@@ -310,6 +310,15 @@ def new_swarm(
     )
 
     # Set resource manager if provided
+    # Auto-create a default ResourceManager if one was not provided
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            resource_manager = None
+
     if resource_manager is not None:
         swarm.set_resource_manager(resource_manager)
 
@@ -357,6 +366,17 @@ def new_host(
 
     if not enable_quic and quic_transport_opt is not None:
         logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+
+    # Enable automatic protection by default: if no resource manager is supplied,
+    # create a default instance so connections/streams are guarded out of the box.
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            # Fallback to leaving it None if creation fails for any reason.
+            resource_manager = None
 
     swarm = new_swarm(
         enable_quic=enable_quic,

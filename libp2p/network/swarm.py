@@ -331,6 +331,24 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
+        # Optional pre-upgrade admission on outbound using endpoint from multiaddr
+        pre_scope = None
+        if self._resource_manager is not None:
+            try:
+                ep = None
+                try:
+                    ep = addr.value_for_protocol("ip4")
+                except Exception:
+                    ep = None
+                pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
+                if pre_scope is None:
+                    raise SwarmException("Connection denied by resource manager")
+            except Exception as e:
+                # Fail-open if rate/cidr checks error; keep pre_scope None
+                if isinstance(e, SwarmException):
+                    raise
+                pre_scope = None
+
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
@@ -338,6 +356,12 @@ class Swarm(Service, INetworkService):
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:
             logger.debug("fail to dial peer %s over base transport", peer_id)
+            # Release pre-upgrade scope on failure
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()  # type: ignore[call-arg]
+            except Exception:
+                pass
             raise SwarmException(
                 f"fail to open connection to peer {peer_id}"
             ) from error
@@ -374,6 +398,41 @@ class Swarm(Service, INetworkService):
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
 
         logger.debug("upgraded mux for peer %s", peer_id)
+
+        # Pass endpoint IP to resource manager for outbound
+        if self._resource_manager is not None:
+            try:
+                ep = None
+                if hasattr(secured_conn, "get_remote_address"):
+                    _endpoint = secured_conn.get_remote_address()
+                    if _endpoint is not None:
+                        ep = _endpoint[0]
+                conn_scope = self._resource_manager.open_connection(
+                    peer_id, endpoint_ip=ep
+                )
+                if conn_scope is None:
+                    await secured_conn.close()
+                    # Release pre-upgrade scope
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()  # type: ignore[call-arg]
+                            pre_scope = None
+                    except Exception:
+                        pass
+                    raise SwarmException("Connection denied by resource manager")
+                try:
+                    setattr(muxed_conn, "_resource_scope", conn_scope)
+                except Exception:
+                    pass
+                # Release pre-upgrade scope after acquiring real scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()  # type: ignore[call-arg]
+                        pre_scope = None
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
         swarm_conn = await self.add_conn(muxed_conn)
         logger.debug("successfully dialed peer %s", peer_id)
@@ -559,6 +618,27 @@ class Swarm(Service, INetworkService):
                         await read_write_closer.close()
                     return
 
+                # Optional pre-upgrade admission using ResourceManager
+                pre_scope = None
+                if self._resource_manager is not None:
+                    try:
+                        endpoint_ip = None
+                        if hasattr(read_write_closer, "get_remote_address"):
+                            ra = read_write_closer.get_remote_address()
+                            if ra is not None:
+                                endpoint_ip = ra[0]
+                        # Perform a preliminary connection admission to guard early
+                        pre_scope = self._resource_manager.open_connection(
+                            None, endpoint_ip=endpoint_ip
+                        )
+                        if pre_scope is None:
+                            # Denied before upgrade; close socket and return early
+                            await read_write_closer.close()
+                            return
+                    except Exception:
+                        # Fail-open on admission errors; guard later in add_conn
+                        pre_scope = None
+
                 raw_conn = RawConnection(read_write_closer, False)
 
                 # Per, https://discuss.libp2p.io/t/multistream-security/130, we first
@@ -584,6 +664,39 @@ class Swarm(Service, INetworkService):
                         f"fail to upgrade mux for peer {peer_id}"
                     ) from error
                 logger.debug("upgraded mux for peer %s", peer_id)
+
+                # Pass endpoint IP to resource manager, if available
+                if self._resource_manager is not None:
+                    try:
+                        ep = None
+                        if hasattr(secured_conn, "get_remote_address"):
+                            _endpoint = secured_conn.get_remote_address()
+                            if _endpoint is not None:
+                                ep = _endpoint[0]
+                        # open_connection will enforce cidr/rate if configured
+                        conn_scope = self._resource_manager.open_connection(
+                            peer_id, endpoint_ip=ep
+                        )
+                        if conn_scope is None:
+                            await secured_conn.close()
+                            raise SwarmException(
+                                "Connection denied by resource manager"
+                            )
+                        # Store on muxed_conn if possible for cleanup propagation
+                        try:
+                            setattr(muxed_conn, "_resource_scope", conn_scope)
+                        except Exception:
+                            pass
+                        # Release any pre-upgrade scope now that we have a real scope
+                        try:
+                            if pre_scope is not None and hasattr(pre_scope, "close"):
+                                pre_scope.close()  # type: ignore[call-arg]
+                                pre_scope = None
+                        except Exception:
+                            pass
+                    except Exception:
+                        # Let add_conn perform final guard if needed
+                        pass
 
                 await self.add_conn(muxed_conn)
                 logger.debug("successfully opened connection to peer %s", peer_id)

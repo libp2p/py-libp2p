@@ -666,12 +666,15 @@ def create_per_peer_rate_limiter(
         RateLimiter: Configured per-peer rate limiter
 
     """
+    # If bursting is allowed and no explicit initial tokens were provided,
+    # start buckets full to enable immediate burst as in common token-bucket usage.
+    effective_initial = initial_tokens if initial_tokens > 0.0 else capacity
     return create_rate_limiter(
         strategy=RateLimitStrategy.TOKEN_BUCKET,
         scope=RateLimitScope.PER_PEER,
         refill_rate=refill_rate,
         capacity=capacity,
-        initial_tokens=initial_tokens,
+        initial_tokens=effective_initial,
         max_peers=max_peers,
     )
 

@@ -5,8 +5,8 @@ Example to demonstrate the monitoring capabilities of the py-libp2p Resource Man
 import random
 import time
 
+from libp2p.rcmgr import Direction
 from libp2p.rcmgr.manager import ResourceLimits, ResourceManager
-from libp2p.rcmgr.metrics import Direction
 from libp2p.rcmgr.monitoring import Monitor
 
 

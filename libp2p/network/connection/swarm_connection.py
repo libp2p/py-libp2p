@@ -16,6 +16,7 @@ from libp2p.network.stream.net_stream import (
     NetStream,
     StreamState,
 )
+from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
@@ -162,6 +163,27 @@ class SwarmConn(INetConn):
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        # Acquire inbound stream resource if a manager is configured
+        rm = getattr(self.swarm, "_resource_manager", None)
+        peer_id_str = str(getattr(self.muxed_conn, "peer_id", ""))
+        acquired = False
+        if rm is not None:
+            try:
+                acquired = rm.acquire_stream(peer_id_str, Direction.INBOUND)
+            except Exception:
+                acquired = False
+
+        if rm is not None and not acquired:
+            # Deny stream: best-effort reset/close
+            try:
+                await muxed_stream.reset()  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    await muxed_stream.close()
+                except Exception:
+                    pass
+            return
+
         net_stream = await self._add_stream(muxed_stream)
         try:
             await self.swarm.common_stream_handler(net_stream)
@@ -169,6 +191,12 @@ class SwarmConn(INetConn):
             # Always remove the stream when the handler finishes
             # Use simple remove_stream since stream handles notifications itself
             self.remove_stream(net_stream)
+            # Release inbound stream resource
+            if rm is not None and acquired:
+                try:
+                    rm.release_stream(peer_id_str, Direction.INBOUND)
+                except Exception:
+                    pass
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         #

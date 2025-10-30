@@ -4,6 +4,7 @@ import threading
 from typing import Any, cast
 
 from .allowlist import Allowlist, AllowlistConfig
+from .cidr_limits import CIDRLimiter
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
 from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_pool import ConnectionPool
@@ -18,6 +19,10 @@ from .memory_pool import MemoryPool
 from .memory_stats import MemoryStatsCache
 from .metrics import Direction, Metrics
 from .prometheus_exporter import PrometheusExporter, create_prometheus_exporter
+from .rate_limiter import (
+    RateLimiter,
+    create_per_peer_rate_limiter,
+)
 
 """
 Resource Manager implementation.
@@ -104,6 +109,12 @@ class ResourceManager:
         enable_prometheus: bool = False,
         prometheus_port: int = 8000,
         prometheus_exporter: PrometheusExporter | None = None,
+        # Basic connection rate limiting (per-peer)
+        enable_rate_limiting: bool = True,
+        connections_per_peer_per_sec: float = 10.0,
+        burst_connections_per_peer: float = 50.0,
+        # Per-subnet (CIDR) network limits: iterable of (cidr, max)
+        cidr_limits: list[tuple[str, int]] | None = None,
     ) -> None:
         # Resource limits
         self.limits = limits or ResourceLimits()
@@ -187,6 +198,31 @@ class ResourceManager:
         if enable_graceful_degradation:
             self.graceful_degradation = GracefulDegradation(self)
 
+        # Optional connection rate limiting (per-peer)
+        self.connection_rate_limiter: RateLimiter | None = None
+        if enable_rate_limiting:
+            self.connection_rate_limiter = create_per_peer_rate_limiter(
+                refill_rate=connections_per_peer_per_sec,
+                capacity=burst_connections_per_peer,
+            )
+
+        # Optional per-subnet limits
+        self.cidr_limiter: CIDRLimiter | None = (
+            CIDRLimiter(cidr_limits) if cidr_limits else None
+        )
+
+        # Hierarchical scope limits (service/protocol and per-peer variants)
+        self._service_stream_limits: dict[str, int] = {}
+        self._service_peer_stream_limits: dict[str, int] = {}
+        self._protocol_stream_limits: dict[str, int] = {}
+        self._protocol_peer_stream_limits: dict[str, int] = {}
+
+        # Scoped counters
+        self._service_stream_counts: dict[str, int] = {}
+        self._service_peer_stream_counts: dict[tuple[str, str], int] = {}
+        self._protocol_stream_counts: dict[str, int] = {}
+        self._protocol_peer_stream_counts: dict[tuple[str, str], int] = {}
+
     def _update_prometheus_metrics(self) -> None:
         """Update Prometheus metrics from internal metrics."""
         if self.prometheus_exporter and self.metrics:
@@ -204,11 +240,44 @@ class ResourceManager:
                 direction=direction, scope=scope, resource=resource_type
             )
 
-    def acquire_connection(self, peer_id: str = "") -> bool:
+    # ---------------------------
+    # Connection resources
+    # ---------------------------
+    def acquire_connection(
+        self,
+        peer_id: str = "",
+        endpoint_ip: str | None = None,
+    ) -> bool:
         """Acquire a connection resource"""
         # Check circuit breaker
         if self.circuit_breaker and self.circuit_breaker.is_open():
             return False
+
+        # Check connection rate limiter (per-peer)
+        if self.connection_rate_limiter is not None:
+            try:
+                from libp2p.peer.id import ID
+
+                pid: ID | None
+                try:
+                    pid = ID.from_base58(peer_id) if peer_id else None
+                except Exception:
+                    pid = None
+                if not self.connection_rate_limiter.try_allow(peer_id=pid):
+                    self._record_blocked_resource("connection", "inbound", scope="rate")
+                    return False
+            except Exception:
+                # Fail-open on limiter errors
+                pass
+
+        # Check CIDR limits if configured
+        if self.cidr_limiter is not None:
+            try:
+                if not self.cidr_limiter.allow(endpoint_ip):
+                    self._record_blocked_resource("connection", "inbound", scope="cidr")
+                    return False
+            except Exception:
+                pass
 
         def _acquire() -> bool:
             with self._lock:
@@ -251,6 +320,19 @@ class ResourceManager:
                         return False
 
                 self._current_connections += 1
+                # Acquire CIDR slot post-count to keep counters aligned
+                if self.cidr_limiter is not None:
+                    try:
+                        if not self.cidr_limiter.acquire(endpoint_ip):
+                            # Rollback and deny
+                            self._current_connections -= 1
+                            self._record_blocked_resource(
+                                "connection", "inbound", scope="cidr"
+                            )
+                            return False
+                    except Exception:
+                        # Fail-open if limiter errors
+                        pass
 
                 # Record metrics if enabled. For allowlisted peers we still
                 # record allowed connections so metrics reflect activity.
@@ -270,7 +352,11 @@ class ResourceManager:
         except CircuitBreakerError:
             return False
 
-    def release_connection(self, peer_id: str = "") -> None:
+    def release_connection(
+        self,
+        peer_id: str = "",
+        endpoint_ip: str | None = None,
+    ) -> None:
         """Release a connection resource"""
         with self._lock:
             if self._current_connections > 0:
@@ -279,9 +365,19 @@ class ResourceManager:
                 if self.metrics:
                     self.metrics.remove_conn("inbound", use_fd=True)
 
+                # Release CIDR slot if in use
+                if self.cidr_limiter is not None:
+                    try:
+                        self.cidr_limiter.release(endpoint_ip)
+                    except Exception:
+                        pass
+
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
 
+    # ---------------------------
+    # Memory resources
+    # ---------------------------
     def acquire_memory(self, size: int) -> bool:
         """Acquire memory resource"""
         # Check circuit breaker
@@ -362,6 +458,9 @@ class ResourceManager:
             # Update Prometheus metrics
             self._update_prometheus_metrics()
 
+    # ---------------------------
+    # Stream resources (global)
+    # ---------------------------
     def acquire_stream(self, peer_id: str, direction: Direction) -> bool:
         """Acquire a stream resource"""
         with self._lock:
@@ -401,6 +500,7 @@ class ResourceManager:
 
                 if isinstance(peer_id, ID):
                     peer_id_str = peer_id.to_base58()
+
                 else:
                     peer_id_str = str(peer_id)
                 self.metrics.allow_stream(peer_id_str, direction_str)
@@ -425,6 +525,163 @@ class ResourceManager:
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
 
+    # ---------------------------
+    # Hierarchical scoped stream limits
+    # ---------------------------
+    def set_service_stream_limit(self, service: str, max_streams: int) -> None:
+        with self._lock:
+            self._service_stream_limits[service] = max(0, int(max_streams))
+
+    def set_service_peer_stream_limit(self, service: str, max_streams: int) -> None:
+        with self._lock:
+            self._service_peer_stream_limits[service] = max(0, int(max_streams))
+
+    def set_protocol_stream_limit(self, protocol: str, max_streams: int) -> None:
+        with self._lock:
+            self._protocol_stream_limits[protocol] = max(0, int(max_streams))
+
+    def set_protocol_peer_stream_limit(self, protocol: str, max_streams: int) -> None:
+        with self._lock:
+            self._protocol_peer_stream_limits[protocol] = max(0, int(max_streams))
+
+    def acquire_scoped_stream(
+        self,
+        peer_id: str,
+        direction: Direction,
+        service: str | None = None,
+        protocol: str | None = None,
+    ) -> bool:
+        """Acquire a stream accounting for service/protocol (and per-peer) limits."""
+        with self._lock:
+            if not self.acquire_stream(peer_id, direction):
+                return False
+
+            # Enforce service total limit
+            if service is not None:
+                limit = self._service_stream_limits.get(service)
+                if limit is not None:
+                    count = self._service_stream_counts.get(service, 0)
+                    if count >= limit:
+                        # rollback global increment
+                        self.release_stream(peer_id, direction)
+                        self._record_blocked_resource(
+                            "stream", scope=f"service:{service}"
+                        )
+                        return False
+                    self._service_stream_counts[service] = count + 1
+
+                # Enforce service per-peer limit
+                peer_limit = self._service_peer_stream_limits.get(service)
+                if peer_limit is not None:
+                    key = (service, peer_id)
+                    pc = self._service_peer_stream_counts.get(key, 0)
+                    if pc >= peer_limit:
+                        self.release_stream(peer_id, direction)
+                        # roll back any service total increment
+                        if service in self._service_stream_counts:
+                            self._service_stream_counts[service] = max(
+                                0, self._service_stream_counts[service] - 1
+                            )
+                        self._record_blocked_resource(
+                            "stream", scope=f"service-peer:{service}"
+                        )
+                        return False
+                    self._service_peer_stream_counts[key] = pc + 1
+
+            # Enforce protocol limits
+            if protocol is not None:
+                limit = self._protocol_stream_limits.get(protocol)
+                if limit is not None:
+                    count = self._protocol_stream_counts.get(protocol, 0)
+                    if count >= limit:
+                        self.release_stream(peer_id, direction)
+                        # rollback service counts too
+                        if (
+                            service is not None
+                            and service in self._service_stream_counts
+                        ):
+                            self._service_stream_counts[service] = max(
+                                0, self._service_stream_counts[service] - 1
+                            )
+                        if service is not None:
+                            key = (service, peer_id)
+                            if key in self._service_peer_stream_counts:
+                                self._service_peer_stream_counts[key] = max(
+                                    0, self._service_peer_stream_counts[key] - 1
+                                )
+                        self._record_blocked_resource(
+                            "stream", scope=f"protocol:{protocol}"
+                        )
+                        return False
+                    self._protocol_stream_counts[protocol] = count + 1
+
+                peer_limit = self._protocol_peer_stream_limits.get(protocol)
+                if peer_limit is not None:
+                    key = (protocol, peer_id)
+                    pc = self._protocol_peer_stream_counts.get(key, 0)
+                    if pc >= peer_limit:
+                        self.release_stream(peer_id, direction)
+                        # rollback other increments
+                        if (
+                            service is not None
+                            and service in self._service_stream_counts
+                        ):
+                            self._service_stream_counts[service] = max(
+                                0, self._service_stream_counts[service] - 1
+                            )
+                        if service is not None:
+                            skey = (service, peer_id)
+                            if skey in self._service_peer_stream_counts:
+                                self._service_peer_stream_counts[skey] = max(
+                                    0, self._service_peer_stream_counts[skey] - 1
+                                )
+                        if protocol in self._protocol_stream_counts:
+                            self._protocol_stream_counts[protocol] = max(
+                                0, self._protocol_stream_counts[protocol] - 1
+                            )
+                        self._record_blocked_resource(
+                            "stream", scope=f"protocol-peer:{protocol}"
+                        )
+                        return False
+                    self._protocol_peer_stream_counts[key] = pc + 1
+
+            return True
+
+    def release_scoped_stream(
+        self,
+        peer_id: str,
+        direction: Direction,
+        service: str | None = None,
+        protocol: str | None = None,
+    ) -> None:
+        with self._lock:
+            # decrement scoped counters first, then global
+            if service is not None:
+                if service in self._service_stream_counts:
+                    self._service_stream_counts[service] = max(
+                        0, self._service_stream_counts[service] - 1
+                    )
+                key = (service, peer_id)
+                if key in self._service_peer_stream_counts:
+                    self._service_peer_stream_counts[key] = max(
+                        0, self._service_peer_stream_counts[key] - 1
+                    )
+            if protocol is not None:
+                if protocol in self._protocol_stream_counts:
+                    self._protocol_stream_counts[protocol] = max(
+                        0, self._protocol_stream_counts[protocol] - 1
+                    )
+                pkey = (protocol, peer_id)
+                if pkey in self._protocol_peer_stream_counts:
+                    self._protocol_peer_stream_counts[pkey] = max(
+                        0, self._protocol_peer_stream_counts[pkey] - 1
+                    )
+
+            self.release_stream(peer_id, direction)
+
+    # ---------------------------
+    # Introspection
+    # ---------------------------
     def get_stats(self) -> dict[str, Any]:
         """Get current resource statistics"""
         with self._lock:
@@ -471,15 +728,28 @@ class ResourceManager:
     def open_connection(
         self,
         peer_id: Any | None = None,
+        endpoint_ip: str | None = None,
     ) -> ConnectionScope | None:
         """
         Open a connection resource for the given peer and return a
         scope object for tracking/cleanup.
         """
         peer_id_str = str(peer_id) if peer_id is not None else ""
-        acquired = self.acquire_connection(peer_id_str)
+        acquired = self.acquire_connection(peer_id_str, endpoint_ip=endpoint_ip)
         if acquired:
-            return ConnectionScope(peer_id_str, self)
+            # Extend scope to remember endpoint for release
+            scope = ConnectionScope(peer_id_str, self)
+            setattr(scope, "_endpoint_ip", endpoint_ip)
+            # Monkey-patch close to include endpoint release
+            # Preserve endpoint on scope for release, then override close()
+
+            def _close_with_endpoint() -> None:
+                ep = getattr(scope, "_endpoint_ip", None)
+                self.release_connection(peer_id_str, endpoint_ip=ep)
+                scope.closed = True
+
+            scope.close = _close_with_endpoint  # type: ignore[assignment]
+            return scope
         return None
 
     # Only one release_connection method is needed, defined above.
@@ -510,7 +780,7 @@ def new_resource_manager(
     enable_circuit_breaker: bool = True,
     enable_graceful_degradation: bool = True,
 ) -> ResourceManager:
-    """Create a new resource manager"""
+    """Create a new resource manager with reasonable defaults."""
     return ResourceManager(
         limits=limits,
         allowlist_config=allowlist_config,
