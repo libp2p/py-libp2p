@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("DEMO_EXPORTER_PORT", "8000")),
+        default=int(os.getenv("DEMO_EXPORTER_PORT", 8000)),
     )
     parser.add_argument(
         "--duration",
