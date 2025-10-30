@@ -1,10 +1,10 @@
 import logging
 import logging.handlers
 import os
-import platform
 from pathlib import (
     Path,
 )
+import platform
 import queue
 import tempfile
 import threading
@@ -40,9 +40,10 @@ def _wait_for_file_operation(file_path: Path, operation: str = "read", max_attem
     
     Returns:
         Result of the operation or None if all attempts failed
+
     """
     import time
-    
+
     for attempt in range(max_attempts):
         try:
             if operation == "read":
@@ -59,7 +60,7 @@ def _wait_for_file_operation(file_path: Path, operation: str = "read", max_attem
                 continue
             else:
                 raise e
-    
+
     return None
 
 
@@ -84,7 +85,7 @@ def _reset_logging():
                 # Ignore errors during cleanup to prevent test failures
                 pass
     _current_handlers.clear()
-    
+
     # Small delay for Windows file handle release
     time.sleep(0.01)
 
@@ -239,14 +240,14 @@ async def test_custom_log_file(clean_env):
             if isinstance(handler, logging.FileHandler):
                 handler.flush()  # Ensure all writes are flushed
                 handler.close()
-        
+
         # Additional wait for Windows file handle release
         await trio.sleep(0.05)
 
         # Check if the file exists and contains our message with robust error handling
         file_exists = _wait_for_file_operation(log_file, "exists")
         assert file_exists, f"Log file {log_file} was not created"
-        
+
         # Read the file content with retry logic for Windows file locking
         content = _wait_for_file_operation(log_file, "read")
         assert content is not None, "Failed to read log file content"
@@ -291,14 +292,14 @@ async def test_default_log_file(clean_env):
             if isinstance(handler, logging.FileHandler):
                 handler.flush()  # Ensure all writes are flushed
                 handler.close()
-        
+
         # Additional wait for Windows file handle release
         await trio.sleep(0.05)
 
         # Check the mocked temp file with more robust error handling
         file_exists = _wait_for_file_operation(mock_temp_file, "exists")
         assert file_exists, f"Log file {mock_temp_file} was not created"
-        
+
         # Read the file content with retry logic for Windows file locking
         content = _wait_for_file_operation(mock_temp_file, "read")
         assert content is not None, "Failed to read log file content"
