@@ -102,8 +102,8 @@ class ResourceManager:
         enable_connection_tracking: bool = True,
         memory_limits: MemoryConnectionLimits | None = None,
         enable_memory_limits: bool = True,
-        enable_connection_pooling: bool = True,
-        enable_memory_pooling: bool = True,
+        enable_connection_pooling: bool = False,
+        enable_memory_pooling: bool = False,
         enable_circuit_breaker: bool = True,
         enable_graceful_degradation: bool = True,
         enable_prometheus: bool = False,
@@ -177,15 +177,17 @@ class ResourceManager:
         # Performance optimizations
         self.connection_pool: ConnectionPool[Any] | None = None
         if enable_connection_pooling:
+            # Avoid eager pre-allocation to reduce memory spikes in tests
             self.connection_pool = ConnectionPool(
-                max_size=self.limits.max_connections, pre_allocate=True
+                max_size=self.limits.max_connections, pre_allocate=False
             )
 
         self.memory_pool: MemoryPool | None = None
         if enable_memory_pooling:
+            # Start with zero initial blocks to avoid upfront allocations
             self.memory_pool = MemoryPool(
                 block_size=1024 * 1024,  # 1MB blocks
-                initial_blocks=100,
+                initial_blocks=0,
                 max_blocks=1000,
             )
 
