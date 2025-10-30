@@ -4,7 +4,6 @@ from collections.abc import (
     Sequence,
 )
 import logging
-from typing import Any
 
 from multiaddr import (
     Multiaddr,
@@ -38,16 +37,9 @@ logger = logging.getLogger("libp2p.transport.tcp")
 class TCPListener(IListener):
     listeners: list[trio.SocketListener]
 
-    def __init__(
-        self,
-        handler_function: THandler,
-        resource_manager: Any | None = None,
-        max_connections: int = 1000,
-    ) -> None:
+    def __init__(self, handler_function: THandler) -> None:
         self.listeners = []
         self.handler = handler_function
-        self._resource_manager: Any | None = resource_manager
-        self._max_connections = max_connections
 
     # TODO: Get rid of `nursery`?
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
@@ -72,22 +64,6 @@ class TCPListener(IListener):
             remote_host: str = ""
             remote_port: int = 0
             try:
-                # Early resource availability check
-                if self._resource_manager is not None:
-                    try:
-                        has_capacity = self._resource_manager.is_resource_available(  # type: ignore[attr-defined]
-                            "connections",
-                            self._max_connections,
-                        )
-                        if not has_capacity:
-                            logger.debug(
-                                "TCP listener rejecting connection: connection limit "
-                                "reached"
-                            )
-                            await stream.aclose()
-                            return
-                    except Exception:
-                        pass
                 tcp_stream = TrioTCPStream(stream)
                 remote_tuple = tcp_stream.get_remote_address()
 
@@ -154,17 +130,6 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
-    def __init__(self) -> None:
-        self._resource_manager: Any | None = None
-        self._max_connections = 1000
-
-    def set_resource_manager(self, resource_manager: Any | None) -> None:
-        self._resource_manager = resource_manager
-
-    def set_max_connections(self, max_connections: int) -> None:
-        """Set the maximum number of connections for this transport."""
-        self._max_connections = max_connections
-
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
         Dial a transport to peer listening on multiaddr.
@@ -194,19 +159,6 @@ class TCP(ITransport):
             )
 
         try:
-            # Early resource availability check before dialing
-            if self._resource_manager is not None:
-                try:
-                    has_capacity = self._resource_manager.is_resource_available(  # type: ignore[attr-defined]
-                        "connections",
-                        self._max_connections,
-                    )
-                    if not has_capacity:
-                        raise OpenConnectionError("Connection limit exceeded")
-                except OpenConnectionError:
-                    raise
-                except Exception:
-                    pass
             # trio.open_tcp_stream requires host to be str or bytes, not None.
             stream = await trio.open_tcp_stream(host_str, port_int)
         except OSError as error:
@@ -232,7 +184,7 @@ class TCP(ITransport):
             that takes a connection as argument which implements interface-connection
         :return: a listener object that implements listener_interface.py
         """
-        return TCPListener(handler_function, self._resource_manager)
+        return TCPListener(handler_function)
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:

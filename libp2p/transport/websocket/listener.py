@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable
 import logging
 import ssl
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -18,11 +18,6 @@ from .connection import P2PWebSocketConnection
 logger = logging.getLogger("libp2p.transport.websocket.listener")
 
 
-@runtime_checkable
-class SupportsResourceChecks(Protocol):
-    def is_resource_available(self, resource_type: str, amount: int) -> bool: ...
-
-
 class WebsocketListener(IListener):
     """
     Listen on /ip4/.../tcp/.../ws addresses, handshake WS, wrap into RawConnection.
@@ -34,8 +29,6 @@ class WebsocketListener(IListener):
         upgrader: TransportUpgrader,
         tls_config: ssl.SSLContext | None = None,
         handshake_timeout: float = 15.0,
-        resource_manager: SupportsResourceChecks | None = None,
-        max_connections: int = 1000,
     ) -> None:
         self._handler = handler
         self._upgrader = upgrader
@@ -46,8 +39,6 @@ class WebsocketListener(IListener):
         self._nursery: trio.Nursery | None = None
         self._listeners: Any = None
         self._is_wss = False  # Track whether this is a WSS listener
-        self._resource_manager: SupportsResourceChecks | None = resource_manager
-        self._max_connections = max_connections
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
@@ -102,23 +93,6 @@ class WebsocketListener(IListener):
                 try:
                     # Apply handshake timeout
                     with trio.fail_after(self._handshake_timeout):
-                        # Early resource check to avoid heavy handshakes
-                        if self._resource_manager is not None:
-                            try:
-                                has_capacity = (
-                                    self._resource_manager.is_resource_available(
-                                        "connections",
-                                        self._max_connections,
-                                    )
-                                )
-                                if not has_capacity:
-                                    logger.debug(
-                                        "WebSocket listener rejecting: connection "
-                                        "limit reached"
-                                    )
-                                    return
-                            except Exception:
-                                pass
                         # Accept the WebSocket connection
                         ws_connection = await request.accept()
                         logger.debug("WebSocket handshake successful")
