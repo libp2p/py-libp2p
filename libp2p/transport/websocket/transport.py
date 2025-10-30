@@ -1,7 +1,9 @@
 import logging
 import ssl
+from typing import Protocol, runtime_checkable
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
@@ -14,6 +16,11 @@ from .connection import P2PWebSocketConnection
 from .listener import WebsocketListener
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class SupportsResourceChecks(Protocol):
+    def is_resource_available(self, resource_type: str, amount: int) -> bool: ...
 
 
 class WebsocketTransport(ITransport):
@@ -43,6 +50,17 @@ class WebsocketTransport(ITransport):
         self._max_buffered_amount = max_buffered_amount
         self._connection_count = 0
         self._max_connections = 1000  # Production limit
+        self._resource_manager: SupportsResourceChecks | None = None
+
+    def set_resource_manager(
+        self, resource_manager: SupportsResourceChecks | None
+    ) -> None:
+        """Optionally attach a ResourceManager for early dial/listen checks."""
+        self._resource_manager = resource_manager
+
+    def set_max_connections(self, max_connections: int) -> None:
+        """Set the maximum number of connections for this transport."""
+        self._max_connections = max_connections
 
     async def dial(self, maddr: Multiaddr) -> RawConnection:
         """Dial a WebSocket connection to the given multiaddr."""
@@ -84,6 +102,20 @@ class WebsocketTransport(ITransport):
                     f"Maximum connections reached: {self._max_connections}"
                 )
 
+            # Early resource manager availability check
+            if self._resource_manager is not None:
+                try:
+                    has_capacity = self._resource_manager.is_resource_available(  # type: ignore[attr-defined]
+                        "connections",
+                        self._max_connections,
+                    )
+                    if not has_capacity:
+                        raise OpenConnectionError("Connection limit exceeded")
+                except OpenConnectionError:
+                    raise
+                except Exception:
+                    pass
+
             # Prepare SSL context for WSS connections
             ssl_context = None
             if parsed.is_wss:
@@ -118,8 +150,6 @@ class WebsocketTransport(ITransport):
             )
 
             # Create a background task manager for this connection
-            import trio
-
             nursery_manager = trio.lowlevel.current_task().parent_nursery
             if nursery_manager is None:
                 raise OpenConnectionError(
@@ -168,7 +198,11 @@ class WebsocketTransport(ITransport):
         """
         logger.debug("WebsocketTransport.create_listener called")
         return WebsocketListener(
-            handler, self._upgrader, self._tls_server_config, self._handshake_timeout
+            handler,
+            self._upgrader,
+            self._tls_server_config,
+            self._handshake_timeout,
+            resource_manager=self._resource_manager,
         )
 
     def resolve(self, maddr: Multiaddr) -> list[Multiaddr]:

@@ -131,6 +131,13 @@ class Swarm(Service, INetworkService):
     def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
         """Attach a ResourceManager to wire connection/stream scopes."""
         self._resource_manager = resource_manager
+        # Propagate to transport if it supports resource manager configuration.
+        if hasattr(self.transport, "set_resource_manager"):
+            try:
+                # type: ignore[attr-defined]
+                self.transport.set_resource_manager(resource_manager)  # type: ignore
+            except Exception as e:
+                logger.warning(f"Failed to set resource manager on transport: {e}")
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
