@@ -19,7 +19,7 @@ try:
 except ImportError:
     LIBP2P_AVAILABLE = False
 
-from py_node import TestResults  # type: ignore
+from libp2p.transport.websocket.interop_tests.py_node.test_utils import TestResults
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -155,7 +155,22 @@ class PyWebSocketNode:
                 logger.info("[libp2p client] Sent and received via libp2p")
                 return response
             except Exception as e:
-                logger.warning(f"libp2p dial failed: {e}, trying HTTP...")
+                logger.warning(f"libp2p dial failed: {e}, trying WebSocket...")
+
+        # Try direct WebSocket echo against JS server
+        try:
+            from trio_websocket import connect_websocket_url
+
+            ws_url = f"ws://127.0.0.1:{port}/"
+            async with trio.open_nursery() as nursery:
+                ws = await connect_websocket_url(nursery, ws_url)
+                await ws.send_message(message)
+                resp = await ws.get_message()
+                await ws.aclose()
+                logger.info("[WS client] Sent and received via WebSocket")
+                return str(resp)
+        except Exception as e:
+            logger.warning(f"WebSocket dial failed: {e}, trying HTTP...")
 
         try:
             import requests

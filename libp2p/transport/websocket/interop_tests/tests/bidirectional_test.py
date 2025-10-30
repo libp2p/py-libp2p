@@ -1,15 +1,14 @@
 import json
 from pathlib import Path
 import subprocess
-import sys
 from typing import Any
 
 import trio
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from py_node.py_websocket_node import PyWebSocketNode  # type: ignore
-from py_node.test_utils import TestResults  # type: ignore
+from libp2p.transport.websocket.interop_tests.py_node.py_websocket_node import (
+    PyWebSocketNode,
+)
+from libp2p.transport.websocket.interop_tests.py_node.test_utils import TestResults
 
 
 async def test_bidirectional_communication() -> dict[str, Any]:
