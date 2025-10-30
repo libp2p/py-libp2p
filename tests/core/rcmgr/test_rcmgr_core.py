@@ -93,7 +93,7 @@ class TestResourceManager:
     def test_stream_acquisition_success(self):
         """Test successful stream acquisition."""
         rm = new_resource_manager()
-        from libp2p.rcmgr.metrics import Direction
+        from libp2p.rcmgr import Direction
 
         assert rm.acquire_stream("peer1", Direction.INBOUND) is True
         assert rm._current_streams == 1
@@ -102,7 +102,7 @@ class TestResourceManager:
         """Test stream acquisition when limit is exceeded."""
         limits = ResourceLimits(max_streams=1)
         rm = new_resource_manager(limits=limits)
-        from libp2p.rcmgr.metrics import Direction
+        from libp2p.rcmgr import Direction
 
         # First stream should succeed
         assert rm.acquire_stream("peer1", Direction.INBOUND) is True
@@ -113,7 +113,7 @@ class TestResourceManager:
     def test_stream_release(self):
         """Test stream release."""
         rm = new_resource_manager()
-        from libp2p.rcmgr.metrics import Direction
+        from libp2p.rcmgr import Direction
 
         rm.acquire_stream("peer1", Direction.INBOUND)
         assert rm._current_streams == 1
@@ -236,7 +236,7 @@ class TestResourceManager:
         """Test stream limits with edge cases."""
         limits = ResourceLimits(max_streams=1)
         rm = new_resource_manager(limits=limits)
-        from libp2p.rcmgr.metrics import Direction
+        from libp2p.rcmgr import Direction
 
         # Test exact limit
         assert rm.acquire_stream("peer1", Direction.INBOUND) is True

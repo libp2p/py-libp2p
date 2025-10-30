@@ -5,7 +5,8 @@ This module tests the Direction and MetricType enum string conversion
 that was fixed to resolve AssertionError failures in CI.
 """
 
-from libp2p.rcmgr.metrics import Direction, MetricType
+from libp2p.rcmgr import Direction
+from libp2p.rcmgr.metrics import MetricType
 
 
 class TestEnumStringConversion:

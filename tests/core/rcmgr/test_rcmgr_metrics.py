@@ -7,7 +7,8 @@ array-based storage, performance, and accuracy.
 
 import time
 
-from libp2p.rcmgr.metrics import Direction, Metrics, MetricType
+from libp2p.rcmgr import Direction
+from libp2p.rcmgr.metrics import Metrics, MetricType
 
 
 class TestMetrics:
