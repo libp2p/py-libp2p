@@ -52,10 +52,28 @@ def _setup_logging(level: str) -> None:
 
 def main() -> None:
     parser = ArgumentParser()
-    parser.add_argument("--port", type=int, default=int(os.getenv("DEMO_EXPORTER_PORT", "8000")))
-    parser.add_argument("--duration", type=int, default=0, help="Run duration in seconds (0 = unlimited)")
-    parser.add_argument("--iterations", type=int, default=0, help="Max iterations to execute (0 = unlimited)")
-    parser.add_argument("--log-level", type=str, default=os.getenv("DEMO_LOG_LEVEL", "INFO"))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("DEMO_EXPORTER_PORT", "8000")),
+    )
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=0,
+        help="Run duration in seconds (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--iterations",
+        type=int,
+        default=0,
+        help="Max iterations to execute (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=os.getenv("DEMO_LOG_LEVEL", "INFO"),
+    )
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
@@ -121,7 +139,11 @@ def main() -> None:
             peer_connections[peer_id] = peer_connections.get(peer_id, 0) + 1
             fd_count += 1
 
-            logging.debug("Connection acquired for %s (total: %s)", peer_id, connection_count)
+            logging.debug(
+                "Connection acquired for %s (total: %s)",
+                peer_id,
+                connection_count,
+            )
 
             monitor.record_connection_establishment(
                 connection_id=f"conn_{connection_count}",
@@ -139,7 +161,11 @@ def main() -> None:
             )
         else:
             blocked_connections += 1
-            logging.debug("Connection blocked for %s (blocked: %s)", peer_id, blocked_connections)
+            logging.debug(
+                "Connection blocked for %s (blocked: %s)",
+                peer_id,
+                blocked_connections,
+            )
             monitor.record_blocked_resource(
                 resource_type="connection",
                 direction="inbound",
@@ -152,7 +178,11 @@ def main() -> None:
             if success:
                 stream_count += 1
                 peer_streams[peer_id] = peer_streams.get(peer_id, 0) + 1
-                logging.debug("Stream acquired for %s (total streams: %s)", peer_id, stream_count)
+                logging.debug(
+                    "Stream acquired for %s (total streams: %s)",
+                    peer_id,
+                    stream_count,
+                )
 
                 monitor.record_peer_resource_change(
                     peer_id=peer_id,
@@ -248,9 +278,14 @@ def main() -> None:
         iteration += 1
         time.sleep(1)
 
-    logging.info("%s active connections, %s blocked", connection_count, blocked_connections)
+    logging.info(
+        "%s active connections, %s blocked",
+        connection_count,
+        blocked_connections,
+    )
 
-    # Keep exporter alive for manual inspection if unlimited duration/iterations and not signaled
+    # Keep exporter alive for manual inspection if unlimited duration/iterations
+    # and not signaled
     if not args.duration and not args.iterations and not stop_event.is_set():
         logging.info("Exporter running on port %s. Press Ctrl+C to stop.", port)
         try:
