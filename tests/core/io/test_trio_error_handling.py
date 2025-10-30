@@ -28,7 +28,7 @@ class TestTrioErrorHandling:
         tcp_stream = TrioTCPStream(mock_stream)
 
         assert tcp_stream.stream == mock_stream
-        assert hasattr(tcp_stream, 'write_lock')
+        assert hasattr(tcp_stream, "write_lock")
 
     @pytest.mark.trio
     async def test_write_handles_closed_resource_error(self):

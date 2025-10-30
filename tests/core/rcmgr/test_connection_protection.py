@@ -26,7 +26,7 @@ class TestConnectionProtection:
         swarm_conn = SwarmConn(mock_muxed_conn, mock_swarm)
 
         # Verify resource scope attribute exists
-        assert hasattr(swarm_conn, '_resource_scope')
+        assert hasattr(swarm_conn, "_resource_scope")
         assert swarm_conn._resource_scope is None
 
     def test_swarm_conn_set_resource_scope_method(self):
@@ -40,7 +40,7 @@ class TestConnectionProtection:
         swarm_conn = SwarmConn(mock_muxed_conn, mock_swarm)
 
         # Verify set_resource_scope method exists
-        assert hasattr(swarm_conn, 'set_resource_scope')
+        assert hasattr(swarm_conn, "set_resource_scope")
         assert callable(swarm_conn.set_resource_scope)
 
     def test_swarm_conn_set_resource_scope_functionality(self):
@@ -109,6 +109,7 @@ class TestConnectionProtection:
 
         # Test close method (should not raise exception)
         import trio
+
         trio.run(swarm_conn.close)
 
         # Verify resource scope was cleaned up
@@ -136,6 +137,7 @@ class TestConnectionProtection:
 
         # Test close method (should not raise exception)
         import trio
+
         trio.run(swarm_conn.close)
 
         # Verify resource scope was still cleaned up despite error

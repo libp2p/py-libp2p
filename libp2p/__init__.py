@@ -181,7 +181,7 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
-    retry_config: Optional["RetryConfig"] = None,
+    retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
@@ -373,13 +373,21 @@ def new_host(
     )
 
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt, enable_mDNS, enable_upnp, bootstrap)
+        return RoutedHost(
+            network=swarm,
+            router=disc_opt,
+            enable_mDNS=enable_mDNS,
+            enable_upnp=enable_upnp,
+            bootstrap=bootstrap,
+            resource_manager=resource_manager,
+        )
     return BasicHost(
         network=swarm,
         enable_mDNS=enable_mDNS,
         bootstrap=bootstrap,
         enable_upnp=enable_upnp,
-        negotiate_timeout=negotiate_timeout
+        negotiate_timeout=negotiate_timeout,
+        resource_manager=resource_manager,
     )
 
 __version__ = __version("libp2p")

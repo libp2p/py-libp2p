@@ -24,6 +24,7 @@ class RoutedHost(BasicHost):
 
     This allows the Host to find the addresses for peers when it does not have them.
     """
+
     _router: IPeerRouting
 
     def __init__(
