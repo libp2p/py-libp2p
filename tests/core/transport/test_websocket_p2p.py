@@ -130,7 +130,6 @@ async def test_websocket_p2p_noise():
             libp2p_keypair=key_pair_a,
             noise_privkey=noise_key_pair_a.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_a = new_host(
@@ -146,7 +145,6 @@ async def test_websocket_p2p_noise():
             libp2p_keypair=key_pair_b,
             noise_privkey=noise_key_pair_b.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_b = new_host(
@@ -226,7 +224,6 @@ async def test_websocket_p2p_libp2p_ping():
             libp2p_keypair=key_pair_a,
             noise_privkey=noise_key_pair_a.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_a = new_host(
@@ -242,7 +239,6 @@ async def test_websocket_p2p_libp2p_ping():
             libp2p_keypair=key_pair_b,
             noise_privkey=noise_key_pair_b.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_b = new_host(
@@ -322,7 +318,6 @@ async def test_websocket_p2p_multiple_streams():
             libp2p_keypair=key_pair_a,
             noise_privkey=noise_key_pair_a.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_a = new_host(
@@ -338,7 +333,6 @@ async def test_websocket_p2p_multiple_streams():
             libp2p_keypair=key_pair_b,
             noise_privkey=noise_key_pair_b.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_b = new_host(
@@ -428,7 +422,6 @@ async def test_websocket_p2p_connection_state():
             libp2p_keypair=key_pair_a,
             noise_privkey=noise_key_pair_a.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_a = new_host(
@@ -444,7 +437,6 @@ async def test_websocket_p2p_connection_state():
             libp2p_keypair=key_pair_b,
             noise_privkey=noise_key_pair_b.private_key,
             early_data=None,
-            with_noise_pipes=False,
         )
     }
     host_b = new_host(
