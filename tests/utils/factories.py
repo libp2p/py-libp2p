@@ -80,6 +80,9 @@ from libp2p.pubsub.pubsub import (
     Pubsub,
     get_peer_and_seqno_msg_id,
 )
+from libp2p.pubsub.score import (
+    ScoreParams,
+)
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
@@ -493,6 +496,7 @@ class GossipsubFactory(factory.Factory):
     px_peers_count = GOSSIPSUB_PARAMS.px_peers_count
     prune_back_off = GOSSIPSUB_PARAMS.prune_back_off
     unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
+    score_params = None
     max_idontwant_messages = 10
 
 
@@ -623,6 +627,7 @@ class PubsubFactory(factory.Factory):
         px_peers_count: int = GOSSIPSUB_PARAMS.px_peers_count,
         prune_back_off: int = GOSSIPSUB_PARAMS.prune_back_off,
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
+        score_params: ScoreParams | None = None,
         max_idontwant_messages: int = 10,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
@@ -648,6 +653,7 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
             )
         else:
@@ -667,6 +673,7 @@ class PubsubFactory(factory.Factory):
                 px_peers_count=px_peers_count,
                 prune_back_off=prune_back_off,
                 unsubscribe_back_off=unsubscribe_back_off,
+                score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
             )
 
