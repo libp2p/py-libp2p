@@ -1,7 +1,6 @@
 import os
-import signal
-import subprocess
 import shutil
+import subprocess
 
 import pytest
 from multiaddr import Multiaddr
@@ -17,8 +16,8 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.noise.transport import (
-    Transport as NoiseTransport,
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader

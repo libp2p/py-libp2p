@@ -441,9 +441,18 @@ class WebsocketTransport(ITransport):
         self._current_connections = 0
         self._proxy_connections = 0  # Track proxy usage
 
+        # Background nursery for WebSocket connection background tasks
+        # Set by Swarm via set_background_nursery()
+        self._background_nursery: trio.Nursery | None = None
+
         # Expose config attributes for backward compatibility
         self._tls_client_config = self._config.tls_client_config
         self._tls_server_config = self._config.tls_server_config
+
+    def set_background_nursery(self, nursery: trio.Nursery) -> None:
+        """Set the nursery to use for background tasks (called by Swarm)."""
+        self._background_nursery = nursery
+        logger.debug("WebSocket transport background nursery set")
 
         # AutoTLS support
         self._autotls_manager: AutoTLSManager | None = None
@@ -647,30 +656,34 @@ class WebsocketTransport(ITransport):
 
         # Apply timeout to the connection process
         with trio.fail_after(self._config.handshake_timeout):
-            # Create a temporary nursery just for the WebSocket connection establishment
-            async with trio.open_nursery() as temp_nursery:
-                from trio_websocket import connect_websocket_url
+            from trio_websocket import connect_websocket_url
 
-                # Create the WebSocket connection
-                ws = await connect_websocket_url(
-                    temp_nursery,
-                    ws_url,
-                    ssl_context=ssl_context,
-                    message_queue_size=1024,
-                    max_message_size=self._config.max_message_size,
+            # Use background nursery if available (set by Swarm), otherwise create temporary one
+            if self._background_nursery is None:
+                raise OpenConnectionError(
+                    "No background nursery available. "
+                    "WebSocket transport requires Swarm to set background nursery."
                 )
 
-                # Create our connection wrapper
-                conn = P2PWebSocketConnection(
-                    ws,
-                    None,  # local_addr will be set after upgrade
-                    is_secure=proto_info.is_wss,
-                    max_buffered_amount=self._config.max_buffered_amount,
-                )
+            # Create the WebSocket connection using the Swarm's background nursery
+            # This nursery stays alive for the lifetime of the Swarm service
+            ws = await connect_websocket_url(
+                self._background_nursery,
+                ws_url,
+                ssl_context=ssl_context,
+                message_queue_size=1024,
+                max_message_size=self._config.max_message_size,
+            )
 
-                # The nursery will close when we exit this block, which might close the
-                # connection. We need to handle this differently.
-                return conn
+            # Create our connection wrapper
+            conn = P2PWebSocketConnection(
+                ws,
+                None,  # local_addr will be set after upgrade
+                is_secure=proto_info.is_wss,
+                max_buffered_amount=self._config.max_buffered_amount,
+            )
+
+            return conn
 
     async def _create_proxy_connection(
         self, proto_info: Any, proxy_url: str, ssl_context: ssl.SSLContext | None

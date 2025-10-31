@@ -300,13 +300,21 @@ class WebsocketListener(IListener):
             self._track_connection(conn)
 
             # Upgrade connection
+            # The handler (Swarm's conn_handler) will:
+            # 1. Wrap connection in RawConnection
+            # 2. Upgrade security (multistream negotiation)
+            # 3. Upgrade to muxed connection
+            # 4. Add connection to swarm and wait for service to finish
             try:
-                # For now, just call the handler directly
-                # TODO: Implement proper connection upgrading
                 await self._handler(conn)
             except Exception as e:
                 logger.error(f"Connection upgrade failed: {e}")
                 self._failed_connections += 1
+                # Ensure connection is closed on failure
+                try:
+                    await conn.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
             finally:
                 self._untrack_connection(conn)
 

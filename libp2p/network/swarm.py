@@ -127,11 +127,18 @@ class Swarm(Service, INetworkService):
         async with trio.open_nursery() as nursery:
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
-            self.event_listener_nursery_created.set()
 
+            # Set background nursery BEFORE setting the event
+            # This ensures transports have the nursery when they check
             if isinstance(self.transport, QUICTransport):
                 self.transport.set_background_nursery(nursery)
                 self.transport.set_swarm(self)
+            elif hasattr(self.transport, 'set_background_nursery'):
+                # WebSocket transport also needs background nursery for connection management
+                self.transport.set_background_nursery(nursery)
+
+            # Now set the event after nursery is set on transport
+            self.event_listener_nursery_created.set()
 
             try:
                 await self.manager.wait_finished()
@@ -652,8 +659,11 @@ class Swarm(Service, INetworkService):
             self,
         )
         logger.debug("Swarm::add_conn | starting muxed connection")
+        logger.debug(f"Swarm::add_conn | muxed_conn type: {type(muxed_conn)}, peer_id: {muxed_conn.peer_id}")
         self.manager.run_task(muxed_conn.start)
+        logger.debug(f"Swarm::add_conn | waiting for event_started for peer {muxed_conn.peer_id}")
         await muxed_conn.event_started.wait()
+        logger.debug(f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}")
         logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()
