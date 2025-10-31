@@ -20,6 +20,8 @@ from libp2p.security.insecure.transport import (
     InsecureTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    FLAG_FIN,
+    FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
     TYPE_PING,
@@ -27,6 +29,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     YAMUX_HEADER_FORMAT,
     MuxedStreamEOF,
     MuxedStreamError,
+    MuxedStreamReset,
     Yamux,
     YamuxStream,
 )
@@ -45,7 +48,9 @@ class TrioStreamAdapter(IRawConnection):
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
-            raise ValueError("Reading unbounded not supported")
+            return await self.receive_stream.receive_some(8192)
+        if n == 0:
+            raise ValueError("Reading zero bytes not supported")
         logging.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
             data = await self.receive_stream.receive_some(n)
@@ -53,7 +58,9 @@ class TrioStreamAdapter(IRawConnection):
             return data
 
     async def close(self) -> None:
-        logging.debug("Closing stream")
+        logging.debug("Closing stream adapter")
+        await self.send_stream.aclose()
+        await self.receive_stream.aclose()
 
     def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
@@ -97,7 +104,6 @@ async def secure_conn_pair(key_pair, peer_id):
     async with trio.open_nursery() as nursery:
         nursery.start_soon(run_outbound, nursery_results)
         nursery.start_soon(run_inbound, nursery_results)
-        await trio.sleep(0.1)  # Give tasks a chance to finish
 
     client_conn = nursery_results.get("client")
     server_conn = nursery_results.get("server")
@@ -116,11 +122,10 @@ async def yamux_pair(secure_conn_pair, peer_id):
     client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
     server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
     async with trio.open_nursery() as nursery:
-        with trio.move_on_after(5):
-            nursery.start_soon(client_yamux.start)
-            nursery.start_soon(server_yamux.start)
-            await trio.sleep(0.1)
-            logging.debug("yamux_pair started")
+        nursery.start_soon(client_yamux.start)
+        nursery.start_soon(server_yamux.start)
+        await trio.sleep(0.1)  # allow start
+        logging.debug("yamux_pair started")
         yield client_yamux, server_yamux
     logging.debug("yamux_pair cleanup")
 
@@ -458,3 +463,69 @@ async def test_yamux_backpressure(yamux_pair):
         await stream.close()
 
     logging.debug("test_yamux_backpressure complete")
+
+
+@pytest.mark.trio
+async def test_yamux_fin_on_window_update(yamux_pair):
+    """
+    Tests that a FIN flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_fin_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_eof(stream):
+        with pytest.raises(MuxedStreamEOF, match="Stream is closed for receiving"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised EOF")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_eof, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_FIN")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_FIN,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_fin_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_rst_on_window_update(yamux_pair):
+    """
+    Tests that a RST flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_rst_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_reset(stream):
+        with pytest.raises(MuxedStreamReset, match="Stream was reset"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised Reset")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_reset, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_RST")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_RST,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_rst_on_window_update complete")
