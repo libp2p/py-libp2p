@@ -189,6 +189,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
         """
         Read data from the WebSocket connection.
 
+        This method blocks until data is available, similar to TCP streams.
+        This is required for multistream negotiation which expects blocking reads.
+
         Args:
             n: Number of bytes to read (None for all available)
 
@@ -200,53 +203,118 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         """
         if self._closed:
-            raise IOException("Connection is closed")
+            # Return empty bytes to signal EOF (like TCP does)
+            return b""
 
         async with self._read_lock:
             try:
-                # If n is None, read at least one message and return all buffered data
+                # If n is None, return all buffered data or block for a new message
                 if n is None:
+                    # If buffer is empty, block until we receive a WebSocket message
                     if not self._read_buffer:
                         try:
-                            # Use a short timeout to avoid blocking indefinitely
-                            with trio.fail_after(1.0):  # 1 second timeout
-                                message = await self._ws_connection.get_message()
-                                if isinstance(message, str):
-                                    message = message.encode("utf-8")
-                                self._read_buffer = message
-                        except trio.TooSlowError:
-                            # No message available within timeout
-                            return b""
-                        except Exception:
-                            # Return empty bytes if no data available
-                            return b""
+                            # Block indefinitely until message arrives (like TCP)
+                            # This is necessary for multistream negotiation
+                            logger.debug("WebSocket read(n=None): buffer empty, waiting for message...")
+                            message = await self._ws_connection.get_message()
+                            if isinstance(message, str):
+                                message = message.encode("utf-8")
+                            logger.debug(f"WebSocket read(n=None): received {len(message)} bytes")
+                            self._read_buffer = message
+                        except Exception as e:
+                            # Handle CloseReason from trio_websocket - treat as connection closed
+                            error_str = str(e)
+                            if "CloseReason" in error_str or "closed" in error_str.lower():
+                                self._closed = True
+                                logger.debug("WebSocket read: connection closed")
+                                return b""
+                            # If connection is closed or error occurs, raise IOException
+                            if self._closed:
+                                return b""
+                            logger.error(f"WebSocket read error: {e}")
+                            raise IOException(f"Read failed: {str(e)}")
 
                     result = self._read_buffer
                     self._read_buffer = b""
                     self._bytes_read += len(result)
+                    logger.debug(f"WebSocket read(n=None): returning {len(result)} bytes")
                     return result
 
-                # For specific byte count requests, return UP TO n bytes
-                if not self._read_buffer:
+                # For specific byte count requests, we need to satisfy read_exactly()
+                # and Yamux handle_incoming() which needs exact byte counts
+                #
+                # IMPORTANT: read_exactly() expects read(n) to return UP TO n bytes
+                # (may return less), and will retry. This matches TCP's receive_some() behavior.
+                #
+                # Strategy:
+                # 1. If we have >= n bytes, return exactly n bytes
+                # 2. If we have partial data (< n), return it immediately (don't block)
+                #    read_exactly() will call us again with remaining bytes
+                # 3. Only block if buffer is completely empty (wait for first message)
+                # 4. This ensures progress and prevents deadlocks
+                
+                # If we already have enough data, return it immediately
+                if len(self._read_buffer) >= n:
+                    result = self._read_buffer[:n]
+                    self._read_buffer = self._read_buffer[n:]
+                    self._bytes_read += len(result)
+                    return result
+                
+                # If we have partial data (< n bytes), return it immediately
+                # This allows read_exactly() to retry and get more data
+                # Returning partial data is the correct behavior for stream-oriented I/O
+                # This matches TCP's receive_some() behavior - return what's available now
+                if self._read_buffer:
+                    result = self._read_buffer
+                    self._read_buffer = b""
+                    self._bytes_read += len(result)
+                    logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (partial, read_exactly will retry)")
+                    return result
+                
+                # Buffer is empty - block until we get at least one message
+                # This is needed for multistream negotiation where we wait for the peer's first message
+                # IMPORTANT: This MUST block until data arrives - multistream negotiation depends on it
+                if not self._closed:
                     try:
-                        with trio.fail_after(1.0):
-                            message = await self._ws_connection.get_message()
-                            if isinstance(message, str):
-                                message = message.encode("utf-8")
-                            self._read_buffer = message
-                    except trio.TooSlowError:
-                        return b""
-                    except Exception:
-                        return b""
+                        # Block until we receive a WebSocket message
+                        # This will block until the peer sends data or connection closes
+                        logger.debug(f"WebSocket read(n={n}): buffer empty, calling get_message()...")
+                        message = await self._ws_connection.get_message()
+                        logger.debug(f"WebSocket read(n={n}): get_message() returned, got {len(message) if message else 0} bytes")
+                        if isinstance(message, str):
+                            message = message.encode("utf-8")
+                        logger.debug(f"WebSocket read(n={n}): received {len(message)} bytes")
+                        self._read_buffer = message
+                        
+                        # Return what we got (may be less than n, that's OK)
+                        # read_exactly() will call us again if it needs more
+                        if len(self._read_buffer) >= n:
+                            result = self._read_buffer[:n]
+                            self._read_buffer = self._read_buffer[n:]
+                            logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (had enough)")
+                        else:
+                            result = self._read_buffer
+                            self._read_buffer = b""
+                            logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (partial)")
+                        
+                        self._bytes_read += len(result)
+                        return result
+                    except Exception as e:
+                        # Handle CloseReason/ConnectionClosed from trio_websocket
+                        error_str = str(e)
+                        error_type = type(e).__name__
+                        if (
+                            "CloseReason" in error_str
+                            or "ConnectionClosed" in error_type
+                            or "closed" in error_str.lower()
+                        ):
+                            self._closed = True
+                            return b""
+                        logger.error(f"WebSocket read error: {e}")
+                        raise IOException(f"Read failed: {str(e)}")
 
-                if len(self._read_buffer) == 0:
-                    return b""
-
-                # Return up to n bytes
-                result = self._read_buffer[:n]
-                self._read_buffer = self._read_buffer[len(result) :]
-                self._bytes_read += len(result)
-                return result
+                # Connection closed and no data
+                return b""
 
             except Exception as e:
                 logger.error(f"WebSocket read failed: {e}")
@@ -280,6 +348,12 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 logger.debug(f"WebSocket wrote {len(data)} bytes successfully")
 
             except Exception as e:
+                # Handle CloseReason from trio_websocket - connection was closed
+                error_str = str(e)
+                if "CloseReason" in error_str or "closed" in error_str.lower():
+                    self._closed = True
+                    logger.debug(f"WebSocket write failed (connection closed): {e}")
+                    raise IOException("Connection closed")
                 logger.error(f"WebSocket write failed: {e}")
                 self._closed = True
                 raise IOException(f"Write failed: {str(e)}")

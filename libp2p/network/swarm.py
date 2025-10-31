@@ -140,11 +140,18 @@ class Swarm(Service, INetworkService):
         async with trio.open_nursery() as nursery:
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
-            self.event_listener_nursery_created.set()
 
+            # Set background nursery BEFORE setting the event
+            # This ensures transports have the nursery when they check
             if isinstance(self.transport, QUICTransport):
                 self.transport.set_background_nursery(nursery)
                 self.transport.set_swarm(self)
+            elif hasattr(self.transport, 'set_background_nursery'):
+                # WebSocket transport also needs background nursery for connection management
+                self.transport.set_background_nursery(nursery)
+
+            # Now set the event after nursery is set on transport
+            self.event_listener_nursery_created.set()
 
             try:
                 await self.manager.wait_finished()
@@ -883,8 +890,11 @@ class Swarm(Service, INetworkService):
         if conn_scope is not None and not hasattr(muxed_conn, "set_resource_scope"):
             swarm_conn.set_resource_scope(conn_scope)  # type: ignore
         logger.debug("Swarm::add_conn | starting muxed connection")
+        logger.debug(f"Swarm::add_conn | muxed_conn type: {type(muxed_conn)}, peer_id: {muxed_conn.peer_id}")
         self.manager.run_task(muxed_conn.start)
+        logger.debug(f"Swarm::add_conn | waiting for event_started for peer {muxed_conn.peer_id}")
         await muxed_conn.event_started.wait()
+        logger.debug(f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}")
         # For QUIC connections, also verify connection is established
         if isinstance(muxed_conn, QUICConnection):
             if not muxed_conn.is_established:

@@ -11,6 +11,10 @@ stack works over WebSocket transport, including:
 - Error handling and recovery
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+import logging
+
 import pytest
 from multiaddr import Multiaddr
 import trio
@@ -24,16 +28,19 @@ from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.security.noise.transport import (
-    Transport as NoiseTransport,
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.tools.async_service import background_trio_service
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport
 
 PLAINTEXT_PROTOCOL_ID = "/plaintext/2.0.0"
 ECHO_PROTOCOL = TProtocol("/echo/1.0.0")
 PING_PROTOCOL = TProtocol("/ipfs/ping/1.0.0")
+
+logger = logging.getLogger(__name__)
 
 
 def create_noise_upgrader(key_pair):
@@ -60,10 +67,11 @@ def create_plaintext_upgrader(key_pair):
     )
 
 
+@asynccontextmanager
 async def create_websocket_host(
     listen_addrs: list[Multiaddr] | None = None,
     use_noise: bool = False,
-) -> BasicHost:
+) -> AsyncIterator[BasicHost]:
     """Create a WebSocket-enabled libp2p host."""
     key_pair = create_new_key_pair()
     peer_id = ID.from_pubkey(key_pair.public_key)
@@ -79,417 +87,881 @@ async def create_websocket_host(
     swarm = Swarm(peer_id, peer_store, upgrader, transport)
     host = BasicHost(swarm)
 
-    if listen_addrs:
-        for addr in listen_addrs:
-            await swarm.listen(addr)
+    # Start swarm with background_trio_service
+    # The Swarm's run() method will set the background nursery on the transport
+    async with background_trio_service(swarm) as manager:
+        # Wait for Swarm to start and set the background nursery
+        # The Swarm's run() method sets event_listener_nursery_created AFTER setting
+        # the background nursery on the transport, so waiting for this event ensures
+        # the transport has the nursery available
+        await swarm.event_listener_nursery_created.wait()
 
-    return host
+        # Optionally listen on addresses
+        if listen_addrs:
+            for addr in listen_addrs:
+                await swarm.listen(addr)
+                # Small delay to ensure listener is ready
+                await trio.sleep(0.05)
+        yield host
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_echo_protocol_plaintext():
     """Test echo protocol over WebSocket with PLAINTEXT security."""
-    # Create two hosts
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
 
     # Echo handler
     received_messages = []
+    handler_called = trio.Event()
 
     async def echo_handler(stream):
-        data = await stream.read()
-        received_messages.append(data)
-        await stream.write(data)
-        await stream.close()
+        try:
+            # Read with timeout - handler should receive data written by client
+            # If this times out, it means Yamux isn't delivering data to streams
+            try:
+                with trio.fail_after(10.0):  # Increased timeout for debugging
+                    data = await stream.read()
+                received_messages.append(data)
+                await stream.write(data)
+            except trio.TooSlowError:
+                # Timeout reading - log and ensure cleanup
+                logger.warning("Echo handler timeout waiting for data")
+            except Exception as e:
+                # Log other errors
+                logger.error(f"Echo handler error: {e}", exc_info=True)
+            finally:
+                # Always close stream, even on timeout/error
+                try:
+                    await stream.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
+        finally:
+            handler_called.set()
 
-    host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
             # Get listening address
             addrs = host1.get_addrs()
-            assert len(addrs) > 0
+            assert len(addrs) > 0, "Host1 should have listening addresses"
             listen_addr = addrs[0]
 
             # Extract peer ID and address
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [listen_addr])
 
-            # Connect
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)  # Allow connection to establish
+            # Connect with timeout
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            # Verify connection established
+            await trio.sleep(0.1)
+            connections = host2.get_network().connections.get(peer_id)
+            assert connections is not None and len(connections) > 0, \
+                "Connection should be established"
 
-            # Send echo message
+            # Send echo message with timeouts
             test_message = b"Hello, WebSocket P2P!"
-            stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
-            await stream.write(test_message)
-            response = await stream.read()
-            await stream.close()
+            stream = None
+            try:
+                with trio.fail_after(10.0):
+                    stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream.write(test_message)
+                
+                # Small delay to allow write to propagate through WebSocket and Yamux layers
+                await trio.sleep(0.2)
+                
+                try:
+                    with trio.fail_after(5.0):
+                        response = await stream.read()
+                except trio.TooSlowError:
+                    # Cleanup on timeout
+                    response = None
+                    raise AssertionError("Stream read timed out - data not received")
+                finally:
+                    # Always close stream
+                    if stream is not None:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
 
-            # Verify echo
-            assert response == test_message
-            assert len(received_messages) == 1
-            assert received_messages[0] == test_message
+                # Verify echo completed (with timeout to prevent hanging)
+                try:
+                    with trio.fail_after(2.0):
+                        await handler_called.wait()
+                except trio.TooSlowError:
+                    pass  # Handler may have timed out, continue to assertions
 
-    finally:
-        await host1.close()
-        await host2.close()
+                # Verify results
+                assert response == test_message, \
+                    f"Response mismatch: expected {test_message!r}, got {response!r}"
+                assert len(received_messages) == 1, \
+                    f"Expected 1 message, got {len(received_messages)}"
+                assert received_messages[0] == test_message, \
+                    f"Received message mismatch: expected {test_message!r}, got {received_messages[0]!r}"
+            except Exception:
+                # Ensure connection cleanup on failure
+                try:
+                    if stream is not None:
+                        await stream.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_echo_protocol_noise():
     """Test echo protocol over WebSocket with Noise security."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=True)
-    host2 = await create_websocket_host([], use_noise=True)
 
     received_messages = []
+    handler_called = trio.Event()
 
     async def echo_handler(stream):
-        data = await stream.read()
-        received_messages.append(data)
-        await stream.write(data)
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                received_messages.append(data)
+                await stream.write(data)
+            except trio.TooSlowError:
+                logger.warning("Echo handler (noise) timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Echo handler (noise) error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler_called.set()
 
-    host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=True) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=True) as host2:
             addrs = host1.get_addrs()
+            assert len(addrs) > 0, "Host1 should have listening addresses"
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [addrs[0]])
 
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)
+            # Connect with timeout
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            # Verify connection
+            await trio.sleep(0.1)
+            connections = host2.get_network().connections.get(peer_id)
+            assert connections is not None and len(connections) > 0, \
+                "Noise connection should be established"
 
+            # Send message with timeouts
             test_message = b"Secure WebSocket with Noise!"
-            stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
-            await stream.write(test_message)
-            response = await stream.read()
-            await stream.close()
+            stream = None
+            try:
+                with trio.fail_after(10.0):
+                    stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream.write(test_message)
+                
+                # Small delay to allow write to propagate through WebSocket and Yamux layers
+                await trio.sleep(0.2)
+                
+                try:
+                    with trio.fail_after(5.0):
+                        response = await stream.read()
+                except trio.TooSlowError:
+                    response = None
+                    raise AssertionError("Stream read timed out - data not received")
+                finally:
+                    if stream is not None:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
 
-            assert response == test_message
+                # Verify handler completed
+                try:
+                    with trio.fail_after(2.0):
+                        await handler_called.wait()
+                except trio.TooSlowError:
+                    pass
 
-    finally:
-        await host1.close()
-        await host2.close()
+                assert response == test_message, \
+                    f"Response mismatch: expected {test_message!r}, got {response!r}"
+                assert len(received_messages) == 1, \
+                    f"Expected 1 message, got {len(received_messages)}"
+            except Exception:
+                try:
+                    if stream is not None:
+                        await stream.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_bidirectional_communication():
     """Test bidirectional communication over WebSocket."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
 
     messages_from_host2 = []
     messages_from_host1 = []
+    handler1_called = trio.Event()
+    handler2_called = trio.Event()
 
     async def handler1(stream):
-        data = await stream.read()
-        messages_from_host2.append(data)
-        await stream.write(b"Response from host1")
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                messages_from_host2.append(data)
+                await stream.write(b"Response from host1")
+            except trio.TooSlowError:
+                logger.warning("Handler1 timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Handler1 error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler1_called.set()
 
     async def handler2(stream):
-        data = await stream.read()
-        messages_from_host1.append(data)
-        await stream.write(b"Response from host2")
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                messages_from_host1.append(data)
+                await stream.write(b"Response from host2")
+            except trio.TooSlowError:
+                logger.warning("Handler2 timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Handler2 error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler2_called.set()
 
-    host1.set_stream_handler(ECHO_PROTOCOL, handler1)
-    host2.set_stream_handler(ECHO_PROTOCOL, handler2)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, handler1)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
+            host2.set_stream_handler(ECHO_PROTOCOL, handler2)
+
             # Host2 connects to Host1
             peer_id_1 = host1.get_id()
-            peer_info_1 = PeerInfo(peer_id_1, [host1.get_addrs()[0]])
-            await host2.connect(peer_info_1)
-
-            # Host1 connects to Host2
             peer_id_2 = host2.get_id()
-            peer_info_2 = PeerInfo(peer_id_2, [host2.get_addrs()[0]])
-            await host1.connect(peer_info_2)
+            peer_info_1 = PeerInfo(peer_id_1, [host1.get_addrs()[0]])
+            
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info_1)
+            
+            await trio.sleep(0.1)
+            # Verify connection
+            connections = host2.get_network().connections.get(peer_id_1)
+            assert connections is not None and len(connections) > 0, \
+                "Connection should be established"
 
-            await trio.sleep(0.5)
+            # Host2 sends to Host1 (using the established connection)
+            stream1 = None
+            stream2 = None
+            try:
+                with trio.fail_after(10.0):
+                    stream1 = await host2.new_stream(peer_id_1, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream1.write(b"Message from host2")
+                
+                try:
+                    with trio.fail_after(5.0):
+                        resp1 = await stream1.read()
+                except trio.TooSlowError:
+                    resp1 = None
+                    raise AssertionError("Stream1 read timed out")
+                finally:
+                    if stream1 is not None:
+                        try:
+                            await stream1.close()
+                        except Exception:
+                            pass
+                
+                try:
+                    with trio.fail_after(2.0):
+                        await handler1_called.wait()
+                except trio.TooSlowError:
+                    pass
 
-            # Host2 sends to Host1
-            stream1 = await host2.new_stream(peer_id_1, [ECHO_PROTOCOL])
-            await stream1.write(b"Message from host2")
-            resp1 = await stream1.read()
-            await stream1.close()
+                # Host1 sends to Host2 (using the same connection, bidirectional)
+                # First ensure host2's peer info is in host1's peerstore
+                host1.get_network().peerstore.add_addrs(
+                    peer_id_2, host2.get_addrs()
+                )
+                
+                with trio.fail_after(10.0):
+                    stream2 = await host1.new_stream(peer_id_2, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream2.write(b"Message from host1")
+                
+                try:
+                    with trio.fail_after(5.0):
+                        resp2 = await stream2.read()
+                except trio.TooSlowError:
+                    resp2 = None
+                    raise AssertionError("Stream2 read timed out")
+                finally:
+                    if stream2 is not None:
+                        try:
+                            await stream2.close()
+                        except Exception:
+                            pass
+                
+                try:
+                    with trio.fail_after(2.0):
+                        await handler2_called.wait()
+                except trio.TooSlowError:
+                    pass
 
-            # Host1 sends to Host2
-            stream2 = await host1.new_stream(peer_id_2, [ECHO_PROTOCOL])
-            await stream2.write(b"Message from host1")
-            resp2 = await stream2.read()
-            await stream2.close()
-
-            assert resp1 == b"Response from host1"
-            assert resp2 == b"Response from host2"
-            assert len(messages_from_host2) == 1
-            assert len(messages_from_host1) == 1
-
-    finally:
-        await host1.close()
-        await host2.close()
+                # Verify results
+                assert resp1 == b"Response from host1", \
+                    f"Expected 'Response from host1', got {resp1!r}"
+                assert resp2 == b"Response from host2", \
+                    f"Expected 'Response from host2', got {resp2!r}"
+                assert len(messages_from_host2) == 1, \
+                    f"Expected 1 message from host2, got {len(messages_from_host2)}"
+                assert len(messages_from_host1) == 1, \
+                    f"Expected 1 message from host1, got {len(messages_from_host1)}"
+            except Exception:
+                try:
+                    if stream1 is not None:
+                        await stream1.close()
+                except Exception:
+                    pass
+                try:
+                    if stream2 is not None:
+                        await stream2.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id_1)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_multiple_streams():
     """Test multiple concurrent streams over a single WebSocket connection."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
 
     message_count = 0
+    message_count_lock = trio.Lock()
 
     async def echo_handler(stream):
         nonlocal message_count
-        data = await stream.read()
-        message_count += 1
-        await stream.write(f"Echo {message_count}: {data.decode()}".encode())
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                async with message_count_lock:
+                    message_count += 1
+                    count = message_count
+                await stream.write(f"Echo {count}: {data.decode()}".encode())
+            except trio.TooSlowError:
+                logger.warning("Echo handler (multiple streams) timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Echo handler (multiple streams) error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        except Exception:
+            # Outer exception - ensure stream is closed
+            try:
+                await stream.close()
+            except Exception:
+                pass
+            raise
 
-    host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [host1.get_addrs()[0]])
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)
+            
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            await trio.sleep(0.1)
+            connections = host2.get_network().connections.get(peer_id)
+            assert connections is not None and len(connections) > 0, \
+                "Connection should be established"
 
-            # Open multiple streams
+            # Open multiple streams with timeout
             streams = []
-            for i in range(5):
-                stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
-                streams.append(stream)
+            try:
+                with trio.fail_after(30.0):
+                    for i in range(5):
+                        stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
+                        streams.append(stream)
 
-            # Send messages concurrently
-            async def send_message(stream, idx):
-                await stream.write(f"Message {idx}".encode())
-                response = await stream.read()
-                await stream.close()
-                return response
+                # Send messages concurrently with timeouts
+                async def send_message(stream, idx):
+                    try:
+                        with trio.fail_after(5.0):
+                            await stream.write(f"Message {idx}".encode())
+                        try:
+                            with trio.fail_after(5.0):
+                                response = await stream.read()
+                        except trio.TooSlowError:
+                            response = None
+                        return response
+                    finally:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
 
-            async with trio.open_nursery() as nursery:
-                responses = []
-                for idx, stream in enumerate(streams):
-                    responses.append(
-                        nursery.start_soon(send_message, stream, idx + 1)
-                    )
-
-                # Collect responses
+                # Send messages concurrently and collect results
                 results = []
-                for resp_task in responses:
-                    results.append(await resp_task.wait())
+                async with trio.open_nursery() as send_nursery:
+                    async def send_and_collect(stream, idx):
+                        try:
+                            result = await send_message(stream, idx)
+                            if result is not None:
+                                results.append(result)
+                        except Exception as e:
+                            logger.error(f"Error in send_and_collect for stream {idx}: {e}")
 
-            # Verify all messages were echoed
-            assert len(results) == 5
-            assert message_count == 5
+                    for idx, stream in enumerate(streams):
+                        send_nursery.start_soon(send_and_collect, stream, idx + 1)
 
-    finally:
-        await host1.close()
-        await host2.close()
+                # Wait a moment for all tasks to complete
+                await trio.sleep(0.5)
+
+                # Verify all messages were echoed
+                assert len(results) == 5, \
+                    f"Expected 5 results, got {len(results)}"
+                assert message_count == 5, \
+                    f"Expected 5 handler calls, got {message_count}"
+            except Exception:
+                # Cleanup all streams on failure
+                for stream in streams:
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_ping_protocol():
     """Test ping protocol over WebSocket."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
+
+    handler_called = trio.Event()
 
     async def ping_handler(stream):
-        data = await stream.read(4)
-        if data == b"ping":
-            await stream.write(b"pong")
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read(4)
+                if data == b"ping":
+                    await stream.write(b"pong")
+            except trio.TooSlowError:
+                logger.warning("Ping handler timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Ping handler error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler_called.set()
 
-    host1.set_stream_handler(PING_PROTOCOL, ping_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(PING_PROTOCOL, ping_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [host1.get_addrs()[0]])
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)
+            
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            await trio.sleep(0.1)
+            connections = host2.get_network().connections.get(peer_id)
+            assert connections is not None and len(connections) > 0, \
+                "Connection should be established"
 
-            # Send ping
-            stream = await host2.new_stream(peer_id, [PING_PROTOCOL])
-            await stream.write(b"ping")
-            response = await stream.read(4)
-            await stream.close()
+            # Send ping with timeouts
+            stream = None
+            try:
+                with trio.fail_after(10.0):
+                    stream = await host2.new_stream(peer_id, [PING_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream.write(b"ping")
+                
+                try:
+                    with trio.fail_after(5.0):
+                        response = await stream.read(4)
+                except trio.TooSlowError:
+                    response = None
+                    raise AssertionError("Ping response timed out")
+                finally:
+                    if stream is not None:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
+                
+                try:
+                    with trio.fail_after(2.0):
+                        await handler_called.wait()
+                except trio.TooSlowError:
+                    pass
 
-            assert response == b"pong"
-
-    finally:
-        await host1.close()
-        await host2.close()
+                assert response == b"pong", \
+                    f"Expected 'pong', got {response!r}"
+            except Exception:
+                try:
+                    if stream is not None:
+                        await stream.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_large_message():
     """Test sending large messages over WebSocket."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
+
+    handler_called = trio.Event()
 
     async def echo_handler(stream):
-        data = await stream.read()
-        await stream.write(data)
-        await stream.close()
+        try:
+            try:
+                # Read large message with timeout
+                with trio.fail_after(30.0):
+                    data = await stream.read()
+                await stream.write(data)
+            except trio.TooSlowError:
+                logger.warning("Echo handler (large message) timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Echo handler (large message) error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler_called.set()
 
-    host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [host1.get_addrs()[0]])
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)
+            
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            await trio.sleep(0.1)
+            connections = host2.get_network().connections.get(peer_id)
+            assert connections is not None and len(connections) > 0, \
+                "Connection should be established"
 
-            # Send large message (100KB)
+            # Send large message (100KB) with timeouts
             large_message = b"x" * (100 * 1024)
-            stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
-            await stream.write(large_message)
+            stream = None
+            try:
+                with trio.fail_after(10.0):
+                    stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(30.0):
+                    await stream.write(large_message)
 
-            # Read response in chunks
-            response = b""
-            while True:
-                chunk = await stream.read(8192)
-                if not chunk:
-                    break
-                response += chunk
+                # Read response in chunks with timeout
+                response = b""
+                try:
+                    with trio.fail_after(30.0):
+                        while len(response) < len(large_message):
+                            chunk = await stream.read(8192)
+                            if not chunk:
+                                break
+                            response += chunk
+                except trio.TooSlowError:
+                    response = None
+                    raise AssertionError("Large message read timed out")
+                finally:
+                    if stream is not None:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
+                
+                try:
+                    with trio.fail_after(2.0):
+                        await handler_called.wait()
+                except trio.TooSlowError:
+                    pass
 
-            await stream.close()
-
-            assert response == large_message
-            assert len(response) == 100 * 1024
-
-    finally:
-        await host1.close()
-        await host2.close()
+                assert response is not None and len(response) == 100 * 1024, \
+                    f"Expected {100 * 1024} bytes, got {len(response) if response else 0}"
+                assert response == large_message, \
+                    "Response should match original message"
+            except Exception:
+                try:
+                    if stream is not None:
+                        await stream.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_connection_lifecycle():
     """Test connection lifecycle management."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    host1 = await create_websocket_host([listen_maddr], use_noise=False)
-    host2 = await create_websocket_host([], use_noise=False)
+
+    handler_called = trio.Event()
 
     async def echo_handler(stream):
-        data = await stream.read()
-        await stream.write(data)
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                await stream.write(data)
+            except trio.TooSlowError:
+                logger.warning("Echo handler (lifecycle) timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Echo handler (lifecycle) error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler_called.set()
 
-    host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as host1:
+        host1.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with host1.run(), host2.run():
+        async with create_websocket_host([], use_noise=False) as host2:
             peer_id = host1.get_id()
             peer_info = PeerInfo(peer_id, [host1.get_addrs()[0]])
 
-            # Connect
-            await host2.connect(peer_info)
-            await trio.sleep(0.5)
+            # Connect with timeout
+            with trio.fail_after(10.0):
+                await host2.connect(peer_info)
+            
+            await trio.sleep(0.2)
 
             # Verify connection exists
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None
-            assert len(connections) > 0
+            assert connections is not None, \
+                "Connection should exist in connection table"
+            assert len(connections) > 0, \
+                f"Connection list should not be empty, got {len(connections)}"
 
-            # Send message
-            stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
-            await stream.write(b"test")
-            response = await stream.read()
-            await stream.close()
-            assert response == b"test"
+            # Send message with timeouts
+            stream = None
+            try:
+                with trio.fail_after(10.0):
+                    stream = await host2.new_stream(peer_id, [ECHO_PROTOCOL])
+                
+                with trio.fail_after(5.0):
+                    await stream.write(b"test")
+                
+                try:
+                    with trio.fail_after(5.0):
+                        response = await stream.read()
+                except trio.TooSlowError:
+                    response = None
+                    raise AssertionError("Stream read timed out")
+                finally:
+                    if stream is not None:
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
+                
+                try:
+                    with trio.fail_after(2.0):
+                        await handler_called.wait()
+                except trio.TooSlowError:
+                    pass
+                
+                assert response == b"test", \
+                    f"Expected 'test', got {response!r}"
 
-            # Disconnect
-            await host2.disconnect(peer_id)
-            await trio.sleep(0.5)
+                # Disconnect with timeout
+                with trio.fail_after(5.0):
+                    await host2.disconnect(peer_id)
+                
+                await trio.sleep(0.5)
 
-            # Connection should be removed
-            connections_after = host2.get_network().connections.get(peer_id)
-            assert connections_after is None or len(connections_after) == 0
-
-    finally:
-        await host1.close()
-        await host2.close()
+                # Connection should be removed
+                connections_after = host2.get_network().connections.get(peer_id)
+                assert connections_after is None or len(connections_after) == 0, \
+                    f"Connection should be removed, but still exists: {connections_after}"
+            except Exception:
+                try:
+                    if stream is not None:
+                        await stream.close()
+                except Exception:
+                    pass
+                try:
+                    await host2.disconnect(peer_id)
+                except Exception:
+                    pass
+                raise
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(60)
 async def test_websocket_multiple_connections():
     """Test multiple hosts connecting to one server."""
     listen_maddr = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
-    server = await create_websocket_host([listen_maddr], use_noise=False)
 
-    received_from = set()
+    received_count = 0
+    received_lock = trio.Lock()
+    handler_called = trio.Event()
 
     async def echo_handler(stream):
-        # Get peer ID from connection
-        peer_id_str = "unknown"
-        # Echo with identifier
-        data = await stream.read()
-        received_from.add(peer_id_str)
-        await stream.write(b"ack")
-        await stream.close()
+        try:
+            try:
+                with trio.fail_after(5.0):
+                    data = await stream.read()
+                async with received_lock:
+                    received_count += 1
+                await stream.write(b"ack")
+            except trio.TooSlowError:
+                logger.warning("Echo handler (multiple connections) timeout waiting for data")
+            except Exception as e:
+                logger.error(f"Echo handler (multiple connections) error: {e}", exc_info=True)
+            finally:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        finally:
+            handler_called.set()
 
-    server.set_stream_handler(ECHO_PROTOCOL, echo_handler)
+    async with create_websocket_host([listen_maddr], use_noise=False) as server:
+        server.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
-    try:
-        async with server.run():
-            peer_id = server.get_id()
-            server_addr = server.get_addrs()[0]
-            peer_info = PeerInfo(peer_id, [server_addr])
+        peer_id = server.get_id()
+        server_addr = server.get_addrs()[0]
+        peer_info = PeerInfo(peer_id, [server_addr])
 
-            # Create multiple clients
+        # Create multiple clients using AsyncExitStack
+        from contextlib import AsyncExitStack
+
+        async with AsyncExitStack() as stack:
             clients = []
             for _ in range(3):
-                client = await create_websocket_host([], use_noise=False)
+                client = await stack.enter_async_context(
+                    create_websocket_host([], use_noise=False)
+                )
                 clients.append(client)
 
-            async with trio.open_nursery() as nursery:
-                for client in clients:
-                    nursery.start_soon(client.run)
+            await trio.sleep(0.3)
 
-                await trio.sleep(0.5)
+            # All clients connect and send messages with timeouts
+            async def client_send(client, client_idx):
+                stream = None
+                try:
+                    with trio.fail_after(10.0):
+                        await client.connect(peer_info)
+                    
+                    await trio.sleep(0.1)
+                    connections = client.get_network().connections.get(peer_id)
+                    assert connections is not None and len(connections) > 0, \
+                        f"Client {client_idx} should have connection"
+                    
+                    with trio.fail_after(10.0):
+                        stream = await client.new_stream(peer_id, [ECHO_PROTOCOL])
+                    
+                    with trio.fail_after(5.0):
+                        await stream.write(b"hello")
+                    
+                    try:
+                        with trio.fail_after(5.0):
+                            response = await stream.read()
+                    except trio.TooSlowError:
+                        response = None
+                        raise AssertionError(f"Client {client_idx}: Stream read timed out")
+                    finally:
+                        if stream is not None:
+                            try:
+                                await stream.close()
+                            except Exception:
+                                pass
+                    
+                    assert response == b"ack", \
+                        f"Client {client_idx}: Expected 'ack', got {response!r}"
+                except Exception as e:
+                    # Ensure cleanup
+                    try:
+                        if stream is not None:
+                            await stream.close()
+                    except Exception:
+                        pass
+                    try:
+                        await client.disconnect(peer_id)
+                    except Exception:
+                        pass
+                    # Re-raise with context
+                    raise AssertionError(f"Client {client_idx} failed: {e}") from e
 
-                # All clients connect and send messages
-                async def client_send(client):
-                    await client.connect(peer_info)
-                    await trio.sleep(0.2)
-                    stream = await client.new_stream(peer_id, [ECHO_PROTOCOL])
-                    await stream.write(b"hello")
-                    response = await stream.read()
-                    await stream.close()
-                    assert response == b"ack"
+            async with trio.open_nursery() as send_nursery:
+                for idx, client in enumerate(clients):
+                    send_nursery.start_soon(client_send, client, idx)
 
-                async with trio.open_nursery() as send_nursery:
-                    for client in clients:
-                        send_nursery.start_soon(client_send, client)
-
-                # Cleanup
-                for client in clients:
-                    await client.close()
-
-    finally:
-        await server.close()
+            # Wait for handlers to complete
+            await trio.sleep(0.5)
+            
+            # Verify all messages received
+            assert received_count == 3, \
+                f"Expected 3 messages received, got {received_count}"
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

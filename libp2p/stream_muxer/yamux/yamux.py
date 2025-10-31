@@ -409,10 +409,14 @@ class Yamux(IMuxedConn):
     async def start(self) -> None:
         logger.debug(f"Starting Yamux for {self.peer_id}")
         if self.event_started.is_set():
+            logger.debug(f"Yamux for {self.peer_id} already started")
             return
+        logger.debug(f"Yamux.start() creating nursery for {self.peer_id}")
         async with trio.open_nursery() as nursery:
             self._nursery = nursery
+            logger.debug(f"Yamux.start() starting handle_incoming task for {self.peer_id}")
             nursery.start_soon(self.handle_incoming)
+            logger.debug(f"Yamux.start() setting event_started for {self.peer_id}")
             self.event_started.set()
         logger.debug(
             f"Yamux.start() exiting for {self.peer_id}, closing new stream channel"
@@ -628,9 +632,12 @@ class Yamux(IMuxedConn):
         raise MuxedStreamEOF("Unexpected end of read_stream")
 
     async def handle_incoming(self) -> None:
+        logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
         while not self.event_shutting_down.is_set():
             try:
+                logger.debug(f"Yamux handle_incoming() calling read({HEADER_SIZE}) for peer {self.peer_id}")
                 header = await self.secured_conn.read(HEADER_SIZE)
+                logger.debug(f"Yamux handle_incoming() received {len(header)} bytes header for peer {self.peer_id}")
                 if not header or len(header) < HEADER_SIZE:
                     logger.debug(
                         f"Connection closed or incompleteheader for peer {self.peer_id}"
@@ -745,9 +752,11 @@ class Yamux(IMuxedConn):
                         )
                 elif typ == TYPE_DATA:
                     try:
+                        logger.debug(f"Yamux handle_incoming() reading {length} bytes data for stream {stream_id}, peer {self.peer_id}")
                         data = (
                             await self.secured_conn.read(length) if length > 0 else b""
                         )
+                        logger.debug(f"Yamux handle_incoming() received {len(data)} bytes data for stream {stream_id}, peer {self.peer_id}")
                         async with self.streams_lock:
                             if stream_id in self.streams:
                                 self.stream_buffers[stream_id].extend(data)
