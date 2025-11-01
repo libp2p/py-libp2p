@@ -178,10 +178,6 @@ Create a file named ``destination_node.py`` with the following content:
                 transport = CircuitV2Transport(host, protocol, config)
                 print("Transport created")
 
-                # Create a listener for relayed connections
-                listener = transport.create_listener(handle_echo_stream)
-                print("Created relay listener")
-
                 # Start listening for relayed connections
                 async with trio.open_nursery() as nursery:
                     await listener.listen("/p2p-circuit", nursery)
