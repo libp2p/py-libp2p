@@ -5,12 +5,6 @@ import logging
 from typing import Any
 
 import pytest
-
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception
 from multiaddr import Multiaddr
 import trio
 
@@ -30,6 +24,10 @@ from libp2p.transport.websocket.multiaddr_utils import (
 from libp2p.transport.websocket.transport import WebsocketTransport
 
 logger = logging.getLogger(__name__)
+
+# ExceptionGroup type handling for Python 3.11+ compatibility
+# Use getattr to avoid type checker errors on Python 3.10
+ExceptionGroupType: type[BaseException] = getattr(builtins, "ExceptionGroup", Exception)
 
 PLAINTEXT_PROTOCOL_ID = "/plaintext/1.0.0"
 
@@ -820,9 +818,13 @@ async def test_wss_host_pair_data_exchange():
         subject = issuer = x509.Name(
             [
                 x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(  # type: ignore
+                    NameOID.STATE_OR_PROVINCE_NAME, "Test"
+                ),
                 x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(  # type: ignore
+                    NameOID.ORGANIZATION_NAME, "Test"
+                ),
                 x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
             ]
         )
@@ -833,9 +835,10 @@ async def test_wss_host_pair_data_exchange():
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
             .not_valid_after(
-                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(days=1)
             )
             .add_extension(
                 x509.SubjectAlternativeName(
