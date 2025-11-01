@@ -1,0 +1,40 @@
+Enhances the `libp2p`` stack with improved peer connection, relay routing, and discovery for resilient networking.
+
+**Voucher and Signature Verification**
+- Implements voucher and signature verification in ``resources.py``
+- Validates incoming relay vouchers and signatures to ensure proper authorization
+- Prevents misuse of relay resources through secure validation
+
+**Relay Selection Logic**
+- Implements initial relay selection logic in ``transport.py``
+- Uses basic selection strategies (first-available or round-robin) for relay dialing
+- Introduces sophisticated relay selection with scoring, latency-based metrics, and retry strategies
+
+**DHT-based Peer Discovery**
+- Implements DHT-based peer discovery using the libp2p DHT
+- Enables dynamic location and connection to peers across the network
+
+**Relay Reservation and Maintenance**
+- Implements reservation storage and refresh mechanism
+- Tracks active relay reservations and refreshes them before expiry
+- Supports long-lived relayed connections
+
+**Relay Multiaddr Handling**
+- Adds ``/p2p-circuit/...`` addresses to peerstore for reconnects and discovery
+- Implements proper parsing and handling of relayed multiaddrs
+- Ensures correct validation and usage of ``/p2p-circuit/p2p/...`` paths during dialing
+
+**CircuitV2Listener Implementation**
+- Implements ``run()`` method in ``CircuitV2Listener``
+- Finalizes listener logic to support incoming relayed connections
+
+**Testing and Quality**
+- Adds dedicated tests for voucher and signature verification
+- Includes tests for initial and advanced relay selection logic
+- Covers DHT-based peer discovery functionality
+- Tests reservation storage and refresh mechanisms
+- Validates relay multiaddr handling and parsing
+- Tests ``CircuitV2Listener`` functionality
+- Maintains 100% test coverage across all new features
+- Resolves all linting issues and adheres to code quality standards
+- Ensures no regressions in existing functionality
