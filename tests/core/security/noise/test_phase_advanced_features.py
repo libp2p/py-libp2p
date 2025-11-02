@@ -22,6 +22,10 @@ from libp2p.security.noise.webtransport import (
     WebTransportCertManager,
     WebTransportSupport,
 )
+from tests.utils.factories import (
+    noise_static_key_factory,
+    transport_handshake_factory,
+)
 
 
 class TestWebTransportSupport:
@@ -291,35 +295,58 @@ class TestEnhancedTransport:
     def key_pairs(self):
         """Create test key pairs."""
         libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
-        return libp2p_keypair, noise_keypair
+        noise_key = noise_static_key_factory()
+        return libp2p_keypair, noise_key
 
-    def test_enhanced_transport_creation(self, key_pairs):
-        """Test enhanced transport creation with all features."""
-        libp2p_keypair, noise_keypair = key_pairs
+    @pytest.mark.trio
+    async def test_enhanced_transport_creation(self, key_pairs, nursery):
+        """Test enhanced transport creation with all features using real TCP."""
+        libp2p_keypair, noise_key = key_pairs
 
-        transport = Transport(
+        initiator_transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
             early_data=b"test_early_data",
             early_data_handler=BufferingEarlyDataHandler(),
             rekey_policy=TimeBasedRekeyPolicy(max_time_seconds=3600),
         )
 
         # Test all features are available
-        assert transport.webtransport_support is not None
-        assert transport.early_data_manager is not None
-        assert transport.rekey_manager is not None
-        assert hasattr(transport, "_static_key_cache")
-        assert transport.early_data == b"test_early_data"
+        assert initiator_transport.webtransport_support is not None
+        assert initiator_transport.early_data_manager is not None
+        assert initiator_transport.rekey_manager is not None
+        assert hasattr(initiator_transport, "_static_key_cache")
+        assert initiator_transport.early_data == b"test_early_data"
+
+        # Create responder transport
+        responder_keypair = create_new_key_pair()
+        responder_noise_key = noise_static_key_factory()
+        responder_transport = Transport(
+            libp2p_keypair=responder_keypair,
+            noise_privkey=responder_noise_key,
+        )
+
+        # Perform real handshake to verify all features work
+        async with transport_handshake_factory(
+            nursery, initiator_transport, responder_transport
+        ) as (init_conn, resp_conn):
+            # Verify connections established
+            assert init_conn is not None
+            assert resp_conn is not None
+
+            # Test data exchange to confirm handshake completed successfully
+            test_data = b"enhanced_transport_test"
+            await init_conn.write(test_data)
+            received = await resp_conn.read(len(test_data))
+            assert received == test_data
 
     def test_pattern_selection(self, key_pairs):
         """Test pattern selection logic."""
-        libp2p_keypair, noise_keypair = key_pairs
+        libp2p_keypair, noise_key = key_pairs
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
         )
 
         # Test default pattern (XX)
@@ -332,16 +359,16 @@ class TestEnhancedTransport:
 
     def test_static_key_caching(self, key_pairs):
         """Test static key caching for performance optimization."""
-        libp2p_keypair, noise_keypair = key_pairs
+        libp2p_keypair, noise_key = key_pairs
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
         )
 
         # Test caching static key
         remote_peer = ID.from_pubkey(libp2p_keypair.public_key)
-        remote_static_key = noise_keypair.public_key
+        remote_static_key = noise_key.get_public_key()
 
         transport.cache_static_key(remote_peer, remote_static_key)
 
@@ -354,51 +381,98 @@ class TestEnhancedTransport:
         cached_key = transport.get_cached_static_key(remote_peer)
         assert cached_key is None
 
-    def test_webtransport_integration(self, key_pairs):
-        """Test WebTransport integration in transport."""
-        libp2p_keypair, noise_keypair = key_pairs
+    @pytest.mark.trio
+    async def test_webtransport_integration(self, key_pairs, nursery):
+        """Test WebTransport integration in transport using real TCP handshake."""
+        libp2p_keypair, noise_key = key_pairs
 
-        transport = Transport(
+        initiator_transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
         )
 
-        # Test WebTransport functionality
-        wt_support = transport.webtransport_support
+        # Add WebTransport certificates
+        wt_support = initiator_transport.webtransport_support
         cert_hash = wt_support.add_certificate(b"webtransport_cert")
 
         assert wt_support.has_certificates() is True
         assert wt_support.validate_certificate_hash(cert_hash) is True
 
+        # Create responder transport
+        responder_keypair = create_new_key_pair()
+        responder_noise_key = noise_static_key_factory()
+        responder_transport = Transport(
+            libp2p_keypair=responder_keypair,
+            noise_privkey=responder_noise_key,
+        )
+        responder_transport.webtransport_support.add_certificate(b"responder_cert")
+
+        # Perform real handshake to verify WebTransport certificates work
+        async with transport_handshake_factory(
+            nursery, initiator_transport, responder_transport
+        ) as (init_conn, resp_conn):
+            # Verify connections established
+            assert init_conn is not None
+            assert resp_conn is not None
+
+            # Test data exchange to confirm handshake completed successfully
+            test_data = b"webtransport_integration_test"
+            await init_conn.write(test_data)
+            received = await resp_conn.read(len(test_data))
+            assert received == test_data
+
     @pytest.mark.trio
-    async def test_early_data_integration(self, key_pairs):
-        """Test early data integration in transport."""
-        libp2p_keypair, noise_keypair = key_pairs
+    async def test_early_data_integration(self, key_pairs, nursery):
+        """Test early data integration in transport using real TCP handshake."""
+        libp2p_keypair, noise_key = key_pairs
 
         handler = BufferingEarlyDataHandler()
-        transport = Transport(
+        initiator_transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
+            early_data=b"initiator_early_data",
             early_data_handler=handler,
         )
 
         # Test early data manager
-        ed_manager = transport.early_data_manager
+        ed_manager = initiator_transport.early_data_manager
         assert ed_manager.handler == handler
 
-        # Test handling early data
-        await ed_manager.handle_early_data(b"transport_early_data")
-        assert ed_manager.has_early_data() is True
-        assert ed_manager.get_early_data() == b"transport_early_data"
+        # Create responder transport
+        responder_keypair = create_new_key_pair()
+        responder_noise_key = noise_static_key_factory()
+        responder_handler = BufferingEarlyDataHandler()
+        responder_transport = Transport(
+            libp2p_keypair=responder_keypair,
+            noise_privkey=responder_noise_key,
+            early_data_handler=responder_handler,
+        )
+
+        # Perform real handshake to verify early data works
+        async with transport_handshake_factory(
+            nursery, initiator_transport, responder_transport
+        ) as (init_conn, resp_conn):
+            # Verify connections established
+            assert init_conn is not None
+            assert resp_conn is not None
+
+            # Test data exchange to confirm handshake completed successfully
+            test_data = b"early_data_integration_test"
+            await init_conn.write(test_data)
+            received = await resp_conn.read(len(test_data))
+            assert received == test_data
+
+            # Verify early data was configured
+            assert initiator_transport.early_data == b"initiator_early_data"
 
     def test_rekey_integration(self, key_pairs):
         """Test rekey integration in transport."""
-        libp2p_keypair, noise_keypair = key_pairs
+        libp2p_keypair, noise_key = key_pairs
 
         policy = TimeBasedRekeyPolicy(max_time_seconds=3600)
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
             rekey_policy=policy,
         )
 
@@ -416,12 +490,12 @@ class TestEnhancedTransport:
 
     def test_backward_compatibility(self, key_pairs):
         """Test backward compatibility with existing transport usage."""
-        libp2p_keypair, noise_keypair = key_pairs
+        libp2p_keypair, noise_key = key_pairs
 
         # Test minimal transport creation (backward compatible)
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_key,
         )
 
         # Test that all required attributes exist

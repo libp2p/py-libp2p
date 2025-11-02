@@ -6,6 +6,10 @@ from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.security.noise.messages import NoiseExtensions, NoiseHandshakePayload
 from libp2p.security.noise.patterns import PatternXX
+from tests.utils.factories import (
+    noise_static_key_factory,
+    pattern_handshake_factory,
+)
 
 
 class TestNoiseExtensionsEarlyData:
@@ -158,26 +162,39 @@ class TestPatternEarlyDataIntegration:
     def pattern_setup(self):
         """Set up pattern for testing."""
         libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        noise_key = noise_static_key_factory()
         local_peer = ID.from_pubkey(libp2p_keypair.public_key)
 
         pattern = PatternXX(
             local_peer,
             libp2p_keypair.private_key,
-            noise_keypair.private_key,
+            noise_key,
             early_data=b"pattern_early_data",
         )
 
-        return pattern, libp2p_keypair, noise_keypair
+        return pattern, libp2p_keypair, noise_key
 
-    def test_pattern_with_extensions_and_early_data(self, pattern_setup):
-        """Test pattern with extensions and early data."""
-        pattern, libp2p_keypair, noise_keypair = pattern_setup
+    @pytest.mark.trio
+    async def test_pattern_with_extensions_and_early_data(self, pattern_setup, nursery):
+        """Test pattern with extensions and early data through real TCP handshake."""
+        responder_pattern, libp2p_keypair, noise_key = pattern_setup
+
+        # Create initiator pattern with early data
+        initiator_keypair = create_new_key_pair()
+        initiator_noise_key = noise_static_key_factory()
+        initiator_peer = ID.from_pubkey(initiator_keypair.public_key)
+        initiator_pattern = PatternXX(
+            local_peer=initiator_peer,
+            libp2p_privkey=initiator_keypair.private_key,
+            noise_static_key=initiator_noise_key,
+            early_data=b"pattern_early_data",
+        )
 
         certhashes = [b"cert1", b"cert2"]
         ext = NoiseExtensions(webtransport_certhashes=certhashes)
 
-        payload = pattern.make_handshake_payload(extensions=ext)
+        # Test payload creation with extensions (unit test aspect)
+        payload = initiator_pattern.make_handshake_payload(extensions=ext)
 
         # Early data should be in extensions
         assert payload.extensions is not None
@@ -187,19 +204,33 @@ class TestPatternEarlyDataIntegration:
         assert payload.has_early_data()
         assert payload.get_early_data() == b"pattern_early_data"
 
+        # Perform real handshake to verify early data with extensions works
+        async with pattern_handshake_factory(
+            nursery, initiator_pattern, responder_pattern
+        ) as (init_conn, resp_conn):
+            # Verify connections established
+            assert init_conn is not None
+            assert resp_conn is not None
+
+            # Test data exchange to confirm handshake completed successfully
+            test_data = b"extensions_and_early_data_test"
+            await init_conn.write(test_data)
+            received = await resp_conn.read(len(test_data))
+            assert received == test_data
+
     def test_pattern_with_extensions_without_early_data(self, pattern_setup):
         """Test pattern with extensions but no early data."""
-        pattern, libp2p_keypair, noise_keypair = pattern_setup
+        pattern, libp2p_keypair, noise_key = pattern_setup
 
         # Create pattern without early data
         libp2p_keypair2 = create_new_key_pair()
-        noise_keypair2 = create_new_key_pair()
+        noise_key2 = noise_static_key_factory()
         local_peer2 = ID.from_pubkey(libp2p_keypair2.public_key)
 
         pattern_no_early = PatternXX(
             local_peer2,
             libp2p_keypair2.private_key,
-            noise_keypair2.private_key,
+            noise_key2,
             early_data=None,
         )
 
@@ -216,7 +247,7 @@ class TestPatternEarlyDataIntegration:
 
     def test_pattern_without_extensions_no_early_data(self, pattern_setup):
         """Test pattern without extensions (no early data)."""
-        pattern, libp2p_keypair, noise_keypair = pattern_setup
+        pattern, libp2p_keypair, noise_key = pattern_setup
 
         payload = pattern.make_handshake_payload()
 
@@ -224,25 +255,52 @@ class TestPatternEarlyDataIntegration:
         assert payload.extensions is None
         assert not payload.has_early_data()
 
-    def test_pattern_early_data_roundtrip(self, pattern_setup):
-        """Test pattern early data roundtrip through serialization."""
-        pattern, libp2p_keypair, noise_keypair = pattern_setup
+    @pytest.mark.trio
+    async def test_pattern_early_data_roundtrip(self, pattern_setup, nursery):
+        """Test pattern early data roundtrip through real TCP handshake."""
+        responder_pattern, libp2p_keypair, noise_key = pattern_setup
+
+        # Create initiator pattern with early data
+        initiator_keypair = create_new_key_pair()
+        initiator_noise_key = noise_static_key_factory()
+        initiator_peer = ID.from_pubkey(initiator_keypair.public_key)
+        initiator_pattern = PatternXX(
+            local_peer=initiator_peer,
+            libp2p_privkey=initiator_keypair.private_key,
+            noise_static_key=initiator_noise_key,
+            early_data=b"initiator_pattern_early_data",
+        )
 
         certhashes = [b"cert1", b"cert2"]
         ext = NoiseExtensions(webtransport_certhashes=certhashes)
 
-        payload = pattern.make_handshake_payload(extensions=ext)
+        # Test serialization roundtrip (unit test aspect)
+        payload = initiator_pattern.make_handshake_payload(extensions=ext)
 
         # Serialize and deserialize
         serialized = payload.serialize()
         deserialized = NoiseHandshakePayload.deserialize(serialized)
 
-        # Early data should be preserved
+        # Early data should be preserved in serialization
         assert deserialized.extensions is not None
-        assert deserialized.extensions.early_data == b"pattern_early_data"
+        assert deserialized.extensions.early_data == b"initiator_pattern_early_data"
         assert deserialized.extensions.webtransport_certhashes == certhashes
         assert deserialized.has_early_data()
-        assert deserialized.get_early_data() == b"pattern_early_data"
+        assert deserialized.get_early_data() == b"initiator_pattern_early_data"
+
+        # Perform real handshake to verify early data works end-to-end
+        async with pattern_handshake_factory(
+            nursery, initiator_pattern, responder_pattern
+        ) as (init_conn, resp_conn):
+            # Verify connections established
+            assert init_conn is not None
+            assert resp_conn is not None
+
+            # Test data exchange to confirm handshake completed successfully
+            test_data = b"early_data_roundtrip_test"
+            await init_conn.write(test_data)
+            received = await resp_conn.read(len(test_data))
+            assert received == test_data
 
 
 class TestBackwardCompatibility:
