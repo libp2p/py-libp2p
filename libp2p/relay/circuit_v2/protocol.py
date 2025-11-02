@@ -305,11 +305,10 @@ class CircuitV2Protocol(Service):
 
         This handler processes relay requests from other peers.
         """
+        # Try to get peer ID first
+        remote_peer_id = stream.muxed_conn.peer_id
+        remote_id = str(remote_peer_id)
         try:
-            # Try to get peer ID first
-            remote_peer_id = stream.muxed_conn.peer_id
-            remote_id = str(remote_peer_id)
-
             logger.debug("Handling hop stream from %s", remote_id)
 
             # First, handle the read timeout gracefully
