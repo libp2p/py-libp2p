@@ -27,9 +27,11 @@ from libp2p.custom_types import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.peer.envelope import Envelope, unmarshal_envelope
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
@@ -62,6 +64,7 @@ from .resources import (
     RelayLimits,
     RelayResourceManager,
 )
+from .utils import maybe_consume_signed_record
 
 logger = logging.getLogger("libp2p.relay.circuit_v2")
 
@@ -302,18 +305,10 @@ class CircuitV2Protocol(Service):
 
         This handler processes relay requests from other peers.
         """
+        # Try to get peer ID first
+        remote_peer_id = stream.muxed_conn.peer_id
+        remote_id = str(remote_peer_id)
         try:
-            # Try to get peer ID first
-            try:
-                # Cast to extended interface with get_remote_peer_id
-                stream_with_peer_id = cast(INetStreamWithExtras, stream)
-                remote_peer_id = stream_with_peer_id.get_remote_peer_id()
-                remote_id = str(remote_peer_id)
-            except Exception:
-                # Fall back to address if peer ID not available
-                remote_addr = stream.get_remote_address()
-                remote_id = f"peer at {remote_addr}" if remote_addr else "unknown peer"
-
             logger.debug("Handling hop stream from %s", remote_id)
 
             # First, handle the read timeout gracefully
@@ -331,10 +326,12 @@ class CircuitV2Protocol(Service):
                         pb_status = PbStatus()
                         pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
                         pb_status.message = "Empty message received"
+                        signed_envelope, _ = env_to_send_in_RPC(self.host)
 
                         response = HopMessage(
                             type=HopMessage.STATUS,
                             status=pb_status,
+                            senderRecord=signed_envelope,
                         )
                         await stream.write(response.SerializeToString())
                         await trio.sleep(0.5)  # Longer wait to ensure message is sent
@@ -348,10 +345,12 @@ class CircuitV2Protocol(Service):
                 pb_status = PbStatus()
                 pb_status.code = cast(Any, int(StatusCode.CONNECTION_FAILED))
                 pb_status.message = "Stream read timeout"
+                signed_envelope, _ = env_to_send_in_RPC(self.host)
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=pb_status,
+                    senderRecord=signed_envelope,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
@@ -366,10 +365,12 @@ class CircuitV2Protocol(Service):
                 pb_status = PbStatus()
                 pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
                 pb_status.message = f"Read error: {str(e)}"
+                signed_envelope, _ = env_to_send_in_RPC(self.host)
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=pb_status,
+                    senderRecord=signed_envelope,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
@@ -389,14 +390,23 @@ class CircuitV2Protocol(Service):
                 pb_status = PbStatus()
                 pb_status.code = cast(Any, int(StatusCode.MALFORMED_MESSAGE))
                 pb_status.message = f"Parse error: {str(e)}"
+                signed_envelope, _ = env_to_send_in_RPC(self.host)
 
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=pb_status,
+                    senderRecord=signed_envelope,
                 )
                 await stream.write(response.SerializeToString())
                 await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                 return
+
+            # Consume sender records if sent
+            if hop_msg.HasField("senderRecord"):
+                if not maybe_consume_signed_record(hop_msg, self.host, remote_peer_id):
+                    logger.error("Received invalid sender-records. Closing stream")
+                    await self._close_stream(stream)
+                    return
 
             # Process based on message type
             if hop_msg.type == HopMessage.RESERVE:
@@ -410,10 +420,14 @@ class CircuitV2Protocol(Service):
             else:
                 logger.error("Invalid message type %d from %s", hop_msg.type, remote_id)
                 # Send a nice error response using _send_status method
+                peer_envelope = self.host.get_peerstore().get_peer_record(
+                    self.host.get_id()
+                )
                 await self._send_status(
                     stream,
                     StatusCode.MALFORMED_MESSAGE,
                     f"Invalid message type: {hop_msg.type}",
+                    peer_envelope,
                 )
 
         except Exception as e:
@@ -422,10 +436,14 @@ class CircuitV2Protocol(Service):
             )
             try:
                 # Send a nice error response using _send_status method
+                peer_envelope = self.host.get_peerstore().get_peer_record(
+                    self.host.get_id()
+                )
                 await self._send_status(
                     stream,
                     StatusCode.MALFORMED_MESSAGE,
                     f"Internal error: {str(e)}",
+                    peer_envelope,
                 )
             except Exception as e2:
                 logger.error(
@@ -438,6 +456,8 @@ class CircuitV2Protocol(Service):
 
         This handler processes incoming relay connections from the destination side.
         """
+        remote_peer_id = stream.muxed_conn.peer_id
+
         try:
             # Read the incoming message with timeout
             with trio.fail_after(self.read_timeout):
@@ -445,24 +465,36 @@ class CircuitV2Protocol(Service):
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
+            if stop_msg.HasField("senderRecord"):
+                if not maybe_consume_signed_record(stop_msg, self.host, remote_peer_id):
+                    logger.error("Received invalid senderRecord. Closing stream")
+                    await self._close_stream(stream)
+                    return
+
             if stop_msg.type != StopMessage.CONNECT:
                 # Use direct attribute access to create status object for error response
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                relay_envelope = unmarshal_envelope(relay_envelope_bytes)
                 await self._send_stop_status(
                     stream,
                     StatusCode.MALFORMED_MESSAGE,
                     "Invalid message type",
+                    relay_envelope,
                 )
                 await self._close_stream(stream)
                 return
 
-            # Get the source stream from active relays
             peer_id = ID(stop_msg.peer)
+            # Get the source stream from active relays
             if peer_id not in self._active_relays:
                 # Use direct attribute access to create status object for error response
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                relay_envelope = unmarshal_envelope(relay_envelope_bytes)
                 await self._send_stop_status(
                     stream,
                     StatusCode.CONNECTION_FAILED,
                     "No pending relay connection",
+                    relay_envelope,
                 )
                 await self._close_stream(stream)
                 return
@@ -470,16 +502,27 @@ class CircuitV2Protocol(Service):
             src_stream, _ = self._active_relays[peer_id]
             self._active_relays[peer_id] = (src_stream, stream)
 
+            # Get the source peer's SPR to send to destination
+            src_peer_id = src_stream.muxed_conn.peer_id
+            src_peer_envelope = self.host.get_peerstore().get_peer_record(src_peer_id)
+
+            # Get the destination peer's SPR to send to source
+            dst_peer_id = stream.muxed_conn.peer_id
+            dst_peer_envelope = self.host.get_peerstore().get_peer_record(dst_peer_id)
+
             # Send success status to both sides
             await self._send_status(
                 src_stream,
                 StatusCode.OK,
                 "Connection established",
+                dst_peer_envelope,
             )
+
             await self._send_stop_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                src_peer_envelope,
             )
 
             # Start relaying data
@@ -501,19 +544,25 @@ class CircuitV2Protocol(Service):
 
         except trio.TooSlowError:
             logger.error("Timeout reading from stop stream")
+            relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            relay_envelope = unmarshal_envelope(relay_envelope_bytes)
             await self._send_stop_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 "Stream read timeout",
+                relay_envelope,
             )
             await self._close_stream(stream)
         except Exception as e:
             logger.error("Error handling stop stream: %s", str(e))
             try:
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                relay_envelope = unmarshal_envelope(relay_envelope_bytes)
                 await self._send_stop_status(
                     stream,
                     StatusCode.MALFORMED_MESSAGE,
                     str(e),
+                    relay_envelope,
                 )
                 await self._close_stream(stream)
             except Exception:
@@ -525,6 +574,8 @@ class CircuitV2Protocol(Service):
         try:
             peer_id = ID(msg.peer)
             logger.debug("Handling reservation request from peer %s", peer_id)
+            signed_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            signed_envelope = unmarshal_envelope(signed_envelope_bytes)
 
             # Check if we can accept more reservations
             if not self.resource_manager.can_accept_reservation(peer_id):
@@ -538,6 +589,7 @@ class CircuitV2Protocol(Service):
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
                     status=status.to_pb(),
+                    senderRecord=signed_envelope.marshal_envelope(),
                 )
                 await stream.write(status_msg.SerializeToString())
                 return
@@ -564,6 +616,7 @@ class CircuitV2Protocol(Service):
                         duration=self.limits.duration,
                         data=self.limits.data,
                     ),
+                    senderRecord=signed_envelope.marshal_envelope(),
                 )
 
                 # Log the response message details for debugging
@@ -591,6 +644,7 @@ class CircuitV2Protocol(Service):
                         stream,
                         StatusCode.INTERNAL_ERROR,
                         f"Failed to process reservation: {str(e)}",
+                        signed_envelope,
                     )
                 except Exception as send_err:
                     logger.error("Failed to send error response: %s", str(send_err))
@@ -611,20 +665,26 @@ class CircuitV2Protocol(Service):
         # Verify reservation if provided
         if msg.HasField("reservation"):
             if not self.resource_manager.verify_reservation(peer_id, msg.reservation):
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                relay_envelope = unmarshal_envelope(relay_envelope_bytes)
                 await self._send_status(
                     stream,
                     StatusCode.PERMISSION_DENIED,
                     "Invalid reservation",
+                    relay_envelope,
                 )
                 await stream.reset()
                 return
 
         # Check resource limits
         if not self.resource_manager.can_accept_connection(peer_id):
+            relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            relay_envelope = unmarshal_envelope(relay_envelope_bytes)
             await self._send_status(
                 stream,
                 StatusCode.RESOURCE_LIMIT_EXCEEDED,
                 "Connection limit exceeded",
+                relay_envelope,
             )
             await stream.reset()
             return
@@ -639,20 +699,35 @@ class CircuitV2Protocol(Service):
                 if not dst_stream:
                     raise ConnectionError("Could not connect to destination")
 
+                # Get remote peer's signed_peer_record and send to the destination peer
+                src_peer_id = cast(INetStreamWithExtras, stream).get_remote_peer_id()
+
+                # Get relay's SPR to send in the STOP CONNECT message
+                relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+
                 # Send STOP CONNECT message
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
                     # Cast to extended interface with get_remote_peer_id
-                    peer=cast(INetStreamWithExtras, stream)
-                    .get_remote_peer_id()
-                    .to_bytes(),
+                    peer=src_peer_id.to_bytes(),
+                    senderRecord=relay_envelope_bytes,
                 )
+
                 await dst_stream.write(stop_msg.SerializeToString())
 
                 # Wait for response from destination
                 resp_bytes = await dst_stream.read()
                 resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
+
+                if resp.HasField("senderRecord"):
+                    if not maybe_consume_signed_record(resp, self.host, peer_id):
+                        logger.error(
+                            "Received invalid signed-records from destination. "
+                            "Closing stream"
+                        )
+                        await self._close_stream(stream)
+                        return
 
                 # Handle status attributes from the response
                 if resp.HasField("status"):
@@ -677,11 +752,15 @@ class CircuitV2Protocol(Service):
             if reservation:
                 reservation.active_connections += 1
 
+            # Get destination peer's SPR to send to source
+            signed_envelope = self.host.get_peerstore().get_peer_record(peer_id)
+
             # Send success status
             await self._send_status(
                 stream,
                 StatusCode.OK,
                 "Connection established",
+                signed_envelope,
             )
 
             # Start relaying data
@@ -703,10 +782,13 @@ class CircuitV2Protocol(Service):
 
         except (trio.TooSlowError, ConnectionError) as e:
             logger.error("Error establishing relay connection: %s", str(e))
+            relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            relay_envelope = unmarshal_envelope(relay_envelope_bytes)
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 str(e),
+                relay_envelope,
             )
             if peer_id in self._active_relays:
                 del self._active_relays[peer_id]
@@ -719,10 +801,13 @@ class CircuitV2Protocol(Service):
                 await dst_stream.reset()
         except Exception as e:
             logger.error("Unexpected error in connect handler: %s", str(e))
+            relay_envelope_bytes, _ = env_to_send_in_RPC(self.host)
+            relay_envelope = unmarshal_envelope(relay_envelope_bytes)
             await self._send_status(
                 stream,
                 StatusCode.CONNECTION_FAILED,
                 "Internal error",
+                relay_envelope,
             )
             if peer_id in self._active_relays:
                 del self._active_relays[peer_id]
@@ -794,6 +879,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: int,
         message: str,
+        envelope: Envelope | None = None,
     ) -> None:
         """Send a status message."""
         try:
@@ -806,10 +892,13 @@ class CircuitV2Protocol(Service):
                 )  # Cast to Any to avoid type errors
                 pb_status.message = message
 
+                # Send destination records to source in case of HOP status OK message
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
                     status=pb_status,
                 )
+                if envelope is not None:
+                    status_msg.senderRecord = envelope.marshal_envelope()
 
                 msg_bytes = status_msg.SerializeToString()
                 logger.debug("Status message serialized (%d bytes)", len(msg_bytes))
@@ -832,6 +921,7 @@ class CircuitV2Protocol(Service):
         stream: ReadWriteCloser,
         code: int,
         message: str,
+        senderRecord: Envelope | None = None,
     ) -> None:
         """Send a status message on a STOP stream."""
         try:
@@ -848,6 +938,9 @@ class CircuitV2Protocol(Service):
                     type=StopMessage.STATUS,
                     status=pb_status,
                 )
+                if senderRecord is not None:
+                    status_msg.senderRecord = senderRecord.marshal_envelope()
+
                 await stream.write(status_msg.SerializeToString())
                 await trio.sleep(0.5)  # Ensure message is sent
         except Exception as e:

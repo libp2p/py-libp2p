@@ -10,6 +10,7 @@ from enum import (
 )
 from typing import (
     Any,
+    cast,
 )
 
 from .pb.circuit_pb2 import Status as PbStatus
@@ -28,7 +29,7 @@ class StatusCode(IntEnum):
     INTERNAL_ERROR = 500
 
 
-def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
+def create_status(code: int | StatusCode = StatusCode.OK, message: str = "") -> Any:
     """
     Create a protocol buffer Status object.
 
@@ -49,7 +50,9 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
     pb_obj = PbStatus()
 
     # Convert the integer status code to the protobuf enum value type
-    pb_obj.code = PbStatus.Code.ValueType(code)
+    # The code field expects PbStatus.Code.ValueType (a NewType wrapper around int)
+    # At runtime, protobuf accepts int directly, but type checker requires ValueType
+    pb_obj.code = cast(PbStatus.Code.ValueType, int(code))  # type: ignore[assignment,attr-defined]
     pb_obj.message = message
 
     return pb_obj
