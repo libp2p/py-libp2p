@@ -27,6 +27,7 @@ from libp2p.custom_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )
@@ -44,6 +45,9 @@ from .protocol import (
 )
 from .protocol_buffer import (
     StatusCode,
+)
+from .utils import (
+    maybe_consume_signed_record,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
@@ -391,10 +395,13 @@ class RelayDiscovery(Service):
                 return False
 
             try:
+                # Prepare signed envelope
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
                 # Create and send reservation request
                 request = HopMessage(
                     type=HopMessage.RESERVE,
                     peer=self.host.get_id().to_bytes(),
+                    senderRecord=envelope_bytes,
                 )
 
                 with trio.fail_after(self.stream_timeout):
@@ -409,6 +416,17 @@ class RelayDiscovery(Service):
                     # Parse response
                     response = HopMessage()
                     response.ParseFromString(response_bytes)
+
+                    # Consume the source signed_peer_record if sent
+                    if response.HasField("senderRecord"):
+                        if not maybe_consume_signed_record(
+                            response, self.host, peer_id
+                        ):
+                            logger.error(
+                                "Received invalid senderRecord, dropping the stream"
+                            )
+                            await stream.close()
+                            return False
 
                     # Check if reservation was successful
                     if response.type == HopMessage.RESERVE and response.HasField(
