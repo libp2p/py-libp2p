@@ -21,9 +21,6 @@ import sys
 sys.path.insert(0, os.path.abspath('..'))
 from unittest.mock import MagicMock
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath('..'))
-
 try:
     import tomllib
 except ModuleNotFoundError:

@@ -163,15 +163,15 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
             # Create and register the transport
             CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized |",
+                "Circuit relay transport initialized | ",
                 "enable_hop=%r enable_stop=%r enable_client=%r",
-                bool(relay_config.enable_hop),
-                bool(relay_config.enable_stop),
-                bool(relay_config.enable_client),
+                relay_config.enable_hop,
+                relay_config.enable_stop,
+                relay_config.enable_client,
             )
 
             print("\nRelay node is running. Use the following address to connect:")
-            print(f"{addrs[0]}/p2p/{peer_id}")
+            print(f"{addrs[0]}")
             print("\nPress Ctrl+C to exit\n")
 
             # Keep the relay running
@@ -240,10 +240,11 @@ async def setup_destination_node(
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "[DEST] Circuit relay transport initialized | "
-                f"enable_hop={relay_config.enable_hop!r} "
-                f"enable_stop={relay_config.enable_stop!r} "
-                f"enable_client={relay_config.enable_client!r}"
+                "Circuit relay transport initialized | ",
+                "enable_hop=%r enable_stop=%r enable_client=%r",
+                relay_config.enable_hop,
+                relay_config.enable_stop,
+                relay_config.enable_client,
             )
 
             # Create discovery service
@@ -372,11 +373,11 @@ async def setup_source_node(
             # Create and initialize transport
             transport = CircuitV2Transport(host, protocol, relay_config)
             logger.info(
-                "Circuit relay transport initialized |",
+                "Circuit relay transport initialized | ",
                 "enable_hop=%r enable_stop=%r enable_client=%r",
-                bool(relay_config.enable_hop),
-                bool(relay_config.enable_stop),
-                bool(relay_config.enable_client),
+                relay_config.enable_hop,
+                relay_config.enable_stop,
+                relay_config.enable_client,
             )
 
             # Create discovery service
