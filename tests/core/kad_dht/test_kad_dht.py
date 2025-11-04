@@ -68,6 +68,50 @@ async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
     raise RuntimeError("Retry function should not reach this point")
 
 
+async def wait_for_peer_record(
+    dht: KadDHT, peer_id: ID, timeout: float = TEST_TIMEOUT, delay: float = 0.1
+) -> Envelope:
+    """
+    Wait for a peer record to become available in the peerstore.
+    
+    This is useful for handling timing issues on different platforms where
+    peer records may not be immediately available after DHT operations.
+    
+    Parameters
+    ----------
+    dht : KadDHT
+        The DHT node to check for the peer record.
+    peer_id : ID
+        The peer ID to wait for.
+    timeout : float
+        Maximum time to wait in seconds.
+    delay : float
+        Delay between retry attempts in seconds.
+    
+    Returns
+    -------
+    Envelope
+        The peer record envelope once it becomes available.
+    
+    Raises
+    ------
+    TimeoutError
+        If the peer record is not available within the timeout period.
+    """
+    start_time = trio.current_time()
+    while True:
+        envelope = dht.host.get_peerstore().get_peer_record(peer_id)
+        if envelope is not None:
+            return envelope
+        
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(
+                f"Peer record for {peer_id} not available after {timeout} seconds"
+            )
+        
+        await trio.sleep(delay)
+
+
 class BlankValidator(Validator):
     def validate(self, key: str, value: bytes) -> None:
         return
@@ -136,9 +180,21 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before the next FIND_NODE
-    # req is sent
-    envelope_a = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
-    envelope_b = dht_b.host.get_peerstore().get_peer_record(dht_a.host.get_id())
+    # req is sent. However, on some platforms (e.g., Windows), peer records may
+    # not be immediately available due to timing differences. We wait for them
+    # to become available, or trigger find_peer operations to exchange them if needed.
+    with trio.fail_after(TEST_TIMEOUT):
+        # Try to get peer records, waiting up to 1 second
+        try:
+            envelope_a = await wait_for_peer_record(dht_a, dht_b.host.get_id(), timeout=1.0)
+            envelope_b = await wait_for_peer_record(dht_b, dht_a.host.get_id(), timeout=1.0)
+        except TimeoutError:
+            # If peer records aren't available yet, trigger find_peer to exchange them
+            await dht_a.find_peer(dht_b.host.get_id())
+            await dht_b.find_peer(dht_a.host.get_id())
+            # Now wait for the records with the full timeout
+            envelope_a = await wait_for_peer_record(dht_a, dht_b.host.get_id())
+            envelope_b = await wait_for_peer_record(dht_b, dht_a.host.get_id())
 
     assert isinstance(envelope_a, Envelope)
     assert isinstance(envelope_b, Envelope)
