@@ -22,8 +22,9 @@ DEFAULT_PRIORITY = 1
 # Maximum message size (4MiB as per spec)
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
-# Maximum block size (2MiB as per spec)
-MAX_BLOCK_SIZE = 2 * 1024 * 1024
+# Maximum block size (63 KB - matches DEFAULT_CHUNK_SIZE in chunker.py)
+# py-libp2p stream limit is ~64 KB, so we use 63 KB to be safe
+MAX_BLOCK_SIZE = 63 * 1024
 
 # Default timeout for operations (in seconds)
 DEFAULT_TIMEOUT = 30

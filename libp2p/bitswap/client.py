@@ -514,8 +514,8 @@ class BitswapClient:
                 del self._expected_blocks[peer_id]
             try:
                 await stream.close()
-            except Exception:
-                pass  # Stream might already be closed
+            except Exception as e:
+                logger.debug(f"Error closing stream: {e}")  # Stream might already be closed
 
     async def _handle_stream(self, stream: INetStream) -> None:
         """Handle incoming Bitswap stream."""
@@ -843,7 +843,8 @@ class BitswapClient:
         """
         Write a length-prefixed message to the stream.
 
-        Chunks large writes to avoid exceeding the stream's write limit.
+        Since blocks are already chunked at 63 KB (below the stream write limit
+        of ~64 KB), we can write messages directly without additional chunking.
         """
         # Serialize message
         msg_bytes = msg.SerializeToString()
@@ -855,13 +856,4 @@ class BitswapClient:
 
         # Write length prefix and message
         length_prefix = varint.encode(len(msg_bytes))
-        data_to_write = length_prefix + msg_bytes
-
-        # Chunk writes to avoid exceeding stream write limit (65535 bytes)
-        MAX_WRITE_SIZE = 65535
-        offset = 0
-        while offset < len(data_to_write):
-            chunk_size = min(MAX_WRITE_SIZE, len(data_to_write) - offset)
-            chunk = data_to_write[offset : offset + chunk_size]
-            await stream.write(chunk)
-            offset += chunk_size
+        await stream.write(length_prefix + msg_bytes)
