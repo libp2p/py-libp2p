@@ -97,6 +97,7 @@ test = [
     "factory-boy>=2.12.0,<3.0.0",
     "p2pclient==0.2.0",
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
