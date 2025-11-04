@@ -50,6 +50,21 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
+# Configure Python domain to prefer canonical imports
+# This helps resolve ambiguous references like ResourceManager
+python_use_unqualified_type_names = False
+
+# Configure autodoc to prefer specific imports for ambiguous references
+autodoc_type_aliases = {
+    "ResourceManager": "libp2p.rcmgr.ResourceManager",
+}
+
+# Suppress specific warnings about ambiguous cross-references
+# Since ResourceManager is intentionally re-exported, both locations are valid
+suppress_warnings = [
+    "ref.python",  # Suppress ambiguous cross-reference warnings
+]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
