@@ -29,6 +29,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )
@@ -50,6 +51,9 @@ from .protocol import (
 )
 from .protocol_buffer import (
     StatusCode,
+)
+from .utils import (
+    maybe_consume_signed_record,
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
@@ -227,9 +231,14 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
+            # Create signed peer record to send with the HOP message
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+
+            # Send HOP CONNECT message
             connect_msg = HopMessage(
                 type=HopMessage.CONNECT,
                 peer=dest_info.peer_id.to_bytes(),
+                senderRecord=envelope_bytes,
             )
             await relay_stream.write(connect_msg.SerializeToString())
 
@@ -238,6 +247,15 @@ class CircuitV2Transport(ITransport):
                 resp_bytes = await relay_stream.read(1024)
                 resp = HopMessage()
                 resp.ParseFromString(resp_bytes)
+
+            # Get destination peer SPR from the relay's response and validate it
+            if resp.HasField("senderRecord"):
+                if not maybe_consume_signed_record(resp, self.host, peer_info.peer_id):
+                    logger.error(
+                        "Received an invalid senderRecord, dropping the stream"
+                    )
+                    await relay_stream.close()
+                    raise ConnectionError("Invalid senderRecord")
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
@@ -306,10 +324,13 @@ class CircuitV2Transport(ITransport):
 
         """
         try:
+            # Create signed envelope for the reservation request to relay
+            envelope_bytes, _ = env_to_send_in_RPC(self.host)
             # Send reservation request
             reserve_msg = HopMessage(
                 type=HopMessage.RESERVE,
                 peer=self.host.get_id().to_bytes(),
+                senderRecord=envelope_bytes,
             )
 
             try:
@@ -333,6 +354,14 @@ class CircuitV2Transport(ITransport):
                         "Failed to read/parse reservation response: %s", str(e)
                     )
                     raise
+
+            if resp.HasField("senderRecord"):
+                if not maybe_consume_signed_record(resp, self.host, relay_peer_id):
+                    logger.error(
+                        "Received an invalid senderRecord, dropping the stream"
+                    )
+                    await stream.close()
+                    return False
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)

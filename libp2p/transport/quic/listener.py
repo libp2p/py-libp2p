@@ -968,7 +968,7 @@ class QUICListener(IListener):
             logger.error(f"Error closing listener: {e}")
 
     async def _remove_connection_by_object(
-        self, connection_obj: QUICConnection
+        self, connection_obj: "QUICConnection"
     ) -> None:
         """Remove a connection by object reference."""
         try:

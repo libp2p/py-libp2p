@@ -50,6 +50,21 @@ extensions = [
     "sphinx_rtd_theme",
 ]
 
+# Configure Python domain to prefer canonical imports
+# This helps resolve ambiguous references like ResourceManager
+python_use_unqualified_type_names = False
+
+# Configure autodoc to prefer specific imports for ambiguous references
+autodoc_type_aliases = {
+    "ResourceManager": "libp2p.rcmgr.ResourceManager",
+}
+
+# Suppress specific warnings about ambiguous cross-references
+# Since ResourceManager is intentionally re-exported, both locations are valid
+suppress_warnings = [
+    "ref.python",  # Suppress ambiguous cross-reference warnings
+]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
@@ -291,7 +306,12 @@ texinfo_documents = [
 ]
 
 # Prevent autodoc from trying to import module from tests.factories
-autodoc_mock_imports = ["tests.factories"]
+autodoc_mock_imports = [
+    "tests.factories",
+    # Mocked ONLY for Sphinx/autodoc: this module does not exist in the codebase
+    # but some doc tools may try to import it. No real code references this import.
+    "libp2p.relay.circuit_v2.lib"
+]
 
 # Documents to append as an appendix to all manuals.
 # texinfo_appendices = []
