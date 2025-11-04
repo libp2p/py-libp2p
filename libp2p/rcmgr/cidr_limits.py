@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import ipaddress
 from threading import RLock
-from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,7 @@ class CIDRLimiter:
 
     def __init__(self, rules: Iterable[tuple[str, int]] | None = None) -> None:
         self._rules: list[CIDRRule] = []
-        self._counts: dict[
-            ipaddress.IPv4Network | ipaddress.IPv6Network, int
-        ] = {}
+        self._counts: dict[ipaddress.IPv4Network | ipaddress.IPv6Network, int] = {}
         self._lock = RLock()
 
         if rules:
@@ -90,5 +88,3 @@ class CIDRLimiter:
                     current = self._counts.get(rule.network, 0)
                     if current > 0:
                         self._counts[rule.network] = current - 1
-
-

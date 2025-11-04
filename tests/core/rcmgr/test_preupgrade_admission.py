@@ -18,5 +18,3 @@ class TestPreUpgradeAdmission:
         scope2 = rm.open_connection(None, endpoint_ip="127.0.0.1")
         assert scope2 is not None
         scope2.close()
-
-
