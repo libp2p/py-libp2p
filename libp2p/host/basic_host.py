@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import (
     AsyncIterator,
     Sequence,
@@ -9,7 +11,6 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
-    Optional,
 )
 
 import multiaddr
@@ -58,6 +59,7 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+from libp2p.rcmgr import ResourceManager
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -100,13 +102,36 @@ class BasicHost(IHost):
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
-        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
+        default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        resource_manager: ResourceManager | None = None,
     ) -> None:
+        """
+        Initialize a BasicHost instance.
+
+        :param network: Network service implementation
+        :param enable_mDNS: Enable mDNS discovery
+        :param enable_upnp: Enable UPnP port mapping
+        :param bootstrap: Bootstrap peer addresses
+        :param default_protocols: Default protocol handlers
+        :param negotiate_timeout: Protocol negotiation timeout
+        :param resource_manager: Optional resource manager instance
+        :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         self.negotiate_timeout = negotiate_timeout
+
+        # Set up resource manager if provided
+        if resource_manager is not None:
+            if hasattr(self._network, "set_resource_manager"):
+                self._network.set_resource_manager(resource_manager)  # type: ignore
+            else:
+                # Log warning if network doesn't support resource manager
+                logger.warning(
+                    "Resource manager provided but network service doesn't support it"
+                )
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))
