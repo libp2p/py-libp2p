@@ -58,7 +58,6 @@ from .score import (
 )
 from .utils import (
     parse_message_id_safe,
-    safe_parse_message_id,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -742,9 +741,8 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, self.degree, current_peers, True
                 )
-                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
-                    peers_to_gossip[peer][topic] = msg_id_strs
+                    peers_to_gossip[peer][topic] = msg_ids
 
         return in_topic_peers, False
 
@@ -992,9 +990,7 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        msg_ids: list[tuple[bytes, bytes]] = [
-            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
-        ]
+        msg_ids: list[str] = [str(msg) for msg in iwant_msg.messageIDs]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
