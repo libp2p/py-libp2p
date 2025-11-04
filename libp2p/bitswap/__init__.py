@@ -30,6 +30,7 @@ from .errors import (
     MessageTooLargeError,
     TimeoutError,
     BlockNotFoundError,
+    BlockUnavailableError,
     InvalidCIDError,
 )
 
@@ -58,5 +59,6 @@ __all__ = [
     "MessageTooLargeError",
     "TimeoutError",
     "BlockNotFoundError",
+    "BlockUnavailableError",
     "InvalidCIDError",
 ]
