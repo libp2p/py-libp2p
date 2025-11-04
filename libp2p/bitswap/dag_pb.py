@@ -5,13 +5,15 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
-import logging
 from dataclasses import dataclass, field
+import logging
 
 from .pb.dag_pb_pb2 import PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 
 logger = logging.getLogger(__name__)
+
+
 @dataclass
 class Link:
     """Represents a link to another block in the DAG."""

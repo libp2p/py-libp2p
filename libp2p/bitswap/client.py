@@ -515,7 +515,8 @@ class BitswapClient:
             try:
                 await stream.close()
             except Exception as e:
-                logger.debug(f"Error closing stream: {e}")  # Stream might already be closed
+                # Stream might already be closed
+                logger.debug(f"Error closing stream: {e}")
 
     async def _handle_stream(self, stream: INetStream) -> None:
         """Handle incoming Bitswap stream."""
