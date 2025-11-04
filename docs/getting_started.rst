@@ -79,6 +79,25 @@ Now that you have configured a **Transport**, **Crypto** and **Stream Multiplexe
 .. literalinclude:: ../examples/doc-examples/example_running.py
    :language: python
 
+Resource Management
+^^^^^^^^^^^^^^^^^^^
+
+py-libp2p enables resource protection by default. When you create a host with
+``new_host()`` (or a network service with ``new_swarm()``), a default
+``ResourceManager`` is created automatically if you do not provide one. This
+guards connections and streams out of the box.
+
+If you want to customize limits, construct and pass your own manager:
+
+.. code-block:: python
+
+    from libp2p import new_host
+    from libp2p.rcmgr import ResourceLimits, new_resource_manager
+
+    limits = ResourceLimits(max_connections=512, max_streams=4096, max_memory_mb=256)
+    rm = new_resource_manager(limits=limits)
+    host = new_host(resource_manager=rm)
+
 Custom Setup
 ~~~~~~~~~~~~
 

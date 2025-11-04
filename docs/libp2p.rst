@@ -17,6 +17,7 @@ Subpackages
    libp2p.peer
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.rcmgr
    libp2p.records
    libp2p.relay
    libp2p.security
