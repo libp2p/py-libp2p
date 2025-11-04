@@ -250,7 +250,7 @@ class CircuitV2Transport(ITransport):
 
             # Get destination peer SPR from the relay's response and validate it
             if resp.HasField("senderRecord"):
-                if not maybe_consume_signed_record(resp, self.host, peer_info.peer_id):
+                if not maybe_consume_signed_record(resp, self.host, dest_info.peer_id):
                     logger.error(
                         "Received an invalid senderRecord, dropping the stream"
                     )

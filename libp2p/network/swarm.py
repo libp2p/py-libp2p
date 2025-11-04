@@ -4,7 +4,7 @@ from collections.abc import (
 )
 import logging
 import random
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from libp2p.network.connection.swarm_connection import SwarmConn
@@ -377,15 +377,15 @@ class Swarm(Service, INetworkService):
             return swarm_conn
 
         logger.debug("dialed peer %s over base transport", peer_id)
-        swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id)
+        swarm_conn = await self.upgrade_outbound_raw_conn(raw_conn, peer_id, pre_scope)
 
         logger.debug("successfully dialed peer %s", peer_id)
 
         return swarm_conn
 
     async def upgrade_outbound_raw_conn(
-        self, raw_conn: IRawConnection, peer_id: ID
-    ) -> SwarmConn:
+        self, raw_conn: IRawConnection, peer_id: ID, pre_scope: Any = None
+    ) -> "SwarmConn":
         """
         Secure the outgoing raw connection and upgrade it to a multiplexed connection.
 
@@ -635,27 +635,6 @@ class Swarm(Service, INetworkService):
                         await read_write_closer.close()
                     return
 
-                # Optional pre-upgrade admission using ResourceManager
-                pre_scope = None
-                if self._resource_manager is not None:
-                    try:
-                        endpoint_ip = None
-                        if hasattr(read_write_closer, "get_remote_address"):
-                            ra = read_write_closer.get_remote_address()
-                            if ra is not None:
-                                endpoint_ip = ra[0]
-                        # Perform a preliminary connection admission to guard early
-                        pre_scope = self._resource_manager.open_connection(
-                            None, endpoint_ip=endpoint_ip
-                        )
-                        if pre_scope is None:
-                            # Denied before upgrade; close socket and return early
-                            await read_write_closer.close()
-                            return
-                    except Exception:
-                        # Fail-open on admission errors; guard later in add_conn
-                        pre_scope = None
-
                 raw_conn = RawConnection(read_write_closer, False)
                 await self.upgrade_inbound_raw_conn(raw_conn, maddr)
                 # NOTE: This is a intentional barrier to prevent from the handler
@@ -717,6 +696,26 @@ class Swarm(Service, INetworkService):
             await secured_conn.close()
             raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
         logger.debug("upgraded mux for peer %s", peer_id)
+        # Optional pre-upgrade admission using ResourceManager
+        pre_scope = None
+        if self._resource_manager is not None:
+            try:
+                endpoint_ip = None
+                if hasattr(raw_conn, "get_remote_address"):
+                    ra = raw_conn.get_remote_address()
+                    if ra is not None:
+                        endpoint_ip = ra[0]
+                # Perform a preliminary connection admission to guard early
+                pre_scope = self._resource_manager.open_connection(
+                    None, endpoint_ip=endpoint_ip
+                )
+                if pre_scope is None:
+                    # Denied before upgrade; close socket and return early
+                    await raw_conn.close()
+                    return None  # type: ignore[return-value]
+            except Exception:
+                # Fail-open on admission errors; guard later in add_conn
+                pre_scope = None
         # Pass endpoint IP to resource manager, if available
         if self._resource_manager is not None:
             try:
@@ -731,9 +730,7 @@ class Swarm(Service, INetworkService):
                 )
                 if conn_scope is None:
                     await secured_conn.close()
-                    raise SwarmException(
-                        "Connection denied by resource manager"
-                    )
+                    raise SwarmException("Connection denied by resource manager")
                 # Store on muxed_conn if possible for cleanup propagation
                 try:
                     setattr(muxed_conn, "_resource_scope", conn_scope)

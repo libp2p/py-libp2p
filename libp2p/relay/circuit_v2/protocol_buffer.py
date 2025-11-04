@@ -27,6 +27,7 @@ class StatusCode(IntEnum):
     STOP_FAILED = 300
     MALFORMED_MESSAGE = 400
 
+
 def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
     """
     Create a protocol buffer Status object.

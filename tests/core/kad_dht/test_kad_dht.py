@@ -112,6 +112,9 @@ async def wait_for_peer_record(
 
         await trio.sleep(delay)
 
+    # add unreachable raise to satisfy Pyright
+    raise TimeoutError("Unreachable code path")
+
 
 class BlankValidator(Validator):
     def validate(self, key: str, value: bytes) -> None:
