@@ -478,9 +478,6 @@ class MerkleDag:
                     total_size,
                     f"metadata: size={total_size}, chunks={len(links)}",
                 )
-            for i, link in enumerate(links):
-                logger.info(f"  Chunk {i}: {link.cid.hex()} ({link.size} bytes)")
-            logger.info("=" * 50)
 
             file_data = b""
             bytes_fetched = 0

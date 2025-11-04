@@ -143,10 +143,10 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
     # Compute hash of data
     digest = hashlib.sha256(data).digest()
 
-    logger.info("      verify_cid:")
-    logger.info(f"        CID: {cid.hex()}")
-    logger.info(f"        Data size: {len(data)} bytes")
-    logger.info(f"        Computed digest: {digest.hex()}")
+    logger.debug("      verify_cid:")
+    logger.debug(f"        CID: {cid.hex()}")
+    logger.debug(f"        Data size: {len(data)} bytes")
+    logger.debug(f"        Computed digest: {digest.hex()}")
 
     # For CIDv0 (multihash)
     if len(cid) >= 2 and cid[0] == HASH_SHA256:
@@ -155,8 +155,8 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         if len(cid) >= 2 + hash_length:
             cid_digest = cid[2 : 2 + hash_length]
             match = digest == cid_digest
-            logger.info(f"        CIDv0 check: {'MATCH' if match else 'MISMATCH'}")
-            logger.info(f"        Expected digest: {cid_digest.hex()}")
+            logger.debug(f"        CIDv0 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.debug(f"        Expected digest: {cid_digest.hex()}")
             return match
 
     # For CIDv1
@@ -166,19 +166,19 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         codec = cid[1]
         hash_type = cid[2]
         hash_length = cid[3]
-        logger.info(
+        logger.debug(
             f"        CIDv1: codec={hex(codec)}, "
             f"hash_type={hex(hash_type)}, length={hash_length}"
         )
         if len(cid) >= 4 + hash_length:
             cid_digest = cid[4 : 4 + hash_length]
             match = digest == cid_digest
-            logger.info(f"        CIDv1 check: {'MATCH' if match else 'MISMATCH'}")
-            logger.info(f"        Expected digest: {cid_digest.hex()}")
-            logger.info(f"        Computed digest: {digest.hex()}")
+            logger.debug(f"        CIDv1 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.debug(f"        Expected digest: {cid_digest.hex()}")
+            logger.debug(f"        Computed digest: {digest.hex()}")
             return match
 
-    logger.info("        No valid CID format detected")
+    logger.debug("        No valid CID format detected")
     return False
 
 

@@ -5,12 +5,13 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from .pb.dag_pb_pb2 import PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 
-
+logger = logging.getLogger(__name__)
 @dataclass
 class Link:
     """Represents a link to another block in the DAG."""
@@ -167,9 +168,9 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
                 hash_type=pb_unixfs.hashType if pb_unixfs.hashType else 0,
                 fanout=pb_unixfs.fanout if pb_unixfs.fanout else 0,
             )
-        except Exception:
+        except Exception as e:
             # If UnixFS data parsing fails, treat as raw data
-            pass
+            logger.debug(f"Failed to parse UnixFS data: {e}")
 
     return links, unixfs_data
 
@@ -240,7 +241,8 @@ def _get_unixfs_data(data: bytes) -> UnixFSData | None:
     try:
         _, unixfs_data = decode_dag_pb(data)
         return unixfs_data
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to extract UnixFS data: {e}")
         return None
 
 
