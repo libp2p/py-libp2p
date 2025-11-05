@@ -1,7 +1,0 @@
-Added GossipSub 1.2 protocol support to py-libp2p.
-
-- Implements the `/meshsub/1.2.0` protocol ID
-- Adds support for IDONTWANT control messages for efficient bandwidth usage
-- Maintains backward compatibility with previous GossipSub versions
-- Exposes public `get_message_id()` method in PubSub class
-- Includes comprehensive test coverage for new functionality
