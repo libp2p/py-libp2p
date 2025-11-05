@@ -15,9 +15,7 @@ class TestHierarchicalScopes:
             "peerA", Direction.OUTBOUND, service="identify"
         )
         # Peer B can open 1 (total now 2)
-        assert rm.acquire_scoped_stream(
-            "peerB", Direction.OUTBOUND, service="identify"
-        )
+        assert rm.acquire_scoped_stream("peerB", Direction.OUTBOUND, service="identify")
         # Any further opens should fail (total limit)
         assert not rm.acquire_scoped_stream(
             "peerC", Direction.OUTBOUND, service="identify"
@@ -48,5 +46,3 @@ class TestHierarchicalScopes:
             "peerB", Direction.INBOUND, protocol="/yamux/1.0.0"
         )
         rm.release_scoped_stream("peerB", Direction.INBOUND, protocol="/yamux/1.0.0")
-
-

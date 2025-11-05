@@ -62,6 +62,7 @@ identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
+circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 
 [project.optional-dependencies]
 dev = [

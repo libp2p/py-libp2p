@@ -1,4 +1,3 @@
-
 from libp2p.rcmgr.cidr_limits import CIDRLimiter
 
 
@@ -23,5 +22,3 @@ class TestCIDRLimiter:
         assert limiter.acquire("10.0.0.2") is True
         limiter.release("10.0.0.2")
         assert limiter.acquire("10.0.0.200") is True
-
-

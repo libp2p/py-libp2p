@@ -4,6 +4,7 @@ import logging
 import time
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.custom_types import TProtocol
@@ -11,14 +12,14 @@ from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamReset,
 )
-from libp2p.relay.circuit_v2.config import (
-    RelayConfig,
-)
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
     RelayInfo,
 )
 from libp2p.relay.circuit_v2.protocol import (
+    PROTOCOL_ID,
+    STOP_PROTOCOL_ID,
     CircuitV2Protocol,
     RelayLimits,
 )
@@ -249,6 +250,135 @@ async def test_circuit_v2_transport_dial_through_relay():
         # Test successful - the connections were established, which is enough to verify
         # that the transport can be initialized and configured correctly
         logger.info("Transport initialization and connection test passed")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_transport_message_routing_through_relay():
+    """
+    Test end-to-end message transfer from source to destination through relay.
+    """
+    async with HostFactory.create_batch_and_listen(3) as hosts:
+        client_host, relay_host, target_host = hosts
+        logger.debug(
+            "Test hosts: client_host=%s relay_host=%s target_host=%s",
+            client_host.get_id(),
+            relay_host.get_id(),
+            target_host.get_id(),
+        )
+
+        # Configure relay
+        limits = RelayLimits(
+            duration=3600,  # 1 hour
+            data=1024 * 1024 * 100,  # 100 MB
+            max_circuit_conns=10,
+            max_reservations=5,
+        )
+        relay_config = RelayConfig(
+            roles=RelayRole.HOP | RelayRole.STOP | RelayRole.CLIENT, limits=limits
+        )
+        relay_protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
+        CircuitV2Transport(relay_host, relay_protocol, relay_config)
+        relay_host.set_stream_handler(PROTOCOL_ID, relay_protocol._handle_hop_stream)
+        relay_host.set_stream_handler(
+            STOP_PROTOCOL_ID, relay_protocol._handle_stop_stream
+        )
+
+        client_limits = RelayLimits(
+            duration=3600,  # 1 hour
+            data=1024 * 1024 * 100,  # 100 MB
+            max_circuit_conns=10,
+            max_reservations=5,
+        )
+        client_config = RelayConfig(
+            roles=RelayRole.CLIENT | RelayRole.STOP, limits=client_limits
+        )
+        client_protocol = CircuitV2Protocol(client_host, client_limits, allow_hop=False)
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+        )
+        client_transport.discovery = client_discovery
+
+        dest_limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+        dest_config = RelayConfig(
+            roles=RelayRole.STOP | RelayRole.CLIENT, limits=dest_limits
+        )
+        dest_protocol = CircuitV2Protocol(target_host, dest_limits, allow_hop=False)
+        CircuitV2Transport(target_host, dest_protocol, dest_config)
+        target_host.set_stream_handler(PROTOCOL_ID, dest_protocol._handle_hop_stream)
+        target_host.set_stream_handler(
+            STOP_PROTOCOL_ID, dest_protocol._handle_stop_stream
+        )
+
+        # Register echo protocol handler on destination
+        test_protocol = TProtocol("/test/echo/1.0.0")
+        message_received = trio.Event()
+        received_message = {}
+
+        async def app_echo_handler(stream):
+            try:
+                msg = await stream.read(1024)
+                received_message["msg"] = msg
+                await stream.write(b"echo:" + msg)
+                message_received.set()
+            finally:
+                await stream.close()
+
+        target_host.set_stream_handler(test_protocol, app_echo_handler)
+
+        # Step 1: Destination connects to Relay
+        with trio.fail_after(CONNECT_TIMEOUT):
+            await connect(target_host, relay_host)
+            assert relay_host.get_id() in target_host.get_network().connections
+            assert target_host.get_id() in relay_host.get_network().connections
+
+        await trio.sleep(SLEEP_TIME)
+
+        # Step 2: Source connects to Relay
+        with trio.fail_after(CONNECT_TIMEOUT):
+            await connect(client_host, relay_host)
+            assert relay_host.get_id() in client_host.get_network().connections
+            assert client_host.get_id() in relay_host.get_network().connections
+
+        await trio.sleep(SLEEP_TIME)
+        relay_id = relay_host.get_id()
+        client_discovery.get_relay = lambda: relay_id
+
+        # Step 3: Source tries to dial the destination via p2p-circuit and opens stream
+        relay_addr = relay_host.get_addrs()[0]
+        dest_id = target_host.get_id()
+        p2p_circuit_addr = Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{dest_id}")
+        # Register the relay address for the destination on the client peerstore
+        client_host.peerstore.add_addr(dest_id, p2p_circuit_addr, 3600)
+
+        with trio.fail_after(CONNECT_TIMEOUT * 2):
+            # Actually dial the destination through relay using client_transport
+            await client_transport.dial(p2p_circuit_addr)
+
+            # Next, open a stream on the test protocol
+            stream = await client_host.new_stream(dest_id, [test_protocol])
+            test_msg = b"hello-via-relay"
+            await stream.write(test_msg)
+            echo_reply = await stream.read(1024)
+            await stream.close()
+
+        # Wait until the destination handler receives the message
+        with trio.fail_after(SLEEP_TIME * 5):
+            await message_received.wait()
+
+        # Assertions
+        assert received_message["msg"] == test_msg, "Destination received wrong message"
+        assert echo_reply == b"echo:" + test_msg, "Client did not get echo response"
+
+        logger.info("Relay message transfer test passed: echoed %s", test_msg)
 
 
 @pytest.mark.trio

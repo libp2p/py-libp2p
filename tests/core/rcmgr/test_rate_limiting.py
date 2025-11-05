@@ -1,4 +1,3 @@
-
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.rcmgr.manager import ResourceManager
@@ -45,5 +44,3 @@ class TestRateLimiting:
 
         # p2 should be allowed (separate bucket)
         assert rm.acquire_connection(p2) is True
-
-
