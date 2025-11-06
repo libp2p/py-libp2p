@@ -18,7 +18,6 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/libp2p/py-libp2p/tox.yml?branch=main&label=build%20status)](https://github.com/libp2p/py-libp2p/actions/workflows/tox.yml)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
-<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank"><img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" alt="Support py-libp2p on drips.network" height="32"></a>
 
 > py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. The core features are stable, and we’re focused on refining performance, expanding protocol support, and ensuring smooth interop with other libp2p implementations. We welcome contributions and real-world usage feedback to help us reach full production maturity.
 
@@ -45,7 +44,6 @@ Our community-driven development model strengthens the Filecoin network by enabl
 A production-ready Python libp2p stack allows Filecoin storage, retrieval, compute, and data collaboration protocols to be integrated into Python workflows: ML training pipelines, scientific collaboration networks, distributed computation tasks, and backend systems. This significantly expands Filecoin’s developer surface area and adoption potential.
 
 We envision py-libp2p as the standard networking substrate for distributed Python applications.
-
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
@@ -173,7 +171,6 @@ _(non-normative, useful for team notes, not a reference)_
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
 
-
 ## Support
 
 If py-libp2p has been useful to you or your project or organization, please consider supporting ongoing maintenance and development:
@@ -181,6 +178,3 @@ If py-libp2p has been useful to you or your project or organization, please cons
 <a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank">
   <img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" height="32" alt="Support py-libp2p on drips.network">
 </a>
-
-
-
