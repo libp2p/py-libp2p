@@ -10,6 +10,7 @@ from enum import (
 )
 from typing import (
     Any,
+    cast,
 )
 
 from .pb.circuit_pb2 import Status as PbStatus
@@ -25,10 +26,9 @@ class StatusCode(IntEnum):
     DIAL_REFUSED = 201
     STOP_FAILED = 300
     MALFORMED_MESSAGE = 400
-    INTERNAL_ERROR = 500
 
 
-def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
+def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
     """
     Create a protocol buffer Status object.
 
@@ -41,15 +41,12 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> Any:
 
     Returns
     -------
-    Any
+    PbStatus
         The protocol buffer Status object
 
     """
-    # Create status object
     pb_obj = PbStatus()
-
-    # Convert the integer status code to the protobuf enum value type
-    pb_obj.code = PbStatus.Code.ValueType(code)
+    pb_obj.code = cast(Any, int(code))
     pb_obj.message = message
 
     return pb_obj
