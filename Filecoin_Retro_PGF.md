@@ -85,7 +85,7 @@ Join the Discord: https://discord.gg/d92MEugb (#py-libp2p)
 
 | **Storage**         | **Status** |
 | ------------------- | :--------: |
-| **`libp2p-record`** |     🌱     |
+| **`libp2p-record`** |     ✅     |
 
 ### General Purpose Utilities & Datatypes
 
