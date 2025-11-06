@@ -127,6 +127,8 @@ _(non-normative, useful for team notes, not a reference)_
 
 If py-libp2p has been useful to your project or organization, please consider supporting ongoing development:
 
-<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank">
-  <img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" height="32" alt="Support py-libp2p on drips.network">
-</a>
+<p>
+    <a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank">
+    <img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" height="32" alt="Support py-libp2p on drips.network">
+    </a>
+</p>
