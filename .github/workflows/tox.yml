@@ -81,7 +81,7 @@ jobs:
           if [[ "${{ matrix.toxenv }}" == 'docs' ]]; then
             export TOXENV=docs
           else
-            export TOXENV=py${{ matrix.python }}-${{ matrix.toxenv }}
+            export TOXENV=$(echo "py${{ matrix.python }}-${{ matrix.toxenv }}" | tr -d '.')
           fi
           # Set PATH for nim commands during tox
           if [[ "${{ matrix.toxenv }}" == 'interop' ]]; then

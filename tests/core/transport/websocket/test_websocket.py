@@ -1,16 +1,16 @@
-# Import exceptiongroup for Python 3.11+
-import builtins
 from collections.abc import Sequence
 import logging
 from typing import Any
 
 import pytest
 
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception
+try:
+    from builtins import ExceptionGroup  # type: ignore[attr-defined]
+except ImportError:
+    try:
+        from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
+    except ImportError:  # pragma: no cover - fallback if dependency missing
+        ExceptionGroup = Exception  # type: ignore[assignment]
 from multiaddr import Multiaddr
 import trio
 
@@ -663,47 +663,196 @@ async def test_websocket_host_pair_data_exchange():
 
 @pytest.mark.trio
 async def test_wss_host_pair_data_exchange():
-    """Test WSS transport validation (simplified)"""
-    # Just test WSS configuration and validation without complex TLS setup
-
+    """Test WSS host pair with actual data exchange using host_pair_factory pattern"""
     import ssl
 
-    from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
+    from libp2p import create_yamux_muxer_option, new_host
+    from libp2p.crypto.secp256k1 import create_new_key_pair
+    from libp2p.custom_types import TProtocol
+    from libp2p.peer.peerinfo import info_from_p2p_addr
+    from libp2p.security.insecure.transport import (
+        PLAINTEXT_PROTOCOL_ID,
+        InsecureTransport,
+    )
 
-    # Test WSS multiaddr parsing
-    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
-    parsed = parse_websocket_multiaddr(wss_maddr)
-    assert parsed.is_wss
+    # Create TLS contexts for WSS (separate for client and server)
+    # For testing, we need to create a self-signed certificate
+    try:
+        import datetime
+        import ipaddress
+        import os
+        import tempfile
 
-    # Test that WSS transport can be created with TLS config
-    upgrader = create_upgrader()
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import NameOID
 
-    # Create minimal TLS contexts
-    client_tls_context = ssl.create_default_context()
-    client_tls_context.check_hostname = False
-    client_tls_context.verify_mode = ssl.CERT_NONE
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
 
-    server_tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    server_tls_context.check_hostname = False
-    server_tls_context.verify_mode = ssl.CERT_NONE
+        # Create certificate
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
+            ]
+        )
 
-    # Test transport creation with TLS config
-    wss_transport = WebsocketTransport(
-        upgrader,
-        tls_client_config=client_tls_context,
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+            .not_valid_after(
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(days=1)
+            )
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("localhost"),
+                        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                    ]
+                ),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
+        )
+
+        # Create temporary files for cert and key
+        cert_file = tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".crt")
+        key_file = tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".key")
+
+        # Write certificate and key to files
+        cert_file.write(cert.public_bytes(serialization.Encoding.PEM))
+        key_file.write(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+
+        cert_file.close()
+        key_file.close()
+
+        # Server context for listener (Host A)
+        server_tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        server_tls_context.load_cert_chain(cert_file.name, key_file.name)
+
+        # Client context for dialer (Host B)
+        client_tls_context = ssl.create_default_context()
+        client_tls_context.check_hostname = False
+        client_tls_context.verify_mode = ssl.CERT_NONE
+
+        # Clean up temp files after use
+        def cleanup_certs():
+            try:
+                os.unlink(cert_file.name)
+                os.unlink(key_file.name)
+            except Exception:
+                pass
+
+    except ImportError:
+        pytest.skip("cryptography package required for WSS tests")
+    except Exception as e:
+        pytest.skip(f"Failed to create test certificates: {e}")
+
+    # Create two hosts with WSS transport and plaintext security
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+
+    # Host A (listener) - WSS transport with server TLS config
+    security_options_a = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_a, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_a = new_host(
+        key_pair=key_pair_a,
+        sec_opt=security_options_a,
+        muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],
         tls_server_config=server_tls_context,
     )
 
-    assert wss_transport is not None
-    assert wss_transport._config.tls_client_config is not None
-    assert wss_transport._config.tls_server_config is not None
+    # Host B (dialer) - WSS transport with client TLS config
+    security_options_b = {
+        PLAINTEXT_PROTOCOL_ID: InsecureTransport(
+            local_key_pair=key_pair_b, secure_bytes_provider=None, peerstore=None
+        )
+    }
+    host_b = new_host(
+        key_pair=key_pair_b,
+        sec_opt=security_options_b,
+        muxer_opt=create_yamux_muxer_option(),
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")],  # WebSocket transport
+        tls_client_config=client_tls_context,
+    )
 
-    # Test multiaddr parsing works correctly
-    assert parsed.is_wss
-    assert parsed.rest_multiaddr.value_for_protocol("ip4") == "127.0.0.1"
-    assert parsed.rest_multiaddr.value_for_protocol("tcp") == "8080"
+    # Test data
+    test_data = b"Hello WSS Host Pair Data Exchange!"
+    received_data = None
 
-    logger.info("WSS transport validation test passed")
+    # Set up handler on host A
+    test_protocol = TProtocol("/test/wss/hostpair/1.0.0")
+
+    async def data_handler(stream):
+        nonlocal received_data
+        received_data = await stream.read(len(test_data))
+        await stream.write(received_data)  # Echo back
+        await stream.close()
+
+    host_a.set_stream_handler(test_protocol, data_handler)
+
+    # Start both hosts and connect them (following host_pair_factory pattern)
+    async with (
+        host_a.run(listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0/wss")]),
+        host_b.run(listen_addrs=[]),
+    ):
+        # Connect the hosts using the same pattern as host_pair_factory
+        # Get host A's listen address and create peer info
+        listen_addrs = host_a.get_addrs()
+        assert len(listen_addrs) > 0
+
+        # Find the WSS address
+        wss_addr = None
+        for addr in listen_addrs:
+            if "/wss" in str(addr):
+                wss_addr = addr
+                break
+
+        assert wss_addr is not None, "No WSS listen address found"
+
+        # Connect host B to host A
+        peer_info = info_from_p2p_addr(wss_addr)
+        await host_b.connect(peer_info)
+
+        # Allow time for connection to establish (following host_pair_factory pattern)
+        await trio.sleep(0.1)
+
+        # Verify connection is established
+        assert len(host_a.get_network().connections) > 0
+        assert len(host_b.get_network().connections) > 0
+
+        # Test data exchange
+        stream = await host_b.new_stream(host_a.get_id(), [test_protocol])
+        await stream.write(test_data)
+        response = await stream.read(len(test_data))
+        await stream.close()
+
+        # Verify data exchange
+        assert received_data == test_data, f"Expected {test_data}, got {received_data}"
+        assert response == test_data, f"Expected echo {test_data}, got {response}"
 
 
 @pytest.mark.trio

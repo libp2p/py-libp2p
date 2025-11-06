@@ -1,4 +1,0 @@
-Added the libp2p-records module in reference with go-libp2p-record repo
-
-- Added the NameSpaceValidator utils in libp2p/records
-- Integrated the PubKey Validators with kad-dht ValueStore interfaces.

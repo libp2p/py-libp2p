@@ -1,6 +1,0 @@
-Added timeouts to CI/CD pipeline to prevent hanging tests.
-
-- Added 60-minute job timeout to GitHub Actions workflow
-- Added 20-minute pytest timeouts to tox.ini for all test environments
-- Updated Makefile test command with 20-minute timeout
-- Prevents tests from hanging indefinitely in CI/CD
