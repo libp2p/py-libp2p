@@ -6,6 +6,13 @@
 
 <h3 align="center">The Python implementation of the libp2p networking stack.</h3>
 
+<p align="center">
+  <a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank">
+    <img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=Support&stat=support"
+         alt="Support py-libp2p on drips.network" height="36">
+  </a>
+</p>
+
 [![Discord](https://img.shields.io/discord/1204447718093750272?color=blueviolet&label=discord)](https://discord.gg/hQJnbd85N6)
 [![PyPI version](https://badge.fury.io/py/libp2p.svg)](https://badge.fury.io/py/libp2p)
 [![Python versions](https://img.shields.io/pypi/pyversions/libp2p.svg)](https://pypi.python.org/pypi/libp2p)
@@ -13,6 +20,31 @@
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
 
 > py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. The core features are stable, and we’re focused on refining performance, expanding protocol support, and ensuring smooth interop with other libp2p implementations. We welcome contributions and real-world usage feedback to help us reach full production maturity.
+
+## Impact
+
+py-libp2p connects the Web3 networking stack to the Python ecosystem — a language widely used in scientific computing, data engineering, machine learning, and research.
+
+These libraries are already powering work in:
+- Federated learning frameworks
+- Decentralized research data sharing systems
+- IPFS & Filecoin developer toolchains
+- Contribution verification and reproducibility protocols
+
+By bringing libp2p to Python, we expand decentralized networking into an ecosystem of millions of researchers, developers, and innovators who historically have not had access to modern peer-to-peer networking primitives.
+
+## Community Adoption & Collaboration
+
+The project has been part of Filecoin & IPFS working groups and has been showcased at PL EngRes, The Gathering, Code for GovTech 2024–25, and Zanzalu'25. Development is driven by an open community across the Filecoin, IPFS, Ethereum, and broader decentralized networking ecosystems.
+
+Our community-driven development model strengthens the Filecoin network by enabling more developers — especially in research computing and applied science — to build decentralized applications natively in Python.
+
+## Why this matters to Filecoin
+
+A production-ready Python libp2p stack allows Filecoin storage, retrieval, compute, and data collaboration protocols to be integrated into Python workflows: ML training pipelines, scientific collaboration networks, distributed computation tasks, and backend systems. This significantly expands Filecoin’s developer surface area and adoption potential.
+
+We envision py-libp2p as the standard networking substrate for distributed Python applications.
+
 
 Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
@@ -55,7 +87,7 @@ ______________________________________________________________________
 | **Secure Communication** | **Status** |                                  **Source**                                   |
 | ------------------------ | :--------: | :---------------------------------------------------------------------------: |
 | **`libp2p-noise`**       |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
-| **`libp2p-tls`**         |     🌱     |                                                                               |
+| **`libp2p-tls`**         |     ✅     |                                                                               |
 
 ______________________________________________________________________
 
@@ -100,7 +132,7 @@ ______________________________________________________________________
 
 | **Storage**         | **Status** |
 | ------------------- | :--------: |
-| **`libp2p-record`** |     🌱     |
+| **`libp2p-record`** |     ✅     |
 
 ______________________________________________________________________
 
@@ -139,3 +171,15 @@ _(non-normative, useful for team notes, not a reference)_
 **Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y.
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
+
+
+## Support
+
+If py-libp2p has been useful to you or your project or organization, please consider supporting ongoing maintenance and development:
+
+<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank">
+  <img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" height="32" alt="Support py-libp2p on drips.network">
+</a>
+
+
+
