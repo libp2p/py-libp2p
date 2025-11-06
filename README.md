@@ -19,11 +19,10 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/libp2p/py-libp2p/tox.yml?branch=main&label=build%20status)](https://github.com/libp2p/py-libp2p/actions/workflows/tox.yml)
 [![Docs build](https://readthedocs.org/projects/py-libp2p/badge/?version=latest)](http://py-libp2p.readthedocs.io/en/latest/?badge=latest)
 
-> py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. The core features are stable, and we’re focused on refining performance, expanding protocol support, and ensuring smooth interop with other libp2p implementations. We welcome contributions and real-world usage feedback to help us reach full production maturity.
+> py-libp2p has moved beyond its experimental roots and is steadily progressing toward production readiness. Core modules are stable, with active work on performance, protocol coverage, and full interop with other libp2p implementations. We welcome contributions and real-world usage feedback to reach full production maturity.
 
 ## Impact
-
-py-libp2p connects the Web3 networking stack to the Python ecosystem — a language widely used in scientific computing, data engineering, machine learning, and research.
+py-libp2p connects the Web3 networking stack to the Python ecosystem — widely used in scientific computing, distributed systems research, machine learning workflows, and backend services.
 
 These libraries are already powering work in:
 - Federated learning frameworks
@@ -31,32 +30,31 @@ These libraries are already powering work in:
 - IPFS & Filecoin developer toolchains
 - Contribution verification and reproducibility protocols
 
-By bringing libp2p to Python, we expand decentralized networking into an ecosystem of millions of researchers, developers, and innovators who historically have not had access to modern peer-to-peer networking primitives.
+By bringing libp2p to Python, we expand decentralized networking into an ecosystem of millions of researchers, engineers, and data practitioners who previously lacked access to modern peer-to-peer infrastructure.
 
 ## Community Adoption & Collaboration
+The project has been part of Filecoin & IPFS working groups and has been showcased at PL EngRes, The Gathering, Code for GovTech 2024–25, and Zanzalu'25. Development is driven by an open community across the Filecoin, IPFS, Ethereum, and broader decentralized computing ecosystems.
 
-The project has been part of Filecoin & IPFS working groups and has been showcased at PL EngRes, The Gathering, Code for GovTech 2024–25, and Zanzalu'25. Development is driven by an open community across the Filecoin, IPFS, Ethereum, and broader decentralized networking ecosystems.
-
-Our community-driven development model strengthens the Filecoin network by enabling more developers — especially in research computing and applied science — to build decentralized applications natively in Python.
+Our community-driven model strengthens the Filecoin network by enabling applied science and research computing workloads to run over decentralized infrastructure.
 
 ## Why this matters to Filecoin
+A production-ready Python libp2p stack enables Filecoin storage, retrieval, compute, and data collaboration workflows to integrate directly into Python-based systems — from ML pipelines to scientific collaboration to distributed data processing.
 
-A production-ready Python libp2p stack allows Filecoin storage, retrieval, compute, and data collaboration protocols to be integrated into Python workflows: ML training pipelines, scientific collaboration networks, distributed computation tasks, and backend systems. This significantly expands Filecoin’s developer surface area and adoption potential.
+We envision py-libp2p as the default networking substrate for distributed Python applications.
 
-We envision py-libp2p as the standard networking substrate for distributed Python applications.
-
-Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/). [View the release notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
+Read more in the [documentation on ReadTheDocs](https://py-libp2p.readthedocs.io/).  
+See also: [Release Notes](https://py-libp2p.readthedocs.io/en/latest/release_notes.html).
 
 ## Maintainers
+Maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev), and [@dhuseby](https://github.com/dhuseby).
 
-Currently maintained by [@pacrob](https://github.com/pacrob), [@seetadev](https://github.com/seetadev) and [@dhuseby](https://github.com/dhuseby). Please reach out to us for collaboration or active feedback. If you have questions, feel free to open a new [discussion](https://github.com/libp2p/py-libp2p/discussions). We are also available on the libp2p Discord — join us at #py-libp2p [sub-channel](https://discord.gg/d92MEugb).
+Questions or ideas?  
+Start a discussion: https://github.com/libp2p/py-libp2p/discussions  
+Join the Discord: https://discord.gg/d92MEugb (#py-libp2p)
 
 ## Feature Breakdown
-
-py-libp2p aims for conformity with [the standard libp2p modules](https://libp2p.io/implementations/). Below is a breakdown of the modules we have developed, are developing, and may develop in the future.
-
-> Legend: ✅: Done  🛠️: In Progress/Usable  🌱 Prototype/Unstable  ❌: Missing
-
+py-libp2p aligns with the standard libp2p modules architecture:  
+✅ Stable · 🛠️ In Progress · 🌱 Prototype · ❌ Not Yet Implemented
 ______________________________________________________________________
 
 ### Transports
