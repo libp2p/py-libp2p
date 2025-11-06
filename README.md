@@ -67,13 +67,13 @@ py-libp2p aligns with the standard libp2p modules architecture:
 
 ### Transports
 
-| Transport                            | Status | Source |
-|-------------------------------------|:------:|:------:|
-| `libp2p-tcp`                        | ✅ | https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py |
-| `libp2p-quic`                       | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic |
-| `libp2p-websocket`                  | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket |
-| `libp2p-webrtc-browser-to-server`   | 🌱 | — |
-| `libp2p-webrtc-private-to-private`  | 🌱 | — |
+| Transport                           | Status | Source |
+|------------------------------------|:------:|:------:|
+| `libp2p-tcp`                       | ✅ | https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py |
+| `libp2p-quic`                      | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic |
+| `libp2p-websocket`                 | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket |
+| `libp2p-webrtc-browser-to-server`  | 🌱 | — |
+| `libp2p-webrtc-private-to-private` | 🌱 | — |
 
 ---
 
@@ -89,10 +89,10 @@ py-libp2p aligns with the standard libp2p modules architecture:
 
 ### Secure Communication
 
-| Secure Channel   | Status | Source |
-|------------------|:------:|:------:|
-| `libp2p-noise`   | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise |
-| `libp2p-tls`     | ✅ | — |
+| Secure Channel | Status | Source |
+|----------------|:------:|:------:|
+| `libp2p-noise` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise |
+| `libp2p-tls`   | ✅ | — |
 
 ---
 
@@ -126,10 +126,10 @@ py-libp2p aligns with the standard libp2p modules architecture:
 
 ### Stream Muxers
 
-| Muxer            | Status | Source |
-|------------------|:------:|:------:|
-| `libp2p-yamux`   | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/yamux |
-| `libp2p-mplex`   | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/mplex |
+| Muxer          | Status | Source |
+|----------------|:------:|:------:|
+| `libp2p-yamux` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/yamux |
+| `libp2p-mplex` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/mplex |
 
 ---
 
