@@ -13,7 +13,6 @@
 
 <h3 align="center">The Python implementation of the libp2p networking stack.</h3>
 
-
 > py-libp2p has moved beyond its experimental roots and is progressing toward production readiness. Core modules are stable, with active work on performance, protocol coverage, and interop with other libp2p implementations. We welcome contributions and real-world usage feedback.
 
 ## Maintainers
@@ -95,7 +94,6 @@ Join the Discord: https://discord.gg/d92MEugb (#py-libp2p)
 | **`libp2p-ping`**     |     ✅     |         [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/host/ping.py)          |
 | **`libp2p-peer`**     |     ✅     |             [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/peer)              |
 | **`libp2p-identify`** |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/identity/identify/identify.py) |
-
 
 ## Explanation of Basic Two Node Communication
 
