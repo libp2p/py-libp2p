@@ -59,11 +59,7 @@ Join the Discord: https://discord.gg/d92MEugb (#py-libp2p)
 
 ## Feature Breakdown
 
-py-libp2p aligns with the standard libp2p modules architecture:
-
 ✅ Stable · 🛠️ In Progress · 🌱 Prototype · ❌ Not Yet Implemented
-
----
 
 ### Transports
 
@@ -75,8 +71,6 @@ py-libp2p aligns with the standard libp2p modules architecture:
 | `libp2p-webrtc-browser-to-server`  | 🌱 | — |
 | `libp2p-webrtc-private-to-private` | 🌱 | — |
 
----
-
 ### NAT Traversal
 
 | NAT Traversal             | Status | Source |
@@ -85,16 +79,12 @@ py-libp2p aligns with the standard libp2p modules architecture:
 | `libp2p-autonat`         | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/host/autonat |
 | `libp2p-hole-punching`   | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/relay/circuit_v2 |
 
----
-
 ### Secure Communication
 
 | Secure Channel | Status | Source |
 |----------------|:------:|:------:|
 | `libp2p-noise` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise |
 | `libp2p-tls`   | ✅ | — |
-
----
 
 ### Discovery
 
@@ -105,15 +95,11 @@ py-libp2p aligns with the standard libp2p modules architecture:
 | `mdns-discovery` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/mdns |
 | `rendezvous`     | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/discovery/rendezvous |
 
----
-
 ### Peer Routing
 
 | Peer Routing     | Status | Source |
 |------------------|:------:|:------:|
 | `libp2p-kad-dht` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/kad_dht |
-
----
 
 ### Publish/Subscribe
 
@@ -122,16 +108,12 @@ py-libp2p aligns with the standard libp2p modules architecture:
 | `libp2p-floodsub` | ✅ | https://github.com/libp2p/py-libp2p/blob/main/libp2p/pubsub/floodsub.py |
 | `libp2p-gossipsub`| ✅ | https://github.com/libp2p/py-libp2p/blob/main/libp2p/pubsub/gossipsub.py |
 
----
-
 ### Stream Muxers
 
 | Muxer          | Status | Source |
 |----------------|:------:|:------:|
 | `libp2p-yamux` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/yamux |
 | `libp2p-mplex` | ✅ | https://github.com/libp2p/py-libp2p/tree/main/libp2p/stream_muxer/mplex |
-
----
 
 ## Support
 
