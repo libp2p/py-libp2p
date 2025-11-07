@@ -408,7 +408,7 @@ class RelayDiscovery(Service):
                     await stream.write(request.SerializeToString())
 
                     # Wait for response
-                    response_bytes = await stream.read()
+                    response_bytes = await stream.read(1024)
                     if not response_bytes:
                         logger.error("No response received from relay %s", peer_id)
                         return False
@@ -429,7 +429,7 @@ class RelayDiscovery(Service):
                             return False
 
                     # Check if reservation was successful
-                    if response.type == HopMessage.RESERVE and response.HasField(
+                    if response.type == HopMessage.STATUS and response.HasField(
                         "status"
                     ):
                         # Access status code directly from protobuf object
