@@ -215,16 +215,25 @@ class P2PWebSocketConnection(ReadWriteCloser):
                         try:
                             # Block indefinitely until message arrives (like TCP)
                             # This is necessary for multistream negotiation
-                            logger.debug("WebSocket read(n=None): buffer empty, waiting for message...")
+                            logger.debug(
+                                "WebSocket read(n=None): buffer empty, "
+                                "waiting for message..."
+                            )
                             message = await self._ws_connection.get_message()
                             if isinstance(message, str):
                                 message = message.encode("utf-8")
-                            logger.debug(f"WebSocket read(n=None): received {len(message)} bytes")
+                            logger.debug(
+                                f"WebSocket read(n=None): received {len(message)} bytes"
+                            )
                             self._read_buffer = message
                         except Exception as e:
-                            # Handle CloseReason from trio_websocket - treat as connection closed
+                            # Handle CloseReason from trio_websocket -
+                            # treat as connection closed
                             error_str = str(e)
-                            if "CloseReason" in error_str or "closed" in error_str.lower():
+                            if (
+                                "CloseReason" in error_str
+                                or "closed" in error_str.lower()
+                            ):
                                 self._closed = True
                                 logger.debug("WebSocket read: connection closed")
                                 return b""
@@ -237,14 +246,17 @@ class P2PWebSocketConnection(ReadWriteCloser):
                     result = self._read_buffer
                     self._read_buffer = b""
                     self._bytes_read += len(result)
-                    logger.debug(f"WebSocket read(n=None): returning {len(result)} bytes")
+                    logger.debug(
+                        f"WebSocket read(n=None): returning {len(result)} bytes"
+                    )
                     return result
 
                 # For specific byte count requests, we need to satisfy read_exactly()
                 # and Yamux handle_incoming() which needs exact byte counts
                 #
                 # IMPORTANT: read_exactly() expects read(n) to return UP TO n bytes
-                # (may return less), and will retry. This matches TCP's receive_some() behavior.
+                # (may return less), and will retry.
+                # This matches TCP's receive_some() behavior.
                 #
                 # Strategy:
                 # 1. If we have >= n bytes, return exactly n bytes
@@ -252,51 +264,77 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 #    read_exactly() will call us again with remaining bytes
                 # 3. Only block if buffer is completely empty (wait for first message)
                 # 4. This ensures progress and prevents deadlocks
-                
+
                 # If we already have enough data, return it immediately
                 if len(self._read_buffer) >= n:
                     result = self._read_buffer[:n]
                     self._read_buffer = self._read_buffer[n:]
                     self._bytes_read += len(result)
                     return result
-                
+
                 # If we have partial data (< n bytes), return it immediately
                 # This allows read_exactly() to retry and get more data
-                # Returning partial data is the correct behavior for stream-oriented I/O
-                # This matches TCP's receive_some() behavior - return what's available now
+                # Returning partial data is the correct behavior
+                # for stream-oriented I/O
+                # This matches TCP's receive_some() behavior -
+                # return what's available now
                 if self._read_buffer:
                     result = self._read_buffer
                     self._read_buffer = b""
                     self._bytes_read += len(result)
-                    logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (partial, read_exactly will retry)")
+                    result_len = len(result)
+                    logger.debug(
+                        f"WebSocket read(n={n}): returning {result_len} bytes "
+                        f"(partial, read_exactly will retry)"
+                    )
                     return result
-                
+
                 # Buffer is empty - block until we get at least one message
-                # This is needed for multistream negotiation where we wait for the peer's first message
-                # IMPORTANT: This MUST block until data arrives - multistream negotiation depends on it
+                # This is needed for multistream negotiation
+                # where we wait for the peer's first message
+                # IMPORTANT: This MUST block until data arrives -
+                # multistream negotiation depends on it
                 if not self._closed:
                     try:
                         # Block until we receive a WebSocket message
-                        # This will block until the peer sends data or connection closes
-                        logger.debug(f"WebSocket read(n={n}): buffer empty, calling get_message()...")
+                        # This will block until the peer sends data
+                        # or connection closes
+                        logger.debug(
+                            f"WebSocket read(n={n}): buffer empty, "
+                            f"calling get_message()..."
+                        )
                         message = await self._ws_connection.get_message()
-                        logger.debug(f"WebSocket read(n={n}): get_message() returned, got {len(message) if message else 0} bytes")
+                        msg_len = len(message) if message else 0
+                        logger.debug(
+                            f"WebSocket read(n={n}): get_message() returned, "
+                            f"got {msg_len} bytes"
+                        )
                         if isinstance(message, str):
                             message = message.encode("utf-8")
-                        logger.debug(f"WebSocket read(n={n}): received {len(message)} bytes")
+                        logger.debug(
+                            f"WebSocket read(n={n}): received {len(message)} bytes"
+                        )
                         self._read_buffer = message
-                        
+
                         # Return what we got (may be less than n, that's OK)
                         # read_exactly() will call us again if it needs more
                         if len(self._read_buffer) >= n:
                             result = self._read_buffer[:n]
                             self._read_buffer = self._read_buffer[n:]
-                            logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (had enough)")
+                            result_len = len(result)
+                            logger.debug(
+                                f"WebSocket read(n={n}): returning {result_len} "
+                                f"bytes (had enough)"
+                            )
                         else:
                             result = self._read_buffer
                             self._read_buffer = b""
-                            logger.debug(f"WebSocket read(n={n}): returning {len(result)} bytes (partial)")
-                        
+                            result_len = len(result)
+                            logger.debug(
+                                f"WebSocket read(n={n}): returning {result_len} "
+                                f"bytes (partial)"
+                            )
+
                         self._bytes_read += len(result)
                         return result
                     except Exception as e:

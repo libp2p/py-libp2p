@@ -175,9 +175,11 @@ class PyWebSocketNode:
         try:
             import requests
 
-            resp = requests.post(f"http://127.0.0.1:{port}", data=message, timeout=10)
+            http_resp: requests.Response = requests.post(
+                f"http://127.0.0.1:{port}", data=message, timeout=10
+            )
             logger.info("[HTTP client] Sent and received via HTTP")
-            return resp.text
+            return http_resp.text
         except Exception as e:
             logger.error(f"HTTP dial also failed: {e}")
             raise
