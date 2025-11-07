@@ -19,20 +19,28 @@ class NoiseExtensions(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     WEBTRANSPORT_CERTHASHES_FIELD_NUMBER: builtins.int
+    STREAM_MUXERS_FIELD_NUMBER: builtins.int
     EARLY_DATA_FIELD_NUMBER: builtins.int
     early_data: builtins.bytes
-    """Early data payload for 0-RTT support"""
+    """Early data payload for 0-RTT support (Python extension)"""
     @property
     def webtransport_certhashes(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.bytes]:
         """WebTransport certificate hashes for WebTransport support"""
+
+    @property
+    def stream_muxers(self) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+        """Stream multiplexers supported by this peer"""
 
     def __init__(
         self,
         *,
         webtransport_certhashes: collections.abc.Iterable[builtins.bytes] | None = ...,
-        early_data: builtins.bytes = ...,
+        stream_muxers: collections.abc.Iterable[builtins.str] | None = ...,
+        early_data: builtins.bytes | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["early_data", b"early_data", "webtransport_certhashes", b"webtransport_certhashes"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["_early_data", b"_early_data", "early_data", b"early_data"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["_early_data", b"_early_data", "early_data", b"early_data", "stream_muxers", b"stream_muxers", "webtransport_certhashes", b"webtransport_certhashes"]) -> None: ...
+    def WhichOneof(self, oneof_group: typing.Literal["_early_data", b"_early_data"]) -> typing.Literal["early_data"] | None: ...
 
 global___NoiseExtensions = NoiseExtensions
 
@@ -44,14 +52,11 @@ class NoiseHandshakePayload(google.protobuf.message.Message):
 
     IDENTITY_KEY_FIELD_NUMBER: builtins.int
     IDENTITY_SIG_FIELD_NUMBER: builtins.int
-    DATA_FIELD_NUMBER: builtins.int
     EXTENSIONS_FIELD_NUMBER: builtins.int
     identity_key: builtins.bytes
     """The libp2p public key of the peer"""
     identity_sig: builtins.bytes
     """Signature of the noise static key by the libp2p private key"""
-    data: builtins.bytes
-    """Legacy early data field (deprecated, use extensions.early_data)"""
     @property
     def extensions(self) -> global___NoiseExtensions:
         """Optional extensions for advanced features"""
@@ -61,10 +66,9 @@ class NoiseHandshakePayload(google.protobuf.message.Message):
         *,
         identity_key: builtins.bytes = ...,
         identity_sig: builtins.bytes = ...,
-        data: builtins.bytes = ...,
         extensions: global___NoiseExtensions | None = ...,
     ) -> None: ...
     def HasField(self, field_name: typing.Literal["extensions", b"extensions"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["data", b"data", "extensions", b"extensions", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["extensions", b"extensions", "identity_key", b"identity_key", "identity_sig", b"identity_sig"]) -> None: ...
 
 global___NoiseHandshakePayload = NoiseHandshakePayload

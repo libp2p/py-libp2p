@@ -8,7 +8,7 @@ message NoiseExtensions {
 	// Stream multiplexers supported by this peer
 	repeated string stream_muxers = 2;
 	// Early data payload for 0-RTT support (Python extension)
-	bytes early_data = 3;
+	optional bytes early_data = 3;
 }
 
 // NoiseHandshakePayload is the payload sent during Noise handshake

@@ -62,7 +62,7 @@ class NoiseExtensions:
 
         """
         early_data = None
-        if pb_ext.early_data != b"":
+        if pb_ext.HasField("early_data"):
             early_data = pb_ext.early_data
         return cls(
             webtransport_certhashes=list(pb_ext.webtransport_certhashes),
