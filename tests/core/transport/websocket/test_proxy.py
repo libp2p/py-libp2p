@@ -88,6 +88,7 @@ def test_proxy_uppercase_takes_precedence():
     - On Windows: whichever was set in os.environ last takes effect
     """
     import platform
+
     original_upper = os.environ.get("HTTP_PROXY")
     original_lower = os.environ.get("http_proxy")
 

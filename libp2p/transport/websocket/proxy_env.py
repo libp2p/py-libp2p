@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+
 def get_proxy_from_environment(url: str) -> str | None:
     """
     Get proxy URL from environment variables with uppercase precedence.

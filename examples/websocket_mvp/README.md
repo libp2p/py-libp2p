@@ -13,26 +13,32 @@ A clean, minimal WebSocket example showcasing enhanced transport features using 
 ## 🚀 Quick Start
 
 ### 1. Start libp2p WebSocket Server
+
 ```bash
 cd /home/yks/pldg/ys-lib/examples/websocket_mvp
 python server.py
 ```
+
 The server will print its full multiaddr (e.g., `/ip4/127.0.0.1/tcp/8080/ws/p2p/12D3KooW...`)
 
 ### 2. Start HTTP Server (in another terminal)
+
 ```bash
 cd /home/yks/pldg/ys-lib/examples/websocket_mvp
 python serve_html.py
 ```
 
 ### 3. Test with Python Client
+
 ```bash
 cd /home/yks/pldg/ys-lib/examples/websocket_mvp
 python client.py
 ```
+
 **Note**: Update the `server_addr` variable in `client.py` with the actual server multiaddr.
 
 ### 4. Test with Browser Client
+
 - Open: `http://localhost:8000/client.html`
 - Enter the server's full multiaddr in the "Server Multiaddr" field
 - Click "Connect"
@@ -51,11 +57,13 @@ python client.py
 ## 🔧 Protocol Details
 
 ### Echo Protocol (`/echo/1.0.0`)
+
 - **libp2p Stream**: Opens stream to `/echo/1.0.0` protocol
 - **Send**: Message via libp2p stream
 - **Receive**: Echoed message via libp2p stream
 
 ### Ping Protocol (`/ping/1.0.0`)
+
 - **libp2p Stream**: Opens stream to `/ping/1.0.0` protocol
 - **Send**: "ping" via libp2p stream
 - **Receive**: "pong" via libp2p stream

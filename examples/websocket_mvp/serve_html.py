@@ -36,6 +36,7 @@ def serve_html_files(port=8000):
         except KeyboardInterrupt:
             print("\n🛑 Server stopped")
 
+
 if __name__ == "__main__":
     port = 8000
     if len(sys.argv) > 1:

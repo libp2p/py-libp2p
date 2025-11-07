@@ -27,7 +27,7 @@ REQUIRED_NODE_MAJOR = 16
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(120)  # type: ignore[attr-defined]
 async def test_ping_with_js_node():
     # Environment guards
     if shutil.which("node") is None:
@@ -96,8 +96,9 @@ async def test_ping_with_js_node():
         peer_id_line: str | None = None
         addr_line: str | None = None
         import re
+
         base58_re = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{20,}$")
-        with trio.move_on_after(30) as cancel_scope:
+        with trio.move_on_after(30):
             while True:
                 text = "".join(captured_out)
                 lines = [ln for ln in text.splitlines() if ln.strip()]
@@ -107,7 +108,6 @@ async def test_ping_with_js_node():
                     break
                 await trio.sleep(0.1)
         # Stop readers; we have enough or timed out
-        cancel_scope = None
         nursery.cancel_scope.cancel()
 
     if not peer_id_line or not addr_line:
@@ -117,73 +117,78 @@ async def test_ping_with_js_node():
             "Timed out waiting for JS node output.\n"
             f"Stdout:\n{out_dump}\n\nStderr:\n{err_dump}\n"
         )
-        peer_id = ID.from_base58(peer_id_line)
-        maddr = Multiaddr(addr_line)
+    if peer_id_line is None or addr_line is None:
+        pytest.fail("Failed to extract peer ID or address from JS node output")
+    # Type narrowing: we know these are not None after the check above
+    assert peer_id_line is not None
+    assert addr_line is not None
+    peer_id = ID.from_base58(peer_id_line)
+    maddr = Multiaddr(addr_line)
 
-        # Debug: Print what we're trying to connect to
-        print(f"JS Node Peer ID: {peer_id_line}")
-        print(f"JS Node Address: {addr_line}")
-        # Optional: print captured logs for debugging
-        print("--- JS stdout (partial) ---\n" + "".join(captured_out)[-2000:])
-        print("--- JS stderr (partial) ---\n" + "".join(captured_err)[-2000:])
+    # Debug: Print what we're trying to connect to
+    print(f"JS Node Peer ID: {peer_id_line}")
+    print(f"JS Node Address: {addr_line}")
+    # Optional: print captured logs for debugging
+    print("--- JS stdout (partial) ---\n" + "".join(captured_out)[-2000:])
+    print("--- JS stderr (partial) ---\n" + "".join(captured_err)[-2000:])
 
-        # Set up Python host
-        key_pair = create_new_key_pair()
-        py_peer_id = ID.from_pubkey(key_pair.public_key)
-        peer_store = PeerStore()
-        peer_store.add_key_pair(py_peer_id, key_pair)
+    # Set up Python host
+    key_pair = create_new_key_pair()
+    py_peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store = PeerStore()
+    peer_store.add_key_pair(py_peer_id, key_pair)
 
-        # Use Noise to match JS libp2p defaults
-        noise_transport = NoiseTransport(
-            libp2p_keypair=key_pair,
-            noise_privkey=create_new_key_pair().private_key,
-            early_data=None,
-            with_noise_pipes=False,
-        )
-        upgrader = TransportUpgrader(
-            secure_transports_by_protocol={TProtocol(NOISE_PROTOCOL_ID): noise_transport},
-            muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
-        )
-        transport = WebsocketTransport(upgrader)
-        swarm = Swarm(py_peer_id, peer_store, upgrader, transport)
-        host = BasicHost(swarm)
+    # Use Noise to match JS libp2p defaults
+    noise_transport = NoiseTransport(
+        libp2p_keypair=key_pair,
+        noise_privkey=create_new_key_pair().private_key,
+        early_data=None,
+        with_noise_pipes=False,
+    )
+    upgrader = TransportUpgrader(
+        secure_transports_by_protocol={TProtocol(NOISE_PROTOCOL_ID): noise_transport},
+        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
+    )
+    transport = WebsocketTransport(upgrader)
+    swarm = Swarm(py_peer_id, peer_store, upgrader, transport)
+    host = BasicHost(swarm)
 
-        # Connect to JS node
-        peer_info = PeerInfo(peer_id, [maddr])
+    # Connect to JS node
+    peer_info = PeerInfo(peer_id, [maddr])
 
-        print(f"Python trying to connect to: {peer_info}")
+    print(f"Python trying to connect to: {peer_info}")
 
-        # Use the host as a context manager
-        async with host.run(listen_addrs=[]):
-            await trio.sleep(1)
+    # Use the host as a context manager
+    async with host.run(listen_addrs=[]):
+        await trio.sleep(1)
 
-            try:
-                with trio.fail_after(30):
-                    await host.connect(peer_info)
-            except SwarmException as e:
-                out_dump = "".join(captured_out)
-                err_dump = "".join(captured_err)
-                underlying_error = e.__cause__
-                pytest.fail(
-                    "Connection failed with SwarmException.\n"
-                    f"Underlying: {underlying_error!r}\n"
-                    f"JS stdout tail:\n{out_dump[-2000:]}\n"
-                    f"JS stderr tail:\n{err_dump[-2000:]}\n"
-                )
-            except trio.TooSlowError:
-                out_dump = "".join(captured_out)
-                err_dump = "".join(captured_err)
-                pytest.fail(
-                    "Connection attempt timed out.\n"
-                    f"JS stdout tail:\n{out_dump[-2000:]}\n"
-                    f"JS stderr tail:\n{err_dump[-2000:]}\n"
-                )
-
-            assert host.get_network().connections.get(peer_id) is not None
-
-            # Ping protocol
+        try:
             with trio.fail_after(30):
-                stream = await host.new_stream(peer_id, [TProtocol("/ipfs/ping/1.0.0")])
-                await stream.write(b"ping")
-                data = await stream.read(4)
-                assert data == b"pong"
+                await host.connect(peer_info)
+        except SwarmException as e:
+            out_dump = "".join(captured_out)
+            err_dump = "".join(captured_err)
+            underlying_error = e.__cause__
+            pytest.fail(
+                "Connection failed with SwarmException.\n"
+                f"Underlying: {underlying_error!r}\n"
+                f"JS stdout tail:\n{out_dump[-2000:]}\n"
+                f"JS stderr tail:\n{err_dump[-2000:]}\n"
+            )
+        except trio.TooSlowError:
+            out_dump = "".join(captured_out)
+            err_dump = "".join(captured_err)
+            pytest.fail(
+                "Connection attempt timed out.\n"
+                f"JS stdout tail:\n{out_dump[-2000:]}\n"
+                f"JS stderr tail:\n{err_dump[-2000:]}\n"
+            )
+
+        assert host.get_network().connections.get(peer_id) is not None
+
+        # Ping protocol
+        with trio.fail_after(30):
+            stream = await host.new_stream(peer_id, [TProtocol("/ipfs/ping/1.0.0")])
+            await stream.write(b"ping")
+            data = await stream.read(4)
+            assert data == b"pong"

@@ -29,15 +29,17 @@ def _is_windows():
     return platform.system() == "Windows"
 
 
-def _wait_for_file_operation(file_path: Path, operation: str = "read", max_attempts: int = 3):
+def _wait_for_file_operation(
+    file_path: Path, operation: str = "read", max_attempts: int = 3
+) -> str | bool | int | None:
     """
     Wait for a file operation to succeed, with retries for Windows file locking.
-    
+
     Args:
         file_path: Path to the file
         operation: Type of operation ('read', 'exists', 'write')
         max_attempts: Maximum number of retry attempts
-    
+
     Returns:
         Result of the operation or None if all attempts failed
 
@@ -76,6 +78,7 @@ def _reset_logging():
     # Close all file handlers to ensure proper cleanup on Windows
     # Add a small delay to allow Windows to release file handles
     import time
+
     for handler in _current_handlers:
         if isinstance(handler, logging.FileHandler):
             try:
@@ -251,7 +254,10 @@ async def test_custom_log_file(clean_env):
         # Read the file content with retry logic for Windows file locking
         content = _wait_for_file_operation(log_file, "read")
         assert content is not None, "Failed to read log file content"
-        assert "Test message" in content, f"Expected 'Test message' in log content, got: {content}"
+        assert isinstance(content, str), "Content should be a string"
+        assert "Test message" in content, (
+            f"Expected 'Test message' in log content, got: {content}"
+        )
 
 
 @pytest.mark.trio
@@ -303,7 +309,10 @@ async def test_default_log_file(clean_env):
         # Read the file content with retry logic for Windows file locking
         content = _wait_for_file_operation(mock_temp_file, "read")
         assert content is not None, "Failed to read log file content"
-        assert "Test message" in content, f"Expected 'Test message' in log content, got: {content}"
+        assert isinstance(content, str), "Content should be a string"
+        assert "Test message" in content, (
+            f"Expected 'Test message' in log content, got: {content}"
+        )
 
 
 def test_invalid_log_level(clean_env):

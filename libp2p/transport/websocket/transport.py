@@ -402,6 +402,9 @@ class WebsocketTransport(ITransport):
     - Concurrent connection handling
     """
 
+    _autotls_manager: AutoTLSManager | None
+    _autotls_initialized: bool
+
     def __init__(
         self,
         upgrader: TransportUpgrader,
@@ -454,8 +457,8 @@ class WebsocketTransport(ITransport):
         self._background_nursery = nursery
         logger.debug("WebSocket transport background nursery set")
 
-        # AutoTLS support
-        self._autotls_manager: AutoTLSManager | None = None
+        # AutoTLS support (initialized lazily)
+        self._autotls_manager = None
         self._autotls_initialized = False
 
     async def can_dial(self, maddr: Multiaddr) -> bool:
@@ -658,7 +661,8 @@ class WebsocketTransport(ITransport):
         with trio.fail_after(self._config.handshake_timeout):
             from trio_websocket import connect_websocket_url
 
-            # Use background nursery if available (set by Swarm), otherwise create temporary one
+            # Use background nursery if available (set by Swarm),
+            # otherwise create temporary one
             if self._background_nursery is None:
                 raise OpenConnectionError(
                     "No background nursery available. "

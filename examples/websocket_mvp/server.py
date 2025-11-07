@@ -20,7 +20,7 @@ from libp2p.transport.websocket.transport import WebsocketConfig, WebsocketTrans
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class WebSocketServer:
 
     def __init__(self, port: int = 8080):
         from typing import Any
+
         self.port = port
         self.host: Any = None
         self.echo_count = 0

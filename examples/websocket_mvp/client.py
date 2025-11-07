@@ -29,7 +29,7 @@ from libp2p.transport.websocket.transport import WebsocketConfig, WebsocketTrans
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,9 @@ class HTMLServer:
                 self.running = True
                 logger.info(f"🌐 HTML server started on http://localhost:{self.port}")
                 logger.info(f"📁 Serving from: {html_dir}")
-                logger.info(f"📄 Browser client: http://localhost:{self.port}/client.html")
+                logger.info(
+                    f"📄 Browser client: http://localhost:{self.port}/client.html"
+                )
 
                 try:
                     httpd.serve_forever()
@@ -172,7 +174,7 @@ class WebSocketClient:
             stream = await self.host.new_stream(peer_info.peer_id, [PING_PROTOCOL_ID])
 
             # Send ping
-            await stream.write("ping".encode("utf-8"))
+            await stream.write(b"ping")
             await stream.close()
 
             # Read response
@@ -236,7 +238,7 @@ class WebSocketClient:
                 logger.info("\n🔄 Testing multiple echoes...")
                 for i in range(3):
                     self.echo_tests += 1
-                    await self.send_echo(peer_info, f"Test message {i+1}")
+                    await self.send_echo(peer_info, f"Test message {i + 1}")
                     await trio.sleep(0.5)
 
                 logger.info("🎉 All tests completed!")
