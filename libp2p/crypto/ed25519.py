@@ -1,18 +1,17 @@
-from Crypto.Hash import (
-    SHA256,
-)
+"""
+Ed25519 cryptographic key implementation.
+
+This module provides Ed25519 public and private key implementations using
+the PyNaCl library. Ed25519 is used for libp2p peer identity signatures.
+"""
+
 from nacl.exceptions import (
     BadSignatureError,
 )
-from nacl.public import (
-    PrivateKey as PrivateKeyImpl,
-    PublicKey as PublicKeyImpl,
-)
 from nacl.signing import (
-    SigningKey,
-    VerifyKey,
+    SigningKey as PrivateKeyImpl,
+    VerifyKey as PublicKeyImpl,
 )
-import nacl.utils as utils
 
 from libp2p.crypto.keys import (
     KeyPair,
@@ -23,6 +22,13 @@ from libp2p.crypto.keys import (
 
 
 class Ed25519PublicKey(PublicKey):
+    """
+    Ed25519 public key implementation.
+
+    Provides cryptographic operations for Ed25519 public keys including
+    signature verification. Used for libp2p peer identity verification.
+    """
+
     def __init__(self, impl: PublicKeyImpl) -> None:
         self.impl = impl
 
@@ -37,24 +43,31 @@ class Ed25519PublicKey(PublicKey):
         return KeyType.Ed25519
 
     def verify(self, data: bytes, signature: bytes) -> bool:
-        verify_key = VerifyKey(self.to_bytes())
         try:
-            verify_key.verify(data, signature)
+            self.impl.verify(data, signature)
         except BadSignatureError:
             return False
         return True
 
 
 class Ed25519PrivateKey(PrivateKey):
+    """
+    Ed25519 private key implementation.
+
+    Provides cryptographic operations for Ed25519 private keys including
+    signature generation and public key derivation. Used for libp2p peer
+    identity signing.
+    """
+
     def __init__(self, impl: PrivateKeyImpl) -> None:
         self.impl = impl
 
     @classmethod
     def new(cls, seed: bytes | None = None) -> "Ed25519PrivateKey":
-        if not seed:
-            seed = utils.random()
-
-        private_key_impl = PrivateKeyImpl.from_seed(seed)
+        if seed:
+            private_key_impl = PrivateKeyImpl(seed)
+        else:
+            private_key_impl = PrivateKeyImpl.generate()
         return cls(private_key_impl)
 
     def to_bytes(self) -> bytes:
@@ -69,12 +82,11 @@ class Ed25519PrivateKey(PrivateKey):
         return KeyType.Ed25519
 
     def sign(self, data: bytes) -> bytes:
-        h = SHA256.new(data)
-        signing_key = SigningKey(self.to_bytes())
-        return signing_key.sign(h.digest())
+        signed = self.impl.sign(data)
+        return signed.signature
 
     def get_public_key(self) -> PublicKey:
-        return Ed25519PublicKey(self.impl.public_key)
+        return Ed25519PublicKey(self.impl.verify_key)
 
 
 def create_new_key_pair(seed: bytes | None = None) -> KeyPair:
