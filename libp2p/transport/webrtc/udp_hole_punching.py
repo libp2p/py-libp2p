@@ -1,5 +1,7 @@
+import json
 import logging
 import socket
+from typing import Any
 
 import trio
 
@@ -7,19 +9,31 @@ logger = logging.getLogger("libp2p.transport.webrtc.direct")
 
 
 class UDPHolePuncher:
-    """UDP hole punching implementation for WebRTC-Direct connections"""
+    """UDP hole punching implementation for WebRTC-Direct connections."""
 
     def __init__(self) -> None:
         self.punch_sockets: dict[str, socket.socket] = {}
         self.local_endpoints: dict[str, tuple[str, int]] = {}
 
     async def punch_hole(
-        self, target_ip: str, target_port: int, local_port: int = 0
+        self,
+        target_ip: str,
+        target_port: int,
+        metadata: dict[str, Any],
+        local_port: int = 0,
     ) -> tuple[str, int]:
         """
         Perform UDP hole punching to establish direct connection.
 
-        Returns: (local_ip, local_port) that can reach the target
+        Args:
+            target_ip: Remote public IP address.
+            target_port: Remote UDP port.
+            metadata: Additional connection metadata (ufrag, peer_id, certhash, etc.).
+            local_port: Optional local UDP port to bind to (0 = random).
+
+        Returns:
+            tuple[str, int]: (local_ip, local_port) that can reach the target.
+
         """
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setblocking(False)
@@ -29,56 +43,58 @@ class UDPHolePuncher:
             sock.bind(("", local_port))
             local_ip, local_port = sock.getsockname()
 
-            # Get local IP by connecting to target (doesn't actually send data)
+            # Best effort to discover outward-facing IP
             try:
                 sock.connect((target_ip, target_port))
                 local_ip = sock.getsockname()[0]
             except Exception:
-                # Fallback to getting local IP
                 local_ip = self._get_local_ip()
 
-            # Send hole punching packets
-            punch_data = b"WEBRTC_PUNCH"
-            for _ in range(5):  # Send multiple packets to increase success rate
+            payload = {
+                "type": "punch",
+                **metadata,
+            }
+            punch_data = json.dumps(payload).encode("utf-8")
+
+            # Send multiple packets to improve success probability
+            for _ in range(5):
                 try:
                     await trio.to_thread.run_sync(
                         sock.sendto, punch_data, (target_ip, target_port)
                     )
                     await trio.sleep(0.1)
-                except Exception as e:
-                    logger.debug(f"Hole punch packet failed: {e}")
-            # Store socket for later use
+                except Exception as exc:
+                    logger.debug("Hole punch packet failed: %s", exc)
+
             endpoint_key = f"{target_ip}:{target_port}"
             self.punch_sockets[endpoint_key] = sock
             self.local_endpoints[endpoint_key] = (local_ip, local_port)
 
-            logger.info(f"UDP hole punched: {local_port} -> {target_port}")
+            logger.info("UDP hole punched: %s -> %s", local_port, target_port)
             return local_ip, local_port
 
-        except Exception as e:
+        except Exception as exc:
             sock.close()
-            logger.error(f"UDP hole punching failed: {e}")
+            logger.error("UDP hole punching failed: %s", exc)
             raise
 
     def _get_local_ip(self) -> str:
-        """Get local IP address"""
+        """Discover the local IP address used for outbound traffic."""
         try:
-            # Connect to a remote address to determine local IP
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as tmp_sock:
+                tmp_sock.connect(("8.8.8.8", 80))
+                return tmp_sock.getsockname()[0]
         except Exception:
             return "127.0.0.1"
 
     def cleanup_socket(self, target_ip: str, target_port: int) -> None:
-        """Clean up hole punching socket"""
+        """Clean up resources associated with the given remote endpoint."""
         endpoint_key = f"{target_ip}:{target_port}"
-        if endpoint_key in self.punch_sockets:
+        sock = self.punch_sockets.pop(endpoint_key, None)
+        if sock is not None:
             try:
-                self.punch_sockets[endpoint_key].close()
+                sock.close()
             except Exception:
                 pass
-            del self.punch_sockets[endpoint_key]
 
-        if endpoint_key in self.local_endpoints:
-            del self.local_endpoints[endpoint_key]
+        self.local_endpoints.pop(endpoint_key, None)

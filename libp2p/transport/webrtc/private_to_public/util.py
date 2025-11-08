@@ -161,8 +161,10 @@ class SDP:
         port = opts[1]
         family = opts[2] if opts[2] is not None else 4
         family_str = str(family)
-        # Use a dummy fingerprint as in the TS code
-        dummy_fingerprint = "sha-256 " + ":".join(["00"] * 32)
+        try:
+            fingerprint = multiaddr_to_fingerprint(ma)
+        except Exception:
+            fingerprint = "sha-256 " + ":".join(["00"] * 32)
         sdp = (
             f"v=0\r\n"
             f"o=- 0 0 IN IP{family_str} {host}\r\n"
@@ -175,7 +177,7 @@ class SDP:
             f"a=setup:active\r\n"
             f"a=ice-ufrag:{ufrag}\r\n"
             f"a=ice-pwd:{ufrag}\r\n"
-            f"a=fingerprint:{dummy_fingerprint}\r\n"
+            f"a=fingerprint:{fingerprint}\r\n"
             f"a=sctp-port:5000\r\n"
             f"a=max-message-size:{MAX_MESSAGE_SIZE}\r\n"
             f"a=candidate:1467250027 1 UDP 1467250027 {host} {port} typ host\r\n"

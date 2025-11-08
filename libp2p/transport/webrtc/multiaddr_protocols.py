@@ -8,14 +8,15 @@ from typing import Any
 
 logger = logging.getLogger("libp2p.transport.webrtc.multiaddr_protocols")
 
-WEBRTC_PROTOCOL_CODE = 280
-WEBRTC_DIRECT_PROTOCOL_CODE = 281
+WEBRTC_PROTOCOL_CODE = 281  # 0x0119
+WEBRTC_DIRECT_PROTOCOL_CODE = 280  # 0x0118
+CERTHASH_PROTOCOL_CODE = 466  # 0x01D2
 
 
 def register_webrtc_protocols() -> None:
     """
     Register WebRTC protocols with the multiaddr protocol table.
-    This allows creating multiaddrs with /webrtc and /webrtc-direct components.
+    Create multiaddrs with /webrtc, /webrtc-direct, and /certhash components.
     """
     try:
         from multiaddr.protocols import REGISTRY, Protocol
@@ -35,9 +36,18 @@ def register_webrtc_protocols() -> None:
             codec=None,
         )
 
+        # Certhash is variable-length (contains base64url string values)
+        # Use 'fspath' codec for variable-length strings
+        certhash_protocol = Protocol(
+            code=CERTHASH_PROTOCOL_CODE,
+            name="certhash",
+            codec="fspath",  # Variable-leng str codec that accepts base64url
+        )
+
         try:
             add_protocol(webrtc_protocol)
             add_protocol(webrtc_direct_protocol)
+            add_protocol(certhash_protocol)
             logger.info(
                 "Successfully registered WebRTC protocols with multiaddr (add_protocol)"
             )
@@ -72,22 +82,31 @@ def register_webrtc_protocols_fallback() -> None:
         if Protocol is not None:
             try:
                 webrtc_proto = Protocol(
-                    code=WEBRTC_PROTOCOL_CODE, name="webrtc", codec=None
+                    code=WEBRTC_PROTOCOL_CODE,
+                    name="webrtc",
+                    codec=None,
                 )
                 webrtc_direct_proto = Protocol(
-                    code=WEBRTC_DIRECT_PROTOCOL_CODE, name="webrtc-direct", codec=None
+                    code=WEBRTC_DIRECT_PROTOCOL_CODE,
+                    name="webrtc-direct",
+                    codec=None,
+                )
+                certhash_proto = Protocol(
+                    code=CERTHASH_PROTOCOL_CODE,
+                    name="certhash",
+                    codec="fspath",  # Variable-length string codec
                 )
             except Exception:
                 Protocol = None
 
         if Protocol is None:
 
-            def _make_proto(code: int, name: str) -> Any:
+            def _make_proto(code: int, name: str, size: int = 0) -> Any:
                 class ProtocolLike:
                     def __init__(self) -> None:
                         self.code = code
                         self.name = name
-                        self.size = 0
+                        self.size = size
                         self.vcode = None
                         self.codec = None
                         self.path = None
@@ -98,6 +117,7 @@ def register_webrtc_protocols_fallback() -> None:
             webrtc_direct_proto = _make_proto(
                 WEBRTC_DIRECT_PROTOCOL_CODE, "webrtc-direct"
             )
+            certhash_proto = _make_proto(CERTHASH_PROTOCOL_CODE, "certhash", size=-1)
 
         reg = getattr(protocols, "REGISTRY", None)
         if reg is not None:
@@ -106,19 +126,28 @@ def register_webrtc_protocols_fallback() -> None:
                 if ProtocolCls is not None:
                     try:
                         wp = ProtocolCls(
-                            code=WEBRTC_PROTOCOL_CODE, name="webrtc", codec=None
+                            code=WEBRTC_PROTOCOL_CODE,
+                            name="webrtc",
+                            codec=None,
                         )
                         wpd = ProtocolCls(
                             code=WEBRTC_DIRECT_PROTOCOL_CODE,
                             name="webrtc-direct",
                             codec=None,
                         )
+                        wpc = ProtocolCls(
+                            code=CERTHASH_PROTOCOL_CODE,
+                            name="certhash",
+                            codec="fspath",
+                        )
                     except Exception:
                         wp = webrtc_proto
                         wpd = webrtc_direct_proto
+                        wpc = certhash_proto
                 else:
                     wp = webrtc_proto
                     wpd = webrtc_direct_proto
+                    wpc = certhash_proto
 
                 try:
                     is_locked = getattr(reg, "locked", False)
@@ -136,12 +165,11 @@ def register_webrtc_protocols_fallback() -> None:
                     try:
                         target_reg.add(wp)
                         target_reg.add(wpd)
+                        target_reg.add(wpc)
                         if target_reg is not reg:
                             protocols.REGISTRY = target_reg
 
-                        logger.info(
-                            "Successfully registered WebRTC protocols via REGISTRY.add"
-                        )
+                        logger.info("Successfully registered WebRTC protocols")
                         return
                     except Exception as e:
                         logger.debug(f"REGISTRY.add failed: {e}")
@@ -181,6 +209,8 @@ def register_webrtc_protocols_fallback() -> None:
                 protocols.PROTOCOLS.append(webrtc_proto)
             if not _exists(protocols.PROTOCOLS, webrtc_direct_proto):
                 protocols.PROTOCOLS.append(webrtc_direct_proto)
+            if not _exists(protocols.PROTOCOLS, certhash_proto):
+                protocols.PROTOCOLS.append(certhash_proto)
 
             # Update registry dictionaries if available
             if reg is not None:
@@ -197,6 +227,13 @@ def register_webrtc_protocols_fallback() -> None:
                     reg._names_to_protocols[name2] = webrtc_direct_proto
                 if code2 is not None:
                     reg._codes_to_protocols[code2] = webrtc_direct_proto
+
+                name3 = getattr(certhash_proto, "name", None)
+                code3 = getattr(certhash_proto, "code", None)
+                if name3 is not None:
+                    reg._names_to_protocols[name3] = certhash_proto
+                if code3 is not None:
+                    reg._codes_to_protocols[code3] = certhash_proto
 
             # Provide protocol_with_name helper if missing
             if not hasattr(protocols, "protocol_with_name"):
@@ -238,17 +275,27 @@ def register_webrtc_protocols_fallback() -> None:
                                     ),
                                     codec=None,
                                 )
+                                rpc = ProtocolCls(
+                                    code=getattr(
+                                        certhash_proto, "code", CERTHASH_PROTOCOL_CODE
+                                    ),
+                                    name=getattr(certhash_proto, "name", "certhash"),
+                                    codec=None,
+                                )
                             except Exception:
                                 rp = webrtc_proto
                                 rpd = webrtc_direct_proto
+                                rpc = certhash_proto
                         else:
                             rp = webrtc_proto
                             rpd = webrtc_direct_proto
+                            rpc = certhash_proto
 
                         if hasattr(reg, "add"):
                             try:
                                 reg.add(rp)
                                 reg.add(rpd)
+                                reg.add(rpc)
                             except Exception:
                                 # try aliases if available
                                 try:
@@ -258,6 +305,9 @@ def register_webrtc_protocols_fallback() -> None:
                                         )
                                         reg.add_alias_name(
                                             rpd, getattr(rpd, "name", None)
+                                        )
+                                        reg.add_alias_name(
+                                            rpc, getattr(rpc, "name", None)
                                         )
                                 except Exception:
                                     pass

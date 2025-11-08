@@ -54,22 +54,35 @@ class WebRTCCertificate:
         cert: x509.Certificate | None = None,
         private_key: ec.EllipticCurvePrivateKey | None = None,
     ) -> None:
+        # Initialize all attributes first
+        self.private_key = None
+        self.cert = None
+        self._fingerprint: str | None = None
+        self._certhash: str | None = None
+
         if private_key is None:
             self.private_key = self.loadOrCreatePrivateKey(True)
         else:
             self.private_key = private_key
+
+        if self.private_key is None:
+            raise Exception("Failed to load or create private key")
+
         if cert is None:
             self.cert, _, _ = self.loadOrCreateCertificate(self.private_key)
         else:
             self.cert = cert
-        self._fingerprint: str | None = None
-        self._certhash: str | None = None
+
+        if self.cert is None:
+            raise Exception("Failed to load or create certificate")
+
         self.cancel_scope: trio.CancelScope | None = None
 
     @property
     def fingerprint(self) -> str:
         """Get SHA-256 fingerprint of certificate"""
         if self._fingerprint is None:
+            assert self.cert is not None, "Certificate must be initialized"
             cert_der = self.cert.public_bytes(Encoding.DER)
             sha256_hash = hashlib.sha256(cert_der).digest()
             self._fingerprint = ":".join(f"{b:02x}" for b in sha256_hash).upper()
@@ -79,6 +92,7 @@ class WebRTCCertificate:
     def certhash(self) -> str:
         """Get multibase-encoded certificate hash for multiaddr"""
         if self._certhash is None:
+            assert self.cert is not None, "Certificate must be initialized"
             cert_der = self.cert.public_bytes(Encoding.DER)
             sha256_hash = hashlib.sha256(cert_der).digest()
             # Multibase base32 encoding with 'u' prefix for base32pad-upper
@@ -90,6 +104,7 @@ class WebRTCCertificate:
 
     def to_pem(self) -> tuple[bytes, bytes]:
         """Export certificate and private key as PEM"""
+        assert self.cert is not None, "Certificate must be initialized"
         cert_pem = self.cert.public_bytes(Encoding.PEM)
         assert self.private_key is not None
         key_pem = self.private_key.private_bytes(
@@ -191,7 +206,10 @@ class WebRTCCertificate:
 
     def _getCertRenewalTime(self) -> int:
         # Return ms until cert expiry minus renewal threshold.
-        renew_at = self.cert.not_valid_after - datetime.timedelta(
+        assert self.cert is not None, "Certificate must be initialized"
+        # Use not_valid_after_utc to get timezone-aware datetime
+        cert_expiry = self.cert.not_valid_after_utc
+        renew_at = cert_expiry - datetime.timedelta(
             milliseconds=DEFAULT_CERTIFICATE_RENEWAL_THRESHOLD
         )
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -256,7 +274,7 @@ class WebRTCCertificate:
             isExpired = (
                 datetime.datetime.now(datetime.timezone.utc)
                 + datetime.timedelta(milliseconds=DEFAULT_CERTIFICATE_RENEWAL_THRESHOLD)
-                >= self.cert.not_valid_after
+                >= self.cert.not_valid_after_utc
             )
             if not isExpired:
                 # Check if the certificate's public key matches with provided key pair
@@ -302,10 +320,15 @@ class WebRTCCertificate:
         return (cert, cert_pem, cert_hash)
 
     async def renewal_loop(self) -> None:
-        while True:
-            await trio.sleep(float(self._getCertRenewalTime()))
-            logger.debug("Renewing TLS certificate")
-            self.loadOrCreateCertificate(self.private_key, True)
+        """Certificate renewal loop that runs until cancelled."""
+        try:
+            while True:
+                await trio.sleep(float(self._getCertRenewalTime()))
+                logger.debug("Renewing TLS certificate")
+                self.loadOrCreateCertificate(self.private_key, True)
+        except trio.Cancelled:
+            logger.debug("Certificate renewal loop cancelled")
+            raise
 
 
 def create_webrtc_multiaddr(

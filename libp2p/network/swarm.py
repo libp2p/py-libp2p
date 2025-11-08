@@ -32,6 +32,7 @@ from libp2p.io.abc import (
     ReadWriteCloser,
 )
 from libp2p.network.config import ConnectionConfig, RetryConfig
+from libp2p.network.transport_manager import UnsupportedTransportError
 from libp2p.peer.id import (
     ID,
 )
@@ -353,6 +354,13 @@ class Swarm(Service, INetworkService):
         # Dial peer (connection to peer does not yet exist)
         # Transport dials peer (gets back a raw conn)
         try:
+            transport_manager = getattr(self, "transport_manager", None)
+            if transport_manager is not None:
+                try:
+                    return await transport_manager.dial(addr, peer_id)
+                except UnsupportedTransportError:
+                    pass
+
             addr = Multiaddr(f"{addr}/p2p/{peer_id}")
             raw_conn = await self.transport.dial(addr)
         except OpenConnectionError as error:

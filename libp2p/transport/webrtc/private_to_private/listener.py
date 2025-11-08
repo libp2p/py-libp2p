@@ -70,8 +70,7 @@ class WebRTCPeerListener(IListener):
         self._nursery = nursery
 
         try:
-            # Register for transport listening events
-            self._setup_transport_event_listener()
+            await self.transport.ensure_listener_ready()
 
             self._is_listening = True
             logger.info("WebRTC peer listener started successfully")
@@ -84,6 +83,9 @@ class WebRTCPeerListener(IListener):
     def _setup_transport_event_listener(self) -> None:
         """Set up listener for transport events."""
         logger.debug("Setting up transport event listener")
+
+        # Register for transport listening events
+        self._register_for_transport_events()
 
         def on_transport_listening(event_data: Any) -> None:
             """Handle transport listening events."""
@@ -100,6 +102,12 @@ class WebRTCPeerListener(IListener):
         """Handle transport listening event - generate WebRTC addresses."""
         logger.debug("Transport listening event received")
 
+        # When circuit relay transport starts listening,
+        #  we can generate WebRTC addresses
+        # The get_addrs() method will be called to retrieve these addresses
+        # This is a passive listener - it doesn't need to do anything here
+        # The address generation happens in get_addrs()
+
     async def close(self) -> None:
         """Stop listening and close the listener."""
         if not self._is_listening:
@@ -109,6 +117,7 @@ class WebRTCPeerListener(IListener):
 
         try:
             # Unregister event listener
+            self._unregister_transport_events()
             self._transport_listening_handler = None
 
             self._is_listening = False
@@ -128,43 +137,14 @@ class WebRTCPeerListener(IListener):
             return tuple()
 
         try:
-            addrs = []
+            addrs = self.transport.get_listener_addresses()
+            if addrs:
+                logger.debug(f"Generated {len(addrs)} WebRTC listener addresses")
+                return tuple(addrs)
 
-            # Get network from host and try to access transport manager
-            network = self.host.get_network()
-            transport_manager = getattr(network, "transport_manager", None)
-
-            if transport_manager:
-                # Get all listeners from transport manager
-                listeners = transport_manager.get_listeners()
-
-                for listener in listeners:
-                    # Skip self to avoid recursion
-                    if listener is self:
-                        continue
-
-                    # Get addresses from each listener
-                    listener_addrs = listener.get_addrs()
-
-                    for addr in listener_addrs:
-                        # Check if this is a circuit address
-                        if self._is_circuit_address(addr):
-                            # Encapsulate with WebRTC protocol
-                            webrtc_addr = addr.encapsulate(
-                                Multiaddr(f"/{WEBRTC_PROTOCOL}")
-                            )
-                            addrs.append(webrtc_addr)
-
-            # If no circuit addresses found, try to create generic WebRTC address
-            if not addrs:
-                peer_id = self.host.get_id()
-                # Create a generic WebRTC multiaddr
-                generic_addr = Multiaddr(f"/{WEBRTC_PROTOCOL}/p2p/{peer_id}")
-                addrs.append(generic_addr)
-
-            logger.debug(f"Generated {len(addrs)} WebRTC listener addresses")
-            return tuple(addrs)
-
+            peer_id = self.host.get_id()
+            generic_addr = Multiaddr(f"/{WEBRTC_PROTOCOL}/p2p/{peer_id}")
+            return (generic_addr,)
         except Exception as e:
             logger.error(f"Error generating listener addresses: {e}")
             return tuple()

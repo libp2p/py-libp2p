@@ -1,10 +1,11 @@
 import asyncio
 from asyncio import AbstractEventLoop
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
 from multiaddr import Multiaddr
+import trio
 from trio_asyncio import aio_as_trio, open_loop
 
 from libp2p.abc import (
@@ -15,6 +16,14 @@ from libp2p.abc import (
 )
 from libp2p.custom_types import THandler, TProtocol
 from libp2p.host.basic_host import IHost
+from libp2p.network.transport_manager import TransportManager
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayLimits, RelayRole
+from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
+from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+from libp2p.tools.async_service.abc import ManagerAPI
+from libp2p.tools.async_service.trio_service import TrioManager
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..constants import (
@@ -29,6 +38,10 @@ from ..private_to_public.util import (
 from .initiate_connection import initiate_connection
 from .listener import WebRTCPeerListener
 from .signaling_stream_handler import handle_incoming_stream
+from .util import extract_relay_base_addr, get_relay_peer, split_addr
+
+if TYPE_CHECKING:
+    from libp2p.network.swarm import Swarm
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_private")
 
@@ -65,6 +78,20 @@ class WebRTCTransport(ITransport):
         # Metrics and monitoring
         self.metrics = None
 
+        # Circuit relay discovery integration
+        self._relay_discovery: Any = None
+        self._relay_protocol: CircuitV2Protocol | None = None
+        self._relay_protocol_manager: TrioManager | None = None
+        self._relay_discovery_manager: ManagerAPI | None = None
+        self._relay_transport: CircuitV2Transport | None = None
+        self._relay_limits: RelayLimits | None = None
+        self._relay_config: RelayConfig | None = None
+
+        # Transport manager integration
+        self._transport_manager: TransportManager | None = None
+        self._signaling_ready: set[ID] = set()
+        self._advertised_addrs: list[Multiaddr] = []
+
         logger.info("WebRTC Transport initialized")
 
     async def start(self) -> None:
@@ -96,6 +123,8 @@ class WebRTCTransport(ITransport):
             )
             logger.info(f"Registered signaling protocol handler: {SIGNALING_PROTOCOL}")
 
+            await self._setup_circuit_relay_support()
+
             self._started = True
             logger.info("WebRTC Transport started successfully")
 
@@ -120,6 +149,20 @@ class WebRTCTransport(ITransport):
 
             self._started = False
             logger.info("WebRTC Transport stopped successfully")
+
+            # Stop relay services
+            if self._relay_discovery_manager is not None:
+                await self._relay_discovery_manager.stop()
+                self._relay_discovery_manager = None
+
+            if self._relay_protocol_manager is not None:
+                await self._relay_protocol_manager.stop()
+                self._relay_protocol_manager = None
+
+            self._relay_transport = None
+            self._relay_discovery = None
+            self._signaling_ready.clear()
+            self._advertised_addrs = []
 
         except Exception as e:
             logger.error(f"Error stopping WebRTC transport: {e}")
@@ -174,6 +217,8 @@ class WebRTCTransport(ITransport):
         logger.info(f"Dialing WebRTC connection to {maddr}")
 
         try:
+            await self.ensure_signaling_connection(maddr)
+
             # Configure peer connection with ICE servers
             ice_servers = pick_random_ice_servers(self.ice_servers)
             rtc_ice_servers = [
@@ -213,9 +258,12 @@ class WebRTCTransport(ITransport):
         if self.host is None:
             raise WebRTCError("Host must be set before creating listener")
 
-        return WebRTCPeerListener(
+        listener = WebRTCPeerListener(
             transport=self, handler=handler_function, host=self.host
         )
+        if self._transport_manager is not None:
+            self._transport_manager.register_listener(listener)
+        return listener
 
     async def _handle_signaling_stream(self, stream: Any) -> None:
         """
@@ -282,6 +330,243 @@ class WebRTCTransport(ITransport):
                     await stream.close()
             except Exception as close_error:
                 logger.warning(f"Error closing signaling stream: {close_error}")
+
+    async def _setup_circuit_relay_support(self) -> None:
+        if not self.host:
+            raise WebRTCError("Host must be set before starting transport")
+
+        self._transport_manager = getattr(
+            self.host.get_network(), "transport_manager", None
+        )
+
+        if (
+            self._transport_manager is not None
+            and self._transport_manager.get_transport("webrtc") is None
+        ):
+            self._transport_manager.register_transport("webrtc", self)
+
+        if self._relay_transport:
+            return
+
+        # Prepare relay configuration (client role with auto reservation)
+        self._relay_limits = RelayLimits(
+            duration=60 * 60,
+            data=1024 * 1024 * 10,
+            max_circuit_conns=8,
+            max_reservations=4,
+        )
+        self._relay_config = RelayConfig(roles=RelayRole.CLIENT)
+
+        self._relay_protocol = CircuitV2Protocol(
+            self.host,
+            self._relay_limits,
+            allow_hop=False,
+        )
+        self._relay_protocol_manager = TrioManager(self._relay_protocol)
+        trio.lowlevel.spawn_system_task(
+            self._relay_protocol_manager.run, name="webrtc-relay-protocol"
+        )
+        await self._relay_protocol_manager.wait_started()
+
+        self._relay_transport = CircuitV2Transport(
+            self.host,
+            self._relay_protocol,
+            self._relay_config,
+        )
+
+        self._relay_discovery = self._relay_transport.discovery
+        if self._relay_discovery:
+            self._relay_discovery_manager = (
+                self._relay_protocol_manager.run_child_service(
+                    self._relay_discovery, daemon=True, name="webrtc-relay-discovery"
+                )
+            )
+            await self._relay_discovery.event_started.wait()
+
+        if (
+            self._transport_manager is not None
+            and self._transport_manager.get_transport("circuit-relay") is None
+        ):
+            self._transport_manager.register_transport(
+                "circuit-relay", self._relay_transport
+            )
+
+    async def ensure_signaling_connection(self, maddr: Multiaddr) -> None:
+        if self.host is None:
+            raise WebRTCError("Transport host not configured")
+
+        await self._setup_circuit_relay_support()
+
+        circuit_addr, target_peer_id = split_addr(maddr)
+        peerstore = self.host.get_peerstore()
+
+        target_component = Multiaddr(f"/p2p/{target_peer_id.to_base58()}")
+        try:
+            relay_circuit_base = circuit_addr.decapsulate(target_component)
+        except ValueError:
+            relay_circuit_base = circuit_addr
+
+        try:
+            peerstore.add_addr(target_peer_id, relay_circuit_base, 3600)
+        except Exception:
+            logger.debug(
+                "Failed to cache relay base address for %s", target_peer_id.to_base58()
+            )
+
+        network_service = self.host.get_network()
+        swarm = cast("Swarm", network_service)
+        existing = swarm.get_connections(target_peer_id)
+        if existing:
+            self._signaling_ready.add(target_peer_id)
+            return
+
+        if self._relay_transport is None:
+            raise WebRTCError("Circuit relay transport not initialized")
+
+        relay_peer = get_relay_peer(circuit_addr)
+        base_addr = extract_relay_base_addr(circuit_addr)
+        if base_addr is not None:
+            peerstore.add_addr(relay_peer, base_addr, 3600)
+
+        try:
+            await swarm.dial_peer(relay_peer)
+        except Exception as exc:
+            raise WebRTCError(f"Failed to dial relay {relay_peer}: {exc}") from exc
+
+        if self._relay_discovery and self._relay_discovery.auto_reserve:
+            try:
+                await self._relay_discovery.make_reservation(relay_peer)
+            except Exception:
+                pass
+
+        try:
+            peer_info = PeerInfo(target_peer_id, [circuit_addr])
+            raw_conn = await self._relay_transport.dial_peer_info(
+                peer_info, relay_peer_id=relay_peer
+            )
+        except Exception as exc:
+            raise WebRTCError(f"Failed to dial target via relay: {exc}") from exc
+
+        try:
+            secured_conn = await swarm.upgrader.upgrade_security(
+                raw_conn, True, target_peer_id
+            )
+            muxed_conn = await swarm.upgrader.upgrade_connection(
+                secured_conn, target_peer_id
+            )
+            await swarm.add_conn(muxed_conn)
+            self._signaling_ready.add(target_peer_id)
+        except Exception as exc:
+            await raw_conn.close()
+            raise WebRTCError(
+                f"Failed to upgrade relay connection for {target_peer_id}: {exc}"
+            ) from exc
+
+    def get_listener_addresses(self) -> list[Multiaddr]:
+        if not self.host or self._relay_transport is None:
+            return []
+
+        if not self._advertised_addrs:
+            self._refresh_listener_addresses()
+
+        return list(self._advertised_addrs)
+
+    async def ensure_listener_ready(self) -> None:
+        if not self.host:
+            raise WebRTCError("Transport host not configured")
+
+        await self._setup_circuit_relay_support()
+
+        if self._relay_discovery is None:
+            raise WebRTCError("Relay discovery not available")
+
+        relays = self._relay_discovery.get_relays()
+        if not relays:
+            await self._relay_discovery.discover_relays()
+            relays = self._relay_discovery.get_relays()
+
+        reservation_failed = False
+        for relay_id in relays:
+            try:
+                if self._relay_discovery.auto_reserve:
+                    await self._relay_discovery.make_reservation(relay_id)
+            except Exception:
+                reservation_failed = True
+                continue
+
+        if reservation_failed:
+            logger.debug("Relay reservation failed for at least one relay")
+
+        self._refresh_listener_addresses()
+
+    def _refresh_listener_addresses(self) -> None:
+        if not self.host:
+            return
+
+        peerstore = self.host.get_peerstore()
+        local_peer = self.host.get_id()
+
+        advertised: list[Multiaddr] = []
+        seen: set[str] = set()
+
+        relay_ids: list[ID]
+        if self._relay_discovery:
+            relay_ids = self._relay_discovery.get_relays()
+        else:
+            relay_ids = []
+
+        for relay_id in relay_ids:
+            relay_addrs = peerstore.addrs(relay_id)
+            if not relay_addrs:
+                continue
+
+            for relay_addr in relay_addrs:
+                base_addr = self._build_relay_base_addr(relay_addr, relay_id)
+                if base_addr is None:
+                    continue
+
+                try:
+                    webrtc_addr = base_addr.encapsulate(
+                        Multiaddr(f"/webrtc/p2p/{local_peer.to_base58()}")
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to compose WebRTC listen addr: %s", exc)
+                    continue
+
+                addr_str = str(webrtc_addr)
+                if addr_str in seen:
+                    continue
+                seen.add(addr_str)
+                advertised.append(webrtc_addr)
+
+                try:
+                    peerstore.add_addr(local_peer, base_addr, 3600)
+                except Exception:
+                    pass
+
+        self._advertised_addrs = advertised
+
+    @staticmethod
+    def _build_relay_base_addr(relay_addr: Multiaddr, relay_id: ID) -> Multiaddr | None:
+        """
+        Normalise relay address to include /p2p/<relay>/p2p-circuit.
+        """
+        try:
+            addr = relay_addr
+            relay_component = f"/p2p/{relay_id.to_base58()}"
+            addr_str = str(addr)
+
+            if relay_component not in addr_str:
+                addr = addr.encapsulate(Multiaddr(relay_component))
+                addr_str = str(addr)
+
+            if "/p2p-circuit" not in addr_str:
+                addr = addr.encapsulate(Multiaddr("/p2p-circuit"))
+
+            return addr
+        except Exception as exc:
+            logger.debug("Failed to normalise relay base addr: %s", exc)
+            return None
 
     async def _cleanup_connection(self, conn_id: str) -> None:
         """Clean up connection resources with proper async handling."""

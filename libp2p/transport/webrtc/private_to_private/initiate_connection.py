@@ -13,7 +13,6 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import IHost, INetStream, IRawConnection
-from libp2p.peer.id import ID
 
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
@@ -24,6 +23,7 @@ from ..constants import (
     WebRTCError,
 )
 from .pb import Message
+from .util import split_addr
 
 logger = logging.getLogger("webrtc.private.initiate_connection")
 
@@ -45,48 +45,77 @@ async def initiate_connection(
     """
     logger.info(f"Initiating WebRTC connection to {maddr}")
 
-    # Parse circuit relay multiaddr to get target peer ID
-    protocols = [p for p in maddr.protocols() if p is not None]
-    target_peer_id = None
-    for i, protocol in enumerate(protocols):
-        if protocol.name == "p2p":
-            if i + 1 < len(protocols) and protocols[i + 1].name == "p2p-circuit":
-                continue
-            else:
-                # This is the target peer
-                p2p_value = maddr.value_for_protocol("p2p")
-                if p2p_value is not None:
-                    target_peer_id = ID.from_base58(p2p_value)
-                    break
-
-    if not target_peer_id:
-        raise WebRTCError(f"Cannot extract target peer ID from multiaddr: {maddr}")
-
-    logger.info(f"Target peer ID: {target_peer_id}")
+    # Split multiaddr to get circuit address and target peer
+    circuit_addr, target_peer_id = split_addr(maddr)
+    logger.info(f"Circuit address: {circuit_addr}, Target peer: {target_peer_id}")
 
     # Variables for cleanup
     peer_connection = None
     signaling_stream = None
 
     try:
-        # Establish signaling stream through circuit relay
-        # Note: new_stream expects peer_id, not multiaddr
-        # We need to extract the relay peer ID from the multiaddr
-        relay_peer_id = None
-        for i, protocol in enumerate(protocols):
-            if protocol.name == "p2p":
-                if i + 1 < len(protocols) and protocols[i + 1].name == "p2p-circuit":
-                    # This is the relay peer
-                    p2p_value = maddr.value_for_protocol("p2p")
-                    if p2p_value is not None:
-                        relay_peer_id = ID.from_base58(p2p_value)
-                        break
+        # Establish connection to target peer through circuit relay
+        # Following js-libp2p pattern: dial circuit address, then open signaling stream
 
-        if not relay_peer_id:
-            raise WebRTCError(f"Cannot extract relay peer ID from multiaddr: {maddr}")
+        network = host.get_network()
+        existing_connections = []
+        if hasattr(network, "get_connections"):
+            existing_connections = network.get_connections(target_peer_id)
 
-        signaling_stream = await host.new_stream(relay_peer_id, [SIGNALING_PROTOCOL])
-        logger.info("Established signaling stream through circuit relay")
+        if not existing_connections:
+            logger.debug(
+                "No existing signaling connection to %s, attempting fallback dial",
+                target_peer_id,
+            )
+
+            # Seed peerstore with circuit address if needed so dial_peer can succeed
+            peerstore = host.get_peerstore()
+            target_component = Multiaddr(f"/p2p/{target_peer_id.to_base58()}")
+            try:
+                base_addr = circuit_addr.decapsulate(target_component)
+            except ValueError:
+                base_addr = circuit_addr
+
+            try:
+                peerstore.add_addrs(target_peer_id, [base_addr], 3600)
+            except Exception as exc:
+                logger.debug(
+                    "Failed to seed peerstore for %s with %s: %s",
+                    target_peer_id,
+                    base_addr,
+                    exc,
+                )
+
+            try:
+                await network.dial_peer(target_peer_id)
+                existing_connections = network.get_connections(target_peer_id)
+                logger.debug(
+                    "Fallback dial established %d signaling connections to %s",
+                    len(existing_connections),
+                    target_peer_id,
+                )
+            except Exception as dial_exc:
+                raise WebRTCError(
+                    f"No signaling connection available to {target_peer_id}. "
+                    "Call ensure_signaling_connection() before initiate_connection."
+                ) from dial_exc
+
+        if not existing_connections:
+            raise WebRTCError(
+                f"No signaling connection to {target_peer_id}. "
+                "Call ensure_signaling_connection() before initiate_connection."
+            )
+
+        # Open signaling stream to target peer
+        logger.debug(
+            "Opening signaling stream to %s using protocol %s",
+            target_peer_id,
+            SIGNALING_PROTOCOL,
+        )
+        signaling_stream = await host.new_stream(target_peer_id, [SIGNALING_PROTOCOL])
+        logger.info(
+            "Established signaling stream through circuit relay to %s", target_peer_id
+        )
 
         # Create RTCPeerConnection and data channel using safe operations
         (
@@ -101,12 +130,10 @@ async def initiate_connection(
         # Setup data channel ready event
         data_channel_ready = trio.Event()
 
-        @data_channel.on("open")
         def on_data_channel_open() -> None:
             logger.info("Data channel opened")
             data_channel_ready.set()
 
-        @data_channel.on("error")
         def on_data_channel_error(error: Any) -> None:
             logger.error(f"Data channel error: {error}")
 
@@ -131,13 +158,16 @@ async def initiate_connection(
         offer_msg.type = Message.SDP_OFFER
         offer_msg.data = offer.sdp
         await _send_signaling_message(signaling_stream, offer_msg)
+        logger.debug("Sent SDP offer to %s", target_peer_id)
 
-        # (Note: aiortc does not emit ice candidate event, per candidate (like js)
+        # (Note: aiortc does not emit ice candidate event, per candidate
         # but sends it along SDP.
         # To maintain interop, we extract and resend in given format)
+        logger.debug("Sending ICE candidates to %s", target_peer_id)
         await _send_ice_candidates(signaling_stream, peer_connection)
 
         # Wait for answer
+        logger.debug("Awaiting SDP answer from %s", target_peer_id)
         answer_msg = await _receive_signaling_message(signaling_stream, timeout)
         if answer_msg.type != Message.SDP_ANSWER:
             raise SDPHandshakeError(f"Expected answer, got: {answer_msg.type}")
@@ -151,6 +181,7 @@ async def initiate_connection(
         logger.info("Set remote description from answer")
 
         # Handle incoming ICE candidates
+        logger.debug("Handling incoming ICE candidates from %s", target_peer_id)
         await _handle_incoming_ice_candidates(
             signaling_stream, peer_connection, timeout
         )

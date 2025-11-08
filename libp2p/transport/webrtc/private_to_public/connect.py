@@ -6,12 +6,15 @@ from multiaddr import Multiaddr
 import trio
 from trio_asyncio import aio_as_trio
 
+from libp2p.peer.id import ID
 from libp2p.transport.webrtc.private_to_public.util import (
     SDP,
     fingerprint_to_multiaddr,
     generate_noise_prologue,
+    multiaddr_to_fingerprint,
 )
 
+from ..connection import WebRTCRawConnection
 from .direct_rtc_connection import DirectPeerConnection
 from .stream import WebRTCStream
 
@@ -27,6 +30,7 @@ async def connect(
     ufrag: str,
     role: str,
     remote_addr: Multiaddr | None = None,
+    remote_peer_id: ID | None = None,
 ) -> "IRawConnection | None":
     """
     Establish a WebRTC-Direct connection, perform the noise handshake,
@@ -48,8 +52,8 @@ async def connect(
             await aio_as_trio(peer_connection.setLocalDescription(munged_desc))
 
             if remote_addr is None:
-                logger.debug("Remote address is None in dialer")
-                raise Exception("Remote address is None in dialer")
+                raise Exception("Remote address is required for client role")
+
             answer_sdp = SDP.server_answer_from_multiaddr(remote_addr, ufrag)
             logger.debug("client setting server description %s", answer_sdp["sdp"])
             answer_desc = RTCSessionDescription(
@@ -58,8 +62,8 @@ async def connect(
             await aio_as_trio(peer_connection.setRemoteDescription(answer_desc))
         else:
             if remote_addr is None:
-                logger.debug("Remote address is None in dialer")
-                raise Exception("Remote address is None in dialer")
+                raise Exception("Remote address is required for server role")
+
             offer_sdp = SDP.client_offer_from_multiaddr(remote_addr, ufrag)
             logger.debug(
                 "server setting client %s %s", offer_sdp["type"], offer_sdp["sdp"]
@@ -78,7 +82,6 @@ async def connect(
                 sdp=munged_answer, type=answer.type
             )
             await aio_as_trio(peer_connection.setLocalDescription(munged_answer_desc))
-            return None
 
         # TODO: Check if this is the best way
         # Wait for handshake channel to open
@@ -102,13 +105,37 @@ async def connect(
 
         logger.debug("%s handshake channel opened", role)
 
+        rtc_pc = peer_connection.peer_connection
+
+        remote_fingerprint: str | None = None
         if role == "server":
-            remote_fingerprint = peer_connection.remoteFingerprint().value
-            remote_addr = fingerprint_to_multiaddr(remote_fingerprint)
+            if remote_addr is not None:
+                try:
+                    remote_fingerprint = multiaddr_to_fingerprint(remote_addr)
+                except Exception:
+                    remote_fingerprint = None
+            if remote_fingerprint is None and rtc_pc.remoteDescription is not None:
+                remote_fingerprint = SDP.get_fingerprint_from_sdp(
+                    rtc_pc.remoteDescription.sdp
+                )
+            if remote_fingerprint and remote_addr is None:
+                remote_addr = fingerprint_to_multiaddr(remote_fingerprint)
+        else:
+            if rtc_pc.remoteDescription is not None:
+                remote_fingerprint = SDP.get_fingerprint_from_sdp(
+                    rtc_pc.remoteDescription.sdp
+                )
+            if remote_fingerprint is None and remote_addr is not None:
+                try:
+                    remote_fingerprint = multiaddr_to_fingerprint(remote_addr)
+                except Exception:
+                    remote_fingerprint = None
 
         # Get local fingerprint
-        local_desc = peer_connection.localDescription
-        local_fingerprint = SDP.get_fingerprint_from_sdp(local_desc.sdp)
+        local_desc = rtc_pc.localDescription
+        local_fingerprint = SDP.get_fingerprint_from_sdp(
+            local_desc.sdp if local_desc is not None else None
+        )
         if local_fingerprint is None:
             raise Exception("Could not get fingerprint from local description sdp")
 
@@ -123,15 +150,36 @@ async def connect(
         # including securing and upgrading the connection
         # Ref: js-libp2p transport-webrtc connect.ts (see lines 135-199)
         # https://github.com/libp2p/js-libp2p/blob/main/packages/transport-webrtc/src/private-to-public/utils/connect.ts
-        noiseProlouge = generate_noise_prologue(local_fingerprint, remote_addr, role)  # noqa: F841
-
-        if role == "client":
-            # IRawConnection()
-            # TODO: Should return IRAWConnection object.
-            return None
+        if remote_addr is not None:
+            noisePrologue = generate_noise_prologue(  # noqa: F841
+                local_fingerprint, remote_addr, role
+            )
         else:
-            # TODO: Should return IRAWConnection object for server role.
-            return None
+            noisePrologue = None  # noqa: F841
+
+        if remote_peer_id is None and remote_addr is not None:
+            try:
+                peer_id_str = remote_addr.value_for_protocol("p2p")
+                if peer_id_str:
+                    remote_peer_id = ID.from_base58(peer_id_str)
+            except Exception:
+                remote_peer_id = None
+
+        if remote_peer_id is None:
+            raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
+
+        raw_connection = WebRTCRawConnection(
+            remote_peer_id,
+            rtc_pc,
+            handshake_channel,
+            is_initiator=(role == "client"),
+        )
+
+        setattr(raw_connection, "remote_multiaddr", remote_addr)
+        setattr(raw_connection, "remote_fingerprint", remote_fingerprint)
+        setattr(raw_connection, "local_fingerprint", local_fingerprint)
+
+        return raw_connection
 
     except Exception as e:
         logger.error("%s noise handshake failed: %s", role, e)

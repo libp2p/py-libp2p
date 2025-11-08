@@ -296,4 +296,5 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "libp2p/transport/webrtc/**",  # Optional WebRTC transport dependencies
 ]
