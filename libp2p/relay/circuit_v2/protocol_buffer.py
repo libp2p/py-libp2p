@@ -9,7 +9,6 @@ from enum import (
     IntEnum,
 )
 from typing import (
-    Any,
     cast,
 )
 
@@ -35,7 +34,7 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
     Parameters
     ----------
     code : int
-        The status code
+        The status code. Can be a StatusCode enum value or an integer.
     message : str
         The status message
 
@@ -46,7 +45,11 @@ def create_status(code: int = StatusCode.OK, message: str = "") -> PbStatus:
 
     """
     pb_obj = PbStatus()
-    pb_obj.code = cast(Any, int(code))
+
+    # Convert the status code (int or StatusCode enum) to the protobuf enum value type.
+    # The code field expects PbStatus.Code.ValueType (a NewType wrapper around int).
+    # At runtime, protobuf accepts int directly, but type checker requires ValueType.
+    pb_obj.code = cast(PbStatus.Code.ValueType, int(code))  # type: ignore[assignment,attr-defined]
     pb_obj.message = message
 
     return pb_obj
