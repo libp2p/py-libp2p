@@ -91,6 +91,9 @@ from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
 )
+from libp2p.security.noise.patterns import (
+    PatternXX,
+)
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
@@ -154,7 +157,10 @@ def initialize_peerstore_with_our_keypair(self_id: ID, key_pair: KeyPair) -> Pee
 
 
 def noise_static_key_factory() -> PrivateKey:
-    return create_ed25519_key_pair().private_key
+    # Generate X25519 key for Noise static key (as per Noise spec)
+    from libp2p.crypto.x25519 import X25519PrivateKey
+
+    return X25519PrivateKey.new()
 
 
 def noise_handshake_payload_factory() -> NoiseHandshakePayload:
@@ -181,7 +187,6 @@ def noise_transport_factory(key_pair: KeyPair) -> ISecureTransport:
         libp2p_keypair=key_pair,
         noise_privkey=noise_static_key_factory(),
         early_data=None,
-        with_noise_pipes=False,
     )
 
 
@@ -257,10 +262,10 @@ async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
     remote_transport = cast(
-        NoiseTransport, noise_transport_factory(create_secp256k1_key_pair())
+        NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
 
     local_secure_conn: ISecureConn | None = None
@@ -288,6 +293,114 @@ async def noise_conn_factory(
                 f"remote_secure_conn={remote_secure_conn}"
             )
         yield local_secure_conn, remote_secure_conn
+
+
+@asynccontextmanager
+async def pattern_handshake_factory(
+    nursery: trio.Nursery,
+    initiator_pattern: PatternXX,
+    responder_pattern: PatternXX,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    """
+    Create a real TCP connection pair and perform Noise XX handshake at pattern level.
+
+    This factory is used for testing PatternXX handshake functionality directly,
+    bypassing the Transport layer to test pattern-specific behavior.
+
+    Args:
+        nursery: Trio nursery for concurrent operations
+        initiator_pattern: PatternXX instance for the initiator side
+        responder_pattern: PatternXX instance for the responder side
+
+    Yields:
+        Tuple of (initiator_secure_conn, responder_secure_conn)
+
+    """
+    initiator_secure_conn: ISecureConn | None = None
+    responder_secure_conn: ISecureConn | None = None
+
+    # Use raw_conn_factory to get TCP connections
+    async with raw_conn_factory(nursery) as conns:
+        init_conn, resp_conn = conns
+
+        async def perform_initiator_handshake() -> None:
+            nonlocal initiator_secure_conn
+            initiator_secure_conn = await initiator_pattern.handshake_outbound(
+                init_conn, responder_pattern.local_peer
+            )
+
+        async def perform_responder_handshake() -> None:
+            nonlocal responder_secure_conn
+            responder_secure_conn = await responder_pattern.handshake_inbound(resp_conn)
+
+        # Perform handshake concurrently
+        async with trio.open_nursery() as handshake_nursery:
+            handshake_nursery.start_soon(perform_initiator_handshake)
+            handshake_nursery.start_soon(perform_responder_handshake)
+
+        # Wait for handshake to complete
+        if initiator_secure_conn is None or responder_secure_conn is None:
+            raise Exception(
+                "Handshake failed: "
+                f"initiator_secure_conn={initiator_secure_conn}, "
+                f"responder_secure_conn={responder_secure_conn}"
+            )
+
+        yield initiator_secure_conn, responder_secure_conn
+
+
+@asynccontextmanager
+async def transport_handshake_factory(
+    nursery: trio.Nursery,
+    initiator_transport: NoiseTransport,
+    responder_transport: NoiseTransport,
+) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    """
+    Create a real TCP connection pair and perform Noise handshake at transport level.
+
+    This factory is used for testing Transport integration with real connections.
+    It uses transport.secure_outbound/inbound which internally use patterns.
+
+    Args:
+        nursery: Trio nursery for concurrent operations
+        initiator_transport: NoiseTransport instance for the initiator side
+        responder_transport: NoiseTransport instance for the responder side
+
+    Yields:
+        Tuple of (initiator_secure_conn, responder_secure_conn)
+
+    """
+    initiator_secure_conn: ISecureConn | None = None
+    responder_secure_conn: ISecureConn | None = None
+
+    # Use raw_conn_factory to get TCP connections
+    async with raw_conn_factory(nursery) as conns:
+        init_conn, resp_conn = conns
+
+        async def upgrade_initiator_conn() -> None:
+            nonlocal initiator_secure_conn
+            initiator_secure_conn = await initiator_transport.secure_outbound(
+                init_conn, responder_transport.local_peer
+            )
+
+        async def upgrade_responder_conn() -> None:
+            nonlocal responder_secure_conn
+            responder_secure_conn = await responder_transport.secure_inbound(resp_conn)
+
+        # Perform handshake concurrently
+        async with trio.open_nursery() as hshake_nursery:
+            hshake_nursery.start_soon(upgrade_initiator_conn)
+            hshake_nursery.start_soon(upgrade_responder_conn)
+
+        # Verify handshake completed
+        if initiator_secure_conn is None or responder_secure_conn is None:
+            raise Exception(
+                "Transport handshake failed: "
+                f"initiator_secure_conn={initiator_secure_conn}, "
+                f"responder_secure_conn={responder_secure_conn}"
+            )
+
+        yield initiator_secure_conn, responder_secure_conn
 
 
 @asynccontextmanager
