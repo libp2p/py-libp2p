@@ -30,6 +30,9 @@ from libp2p.identity.identify_push.identify_push import (
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
+from libp2p.peer.peerstore import (
+    PeerStoreError,
+)
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -698,3 +701,68 @@ async def test_identify_push_legacy_raw_format(security_protocol):
         host_a_public_key = host_a.get_public_key().serialize()
         peerstore_public_key = peerstore.pubkey(peer_id).serialize()
         assert host_a_public_key == peerstore_public_key
+
+
+@pytest.mark.trio
+async def test_identify_push_rejects_mismatched_peer_id(security_protocol):
+    """
+    Test that identify_push rejects signed peer records with mismatched peer IDs.
+
+    This test verifies the security fix that prevents peer ID spoofing attacks.
+    An attacker should not be able to forward a valid signed PeerRecord from
+    another peer to cause address poisoning / identity spoofing.
+    """
+    async with host_pair_factory(security_protocol=security_protocol) as (
+        host_a,
+        host_b,
+    ):
+        # Create a third host to generate a signed peer record
+        async with host_pair_factory(security_protocol=security_protocol) as (
+            host_c,
+            _,
+        ):
+            # Create identify message with host_c's signed peer record
+            identify_msg_c = _mk_identify_protobuf(host_c, None)
+
+            # Get peerstore and peer IDs
+            peerstore_b = host_b.get_peerstore()
+            peer_id_a = host_a.get_id()
+            peer_id_c = host_c.get_id()
+
+            # Verify host_c's addresses are not in host_b's peerstore initially
+            # Handle case where peer ID doesn't exist yet
+            try:
+                addrs_before = set(peerstore_b.addrs(peer_id_c))
+            except PeerStoreError:
+                addrs_before = set()
+
+            # Verify host_c's peer ID is not in peerstore initially
+            peer_id_c_in_peerstore_before = peer_id_c in peerstore_b.peer_ids()
+
+            # Try to update peerstore with host_c's signed record but using
+            # host_a's peer ID. This simulates an attack where host_a tries to
+            # forward host_c's signed record. The validation should reject this
+            # because peer IDs don't match
+            await _update_peerstore_from_identify(
+                peerstore_b, peer_id_a, identify_msg_c
+            )
+
+            # Verify host_c's addresses were NOT added to host_b's peerstore
+            # (because the peer ID mismatch should cause rejection)
+            try:
+                addrs_after = set(peerstore_b.addrs(peer_id_c))
+            except PeerStoreError:
+                addrs_after = set()
+
+            # The addresses should not have been added due to mismatch
+            assert addrs_after == addrs_before, (
+                "Peerstore should not be updated when peer ID mismatch occurs. "
+                f"Expected {addrs_before}, got {addrs_after}"
+            )
+
+            # Also verify that host_c's peer ID is still not in peerstore
+            # (or if it was already there, it wasn't added by this operation)
+            peer_id_c_in_peerstore_after = peer_id_c in peerstore_b.peer_ids()
+            assert peer_id_c_in_peerstore_after == peer_id_c_in_peerstore_before, (
+                "Peer ID should not be added to peerstore when validation fails"
+            )

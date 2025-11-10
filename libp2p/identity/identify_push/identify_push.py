@@ -108,6 +108,9 @@ async def _update_peerstore_from_identify(
 
     This function handles partial updates, where only some fields may be present
     in the identify message.
+
+    Security: Signed peer records are validated to ensure the peer ID in the
+    record matches the sender's peer ID to prevent peer ID spoofing attacks.
     """
     # Update public key if present
     if identify_msg.HasField("public_key"):
@@ -141,14 +144,16 @@ async def _update_peerstore_from_identify(
                 identify_msg.signedPeerRecord, "libp2p-peer-record"
             )
             # Cross-check peer-id consistency
-            if str(record.peer_id) != str(peer_id):
+            # Security: Reject signed peer records where the peer ID doesn't match
+            # the sender's peer ID to prevent peer ID spoofing attacks
+            if record.peer_id != peer_id:
                 logger.warning(
                     "SignedPeerRecord peer-id mismatch: record=%s, sender=%s. "
                     "Ignoring.",
                     record.peer_id,
                     peer_id,
                 )
-                return  # 🚨 reject forged record
+                return  # Reject forged record - peer ID mismatch
 
             if not peerstore.consume_peer_record(envelope, 7200):
                 logger.error(
