@@ -40,6 +40,7 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
     MuxedStreamEOF,
     MuxedStreamError,
     MuxedStreamReset,
@@ -187,6 +188,23 @@ class YamuxStream(IMuxedStream):
                 await _do_window_update()
 
     async def read(self, n: int | None = -1) -> bytes:
+        """
+        Read data from the stream.
+
+        Args:
+            n: Number of bytes to read. If -1 or None, read all available data
+               until the stream is closed.
+
+        Returns:
+            bytes: The data read from the stream. May return partial data
+                   if the stream is reset or closed before reading all requested bytes.
+
+        Raises:
+            MuxedStreamReset: If the stream was reset by the remote peer.
+            MuxedStreamEOF: If the stream is closed for receiving and no more
+                           data is available.
+
+        """
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
@@ -397,9 +415,17 @@ class Yamux(IMuxedConn):
             nursery.start_soon(self.handle_incoming)
             self.event_started.set()
         logger.debug(
-            f"Yamux.start() exiting for {self.peer_id},closing new stream channel"
+            f"Yamux.start() exiting for {self.peer_id}, closing new stream channel"
         )
-        self.new_stream_send_channel.close()
+        try:
+            self.new_stream_send_channel.close()
+        except trio.ClosedResourceError:
+            # Channel already closed. This occurs when close() was called or when
+            # handle_incoming() detected a connection error and called
+            # _cleanup_on_error(). In both cases, handle_incoming() exits, causing
+            # the nursery to exit. This is fine - we just wanted to make sure
+            # it's closed.
+            pass
 
     @property
     def is_initiator(self) -> bool:
@@ -483,6 +509,20 @@ class Yamux(IMuxedConn):
             raise MuxedStreamError(f"Failed to send SYN: {e}") from e
 
     async def accept_stream(self) -> IMuxedStream:
+        """
+        Accept a new stream from the remote peer.
+
+        Returns:
+            IMuxedStream: A new stream from the remote peer.
+
+        Raises:
+            MuxedConnUnavailable: If the connection is closed while waiting for a new
+                stream. This ensures that accept_stream() does not hang indefinitely
+                when the underlying connection terminates (either cleanly or due to
+                error). The caller (e.g., SwarmConn) catches this exception to properly
+                clean up the connection.
+
+        """
         logger.debug("Waiting for new stream")
         try:
             stream = await self.new_stream_receive_channel.receive()
@@ -490,8 +530,7 @@ class Yamux(IMuxedConn):
             return stream
         except trio.EndOfChannel:
             logger.debug("New stream channel closed, connection is shutting down")
-            await trio.sleep_forever()
-            raise MuxedStreamEOF("Connection closed")
+            raise MuxedConnUnavailable("Connection closed")
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logger.debug(f"Reading from stream {self.peer_id}:{stream_id}, n={n}")
@@ -723,6 +762,10 @@ class Yamux(IMuxedConn):
                                 if self.streams[stream_id].send_closed:
                                     self.streams[stream_id].closed = True
                                 self.stream_events[stream_id].set()
+                # Handle WINDOW_UPDATE frames
+                # Per Yamux spec (https://github.com/hashicorp/yamux/blob/master/spec.md#flag-field),
+                # FIN and RST flags may be sent with WINDOW_UPDATE frames, not just
+                # DATA frames.
                 elif typ == TYPE_WINDOW_UPDATE:
                     increment = length
                     async with self.streams_lock:
@@ -759,11 +802,13 @@ class Yamux(IMuxedConn):
                                 self.stream_events[stream_id].set()
             except Exception as e:
                 # Special handling for expected IncompleteReadError on stream close
+                # This occurs when the connection closes while reading the header
+                # (12 bytes)
                 if isinstance(e, IncompleteReadError):
                     details = getattr(e, "args", [{}])[0]
                     if (
                         isinstance(details, dict)
-                        and details.get("requested_count") == 12  # HEADER_SIZE
+                        and details.get("requested_count") == HEADER_SIZE
                         and details.get("received_count") == 0
                     ):
                         logger.info(
@@ -850,8 +895,7 @@ class Yamux(IMuxedConn):
                 if inspect.iscoroutinefunction(self.on_close):
                     await self.on_close()
                 else:
-                    # Assuming on_close returns an awaitable as per type hint
-                    await self.on_close()
+                    self.on_close()
             except Exception as callback_error:
                 logger.error(f"Error in on_close callback: {callback_error}")
 

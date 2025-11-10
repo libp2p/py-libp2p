@@ -19,6 +19,9 @@ from libp2p.peer.id import (
 from libp2p.security.insecure.transport import (
     InsecureTransport,
 )
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
+)
 from libp2p.stream_muxer.yamux.yamux import (
     FLAG_FIN,
     FLAG_RST,
@@ -529,3 +532,75 @@ async def test_yamux_rst_on_window_update(yamux_pair):
         await server_yamux.secured_conn.write(header)
 
     logging.debug("test_yamux_rst_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_accept_stream_unblocks_on_close(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes (fixes #930).
+
+    This test verifies that accept_stream() raises MuxedConnUnavailable when
+    the connection is closed, preventing indefinite hangs. This matches the
+    behavior of Mplex and QUIC implementations.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_close")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def close_connection():
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing server connection")
+        await server_yamux.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(close_connection)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_close complete")
+
+
+@pytest.mark.trio
+async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes due to error.
+
+    This verifies the fix works for error scenarios, not just clean closes.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_error")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def trigger_error():
+        await trio.sleep(0.1)
+        logging.debug("Test: Closing underlying connection to trigger error")
+        await server_yamux.secured_conn.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(trigger_error)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
