@@ -5,9 +5,6 @@ import trio
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
-from libp2p.io.exceptions import (
-    IOException,
-)
 
 logger = logging.getLogger("libp2p.io.trio")
 
@@ -24,12 +21,16 @@ class TrioTCPStream(ReadWriteCloser):
         self.write_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
-        """Raise `RawConnError` if the underlying connection breaks."""
+        """Handle write operations gracefully when resources are closed."""
         async with self.write_lock:
             try:
                 await self.stream.send_all(data)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
-                raise IOException from error
+                # Underlying socket is closed or broken — treat as normal closure
+                # during peer disconnection scenarios rather than raising an error
+                logger.debug("Write attempted on closed/broken resource: %s", error)
+                # Don't raise IOException - treat as successful write to closed stream
+                return
 
     async def read(self, n: int | None = None) -> bytes:
         async with self.read_lock:
@@ -38,7 +39,11 @@ class TrioTCPStream(ReadWriteCloser):
             try:
                 return await self.stream.receive_some(n)
             except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
-                raise IOException from error
+                # Underlying socket is closed/broken. Return empty bytes to
+                # indicate EOF/closure and allow higher layers to handle removal
+                # without raising additional exceptions during their cleanup.
+                logger.debug("Read attempted on closed/broken resource: %s", error)
+                return b""
 
     async def close(self) -> None:
         await self.stream.aclose()

@@ -20,6 +20,7 @@ import trio
 from libp2p.abc import IMuxedConn, IRawConnection
 from libp2p.custom_types import TQUICStreamHandlerFn
 from libp2p.peer.id import ID
+from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
 from .exceptions import (
@@ -115,8 +116,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._stream_lock = trio.Lock()
 
         # Stream counting and limits
-        self._outbound_stream_count = 0
-        self._inbound_stream_count = 0
+        self._outbound_stream_count: int = 0
+        self._inbound_stream_count: int = 0
 
         # Stream acceptance for incoming streams
         self._stream_accept_queue: list[QUICStream] = []
@@ -124,17 +125,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Connection state
         self._closed: bool = False
-        self._established = False
-        self._started = False
-        self._handshake_completed = False
-        self._peer_verified = False
+        self._established: bool = False
+        self._started: bool = False
+        self._handshake_completed: bool = False
+        self._peer_verified: bool = False
 
         # Security state
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_events: list[events.HandshakeCompleted] = []
 
         # Background task management
-        self._background_tasks_started = False
+        self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
@@ -146,19 +147,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._connection_id_sequence_numbers: set[int] = set()
 
         # Event processing control with batching
-        self._event_processing_active = False
+        self._event_processing_active: bool = False
         self._event_batch: list[events.QuicEvent] = []
-        self._event_batch_size = 10
-        self._last_event_time = 0.0
+        self._event_batch_size: int = 10
+        self._last_event_time: float = 0.0
 
         # Set quic connection configuration
-        self.CONNECTION_CLOSE_TIMEOUT = transport._config.CONNECTION_CLOSE_TIMEOUT
-        self.MAX_INCOMING_STREAMS = transport._config.MAX_INCOMING_STREAMS
-        self.MAX_OUTGOING_STREAMS = transport._config.MAX_OUTGOING_STREAMS
+        self.CONNECTION_CLOSE_TIMEOUT = self._transport._config.CONNECTION_CLOSE_TIMEOUT
+        self.MAX_INCOMING_STREAMS = self._transport._config.MAX_INCOMING_STREAMS
+        self.MAX_OUTGOING_STREAMS = self._transport._config.MAX_OUTGOING_STREAMS
         self.CONNECTION_HANDSHAKE_TIMEOUT = (
-            transport._config.CONNECTION_HANDSHAKE_TIMEOUT
+            self._transport._config.CONNECTION_HANDSHAKE_TIMEOUT
         )
-        self.MAX_CONCURRENT_STREAMS = transport._config.MAX_CONCURRENT_STREAMS
+        self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
 
         # Performance and monitoring
         self._connection_start_time = time.time()
@@ -177,10 +178,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
         }
 
         logger.debug(
-            f"Created QUIC connection to {remote_peer_id} "
-            f"(initiator: {is_initiator}, addr: {remote_addr}, "
-            "security: {security_manager is not None})"
+            f"Created QUIC connection to {self._remote_peer_id} "
+            f"(initiator: {self._is_initiator}, addr: {self._remote_addr}, "
+            f"security: {self._security_manager is not None})"
         )
+
+    # Resource manager integration
+    def set_resource_scope(self, scope: Any) -> None:
+        """
+        Attach a resource scope to the connection for stream construction and cleanup.
+        """
+        self._resource_scope = scope
 
     def _calculate_initial_stream_id(self) -> int:
         """
@@ -721,11 +729,27 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 stream_id = self._next_stream_id
                 self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
+                # Acquire stream scope from resource manager if available
+                stream_scope = None
+                if self._resource_scope and hasattr(
+                    self._resource_scope, "_resource_manager"
+                ):
+                    try:
+                        stream_scope = (
+                            self._resource_scope._resource_manager.open_stream(
+                                peer_id=self._remote_peer_id,
+                                direction=Direction.OUTBOUND,
+                            )
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to acquire stream scope: {e}")
+                        raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
+
                 stream = QUICStream(
                     connection=self,
                     stream_id=stream_id,
                     direction=StreamDirection.OUTBOUND,
-                    resource_scope=self._resource_scope,
+                    resource_scope=stream_scope,
                     remote_addr=self._remote_addr,
                 )
 
@@ -935,12 +959,25 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 logger.warning(f"Rejecting inbound stream {stream_id}: limit reached")
                 raise QUICStreamLimitError("Too many inbound streams")
 
+            # Acquire stream scope from resource manager if available
+            stream_scope = None
+            if self._resource_scope and hasattr(
+                self._resource_scope, "_resource_manager"
+            ):
+                try:
+                    stream_scope = self._resource_scope._resource_manager.open_stream(
+                        peer_id=self._remote_peer_id, direction=Direction.INBOUND
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to acquire stream scope: {e}")
+                    raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
+
             # Create stream
             stream = QUICStream(
                 connection=self,
                 stream_id=stream_id,
                 direction=StreamDirection.INBOUND,
-                resource_scope=self._resource_scope,
+                resource_scope=stream_scope,
                 remote_addr=self._remote_addr,
             )
 
@@ -1322,6 +1359,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._closed_event.set()
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
+
+            # Release resource scope if present
+            try:
+                scope = getattr(self, "_resource_scope", None)
+                if scope is not None and hasattr(scope, "done"):
+                    scope.done()
+                    self._resource_scope = None
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")

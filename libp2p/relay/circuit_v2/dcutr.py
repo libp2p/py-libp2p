@@ -523,9 +523,10 @@ class DCUtRProtocol(Service):
             return False
 
         # Handle both single connection and list of connections
-        connections: list[INetConn] = (
-            [conn_or_conns] if not isinstance(conn_or_conns, list) else conn_or_conns
-        )
+        if isinstance(conn_or_conns, list):
+            connections: list[INetConn] = conn_or_conns
+        else:
+            connections = [conn_or_conns]
 
         # Check if any connection is direct (not relayed)
         for conn in connections:
