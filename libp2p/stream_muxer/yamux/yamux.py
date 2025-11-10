@@ -847,7 +847,14 @@ class Yamux(IMuxedConn):
                         )
                 # Don't crash the whole connection for temporary errors
                 if self.event_shutting_down.is_set() or isinstance(
-                    e, (RawConnError, OSError, IncompleteReadError)
+                    e,
+                    (
+                        RawConnError,
+                        OSError,
+                        IncompleteReadError,
+                        trio.ClosedResourceError,
+                        trio.BrokenResourceError,
+                    ),
                 ):
                     await self._cleanup_on_error()
                     break

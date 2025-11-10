@@ -588,12 +588,11 @@ async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
     Test that accept_stream unblocks when connection closes due to error.
 
     This verifies the fix works for error scenarios, not just clean closes.
+    We close the underlying raw connection to simulate a network error.
 
-    Note: Skipped on Windows because directly closing secured_conn while
-    handle_incoming() is reading from it causes a fatal worker crash (not a
-    catchable exception) due to Windows I/O semantics. The core functionality
-    is fully tested by test_yamux_accept_stream_unblocks_on_close which works
-    on all platforms including Windows.
+    Note: Skipped on Windows because directly closing connections during active
+    read causes a fatal worker crash. The core functionality is fully tested by
+    test_yamux_accept_stream_unblocks_on_close which works on all platforms.
     """
     logging.debug("Starting test_yamux_accept_stream_unblocks_on_error")
     client_yamux, server_yamux = yamux_pair
@@ -601,14 +600,19 @@ async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
     exception_raised = trio.Event()
 
     async def trigger_error():
-        await trio.sleep(0.1)
-        logging.debug("Test: Closing underlying connection to trigger error")
-        await server_yamux.secured_conn.close()
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing underlying raw connection to trigger error")
+        # Close the underlying raw connection to simulate a network error
+        # This is more reliable than closing secured_conn directly
+        raw_conn = server_yamux.secured_conn.conn
+        await raw_conn.close()
 
     async def accept_should_unblock():
         with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
             await server_yamux.accept_stream()
         # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
         exception_raised.set()
 
     async with trio.open_nursery() as nursery:
