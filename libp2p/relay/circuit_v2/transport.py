@@ -63,8 +63,9 @@ from .utils import (
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
 TOP_N = 3
-RESERVATION_REFRESH_INTERVAL = 10 # seconds
-RESERVATION_REFRESH_MARGIN = 30 # seconds
+RESERVATION_REFRESH_INTERVAL = 10  # seconds
+RESERVATION_REFRESH_MARGIN = 30  # seconds
+
 
 class CircuitV2Transport(ITransport):
     """
@@ -106,7 +107,7 @@ class CircuitV2Transport(ITransport):
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
         self._last_relay_index = -1
-        self._relay_list = []
+        self._relay_list: list[ID] = []
         self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
         self._refreshing = False
@@ -233,7 +234,7 @@ class CircuitV2Transport(ITransport):
                 logger.debug(
                     "Trying stored circuit multiaddr %s for peer %s",
                     ma,
-                    dest_info.peer_id
+                    dest_info.peer_id,
                 )
                 conn = await self._dial_via_circuit_addr(ma, dest_info)
                 if conn:
@@ -318,8 +319,7 @@ class CircuitV2Transport(ITransport):
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
 
     def parse_circuit_ma(
-            self,
-            ma: multiaddr.Multiaddr
+        self, ma: multiaddr.Multiaddr
     ) -> tuple[multiaddr.Multiaddr, ID]:
         """
         Parse a /p2p-circuit/p2p/<targetPeerID> path from a relay Multiaddr.
@@ -355,9 +355,7 @@ class CircuitV2Transport(ITransport):
 
         relay_parts = parts[:-2]
         relay_ma_str = "/".join(
-            f"{p[0].name}/{p[1]}"
-            for p in relay_parts
-            if p[1] is not None
+            f"{p[0].name}/{p[1]}" for p in relay_parts if p[1] is not None
         )
         relay_ma = (
             multiaddr.Multiaddr(relay_ma_str)
@@ -383,31 +381,24 @@ class CircuitV2Transport(ITransport):
                     continue
 
                 # Construct /p2p-circuit address
-                circuit_ma = (
-                    relay_ma
-                        .encapsulate(multiaddr.Multiaddr("/p2p-circuit"))
-                        .encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
-                )
+                circuit_ma = relay_ma.encapsulate(
+                    multiaddr.Multiaddr("/p2p-circuit")
+                ).encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
 
-                peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31-1)
+                peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31 - 1)
                 logger.debug(
                     "Stored relay circuit multiaddr %s for peer %s",
                     circuit_ma,
-                    peer_info.peer_id
+                    peer_info.peer_id,
                 )
 
         except Exception as e:
             logger.error(
-                "Failed to store relay multiaddrs for peer %s: %s",
-                peer_info.peer_id,
-                e
+                "Failed to store relay multiaddrs for peer %s: %s", peer_info.peer_id, e
             )
 
-
     async def _dial_via_circuit_addr(
-            self,
-            circuit_ma: multiaddr.Multiaddr,
-            peer_info: PeerInfo
+        self, circuit_ma: multiaddr.Multiaddr, peer_info: PeerInfo
     ) -> RawConnection:
         """
         Dial using a stored /p2p-circuit multiaddr.
@@ -421,7 +412,7 @@ class CircuitV2Transport(ITransport):
         if idx == -1:
             raise ConnectionError("Not a p2p-ciruit multiaddr")
 
-        relay_ma_str = ma_str[:idx] # everything before /p2p-circuit
+        relay_ma_str = ma_str[:idx]  # everything before /p2p-circuit
         relay_ma = multiaddr.Multiaddr(relay_ma_str)
         relay_peer_id_str = relay_ma.value_for_protocol("p2p")
         if not relay_peer_id_str:
@@ -491,18 +482,16 @@ class CircuitV2Transport(ITransport):
                 # --- Step 2: Fall back to DHT if still empty ---
                 if not self._relay_list and self.dht:
                     discovered = await self.discover_peers(
-                        peer_info.peer_id.to_bytes(),
-                        max_results=TOP_N
+                        peer_info.peer_id.to_bytes(), max_results=TOP_N
                     )
                     for p in discovered:
                         if p.peer_id.to_string() not in {
-                            r.to_string()
-                            for r in self._relay_list
+                            r.to_string() for r in self._relay_list
                         }:
                             self._relay_list.append(p.peer_id)
 
             if not self._relay_list:
-                backoff = min(2 ** attempt, 10)
+                backoff = min(2**attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
@@ -513,17 +502,18 @@ class CircuitV2Transport(ITransport):
                     nursery.start_soon(self._measure_relay, relay_id, scored_relays)
 
             if not scored_relays:
-                backoff = min(2 ** attempt, 10)
+                backoff = min(2**attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
             # --- Step 4: Filter by minimum score ---
             filtered = [
-                (rid, score) for rid, score in scored_relays
+                (rid, score)
+                for rid, score in scored_relays
                 if score >= self.client_config.min_relay_score
             ]
             if not filtered:
-                backoff = min(2 ** attempt, 10)
+                backoff = min(2**attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
@@ -531,7 +521,7 @@ class CircuitV2Transport(ITransport):
             filtered.sort(key=lambda x: (x[1], x[0].to_string()), reverse=True)
             top_relays = [rid for rid, _ in filtered[:TOP_N]]
             if not top_relays:
-                backoff = min(2 ** attempt, 10)
+                backoff = min(2**attempt, 10)
                 await trio.sleep(backoff)
                 continue
 
@@ -547,7 +537,7 @@ class CircuitV2Transport(ITransport):
                 self._relay_metrics[chosen] = {
                     "latency": 0,
                     "failures": 0,
-                    "last_seen": 0
+                    "last_seen": 0,
                 }
 
             logger.debug(
@@ -560,7 +550,7 @@ class CircuitV2Transport(ITransport):
 
         logger.warning(
             "No suitable relay found after %d attempts",
-            self.client_config.max_auto_relay_attempts
+            self.client_config.max_auto_relay_attempts,
         )
         return None
 
@@ -573,10 +563,11 @@ class CircuitV2Transport(ITransport):
         # 1. Use the routing table of the DHT
         closest_ids = self.dht.routing_table.find_local_closest_peers(key, 20)
         for peer_id in closest_ids:
-            if peer_id == self.dht.local_peer_id:
+            if self.dht and peer_id == self.dht.local_peer_id:
                 continue
             if len(found_peers) >= max_results:
                 break
+            assert self.dht is not None
             peer_info = await self.dht.find_peer(peer_id)
             if peer_info:
                 found_peers.append(peer_info)
@@ -593,13 +584,11 @@ class CircuitV2Transport(ITransport):
         except Exception:
             return False
 
-    async def _measure_relay(self, relay_id: ID, scored_relays: list):
+    async def _measure_relay(
+        self, relay_id: ID, scored_relays: list[tuple[ID, float]]
+    ) -> None:
         metrics = self._relay_metrics.setdefault(
-            relay_id, {
-                "latency": 0,
-                "failures": 0,
-                "last_seen": 0
-            }
+            relay_id, {"latency": 0, "failures": 0, "last_seen": 0}
         )
         start = time.monotonic()
         available = await self._is_relay_available(relay_id)
@@ -609,11 +598,13 @@ class CircuitV2Transport(ITransport):
             metrics["failures"] += 1
             return
 
-        metrics.update({
-            "latency": latency,
-            "failures": max(0, metrics["failures"] - 1),
-            "last_seen": time.time()
-        })
+        metrics.update(
+            {
+                "latency": latency,
+                "failures": max(0.0, metrics["failures"] - 1),
+                "last_seen": time.time(),
+            }
+        )
 
         score = (
             1000
@@ -624,10 +615,7 @@ class CircuitV2Transport(ITransport):
         scored_relays.append((relay_id, score))
 
     async def reserve(
-            self,
-            stream: INetStream,
-            relay_peer_id: ID,
-            nursery: trio.Nursery
+        self, stream: INetStream, relay_peer_id: ID, nursery: trio.Nursery
     ) -> bool:
         """
         Public method to create a reservation and start refresher if needed.
@@ -639,9 +627,7 @@ class CircuitV2Transport(ITransport):
         # Start refresher if this is the first reservation
         if not self._refreshing:
             self._refreshing = True
-            nursery.start_soon(
-                self._refresh_reservations_worker
-            )
+            nursery.start_soon(self._refresh_reservations_worker)
         return True
 
     async def _make_reservation(
@@ -738,8 +724,8 @@ class CircuitV2Transport(ITransport):
             while self._reservations:
                 now = time.time()
                 expired = [
-                    relay_peer_id for relay_peer_id,
-                    exp in self._reservations.items()
+                    relay_peer_id
+                    for relay_peer_id, exp in self._reservations.items()
                     if exp <= now
                 ]
 
@@ -748,20 +734,17 @@ class CircuitV2Transport(ITransport):
                     logger.info("Reservation expired for peer %s", relay_peer_id)
                     del self._reservations[relay_peer_id]
 
-
                 to_refresh = [
                     relay_peer_id
                     for relay_peer_id, exp in self._reservations.items()
                     if exp - now <= RESERVATION_REFRESH_MARGIN
                 ]
 
-
                 for relay_peer_id in to_refresh:
-                  try:
-                       # Open a fresh stream per refresh
+                    try:
+                        # Open a fresh stream per refresh
                         stream = await self.host.new_stream(
-                            relay_peer_id,
-                            [PROTOCOL_ID]
+                            relay_peer_id, [PROTOCOL_ID]
                         )
                         success = await self._make_reservation(stream, relay_peer_id)
                         await stream.close()
@@ -772,21 +755,22 @@ class CircuitV2Transport(ITransport):
                         else:
                             logger.warning(
                                 "Failed to refresh reservation for relay %s",
-                                relay_peer_id
+                                relay_peer_id,
                             )
-                  except Exception as e:
-                      logger.error(
+                    except Exception as e:
+                        logger.error(
                             "Error refreshing reservation for relay %s: %s",
-                            relay_peer_id, str(e)
+                            relay_peer_id,
+                            str(e),
                         )
 
                 # Calculate next wake-up dynamically
                 now = time.time()
                 next_exp = min(
                     self._reservations.values(),
-                    default=now + RESERVATION_REFRESH_INTERVAL
+                    default=now + RESERVATION_REFRESH_INTERVAL,
                 )
-                sleep_time = max(0, next_exp - now - RESERVATION_REFRESH_MARGIN)
+                sleep_time = max(0.0, next_exp - now - RESERVATION_REFRESH_MARGIN)
                 await trio.sleep(sleep_time)
 
         except trio.Cancelled:
@@ -795,9 +779,6 @@ class CircuitV2Transport(ITransport):
         finally:
             self._refreshing = False
             logger.info("Stopped reservation refresher")
-
-
-
 
     def create_listener(self, handler_function: THandler) -> IListener:
         """
@@ -817,10 +798,7 @@ class CircuitV2Transport(ITransport):
 
         """
         return CircuitV2Listener(
-            self.host,
-            handler_function,
-            self.protocol,
-            self.config
+            self.host, handler_function, self.protocol, self.config
         )
 
 
@@ -925,16 +903,17 @@ class CircuitV2Listener(Service, IListener):
             except ConnectionError as e:
                 logger.error(
                     "Failed to handle incoming connection from %s: %s",
-                    remote_peer_id, str(e)
+                    remote_peer_id,
+                    str(e),
                 )
                 await stream.close()
             except Exception as e:
                 logger.error(
                     "Unexpected error handling stream from %s: %s",
-                    remote_peer_id, str(e)
+                    remote_peer_id,
+                    str(e),
                 )
                 await stream.close()
-
 
         self.host.set_stream_handler(PROTOCOL_ID, stream_handler)
         try:

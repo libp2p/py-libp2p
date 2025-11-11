@@ -24,6 +24,7 @@ from .pb.circuit_pb2 import Reservation as PbReservation
 RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
 TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
 
+
 # Reservation status enum
 class ReservationStatus(Enum):
     """Lifecycle status of a relay reservation."""
@@ -318,4 +319,3 @@ class RelayResourceManager:
             return self.limits.duration
 
         return 0
-

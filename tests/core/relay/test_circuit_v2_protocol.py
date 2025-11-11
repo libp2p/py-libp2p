@@ -59,13 +59,16 @@ STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
 SLEEP_TIME = 1.0  # seconds (increased)
 
+
 @pytest.fixture
 def key_pair():
     return create_new_key_pair()
 
+
 @pytest.fixture
 def peer_store():
     return peerstore.PeerStore()
+
 
 @pytest.fixture
 def peer_id(key_pair, peer_store):
@@ -77,16 +80,14 @@ def peer_id(key_pair, peer_store):
 @pytest.fixture
 def limits():
     return RelayLimits(
-        duration=3600,
-        data=1_000_000,
-        max_circuit_conns=10,
-        max_reservations=100
+        duration=3600, data=1_000_000, max_circuit_conns=10, max_reservations=100
     )
 
 
 @pytest.fixture
 def manager(limits, peer_store):
     return RelayResourceManager(limits, peer_store)
+
 
 @pytest.fixture
 def reservation(manager, peer_id):
