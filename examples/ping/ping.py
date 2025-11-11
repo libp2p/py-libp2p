@@ -4,6 +4,7 @@ import logging
 import multiaddr
 import trio
 
+from examples.advanced.network_discover import get_optimal_binding_address
 from libp2p import (
     new_host,
 )
@@ -69,6 +70,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
     if port <= 0:
         port = find_free_port()
+
+    _ = get_available_interfaces(8000)
+    _ = get_optimal_binding_address(8000)
 
     if transport == "tcp":
         listen_addrs = get_available_interfaces(port)
