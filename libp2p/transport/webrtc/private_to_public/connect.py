@@ -1,14 +1,23 @@
+from collections.abc import Awaitable, Callable
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from aiortc import RTCDataChannel, RTCSessionDescription
+from aioice.candidate import Candidate
+from aiortc import RTCDataChannel, RTCIceCandidate, RTCSessionDescription
+from aiortc.rtcicetransport import candidate_from_aioice
 from multiaddr import Multiaddr
 import trio
 from trio_asyncio import aio_as_trio
 
+from libp2p.abc import ISecureConn
 from libp2p.peer.id import ID
+from libp2p.security.security_multistream import SecurityMultistream
+from libp2p.transport.webrtc.async_bridge import get_webrtc_bridge
 from libp2p.transport.webrtc.private_to_public.util import (
     SDP,
+    canonicalize_certhash,
+    extract_certhash,
+    fingerprint_to_certhash,
     fingerprint_to_multiaddr,
     generate_noise_prologue,
     multiaddr_to_fingerprint,
@@ -16,10 +25,10 @@ from libp2p.transport.webrtc.private_to_public.util import (
 
 from ..connection import WebRTCRawConnection
 from .direct_rtc_connection import DirectPeerConnection
-from .stream import WebRTCStream
 
 if TYPE_CHECKING:
     from libp2p.abc import IRawConnection
+    from libp2p.transport.webrtc.signal_service import SignalService
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
@@ -31,15 +40,83 @@ async def connect(
     role: str,
     remote_addr: Multiaddr | None = None,
     remote_peer_id: ID | None = None,
-) -> "IRawConnection | None":
+    *,
+    signal_service: "SignalService | None" = None,
+    certhash: str | None = None,
+    incoming_offer: RTCSessionDescription | None = None,
+    offer_handler: Callable[
+        [RTCSessionDescription, str], Awaitable[RTCSessionDescription]
+    ]
+    | None = None,
+    answer_handler: Callable[[RTCSessionDescription, str], Awaitable[None]]
+    | None = None,
+    security_multistream: SecurityMultistream | None = None,
+) -> tuple["IRawConnection | ISecureConn", RTCSessionDescription | None]:
     """
     Establish a WebRTC-Direct connection, perform the noise handshake,
     and return the upgraded connection.
     """
     # Create data channel for noise handshake (negotiated, id=0)
-    handshake_channel: RTCDataChannel = (
-        peer_connection.peer_connection.createDataChannel("", negotiated=True, id=0)
+    rtc_pc = peer_connection.peer_connection
+    bridge = get_webrtc_bridge()
+    cleanup_handlers: list[
+        tuple[str, Callable[[dict[str, Any], str], Awaitable[None]]]
+    ] = []
+
+    handshake_channel: RTCDataChannel = rtc_pc.createDataChannel(
+        "", negotiated=True, id=0
     )
+
+    if signal_service is not None and remote_peer_id is not None:
+        remote_peer_str = remote_peer_id.to_base58()
+
+        def _queue_local_candidate(candidate: RTCIceCandidate | None) -> None:
+            if signal_service is None or remote_peer_id is None:
+                return
+            if candidate is None:
+                signal_service.enqueue_local_candidate(
+                    remote_peer_id, None, extra={"ufrag": ufrag}
+                )
+                return
+            candidate_any = cast(Any, candidate)
+            if hasattr(candidate_any, "to_sdp"):
+                candidate_sdp = candidate_any.to_sdp()
+            else:
+                candidate_sdp = getattr(candidate_any, "candidate", None)
+            signal_service.enqueue_local_candidate(
+                remote_peer_id,
+                {
+                    "candidate": candidate_sdp,
+                    "sdpMid": candidate_any.sdpMid,
+                    "sdpMLineIndex": candidate_any.sdpMLineIndex,
+                },
+                extra={"ufrag": ufrag},
+            )
+
+        rtc_pc.on("icecandidate", _queue_local_candidate)
+
+        async def _handle_remote_ice(
+            message: dict[str, Any], sender_peer_id: str
+        ) -> None:
+            if sender_peer_id != remote_peer_str:
+                return
+            msg_ufrag = message.get("ufrag")
+            if msg_ufrag is not None and msg_ufrag != ufrag:
+                return
+            candidate_payload = message.get("candidate")
+            async with bridge:
+                if candidate_payload is None:
+                    await bridge.add_ice_candidate(rtc_pc, None)
+                    return
+                candidate_obj = candidate_from_aioice(
+                    Candidate.from_sdp(candidate_payload.get("candidate", ""))
+                )
+                candidate_obj.sdpMid = candidate_payload.get("sdpMid")
+                candidate_obj.sdpMLineIndex = candidate_payload.get("sdpMLineIndex")
+                await bridge.add_ice_candidate(rtc_pc, candidate_obj)
+
+        signal_service.add_handler("ice", _handle_remote_ice)
+        cleanup_handlers.append(("ice", _handle_remote_ice))
 
     try:
         if role == "client":
@@ -54,34 +131,52 @@ async def connect(
             if remote_addr is None:
                 raise Exception("Remote address is required for client role")
 
-            answer_sdp = SDP.server_answer_from_multiaddr(remote_addr, ufrag)
-            logger.debug("client setting server description %s", answer_sdp["sdp"])
-            answer_desc = RTCSessionDescription(
-                sdp=answer_sdp["sdp"], type=answer_sdp["type"]
-            )
+            if certhash is None:
+                try:
+                    certhash = extract_certhash(remote_addr)
+                except Exception:
+                    certhash = None
+
+            if offer_handler is not None:
+                answer_desc = await offer_handler(munged_desc, ufrag)
+            elif signal_service is not None and remote_peer_id is not None:
+                answer_desc = await signal_service.negotiate_connection(
+                    remote_peer_id,
+                    munged_desc,
+                    certhash or "",
+                    extra={"ufrag": ufrag},
+                )
+            else:
+                raise Exception(
+                    "Signal service or offer_handler required for WebRTC-Direct dialing"
+                )
             await aio_as_trio(peer_connection.setRemoteDescription(answer_desc))
         else:
-            if remote_addr is None:
-                raise Exception("Remote address is required for server role")
-
-            offer_sdp = SDP.client_offer_from_multiaddr(remote_addr, ufrag)
-            logger.debug(
-                "server setting client %s %s", offer_sdp["type"], offer_sdp["sdp"]
-            )
-            offer_desc = RTCSessionDescription(
-                sdp=offer_sdp["sdp"], type=offer_sdp["type"]
-            )
+            if incoming_offer is not None:
+                offer_desc = incoming_offer
+            else:
+                raise Exception(
+                    "Server role requires incoming SDP offer via signaling service"
+                )
             await aio_as_trio(peer_connection.setRemoteDescription(offer_desc))
 
             logger.debug("server creating local answer")
-            answer = await peer_connection.createAnswer()
+            answer_desc = await peer_connection.createAnswer()
             logger.debug("server created local answer")
-            munged_answer = SDP.munge_offer(answer.sdp, ufrag)
-            logger.debug("server setting local description %s", munged_answer)
-            munged_answer_desc = RTCSessionDescription(
-                sdp=munged_answer, type=answer.type
-            )
-            await aio_as_trio(peer_connection.setLocalDescription(munged_answer_desc))
+            if answer_handler is not None:
+                await answer_handler(answer_desc, ufrag)
+            elif signal_service is not None and remote_peer_id is not None:
+                await signal_service.send_answer(
+                    remote_peer_id,
+                    answer_desc.sdp,
+                    answer_desc.type,
+                    certhash or "",
+                    extra={"ufrag": ufrag},
+                )
+            else:
+                raise Exception(
+                    "Signal service or ans_handler required for WebRTC-Direct answer"
+                )
 
         # TODO: Check if this is the best way
         # Wait for handshake channel to open
@@ -139,23 +234,39 @@ async def connect(
         if local_fingerprint is None:
             raise Exception("Could not get fingerprint from local description sdp")
 
-        # Setup stream for read and write on RTCDataChannel
-        webrtc_stream = WebRTCStream.createStream(  # noqa: F841
-            handshake_channel,
-            direction="outbound",
-        )
+        if remote_fingerprint is None:
+            try:
+                fp_obj = peer_connection.remoteFingerprint()
+            except Exception:  # pragma: no cover - defensive
+                fp_obj = None
+            if fp_obj:
+                fp_value = getattr(fp_obj, "value", None)
+                if fp_value:
+                    algorithm = getattr(fp_obj, "algorithm", "sha-256")
+                    remote_fingerprint = f"{algorithm} {fp_value.upper()}"
 
-        logger.debug("%s performing noise handshake", role)
-        # TODO: Complete the noise handshake and connection authentication
-        # including securing and upgrading the connection
-        # Ref: js-libp2p transport-webrtc connect.ts (see lines 135-199)
-        # https://github.com/libp2p/js-libp2p/blob/main/packages/transport-webrtc/src/private-to-public/utils/connect.ts
-        if remote_addr is not None:
-            noisePrologue = generate_noise_prologue(  # noqa: F841
-                local_fingerprint, remote_addr, role
-            )
-        else:
-            noisePrologue = None  # noqa: F841
+        expected_certhash: str | None = certhash
+        if expected_certhash is None and remote_addr is not None:
+            try:
+                expected_certhash = extract_certhash(remote_addr)
+            except Exception:
+                expected_certhash = None
+
+        actual_certhash: str | None = None
+        if remote_fingerprint:
+            try:
+                actual_certhash = fingerprint_to_certhash(remote_fingerprint)
+            except Exception:
+                actual_certhash = None
+
+        if expected_certhash is not None and actual_certhash is not None:
+            if expected_certhash != actual_certhash:
+                raise Exception(
+                    "Remote certhash mismatch detected during WebRTC connection setup"
+                )
+
+        if remote_addr is not None and actual_certhash is not None:
+            remote_addr = canonicalize_certhash(remote_addr, actual_certhash)
 
         if remote_peer_id is None and remote_addr is not None:
             try:
@@ -175,12 +286,51 @@ async def connect(
             is_initiator=(role == "client"),
         )
 
-        setattr(raw_connection, "remote_multiaddr", remote_addr)
-        setattr(raw_connection, "remote_fingerprint", remote_fingerprint)
-        setattr(raw_connection, "local_fingerprint", local_fingerprint)
+        raw_connection.remote_multiaddr = remote_addr
+        raw_connection.remote_fingerprint = remote_fingerprint
+        raw_connection.local_fingerprint = local_fingerprint
+        secure_conn: "IRawConnection | ISecureConn" = raw_connection
 
-        return raw_connection
+        noise_prologue: bytes | None = None
+        if remote_addr is not None:
+            noise_prologue = generate_noise_prologue(
+                local_fingerprint, remote_addr, role
+            )
+
+        if security_multistream is not None:
+            transport = await security_multistream.select_transport(
+                raw_connection, role == "client"
+            )
+            if hasattr(transport, "set_prologue"):
+                transport.set_prologue(noise_prologue)
+
+            if role == "client":
+                secure_conn = await transport.secure_outbound(
+                    raw_connection, remote_peer_id
+                )
+            else:
+                secure_conn = await transport.secure_inbound(raw_connection)
+
+        if hasattr(secure_conn, "remote_multiaddr"):
+            setattr(secure_conn, "remote_multiaddr", remote_addr)
+        if hasattr(secure_conn, "remote_fingerprint"):
+            setattr(secure_conn, "remote_fingerprint", remote_fingerprint)
+        if hasattr(secure_conn, "local_fingerprint"):
+            setattr(secure_conn, "local_fingerprint", local_fingerprint)
+        if hasattr(secure_conn, "remote_peer_id"):
+            setattr(secure_conn, "remote_peer_id", remote_peer_id)
+        if signal_service is not None and remote_peer_id is not None:
+            await signal_service.flush_local_ice(remote_peer_id)
+            await signal_service.flush_ice_candidates(remote_peer_id)
+
+        return secure_conn, answer_desc if role == "server" else None
 
     except Exception as e:
         logger.error("%s noise handshake failed: %s", role, e)
         raise
+    finally:
+        if signal_service is not None and cleanup_handlers:
+            for msg_type, handler in cleanup_handlers:
+                signal_service.remove_handler(msg_type, handler)
+        if signal_service is not None and remote_peer_id is not None:
+            signal_service.pending_local_ice.pop(str(remote_peer_id), None)

@@ -9,6 +9,7 @@ from aiortc import (
 from trio_asyncio import aio_as_trio
 
 from .gen_certificate import WebRTCCertificate
+from .util import SDP
 
 
 @dataclass
@@ -68,8 +69,16 @@ class DirectPeerConnection(RTCPeerConnection):
         await aio_as_trio(self.setLocalDescription(patched_answer))
         return patched_answer
 
-    # TODO: FIx this
     def remoteFingerprint(self) -> RTCDtlsFingerprint:
+        desc = getattr(self.peer_connection, "remoteDescription", None)
+        if desc is not None and desc.sdp:
+            fingerprint = SDP.get_fingerprint_from_sdp(desc.sdp)
+            if fingerprint:
+                parts = fingerprint.split(" ", 1)
+                if len(parts) == 2:
+                    algorithm, value = parts
+                    return RTCDtlsFingerprint(algorithm, value)
+                return RTCDtlsFingerprint("sha-256", parts[0])
         return RTCDtlsFingerprint("", "")
 
     @staticmethod

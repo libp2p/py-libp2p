@@ -36,7 +36,6 @@ class UDPHolePuncher:
 
         """
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setblocking(False)
 
         try:
             # Bind to local port (0 = random port)
@@ -45,8 +44,9 @@ class UDPHolePuncher:
 
             # Best effort to discover outward-facing IP
             try:
-                sock.connect((target_ip, target_port))
-                local_ip = sock.getsockname()[0]
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as tmp_sock:
+                    tmp_sock.connect((target_ip, target_port))
+                    local_ip = tmp_sock.getsockname()[0]
             except Exception:
                 local_ip = self._get_local_ip()
 
@@ -62,9 +62,12 @@ class UDPHolePuncher:
                     await trio.to_thread.run_sync(
                         sock.sendto, punch_data, (target_ip, target_port)
                     )
+                    print(
+                        f"sent punch to {target_ip}:{target_port} metadata={metadata}"
+                    )
                     await trio.sleep(0.1)
                 except Exception as exc:
-                    logger.debug("Hole punch packet failed: %s", exc)
+                    print(f"[puncher] send failed: {exc}")
 
             endpoint_key = f"{target_ip}:{target_port}"
             self.punch_sockets[endpoint_key] = sock

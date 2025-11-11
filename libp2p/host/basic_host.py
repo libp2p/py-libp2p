@@ -281,6 +281,11 @@ class BasicHost(IHost):
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
 
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """Remove the stream handler registered for `protocol_id`, if any."""
+        if hasattr(self.multiselect, "remove_handler"):
+            self.multiselect.remove_handler(protocol_id)
+
     async def new_stream(
         self,
         peer_id: ID,

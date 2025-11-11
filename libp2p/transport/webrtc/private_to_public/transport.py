@@ -1,4 +1,5 @@
 import logging
+from typing import TYPE_CHECKING, Any, cast
 
 from aiortc import (
     RTCConfiguration,
@@ -9,7 +10,7 @@ from multiaddr import Multiaddr
 import trio
 from trio_asyncio import aio_as_trio, open_loop
 
-from libp2p.abc import IHost, IListener, IRawConnection, ITransport
+from libp2p.abc import IHost, IListener, IRawConnection, ISecureConn, ITransport
 from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
@@ -18,6 +19,7 @@ from ..constants import (
     DEFAULT_ICE_SERVERS,
     WebRTCError,
 )
+from ..signal_service import SignalService
 from ..udp_hole_punching import UDPHolePuncher
 from .connect import connect
 from .direct_rtc_connection import DirectPeerConnection
@@ -27,8 +29,14 @@ from .gen_certificate import (
 )
 from .listener import WebRTCDirectListener
 from .util import (
+    canonicalize_certhash,
+    extract_certhash,
+    fingerprint_to_certhash,
     generate_ufrag,
 )
+
+if TYPE_CHECKING:
+    from libp2p.network.swarm import Swarm
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
@@ -41,7 +49,7 @@ class WebRTCDirectTransport(ITransport):
     def __init__(self) -> None:
         """Initialize WebRTC-Direct transport."""
         self.ice_servers = DEFAULT_ICE_SERVERS
-        self.active_connections: dict[str, IRawConnection] = {}
+        self.active_connections: dict[str, IRawConnection | ISecureConn] = {}
         self.pending_connections: dict[str, RTCPeerConnection] = {}
         self._started = False
         self.host: IHost | None = None
@@ -50,6 +58,7 @@ class WebRTCDirectTransport(ITransport):
         self.udp_puncher = UDPHolePuncher()
         self._renewal_task = None
         self.supported_protocols: set[str] = {"webrtc-direct", "p2p"}
+        self.signal_service: SignalService | None = None
         logger.info("WebRTC-Direct Transport initialized")
 
     async def start(self, nursery: trio.Nursery) -> None:
@@ -67,6 +76,14 @@ class WebRTCDirectTransport(ITransport):
         # For now, skip renewal to avoid hanging tests
         # self._renewal_task = nursery.start_soon(self.cert_mgr.renewal_loop)
         self._renewal_task = None
+
+        if self.signal_service is None:
+            self.signal_service = SignalService(self.host)
+        network = self.host.get_network()
+        try:
+            await self.signal_service.listen(network, None)
+        except Exception:
+            logger.warning("Failed to start WebRTC signaling service", exc_info=True)
 
         self._started = True
         logger.info("WebRTC-Direct Transport started")
@@ -141,12 +158,16 @@ class WebRTCDirectTransport(ITransport):
                 "role": "client",
             }
 
+            print(f"UDP punch toward {ip}:{port} with metadata {punch_metadata}")
             try:
                 await self.udp_puncher.punch_hole(ip, port, punch_metadata)
             except Exception as punch_exc:
                 logger.warning(
                     "UDP hole punching failed prior to dialing: %s", punch_exc
                 )
+            else:
+                # Give the remote listener a brief moment to register the punch metadata
+                await trio.sleep(0.2)
 
             async with open_loop():
                 conn_id = str(peer_id)
@@ -158,25 +179,91 @@ class WebRTCDirectTransport(ITransport):
                 )
 
                 try:
-                    connection = await connect(
+                    swarm = cast("Swarm", self.host.get_network())
+                    if self.signal_service is None:
+                        raise WebRTCError(
+                            "Signal service not available for WebRTC-Direct dialing"
+                        )
+
+                    async def handle_offer(
+                        offer_desc: RTCSessionDescription, handler_ufrag: str
+                    ) -> RTCSessionDescription:
+                        return await self._exchange_offer_answer_direct(
+                            peer_id,
+                            offer_desc,
+                            certhash or "",
+                            {"ufrag": handler_ufrag},
+                        )
+
+                    secure_conn, _ = await connect(
                         role="client",
                         ufrag=ufrag,
                         peer_connection=direct_peer_connection,
                         remote_addr=maddr,
-                        remote_peer_id=peer_id
-                        if isinstance(peer_id, ID)
-                        else ID.from_base58(str(peer_id)),
+                        remote_peer_id=peer_id,
+                        signal_service=None,
+                        certhash=certhash,
+                        offer_handler=handle_offer,
+                        security_multistream=swarm.upgrader.security_multistream,
                     )
-                    if connection is None:
+                    if secure_conn is None:
                         raise OpenConnectionError("WebRTC-Direct connection failed")
-                    self.active_connections[conn_id] = connection
+                    remote_fp = getattr(secure_conn, "remote_fingerprint", None)
+                    expected_certhash = None
+                    try:
+                        expected_certhash = extract_certhash(maddr)
+                    except Exception:
+                        expected_certhash = None
+                    actual_certhash = None
+                    if remote_fp:
+                        try:
+                            actual_certhash = fingerprint_to_certhash(remote_fp)
+                        except Exception:
+                            actual_certhash = None
+                    if expected_certhash and actual_certhash:
+                        if expected_certhash != actual_certhash:
+                            await secure_conn.close()
+                            raise OpenConnectionError(
+                                "Remote certhash mismatch detected during dial"
+                            )
+                    canonical_remote = (
+                        canonicalize_certhash(maddr, actual_certhash)
+                        if actual_certhash
+                        else maddr
+                    )
+                    setattr(secure_conn, "remote_multiaddr", canonical_remote)
+                    if self.cert_mgr is not None and self.host is not None:
+                        local_peer = self.host.get_id()
+                        local_ma = Multiaddr(
+                            f"/certhash/{self.cert_mgr.certhash}/p2p/{local_peer}"
+                        )
+                        setattr(secure_conn, "local_multiaddr", local_ma)
+                        if getattr(secure_conn, "local_fingerprint", None) is None:
+                            setattr(
+                                secure_conn,
+                                "local_fingerprint",
+                                self.cert_mgr.fingerprint,
+                            )
+                    if self.host is not None:
+                        try:
+                            self.host.get_peerstore().add_addrs(
+                                peer_id,
+                                [canonical_remote],
+                                3600,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to persist WebRTC-Direct remote address for %s",
+                                peer_id,
+                            )
+                    self.active_connections[conn_id] = secure_conn
                     self.pending_connections.pop(conn_id, None)
                     self.connection_events.pop(conn_id, None)
 
                     logger.debug(
                         f"Successfully established WebRTC-direct connection to{peer_id}"
                     )
-                    return connection
+                    return secure_conn
                 except Exception as e:
                     logger.error(f"Failed to connect as client: {e}")
                     await direct_peer_connection.close()
@@ -193,34 +280,90 @@ class WebRTCDirectTransport(ITransport):
         if self.cert_mgr is None:
             raise OpenConnectionError("Cert_mgr not present")
         rtc_config = RTCConfiguration()
-        return WebRTCDirectListener(
+        listener = WebRTCDirectListener(
             transport=self,
             cert=self.cert_mgr,
             rtc_configuration=rtc_config,
+            signal_service=self.signal_service,
         )
+        return listener
 
-    async def register_incoming_connection(self, connection: IRawConnection) -> None:
+    async def register_incoming_connection(
+        self, connection: IRawConnection | ISecureConn
+    ) -> None:
         """Register an incoming connection from the listener."""
+        if self.host is None:
+            await connection.close()
+            return
+
         remote_peer_id = getattr(connection, "remote_peer_id", None)
-        conn_id = (
-            str(remote_peer_id) if remote_peer_id is not None else str(id(connection))
-        )
+        if remote_peer_id is None:
+            await connection.close()
+            raise WebRTCError("Incoming WebRTC-Direct conn: missing remote peer ID")
+
+        network = self.host.get_network()
+        if not hasattr(network, "upgrader") or not hasattr(network, "add_conn"):
+            await connection.close()
+            raise WebRTCError(
+                "Host network does not expose upgrader/add_conn required for WebRTC"
+            )
+
+        swarm = cast("Swarm", network)
+
+        try:
+            if isinstance(connection, ISecureConn):
+                secured_conn = connection
+            else:
+                secured_conn = await swarm.upgrader.upgrade_security(
+                    connection, False, remote_peer_id
+                )
+            muxed_conn = await swarm.upgrader.upgrade_connection(
+                secured_conn, remote_peer_id
+            )
+            await swarm.add_conn(muxed_conn)
+            logger.info(
+                "Registered incoming WebRTC-Direct connection from %s", remote_peer_id
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to upgrade incoming WebRTC-Direct connection from %s: %s",
+                remote_peer_id,
+                exc,
+            )
+            try:
+                await connection.close()
+            except Exception:
+                pass
+            raise WebRTCError(
+                f"Failed to upgrade incoming WebRTC-Direct connection: {exc}"
+            ) from exc
+
+        conn_id = str(remote_peer_id)
         self.pending_connections.pop(conn_id, None)
-        self.active_connections[conn_id] = connection
+        self.active_connections[conn_id] = secured_conn
 
         event = self.connection_events.get(conn_id)
         if event is not None:
             event.set()
 
     async def _exchange_offer_answer_direct(
-        self, peer_id: ID, offer: RTCSessionDescription, certhash: str
-    ) -> None:
-        """Exchange offer/answer for direct connection via pubsub."""
-        # TODO: Implement pubsub-based offer/answer exchange
-        # This would use libp2p pubsub to exchange SDP messages
-        # WHy??
-        logger.debug(f"Exchanging offer/answer with {peer_id} via pubsub")
-        pass
+        self,
+        peer_id: ID,
+        offer: RTCSessionDescription,
+        certhash: str,
+        extra: dict[str, Any] | None = None,
+    ) -> RTCSessionDescription:
+        """Exchange offer/answer over the configured signaling service."""
+        if self.signal_service is None:
+            raise WebRTCError("Signal service not configured for WebRTC-Direct")
+
+        payload = extra.copy() if extra else {}
+        logger.debug(
+            "Exchanging WebRTC-Direct offer with %s via signal service", peer_id
+        )
+        return await self.signal_service.negotiate_connection(
+            peer_id, offer, certhash, payload
+        )
 
     async def _cleanup_connection(self, conn_id: str) -> None:
         """Clean up connection resources."""

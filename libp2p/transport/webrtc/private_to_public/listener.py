@@ -3,20 +3,33 @@ from dataclasses import dataclass
 import json
 import logging
 import socket
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from aiortc import RTCConfiguration
+from aioice.candidate import Candidate
+from aiortc import RTCConfiguration, RTCIceCandidate, RTCSessionDescription
+from aiortc.rtcicetransport import candidate_from_aioice
 from multiaddr import Multiaddr
 import trio
 import trio.socket
+from trio_asyncio import open_loop
 
-from libp2p.abc import IListener
+from libp2p.abc import IHost, IListener
 from libp2p.peer.id import ID
+from libp2p.transport.webrtc.async_bridge import get_webrtc_bridge
 
+from ..constants import WebRTCError
 from .connect import connect
 from .direct_rtc_connection import DirectPeerConnection
 from .gen_certificate import WebRTCCertificate
-from .util import extract_from_multiaddr
+from .util import (
+    canonicalize_certhash,
+    extract_from_multiaddr,
+    fingerprint_to_certhash,
+)
+
+if TYPE_CHECKING:
+    from libp2p.network.swarm import Swarm
+    from libp2p.transport.webrtc.signal_service import SignalService
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
@@ -30,6 +43,22 @@ class UDPMuxServer:
     owner: "WebRTCDirectListener"
     peer_id: ID
     cancel_scope: trio.CancelScope | None = None
+
+
+@dataclass
+class PendingSession:
+    ufrag: str
+    peer_connection: DirectPeerConnection | None = None
+    remote_host: str | None = None
+    remote_port: int | None = None
+    remote_peer_id: ID | None = None
+    certhash: str | None = None
+    remote_info: dict[str, Any] | None = None
+    client_multiaddr: Multiaddr | None = None
+    offer: RTCSessionDescription | None = None
+    ice_listener_registered: bool = False
+    finalized: bool = False
+    finalizing: bool = False
 
 
 UDP_MUX_LISTENERS: list[UDPMuxServer] = []
@@ -47,16 +76,35 @@ class WebRTCDirectListener(IListener):
         transport: Any,
         cert: WebRTCCertificate,
         rtc_configuration: RTCConfiguration,
+        signal_service: "SignalService | None",
     ) -> None:
         self.transport = transport
-        # self.handler = handler
         self._is_listening = False
         self._listen_addrs: list[Multiaddr] = []
         self.cert: WebRTCCertificate = cert
-        self.peer_connections: dict[str, DirectPeerConnection] = {}
         self.rtc_configuration = rtc_configuration
         self._nursery: trio.Nursery | None = None
         self._udp_servers: list[UDPMuxServer] = []
+        self.sessions: dict[str, PendingSession] = {}
+        self.signal_service = signal_service
+        self._ice_handler_registered = False
+        self._connection_state_handler_registered = False
+        self.host: IHost | None = getattr(transport, "host", None)
+
+        if self.signal_service is not None:
+            self.signal_service.set_handler("offer", self._handle_signal_offer)
+            self.signal_service.add_handler("ice", self._handle_signal_ice)
+            self.signal_service.add_handler(
+                "connection_state", self._handle_signal_connection_state
+            )
+            self._ice_handler_registered = True
+            self._connection_state_handler_registered = True
+
+    def get_addrs(self) -> tuple[Multiaddr, ...]:
+        """
+        Return the advertised listening addresses for this listener.
+        """
+        return tuple(self._listen_addrs)
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """
@@ -94,7 +142,7 @@ class WebRTCDirectListener(IListener):
 
             if udp_mux_server is None:
                 logger.info("Starting UDP mux server on %s:%s", host, port)
-                udp_mux_server = self.start_udp_mux_server(
+                udp_mux_server = await self.start_udp_mux_server(
                     host, int(port), int(family), nursery
                 )
                 UDP_MUX_LISTENERS.append(udp_mux_server)
@@ -129,7 +177,7 @@ class WebRTCDirectListener(IListener):
             logger.error(f"Failed to start WebRTC-Direct listener: {e}")
             return False
 
-    def start_udp_mux_server(
+    async def start_udp_mux_server(
         self, host: str, port: int, family: int, nursery: trio.Nursery
     ) -> UDPMuxServer:
         """
@@ -144,7 +192,7 @@ class WebRTCDirectListener(IListener):
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         bind_result = udp_socket.bind((bind_host, port))
         if isinstance(bind_result, Awaitable):
-            raise RuntimeError("trio.socket.bind returned unexpected awaitable")
+            await bind_result
         actual_port = udp_socket.getsockname()[1]
 
         cancel_scope = trio.CancelScope()
@@ -238,132 +286,345 @@ class WebRTCDirectListener(IListener):
             )
             return
 
-        remote_info = {
+        session = self.sessions.get(ufrag)
+        if session is None:
+            session = PendingSession(ufrag=ufrag)
+            self.sessions[ufrag] = session
+
+        session.remote_info = {
             "peer_id": message.get("peer_id"),
             "certhash": message.get("certhash"),
             "fingerprint": message.get("fingerprint"),
         }
+        session.remote_host = remote_host
+        session.remote_port = remote_port
 
-        await self.incoming_connection(ufrag, remote_host, remote_port, remote_info)
+        await self.incoming_connection(ufrag)
 
     async def incoming_connection(
         self,
         ufrag: str,
-        remote_host: str,
-        remote_port: int,
-        remote_info: dict[str, Any] | None = None,
     ) -> None:
         """
         Handle an incoming connection for the given ICE ufrag, remote host, and port.
         """
-        key = f"{remote_host}:{remote_port}:{ufrag}"
-        peer_connection = self.peer_connections.get(key)
+        session = self.sessions.get(ufrag)
+        if session is None:
+            session = PendingSession(ufrag=ufrag)
+            self.sessions[ufrag] = session
 
-        if peer_connection is not None:
-            logger.debug(f"Already got peer connection for {key}")
+        if session.peer_connection is None:
+            logger.info("Create peer connection for session %s", ufrag)
+            session.peer_connection = (
+                await DirectPeerConnection.create_dialer_rtc_peer_connection(
+                    role="server",
+                    ufrag=ufrag,
+                    rtc_configuration=self.rtc_configuration,
+                    certificate=self.cert,
+                )
+            )
+            if (
+                self.signal_service is not None
+                and session.peer_connection is not None
+                and not session.ice_listener_registered
+            ):
+
+                def _queue_local_candidate(
+                    candidate: RTCIceCandidate | None,
+                ) -> None:
+                    if self.signal_service is None or session.remote_peer_id is None:
+                        return
+                    if candidate is None:
+                        self.signal_service.enqueue_local_candidate(
+                            session.remote_peer_id,
+                            None,
+                            extra={"ufrag": session.ufrag},
+                        )
+                        return
+                    candidate_any = cast(Any, candidate)
+                    if hasattr(candidate_any, "to_sdp"):
+                        candidate_sdp = candidate_any.to_sdp()
+                    else:
+                        candidate_sdp = getattr(candidate_any, "candidate", None)
+                    self.signal_service.enqueue_local_candidate(
+                        session.remote_peer_id,
+                        {
+                            "candidate": candidate_sdp,
+                            "sdpMid": candidate_any.sdpMid,
+                            "sdpMLineIndex": candidate_any.sdpMLineIndex,
+                        },
+                        extra={"ufrag": session.ufrag},
+                    )
+
+                session.peer_connection.peer_connection.on(
+                    "icecandidate", _queue_local_candidate
+                )
+                session.ice_listener_registered = True
+
+        if session.remote_info is None:
+            logger.debug("Session %s missing remote info; waiting", ufrag)
             return
 
-        logger.info(f"Create peer connection for {key}")
+        peer_id_str = session.remote_info.get("peer_id")
+        certhash = session.remote_info.get("certhash")
 
-        peer_connection = await DirectPeerConnection.create_dialer_rtc_peer_connection(
-            role="server",
-            ufrag=ufrag,
-            rtc_configuration=self.rtc_configuration,
-            certificate=self.cert,
-        )
-
-        self.peer_connections[key] = peer_connection
+        if not peer_id_str or not certhash:
+            logger.debug("Session %s missing peer metadata; waiting", ufrag)
+            return
 
         try:
-            if remote_info is None:
-                remote_info = {}
+            session.remote_peer_id = ID.from_base58(str(peer_id_str))
+        except Exception as exc:
+            logger.warning("Invalid peer ID in punch for session %s: %s", ufrag, exc)
+            return
 
-            peer_id_str = remote_info.get("peer_id")
-            certhash = remote_info.get("certhash")
+        session.certhash = certhash
 
-            if not peer_id_str or not certhash:
-                logger.debug(
-                    "Missing peer metadata in punch from %s:%s",
-                    remote_host,
-                    remote_port,
-                )
-                self.peer_connections.pop(key, None)
-                try:
-                    await peer_connection.close()
-                except Exception:
-                    pass
+        if (
+            session.remote_host is not None
+            and session.remote_port is not None
+            and session.remote_peer_id is not None
+        ):
+            ip_proto = "ip6" if ":" in session.remote_host else "ip4"
+            session.client_multiaddr = Multiaddr(
+                f"/{ip_proto}/{session.remote_host}/udp/{session.remote_port}"
+                f"/webrtc-direct/certhash/{certhash}/p2p/{session.remote_peer_id}"
+            )
+
+        if session.offer is not None and session.client_multiaddr is not None:
+            await self._finalize_session(session)
+
+    async def _handle_signal_offer(
+        self, message: dict[str, Any], sender_peer_id: str
+    ) -> None:
+        ufrag = message.get("ufrag")
+        if not ufrag:
+            logger.debug("Received signaling offer without ufrag; ignoring")
+            return
+
+        try:
+            sender_id = ID.from_base58(sender_peer_id)
+        except Exception:
+            logger.debug("Invalid sender peer ID %s in signaling offer", sender_peer_id)
+            return
+
+        session = self.sessions.get(ufrag)
+        if session is None:
+            session = PendingSession(ufrag=ufrag)
+            self.sessions[ufrag] = session
+        if session.finalized or session.finalizing:
+            return
+
+        session.offer = RTCSessionDescription(
+            sdp=message.get("sdp", ""),
+            type=message.get("sdpType", "offer"),
+        )
+        session.certhash = message.get("certhash", session.certhash)
+        if session.remote_peer_id is None:
+            session.remote_peer_id = sender_id
+
+        if (
+            session.peer_connection is not None
+            and session.remote_host is not None
+            and session.remote_port is not None
+        ):
+            ip_proto = "ip6" if ":" in session.remote_host else "ip4"
+            session.client_multiaddr = Multiaddr(
+                f"/{ip_proto}/{session.remote_host}/udp/{session.remote_port}"
+                f"/webrtc-direct/certhash/{session.certhash}/p2p/{session.remote_peer_id}"
+            )
+            await self._finalize_session(session)
+
+    async def _handle_signal_ice(
+        self, message: dict[str, Any], sender_peer_id: str
+    ) -> None:
+        ufrag = message.get("ufrag")
+        if not ufrag:
+            return
+        session = self.sessions.get(ufrag)
+        if session is None or session.peer_connection is None:
+            return
+        if (
+            session.remote_peer_id is not None
+            and session.remote_peer_id.to_base58() != sender_peer_id
+        ):
+            return
+
+        candidate_payload = message.get("candidate")
+        bridge = get_webrtc_bridge()
+        peer_conn = session.peer_connection.peer_connection
+        async with bridge:
+            if candidate_payload is None:
+                await bridge.add_ice_candidate(peer_conn, None)
                 return
-
             try:
-                remote_peer_id = ID.from_base58(str(peer_id_str))
-            except Exception as exc:
-                logger.warning(
-                    "Invalid peer ID in punch from %s:%s: %s",
-                    remote_host,
-                    remote_port,
-                    exc,
+                candidate_obj = candidate_from_aioice(
+                    Candidate.from_sdp(candidate_payload.get("candidate", ""))
                 )
-                self.peer_connections.pop(key, None)
-                try:
-                    await peer_connection.close()
-                except Exception:
-                    pass
-                return
+                candidate_obj.sdpMid = candidate_payload.get("sdpMid")
+                candidate_obj.sdpMLineIndex = candidate_payload.get("sdpMLineIndex")
+                await bridge.add_ice_candidate(peer_conn, candidate_obj)
+            except Exception:
+                logger.debug(
+                    "Failed to add ICE candidate from %s", sender_peer_id, exc_info=True
+                )
 
-            ip_proto = "ip6" if ":" in remote_host else "ip4"
-            client_multiaddr = Multiaddr(
-                f"/{ip_proto}/{remote_host}/udp/{remote_port}"
-                f"/webrtc-direct/certhash/{certhash}/p2p/{remote_peer_id}"
+    async def _handle_signal_connection_state(
+        self, message: dict[str, Any], sender_peer_id: str
+    ) -> None:
+        if message.get("state") != "failed":
+            return
+        logger.warning(
+            "Remote peer %s reported WebRTC connection failure: %s",
+            sender_peer_id,
+            message.get("reason"),
+        )
+
+    async def _finalize_session(self, session: PendingSession) -> None:
+        if session.finalized or session.finalizing:
+            return
+
+        if (
+            session.peer_connection is None
+            or session.offer is None
+            or session.client_multiaddr is None
+            or session.remote_peer_id is None
+        ):
+            return
+
+        signal_service = self.transport.signal_service
+        if signal_service is None:
+            raise WebRTCError("Signal service not available for WebRTC-Direct listener")
+
+        session.finalizing = True
+
+        async def send_answer(
+            answer_desc: RTCSessionDescription, handler_ufrag: str
+        ) -> None:
+            await signal_service.send_answer(
+                session.remote_peer_id,
+                answer_desc.sdp,
+                answer_desc.type,
+                session.certhash or "",
+                extra={"ufrag": handler_ufrag},
             )
 
-            connection = await connect(
-                peer_connection,
-                ufrag,
-                role="server",
-                remote_addr=client_multiaddr,
-                remote_peer_id=remote_peer_id,
+        try:
+            swarm = cast("Swarm", self.host.get_network()) if self.host else None
+            security_multistream = (
+                swarm.upgrader.security_multistream if swarm is not None else None
             )
+            async with open_loop():
+                connection, _ = await connect(
+                    session.peer_connection,
+                    session.ufrag,
+                    role="server",
+                    remote_addr=session.client_multiaddr,
+                    remote_peer_id=session.remote_peer_id,
+                    incoming_offer=session.offer,
+                    certhash=session.certhash,
+                    answer_handler=send_answer,
+                    security_multistream=security_multistream,
+                )
 
-            if connection is None:
-                logger.warning("WebRTC-Direct server connect returned no connection")
-                self.peer_connections.pop(key, None)
+            connection_any = cast(Any, connection)
+
+            actual_certhash = None
+            remote_fingerprint = getattr(connection_any, "remote_fingerprint", None)
+            if remote_fingerprint:
                 try:
-                    await peer_connection.close()
+                    actual_certhash = fingerprint_to_certhash(remote_fingerprint)
                 except Exception:
-                    pass
-                return
+                    actual_certhash = None
+            elif hasattr(session.peer_connection, "remoteFingerprint"):
+                try:
+                    fp_obj = session.peer_connection.remoteFingerprint()
+                except Exception:
+                    fp_obj = None
+                if fp_obj and fp_obj.value:
+                    remote_fingerprint = f"{fp_obj.algorithm} {fp_obj.value.upper()}"
+                    setattr(connection_any, "remote_fingerprint", remote_fingerprint)
+                    try:
+                        actual_certhash = fingerprint_to_certhash(remote_fingerprint)
+                    except Exception:
+                        actual_certhash = None
 
-            fingerprint_hint = remote_info.get("fingerprint") if remote_info else None
+            expected_certhash = session.certhash
+            if expected_certhash and actual_certhash:
+                if expected_certhash != actual_certhash:
+                    logger.warning(
+                        "Rejecting WebRTC-Direct conn due to certhash mismatch",
+                        session.ufrag,
+                    )
+                    await connection.close()
+                    return
+
+            if actual_certhash is None:
+                actual_certhash = expected_certhash
+
+            canonical_remote = (
+                canonicalize_certhash(session.client_multiaddr, actual_certhash)
+                if actual_certhash
+                else session.client_multiaddr
+            )
+            setattr(connection_any, "remote_multiaddr", canonical_remote)
+
+            if self._listen_addrs:
+                setattr(connection_any, "local_multiaddr", self._listen_addrs[0])
+
+            if getattr(connection_any, "local_fingerprint", None) is None:
+                setattr(connection_any, "local_fingerprint", self.cert.fingerprint)
+
+            fingerprint_hint = (
+                session.remote_info.get("fingerprint") if session.remote_info else None
+            )
             if (
                 fingerprint_hint
-                and getattr(connection, "remote_fingerprint", None) is None
+                and getattr(connection_any, "remote_fingerprint", None) is None
             ):
-                setattr(connection, "remote_fingerprint", fingerprint_hint)
+                setattr(connection_any, "remote_fingerprint", fingerprint_hint)
 
-            if getattr(connection, "remote_peer_id", None) is None:
-                setattr(connection, "remote_peer_id", remote_peer_id)
+            if getattr(connection_any, "remote_peer_id", None) is None:
+                setattr(connection_any, "remote_peer_id", session.remote_peer_id)
 
-            self.peer_connections.pop(key, None)
+            if (
+                self.transport.host is not None
+                and canonical_remote is not None
+                and session.remote_peer_id is not None
+            ):
+                try:
+                    self.transport.host.get_peerstore().add_addrs(
+                        session.remote_peer_id,
+                        [canonical_remote],
+                        3600,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to cache remote WebRTC-Direct address for %s",
+                        session.remote_peer_id,
+                    )
 
             await self.transport.register_incoming_connection(connection)
             logger.info(
-                "WebRTC-Direct incoming connection established with %s", remote_peer_id
+                "WebRTC-Direct incoming connection established with %s",
+                session.remote_peer_id,
             )
-        except Exception as err:
-            logger.error(
-                "Failed to establish incoming WebRTC-Direct connection from %s:%s: %s",
-                remote_host,
-                remote_port,
-                err,
-            )
-            self.peer_connections.pop(key, None)
-            try:
-                await peer_connection.close()
-            except Exception:
-                pass
+            await signal_service.flush_local_ice(session.remote_peer_id)
+            await signal_service.flush_ice_candidates(session.remote_peer_id)
+            session.finalized = True
+        except Exception as exc:
+            session.finalized = False
+            session.finalizing = False
+            logger.exception("Failed to finalize WebRTC-Direct session %s", exc)
+            if "connection" in locals():
+                await connection.close()
+            return
+        finally:
+            session.finalizing = False
+            if session.finalized:
+                self.sessions.pop(session.ufrag, None)
 
     async def close(self) -> None:
-        """Close the listener."""
         self._is_listening = False
         self._nursery = None
 
@@ -379,9 +640,15 @@ class WebRTCDirectListener(IListener):
             except ValueError:
                 pass
         self._udp_servers.clear()
+        self.sessions.clear()
+
+        if self.signal_service is not None:
+            self.signal_service.set_handler("offer", None)
+            if self._ice_handler_registered:
+                self.signal_service.remove_handler("ice", self._handle_signal_ice)
+            if self._connection_state_handler_registered:
+                self.signal_service.remove_handler(
+                    "connection_state", self._handle_signal_connection_state
+                )
 
         logger.info("WebRTC-Direct listener closed")
-
-    def get_addrs(self) -> tuple[Multiaddr, ...]:
-        """Get listener addresses."""
-        return tuple(self._listen_addrs)

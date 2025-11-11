@@ -5,7 +5,7 @@ from typing import Any
 
 from multiaddr import Multiaddr
 
-from libp2p.abc import IListener, INetConn, IRawConnection, ITransport
+from libp2p.abc import IListener, INetConn, IRawConnection, ISecureConn, ITransport
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 
@@ -124,14 +124,17 @@ class TransportManager:
             await transport.ensure_signaling_connection(maddr)  # type: ignore[attr-defined]
 
         raw_conn = await transport.dial(maddr)
-        if not isinstance(raw_conn, IRawConnection):
-            raise OpenConnectionError("Transport did not return a raw connection")
+        if not isinstance(raw_conn, (IRawConnection, ISecureConn)):
+            raise OpenConnectionError("Transport did not return a connection")
 
         target_peer = self._resolve_peer_id(maddr, peer_id)
 
-        secured_conn = await self._swarm.upgrader.upgrade_security(
-            raw_conn, True, target_peer
-        )
+        if isinstance(raw_conn, ISecureConn):
+            secured_conn: ISecureConn = raw_conn
+        else:
+            secured_conn = await self._swarm.upgrader.upgrade_security(
+                raw_conn, True, target_peer
+            )
         muxed_conn = await self._swarm.upgrader.upgrade_connection(
             secured_conn, target_peer
         )

@@ -48,6 +48,10 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
+    def remove_handler(self, protocol: TProtocol | None) -> None:
+        """Remove a handler for the given protocol if it exists."""
+        self.handlers.pop(protocol, None)
+
     async def negotiate(
         self,
         communicator: IMultiselectCommunicator,

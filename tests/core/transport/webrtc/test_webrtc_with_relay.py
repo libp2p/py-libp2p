@@ -6,8 +6,11 @@ import trio
 
 from libp2p.transport.webrtc.private_to_private.relay_fixtures import (
     echo_stream_handler,
+    store_relay_addrs,
 )
 from libp2p.transport.webrtc.private_to_private.transport import WebRTCTransport
+
+pytest_plugins = ("libp2p.transport.webrtc.private_to_private.relay_fixtures",)
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +116,9 @@ async def test_webrtc_dial_through_relay(relay_host, listener_host):
 
             # Add relay addresses to client's peerstore
             if relay_addrs:
-                client_host.get_peerstore().add_addrs(relay_id, list(relay_addrs), 3600)
+                store_relay_addrs(
+                    relay_id, list(relay_addrs), client_host.get_peerstore()
+                )
 
             network = client_host.get_network()
             await network.dial_peer(relay_id)

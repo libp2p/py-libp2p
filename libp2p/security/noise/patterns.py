@@ -126,12 +126,15 @@ class BasePattern(IPattern):
     local_peer: ID
     libp2p_privkey: PrivateKey
     early_data: bytes | None
+    prologue: bytes | None = None
 
     def create_noise_state(self) -> NoiseState:
         noise_state = NoiseState.from_name(self.protocol_name)
         noise_state.set_keypair_from_private_bytes(
             NoiseKeypairEnum.STATIC, self.noise_static_key.to_bytes()
         )
+        if self.prologue:
+            noise_state.set_prologue(self.prologue)
         if noise_state.noise_protocol is None:
             raise NoiseStateError("noise_protocol is not initialized")
         return noise_state
@@ -182,6 +185,9 @@ class BasePattern(IPattern):
                 signature,
                 extensions=None,
             )
+
+    def set_prologue(self, prologue: bytes | None) -> None:
+        self.prologue = prologue
 
 
 class PatternXX(BasePattern):

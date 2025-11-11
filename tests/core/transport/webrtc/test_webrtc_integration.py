@@ -21,14 +21,18 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
+from libp2p.abc import IHost
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.exceptions import MultiError
+from libp2p.network.exceptions import SwarmException
 
 # Import WebRTC protocols to trigger registration
 from libp2p.transport.webrtc import multiaddr_protocols  # noqa: F401
-from libp2p.transport.webrtc.connection import WebRTCRawConnection
+from libp2p.transport.webrtc.connection import WebRTCRawConnection, WebRTCStream
 from libp2p.transport.webrtc.private_to_private.relay_fixtures import (
     echo_stream_handler,
+    store_relay_addrs,
 )
 from libp2p.transport.webrtc.private_to_private.transport import WebRTCTransport
 from libp2p.transport.webrtc.private_to_private.util import split_addr
@@ -44,11 +48,6 @@ pytest_plugins = ("libp2p.transport.webrtc.private_to_private.relay_fixtures",)
 # Test configuration
 TEST_TIMEOUT = 30.0
 ECHO_PROTOCOL = TProtocol("/libp2p/echo/1.0.0")
-
-
-# ============================================================================
-# FIXTURES
-# ============================================================================
 
 
 @pytest.fixture
@@ -247,22 +246,55 @@ async def test_webrtc_direct_listen_on_localhost():
     await host_a.close()
 
 
-# NOTE: Full end-to-end WebRTC-Direct test is complex and requires:
-# 1. Proper UDP socket binding and STUN/TURN integration
-# 2. ICE candidate exchange
-# 3. DTLS handshake
-# 4. Data channel establishment
-
 # ============================================================================
 # INTEGRATION TESTS - WebRTC via Circuit Relay (Private-to-Private)
 # ============================================================================
 
 
 @pytest.mark.trio
-async def test_webrtc_relayed_connection(relay_host, listener_host, client_host):
-    """
-    Test WebRTC connection via circuit relay using real transports.
-    """
+async def test_webrtc_relayed_connection(
+    relay_host: IHost, listener_host: IHost, client_host: IHost
+):
+    """End-to-end WebRTC connection through a relay with explicit pre-flight checks."""
+    relay_id = relay_host.get_id()
+    relay_addrs = list(relay_host.get_addrs())
+    print("relay raw addrs:", [str(addr) for addr in relay_addrs])
+    assert relay_addrs, (
+        "Relay did not advertise any addresses; unable to proceed with relayed dial"
+    )
+
+    store_relay_addrs(relay_id, relay_addrs, client_host.get_peerstore())
+
+    stored_addrs = list(client_host.get_peerstore().addrs(relay_id))
+    print("relay stored addrs:", [str(addr) for addr in stored_addrs])
+    assert stored_addrs, "Client peerstore missing relay addresses after normalisation"
+    for addr in stored_addrs:
+        addr_str = str(addr)
+        assert addr_str.count("/p2p/") == 0, (
+            f"Relay addr should be raw transport addr, got {addr_str}"
+        )
+
+    swarm = client_host.get_network()
+    try:
+        connections = await swarm.dial_peer(relay_id)
+    except SwarmException as exc:
+        cause = exc.__cause__
+        details = ""
+        if isinstance(cause, MultiError):
+            details = " | ".join(str(err) for err in cause.errors)
+        pytest.fail(f"Dial to relay failed: {exc} (cause: {details})")
+
+    assert connections, "Client failed to establish any connection to relay"
+
+    # Confirm connectivity from both perspectives to guard against false positives.
+    assert relay_id in swarm.connections, (
+        "Client swarm does not record connection to relay"
+    )
+    assert client_host.get_id() in relay_host.get_network().connections, (
+        "Relay does not record connection from client"
+    )
+
+    # Prepare transports for listener and client.
     listener_transport = WebRTCTransport({})
     listener_transport.set_host(listener_host)
     await listener_transport.start()
@@ -273,26 +305,20 @@ async def test_webrtc_relayed_connection(relay_host, listener_host, client_host)
 
     webrtc_listener = listener_transport.create_listener(echo_stream_handler)
 
-    connection = None
-    stream = None
+    connection: WebRTCRawConnection | None = None
+    stream: WebRTCStream | None = None
 
     try:
         async with trio.open_nursery() as nursery:
             success = await webrtc_listener.listen(Multiaddr("/webrtc"), nursery)
             assert success, "WebRTC listener failed to start"
 
-            await trio.sleep(2.0)
+            await trio.sleep(1.5)
 
             webrtc_addrs = webrtc_listener.get_addrs()
             assert webrtc_addrs, "Listener did not advertise WebRTC addresses"
-
             webrtc_addr = webrtc_addrs[0]
             logger.info("Listener advertising WebRTC address: %s", webrtc_addr)
-
-            relay_id = relay_host.get_id()
-            relay_addrs = relay_host.get_addrs()
-            if relay_addrs:
-                client_host.get_peerstore().add_addrs(relay_id, list(relay_addrs), 3600)
 
             circuit_addr, target_peer = split_addr(webrtc_addr)
             assert target_peer == listener_host.get_id(), (
@@ -300,20 +326,27 @@ async def test_webrtc_relayed_connection(relay_host, listener_host, client_host)
             )
 
             target_component = Multiaddr(f"/p2p/{target_peer.to_base58()}")
+            print("circuit addr:", str(circuit_addr))
+            print("target component:", str(target_component))
             try:
                 base_addr = circuit_addr.decapsulate(target_component)
             except ValueError:
                 base_addr = circuit_addr
 
-            client_host.get_peerstore().add_addrs(target_peer, [base_addr], 3600)
+            store_relay_addrs(target_peer, [base_addr], client_host.get_peerstore())
+            print(
+                "listener base addr stored for target:",
+                [str(addr) for addr in client_host.get_peerstore().addrs(target_peer)],
+            )
 
-            await client_host.get_network().dial_peer(relay_id)
+            try:
+                raw_connection = await client_transport.dial(webrtc_addr)
+            except Exception as exc:
+                pytest.fail(f"WebRTC dial raised unexpected exception: {exc}")
 
-            raw_connection = await client_transport.dial(webrtc_addr)
             assert raw_connection is not None, (
                 "WebRTC connection could not be established"
             )
-
             connection = cast(WebRTCRawConnection, raw_connection)
 
             stream = await connection.open_stream()

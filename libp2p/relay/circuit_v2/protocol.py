@@ -57,10 +57,10 @@ from .config import (
 )
 from .pb.circuit_pb2 import (
     HopMessage,
-    Limit,
-    Reservation,
     Status as PbStatus,
     StopMessage,
+    Limit,
+    Reservation,
 )
 from .protocol_buffer import (
     StatusCode,
@@ -194,10 +194,10 @@ class CircuitV2Protocol(Service):
             # Unregister protocol handlers
             if self.allow_hop:
                 try:
-                    # Cast host to extended interface with remove_stream_handler
-                    host_with_handlers = cast(IHostWithStreamHandlers, self.host)
-                    host_with_handlers.remove_stream_handler(PROTOCOL_ID)
-                    host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
+                    if hasattr(self.host, "remove_stream_handler"):
+                        host_with_handlers = cast(IHostWithStreamHandlers, self.host)
+                        host_with_handlers.remove_stream_handler(PROTOCOL_ID)
+                        host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
@@ -570,6 +570,9 @@ class CircuitV2Protocol(Service):
                     status=status,
                     senderRecord=signed_envelope.marshal_envelope(),
                 )
+                status_msg.status.code = status.code
+                status_msg.status.message = status.message
+
                 await stream.write(status_msg.SerializeToString())
                 return
 
@@ -867,8 +870,9 @@ class CircuitV2Protocol(Service):
                 # Send destination records to source in case of HOP status OK message
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
-                    status=pb_status,
                 )
+                status_msg.status.code = pb_status.code
+                status_msg.status.message = pb_status.message
                 if envelope is not None:
                     status_msg.senderRecord = envelope.marshal_envelope()
 
@@ -904,8 +908,10 @@ class CircuitV2Protocol(Service):
 
                 status_msg = StopMessage(
                     type=StopMessage.STATUS,
-                    status=pb_status,
                 )
+                status_msg.status.code = pb_status.code
+                status_msg.status.message = pb_status.message
+
                 if senderRecord is not None:
                     status_msg.senderRecord = senderRecord.marshal_envelope()
 

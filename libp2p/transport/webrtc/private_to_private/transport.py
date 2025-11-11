@@ -10,6 +10,7 @@ from trio_asyncio import aio_as_trio, open_loop
 
 from libp2p.abc import (
     IListener,
+    INetStream,
     INetworkService,
     IRawConnection,
     ITransport,
@@ -20,8 +21,10 @@ from libp2p.network.transport_manager import TransportManager
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayLimits, RelayRole
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+from libp2p.stream_muxer.yamux.yamux import YamuxStream
 from libp2p.tools.async_service.abc import ManagerAPI
 from libp2p.tools.async_service.trio_service import TrioManager
 from libp2p.transport.exceptions import OpenConnectionError
@@ -79,7 +82,7 @@ class WebRTCTransport(ITransport):
         self.metrics = None
 
         # Circuit relay discovery integration
-        self._relay_discovery: Any = None
+        self._relay_discovery: RelayDiscovery | None = None
         self._relay_protocol: CircuitV2Protocol | None = None
         self._relay_protocol_manager: TrioManager | None = None
         self._relay_discovery_manager: ManagerAPI | None = None
@@ -150,7 +153,6 @@ class WebRTCTransport(ITransport):
             self._started = False
             logger.info("WebRTC Transport stopped successfully")
 
-            # Stop relay services
             if self._relay_discovery_manager is not None:
                 await self._relay_discovery_manager.stop()
                 self._relay_discovery_manager = None
@@ -265,7 +267,7 @@ class WebRTCTransport(ITransport):
             self._transport_manager.register_listener(listener)
         return listener
 
-    async def _handle_signaling_stream(self, stream: Any) -> None:
+    async def _handle_signaling_stream(self, stream: INetStream) -> None:
         """
         Handle incoming signaling stream from circuit relay with proper async context.
 
@@ -280,10 +282,15 @@ class WebRTCTransport(ITransport):
 
         try:
             # Extract connection info from stream
-            if hasattr(stream, "muxed_conn") and hasattr(stream.muxed_conn, "peer_id"):
+            stream_for_info = cast(YamuxStream, stream)
+            if hasattr(stream_for_info, "muxed_conn") and hasattr(
+                stream_for_info.muxed_conn, "peer_id"
+            ):
                 connection_info = {
-                    "peer_id": stream.muxed_conn.peer_id,
-                    "remote_addr": getattr(stream.muxed_conn, "remote_addr", None),
+                    "peer_id": stream_for_info.muxed_conn.peer_id,
+                    "remote_addr": getattr(
+                        stream_for_info.muxed_conn, "remote_addr", None
+                    ),
                 }
 
             logger.debug(f"Handling incoming signaling stream from {connection_info}")
@@ -307,18 +314,7 @@ class WebRTCTransport(ITransport):
 
             # Track connection if successful
             if result:
-                remote_peer_id = getattr(result, "remote_peer_id", None)
-                conn_id = (
-                    str(remote_peer_id)
-                    if remote_peer_id is not None
-                    else str(id(result))
-                )
-                self.active_connections[conn_id] = result
-                logger.info(f"Successfully handled connection from {remote_peer_id}")
-
-                # TODO: Notify the application layer about the new connection
-                # This would typically go through the host's connection manager
-
+                await self.register_incoming_connection(result)
             else:
                 logger.warning("Signaling stream handling returned no connection")
 
@@ -381,7 +377,7 @@ class WebRTCTransport(ITransport):
                     self._relay_discovery, daemon=True, name="webrtc-relay-discovery"
                 )
             )
-            await self._relay_discovery.event_started.wait()
+            await self._relay_discovery_manager.wait_started()
 
         if (
             self._transport_manager is not None
@@ -433,7 +429,7 @@ class WebRTCTransport(ITransport):
         except Exception as exc:
             raise WebRTCError(f"Failed to dial relay {relay_peer}: {exc}") from exc
 
-        if self._relay_discovery and self._relay_discovery.auto_reserve:
+        if self._relay_discovery:
             try:
                 await self._relay_discovery.make_reservation(relay_peer)
             except Exception:
@@ -481,9 +477,15 @@ class WebRTCTransport(ITransport):
             raise WebRTCError("Relay discovery not available")
 
         relays = self._relay_discovery.get_relays()
+        relay_list = [str(r) for r in relays]
+        logger.info("Relay discovery initial relays: %s", relay_list)
+        print("relay discovery initial relays:", relay_list)
         if not relays:
             await self._relay_discovery.discover_relays()
             relays = self._relay_discovery.get_relays()
+            relay_list = [str(r) for r in relays]
+            logger.info("Relay discovery after manual discover: %s", relay_list)
+            print("relay discovery after manual discover:", relay_list)
 
         reservation_failed = False
         for relay_id in relays:
@@ -494,10 +496,25 @@ class WebRTCTransport(ITransport):
                 reservation_failed = True
                 continue
 
+        relay_list = [str(r) for r in relays]
+        logger.info(
+            "Ensure listener ready using relays: %s (reservation_failed=%s)",
+            relay_list,
+            reservation_failed,
+        )
+        print(
+            "ensure_listener_ready relays:",
+            relay_list,
+            "reservation_failed=",
+            reservation_failed,
+        )
         if reservation_failed:
             logger.debug("Relay reservation failed for at least one relay")
 
         self._refresh_listener_addresses()
+        advertised_list = [str(addr) for addr in self._advertised_addrs]
+        logger.info("Advertised listener addrs: %s", advertised_list)
+        print("advertised listener addrs:", advertised_list)
 
     def _refresh_listener_addresses(self) -> None:
         if not self.host:
@@ -514,6 +531,13 @@ class WebRTCTransport(ITransport):
             relay_ids = self._relay_discovery.get_relays()
         else:
             relay_ids = []
+
+        if not relay_ids:
+            try:
+                peer_ids: list[ID] = list(getattr(peerstore, "peer_ids", lambda: [])())
+            except Exception:
+                peer_ids = []
+            relay_ids = [pid for pid in peer_ids if pid != local_peer]
 
         for relay_id in relay_ids:
             relay_addrs = peerstore.addrs(relay_id)
@@ -593,7 +617,7 @@ class WebRTCTransport(ITransport):
         except Exception as e:
             logger.error(f"Error in connection cleanup for {conn_id}: {e}")
 
-    async def _on_protocol(self, stream: Any) -> None:
+    async def _on_protocol(self, stream: INetStream) -> None:
         """
         Handle incoming signaling stream (following JS pattern).
 
@@ -623,13 +647,7 @@ class WebRTCTransport(ITransport):
                 )
 
                 if result:
-                    remote_peer_id = getattr(result, "remote_peer_id", None)
-                    conn_id = str(remote_peer_id) if remote_peer_id else str(id(result))
-                    self.active_connections[conn_id] = result
-
-                    logger.info(
-                        f"Successfully handled WebRTC connection from {remote_peer_id}"
-                    )
+                    await self.register_incoming_connection(result)
                 else:
                     logger.warning("Signaling stream handling failed")
 
@@ -649,6 +667,53 @@ class WebRTCTransport(ITransport):
         if hasattr(host, "get_network"):
             self._network = host.get_network()
             logger.debug("Stored network reference from host")
+
+    async def register_incoming_connection(self, connection: IRawConnection) -> None:
+        """
+        Upgrade and register an incoming raw WebRTC connection with the swarm.
+        """
+        if self.host is None:
+            await connection.close()
+            raise WebRTCError("Host not set for incoming WebRTC connection")
+
+        remote_peer_id = getattr(connection, "remote_peer_id", None)
+        if remote_peer_id is None:
+            await connection.close()
+            raise WebRTCError("Incoming WebRTC connection missing remote peer ID")
+
+        network = self.host.get_network()
+        if not hasattr(network, "upgrader") or not hasattr(network, "add_conn"):
+            await connection.close()
+            raise WebRTCError(
+                "Host network must expose upgrader/add_conn for WebRTC connections"
+            )
+
+        swarm = cast("Swarm", network)
+        try:
+            secured_conn = await swarm.upgrader.upgrade_security(
+                connection, False, remote_peer_id
+            )
+            muxed_conn = await swarm.upgrader.upgrade_connection(
+                secured_conn, remote_peer_id
+            )
+            await swarm.add_conn(muxed_conn)
+            logger.info("Registered incoming WebRTC connection from %s", remote_peer_id)
+        except Exception as exc:
+            logger.error(
+                "Failed to upgrade incoming WebRTC connection from %s: %s",
+                remote_peer_id,
+                exc,
+            )
+            try:
+                await connection.close()
+            except Exception:
+                pass
+            raise WebRTCError(
+                f"Failed to upgrade incoming WebRTC connection: {exc}"
+            ) from exc
+
+        conn_id = str(remote_peer_id)
+        self.active_connections[conn_id] = connection
 
     def get_supported_protocols(self) -> set[str]:
         """Get supported protocols."""
@@ -672,5 +737,7 @@ class WebRTCTransport(ITransport):
         if not self._started or not self.host:
             return []
 
-        # TODO: Return circuit relay addresses that can be used for WebRTC signaling
-        return []
+        if not self._advertised_addrs:
+            self._refresh_listener_addresses()
+
+        return list(self._advertised_addrs)

@@ -33,7 +33,6 @@ from ..constants import (
 from ..exception import (
     WebRTCStreamClosedError,
     WebRTCStreamError,
-    WebRTCStreamResetError,
     WebRTCStreamStateError,
     WebRTCStreamTimeoutError,
 )
@@ -193,18 +192,16 @@ class WebRTCStream(IMuxedStream):
                     await self._receive_event.wait()
                     self._receive_event = trio.Event()  # Reset for next wait
 
-            if cancel_scope.cancelled_caught:
-                raise WebRTCStreamTimeoutError(
-                    f"Read timeout on stream {self.stream_id}"
-                )
-            return b""
-        except WebRTCStreamResetError:
-            # Stream was reset while reading
+                    if cancel_scope.cancelled_caught:
+                        raise WebRTCStreamTimeoutError(
+                            f"Read timeout on stream {self.stream_id}"
+                        )
+        except WebRTCStreamTimeoutError:
             raise
         except Exception as e:
             logger.error(f"Error reading from stream {self.stream_id}: {e}")
             await self._handle_stream_error(e)
-            raise
+            raise WebRTCStreamError(f"Error reading from stream {self.stream_id}: {e}")
 
     async def write(self, data: bytes, check_buffer: bool = True) -> None:
         """

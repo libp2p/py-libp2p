@@ -44,6 +44,7 @@ class Transport(ISecureTransport):
     webtransport_support: WebTransportSupport
     early_data_manager: EarlyDataManager
     rekey_manager: RekeyManager
+    _prologue: bytes | None
 
     def __init__(
         self,
@@ -71,25 +72,28 @@ class Transport(ISecureTransport):
 
         # Initialize advanced features
         self.webtransport_support = WebTransportSupport()
+        self._prologue = None
+
         self.early_data_manager = EarlyDataManager(early_data_handler)
         self.rekey_manager = RekeyManager(rekey_policy)
         self._static_key_cache: dict[ID, bytes] = {}
 
     def get_pattern(self) -> IPattern:
-        """
-        Get the handshake pattern for the connection.
+        if self.with_noise_pipes:
+            raise NotImplementedError
+        else:
+            pattern = PatternXX(
+                self.local_peer,
+                self.libp2p_privkey,
+                self.noise_privkey,
+                self.early_data,
+            )
+            if hasattr(pattern, "set_prologue"):
+                pattern.set_prologue(self._prologue)
+            return pattern
 
-        Returns:
-            IPattern: The XX handshake pattern
-
-        """
-        # Always use XX pattern (IK pattern has been deprecated)
-        return PatternXX(
-            self.local_peer,
-            self.libp2p_privkey,
-            self.noise_privkey,
-            self.early_data,
-        )
+    def set_prologue(self, prologue: bytes | None) -> None:
+        self._prologue = prologue
 
     async def secure_inbound(self, conn: IRawConnection) -> ISecureConn:
         """

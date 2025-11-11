@@ -4,15 +4,24 @@ Test fixtures for WebRTC transport with circuit relay infrastructure.
 
 from collections.abc import AsyncIterator
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 
-from libp2p.host.basic_host import BasicHost
+from libp2p.abc import IHost
+from libp2p.io.abc import ReadWriteCloser
+from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.config import RelayLimits
-from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
+from libp2p.relay.circuit_v2.protocol import (
+    PROTOCOL_ID as RELAY_HOP_PROTOCOL_ID,
+    STOP_PROTOCOL_ID as RELAY_STOP_PROTOCOL_ID,
+    CircuitV2Protocol,
+)
+from libp2p.stream_muxer.yamux.yamux import YamuxStream
 from libp2p.tools.async_service.trio_service import background_trio_service
+from libp2p.tools.utils import connect
 from tests.utils.factories import HostFactory
 
 logger = logging.getLogger(__name__)
@@ -26,6 +35,44 @@ DEFAULT_RELAY_LIMITS = RelayLimits(
 )
 
 
+def store_relay_addrs(peer_id: ID, addrs: list[Multiaddr], peerstore: Any) -> None:
+    """Normalise relay addresses before storing them in the peerstore."""
+    if not addrs:
+        return
+
+    suffix = Multiaddr(f"/p2p/{peer_id.to_base58()}")
+    normalised: list[Multiaddr] = []
+
+    for addr in addrs:
+        base_addr = addr
+        try:
+            base_addr = addr.decapsulate(suffix)
+        except ValueError:
+            # Address might already be normalised (no /p2p component)
+            base_addr = addr
+        if str(base_addr) == "":
+            logger.debug("Skipping empty relay addr derived from %s", addr)
+            continue
+        print(f"Normalised relay addr {addr} -> {base_addr}")
+        normalised.append(base_addr)
+
+    try:
+        peerstore.add_addrs(peer_id, normalised, 3600)
+    except Exception as exc:
+        logger.debug("Failed to store relay addrs for %s: %s", peer_id, exc)
+
+    try:
+        peerstore.add_protocols(
+            peer_id,
+            [
+                str(RELAY_HOP_PROTOCOL_ID),
+                str(RELAY_STOP_PROTOCOL_ID),
+            ],
+        )
+    except Exception as exc:
+        logger.debug("Failed to mark relay protocols for %s: %s", peer_id, exc)
+
+
 @pytest.fixture
 def relay_limits() -> RelayLimits:
     """Fixture providing default relay limits."""
@@ -33,12 +80,12 @@ def relay_limits() -> RelayLimits:
 
 
 @pytest.fixture
-async def relay_host() -> AsyncIterator[BasicHost]:
+async def relay_host() -> AsyncIterator[IHost]:
     """
     Create a host configured as a circuit relay server.
 
     Returns:
-        BasicHost: Host configured as relay
+        IHost: Host configured as relay
 
     """
     async with HostFactory.create_batch_and_listen(1) as hosts:
@@ -56,12 +103,11 @@ async def relay_host() -> AsyncIterator[BasicHost]:
             try:
                 yield relay_host
             finally:
-                # Cleanup is handled by background_trio_service context manager
                 pass
 
 
 @pytest.fixture
-async def client_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
+async def client_host(relay_host: IHost) -> AsyncIterator[IHost]:
     """
     Create a client host that can connect to the relay.
 
@@ -69,7 +115,7 @@ async def client_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
         relay_host: The relay host fixture
 
     Returns:
-        BasicHost: Client host configured to use relay
+        IHost: Client host configured to use relay
 
     """
     async with HostFactory.create_batch_and_listen(1) as hosts:
@@ -77,13 +123,14 @@ async def client_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
 
         # Connect client to relay
         relay_id = relay_host.get_id()
-        relay_addrs = relay_host.get_addrs()
+        relay_addrs = list(relay_host.get_addrs())
 
         if relay_addrs:
+            store_relay_addrs(relay_id, relay_addrs, client_host.get_peerstore())
+
             try:
-                # Use network to dial peer
-                network = client_host.get_network()
-                await network.dial_peer(relay_id)
+                await connect(client_host, relay_host)
+                await trio.sleep(0.1)
                 logger.info(f"Client connected to relay {relay_id}")
             except Exception as e:
                 logger.warning(f"Failed to connect client to relay: {e}")
@@ -92,7 +139,7 @@ async def client_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
 
 
 @pytest.fixture
-async def listener_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
+async def listener_host(relay_host: IHost) -> AsyncIterator[IHost]:
     """
     Create a listener host that makes a reservation on the relay.
 
@@ -100,7 +147,7 @@ async def listener_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
         relay_host: The relay host fixture
 
     Returns:
-        BasicHost: Listener host with circuit relay reservation
+        IHost: Listener host with circuit relay reservation
 
     """
     async with HostFactory.create_batch_and_listen(1) as hosts:
@@ -117,13 +164,14 @@ async def listener_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
         async with background_trio_service(relay_protocol):
             # Connect to relay
             relay_id = relay_host.get_id()
-            relay_addrs = relay_host.get_addrs()
+            relay_addrs = list(relay_host.get_addrs())
 
             if relay_addrs:
+                store_relay_addrs(relay_id, relay_addrs, listener_host.get_peerstore())
+
                 try:
-                    # Use network to dial peer
-                    network = listener_host.get_network()
-                    await network.dial_peer(relay_id)
+                    # Use utility helper to establish the connection to the relay
+                    await connect(listener_host, relay_host)
                     logger.info(f"Listener connected to relay {relay_id}")
 
                     # Wait for reservation to be made
@@ -135,19 +183,19 @@ async def listener_host(relay_host: BasicHost) -> AsyncIterator[BasicHost]:
             try:
                 yield listener_host
             finally:
-                # Cleanup is handled by background_trio_service context manager
                 pass
 
 
-async def echo_stream_handler(stream: Any) -> None:
+async def echo_stream_handler(stream: ReadWriteCloser) -> None:
     """Simple echo handler for testing."""
+    yamux_stream = cast(YamuxStream, stream)
     try:
         while True:
-            data = await stream.read(1024)
+            data = await yamux_stream.read(1024)
             if not data:
                 break
-            await stream.write(data)
+            await yamux_stream.write(data)
     except Exception as e:
         logger.debug(f"Echo handler error: {e}")
     finally:
-        await stream.close()
+        await yamux_stream.close()

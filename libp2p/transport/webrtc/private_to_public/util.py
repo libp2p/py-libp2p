@@ -201,14 +201,45 @@ def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
         The resulting multiaddr with a /certhash/ component.
 
     """
-    fingerprint = fingerprint.strip().replace(" ", "").upper()
-    parts = fingerprint.split(":")
-    encoded = bytes(int(part, 16) for part in parts)
+    if fingerprint is None:
+        raise ValueError("Fingerprint is required to build certhash multiaddr")
+    fingerprint = fingerprint.strip()
+    if " " in fingerprint:
+        _, hex_part = fingerprint.split(" ", 1)
+    else:
+        hex_part = fingerprint
+    hex_part = hex_part.replace(":", "").replace(" ", "").upper()
+    if not hex_part:
+        raise ValueError("Fingerprint hex portion is empty")
+    try:
+        encoded = bytes.fromhex(hex_part)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise ValueError(f"Invalid fingerprint hex data: {hex_part}") from exc
     digest = hashlib.sha256(encoded).digest()
     # Multibase base64url, no padding, prefix "uEi" (libp2p convention)
     b64 = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
     certhash = f"uEi{b64}"
     return Multiaddr(f"/certhash/{certhash}")
+
+
+def fingerprint_to_certhash(fingerprint: str) -> str:
+    """
+    Convert a DTLS fingerprint string to a certhash component.
+
+    Parameters
+    ----------
+    fingerprint : str
+        The DTLS fingerprint as a colon-separated hex string, optionally prefixed
+        by the hash algorithm (e.g. "sha-256 AA:BB:...").
+
+    Returns
+    -------
+    str
+        The certhash string (multibase base64url, prefix "uEi").
+
+    """
+    certhash_ma = fingerprint_to_multiaddr(fingerprint)
+    return extract_certhash(certhash_ma)
 
 
 def get_hash_function(code: int) -> str:
@@ -265,6 +296,53 @@ def extract_certhash(ma: Multiaddr) -> str:
         if proto[0].name == "certhash":
             return proto[1]
     raise Exception(f"Couldn't find a certhash component in: {str(ma)}")
+
+
+def canonicalize_certhash(ma: Multiaddr, certhash: str) -> Multiaddr:
+    """
+    Ensure a multiaddr contains the provided certhash component in canonical form.
+
+    The function preserves the original protocol ordering, replacing the existing
+    certhash value if present, or inserting the new certhash immediately before the
+    trailing /p2p component if one exists (to match libp2p expectations).
+    """
+
+    def _value_to_str(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            try:
+                return value.decode("utf-8")
+            except Exception:
+                return value.hex()
+        return str(value)
+
+    protocols_list = list(ma.protocols())
+    values_list = list(ma.values())
+
+    has_certhash = any(proto.name == "certhash" for proto in protocols_list)
+    parts: list[str] = []
+    inserted = False
+
+    for proto, value in zip(protocols_list, values_list):
+        name = proto.name
+        if name == "certhash":
+            value_str = certhash
+        else:
+            value_str = _value_to_str(value)
+        if not has_certhash and not inserted and name == "p2p":
+            parts.append(f"/certhash/{certhash}")
+            inserted = True
+
+        if value_str == "":
+            parts.append(f"/{name}")
+        else:
+            parts.append(f"/{name}/{value_str}")
+
+    if not has_certhash and not inserted:
+        parts.append(f"/certhash/{certhash}")
+
+    return Multiaddr("".join(parts))
 
 
 def certhash_encode(s: str) -> tuple[int, bytes]:

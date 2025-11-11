@@ -1,12 +1,8 @@
-from collections.abc import (
-    Awaitable,
-    Callable,
-)
+from collections import defaultdict
+from collections.abc import Awaitable, Callable
 import json
 import logging
-from typing import (
-    Any,
-)
+from typing import Any, cast
 
 from aiortc import (
     RTCIceCandidate,
@@ -38,21 +34,62 @@ class SignalService(INotifee):
     def __init__(self, host: IHost) -> None:
         self.host = host
         self.signal_protocol = TProtocol(SIGNALING_PROTOCOL)
-        self._handlers: dict[str, Callable[[dict[str, Any], str], Awaitable[None]]] = {}
+        self._handlers: dict[
+            str, list[Callable[[dict[str, Any], str], Awaitable[Any]]]
+        ] = defaultdict(list)
         self._is_listening = False
 
         # Track active signaling streams
         self.active_streams: dict[str, INetStream] = {}
         # ICE candidate queue for trickling
         self.ice_candidate_queues: dict[str, list[dict[str, Any]]] = {}
+        # Local ICE candidates gathered before signaling stream is ready
+        self.pending_local_ice: dict[
+            str, list[tuple[dict[str, Any] | None, dict[str, Any] | None]]
+        ] = {}
 
     def set_handler(
-        self, msg_type: str, handler: Callable[[dict[str, Any], str], Awaitable[None]]
+        self,
+        msg_type: str,
+        handler: Callable[[dict[str, Any], str], Awaitable[None]] | None,
     ) -> None:
-        self._handlers[msg_type] = handler
+        if handler is None:
+            self._handlers.pop(msg_type, None)
+        else:
+            self._handlers[msg_type] = [handler]
+
+    def add_handler(
+        self,
+        msg_type: str,
+        handler: Callable[[dict[str, Any], str], Awaitable[None]],
+    ) -> None:
+        self._handlers[msg_type].append(handler)
+
+    def remove_handler(
+        self,
+        msg_type: str,
+        handler: Callable[[dict[str, Any], str], Awaitable[None]],
+    ) -> None:
+        handlers = self._handlers.get(msg_type)
+        if not handlers:
+            return
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            return
+        if not handlers:
+            self._handlers.pop(msg_type, None)
 
     async def listen(self, network: Any, multiaddr: Any) -> None:
         self.host.set_stream_handler(self.signal_protocol, self.handle_signal)
+        if hasattr(network, "register_notifee"):
+            try:
+                network.register_notifee(self)
+            except Exception:
+                logger.debug(
+                    "Failed to register signal service as notifee", exc_info=True
+                )
+        self._is_listening = True
         return None
 
     async def handle_signal(self, stream: INetStream) -> None:
@@ -66,12 +103,19 @@ class SignalService(INotifee):
                     break
                 msg = json.loads(data.decode())
                 msg_type = msg.get("type")
-                if msg_type in self._handlers:
-                    await self._handlers[msg_type](msg, str(peer_id))
+                handlers = self._handlers.get(msg_type, [])
+                if handlers:
+                    for handler in list(handlers):
+                        try:
+                            await handler(msg, str(peer_id))
+                        except Exception:
+                            logger.exception(
+                                "Signal handler for %s raised an exception", msg_type
+                            )
                 else:
-                    print(f"No handler for msg type: {msg_type}")
+                    logger.debug("No handler for signal message type %s", msg_type)
             except Exception as e:
-                print(f"Error in signal handler for {peer_id}: {e}")
+                logger.error("Error in signal handler for %s: %s", peer_id, e)
                 break
 
     async def send_signal(self, peer_id: ID, message: dict[str, Any]) -> None:
@@ -93,40 +137,78 @@ class SignalService(INotifee):
         except Exception as e:
             logger.error(f"Failed to send signal to {peer_id}: {e}")
             # Clean up failed stream
-            if peer_id_str in self.active_streams:
-                del self.active_streams[peer_id_str]
+            self.active_streams.pop(peer_id_str, None)
             raise
 
     async def send_offer(
-        self, peer_id: ID, sdp: str, sdp_type: str, certhash: str
+        self,
+        peer_id: ID,
+        sdp: str,
+        sdp_type: str,
+        certhash: str,
+        extra: dict[str, Any] | None = None,
     ) -> None:
+        payload = {
+            "type": "offer",
+            "sdp": sdp,
+            "sdpType": sdp_type,
+            "certhash": certhash,
+        }
+        if extra:
+            payload.update(extra)
         await self.send_signal(
             peer_id,
-            {"type": "offer", "sdp": sdp, "sdpType": sdp_type, "certhash": certhash},
+            payload,
         )
 
     async def send_answer(
-        self, peer_id: ID, sdp: str, sdp_type: str, certhash: str
+        self,
+        peer_id: ID,
+        sdp: str,
+        sdp_type: str,
+        certhash: str,
+        extra: dict[str, Any] | None = None,
     ) -> None:
+        payload = {
+            "type": "answer",
+            "sdp": sdp,
+            "sdpType": sdp_type,
+            "certhash": certhash,
+        }
+        if extra:
+            payload.update(extra)
         await self.send_signal(
             peer_id,
-            {"type": "answer", "sdp": sdp, "sdpType": sdp_type, "certhash": certhash},
+            payload,
         )
 
-    async def send_ice_candidate(self, peer_id: ID, candidate: RTCIceCandidate) -> None:
+    async def send_ice_candidate(
+        self,
+        peer_id: ID,
+        candidate: RTCIceCandidate | dict[str, Any] | None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         """Send ICE candidate with trickling support"""
         peer_id_str = str(peer_id)
-        candidate_msg = {
+        if isinstance(candidate, dict) or candidate is None:
+            payload = candidate
+        else:
+            candidate_any = cast(Any, candidate)
+            if hasattr(candidate_any, "to_sdp"):
+                candidate_str = candidate_any.to_sdp()
+            else:
+                candidate_str = getattr(candidate_any, "candidate", None)
+            payload = {
+                "candidate": candidate_str,
+                "sdpMid": candidate_any.sdpMid,
+                "sdpMLineIndex": candidate_any.sdpMLineIndex,
+            }
+        candidate_msg: dict[str, Any] = {
             "type": "ice",
-            "candidateType": candidate.type,
-            "component": candidate.component,
-            "foundation": candidate.foundation,
-            "priority": candidate.priority,
-            "ip": candidate.ip,
-            "port": candidate.port,
-            "protocol": candidate.protocol,
-            "sdpMid": candidate.sdpMid,
+            "candidate": payload,
         }
+        if extra:
+            candidate_msg.update(extra)
 
         # Queue candidate if stream not ready
         if peer_id_str not in self.active_streams:
@@ -147,6 +229,27 @@ class SignalService(INotifee):
                 await self.send_signal(peer_id, candidate_msg)
             logger.debug(f"Flushed {len(candidates)} ICE candidates for {peer_id}")
 
+    def enqueue_local_candidate(
+        self,
+        peer_id: ID | str,
+        candidate_payload: dict[str, Any] | None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a locally gathered ICE candidate for later flushing."""
+        peer_id_str = str(peer_id)
+        self.pending_local_ice.setdefault(peer_id_str, []).append(
+            (candidate_payload, extra)
+        )
+
+    async def flush_local_ice(self, peer_id: ID) -> None:
+        """Send any queued local ICE candidates for the given peer."""
+        peer_id_str = str(peer_id)
+        pending = self.pending_local_ice.pop(peer_id_str, [])
+        if not pending:
+            return
+        for payload, extra in pending:
+            await self.send_ice_candidate(peer_id, payload, extra=extra)
+
     async def send_connection_state(
         self, peer_id: ID, state: str, reason: str | None = None
     ) -> None:
@@ -157,12 +260,16 @@ class SignalService(INotifee):
         await self.send_signal(peer_id, message)
 
     async def negotiate_connection(
-        self, peer_id: ID, offer: RTCSessionDescription, certhash: str
+        self,
+        peer_id: ID,
+        offer: RTCSessionDescription,
+        certhash: str,
+        extra: dict[str, Any] | None = None,
     ) -> RTCSessionDescription:
         """Complete SDP offer/answer exchange with error handling and timeouts"""
         try:
             # Send offer
-            await self.send_offer(peer_id, offer.sdp, offer.type, certhash)
+            await self.send_offer(peer_id, offer.sdp, offer.type, certhash, extra)
 
             # Wait for answer with timeout
             answer_received = trio.Event()
@@ -185,7 +292,10 @@ class SignalService(INotifee):
                         error_occurred = msg.get("message", "Unknown error")
                         answer_received.set()
 
-            # Set temporary handler for answer
+            prev_answer_handlers = list(self._handlers.get("answer", []))
+            prev_error_handlers = list(self._handlers.get("error", []))
+
+            # Set temporary handler for answer/error
             self.set_handler("answer", answer_handler)
             self.set_handler("error", answer_handler)
 
@@ -211,15 +321,37 @@ class SignalService(INotifee):
             logger.error(f"SDP negotiation failed with {peer_id}: {e}")
             await self.send_connection_state(peer_id, "failed", str(e))
             raise
+        finally:
+            # Restore previous handlers
+            if prev_answer_handlers:
+                self._handlers["answer"] = prev_answer_handlers
+            else:
+                self._handlers.pop("answer", None)
+            if prev_error_handlers:
+                self._handlers["error"] = prev_error_handlers
+            else:
+                self._handlers.pop("error", None)
 
     async def handle_incoming_connection(
         self, offer: RTCSessionDescription, sender_peer_id: str, certhash: str
     ) -> RTCSessionDescription:
         """Handle incoming connection offer and generate answer"""
         try:
-            # TODO: Return answer SDP after setting up peer connection
-            raise NotImplementedError(
-                "Handle incoming connection must be implemented by transport"
+            offer_msg = {
+                "type": "offer",
+                "sdp": offer.sdp,
+                "sdpType": offer.type,
+                "certhash": certhash,
+            }
+            handlers = self._handlers.get("offer", [])
+            if not handlers:
+                raise RuntimeError("No offer handler registered for signaling service")
+            for handler in list(handlers):
+                result = await handler(offer_msg, sender_peer_id)
+                if isinstance(result, RTCSessionDescription):
+                    return result
+            raise RuntimeError(
+                "Offer handlers did not return an RTCSessionDescription answer"
             )
 
         except Exception as e:
