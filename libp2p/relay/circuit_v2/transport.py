@@ -217,7 +217,14 @@ class CircuitV2Transport(ITransport):
         # Prefer stored /p2p-circuit addrs from peerstore
         # Try first to read addresses from peerstore
         peer_store = self.host.get_peerstore()
-        stored_addrs = peer_store.addrs(dest_info.peer_id)
+
+        stored_addrs = []
+        try:
+            stored_addrs = peer_store.addrs(dest_info.peer_id)
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch stored addresses for peer %s: %s", dest_info.peer_id, e
+            )
 
         # Get validated stored p2p-circuit addrs
         circuit_addrs = []
