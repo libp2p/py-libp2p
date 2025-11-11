@@ -163,7 +163,7 @@ def generate_new_rsa_identity() -> KeyPair:
 def generate_new_ed25519_identity() -> KeyPair:
     """
     Generate a new Ed25519 identity key pair.
-    
+
     Ed25519 is preferred for better interoperability with other libp2p implementations
     (e.g., Rust, Go) which often disable RSA support.
     """
@@ -220,7 +220,7 @@ def new_swarm(
           due to its improved performance and features.
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
-    
+
     Note: Ed25519 keys are used by default for better interoperability with
           other libp2p implementations (Rust, Go) which often disable RSA support.
     """

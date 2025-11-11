@@ -653,16 +653,17 @@ class Yamux(IMuxedConn):
                             self.streams[stream_id] = stream
                             self.stream_buffers[stream_id] = bytearray()
                             self.stream_events[stream_id] = trio.Event()
-                            
+
                             # Read any data that came with the SYN frame
                             if length > 0:
                                 data = await self.secured_conn.read(length)
                                 self.stream_buffers[stream_id].extend(data)
                                 self.stream_events[stream_id].set()
                                 logger.debug(
-                                    f"Read {length} bytes with SYN for stream {stream_id}"
+                                    f"Read {length} bytes with SYN "
+                                    f"for stream {stream_id}"
                                 )
-                            
+
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
                                 0,
