@@ -1,4 +1,5 @@
 import logging
+import platform
 import struct
 
 import pytest
@@ -19,7 +20,12 @@ from libp2p.peer.id import (
 from libp2p.security.insecure.transport import (
     InsecureTransport,
 )
+from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
+)
 from libp2p.stream_muxer.yamux.yamux import (
+    FLAG_FIN,
+    FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
     TYPE_PING,
@@ -27,6 +33,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     YAMUX_HEADER_FORMAT,
     MuxedStreamEOF,
     MuxedStreamError,
+    MuxedStreamReset,
     Yamux,
     YamuxStream,
 )
@@ -45,7 +52,9 @@ class TrioStreamAdapter(IRawConnection):
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
-            raise ValueError("Reading unbounded not supported")
+            return await self.receive_stream.receive_some(8192)
+        if n == 0:
+            raise ValueError("Reading zero bytes not supported")
         logging.debug(f"Attempting to read {n} bytes")
         with trio.move_on_after(2):
             data = await self.receive_stream.receive_some(n)
@@ -53,7 +62,9 @@ class TrioStreamAdapter(IRawConnection):
             return data
 
     async def close(self) -> None:
-        logging.debug("Closing stream")
+        logging.debug("Closing stream adapter")
+        await self.send_stream.aclose()
+        await self.receive_stream.aclose()
 
     def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
@@ -97,7 +108,6 @@ async def secure_conn_pair(key_pair, peer_id):
     async with trio.open_nursery() as nursery:
         nursery.start_soon(run_outbound, nursery_results)
         nursery.start_soon(run_inbound, nursery_results)
-        await trio.sleep(0.1)  # Give tasks a chance to finish
 
     client_conn = nursery_results.get("client")
     server_conn = nursery_results.get("server")
@@ -116,11 +126,10 @@ async def yamux_pair(secure_conn_pair, peer_id):
     client_yamux = Yamux(client_conn, peer_id, is_initiator=True)
     server_yamux = Yamux(server_conn, peer_id, is_initiator=False)
     async with trio.open_nursery() as nursery:
-        with trio.move_on_after(5):
-            nursery.start_soon(client_yamux.start)
-            nursery.start_soon(server_yamux.start)
-            await trio.sleep(0.1)
-            logging.debug("yamux_pair started")
+        nursery.start_soon(client_yamux.start)
+        nursery.start_soon(server_yamux.start)
+        await trio.sleep(0.1)  # allow start
+        logging.debug("yamux_pair started")
         yield client_yamux, server_yamux
     logging.debug("yamux_pair cleanup")
 
@@ -458,3 +467,160 @@ async def test_yamux_backpressure(yamux_pair):
         await stream.close()
 
     logging.debug("test_yamux_backpressure complete")
+
+
+@pytest.mark.trio
+async def test_yamux_fin_on_window_update(yamux_pair):
+    """
+    Tests that a FIN flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_fin_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_eof(stream):
+        with pytest.raises(MuxedStreamEOF, match="Stream is closed for receiving"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised EOF")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_eof, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_FIN")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_FIN,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_fin_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_rst_on_window_update(yamux_pair):
+    """
+    Tests that a RST flag is correctly processed when it arrives
+    on a WINDOW_UPDATE frame, as per the Yamux spec.
+    """
+    logging.debug("Starting test_yamux_rst_on_window_update")
+    client_yamux, server_yamux = yamux_pair
+    client_stream = await client_yamux.open_stream()
+
+    async def read_and_catch_reset(stream):
+        with pytest.raises(MuxedStreamReset, match="Stream was reset"):
+            logging.debug("Test: client_stream.read() blocking...")
+            await stream.read()
+        logging.debug("Test: client_stream.read() correctly raised Reset")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_and_catch_reset, client_stream)
+        await trio.sleep(0.1)
+        logging.debug("Test: Server injecting WINDOW_UPDATE with FLAG_RST")
+        header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_RST,
+            client_stream.stream_id,
+            0,
+        )
+        await server_yamux.secured_conn.write(header)
+
+    logging.debug("test_yamux_rst_on_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_accept_stream_unblocks_on_close(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes (fixes #930).
+
+    This test verifies that accept_stream() raises MuxedConnUnavailable when
+    the connection is closed, preventing indefinite hangs. This matches the
+    behavior of Mplex and QUIC implementations.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_close")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def close_connection():
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing server connection")
+        await server_yamux.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(close_connection)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_close complete")
+
+
+@pytest.mark.trio
+@pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason=(
+        "Directly closing secured_conn during active read causes worker crash "
+        "on Windows due to platform I/O semantics. The main functionality is "
+        "tested by test_yamux_accept_stream_unblocks_on_close which works on "
+        "all platforms. See 1014-WINDOWS-TEST-FAILURE-ANALYSIS.md for details."
+    ),
+)
+async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
+    """
+    Test that accept_stream unblocks when connection closes due to error.
+
+    This verifies the fix works for error scenarios, not just clean closes.
+    We close the underlying raw connection to simulate a network error.
+
+    Note: Skipped on Windows because directly closing connections during active
+    read causes a fatal worker crash. The core functionality is fully tested by
+    test_yamux_accept_stream_unblocks_on_close which works on all platforms.
+    """
+    logging.debug("Starting test_yamux_accept_stream_unblocks_on_error")
+    client_yamux, server_yamux = yamux_pair
+
+    exception_raised = trio.Event()
+
+    async def trigger_error():
+        await trio.sleep(0.1)  # Give accept_stream time to start waiting
+        logging.debug("Test: Closing underlying raw connection to trigger error")
+        # Close the underlying raw connection to simulate a network error
+        # This is more reliable than closing secured_conn directly
+        raw_conn = server_yamux.secured_conn.conn
+        await raw_conn.close()
+
+    async def accept_should_unblock():
+        with pytest.raises(MuxedConnUnavailable, match="Connection closed"):
+            logging.debug("Test: Waiting for accept_stream to unblock")
+            await server_yamux.accept_stream()
+        # If we reach here, the exception was raised (pytest.raises caught it)
+        logging.debug("Test: accept_stream correctly raised MuxedConnUnavailable")
+        exception_raised.set()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(accept_should_unblock)
+        nursery.start_soon(trigger_error)
+
+    # Assert that the exception was raised (test didn't hang)
+    assert exception_raised.is_set(), (
+        "accept_stream() should have raised MuxedConnUnavailable"
+    )
+    logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
