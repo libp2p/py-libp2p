@@ -419,7 +419,7 @@ class Yamux(IMuxedConn):
             )
             nursery.start_soon(self.handle_incoming)
             self.event_started.set()
-            
+
             logger.debug(
                 f"Yamux.start() nursery will now block until cancelled "
                 f"for {self.peer_id}"
