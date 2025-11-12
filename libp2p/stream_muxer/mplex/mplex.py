@@ -1,4 +1,12 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
+import inspect
 import logging
+from typing import (
+    Any,
+)
 
 import trio
 
@@ -66,15 +74,20 @@ class Mplex(IMuxedConn):
     event_shutting_down: trio.Event
     event_closed: trio.Event
     event_started: trio.Event
+    on_close: Callable[[], Awaitable[Any]] | None
 
-    def __init__(self, secured_conn: ISecureConn, peer_id: ID) -> None:
+    def __init__(
+        self,
+        secured_conn: ISecureConn,
+        peer_id: ID,
+        on_close: Callable[[], Awaitable[Any]] | None = None,
+    ) -> None:
         """
         Create a new muxed connection.
 
         :param secured_conn: an instance of ``ISecureConn``
-        :param generic_protocol_handler: generic protocol handler
-        for new muxed streams
         :param peer_id: peer_id of peer the connection is to
+        :param on_close: optional callback to be called when the connection closes
         """
         self.secured_conn = secured_conn
 
@@ -92,6 +105,7 @@ class Mplex(IMuxedConn):
         self.event_shutting_down = trio.Event()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        self.on_close = on_close
 
     async def start(self) -> None:
         await self.handle_incoming()
@@ -362,6 +376,19 @@ class Mplex(IMuxedConn):
                 await send_channel.aclose()
         self.event_closed.set()
         await self.new_stream_send_channel.aclose()
+        # Call on_close callback if provided
+        if self.on_close:
+            logger.debug(f"Calling on_close for peer {self.peer_id}")
+            try:
+                if inspect.iscoroutinefunction(self.on_close):
+                    await self.on_close()
+                else:
+                    # Handle case where on_close is not a coroutine function
+                    result = self.on_close()
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception as callback_error:
+                logger.error(f"Error in on_close callback: {callback_error}")
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""

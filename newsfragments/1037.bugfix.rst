@@ -1,0 +1,1 @@
+Fixed Mplex connection cleanup to properly handle connection closure callbacks, resolving interop test failures with chromium-rust-v0.53.
