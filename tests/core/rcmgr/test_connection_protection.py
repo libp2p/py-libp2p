@@ -74,7 +74,7 @@ class TestConnectionProtection:
 
         # Set a mock resource scope
         mock_scope = Mock()
-        mock_scope.close = AsyncMock()
+        mock_scope.close = Mock()
         swarm_conn.set_resource_scope(mock_scope)
 
         # Mock the cleanup method to avoid actual cleanup
@@ -129,7 +129,7 @@ class TestConnectionProtection:
 
         # Set a mock resource scope that raises error
         mock_scope = Mock()
-        mock_scope.close = AsyncMock(side_effect=Exception("Cleanup error"))
+        mock_scope.close = Mock(side_effect=Exception("Cleanup error"))
         swarm_conn.set_resource_scope(mock_scope)
 
         # Mock the cleanup method to avoid actual cleanup

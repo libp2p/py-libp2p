@@ -99,7 +99,7 @@ class SwarmConn(INetConn):
             try:
                 # Release the resource scope
                 if hasattr(self._resource_scope, "close"):
-                    await self._resource_scope.close()
+                    self._resource_scope.close()
                 elif hasattr(self._resource_scope, "release"):
                     self._resource_scope.release()
                 logging.debug(
