@@ -49,7 +49,6 @@ def create_noise_upgrader(key_pair):
         libp2p_keypair=key_pair,
         noise_privkey=create_new_key_pair().private_key,
         early_data=None,
-        with_noise_pipes=False,
     )
     return TransportUpgrader(
         secure_transports_by_protocol={TProtocol(NOISE_PROTOCOL_ID): noise_transport},
