@@ -36,6 +36,7 @@ def create_self_signed_certificate():
     """Create a self-signed certificate for WSS testing."""
     try:
         import datetime
+        from datetime import timezone
         import ipaddress
         import ssl
 
@@ -70,9 +71,9 @@ def create_self_signed_certificate():
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_before(datetime.datetime.now(timezone.utc))
             .not_valid_after(
-                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+                datetime.datetime.now(timezone.utc) + datetime.timedelta(days=1)
             )
             .add_extension(
                 x509.SubjectAlternativeName(
