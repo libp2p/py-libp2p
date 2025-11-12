@@ -8,6 +8,7 @@ import trio
 from trio.lowlevel import open_process
 
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.exceptions import SwarmException
@@ -139,9 +140,11 @@ async def test_ping_with_js_node():
     peer_store.add_key_pair(py_peer_id, key_pair)
 
     # Use Noise to match JS libp2p defaults
+    # Noise protocol requires X25519 keys for static key (as per Noise spec)
+    noise_key_pair = create_new_x25519_key_pair()
     noise_transport = NoiseTransport(
         libp2p_keypair=key_pair,
-        noise_privkey=create_new_key_pair().private_key,
+        noise_privkey=noise_key_pair.private_key,
         early_data=None,
     )
     upgrader = TransportUpgrader(
@@ -154,12 +157,16 @@ async def test_ping_with_js_node():
 
     # Connect to JS node
     peer_info = PeerInfo(peer_id, [maddr])
+    
+    # Add peer info to peerstore before connecting
+    peer_store.add_addrs(peer_id, [maddr], 60)  # 60 second TTL
 
     print(f"Python trying to connect to: {peer_info}")
 
     # Use the host as a context manager
     async with host.run(listen_addrs=[]):
-        await trio.sleep(1)
+        # Give the host time to fully start
+        await trio.sleep(2)
 
         try:
             with trio.fail_after(30):
