@@ -12,14 +12,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the py-libp2p-${commitSha} folder so we can use it as a local dependency
-COPY py-libp2p-* /app/py-libp2p
+COPY ./ /app/py-libp2p
 
 # Copy pyproject.toml and install Python dependencies
-COPY pyproject.toml .
+COPY interop/transport/pyproject.toml .
 RUN pip install --no-cache-dir -e .
 
 # Copy the ping test implementation
-COPY ping_test.py .
+COPY interop/transport/ping_test.py .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
