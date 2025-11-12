@@ -108,6 +108,7 @@ class BasicHost(IHost):
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
+        psk: str | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -148,6 +149,7 @@ class BasicHost(IHost):
         self.bootstrap = None
         if bootstrap:
             self.bootstrap = BootstrapDiscovery(network, bootstrap)
+        self.psk = psk
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
