@@ -20,5 +20,3 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ping_test*"]
-
- 
