@@ -4,7 +4,7 @@ Transport registry for dynamic transport selection based on multiaddr protocols.
 
 from collections.abc import Callable
 import logging
-from typing import Any
+from typing import Any, cast
 
 from multiaddr import Multiaddr
 from multiaddr.protocols import Protocol
@@ -37,7 +37,45 @@ def _get_websocket_transport() -> Any:
     return WebsocketTransport
 
 
+def _get_webrtc_transport() -> Any:
+    from libp2p.transport.webrtc.private_to_private.transport import WebRTCTransport
+
+    return WebRTCTransport
+
+
 logger = logging.getLogger("libp2p.transport.registry")
+
+
+def _is_valid_webrtc_multiaddr(maddr: Multiaddr) -> bool:
+    """
+    Validate that a multiaddr has a valid WebRTC structure.
+
+    :param maddr: The multiaddr to validate
+    :return: True if valid WebRTC structure, False otherwise
+    """
+    try:
+        protocols = [p.name for p in maddr.protocols()]
+
+        # Must have webrtc protocol
+        if "webrtc" not in protocols:
+            return False
+
+        # WebRTC multiaddr should have p2p protocol (target peer)
+        if "p2p" not in protocols:
+            return False
+
+        # For private-to-private, should have p2p-circuit
+        # For private-to-public, should have webrtc-direct and certhash
+        if "p2p-circuit" in protocols:
+            # Private-to-private: must have relay path
+            return True
+        elif "webrtc-direct" in protocols:
+            # Private-to-public: should have certhash
+            return "certhash" in protocols
+
+        return True
+    except Exception:
+        return False
 
 
 def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
@@ -103,6 +141,10 @@ class TransportRegistry:
         QUICTransport = _get_quic_transport()
         self.register_transport("quic", QUICTransport)
         self.register_transport("quic-v1", QUICTransport)
+
+        # Register WebRTC transport for /webrtc protocol
+        WebRTCTransport = _get_webrtc_transport()
+        self.register_transport("webrtc", WebRTCTransport)
 
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
@@ -172,6 +214,19 @@ class TransportRegistry:
                 QUICTransport = _get_quic_transport()
                 config = kwargs.get("config")
                 return QUICTransport(private_key, config)
+            elif protocol == "webrtc":
+                # WebRTC transport can be created with optional config
+                config = kwargs.get("config", {})
+                transport_ctor = cast(Any, transport_class)
+                if config:
+                    try:
+                        return transport_ctor(config)
+                    except TypeError:
+                        logger.debug(
+                            "WebRTC transport %s does not accept config parameter",
+                            transport_class,
+                        )
+                return transport_ctor()
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()
@@ -241,6 +296,16 @@ def create_transport_for_multiaddr(
                     return registry.create_transport("wss", upgrader, **kwargs)
                 else:
                     return registry.create_transport("ws", upgrader, **kwargs)
+        elif "webrtc" in protocols:
+            # For WebRTC, we need a valid structure like:
+            # /ip4/127.0.0.1/tcp/8080/ws/p2p/RELAY_ID/p2p-circuit/webrtc/p2p/TARGET_ID
+            # or /ip4/127.0.0.1/udp/0/webrtc-direct/certhash/.../p2p/PEER_ID
+            # Check if the multiaddr has proper WebRTC structure
+            if _is_valid_webrtc_multiaddr(maddr):
+                registry = get_transport_registry()
+                # WebRTC transport doesn't require upgrader in the same way
+                # Create with config if needed
+                return registry.create_transport("webrtc", upgrader, **kwargs)
         elif "tcp" in protocols:
             # For TCP, we need a valid structure like /ip4/127.0.0.1/tcp/8080
             # Check if the multiaddr has proper TCP structure
