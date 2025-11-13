@@ -437,9 +437,7 @@ class WebRTCTransport(ITransport):
 
         try:
             peer_info = PeerInfo(target_peer_id, [circuit_addr])
-            raw_conn = await self._relay_transport.dial_peer_info(
-                peer_info, relay_peer_id=relay_peer
-            )
+            raw_conn = await self._relay_transport.dial_peer_info(peer_info)
         except Exception as exc:
             raise WebRTCError(f"Failed to dial target via relay: {exc}") from exc
 

@@ -201,22 +201,95 @@ async def initiate_connection(
             peer_connection.on("connectionstatechange", on_connection_state_change)
 
         # Wait for either success or failure
-        with trio.move_on_after(timeout) as cancel_scope:
-            async with trio.open_nursery() as nursery:
-                nursery.start_soon(_wait_for_event, data_channel_ready)
-                nursery.start_soon(_wait_for_event, connection_failed)
+        # Use a single event to track completion and a flag for success/failure
+        completion_event = trio.Event()
+        success_result = False
 
-                # Break out when either event is set
-                if data_channel_ready.is_set():
-                    nursery.cancel_scope.cancel()
-                elif connection_failed.is_set():
-                    raise WebRTCError("WebRTC connection failed")
+        async def wait_for_success() -> None:
+            nonlocal success_result
+            try:
+                await data_channel_ready.wait()
+                success_result = True
+                completion_event.set()
+            except Exception as e:
+                logger.debug(f"Error in wait_for_success: {e}")
+                completion_event.set()
 
-        if cancel_scope.cancelled_caught:
-            raise WebRTCError("Data channel connection timeout")
+        async def wait_for_failure() -> None:
+            try:
+                await connection_failed.wait()
+                completion_event.set()
+            except Exception as e:
+                logger.debug(f"Error in wait_for_failure: {e}")
+                completion_event.set()
 
-        if not data_channel_ready.is_set():
-            raise WebRTCError("Data channel failed to open")
+        try:
+            with trio.move_on_after(timeout) as cancel_scope:
+                try:
+                    async with trio.open_nursery() as nursery:
+                        nursery.start_soon(wait_for_success)
+                        nursery.start_soon(wait_for_failure)
+                        await completion_event.wait()
+                        # Cancel nursery tasks since we got what we needed
+                        # This is safe - tasks will handle cancellation gracefully
+                        nursery.cancel_scope.cancel()
+                except* trio.Cancelled:
+                    # Cancellation is expected when we cancel the nursery
+                    # Check if we got what we wanted before cancellation
+                    if not data_channel_ready.is_set() and connection_failed.is_set():
+                        raise WebRTCError("WebRTC connection failed")
+                    # Otherwise, cancellation is fine if we got success
+                except* Exception as eg:
+                    # Handle ExceptionGroup from Trio nursery
+                    # Extract meaningful exceptions (skip Cancelled)
+                    errors = [
+                        e for e in eg.exceptions if not isinstance(e, trio.Cancelled)
+                    ]
+                    if errors:
+                        # Log all errors for debugging
+                        for err in errors:
+                            logger.error(f"Nursery task error: {err}", exc_info=err)
+                        # Use the first error as the primary cause
+                        primary_error = errors[0]
+                        # Check if it's a connection failure
+                        if connection_failed.is_set():
+                            raise WebRTCError(
+                                "WebRTC connection failed"
+                            ) from primary_error
+                        # Re-raise if it's already a WebRTCError
+                        if isinstance(primary_error, WebRTCError):
+                            raise primary_error
+                        # Otherwise, wrap it
+                        raise WebRTCError(
+                            f"Connection establishment error: {primary_error}"
+                        ) from primary_error
+                    # If only cancellations, check our state
+                    if connection_failed.is_set():
+                        raise WebRTCError("WebRTC connection failed")
+                    if not data_channel_ready.is_set():
+                        raise WebRTCError("Unexpected exception group from nursery")
+
+            # Check results after waiting
+            if connection_failed.is_set():
+                raise WebRTCError("WebRTC connection failed")
+
+            if cancel_scope.cancelled_caught:
+                if not data_channel_ready.is_set():
+                    raise WebRTCError("Data channel connection timeout")
+
+            if not data_channel_ready.is_set():
+                raise WebRTCError("Data channel failed to open")
+
+        except WebRTCError:
+            # Re-raise WebRTCErrors as-is
+            raise
+        except Exception as e:
+            # Handle any other exceptions
+            # Check if it's a connection failure
+            if connection_failed.is_set():
+                raise WebRTCError("WebRTC connection failed") from e
+            # Otherwise, wrap it
+            raise WebRTCError(f"Connection establishment error: {e}") from e
 
         # Create connection wrapper
         connection = WebRTCRawConnection(
@@ -226,27 +299,45 @@ async def initiate_connection(
             is_initiator=True,
         )
 
-        logger.debug("initiator connected, closing init channel")
-        data_channel.close()
-
         logger.info(f"Successfully established WebRTC connection to {target_peer_id}")
         return connection
 
     except Exception as e:
         logger.error(f"Failed to initiate WebRTC connection: {e}")
 
-        # Cleanup on failure
+        # Cleanup on failure - handle closed event loops gracefully
+        # Note: This cleanup happens while still in the open_loop()
+        #  context from transport.dial()
         if peer_connection:
             try:
-                await TrioSafeWebRTCOperations.cleanup_webrtc_resources(peer_connection)
+                bridge = TrioSafeWebRTCOperations._get_bridge()
+                try:
+                    async with bridge:
+                        await bridge.close_peer_connection(peer_connection)
+                except (RuntimeError, Exception) as cleanup_error:
+                    # Check if it's a closed loop issue
+                    error_str = str(cleanup_error).lower()
+                    if "closed" in error_str or "no running event loop" in error_str:
+                        logger.debug("Event loop closed during cleanup (non-critical)")
+                    else:
+                        logger.warning(
+                            f"Error cleaning up peer connection: {cleanup_error}"
+                        )
             except Exception as cleanup_error:
-                logger.warning(f"Error cleaning up peer connection: {cleanup_error}")
+                # Final fallback - log but don't fail
+                error_str = str(cleanup_error).lower()
+                if "closed" not in error_str:
+                    logger.warning(
+                        f"Unexpected err during conn cleanup: {cleanup_error}"
+                    )
 
         if signaling_stream:
             try:
                 await signaling_stream.close()
             except Exception as cleanup_error:
-                logger.warning(f"Error cleaning up signaling stream: {cleanup_error}")
+                logger.debug(
+                    f"Error closing signaling stream during cleanup: {cleanup_error}"
+                )
 
         raise WebRTCError(f"Connection initiation failed: {e}") from e
 

@@ -44,6 +44,7 @@ class Transport(ISecureTransport):
     webtransport_support: WebTransportSupport
     early_data_manager: EarlyDataManager
     rekey_manager: RekeyManager
+    with_noise_pipes: bool
     _prologue: bytes | None
 
     def __init__(
@@ -53,6 +54,7 @@ class Transport(ISecureTransport):
         early_data: bytes | None = None,
         early_data_handler: EarlyDataHandler | None = None,
         rekey_policy: RekeyPolicy | None = None,
+        with_noise_pipes: bool = False,
     ) -> None:
         """
         Initialize enhanced Noise transport.
@@ -63,12 +65,14 @@ class Transport(ISecureTransport):
             early_data: Optional early data
             early_data_handler: Optional early data handler
             rekey_policy: Optional rekey policy
+            with_noise_pipes: Enable Noise pipes support (not implemented)
 
         """
         self.libp2p_privkey = libp2p_keypair.private_key
         self.noise_privkey = noise_privkey
         self.local_peer = ID.from_pubkey(libp2p_keypair.public_key)
         self.early_data = early_data
+        self.with_noise_pipes = with_noise_pipes
 
         # Initialize advanced features
         self.webtransport_support = WebTransportSupport()

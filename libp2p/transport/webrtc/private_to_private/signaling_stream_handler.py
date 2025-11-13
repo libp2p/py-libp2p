@@ -120,22 +120,90 @@ async def handle_incoming_stream(
         peer_connection.on("connectionstatechange", on_connection_state_change)
 
         # Wait for either success or failure
-        with trio.move_on_after(timeout) as cancel_scope:
-            async with trio.open_nursery() as nursery:
-                nursery.start_soon(_wait_for_event, data_channel_ready)
-                nursery.start_soon(_wait_for_event, connection_failed)
+        completion_event = trio.Event()
 
-                # Break out when either event is set
-                if data_channel_ready.is_set():
-                    nursery.cancel_scope.cancel()
-                elif connection_failed.is_set():
-                    raise WebRTCError("WebRTC connection failed")
+        async def wait_for_success() -> None:
+            try:
+                await data_channel_ready.wait()
+                completion_event.set()
+            except Exception as e:
+                logger.debug(f"Error in wait_for_success: {e}")
+                completion_event.set()
 
-        if cancel_scope.cancelled_caught:
-            raise WebRTCError("Data channel connection timeout")
+        async def wait_for_failure() -> None:
+            try:
+                await connection_failed.wait()
+                completion_event.set()
+            except Exception as e:
+                logger.debug(f"Error in wait_for_failure: {e}")
+                completion_event.set()
 
-        if not data_channel_ready.is_set():
-            raise WebRTCError("Data channel failed to open")
+        try:
+            with trio.move_on_after(timeout) as cancel_scope:
+                try:
+                    async with trio.open_nursery() as nursery:
+                        nursery.start_soon(wait_for_success)
+                        nursery.start_soon(wait_for_failure)
+                        await completion_event.wait()
+                        # Cancel nursery tasks since we got what we needed
+                        nursery.cancel_scope.cancel()
+                except* trio.Cancelled:
+                    # Cancellation is expected when we cancel the nursery
+                    # Check if we got what we wanted before cancellation
+                    if not data_channel_ready.is_set() and connection_failed.is_set():
+                        raise WebRTCError("WebRTC connection failed")
+                    # Otherwise, cancellation is fine if we got success
+                except* Exception as eg:
+                    # Handle ExceptionGroup from Trio nursery
+                    # Extract meaningful exceptions (skip Cancelled)
+                    errors = [
+                        e for e in eg.exceptions if not isinstance(e, trio.Cancelled)
+                    ]
+                    if errors:
+                        # Log all errors for debugging
+                        for err in errors:
+                            logger.error(f"Nursery task error: {err}", exc_info=err)
+                        # Use the first error as the primary cause
+                        primary_error = errors[0]
+                        # Check if it's a connection failure
+                        if connection_failed.is_set():
+                            raise WebRTCError(
+                                "WebRTC connection failed"
+                            ) from primary_error
+                        # Re-raise if it's already a WebRTCError
+                        if isinstance(primary_error, WebRTCError):
+                            raise primary_error
+                        # Otherwise, wrap it
+                        raise WebRTCError(
+                            f"Connection establishment error: {primary_error}"
+                        ) from primary_error
+                    # If only cancellations, check our state
+                    if connection_failed.is_set():
+                        raise WebRTCError("WebRTC connection failed")
+                    if not data_channel_ready.is_set():
+                        raise WebRTCError("Unexpected exception group from nursery")
+
+            # Check results after waiting
+            if connection_failed.is_set():
+                raise WebRTCError("WebRTC connection failed")
+
+            if cancel_scope.cancelled_caught:
+                if not data_channel_ready.is_set():
+                    raise WebRTCError("Data channel connection timeout")
+
+            if not data_channel_ready.is_set():
+                raise WebRTCError("Data channel failed to open")
+
+        except WebRTCError:
+            # Re-raise WebRTCErrors as-is
+            raise
+        except Exception as e:
+            # Handle any other exceptions
+            # Check if it's a connection failure
+            if connection_failed.is_set():
+                raise WebRTCError("WebRTC connection failed") from e
+            # Otherwise, wrap it
+            raise WebRTCError(f"Connection establishment error: {e}") from e
 
         if not received_data_channel:
             raise WebRTCError("No data channel received")

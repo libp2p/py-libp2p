@@ -136,8 +136,21 @@ class WebRTCAsyncBridge:
         try:
             await aio_as_trio(peer_connection.close())
             logger.debug("Successfully closed peer connection")
+        except RuntimeError as e:
+            # Handle closed event loop gracefully
+            if "closed" in str(e).lower() or "no running event loop" in str(e).lower():
+                logger.debug(
+                    "Event loop closed during peer connection cleanup (non-critical)"
+                )
+                return
+            raise
         except Exception as e:
-            logger.error(f"Failed to close peer connection: {e}")
+            # Only log as error if it's not a closed loop issue
+            error_str = str(e).lower()
+            if "closed" not in error_str and "no running event loop" not in error_str:
+                logger.error(f"Failed to close peer connection: {e}")
+            else:
+                logger.debug(f"Event loop issue during cleanup (non-critical): {e}")
             raise
 
     async def close_data_channel(self, data_channel: RTCDataChannel) -> None:
@@ -145,8 +158,21 @@ class WebRTCAsyncBridge:
         try:
             await aio_as_trio(data_channel.close)
             logger.debug("Successfully closed data channel")
+        except RuntimeError as e:
+            # Handle closed event loop gracefully
+            if "closed" in str(e).lower() or "no running event loop" in str(e).lower():
+                logger.debug(
+                    "Event loop closed during data channel cleanup (non-critical)"
+                )
+                return
+            raise
         except Exception as e:
-            logger.error(f"Failed to close data channel: {e}")
+            # Only log as error if it's not a closed loop issue
+            error_str = str(e).lower()
+            if "closed" not in error_str and "no running event loop" not in error_str:
+                logger.error(f"Failed to close data channel: {e}")
+            else:
+                logger.debug(f"Event loop issue during cleanup (non-critical): {e}")
             raise
 
     async def send_data(self, data_channel: RTCDataChannel, data: bytes) -> None:
@@ -236,15 +262,28 @@ class TrioSafeWebRTCOperations:
     async def cleanup_webrtc_resources(*resources: Any) -> None:
         """Clean up WebRTC resources safely"""
         bridge = get_webrtc_bridge()
-        async with bridge:
-            for resource in resources:
-                try:
-                    if hasattr(resource, "close"):
-                        if isinstance(resource, RTCPeerConnection):
-                            await bridge.close_peer_connection(resource)
-                        elif isinstance(resource, RTCDataChannel):
-                            await bridge.close_data_channel(resource)
-                        else:
-                            await aio_as_trio(resource.close())
-                except Exception as e:
-                    logger.warning(f"Error cleaning up resource {type(resource)}: {e}")
+        try:
+            async with bridge:
+                for resource in resources:
+                    try:
+                        if hasattr(resource, "close"):
+                            if isinstance(resource, RTCPeerConnection):
+                                await bridge.close_peer_connection(resource)
+                            elif isinstance(resource, RTCDataChannel):
+                                await bridge.close_data_channel(resource)
+                            else:
+                                await aio_as_trio(resource.close())
+                    except Exception as e:
+                        logger.warning(
+                            f"Error cleaning up resource {type(resource)}: {e}"
+                        )
+        except RuntimeError as e:
+            # Event loop might be closed - this is acceptable during cleanup
+            if (
+                "closed" not in str(e).lower()
+                and "no running event loop" not in str(e).lower()
+            ):
+                raise
+            logger.debug("Event loop closed during cleanup (non-critical)")
+        except Exception as e:
+            logger.warning(f"Error during WebRTC resource cleanup: {e}")

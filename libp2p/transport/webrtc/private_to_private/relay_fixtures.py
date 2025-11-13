@@ -98,7 +98,7 @@ async def relay_host() -> AsyncIterator[IHost]:
         # Start the relay protocol using background_trio_service
         # This properly initializes the Service manager
         async with background_trio_service(relay_protocol):
-            await trio.sleep(0.1)  # Give it time to start
+            await trio.sleep(0.1)
 
             try:
                 yield relay_host
