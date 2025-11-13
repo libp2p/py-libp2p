@@ -1,0 +1,1 @@
+Fixed interoperability with rust-libp2p by switching default key generation to Ed25519 and enhancing Yamux to handle data with SYN/ACK frames.
