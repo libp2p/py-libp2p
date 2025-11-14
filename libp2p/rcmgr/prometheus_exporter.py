@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 
 try:
-    from prometheus_client import (
+    from prometheus_client import (  # type: ignore[import]
         CONTENT_TYPE_LATEST,
         CollectorRegistry,
         Gauge,

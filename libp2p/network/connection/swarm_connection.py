@@ -68,9 +68,13 @@ class SwarmConn(INetConn):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
         else:
-            logging.error(
-                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute"
+            # If on_close doesn't exist, create it. This ensures compatibility
+            # with muxer implementations that don't have on_close support.
+            logging.debug(
+                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute, "
+                "creating it"
             )
+            setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
 
     def set_resource_scope(self, scope: Any) -> None:
         """Set the resource scope for this connection."""
@@ -99,7 +103,7 @@ class SwarmConn(INetConn):
             try:
                 # Release the resource scope
                 if hasattr(self._resource_scope, "close"):
-                    await self._resource_scope.close()
+                    self._resource_scope.close()
                 elif hasattr(self._resource_scope, "release"):
                     self._resource_scope.release()
                 logging.debug(

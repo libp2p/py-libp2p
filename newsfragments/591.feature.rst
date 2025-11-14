@@ -1,0 +1,13 @@
+Noise protocol now uses spec-compliant X25519 keys for DH exchange while maintaining Ed25519 keys for libp2p identity signatures. This fixes signature verification failures and ensures compatibility with other libp2p implementations. Updated ``tests/utils/factories.py`` to use separate X25519 keys for Noise static keys and ``libp2p/security/noise/patterns.py`` to properly handle key separation during handshake.
+
+Full Specification Compliance Achieved:
+Stream Muxers: Added stream_muxers field to NoiseExtensions (spec requirement)
+Legacy Cleanup: Removed non-spec data field from NoiseHandshakePayload
+Protobuf Schema: Updated to match official libp2p/specs/noise
+WebTransport Support: Certificate hash exchange fully implemented
+
+Beyond Specification - Advanced Features:
+Early Data (0-RTT): Full implementation with handlers and callbacks
+Advanced Rekeying: Configurable policies and statistics
+Static Key Caching: Performance optimizations
+Comprehensive Management: Full handler system for early data
