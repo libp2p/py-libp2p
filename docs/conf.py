@@ -13,9 +13,9 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
+# sys.path.insert(0, str(Path('.').absolute()))
 
 import doctest
-import os
 import sys
 
 sys.path.insert(0, os.path.abspath(".."))
@@ -28,7 +28,9 @@ except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
 # Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+from libp2p.utils.paths import get_script_dir, join_paths
+
+pyproject_path = join_paths(get_script_dir(__file__), "..", "pyproject.toml")
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)
