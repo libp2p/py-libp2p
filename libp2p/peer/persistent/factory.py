@@ -10,19 +10,19 @@ from typing import Any, Literal
 
 # Optional imports - check availability once at module level
 try:
-    import plyvel
+    import plyvel  # type: ignore[import-untyped]
 
     PLYVEL_AVAILABLE = True
 except ImportError:
-    plyvel = None
+    plyvel = None  # type: ignore[assignment]
     PLYVEL_AVAILABLE = False
 
 try:
-    import rocksdb
+    import rocksdb  # type: ignore[import-untyped]
 
     ROCKSDB_AVAILABLE = True
 except ImportError:
-    rocksdb = None
+    rocksdb = None  # type: ignore[assignment]
     ROCKSDB_AVAILABLE = False
 
 from .async_.peerstore import AsyncPersistentPeerStore

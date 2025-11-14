@@ -111,7 +111,8 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
                             setattr(opts, key, value)
 
                     # Open RocksDB database
-                    self.db = self._rocksdb.DB(str(self.path), opts)
+                    # pyrefly can't infer types for dynamically imported modules
+                    self.db = self._rocksdb.DB(str(self.path), opts)  # type: ignore[missing-attribute]
 
     def get(self, key: bytes) -> bytes | None:
         """Retrieve a value by key."""
