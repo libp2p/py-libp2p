@@ -653,6 +653,17 @@ class Yamux(IMuxedConn):
                             self.streams[stream_id] = stream
                             self.stream_buffers[stream_id] = bytearray()
                             self.stream_events[stream_id] = trio.Event()
+
+                            # Read any data that came with the SYN frame
+                            if length > 0:
+                                data = await self.secured_conn.read(length)
+                                self.stream_buffers[stream_id].extend(data)
+                                self.stream_events[stream_id].set()
+                                logger.debug(
+                                    f"Read {length} bytes with SYN "
+                                    f"for stream {stream_id}"
+                                )
+
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
                                 0,
@@ -680,10 +691,20 @@ class Yamux(IMuxedConn):
                 elif typ == TYPE_DATA and flags & FLAG_ACK:
                     async with self.streams_lock:
                         if stream_id in self.streams:
-                            logger.debug(
-                                f"Received ACK for stream"
-                                f"{stream_id} for peer {self.peer_id}"
-                            )
+                            # Read any data that came with the ACK
+                            if length > 0:
+                                data = await self.secured_conn.read(length)
+                                self.stream_buffers[stream_id].extend(data)
+                                self.stream_events[stream_id].set()
+                                logger.debug(
+                                    f"Received ACK with {length} bytes for stream "
+                                    f"{stream_id} for peer {self.peer_id}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"Received ACK (no data) for stream {stream_id} "
+                                    f"for peer {self.peer_id}"
+                                )
                 elif typ == TYPE_GO_AWAY:
                     error_code = length
                     if error_code == GO_AWAY_NORMAL:

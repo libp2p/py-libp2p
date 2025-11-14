@@ -33,8 +33,11 @@ from libp2p.rcmgr import ResourceManager
 from libp2p.crypto.keys import (
     KeyPair,
 )
+from libp2p.crypto.ed25519 import (
+    create_new_key_pair as create_new_ed25519_key_pair,
+)
 from libp2p.crypto.rsa import (
-    create_new_key_pair,
+    create_new_key_pair as create_new_rsa_key_pair,
 )
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
@@ -154,7 +157,17 @@ def create_mplex_muxer_option() -> TMuxerOptions:
 
 
 def generate_new_rsa_identity() -> KeyPair:
-    return create_new_key_pair()
+    return create_new_rsa_key_pair()
+
+
+def generate_new_ed25519_identity() -> KeyPair:
+    """
+    Generate a new Ed25519 identity key pair.
+
+    Ed25519 is preferred for better interoperability with other libp2p implementations
+    (e.g., Rust, Go) which often disable RSA support.
+    """
+    return create_new_ed25519_key_pair()
 
 
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
@@ -207,9 +220,14 @@ def new_swarm(
           due to its improved performance and features.
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
+
+    Note: Ed25519 keys are used by default for better interoperability with
+          other libp2p implementations (Rust, Go) which often disable RSA support.
     """
     if key_pair is None:
-        key_pair = generate_new_rsa_identity()
+        # Use Ed25519 by default for better interoperability with Rust/Go libp2p
+        # which often compile without RSA support
+        key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
 
