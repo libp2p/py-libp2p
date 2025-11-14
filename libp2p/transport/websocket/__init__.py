@@ -32,3 +32,6 @@ __all__ = [
     "WithAutoTLS",
     "combine_configs",
 ]
+
+WebSocketTransport = WebsocketTransport
+__all__.append("WebSocketTransport")

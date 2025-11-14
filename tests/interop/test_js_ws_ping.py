@@ -157,7 +157,7 @@ async def test_ping_with_js_node():
 
     # Connect to JS node
     peer_info = PeerInfo(peer_id, [maddr])
-    
+
     # Add peer info to peerstore before connecting
     peer_store.add_addrs(peer_id, [maddr], 60)  # 60 second TTL
 

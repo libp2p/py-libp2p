@@ -642,6 +642,13 @@ class Yamux(IMuxedConn):
                     f"for peer {self.peer_id}"
                 )
                 header = await self.secured_conn.read(HEADER_SIZE)
+                if header is None:
+                    logger.debug(
+                        f"Connection closed (None returned) for peer {self.peer_id}"
+                    )
+                    self.event_shutting_down.set()
+                    await self._cleanup_on_error()
+                    break
                 header_len = len(header)
                 logger.debug(
                     f"Yamux handle_incoming() received {header_len} bytes "
@@ -768,6 +775,14 @@ class Yamux(IMuxedConn):
                         data = (
                             await self.secured_conn.read(length) if length > 0 else b""
                         )
+                        if data is None:
+                            logger.debug(
+                                f"Connection closed (None returned) while reading data "
+                                f"for peer {self.peer_id}"
+                            )
+                            self.event_shutting_down.set()
+                            await self._cleanup_on_error()
+                            break
                         data_len = len(data)
                         logger.debug(
                             f"Yamux handle_incoming() received {data_len} bytes "
@@ -912,7 +927,10 @@ class Yamux(IMuxedConn):
         self.event_shutting_down.set()
 
         # Close the new stream channel to unblock any pending accept_stream()
-        self.new_stream_send_channel.close()
+        try:
+            self.new_stream_send_channel.close()
+        except trio.ClosedResourceError:
+            pass  # Already closed
 
         # Clean up streams
         async with self.streams_lock:
@@ -951,7 +969,3 @@ class Yamux(IMuxedConn):
                     self.on_close()
             except Exception as callback_error:
                 logger.error(f"Error in on_close callback: {callback_error}")
-
-        # Cancel nursery tasks
-        if self._nursery:
-            self._nursery.cancel_scope.cancel()
