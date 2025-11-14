@@ -1,9 +1,0 @@
-Implemented timeout enforcement for MplexStream deadline functionality.
-
-The MplexStream class now properly enforces read and write deadlines using trio.fail_after(),
-preventing operations from hanging indefinitely. The set_deadline(), set_read_deadline(),
-and set_write_deadline() methods now include input validation and return meaningful
-boolean values. TimeoutError exceptions are raised when operations exceed their deadlines.
-
-This addresses the issue where deadline methods existed but were not actually enforced,
-improving reliability and preventing resource leaks in production applications.

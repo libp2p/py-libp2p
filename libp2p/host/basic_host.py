@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import (
     AsyncIterator,
     Sequence,
@@ -9,17 +11,18 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
-    Optional,
 )
 
 import multiaddr
 
 from libp2p.abc import (
     IHost,
+    IMuxedConn,
     INetConn,
     INetStream,
     INetworkService,
     IPeerStore,
+    IRawConnection,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -58,6 +61,7 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+from libp2p.rcmgr import ResourceManager
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -66,6 +70,7 @@ if TYPE_CHECKING:
     from collections import (
         OrderedDict,
     )
+from multiaddr import Multiaddr
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
@@ -100,13 +105,36 @@ class BasicHost(IHost):
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
         bootstrap: list[str] | None = None,
-        default_protocols: Optional["OrderedDict[TProtocol, StreamHandlerFn]"] = None,
+        default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
+        resource_manager: ResourceManager | None = None,
     ) -> None:
+        """
+        Initialize a BasicHost instance.
+
+        :param network: Network service implementation
+        :param enable_mDNS: Enable mDNS discovery
+        :param enable_upnp: Enable UPnP port mapping
+        :param bootstrap: Bootstrap peer addresses
+        :param default_protocols: Default protocol handlers
+        :param negotiate_timeout: Protocol negotiation timeout
+        :param resource_manager: Optional resource manager instance
+        :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
         self.negotiate_timeout = negotiate_timeout
+
+        # Set up resource manager if provided
+        if resource_manager is not None:
+            if hasattr(self._network, "set_resource_manager"):
+                self._network.set_resource_manager(resource_manager)  # type: ignore
+            else:
+                # Log warning if network doesn't support resource manager
+                logger.warning(
+                    "Resource manager provided but network service doesn't support it"
+                )
         # Protocol muxing
         default_protocols = default_protocols or get_default_protocols(self)
         self.multiselect = Multiselect(dict(default_protocols.items()))
@@ -376,11 +404,37 @@ class BasicHost(IHost):
         """
         return len(self._network.get_connections(peer_id)) > 0
 
-    def get_peer_connection_info(self, peer_id: ID) -> INetConn | None:
+    def get_peer_connection_info(self, peer_id: ID) -> list[INetConn] | None:
         """
         Get connection information for a specific peer if connected.
 
         :param peer_id: ID of the peer to get info for
         :return: Connection object if peer is connected, None otherwise
         """
-        return self._network.get_connection(peer_id)
+        return self._network.connections.get(peer_id)
+
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Upgrade a raw outbound connection for the peer_id using the underlying network.
+
+        :param raw_conn: The raw connection to upgrade.
+        :param peer_id: The peer this connection is to.
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
+
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Upgrade a raw inbound connection using the underlying network.
+
+        :param raw_conn: The inbound raw connection to upgrade.
+        :param maddr: The multiaddress this connection arrived on.
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        return await self._network.upgrade_inbound_raw_conn(raw_conn, maddr)
