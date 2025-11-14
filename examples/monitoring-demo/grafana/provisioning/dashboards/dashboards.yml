@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: 'py-libp2p'
+    orgId: 1
+    folder: 'py-libp2p'
+    folderUid: 'py-libp2p'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

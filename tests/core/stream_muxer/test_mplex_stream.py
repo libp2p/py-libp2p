@@ -179,7 +179,7 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close the other side.
     await stream_1.close()
-    await trio.sleep(0.01)
+    await wait_all_tasks_blocked()
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()
     assert stream_1.event_local_closed.is_set()
@@ -250,3 +250,310 @@ async def test_mplex_stream_close_mux_unavailable(monkeypatch, mplex_stream_pair
 
     with pytest.raises(RuntimeError, match="Failed to send close message"):
         await stream_0.close()
+
+
+# ========== Deadline Tests ==========
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_deadline_timeout(mplex_stream_pair):
+    """Test that read operation times out when deadline is exceeded."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set a short read deadline
+    stream_1.set_read_deadline(0.5)
+
+    # Try to read without any data being sent - should timeout
+    with pytest.raises(
+        TimeoutError, match="Read operation timed out after 0.5 seconds"
+    ):
+        await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_within_deadline(mplex_stream_pair):
+    """Test that read operation succeeds when completed within deadline."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set a generous read deadline
+    stream_1.set_read_deadline(5)
+
+    # Send data and read it - should succeed
+    await stream_0.write(DATA)
+    result = await stream_1.read(MAX_READ_LEN)
+    assert result == DATA
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_deadline_none(mplex_stream_pair):
+    """Test that read operation with no deadline works as before."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Ensure read_deadline is None (default)
+    assert stream_1.read_deadline is None
+
+    # Send data and read it
+    await stream_0.write(DATA)
+    result = await stream_1.read(MAX_READ_LEN)
+    assert result == DATA
+
+
+@pytest.mark.trio
+async def test_mplex_stream_write_deadline_timeout(mplex_stream_pair, monkeypatch):
+    """Test that write operation times out when deadline is exceeded."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set a short write deadline
+    stream_0.set_write_deadline(0.5)
+
+    # Mock send_message to simulate a hanging write
+    async def slow_send_message(*args, **kwargs):
+        await trio.sleep(2)  # Longer than deadline
+
+    monkeypatch.setattr(stream_0.muxed_conn, "send_message", slow_send_message)
+
+    # Try to write - should timeout
+    with pytest.raises(
+        TimeoutError, match="Write operation timed out after 0.5 seconds"
+    ):
+        await stream_0.write(DATA)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_write_within_deadline(mplex_stream_pair):
+    """Test that write operation succeeds when completed within deadline."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set a generous write deadline
+    stream_0.set_write_deadline(5)
+
+    # Write data - should succeed
+    await stream_0.write(DATA)
+    result = await stream_1.read(MAX_READ_LEN)
+    assert result == DATA
+
+
+@pytest.mark.trio
+async def test_mplex_stream_write_deadline_none(mplex_stream_pair):
+    """Test that write operation with no deadline works as before."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Ensure write_deadline is None (default)
+    assert stream_0.write_deadline is None
+
+    # Write and read data
+    await stream_0.write(DATA)
+    result = await stream_1.read(MAX_READ_LEN)
+    assert result == DATA
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_deadline_sets_both(mplex_stream_pair):
+    """Test that set_deadline sets both read and write deadlines."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set deadline for both operations
+    assert stream_0.set_deadline(30) is True
+    assert stream_0.read_deadline == 30
+    assert stream_0.write_deadline == 30
+
+    # Should be able to update it
+    assert stream_0.set_deadline(60) is True
+    assert stream_0.read_deadline == 60
+    assert stream_0.write_deadline == 60
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_read_deadline_only(mplex_stream_pair):
+    """Test that set_read_deadline only sets read deadline."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set only read deadline
+    assert stream_0.set_read_deadline(30) is True
+    assert stream_0.read_deadline == 30
+    assert stream_0.write_deadline is None
+
+
+@pytest.mark.trio
+async def test_mplex_stream_set_write_deadline_only(mplex_stream_pair):
+    """Test that set_write_deadline only sets write deadline."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set only write deadline
+    assert stream_0.set_write_deadline(30) is True
+    assert stream_0.write_deadline == 30
+    assert stream_0.read_deadline is None
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_independent(mplex_stream_pair):
+    """Test that read and write deadlines can be set independently."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set different deadlines
+    stream_0.set_read_deadline(10)
+    stream_0.set_write_deadline(20)
+
+    assert stream_0.read_deadline == 10
+    assert stream_0.write_deadline == 20
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_deadline_with_reset_stream(mplex_stream_pair):
+    """Test that read deadline doesn't interfere with stream reset detection."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set read deadline
+    stream_1.set_read_deadline(5)
+
+    # Reset the stream
+    await stream_1.reset()
+
+    # Should raise MplexStreamReset, not TimeoutError
+    with pytest.raises(MplexStreamReset):
+        await stream_1.read(MAX_READ_LEN)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_write_deadline_with_closed_stream(mplex_stream_pair):
+    """Test that write deadline doesn't interfere with closed stream detection."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set write deadline
+    stream_0.set_write_deadline(5)
+
+    # Close the stream
+    await stream_0.close()
+
+    # Should raise MplexStreamClosed, not TimeoutError
+    with pytest.raises(MplexStreamClosed):
+        await stream_0.write(DATA)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_read_deadline_until_eof(mplex_stream_pair):
+    """Test that read deadline works with read(None) - read until EOF."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set a generous deadline for reading until EOF
+    stream_1.set_read_deadline(2)
+
+    async def read_until_eof():
+        return await stream_1.read()
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(read_until_eof)
+        await stream_0.write(DATA)
+        await stream_0.close()
+
+    # The read should complete successfully
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_update(mplex_stream_pair):
+    """Test that deadlines can be updated multiple times."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Initial deadline
+    stream_0.set_deadline(10)
+    assert stream_0.read_deadline == 10
+    assert stream_0.write_deadline == 10
+
+    # Update to shorter deadline
+    stream_0.set_deadline(5)
+    assert stream_0.read_deadline == 5
+    assert stream_0.write_deadline == 5
+
+    # Update individual deadlines
+    stream_0.set_read_deadline(15)
+    stream_0.set_write_deadline(20)
+    assert stream_0.read_deadline == 15
+    assert stream_0.write_deadline == 20
+
+
+@pytest.mark.trio
+async def test_mplex_stream_concurrent_operations_with_deadlines(mplex_stream_pair):
+    """Test that deadlines work correctly with concurrent read/write operations."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Set deadlines
+    stream_0.set_write_deadline(5)
+    stream_1.set_read_deadline(5)
+
+    # Concurrent write and read
+    async def writer():
+        for i in range(5):
+            await stream_0.write(DATA)
+            await trio.sleep(0.01)
+
+    async def reader():
+        for i in range(5):
+            result = await stream_1.read(len(DATA))
+            assert result == DATA
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(writer)
+        nursery.start_soon(reader)
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_negative_ttl(mplex_stream_pair):
+    """Test that deadline methods return False for negative TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with negative TTL
+    assert stream_0.set_deadline(-1) is False
+    assert stream_0.set_deadline(-10) is False
+    # Deadlines should remain unchanged
+    assert stream_0.read_deadline is None
+    assert stream_0.write_deadline is None
+
+    # Test set_read_deadline with negative TTL
+    assert stream_0.set_read_deadline(-1) is False
+    assert stream_0.set_read_deadline(-5) is False
+    # Read deadline should remain unchanged
+    assert stream_0.read_deadline is None
+
+    # Test set_write_deadline with negative TTL
+    assert stream_0.set_write_deadline(-1) is False
+    assert stream_0.set_write_deadline(-3) is False
+    # Write deadline should remain unchanged
+    assert stream_0.write_deadline is None
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_zero_ttl(mplex_stream_pair):
+    """Test that deadline methods accept zero TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with zero TTL (should be valid)
+    assert stream_0.set_deadline(0) is True
+    assert stream_0.read_deadline == 0
+    assert stream_0.write_deadline == 0
+
+    # Test set_read_deadline with zero TTL
+    assert stream_0.set_read_deadline(0) is True
+    assert stream_0.read_deadline == 0
+
+    # Test set_write_deadline with zero TTL
+    assert stream_0.set_write_deadline(0) is True
+    assert stream_0.write_deadline == 0
+
+
+@pytest.mark.trio
+async def test_mplex_stream_deadline_validation_positive_ttl(mplex_stream_pair):
+    """Test that deadline methods accept positive TTL values."""
+    stream_0, stream_1 = mplex_stream_pair
+
+    # Test set_deadline with positive TTL
+    assert stream_0.set_deadline(1) is True
+    assert stream_0.read_deadline == 1
+    assert stream_0.write_deadline == 1
+
+    # Test set_read_deadline with positive TTL
+    assert stream_0.set_read_deadline(5) is True
+    assert stream_0.read_deadline == 5
+
+    # Test set_write_deadline with positive TTL
+    assert stream_0.set_write_deadline(10) is True
+    assert stream_0.write_deadline == 10

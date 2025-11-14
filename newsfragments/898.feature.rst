@@ -1,1 +1,0 @@
-Added `Rendezvous` peer discovery module that enables namespace-based peer registration and discovery with automatic refresh capabilities for decentralized peer-to-peer networking.

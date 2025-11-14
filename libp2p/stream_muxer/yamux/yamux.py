@@ -40,6 +40,7 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.stream_muxer.exceptions import (
+    MuxedConnUnavailable,
     MuxedStreamEOF,
     MuxedStreamError,
     MuxedStreamReset,
@@ -187,15 +188,34 @@ class YamuxStream(IMuxedStream):
                 await _do_window_update()
 
     async def read(self, n: int | None = -1) -> bytes:
+        """
+        Read data from the stream.
+
+        Args:
+            n: Number of bytes to read. If -1 or None, read all available data
+               until the stream is closed.
+
+        Returns:
+            bytes: The data read from the stream. May return partial data
+                   if the stream is reset or closed before reading all requested bytes.
+
+        Raises:
+            MuxedStreamReset: If the stream was reset by the remote peer.
+            MuxedStreamEOF: If the stream is closed for receiving and no more
+                           data is available.
+
+        """
         # Handle None value for n by converting it to -1
         if n is None:
             n = -1
 
-        # If the stream is closed for receiving and the buffer is empty, raise EOF
+        # If the stream is closed for receiving and the buffer is empty, check status
         if self.recv_closed and not self.conn.stream_buffers.get(self.stream_id):
             logger.debug(
                 f"Stream {self.stream_id}: Stream closed for receiving and buffer empty"
             )
+            if self.reset_received:
+                raise MuxedStreamReset("Stream was reset")
             raise MuxedStreamEOF("Stream is closed for receiving")
 
         if n == -1:
@@ -207,6 +227,12 @@ class YamuxStream(IMuxedStream):
                 # If buffer is not available, check if stream is closed
                 if buffer is None:
                     logger.debug(f"Stream {self.stream_id}: No buffer available")
+                    # If reset was received, raise reset. Otherwise, EOF.
+                    if self.reset_received:
+                        raise MuxedStreamReset("Stream was reset")
+                    # If we got data before the buffer disappeared, return it
+                    if data:
+                        return data
                     raise MuxedStreamEOF("Stream buffer closed")
 
                 # If we have data in buffer, process it
@@ -221,20 +247,31 @@ class YamuxStream(IMuxedStream):
                         logger.debug(f"Stream {self.stream_id}: Update {len(chunk)}")
                         await self.send_window_update(len(chunk), skip_lock=True)
 
-                # If stream is closed (FIN received) and buffer is empty, break
-                if self.recv_closed and len(buffer) == 0:
-                    logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
-                    break
-
-                # If stream was reset, raise reset error
+                # Check for reset
                 if self.reset_received:
                     logger.debug(f"Stream {self.stream_id}: Stream was reset")
+                    # Return any data we managed to read before the reset
+                    if data:
+                        return data
                     raise MuxedStreamReset("Stream was reset")
+
+                # If stream is closed and buffer is empty
+                if self.recv_closed and len(buffer) == 0:
+                    logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
+                    if data:
+                        return data
+                    else:
+                        raise MuxedStreamEOF("Stream is closed for receiving")
 
                 # Wait for more data or stream closure
                 logger.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
-                await self.conn.stream_events[self.stream_id].wait()
-                self.conn.stream_events[self.stream_id] = trio.Event()
+                try:
+                    await self.conn.stream_events[self.stream_id].wait()
+                    self.conn.stream_events[self.stream_id] = trio.Event()
+                except KeyError:
+                    # Event was removed, means connection is closing
+                    logger.debug(f"Stream {self.stream_id}: Event removed, closing")
+                    raise MuxedStreamEOF("Stream was removed during read")
 
             # After loop exit, first check if we have data to return
             if data:
@@ -248,7 +285,8 @@ class YamuxStream(IMuxedStream):
                 logger.debug(f"Stream {self.stream_id}: Connection shutting down")
                 raise MuxedStreamEOF("Connection shut down")
 
-            # Return empty data
+            # Return empty data (e.g., clean FIN received)
+            # This path should no longer be hit for FIN, as it's raised in the loop
             return b""
         else:
             data = await self.conn.read_stream(self.stream_id, n)
@@ -265,11 +303,15 @@ class YamuxStream(IMuxedStream):
         async with self.close_lock:
             if not self.send_closed:
                 logger.debug(f"Half-closing stream {self.stream_id} (local end)")
-                header = struct.pack(
-                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
-                )
-                await self.conn.secured_conn.write(header)
-                self.send_closed = True
+                try:
+                    header = struct.pack(
+                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
+                    )
+                    await self.conn.secured_conn.write(header)
+                except RawConnError as e:
+                    logger.debug(f"Error sending FIN, connection likely closed: {e}")
+                finally:
+                    self.send_closed = True
 
             # Only set fully closed if both directions are closed
             if self.send_closed and self.recv_closed:
@@ -282,12 +324,18 @@ class YamuxStream(IMuxedStream):
         if not self.closed:
             async with self.close_lock:
                 logger.debug(f"Resetting stream {self.stream_id}")
-                header = struct.pack(
-                    YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
-                )
-                await self.conn.secured_conn.write(header)
-                self.closed = True
-                self.reset_received = True  # Mark as reset
+                try:
+                    header = struct.pack(
+                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
+                    )
+                    await self.conn.secured_conn.write(header)
+                except RawConnError as e:
+                    logger.debug(f"Error sending RST, connection likely closed: {e}")
+                finally:
+                    self.closed = True
+                    self.send_closed = True
+                    self.recv_closed = True
+                    self.reset_received = True  # Mark as reset
 
     def set_deadline(self, ttl: int) -> bool:
         """
@@ -366,6 +414,18 @@ class Yamux(IMuxedConn):
             self._nursery = nursery
             nursery.start_soon(self.handle_incoming)
             self.event_started.set()
+        logger.debug(
+            f"Yamux.start() exiting for {self.peer_id}, closing new stream channel"
+        )
+        try:
+            self.new_stream_send_channel.close()
+        except trio.ClosedResourceError:
+            # Channel already closed. This occurs when close() was called or when
+            # handle_incoming() detected a connection error and called
+            # _cleanup_on_error(). In both cases, handle_incoming() exits, causing
+            # the nursery to exit. This is fine - we just wanted to make sure
+            # it's closed.
+            pass
 
     @property
     def is_initiator(self) -> bool:
@@ -383,10 +443,14 @@ class Yamux(IMuxedConn):
                 except Exception as e:
                     logger.debug(f"Failed to send GO_AWAY: {e}")
                 self.event_shutting_down.set()
+                # Close channel to unblock accept_stream
+                self.new_stream_send_channel.close()
                 for stream in self.streams.values():
                     stream.closed = True
                     stream.send_closed = True
                     stream.recv_closed = True
+                    if stream.stream_id in self.stream_events:
+                        self.stream_events[stream.stream_id].set()
                 self.streams.clear()
                 self.stream_buffers.clear()
                 self.stream_events.clear()
@@ -414,6 +478,9 @@ class Yamux(IMuxedConn):
         # Wait for backlog slot
         await self.stream_backlog_semaphore.acquire()
         async with self.streams_lock:
+            if self.event_shutting_down.is_set():
+                self.stream_backlog_semaphore.release()
+                raise MuxedStreamError("Connection is shutting down")
             stream_id = self.next_stream_id
             self.next_stream_id += 2
             stream = YamuxStream(stream_id, self, True)
@@ -431,16 +498,39 @@ class Yamux(IMuxedConn):
             return stream
         except Exception as e:
             self.stream_backlog_semaphore.release()
-            raise e
+            # Clean up stream if SYN fails
+            async with self.streams_lock:
+                if stream_id in self.streams:
+                    del self.streams[stream_id]
+                if stream_id in self.stream_buffers:
+                    del self.stream_buffers[stream_id]
+                if stream_id in self.stream_events:
+                    del self.stream_events[stream_id]
+            raise MuxedStreamError(f"Failed to send SYN: {e}") from e
 
     async def accept_stream(self) -> IMuxedStream:
+        """
+        Accept a new stream from the remote peer.
+
+        Returns:
+            IMuxedStream: A new stream from the remote peer.
+
+        Raises:
+            MuxedConnUnavailable: If the connection is closed while waiting for a new
+                stream. This ensures that accept_stream() does not hang indefinitely
+                when the underlying connection terminates (either cleanly or due to
+                error). The caller (e.g., SwarmConn) catches this exception to properly
+                clean up the connection.
+
+        """
         logger.debug("Waiting for new stream")
         try:
             stream = await self.new_stream_receive_channel.receive()
             logger.debug(f"Received stream {stream.stream_id}")
             return stream
         except trio.EndOfChannel:
-            raise MuxedStreamError("No new streams available")
+            logger.debug("New stream channel closed, connection is shutting down")
+            raise MuxedConnUnavailable("Connection closed")
 
     async def read_stream(self, stream_id: int, n: int = -1) -> bytes:
         logger.debug(f"Reading from stream {self.peer_id}:{stream_id}, n={n}")
@@ -471,8 +561,10 @@ class Yamux(IMuxedConn):
                         f"Stream {self.peer_id}:{stream_id}:"
                         f"Buffer gone, assuming closed"
                     )
+                    if stream.reset_received:
+                        raise MuxedStreamReset("Stream was reset")
                     raise MuxedStreamEOF("Stream buffer closed")
-                # If FIN received and buffer has data, return it
+
                 if stream.recv_closed and buffer and len(buffer) > 0:
                     if n == -1 or n >= len(buffer):
                         data = bytes(buffer)
@@ -483,17 +575,17 @@ class Yamux(IMuxedConn):
                     logger.debug(
                         f"Returning {len(data)} bytes"
                         f"from stream {self.peer_id}:{stream_id}, "
-                        f"buffer_len={len(buffer)}"
+                        f"buffer_len={len(buffer)} (recv_closed)"
                     )
                     return data
-                # If reset received and buffer is empty, raise reset
+
                 if stream.reset_received:
                     logger.debug(
                         f"Stream {self.peer_id}:{stream_id}:"
                         f"reset_received=True, raising MuxedStreamReset"
                     )
                     raise MuxedStreamReset("Stream was reset")
-                # Check if we can return data (no FIN or reset)
+
                 if buffer and len(buffer) > 0:
                     if n == -1 or n >= len(buffer):
                         data = bytes(buffer)
@@ -507,13 +599,7 @@ class Yamux(IMuxedConn):
                         f"buffer_len={len(buffer)}"
                     )
                     return data
-                # Check if stream is closed
-                if stream.closed:
-                    logger.debug(
-                        f"Stream {self.peer_id}:{stream_id}:"
-                        f"closed=True, raising MuxedStreamReset"
-                    )
-                    raise MuxedStreamReset("Stream is reset or closed")
+
                 # Check if recv_closed and buffer empty
                 if stream.recv_closed:
                     logger.debug(
@@ -521,6 +607,14 @@ class Yamux(IMuxedConn):
                         f"recv_closed=True, buffer empty, raising EOF"
                     )
                     raise MuxedStreamEOF("Stream is closed for receiving")
+
+                # Check if stream is fully closed
+                if stream.closed:
+                    logger.debug(
+                        f"Stream {self.peer_id}:{stream_id}:"
+                        f"closed=True, raising MuxedStreamReset"
+                    )
+                    raise MuxedStreamReset("Stream is reset or closed")
 
             # Wait for data if stream is still open
             logger.debug(f"Waiting for data on stream {self.peer_id}:{stream_id}")
@@ -539,7 +633,7 @@ class Yamux(IMuxedConn):
                 header = await self.secured_conn.read(HEADER_SIZE)
                 if not header or len(header) < HEADER_SIZE:
                     logger.debug(
-                        f"Connection closed orincomplete header for peer {self.peer_id}"
+                        f"Connection closed or incompleteheader for peer {self.peer_id}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -583,15 +677,6 @@ class Yamux(IMuxedConn):
                                 0,
                             )
                             await self.secured_conn.write(rst_header)
-                elif typ == TYPE_DATA and flags & FLAG_RST:
-                    async with self.streams_lock:
-                        if stream_id in self.streams:
-                            logger.debug(
-                                f"Resetting stream {stream_id} for peer {self.peer_id}"
-                            )
-                            self.streams[stream_id].closed = True
-                            self.streams[stream_id].reset_received = True
-                            self.stream_events[stream_id].set()
                 elif typ == TYPE_DATA and flags & FLAG_ACK:
                     async with self.streams_lock:
                         if stream_id in self.streams:
@@ -645,7 +730,10 @@ class Yamux(IMuxedConn):
                         async with self.streams_lock:
                             if stream_id in self.streams:
                                 self.stream_buffers[stream_id].extend(data)
+                                # Always set event, even if no data
+                                # in case FIN/RST is set
                                 self.stream_events[stream_id].set()
+
                                 if flags & FLAG_FIN:
                                     logger.debug(
                                         f"Received FIN for stream {self.peer_id}:"
@@ -654,6 +742,17 @@ class Yamux(IMuxedConn):
                                     self.streams[stream_id].recv_closed = True
                                     if self.streams[stream_id].send_closed:
                                         self.streams[stream_id].closed = True
+
+                                if flags & FLAG_RST:
+                                    logger.debug(
+                                        f"Resetting stream {stream_id} for peer"
+                                        f"{self.peer_id} (RST on DATA)"
+                                    )
+                                    self.streams[stream_id].closed = True
+                                    self.streams[stream_id].reset_received = True
+                                    # Wake up reader
+                                    self.stream_events[stream_id].set()
+
                     except Exception as e:
                         logger.error(f"Error reading data for stream {stream_id}: {e}")
                         # Mark stream as closed on read error
@@ -663,6 +762,10 @@ class Yamux(IMuxedConn):
                                 if self.streams[stream_id].send_closed:
                                     self.streams[stream_id].closed = True
                                 self.stream_events[stream_id].set()
+                # Handle WINDOW_UPDATE frames
+                # Per Yamux spec (https://github.com/hashicorp/yamux/blob/master/spec.md#flag-field),
+                # FIN and RST flags may be sent with WINDOW_UPDATE frames, not just
+                # DATA frames.
                 elif typ == TYPE_WINDOW_UPDATE:
                     increment = length
                     async with self.streams_lock:
@@ -675,13 +778,37 @@ class Yamux(IMuxedConn):
                                     f" increment: {increment}"
                                 )
                                 stream.send_window += increment
+
+                            # Check for FIN/RST flags on WINDOW_UPDATE
+                            if flags & FLAG_FIN:
+                                logger.debug(
+                                    f"Received FIN for stream {self.peer_id}:"
+                                    f"{stream_id} on WINDOW_UPDATE, marking recv_closed"
+                                )
+                                stream.recv_closed = True
+                                if stream.send_closed:
+                                    stream.closed = True
+                                # Wake up reader
+                                self.stream_events[stream_id].set()
+
+                            if flags & FLAG_RST:
+                                logger.debug(
+                                    f"Resetting stream {stream_id} for peer"
+                                    f"{self.peer_id} (RST on WINDOW_UPDATE)"
+                                )
+                                stream.closed = True
+                                stream.reset_received = True
+                                # Wake up reader
+                                self.stream_events[stream_id].set()
             except Exception as e:
                 # Special handling for expected IncompleteReadError on stream close
+                # This occurs when the connection closes while reading the header
+                # (12 bytes)
                 if isinstance(e, IncompleteReadError):
                     details = getattr(e, "args", [{}])[0]
                     if (
                         isinstance(details, dict)
-                        and details.get("requested_count") == 2
+                        and details.get("requested_count") == HEADER_SIZE
                         and details.get("received_count") == 0
                     ):
                         logger.info(
@@ -720,7 +847,14 @@ class Yamux(IMuxedConn):
                         )
                 # Don't crash the whole connection for temporary errors
                 if self.event_shutting_down.is_set() or isinstance(
-                    e, (RawConnError, OSError)
+                    e,
+                    (
+                        RawConnError,
+                        OSError,
+                        IncompleteReadError,
+                        trio.ClosedResourceError,
+                        trio.BrokenResourceError,
+                    ),
                 ):
                     await self._cleanup_on_error()
                     break
@@ -731,18 +865,23 @@ class Yamux(IMuxedConn):
         # Set shutdown flag first to prevent other operations
         self.event_shutting_down.set()
 
+        # Close the new stream channel to unblock any pending accept_stream()
+        self.new_stream_send_channel.close()
+
         # Clean up streams
         async with self.streams_lock:
             for stream in self.streams.values():
                 stream.closed = True
                 stream.send_closed = True
                 stream.recv_closed = True
+                stream.reset_received = True
                 # Set the event so any waiters are woken up
                 if stream.stream_id in self.stream_events:
                     self.stream_events[stream.stream_id].set()
             # Clear buffers and events
             self.stream_buffers.clear()
             self.stream_events.clear()
+            self.streams.clear()
 
         # Close the secured connection
         try:

@@ -1,16 +1,16 @@
-# Import exceptiongroup for Python 3.11+
-import builtins
 from collections.abc import Sequence
 import logging
 from typing import Any
 
 import pytest
 
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception
+try:
+    from builtins import ExceptionGroup  # type: ignore[attr-defined]
+except ImportError:
+    try:
+        from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
+    except ImportError:  # pragma: no cover - fallback if dependency missing
+        ExceptionGroup = Exception  # type: ignore[assignment]
 from multiaddr import Multiaddr
 import trio
 
@@ -833,9 +833,10 @@ async def test_wss_host_pair_data_exchange():
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
             .not_valid_after(
-                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(days=1)
             )
             .add_extension(
                 x509.SubjectAlternativeName(
