@@ -5,11 +5,11 @@ This module contains functional tests for persistence behavior across
 peerstore restarts, testing that data is properly saved and loaded.
 """
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
-import trio
+from multiaddr import Multiaddr
 
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
@@ -23,8 +23,6 @@ from libp2p.peer.persistent import (
     create_sync_rocksdb_peerstore,
     create_sync_sqlite_peerstore,
 )
-from multiaddr import Multiaddr
-
 
 # ============================================================================
 # Fixtures
@@ -73,7 +71,7 @@ async def test_async_sqlite_basic_persistence(peer_id, addr):
 
         # Create second peerstore and verify data persisted
         peerstore2 = create_async_sqlite_peerstore(str(db_path))
-        
+
         addrs = await peerstore2.addrs_async(peer_id)
         assert len(addrs) == 1
         assert addrs[0] == addr
@@ -105,15 +103,15 @@ async def test_async_sqlite_multiple_peers_persistence(peer_id, peer_id_2, addr,
 
         # Create second peerstore and verify all data persisted
         peerstore2 = create_async_sqlite_peerstore(str(db_path))
-        
+
         # Check first peer
         addrs1 = await peerstore2.addrs_async(peer_id)
         assert len(addrs1) == 1
         assert addrs1[0] == addr
-        
+
         protocols1 = await peerstore2.get_protocols_async(peer_id)
         assert "/ipfs/ping/1.0.0" in protocols1
-        
+
         agent = await peerstore2.get_async(peer_id, "agent")
         assert agent == "py-libp2p"
 
@@ -121,10 +119,10 @@ async def test_async_sqlite_multiple_peers_persistence(peer_id, peer_id_2, addr,
         addrs2 = await peerstore2.addrs_async(peer_id_2)
         assert len(addrs2) == 1
         assert addrs2[0] == addr2
-        
+
         protocols2 = await peerstore2.get_protocols_async(peer_id_2)
         assert "/ipfs/id/1.0.0" in protocols2
-        
+
         version = await peerstore2.get_async(peer_id_2, "version")
         assert version == "1.0.0"
 
@@ -151,12 +149,12 @@ async def test_async_sqlite_data_updates_persistence(peer_id, addr, addr2):
 
         # Create third peerstore and verify updates persisted
         peerstore3 = create_async_sqlite_peerstore(str(db_path))
-        
+
         addrs = await peerstore3.addrs_async(peer_id)
         assert len(addrs) == 2
         assert addr in addrs
         assert addr2 in addrs
-        
+
         version = await peerstore3.get_async(peer_id, "version")
         assert version == "2.0.0"
 
@@ -178,7 +176,7 @@ async def test_async_memory_not_persistent(peer_id, addr):
     # Verify data is not persisted
     addrs = await peerstore2.addrs_async(peer_id)
     assert len(addrs) == 0
-    
+
     with pytest.raises(PeerStoreError):
         await peerstore2.get_async(peer_id, "test")
 
@@ -200,11 +198,11 @@ async def test_async_leveldb_persistence_if_available(peer_id, addr):
 
             # Create second peerstore and verify data persisted
             peerstore2 = create_async_leveldb_peerstore(str(db_path))
-            
+
             addrs = await peerstore2.addrs_async(peer_id)
             assert len(addrs) == 1
             assert addrs[0] == addr
-            
+
             value = await peerstore2.get_async(peer_id, "test")
             assert value == "value"
 
@@ -228,11 +226,11 @@ async def test_async_rocksdb_persistence_if_available(peer_id, addr):
 
             # Create second peerstore and verify data persisted
             peerstore2 = create_async_rocksdb_peerstore(str(db_path))
-            
+
             addrs = await peerstore2.addrs_async(peer_id)
             assert len(addrs) == 1
             assert addrs[0] == addr
-            
+
             value = await peerstore2.get_async(peer_id, "test")
             assert value == "value"
 
@@ -259,7 +257,7 @@ def test_sync_sqlite_basic_persistence(peer_id, addr):
 
         # Create second peerstore and verify data persisted
         peerstore2 = create_sync_sqlite_peerstore(str(db_path))
-        
+
         addrs = peerstore2.addrs(peer_id)
         assert len(addrs) == 1
         assert addrs[0] == addr
@@ -290,15 +288,15 @@ def test_sync_sqlite_multiple_peers_persistence(peer_id, peer_id_2, addr, addr2)
 
         # Create second peerstore and verify all data persisted
         peerstore2 = create_sync_sqlite_peerstore(str(db_path))
-        
+
         # Check first peer
         addrs1 = peerstore2.addrs(peer_id)
         assert len(addrs1) == 1
         assert addrs1[0] == addr
-        
+
         protocols1 = peerstore2.get_protocols(peer_id)
         assert "/ipfs/ping/1.0.0" in protocols1
-        
+
         agent = peerstore2.get(peer_id, "agent")
         assert agent == "py-libp2p"
 
@@ -306,10 +304,10 @@ def test_sync_sqlite_multiple_peers_persistence(peer_id, peer_id_2, addr, addr2)
         addrs2 = peerstore2.addrs(peer_id_2)
         assert len(addrs2) == 1
         assert addrs2[0] == addr2
-        
+
         protocols2 = peerstore2.get_protocols(peer_id_2)
         assert "/ipfs/id/1.0.0" in protocols2
-        
+
         version = peerstore2.get(peer_id_2, "version")
         assert version == "1.0.0"
 
@@ -335,12 +333,12 @@ def test_sync_sqlite_data_updates_persistence(peer_id, addr, addr2):
 
         # Create third peerstore and verify updates persisted
         peerstore3 = create_sync_sqlite_peerstore(str(db_path))
-        
+
         addrs = peerstore3.addrs(peer_id)
         assert len(addrs) == 2
         assert addr in addrs
         assert addr2 in addrs
-        
+
         version = peerstore3.get(peer_id, "version")
         assert version == "2.0.0"
 
@@ -361,7 +359,7 @@ def test_sync_memory_not_persistent(peer_id, addr):
     # Verify data is not persisted
     addrs = peerstore2.addrs(peer_id)
     assert len(addrs) == 0
-    
+
     with pytest.raises(PeerStoreError):
         peerstore2.get(peer_id, "test")
 
@@ -382,11 +380,11 @@ def test_sync_leveldb_persistence_if_available(peer_id, addr):
 
             # Create second peerstore and verify data persisted
             peerstore2 = create_sync_leveldb_peerstore(str(db_path))
-            
+
             addrs = peerstore2.addrs(peer_id)
             assert len(addrs) == 1
             assert addrs[0] == addr
-            
+
             value = peerstore2.get(peer_id, "test")
             assert value == "value"
 
@@ -409,11 +407,11 @@ def test_sync_rocksdb_persistence_if_available(peer_id, addr):
 
             # Create second peerstore and verify data persisted
             peerstore2 = create_sync_rocksdb_peerstore(str(db_path))
-            
+
             addrs = peerstore2.addrs(peer_id)
             assert len(addrs) == 1
             assert addrs[0] == addr
-            
+
             value = peerstore2.get(peer_id, "test")
             assert value == "value"
 
@@ -429,17 +427,18 @@ def test_sync_rocksdb_persistence_if_available(peer_id, addr):
 @pytest.mark.trio
 async def test_async_cross_backend_no_persistence():
     """Test that different backends don't share data."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Add data to memory backend
     memory_store = create_async_memory_peerstore()
     await memory_store.add_addrs_async(peer_id, [addr], 3600)
     await memory_store.close_async()
-    
+
     # Create SQLite backend - should not have the data
     with tempfile.TemporaryDirectory() as temp_dir:
         sqlite_store = create_async_sqlite_peerstore(Path(temp_dir) / "test.db")
@@ -450,17 +449,18 @@ async def test_async_cross_backend_no_persistence():
 
 def test_sync_cross_backend_no_persistence():
     """Test that different backends don't share data."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Add data to memory backend
     memory_store = create_sync_memory_peerstore()
     memory_store.add_addrs(peer_id, [addr], 3600)
     memory_store.close()
-    
+
     # Create SQLite backend - should not have the data
     with tempfile.TemporaryDirectory() as temp_dir:
         sqlite_store = create_sync_sqlite_peerstore(Path(temp_dir) / "test.db")

@@ -1,13 +1,13 @@
 """
 Asynchronous persistent peerstore implementation for py-libp2p.
 
-This module provides an asynchronous persistent peerstore that stores peer data 
+This module provides an asynchronous persistent peerstore that stores peer data
 in a datastore backend, similar to the pstoreds implementation in go-libp2p.
 All operations are purely asynchronous using trio.
 """
 
 from collections import defaultdict
-from collections.abc import AsyncGenerator, AsyncIterable, Sequence
+from collections.abc import AsyncIterable, Sequence
 import logging
 import pickle
 from typing import Any
@@ -31,11 +31,12 @@ logger = logging.getLogger(__name__)
 
 class AsyncPersistentPeerStore(IAsyncPeerStore):
     """
-    Asynchronous persistent peerstore implementation that stores peer data in a datastore backend.
+    Asynchronous persistent peerstore implementation that stores peer data
+    in a datastore backend.
 
-    This implementation follows the IAsyncPeerStore interface with purely asynchronous operations.
-    All data is persisted to the datastore backend using async/await, similar to the 
-    pstoreds implementation in go-libp2p.
+    This implementation follows the IAsyncPeerStore interface with purely
+    asynchronous operations. All data is persisted to the datastore backend
+    using async/await, similar to the pstoreds implementation in go-libp2p.
     """
 
     def __init__(self, datastore: IDatastore, max_records: int = 10000) -> None:
@@ -194,7 +195,9 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                     logger.error(f"Failed to load peer record for {peer_id}: {e}")
             return self.peer_record_map.get(peer_id)
 
-    async def _save_peer_record(self, peer_id: ID, record_state: PeerRecordState) -> None:
+    async def _save_peer_record(
+        self, peer_id: ID, record_state: PeerRecordState
+    ) -> None:
         """Save peer record to datastore."""
         try:
             record_key = self._get_peer_record_key(peer_id)
@@ -268,7 +271,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         """
         # Get all peer IDs from datastore by querying all prefixes
         peer_ids = set()
-        
+
         try:
             # Query all address keys to find peer IDs
             for key, _ in self.datastore.query(self.ADDR_PREFIX):
@@ -284,7 +287,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
 
         # Also include any peer IDs from memory cache
         peer_ids.update(self.peer_data_map.keys())
-        
+
         return list(peer_ids)
 
     async def clear_peerdata_async(self, peer_id: ID) -> None:
@@ -307,7 +310,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         """
         valid_peer_ids: list[ID] = []
         all_peer_ids = await self.peer_ids_async()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = await self._load_peer_data(peer_id)
@@ -318,7 +321,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                     await self._save_peer_data(peer_id, peer_data)
             except Exception as e:
                 logger.error(f"Error checking validity of peer {peer_id}: {e}")
-                
+
         return valid_peer_ids
 
     async def _enforce_record_limit(self) -> None:
@@ -392,7 +395,9 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         peer_data.set_protocols(list(protocols))
         await self._save_peer_data(peer_id, peer_data)
 
-    async def remove_protocols_async(self, peer_id: ID, protocols: Sequence[str]) -> None:
+    async def remove_protocols_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> None:
         """
         :param peer_id: peer ID to get info for
         :param protocols: unsupported protocols to remove
@@ -401,14 +406,18 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         peer_data.remove_protocols(protocols)
         await self._save_peer_data(peer_id, peer_data)
 
-    async def supports_protocols_async(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
+    async def supports_protocols_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> list[str]:
         """
         :return: all of the peer IDs stored in peer store
         """
         peer_data = await self._load_peer_data(peer_id)
         return peer_data.supports_protocols(protocols)
 
-    async def first_supported_protocol_async(self, peer_id: ID, protocols: Sequence[str]) -> str:
+    async def first_supported_protocol_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> str:
         peer_data = await self._load_peer_data(peer_id)
         return peer_data.first_supported_protocol(protocols)
 
@@ -517,7 +526,9 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         """
         await self.add_addrs_async(peer_id, [addr], ttl)
 
-    async def add_addrs_async(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+    async def add_addrs_async(
+        self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int
+    ) -> None:
         """
         :param peer_id: peer ID to add address for
         :param addrs:
@@ -570,7 +581,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         """
         output: list[ID] = []
         all_peer_ids = await self.peer_ids_async()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = await self._load_peer_data(peer_id)
@@ -582,7 +593,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                         await self._save_peer_data(peer_id, peer_data)
             except Exception as e:
                 logger.error(f"Error checking addresses for peer {peer_id}: {e}")
-                
+
         return output
 
     async def addr_stream_async(self, peer_id: ID) -> AsyncIterable[Multiaddr]:  # type: ignore[override]
@@ -660,7 +671,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         """Returns the peer_ids for which keys are stored"""
         peer_ids_with_keys: list[ID] = []
         all_peer_ids = await self.peer_ids_async()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = await self._load_peer_data(peer_id)
@@ -668,7 +679,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
                     peer_ids_with_keys.append(peer_id)
             except Exception as e:
                 logger.error(f"Error checking keys for peer {peer_id}: {e}")
-                
+
         return peer_ids_with_keys
 
     async def clear_keydata_async(self, peer_id: ID) -> None:

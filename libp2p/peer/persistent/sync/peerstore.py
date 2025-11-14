@@ -1,7 +1,7 @@
 """
 Synchronous persistent peerstore implementation for py-libp2p.
 
-This module provides a synchronous persistent peerstore that stores peer data 
+This module provides a synchronous persistent peerstore that stores peer data
 in a datastore backend, similar to the pstoreds implementation in go-libp2p.
 All operations are purely synchronous without any async/await.
 """
@@ -11,7 +11,7 @@ from collections.abc import Sequence
 import logging
 import pickle
 import threading
-from typing import Any, Iterator
+from typing import Any
 
 from multiaddr import Multiaddr
 
@@ -30,11 +30,13 @@ logger = logging.getLogger(__name__)
 
 class SyncPersistentPeerStore(IPeerStore):
     """
-    Synchronous persistent peerstore implementation that stores peer data in a datastore backend.
+    Synchronous persistent peerstore implementation that stores peer data
+    in a datastore backend.
 
-    This implementation follows the IPeerStore interface with purely synchronous operations.
-    All data is persisted immediately to the datastore backend without background threads
-    or async operations, similar to the pstoreds implementation in go-libp2p.
+    This implementation follows the IPeerStore interface with purely
+    synchronous operations. All data is persisted immediately to the datastore
+    backend without background threads or async operations, similar to the
+    pstoreds implementation in go-libp2p.
     """
 
     def __init__(self, datastore: IDatastoreSync, max_records: int = 10000) -> None:
@@ -267,7 +269,7 @@ class SyncPersistentPeerStore(IPeerStore):
         """
         # Get all peer IDs from datastore by querying all prefixes
         peer_ids = set()
-        
+
         try:
             # Query all address keys to find peer IDs
             for key, _ in self.datastore.query(self.ADDR_PREFIX):
@@ -283,7 +285,7 @@ class SyncPersistentPeerStore(IPeerStore):
 
         # Also include any peer IDs from memory cache
         peer_ids.update(self.peer_data_map.keys())
-        
+
         return list(peer_ids)
 
     def clear_peerdata(self, peer_id: ID) -> None:
@@ -306,7 +308,7 @@ class SyncPersistentPeerStore(IPeerStore):
         """
         valid_peer_ids: list[ID] = []
         all_peer_ids = self.peer_ids()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = self._load_peer_data(peer_id)
@@ -317,7 +319,7 @@ class SyncPersistentPeerStore(IPeerStore):
                     self._save_peer_data(peer_id, peer_data)
             except Exception as e:
                 logger.error(f"Error checking validity of peer {peer_id}: {e}")
-                
+
         return valid_peer_ids
 
     def _enforce_record_limit(self) -> None:
@@ -550,7 +552,7 @@ class SyncPersistentPeerStore(IPeerStore):
         """
         output: list[ID] = []
         all_peer_ids = self.peer_ids()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = self._load_peer_data(peer_id)
@@ -562,10 +564,11 @@ class SyncPersistentPeerStore(IPeerStore):
                         self._save_peer_data(peer_id, peer_data)
             except Exception as e:
                 logger.error(f"Error checking addresses for peer {peer_id}: {e}")
-                
+
         return output
 
-    # Note: addr_stream is not implemented in sync version as it requires async operations
+    # Note: addr_stream is not implemented in sync version as it requires
+    # async operations
     def addr_stream(self, peer_id: ID) -> None:
         """
         Address stream not supported in synchronous peerstore.
@@ -637,7 +640,7 @@ class SyncPersistentPeerStore(IPeerStore):
         """Returns the peer_ids for which keys are stored"""
         peer_ids_with_keys: list[ID] = []
         all_peer_ids = self.peer_ids()
-        
+
         for peer_id in all_peer_ids:
             try:
                 peer_data = self._load_peer_data(peer_id)
@@ -645,7 +648,7 @@ class SyncPersistentPeerStore(IPeerStore):
                     peer_ids_with_keys.append(peer_id)
             except Exception as e:
                 logger.error(f"Error checking keys for peer {peer_id}: {e}")
-                
+
         return peer_ids_with_keys
 
     def clear_keydata(self, peer_id: ID) -> None:

@@ -1,7 +1,7 @@
 """
 Synchronous LevelDB datastore implementation for persistent peer storage.
 
-This provides a synchronous LevelDB-based datastore for high-performance 
+This provides a synchronous LevelDB-based datastore for high-performance
 persistent storage. LevelDB is a fast key-value storage library written at Google.
 """
 
@@ -100,7 +100,7 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("LevelDB database is not initialized")
-        
+
         with self._lock:
             try:
                 return self.db.Get(key)
@@ -112,7 +112,7 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("LevelDB database is not initialized")
-        
+
         with self._lock:
             self.db.Put(key, value)
 
@@ -121,7 +121,7 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("LevelDB database is not initialized")
-        
+
         with self._lock:
             try:
                 self.db.Delete(key)
@@ -133,7 +133,7 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("LevelDB database is not initialized")
-        
+
         with self._lock:
             try:
                 self.db.Get(key)
@@ -148,14 +148,14 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("LevelDB database is not initialized")
-        
+
         with self._lock:
             # Create iterator with prefix
             if prefix:
                 iterator = self.db.iterator(prefix=prefix)
             else:
                 iterator = self.db.iterator()
-            
+
             try:
                 for key, value in iterator:
                     yield key, value

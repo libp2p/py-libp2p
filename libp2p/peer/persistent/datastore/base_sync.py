@@ -1,8 +1,8 @@
 """
 Synchronous datastore interfaces for persistent peer storage.
 
-This module defines the synchronous interfaces that all sync datastore 
-implementations must follow, providing the core operations needed for 
+This module defines the synchronous interfaces that all sync datastore
+implementations must follow, providing the core operations needed for
 persistent peer storage without async/await.
 """
 

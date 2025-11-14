@@ -5,8 +5,8 @@ This module contains functional tests for the AsyncPersistentPeerStore class,
 testing all async methods with the _async suffix.
 """
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
 from multiaddr import Multiaddr
@@ -15,11 +15,9 @@ import trio
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.persistent import (
-    AsyncPersistentPeerStore,
     create_async_memory_peerstore,
     create_async_sqlite_peerstore,
 )
-
 
 # ============================================================================
 # Fixtures

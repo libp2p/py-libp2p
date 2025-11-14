@@ -75,7 +75,7 @@ class MemoryDatastoreSync(IBatchingDatastoreSync):
         with self._lock:
             # Create a copy to avoid issues with concurrent modification
             data_copy: dict[bytes, bytes] = dict(self._data)
-        
+
         for key, value in data_copy.items():
             if key.startswith(prefix):
                 yield (key, value)

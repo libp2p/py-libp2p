@@ -7,7 +7,7 @@ synchronous ones.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator, AsyncIterable, Coroutine, Sequence
+from collections.abc import AsyncIterable, Sequence
 from typing import Any, Optional
 
 from multiaddr import Multiaddr
@@ -94,7 +94,9 @@ class IAsyncAddrBook(ABC):
         """
 
     @abstractmethod
-    async def add_addrs_async(self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int) -> None:
+    async def add_addrs_async(
+        self, peer_id: ID, addrs: Sequence[Multiaddr], ttl: int
+    ) -> None:
         """
         Add multiple addresses for the specified peer.
 
@@ -420,7 +422,9 @@ class IAsyncProtoBook(ABC):
         """
 
     @abstractmethod
-    async def remove_protocols_async(self, peer_id: ID, protocols: Sequence[str]) -> None:
+    async def remove_protocols_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> None:
         """
         Remove protocols for the specified peer.
 
@@ -434,7 +438,9 @@ class IAsyncProtoBook(ABC):
         """
 
     @abstractmethod
-    async def supports_protocols_async(self, peer_id: ID, protocols: Sequence[str]) -> list[str]:
+    async def supports_protocols_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> list[str]:
         """
         Check which protocols are supported by the specified peer.
 
@@ -453,7 +459,9 @@ class IAsyncProtoBook(ABC):
         """
 
     @abstractmethod
-    async def first_supported_protocol_async(self, peer_id: ID, protocols: Sequence[str]) -> str:
+    async def first_supported_protocol_async(
+        self, peer_id: ID, protocols: Sequence[str]
+    ) -> str:
         """
         Get the first supported protocol from the given list.
 

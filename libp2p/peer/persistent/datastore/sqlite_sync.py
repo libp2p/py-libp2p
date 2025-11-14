@@ -36,7 +36,8 @@ class SQLiteBatchSync(IBatchSync):
                 for operation, key, value in self.operations:
                     if operation == "put":
                         cursor.execute(
-                            "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)",
+                            "INSERT OR REPLACE INTO datastore "
+                            "(key, value) VALUES (?, ?)",
                             (key, value),
                         )
                     elif operation == "delete":
@@ -94,7 +95,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             cursor = self.connection.cursor()
             cursor.execute("SELECT value FROM datastore WHERE key = ?", (key,))
@@ -106,11 +107,11 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             cursor = self.connection.cursor()
             cursor.execute(
-                "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)", 
+                "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)",
                 (key, value)
             )
             self.connection.commit()
@@ -120,7 +121,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             cursor = self.connection.cursor()
             cursor.execute("DELETE FROM datastore WHERE key = ?", (key,))
@@ -131,7 +132,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             cursor = self.connection.cursor()
             cursor.execute("SELECT 1 FROM datastore WHERE key = ?", (key,))
@@ -144,12 +145,12 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             cursor = self.connection.cursor()
             if prefix:
                 cursor.execute(
-                    "SELECT key, value FROM datastore WHERE key LIKE ?", 
+                    "SELECT key, value FROM datastore WHERE key LIKE ?",
                     (prefix + b"%",)
                 )
             else:
@@ -170,7 +171,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.connection is None:
             raise ValueError("SQLite connection is not initialized")
-        
+
         with self._lock:
             self.connection.commit()
 

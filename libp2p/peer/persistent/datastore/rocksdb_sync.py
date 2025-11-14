@@ -38,7 +38,7 @@ class RocksDBBatchSync(IBatchSync):
                 db = self.db.db
                 if db is None:
                     raise ValueError("RocksDB database is not initialized")
-                
+
                 rocksdb = self.db._rocksdb
                 write_batch = rocksdb.WriteBatch()
 
@@ -118,7 +118,7 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("RocksDB database is not initialized")
-        
+
         with self._lock:
             return self.db.get(key)
 
@@ -127,7 +127,7 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("RocksDB database is not initialized")
-        
+
         with self._lock:
             self.db.put(key, value)
 
@@ -136,7 +136,7 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("RocksDB database is not initialized")
-        
+
         with self._lock:
             self.db.delete(key)
 
@@ -145,7 +145,7 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("RocksDB database is not initialized")
-        
+
         with self._lock:
             return self.db.get(key) is not None
 
@@ -156,12 +156,12 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
         self._ensure_connection()
         if self.db is None:
             raise ValueError("RocksDB database is not initialized")
-        
+
         with self._lock:
             # Create iterator
             iterator = self.db.iterkeys()
             iterator.seek_to_first()
-            
+
             try:
                 for key in iterator:
                     if not prefix or key.startswith(prefix):

@@ -5,11 +5,10 @@ This module contains functional tests for different datastore backends
 (Memory, SQLite, LevelDB, RocksDB) for both sync and async implementations.
 """
 
-import tempfile
 from pathlib import Path
+import tempfile
 
 import pytest
-import trio
 
 from libp2p.peer.persistent import (
     AsyncPersistentPeerStore,
@@ -23,7 +22,6 @@ from libp2p.peer.persistent import (
     create_sync_rocksdb_peerstore,
     create_sync_sqlite_peerstore,
 )
-
 
 # ============================================================================
 # Async Backend Tests
@@ -118,25 +116,26 @@ def test_sync_rocksdb_backend():
 @pytest.mark.trio
 async def test_async_backends_consistency():
     """Test that all async backends behave consistently."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Test memory backend
     memory_store = create_async_memory_peerstore()
     await memory_store.add_addrs_async(peer_id, [addr], 3600)
     memory_addrs = await memory_store.addrs_async(peer_id)
     await memory_store.close_async()
-    
+
     # Test SQLite backend
     with tempfile.TemporaryDirectory() as temp_dir:
         sqlite_store = create_async_sqlite_peerstore(Path(temp_dir) / "test.db")
         await sqlite_store.add_addrs_async(peer_id, [addr], 3600)
         sqlite_addrs = await sqlite_store.addrs_async(peer_id)
         await sqlite_store.close_async()
-    
+
     # Both should return the same result
     assert memory_addrs == sqlite_addrs
     assert len(memory_addrs) == 1
@@ -145,25 +144,26 @@ async def test_async_backends_consistency():
 
 def test_sync_backends_consistency():
     """Test that all sync backends behave consistently."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Test memory backend
     memory_store = create_sync_memory_peerstore()
     memory_store.add_addrs(peer_id, [addr], 3600)
     memory_addrs = memory_store.addrs(peer_id)
     memory_store.close()
-    
+
     # Test SQLite backend
     with tempfile.TemporaryDirectory() as temp_dir:
         sqlite_store = create_sync_sqlite_peerstore(Path(temp_dir) / "test.db")
         sqlite_store.add_addrs(peer_id, [addr], 3600)
         sqlite_addrs = sqlite_store.addrs(peer_id)
         sqlite_store.close()
-    
+
     # Both should return the same result
     assert memory_addrs == sqlite_addrs
     assert len(memory_addrs) == 1
@@ -179,20 +179,20 @@ async def test_sqlite_file_creation():
     """Test that SQLite backend creates database files."""
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "test.db"
-        
+
         # File shouldn't exist initially
         assert not db_path.exists()
-        
+
         # Create peerstore
         peerstore = create_async_sqlite_peerstore(str(db_path))
-        
+
         # Add some data to trigger database creation
         from libp2p.peer.id import ID
         peer_id = ID.from_base58("QmTestPeer")
         await peerstore.add_addrs_async(peer_id, [], 3600)
-        
+
         await peerstore.close_async()
-        
+
         # File should exist now
         assert db_path.exists()
 
@@ -201,20 +201,20 @@ def test_sync_sqlite_file_creation():
     """Test that sync SQLite backend creates database files."""
     with tempfile.TemporaryDirectory() as temp_dir:
         db_path = Path(temp_dir) / "test.db"
-        
+
         # File shouldn't exist initially
         assert not db_path.exists()
-        
+
         # Create peerstore
         peerstore = create_sync_sqlite_peerstore(str(db_path))
-        
+
         # Add some data to trigger database creation
         from libp2p.peer.id import ID
         peer_id = ID.from_base58("QmTestPeer")
         peerstore.add_addrs(peer_id, [], 3600)
-        
+
         peerstore.close()
-        
+
         # File should exist now
         assert db_path.exists()
 
@@ -222,51 +222,53 @@ def test_sync_sqlite_file_creation():
 @pytest.mark.trio
 async def test_memory_backend_isolation():
     """Test that memory backends are isolated from each other."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Create two separate memory peerstores
     store1 = create_async_memory_peerstore()
     store2 = create_async_memory_peerstore()
-    
+
     # Add data to first store
     await store1.add_addrs_async(peer_id, [addr], 3600)
-    
+
     # Second store should not have the data
     addrs1 = await store1.addrs_async(peer_id)
     addrs2 = await store2.addrs_async(peer_id)
-    
+
     assert len(addrs1) == 1
     assert len(addrs2) == 0
-    
+
     await store1.close_async()
     await store2.close_async()
 
 
 def test_sync_memory_backend_isolation():
     """Test that sync memory backends are isolated from each other."""
-    from libp2p.peer.id import ID
     from multiaddr import Multiaddr
-    
+
+    from libp2p.peer.id import ID
+
     peer_id = ID.from_base58("QmTestPeer")
     addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
-    
+
     # Create two separate memory peerstores
     store1 = create_sync_memory_peerstore()
     store2 = create_sync_memory_peerstore()
-    
+
     # Add data to first store
     store1.add_addrs(peer_id, [addr], 3600)
-    
+
     # Second store should not have the data
     addrs1 = store1.addrs(peer_id)
     addrs2 = store2.addrs(peer_id)
-    
+
     assert len(addrs1) == 1
     assert len(addrs2) == 0
-    
+
     store1.close()
     store2.close()

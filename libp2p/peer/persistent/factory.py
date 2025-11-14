@@ -6,7 +6,7 @@ and asynchronous persistent peerstores with different datastore backends.
 """
 
 from pathlib import Path
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 # Optional imports - check availability once at module level
 try:
@@ -285,7 +285,7 @@ def create_sync_leveldb_peerstore(
             "LevelDB support requires 'plyvel' package. "
             "Install with: pip install plyvel"
         )
-    
+
     datastore = LevelDBDatastoreSync(db_path, **options)
     return SyncPersistentPeerStore(datastore, max_records)
 
@@ -316,7 +316,7 @@ def create_async_leveldb_peerstore(
             "LevelDB support requires 'plyvel' package. "
             "Install with: pip install plyvel"
         )
-    
+
     datastore = LevelDBDatastore(db_path, **options)
     return AsyncPersistentPeerStore(datastore, max_records)
 
@@ -347,7 +347,7 @@ def create_sync_rocksdb_peerstore(
             "RocksDB support requires 'python-rocksdb' package. "
             "Install with: pip install python-rocksdb"
         )
-    
+
     datastore = RocksDBDatastoreSync(db_path, **options)
     return SyncPersistentPeerStore(datastore, max_records)
 
@@ -378,6 +378,6 @@ def create_async_rocksdb_peerstore(
             "RocksDB support requires 'python-rocksdb' package. "
             "Install with: pip install python-rocksdb"
         )
-    
+
     datastore = RocksDBDatastore(db_path, **options)
     return AsyncPersistentPeerStore(datastore, max_records)
