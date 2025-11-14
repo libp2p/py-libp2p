@@ -702,8 +702,8 @@ class Yamux(IMuxedConn):
                                 )
                             else:
                                 logger.debug(
-                                    f"Received ACK for stream"
-                                    f"{stream_id} for peer {self.peer_id}"
+                                    f"Received ACK (no data) for stream {stream_id} "
+                                    f"for peer {self.peer_id}"
                                 )
                 elif typ == TYPE_GO_AWAY:
                     error_code = length
