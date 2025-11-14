@@ -1,0 +1,17 @@
+Added persistent peer storage system with datastore-agnostic backend support.
+
+The new PersistentPeerStore implementation provides persistent storage for peer data
+(addresses, keys, metadata, protocols, latency metrics) across application restarts.
+This addresses the limitation of the in-memory peerstore that loses all peer information
+when the process restarts.
+
+Key features:
+- Datastore-agnostic interface supporting multiple backends (SQLite, LevelDB, RocksDB, Memory)
+- Full compatibility with existing IPeerStore interface
+- Automatic persistence of all PeerData fields including last_identified, ttl, and latmap
+- Factory functions for easy creation with different backends
+- Comprehensive test suite and usage examples
+
+The implementation follows the same architectural pattern as go-libp2p's pstoreds package,
+providing a robust foundation for long-running libp2p applications that need to maintain
+peer information across restarts.
