@@ -38,7 +38,7 @@ from .rocksdb_sync import RocksDBDatastoreSync
 __all__ = [
     # Async interfaces
     "IDatastore",
-    "IBatchingDatastore", 
+    "IBatchingDatastore",
     "IBatch",
     # Sync interfaces
     "IDatastoreSync",
@@ -46,12 +46,12 @@ __all__ = [
     "IBatchSync",
     # Async implementations
     "SQLiteDatastore",
-    "MemoryDatastore", 
+    "MemoryDatastore",
     "LevelDBDatastore",
     "RocksDBDatastore",
     # Sync implementations
     "SQLiteDatastoreSync",
     "MemoryDatastoreSync",
-    "LevelDBDatastoreSync", 
+    "LevelDBDatastoreSync",
     "RocksDBDatastoreSync",
 ]

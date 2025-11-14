@@ -157,8 +157,7 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
                 iterator = self.db.iterator()
 
             try:
-                for key, value in iterator:
-                    yield key, value
+                yield from iterator
             finally:
                 iterator.close()
 

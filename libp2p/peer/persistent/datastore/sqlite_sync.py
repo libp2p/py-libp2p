@@ -112,7 +112,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             cursor = self.connection.cursor()
             cursor.execute(
                 "INSERT OR REPLACE INTO datastore (key, value) VALUES (?, ?)",
-                (key, value)
+                (key, value),
             )
             self.connection.commit()
 
@@ -151,7 +151,7 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             if prefix:
                 cursor.execute(
                     "SELECT key, value FROM datastore WHERE key LIKE ?",
-                    (prefix + b"%",)
+                    (prefix + b"%",),
                 )
             else:
                 cursor.execute("SELECT key, value FROM datastore")

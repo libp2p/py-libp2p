@@ -11,6 +11,7 @@ from typing import Any, Literal
 # Optional imports - check availability once at module level
 try:
     import plyvel
+
     PLYVEL_AVAILABLE = True
 except ImportError:
     plyvel = None
@@ -18,6 +19,7 @@ except ImportError:
 
 try:
     import rocksdb
+
     ROCKSDB_AVAILABLE = True
 except ImportError:
     rocksdb = None
@@ -186,6 +188,7 @@ def create_async_peerstore(
 
 
 # Convenience functions for specific backends
+
 
 def create_sync_sqlite_peerstore(
     db_path: str | Path, max_records: int = 10000, **options: Any

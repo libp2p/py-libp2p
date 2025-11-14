@@ -23,6 +23,7 @@ from libp2p.peer.persistent import (
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def peer_id():
     """Create a test peer ID."""
@@ -63,6 +64,7 @@ def async_sqlite_peerstore():
 # ============================================================================
 # Basic Functionality Tests
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_initialization(async_memory_peerstore):
@@ -222,6 +224,7 @@ async def test_first_supported_protocol(async_memory_peerstore, peer_id):
 # Data Management Tests
 # ============================================================================
 
+
 @pytest.mark.trio
 async def test_clear_peerdata(async_memory_peerstore, peer_id, addr):
     """Test clearing peer data."""
@@ -290,6 +293,7 @@ async def test_clear_metrics(async_memory_peerstore, peer_id):
 # Stream Tests
 # ============================================================================
 
+
 @pytest.mark.trio
 async def test_addr_stream(async_memory_peerstore, peer_id, addr):
     """Test address stream functionality."""
@@ -313,6 +317,7 @@ async def test_addr_stream(async_memory_peerstore, peer_id, addr):
 # Lifecycle Tests
 # ============================================================================
 
+
 @pytest.mark.trio
 async def test_close(async_memory_peerstore):
     """Test closing the async peerstore."""
@@ -323,6 +328,7 @@ async def test_close(async_memory_peerstore):
 # ============================================================================
 # Error Handling Tests
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_nonexistent_peer(async_memory_peerstore, peer_id):
@@ -363,6 +369,7 @@ async def test_empty_peers_with_addrs(async_memory_peerstore):
 # ============================================================================
 # SQLite Persistence Test
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_sqlite_persistence(peer_id, addr):

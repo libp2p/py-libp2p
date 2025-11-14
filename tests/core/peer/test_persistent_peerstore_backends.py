@@ -27,6 +27,7 @@ from libp2p.peer.persistent import (
 # Async Backend Tests
 # ============================================================================
 
+
 @pytest.mark.trio
 async def test_async_memory_backend():
     """Test async memory backend."""
@@ -72,6 +73,7 @@ async def test_async_rocksdb_backend():
 # Sync Backend Tests
 # ============================================================================
 
+
 def test_sync_memory_backend():
     """Test sync memory backend."""
     peerstore = create_sync_memory_peerstore()
@@ -112,6 +114,7 @@ def test_sync_rocksdb_backend():
 # ============================================================================
 # Backend Comparison Tests
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_async_backends_consistency():
@@ -174,6 +177,7 @@ def test_sync_backends_consistency():
 # Backend-Specific Feature Tests
 # ============================================================================
 
+
 @pytest.mark.trio
 async def test_sqlite_file_creation():
     """Test that SQLite backend creates database files."""
@@ -188,6 +192,7 @@ async def test_sqlite_file_creation():
 
         # Add some data to trigger database creation
         from libp2p.peer.id import ID
+
         peer_id = ID.from_base58("QmTestPeer")
         await peerstore.add_addrs_async(peer_id, [], 3600)
 
@@ -210,6 +215,7 @@ def test_sync_sqlite_file_creation():
 
         # Add some data to trigger database creation
         from libp2p.peer.id import ID
+
         peer_id = ID.from_base58("QmTestPeer")
         peerstore.add_addrs(peer_id, [], 3600)
 

@@ -23,6 +23,7 @@ from libp2p.peer.persistent import (
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def peer_id():
     """Create a test peer ID."""
@@ -63,6 +64,7 @@ def sync_sqlite_peerstore():
 # ============================================================================
 # Basic Functionality Tests
 # ============================================================================
+
 
 def test_initialization(sync_memory_peerstore):
     """Test sync peerstore initialization."""
@@ -210,6 +212,7 @@ def test_first_supported_protocol(sync_memory_peerstore, peer_id):
 # Data Management Tests
 # ============================================================================
 
+
 def test_clear_peerdata(sync_memory_peerstore, peer_id, addr):
     """Test clearing peer data."""
     # Add some data
@@ -273,6 +276,7 @@ def test_clear_metrics(sync_memory_peerstore, peer_id):
 # Stream Tests
 # ============================================================================
 
+
 def test_addr_stream_not_supported(sync_memory_peerstore, peer_id):
     """Test that addr_stream is not supported in sync peerstore."""
     # This should raise NotImplementedError
@@ -285,6 +289,7 @@ def test_addr_stream_not_supported(sync_memory_peerstore, peer_id):
 # Lifecycle Tests
 # ============================================================================
 
+
 def test_close(sync_memory_peerstore):
     """Test closing the sync peerstore."""
     # This should not raise an exception
@@ -294,6 +299,7 @@ def test_close(sync_memory_peerstore):
 # ============================================================================
 # Error Handling Tests
 # ============================================================================
+
 
 def test_nonexistent_peer(sync_memory_peerstore, peer_id):
     """Test operations on nonexistent peer."""
@@ -329,6 +335,7 @@ def test_empty_peers_with_addrs(sync_memory_peerstore):
 # ============================================================================
 # SQLite Persistence Test
 # ============================================================================
+
 
 def test_sqlite_persistence(peer_id, addr):
     """Test SQLite persistence with sync peerstore."""

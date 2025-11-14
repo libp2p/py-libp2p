@@ -28,6 +28,7 @@ from libp2p.peer.persistent import (
 # Fixtures
 # ============================================================================
 
+
 @pytest.fixture
 def peer_id():
     """Create a test peer ID."""
@@ -55,6 +56,7 @@ def addr2():
 # ============================================================================
 # Async Persistence Tests
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_async_sqlite_basic_persistence(peer_id, addr):
@@ -243,6 +245,7 @@ async def test_async_rocksdb_persistence_if_available(peer_id, addr):
 # Sync Persistence Tests
 # ============================================================================
 
+
 def test_sync_sqlite_basic_persistence(peer_id, addr):
     """Test basic SQLite persistence with sync peerstore."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -423,6 +426,7 @@ def test_sync_rocksdb_persistence_if_available(peer_id, addr):
 # ============================================================================
 # Cross-Backend Persistence Tests
 # ============================================================================
+
 
 @pytest.mark.trio
 async def test_async_cross_backend_no_persistence():

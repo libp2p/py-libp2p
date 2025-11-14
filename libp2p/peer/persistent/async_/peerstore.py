@@ -276,7 +276,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
             # Query all address keys to find peer IDs
             for key, _ in self.datastore.query(self.ADDR_PREFIX):
                 if key.startswith(self.ADDR_PREFIX):
-                    peer_id_bytes = key[len(self.ADDR_PREFIX):]
+                    peer_id_bytes = key[len(self.ADDR_PREFIX) :]
                     try:
                         peer_id = ID(peer_id_bytes)
                         peer_ids.add(peer_id)

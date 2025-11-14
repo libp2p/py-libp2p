@@ -8,7 +8,7 @@ synchronous ones.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable, Sequence
-from typing import Any, Optional
+from typing import Any
 
 from multiaddr import Multiaddr
 
@@ -174,7 +174,7 @@ class IAsyncCertifiedAddrBook(ABC):
     """Async interface for certified address book operations."""
 
     @abstractmethod
-    async def get_local_record_async(self) -> Optional[Envelope]:
+    async def get_local_record_async(self) -> Envelope | None:
         """Get the local-signed-record wrapped in Envelope"""
 
     @abstractmethod
@@ -197,7 +197,7 @@ class IAsyncCertifiedAddrBook(ABC):
         """
 
     @abstractmethod
-    async def get_peer_record_async(self, peer_id: ID) -> Optional[Envelope]:
+    async def get_peer_record_async(self, peer_id: ID) -> Envelope | None:
         """
         Retrieve the most recent signed PeerRecord `Envelope` for a peer.
 
