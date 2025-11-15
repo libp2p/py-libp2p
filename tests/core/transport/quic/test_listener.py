@@ -149,10 +149,10 @@ class TestQUICListener:
         assert initial_stats["bytes_received"] == 0
         assert initial_stats["packets_processed"] == 0
 
+
 @pytest.mark.trio
 async def test_listener_fallback_routing_by_address():
     """Test that listener can route packets by address when CID is unknown."""
-
     # Setup
     private_key = create_new_key_pair().private_key
     config = QUICTransportConfig(idle_timeout=10.0)

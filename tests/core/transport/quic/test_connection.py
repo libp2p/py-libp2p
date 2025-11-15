@@ -7,8 +7,8 @@ error handling, and concurrent operations.
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from multiaddr.multiaddr import Multiaddr
 from aioquic.quic.events import ConnectionIdIssued
+from multiaddr.multiaddr import Multiaddr
 import trio
 
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -553,10 +553,10 @@ async def test_invalid_certificate_verification():
     ):
         manager.verify_peer_identity(corrupted_cert, peer_id1)
 
+
 @pytest.mark.trio
 async def test_connection_id_issued_notifies_listener():
     """Test that ConnectionIdIssued events notify listener to register new CID."""
-
     # Setup mock transport with listener
     mock_quic_conn = Mock()
     mock_quic_conn.next_event.return_value = None
