@@ -1041,27 +1041,67 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         This is the CRITICAL missing functionality that was causing your issue!
         """
-        logger.debug(f"🆔 NEW CONNECTION ID ISSUED: {event.connection_id.hex()}")
-        logger.debug(f"🆔 NEW CONNECTION ID ISSUED: {event.connection_id.hex()}")
+        new_cid = event.connection_id
+        logger.debug(f"NEW CONNECTION ID ISSUED: {new_cid.hex()}")
 
         # Add to available connection IDs
-        self._available_connection_ids.add(event.connection_id)
+        self._available_connection_ids.add(new_cid)
 
         # If we don't have a current connection ID, use this one
         if self._current_connection_id is None:
-            self._current_connection_id = event.connection_id
-            logger.debug(
-                f"🆔 Set current connection ID to: {event.connection_id.hex()}"
-            )
-            logger.debug(
-                f"🆔 Set current connection ID to: {event.connection_id.hex()}"
-            )
+            self._current_connection_id = new_cid
+            logger.debug(f"Set current connection ID to: {new_cid.hex()}")
+
+        # CRITICAL FIX: Notify listener to register this new CID
+        # This ensures packets with the new CID can be routed correctly
+        await self._notify_listener_of_new_cid(new_cid)
 
         # Update statistics
         self._stats["connection_ids_issued"] += 1
 
         logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
-        logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
+
+    async def _notify_listener_of_new_cid(self, new_cid: bytes) -> None:
+        """
+        Notify the parent listener to register a new Connection ID.
+
+        This is critical for proper packet routing when the peer issues
+        new Connection IDs after the handshake completes.
+        """
+        try:
+            if not self._transport:
+                return
+
+            # Find the listener that owns this connection
+            for listener in self._transport._listeners:
+                # Find this connection in the listener's tracking
+                for tracked_cid, tracked_conn in list(listener._connections.items()):
+                    if tracked_conn is self:
+                        # Found our connection - register the new CID
+                        async with listener._connection_lock:
+                            # Map new CID to the same address as the original CID
+                            original_addr = listener._cid_to_addr.get(tracked_cid)
+                            if original_addr:
+                                listener._cid_to_addr[new_cid] = original_addr
+                                listener._connections[new_cid] = self
+                                logger.debug(
+                                    f"Registered new CID {new_cid.hex()[:8]} "
+                                    f"for connection {tracked_cid.hex()[:8]} "
+                                    f"at address {original_addr}"
+                                )
+                            else:
+                                logger.warning(
+                                    f"Could not find address for CID "
+                                    f"{tracked_cid.hex()[:8]} when registering new CID "
+                                    f"{new_cid.hex()[:8]}"
+                                )
+                        return
+
+            logger.debug(
+                f"Could not find listener to register new CID {new_cid.hex()[:8]}"
+            )
+        except Exception as e:
+            logger.error(f"Error notifying listener of new CID: {e}")
 
     async def _handle_connection_id_retired(
         self, event: events.ConnectionIdRetired

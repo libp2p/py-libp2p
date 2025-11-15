@@ -292,18 +292,53 @@ class QUICListener(IListener):
                     else:
                         # Try to find connection by address
                         # (for new CIDs issued after promotion)
+                        # This handles the race condition where packets with new CIDs
+                        # arrive before ConnectionIdIssued events are processed
                         original_cid = self._addr_to_cid.get(addr)
                         if original_cid:
                             connection_obj = self._connections.get(original_cid)
                             if connection_obj:
                                 # This is a new CID for an existing connection
-                                # - register it
+                                # - register it immediately
                                 self._connections[dest_cid] = connection_obj
                                 self._cid_to_addr[dest_cid] = addr
+                                logger.debug(
+                                    f"Registered new CID {dest_cid.hex()[:8]} "
+                                    f"for existing connection {original_cid.hex()[:8]} "
+                                    f"at address {addr} (fallback mechanism)"
+                                )
                             else:
+                                # Address mapping exists but connection not found
+                                # Clean up stale mapping
+                                del self._addr_to_cid[addr]
                                 return
                         else:
-                            return
+                            # No address mapping - try to find connection by checking
+                            # all connections for matching address (last resort)
+                            for cid, conn in self._connections.items():
+                                if (
+                                    hasattr(conn, "_remote_addr")
+                                    and conn._remote_addr == addr
+                                ):
+                                    # Found connection by address - register new CID
+                                    self._connections[dest_cid] = conn
+                                    self._cid_to_addr[dest_cid] = addr
+                                    # Update addr mapping to use new CID
+                                    self._addr_to_cid[addr] = dest_cid
+                                    logger.debug(
+                                        f"Registered new CID {dest_cid.hex()[:8]} "
+                                        f"for connection {cid.hex()[:8]} at address "
+                                        f"{addr} (address-based fallback)"
+                                    )
+                                    connection_obj = conn
+                                    break
+                            if not connection_obj:
+                                # No connection found - drop packet
+                                logger.debug(
+                                    f"No connection found for CID {dest_cid.hex()[:8]} "
+                                    f"at address {addr}, dropping packet"
+                                )
+                                return
 
             # Process outside the lock
             if connection_obj:
