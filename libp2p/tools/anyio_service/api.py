@@ -9,7 +9,7 @@ import sys
 from typing import Any, Optional, TypeVar, cast
 
 import anyio
-from anyio.abc import ObjectReceiveStream, ObjectSendStream
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
 from .exceptions import LifecycleError
 from .stats import Stats
@@ -209,7 +209,7 @@ _ChannelPayload = tuple[Optional[Any], Optional[BaseException]]
 async def _wait_finished(
     service: ServiceAPI,
     api_func: Callable[..., Any],
-    stream: ObjectSendStream[_ChannelPayload],
+    stream: MemoryObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: wait for service to finish."""
     manager = service.get_manager()
@@ -243,7 +243,7 @@ async def _wait_api_fn(
     api_fn: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    stream: ObjectSendStream[_ChannelPayload],
+    stream: MemoryObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: execute the API function."""
     try:
@@ -283,8 +283,8 @@ def external_api(func: TFunc) -> TFunc:
 
         # Create a memory stream for communication
         streams: tuple[
-            ObjectSendStream[_ChannelPayload],
-            ObjectReceiveStream[_ChannelPayload],
+            MemoryObjectSendStream[_ChannelPayload],
+            MemoryObjectReceiveStream[_ChannelPayload],
         ] = anyio.create_memory_object_stream(0)
         send_stream, receive_stream = streams
 

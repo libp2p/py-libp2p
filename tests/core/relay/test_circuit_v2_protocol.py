@@ -34,7 +34,7 @@ from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
 )
 from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (

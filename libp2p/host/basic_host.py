@@ -62,7 +62,7 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 
