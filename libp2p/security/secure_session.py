@@ -82,6 +82,11 @@ class SecureSession(BaseSession):
 
         msg = await self.conn.read_msg()
 
+        # If underlying connection returned empty bytes, treat as closed
+        # and raise to signal that reads after close are invalid.
+        if msg == b"":
+            raise Exception("Connection closed")
+
         if n is None:
             return msg
 

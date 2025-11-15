@@ -10,6 +10,7 @@ import ssl
 
 from aioquic.quic.configuration import QuicConfiguration
 import multiaddr
+import multiaddr.protocols
 
 from libp2p.custom_types import TProtocol
 from libp2p.transport.quic.security import QUICTLSConfigManager
@@ -107,21 +108,22 @@ def quic_multiaddr_to_endpoint(maddr: multiaddr.Multiaddr) -> tuple[str, int]:
 
         # Try to get IPv4 address
         try:
-            host = maddr.value_for_protocol(multiaddr.protocols.P_IP4)  # type: ignore
+            host = maddr.value_for_protocol(multiaddr.protocols.P_IP4)
         except Exception:
             pass
 
         # Try to get IPv6 address if IPv4 not found
         if host is None:
             try:
-                host = maddr.value_for_protocol(multiaddr.protocols.P_IP6)  # type: ignore
+                host = maddr.value_for_protocol(multiaddr.protocols.P_IP6)
             except Exception:
                 pass
 
         # Get UDP port
         try:
-            port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)  # type: ignore
-            port = int(port_str)
+            port_str = maddr.value_for_protocol(multiaddr.protocols.P_UDP)
+            if port_str is not None:
+                port = int(port_str)
         except Exception:
             pass
 
@@ -356,12 +358,6 @@ def create_server_config_from_base(
                 if server_tls_config.alpn_protocols:
                     server_config.alpn_protocols = server_tls_config.alpn_protocols
                 server_tls_config.request_client_certificate = True
-                if getattr(server_tls_config, "request_client_certificate", False):
-                    server_config._libp2p_request_client_cert = True  # type: ignore
-                else:
-                    logger.error(
-                        "🔧 Failed to set request_client_certificate in server config"
-                    )
 
             except Exception as e:
                 logger.warning(f"Failed to apply security manager config: {e}")

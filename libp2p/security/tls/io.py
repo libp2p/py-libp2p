@@ -50,6 +50,8 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_complete = False
         self._negotiated_protocol: str | None = None
+        # Track whether the TLS wrapper has been closed to prevent I/O after close
+        self._closed = False
 
     async def handshake(self) -> None:
         """
@@ -162,7 +164,9 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             msg: Message to encrypt and send
 
         """
-        # Ensure handshake was called
+        # Ensure handshake was called and connection is open
+        if self._closed:
+            raise RuntimeError("Cannot write: TLS connection is closed")
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
         # write plaintext into SSL object and flush ciphertext to transport
@@ -188,7 +192,9 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             Decrypted message bytes
 
         """
-        # Ensure handshake was called
+        # Ensure handshake was called and connection is open
+        if self._closed:
+            raise RuntimeError("Cannot read: TLS connection is closed")
         if not self._handshake_complete:
             raise RuntimeError("Call handshake() first")
 
@@ -271,6 +277,8 @@ class TLSReadWriter(EncryptedMsgReadWriter):
                     pass
         finally:
             await self.raw_connection.close()
+            # Mark as closed so subsequent reads/writes raise
+            self._closed = True
 
     def get_negotiated_protocol(self) -> str | None:
         """

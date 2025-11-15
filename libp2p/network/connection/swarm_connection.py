@@ -1,6 +1,7 @@
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 from multiaddr import Multiaddr
@@ -15,6 +16,7 @@ from libp2p.network.stream.net_stream import (
     NetStream,
     StreamState,
 )
+from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
@@ -34,6 +36,7 @@ class SwarmConn(INetConn):
     swarm: "Swarm"
     streams: set[NetStream]
     event_closed: trio.Event
+    _resource_scope: Any | None
 
     def __init__(
         self,
@@ -45,6 +48,7 @@ class SwarmConn(INetConn):
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        self._resource_scope = None
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -64,9 +68,17 @@ class SwarmConn(INetConn):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
         else:
-            logging.error(
-                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute"
+            # If on_close doesn't exist, create it. This ensures compatibility
+            # with muxer implementations that don't have on_close support.
+            logging.debug(
+                f"muxed_conn for peer {muxed_conn.peer_id} has no on_close attribute, "
+                "creating it"
             )
+            setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
+
+    def set_resource_scope(self, scope: Any) -> None:
+        """Set the resource scope for this connection."""
+        self._resource_scope = scope
 
     @property
     def is_closed(self) -> bool:
@@ -85,6 +97,22 @@ class SwarmConn(INetConn):
             return
         logging.debug(f"Closing SwarmConn for peer {self.muxed_conn.peer_id}")
         self.event_closed.set()
+
+        # Clean up resource scope if it exists
+        if self._resource_scope is not None:
+            try:
+                # Release the resource scope
+                if hasattr(self._resource_scope, "close"):
+                    self._resource_scope.close()
+                elif hasattr(self._resource_scope, "release"):
+                    self._resource_scope.release()
+                logging.debug(
+                    f"Released resource scope for peer {self.muxed_conn.peer_id}"
+                )
+            except Exception as e:
+                logging.warning(f"Error releasing resource scope: {e}")
+            finally:
+                self._resource_scope = None
 
         # Close the muxed connection
         try:
@@ -139,6 +167,27 @@ class SwarmConn(INetConn):
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        # Acquire inbound stream resource if a manager is configured
+        rm = getattr(self.swarm, "_resource_manager", None)
+        peer_id_str = str(getattr(self.muxed_conn, "peer_id", ""))
+        acquired = False
+        if rm is not None:
+            try:
+                acquired = rm.acquire_stream(peer_id_str, Direction.INBOUND)
+            except Exception:
+                acquired = False
+
+        if rm is not None and not acquired:
+            # Deny stream: best-effort reset/close
+            try:
+                await muxed_stream.reset()  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    await muxed_stream.close()
+                except Exception:
+                    pass
+            return
+
         net_stream = await self._add_stream(muxed_stream)
         try:
             await self.swarm.common_stream_handler(net_stream)
@@ -146,6 +195,12 @@ class SwarmConn(INetConn):
             # Always remove the stream when the handler finishes
             # Use simple remove_stream since stream handles notifications itself
             self.remove_stream(net_stream)
+            # Release inbound stream resource
+            if rm is not None and acquired:
+                try:
+                    rm.release_stream(peer_id_str, Direction.INBOUND)
+                except Exception:
+                    pass
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         #
