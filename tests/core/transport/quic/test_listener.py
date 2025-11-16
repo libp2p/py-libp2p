@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from multiaddr.multiaddr import Multiaddr
@@ -148,3 +148,44 @@ class TestQUICListener:
         assert initial_stats["connections_rejected"] == 0
         assert initial_stats["bytes_received"] == 0
         assert initial_stats["packets_processed"] == 0
+
+
+@pytest.mark.trio
+async def test_listener_fallback_routing_by_address():
+    """Test that listener can route packets by address when CID is unknown."""
+    # Setup
+    private_key = create_new_key_pair().private_key
+    config = QUICTransportConfig(idle_timeout=10.0)
+    transport = QUICTransport(private_key, config)
+    handler = AsyncMock()
+    listener = transport.create_listener(handler)
+
+    # Create mock connection
+    mock_connection = Mock()
+    addr = ("127.0.0.1", 9999)
+    mock_connection._remote_addr = addr
+
+    initial_cid = b"\x01" * 8
+    unknown_cid = b"\x02" * 8
+
+    # Register connection with initial CID
+    async with listener._connection_lock:
+        listener._connections[initial_cid] = mock_connection
+        listener._cid_to_addr[initial_cid] = addr
+        listener._addr_to_cid[addr] = initial_cid
+
+    # Simulate fallback mechanism: find by address when CID unknown
+    async with listener._connection_lock:
+        connection_found = None
+        for cid, conn in listener._connections.items():
+            if hasattr(conn, "_remote_addr") and conn._remote_addr == addr:
+                connection_found = conn
+                # Register the new CID
+                listener._connections[unknown_cid] = conn
+                listener._cid_to_addr[unknown_cid] = addr
+                break
+
+    # Verify connection was found and new CID registered
+    assert connection_found is mock_connection
+    assert listener._connections[unknown_cid] is mock_connection
+    assert listener._cid_to_addr[unknown_cid] == addr

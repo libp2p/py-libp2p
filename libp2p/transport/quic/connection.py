@@ -1111,7 +1111,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         This handles when the peer tells us to stop using a connection ID.
         """
-        logger.debug(f"🗑️ CONNECTION ID RETIRED: {event.connection_id.hex()}")
+        logger.debug(f"CONNECTION ID RETIRED: {event.connection_id.hex()}")
 
         # Remove from available IDs and add to retired set
         self._available_connection_ids.discard(event.connection_id)
