@@ -1,122 +1,339 @@
-## Network Attack Mitigation Strategies for py-libp2p
+# **Network Attack Mitigation Strategies for py-libp2p**
 
-This document outlines mitigation strategies and expected system behavior under key adversarial scenarios implemented in the `attack_simulation` test suite. It is designed to guide contributors and researchers working on hardening py-libp2p against network-level threats inspired by Polkadot/Smoldot security principles.
+This document outlines the mitigation strategies and expected system behavior for all adversarial scenarios implemented in the `attack_simulation` suite. 
 
----
-
-### 1. Eclipse + Bootnode Poisoning Attack
-
-**Path:** `tests/security/attack_simulation/eclipse_attack/bootnode_poisoning.py`
-
-#### Threat Vector
-
-Malicious bootnodes isolate honest peers during network bootstrap. Since initial peer discovery depends on these nodes, an attacker can cut honest peers off from the canonical network.
-
-#### Expected System Response
-
-* Detect isolation and reduced peer diversity
-* Attempt re-seeding via fallback peers
-* Drop malicious connections upon detection
-
-#### Mitigation Procedures
-
-* Maintain bootnode diversity (geo + operator)
-* Periodic bootnode rotation
-* Use authenticated bootnode lists with trust anchors
-* Implement fallback peer list and randomized re-seeding
+The goal is to help contributors strengthen py-libp2p’s robustness against real network adversaries by providing a clear understanding of how each attack works and how it should ideally defend itself.
 
 ---
 
-### 2. Long-Range Fork Replay
+# **📊 Attack Coverage Table**
 
-**Path:** `tests/security/attack_simulation/fork_attack/long_range_fork.py`
+| **Attack Type**                   | **Key Metrics Evaluated**                                                               | **Simulation Path**                     |
+| --------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------- |
+| **Eclipse / Bootnode Poisoning**  | Isolation rate, DHT contamination, fallback recovery time, peer diversity degradation   | `eclipse_attack/bootnode_poisoning.py`  |
+| **Sybil Attack**                  | Identity amplification, fake peer influence, routing pollution, connection hijacking    | `sybil_attack/*.py`                     |
+| **Flooding Attack**               | Message rate spikes, pubsub congestion, bandwidth saturation, latency inflation         | `flooding_attack/*.py`                  |
+| **Invalid Block Propagation**     | Pre-finality acceptance rate, post-finality detection latency, malicious peer isolation | `data_attack/invalid_block.py`          |
+| **Long-Range Fork Replay**        | Fork detection rate, false acceptance probability, resync success time                  | `fork_attack/long_range_fork.py`        |
+| **Finality Stall Attack**         | Memory growth, stall detection delay, pruning performance, recovery behavior            | `finality_attack/stall_simulation.py`   |
+| **Replay Attack**                 | Replayed message detection, nonce mismatch rate, out-of-order detection                 | `replay_attack/*.py`                    |
+| **Routing Poisoning**             | Fake routing entries injected, lookup failure rate, routing inaccuracy                  | `routing_poisoning/*.py`                |
+| **Connection Exhaustion (DoS)**   | Connection saturation, handshake exhaustion, resource starvation metrics                | `connection_exhaustion/*.py`            |
+| **Protocol Violation Attack**     | Malformed message rejection, handshake exploit detection, protocol error rates          | `protocol_attack/*.py`                  |
+| **Topology Partition Attack**     | Graph connectivity loss, partition size, affected nodes %, edge cut ratio               | `topology_attack/partition_attack.py`   |
+| **Gossip Delay (Latency Attack)** | Latency ratio, delayed propagation %, spike size, resilience degradation                | `latency_attack/gossip_delay_attack.py` |
+| **Time Drift Attack**             | Clock skew, timeout misfires, ordering instability, resilience score                    | `time_attack/time_drift_attack.py`      |
+| **Simple Attack Runner**          | High-level smoke test behavior                                                          | `test_attacks_simple.py`                |
+| **Unified Attack Runner**         | Multi-attack resilience verification                                                    | `test_runner.py`                        |
 
-#### Threat Vector
+---
 
-Offline nodes reconnect after long downtime and are fed an outdated fork by malicious peers. If checkpoint freshness is not validated, the node may accept stale chain data.
+# **1. Eclipse Attack: Bootnode Poisoning**
 
-#### Expected System Response
+**Path:** `eclipse_attack/bootnode_poisoning.py`
 
-* Detect stale forks through checkpoint or finality comparison
-* Trigger resync with canonical chain
-* Flag and isolate malicious peers
+### **Threat Vector**
 
-#### Mitigation Procedures
+Malicious bootnodes mislead peers during initial discovery, creating isolated mini-networks or fully eclipsed nodes.
+
+### **Expected System Response**
+
+* Detect bootnode monotony (all peers coming from same source)
+* Trigger fallback peer discovery
+* Flag inconsistent routing table patterns
+
+### **Mitigations**
+
+* Maintain **bootnode diversity** (different operators, regions)
+* Rotate bootnodes periodically
+* Validate bootnode authenticity through signed lists
+* Use peer scoring to penalize repeatedly misleading peers
+
+---
+
+# **2. Sybil Attack**
+
+**Path:** `sybil_attack/*.py`
+
+### **Threat Vector**
+
+An attacker floods the network with fake identities to control routing or influence decisions.
+
+### **Expected System Response**
+
+* Detect disproportionate identity clusters
+* Use scoring to reduce influence of suspicious identities
+* Maintain peer diversity during selection
+
+### **Mitigations**
+
+* Identity cost (proof-of-work or stake, depending on chain)
+* Strong peer scoring
+* Reject excessive connections from same IP/subnet
+* Encourage diverse routing table population
+
+---
+
+# **3. Flooding Attack**
+
+**Path:** `flooding_attack/*.py`
+
+### **Threat Vector**
+
+Attacker sends high-volume pubsub messages, connection flood attempts, or gossip spam.
+
+### **Expected System Response**
+
+* Detect throughput anomalies
+* Apply rate-limiting
+* Evict abusive peers
+
+### **Mitigations**
+
+* Pubsub message rate caps
+* Connection throttling
+* Bandwidth quotas
+* Early drop of repeated or malformed messages
+
+---
+
+# **4. Invalid Block Propagation**
+
+**Path:** `data_attack/invalid_block.py`
+
+### **Threat Vector**
+
+Malicious validators propagate authentic-looking but invalid blocks, targeting light clients.
+
+### **Expected System Response**
+
+* Detect invalidity after finality
+* Rollback and isolate emitter
+* Prefer multiple validation sources
+
+### **Mitigations**
+
+* Dual-validity checks: authenticity + state integrity
+* Cache recent finality checkpoints
+* Require multi-peer agreement before pre-finality acceptance
+* Rapid blacklist of invalid block producers
+
+---
+
+# **5. Long-Range Fork Replay**
+
+**Path:** `fork_attack/long_range_fork.py`
+
+### **Threat Vector**
+
+Nodes offline for long durations may be fed outdated chain histories by malicious peers.
+
+### **Expected System Response**
+
+* Compare against trusted checkpoints
+* Detect outdated finality
+* Re-sync to canonical chain
+
+### **Mitigations**
 
 * Enforce checkpoint freshness validation
-* Require multi-peer consensus on finalized state
-* Use trusted checkpoint feeds for light nodes
-* Maintain fallback sync sources
+* Multi-peer consensus for finalized state
+* Maintain trusted, rotating checkpoint providers
+* Reject unanchored long-range histories
 
 ---
 
-### 3. Invalid Block Propagation
+# **6. Finality Stall Attack**
 
-**Path:** `tests/security/attack_simulation/data_attack/invalid_block.py`
+**Path:** `finality_attack/stall_simulation.py`
 
-#### Threat Vector
+### **Threat Vector**
 
-Malicious validators produce authentic but invalid blocks that light clients accept pre-finality, causing temporary inconsistencies.
+Finality stops while block production continues, causing memory bloat and inconsistent state in light clients.
 
-#### Expected System Response
+### **Expected System Response**
 
-* Light clients detect invalidity post-finality
-* Trigger rollback and peer isolation
-* Full nodes detect earlier via state checks
+* Detect stalled finality streams
+* Trigger pruning of non-finalized blocks
+* Pause aggressive block acceptance
 
-#### Mitigation Procedures
+### **Mitigations**
 
-* Dual validation: authenticity + integrity
-* Lightweight pre-finality validity heuristics
-* Rapid disconnection from malicious peers
-* Alerting and telemetry hooks
-
----
-
-### 4. Finality Stall Attack
-
-**Path:** `tests/security/attack_simulation/finality_attack/stall_simulation.py`
-
-#### Threat Vector
-
-Finality halts while blocks continue to be produced. Light clients accumulate non-finalized blocks, potentially exhausting memory and degrading performance.
-
-#### Expected System Response
-
-* Detect stalled finality gossip
-* Trigger timeout-based pruning of non-finalized blocks
-* Throttle block processing under stall
-
-#### Mitigation Procedures
-
-* Prune memory aggressively during stall
-* Set finality stall detection thresholds
-* Resume sync and clean-up after finality resumes
-* Monitor memory telemetry and trigger alerts
+* Memory-pruning limits
+* Finality stall detection thresholds
+* Auto-throttle block intake
+* Resume sync and garbage-collect old blocks after recovery
 
 ---
 
-### 5. Cross-Attack Mitigation Principles
+# **7. Replay Attack**
 
-* **Bootnode Diversity:** Use multiple independent operators to prevent total isolation
-* **Checkpoint Freshness:** Ensure light clients verify the recency of state checkpoints
-* **Peer Behavior Monitoring:** Real-time detection of anomalous propagation
-* **Fallback Paths:** Redundant peer and checkpoint sources for recovery
-* **Telemetry & Alerting:** Early warning for cascading network failures
+**Path:** `replay_attack/*.py`
+
+### **Threat Vector**
+
+Attacker captures valid messages and replays them to confuse peers or manipulate state transitions.
+
+### **Expected System Response**
+
+* Track nonces / timestamps
+* Reject duplicates
+* Detect out-of-order sequences
+
+### **Mitigations**
+
+* Nonce-based replay protection
+* Soft time-window validation
+* Detection of repetitive patterns
+* Peer scoring penalties
 
 ---
 
-###  6. Testing & Benchmarking
+# **8. Routing Poisoning Attack**
 
-| Attack Type        | Key Metrics                                      | Test Path                              |
-| ------------------ | ------------------------------------------------ | -------------------------------------- |
-| Eclipse / Bootnode | Isolation rate, DHT persistence, recovery time   | `eclipse_attack/bootnode_poisoning.py` |
-| Long-Range Fork    | Fork detection rate, false acceptance rate       | `fork_attack/long_range_fork.py`       |
-| Invalid Block      | Invalid block acceptance pre-finality, latency   | `data_attack/invalid_block.py`         |
-| Finality Stall     | Memory growth, stall detection, recovery latency | `finality_attack/stall_simulation.py`  |
+**Path:** `routing_poisoning/*.py`
+
+### **Threat Vector**
+
+Malicious peers inject fake routing entries to pollute DHT results.
+
+### **Expected System Response**
+
+* Detect inconsistent routing entries
+* Reduce trust in suspicious sources
+* Cross-check entries across peers
+
+### **Mitigations**
+
+* Multi-peer confirmation before accepting routing entries
+* Penalize peers advertising excessive fake entries
+* Maintain routing table diversity
+* Perform periodic route cleanup
 
 ---
 
-### Acknowledgments
+# **9. Connection Exhaustion (DoS)**
 
-These scenarios are inspired by security research in the Polkadot/Smoldot ecosystem and are extended to enhance py-libp2p’s resilience testing framework.
+**Path:** `connection_exhaustion/*.py`
+
+### **Threat Vector**
+
+Attacker opens many simultaneous connections to exhaust file descriptors and memory.
+
+### **Expected System Response**
+
+* Connection caps engage
+* Reject new connections gracefully
+* Evict least-scored peers
+
+### **Mitigations**
+
+* Per-peer connection limits
+* Global connection limits
+* Adaptive backoff
+* Resource-aware connection prioritization
+
+---
+
+# **10. Protocol Violation Attack**
+
+**Path:** `protocol_attack/*.py`
+
+### **Threat Vector**
+
+Malformed messages, handshake exploits, invalid protocol steps, or inconsistent payloads.
+
+### **Expected System Response**
+
+* Reject malformed payloads
+* Trigger protocol error events
+* Isolate recurring offenders
+
+### **Mitigations**
+
+* Strict schema validation
+* Enforce handshake invariants
+* Runtime protocol sanity checks
+* Peer scoring for violations
+
+---
+
+# **11. Topology Partition Attack**
+
+**Path:** `topology_attack/partition_attack.py`
+
+### **Threat Vector**
+
+Adversary partitions the network into disconnected components, breaking routing and consensus.
+
+### **Expected System Response**
+
+* Detect graph connectivity drop
+* Attempt alternate edges
+* Trigger recovery via fallback peers
+
+### **Mitigations**
+
+* Encourage mesh diversity
+* Maintain redundant paths
+* Topology monitoring
+* Periodic reconnection to random nodes
+
+---
+
+# **12. Gossip Delay (Latency Attack)**
+
+**Path:** `latency_attack/gossip_delay_attack.py`
+
+### **Threat Vector**
+
+Attacker introduces targeted latency to delay gossip propagation, affecting block production, routing and consensus liveness.
+
+### **Expected System Response**
+
+* Detect latency spikes
+* Identify chronically slow peers
+* Adapt gossip heartbeat speeds
+
+### **Mitigations**
+
+* Latency scoring
+* Slow-peer eviction
+* Prioritize fast-forward peers
+* Enforce max gossip delay thresholds
+
+---
+
+# **13. Time Drift Attack**
+
+**Path:** `time_attack/time_drift_attack.py`
+
+### **Threat Vector**
+
+Nodes experience clock drift (positive or negative), causing timeout misfires, ordering errors and inconsistent state views.
+
+### **Expected System Response**
+
+* Detect drift using heartbeat timestamps
+* Adjust timeout thresholds
+* Account for max drift in ordering logic
+
+### **Mitigations**
+
+* Clock synchronization heuristics
+* Drift-tolerant timeout windows
+* Sequence numbers for ordering
+* Penalize peers with extreme drift
+
+---
+
+# **Cross-Attack Mitigation Principles**
+
+Across all attacks, the following principles improve resilience:
+
+* **Peer diversity:** avoid relying on single sources of truth
+* **Fallback paths:** provide alternate discovery and validation mechanisms
+* **Peer scoring:** down-rank malicious or unstable peers
+* **Telemetry & alerts:** early detection of anomalies
+* **Adaptive algorithms:** network-aware timeouts and thresholds
+* **Redundant validation:** multi-peer confirmations for critical data

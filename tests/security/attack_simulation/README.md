@@ -49,6 +49,12 @@ tests/security/attack_simulation/
 │   └── invalid_block.py
 ├── finality_attack/       # Finality stall simulation
 │   └── stall_simulation.py
+├── time_attack/           # # Introduces inconsistent logical clocks across peers
+│   └── time_drift_attack.py 
+├── topology_attack/       # Cuts communication links to split the network
+│   └── partition_attack.py
+├── latency_attack/       # Artificially delays gossip propagation to slow message flow
+│   └── gossip_delay_attack.py
 ├── utils/                 # Shared utilities
 ├── config/                # Configurations
 ├── docs/                  # Documentation
