@@ -565,10 +565,11 @@ async def test_connection_id_issued_notifies_listener():
     mock_transport = Mock()
     mock_transport._config = QUICTransportConfig()
 
+    from libp2p.transport.quic.connection_id_registry import ConnectionIDRegistry
+
     mock_listener = Mock()
-    mock_listener._connections = {}
-    mock_listener._cid_to_addr = {}
     mock_listener._connection_lock = trio.Lock()
+    mock_listener._registry = ConnectionIDRegistry(mock_listener._connection_lock)
     mock_transport._listeners = [mock_listener]
 
     private_key = create_new_key_pair().private_key
@@ -586,8 +587,9 @@ async def test_connection_id_issued_notifies_listener():
 
     # Register connection with initial CID
     initial_cid = b"\x01" * 8
-    mock_listener._connections[initial_cid] = conn
-    mock_listener._cid_to_addr[initial_cid] = ("127.0.0.1", 9999)
+    await mock_listener._registry.register_connection(
+        initial_cid, conn, ("127.0.0.1", 9999)
+    )
 
     # Issue new CID
     new_cid = b"\x02" * 8
@@ -595,6 +597,5 @@ async def test_connection_id_issued_notifies_listener():
     await conn._handle_connection_id_issued(event)
 
     # Verify listener was notified and registered the new CID
-    assert new_cid in mock_listener._connections
-    assert mock_listener._connections[new_cid] is conn
-    assert mock_listener._cid_to_addr[new_cid] == ("127.0.0.1", 9999)
+    conn_found, _, _ = await mock_listener._registry.find_by_cid(new_cid)
+    assert conn_found is conn

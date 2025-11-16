@@ -1,0 +1,444 @@
+"""
+Unit tests for ConnectionIDRegistry.
+
+Tests the Connection ID routing state management and all registry operations.
+"""
+
+from unittest.mock import Mock
+
+import pytest
+import trio
+
+from libp2p.transport.quic.connection_id_registry import ConnectionIDRegistry
+
+
+@pytest.fixture
+def registry():
+    """Create a ConnectionIDRegistry instance for testing."""
+    lock = trio.Lock()
+    return ConnectionIDRegistry(lock)
+
+
+@pytest.fixture
+def mock_connection():
+    """Create a mock QUICConnection for testing."""
+    conn = Mock()
+    conn._remote_addr = ("127.0.0.1", 12345)
+    return conn
+
+
+@pytest.fixture
+def mock_pending_connection():
+    """Create a mock QuicConnection (aioquic) for testing."""
+    return Mock()
+
+
+@pytest.mark.trio
+async def test_register_connection(registry, mock_connection):
+    """Test registering an established connection."""
+    cid = b"test_cid_1"
+    addr = ("127.0.0.1", 12345)
+
+    await registry.register_connection(cid, mock_connection, addr)
+
+    # Verify connection is registered
+    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert connection_obj is mock_connection
+    assert pending_conn is None
+    assert is_pending is False
+
+    # Verify address mappings
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid == cid
+
+
+@pytest.mark.trio
+async def test_register_pending(registry, mock_pending_connection):
+    """Test registering a pending connection."""
+    cid = b"test_cid_2"
+    addr = ("127.0.0.1", 54321)
+
+    await registry.register_pending(cid, mock_pending_connection, addr)
+
+    # Verify pending connection is registered
+    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert connection_obj is None
+    assert pending_conn is mock_pending_connection
+    assert is_pending is True
+
+    # Verify address mappings exist (but find_by_address only returns
+    # established connections)
+    # The CID should still be mapped to the address internally
+    found_connection, found_cid = await registry.find_by_address(addr)
+    # find_by_address only searches established connections, so it won't find pending
+    assert found_connection is None
+    # But we can verify the CID is registered by checking directly
+    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert pending_conn is mock_pending_connection
+    assert is_pending is True
+
+
+@pytest.mark.trio
+async def test_find_by_cid_not_found(registry):
+    """Test finding a non-existent Connection ID."""
+    cid = b"nonexistent_cid"
+
+    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert connection_obj is None
+    assert pending_conn is None
+    assert is_pending is False
+
+
+@pytest.mark.trio
+async def test_find_by_address_not_found(registry):
+    """Test finding a connection by non-existent address."""
+    addr = ("192.168.1.1", 9999)
+
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is None
+    assert found_cid is None
+
+
+@pytest.mark.trio
+async def test_add_connection_id(registry, mock_connection):
+    """Test adding a new Connection ID for an existing connection."""
+    original_cid = b"original_cid"
+    new_cid = b"new_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register original connection
+    await registry.register_connection(original_cid, mock_connection, addr)
+
+    # Add new Connection ID
+    await registry.add_connection_id(new_cid, original_cid)
+
+    # Verify both Connection IDs map to the same connection
+    conn1, _, _ = await registry.find_by_cid(original_cid)
+    conn2, _, _ = await registry.find_by_cid(new_cid)
+    assert conn1 is mock_connection
+    assert conn2 is mock_connection
+
+    # Verify both Connection IDs map to the same address
+    found_conn1, cid1 = await registry.find_by_address(addr)
+    assert found_conn1 is mock_connection
+    # The address should map to one of the Connection IDs
+    assert cid1 in (original_cid, new_cid)
+
+
+@pytest.mark.trio
+async def test_remove_connection_id(registry, mock_connection):
+    """Test removing a Connection ID and cleaning up mappings."""
+    cid = b"test_cid_3"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid, mock_connection, addr)
+
+    # Verify it exists
+    connection_obj, _, _ = await registry.find_by_cid(cid)
+    assert connection_obj is mock_connection
+
+    # Remove Connection ID
+    removed_addr = await registry.remove_connection_id(cid)
+
+    # Verify it's removed
+    connection_obj, _, _ = await registry.find_by_cid(cid)
+    assert connection_obj is None
+    assert removed_addr == addr
+
+    # Verify address mapping is cleaned up
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is None
+    assert found_cid is None
+
+
+@pytest.mark.trio
+async def test_remove_pending_connection(registry, mock_pending_connection):
+    """Test removing a pending connection."""
+    cid = b"pending_cid"
+    addr = ("127.0.0.1", 54321)
+
+    # Register pending connection
+    await registry.register_pending(cid, mock_pending_connection, addr)
+
+    # Verify it exists
+    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert pending_conn is mock_pending_connection
+    assert is_pending is True
+
+    # Remove pending connection
+    await registry.remove_pending_connection(cid)
+
+    # Verify it's removed
+    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert pending_conn is None
+    assert is_pending is False
+
+
+@pytest.mark.trio
+async def test_promote_pending(registry, mock_connection, mock_pending_connection):
+    """Test promoting a pending connection to established."""
+    cid = b"promote_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register as pending
+    await registry.register_pending(cid, mock_pending_connection, addr)
+
+    # Verify it's pending
+    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert pending_conn is mock_pending_connection
+    assert is_pending is True
+
+    # Promote to established
+    await registry.promote_pending(cid, mock_connection)
+
+    # Verify it's now established
+    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    assert connection_obj is mock_connection
+    assert pending_conn is None
+    assert is_pending is False
+
+    # Verify address mapping is still intact
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid == cid
+
+
+@pytest.mark.trio
+async def test_register_new_cid_for_existing_connection(registry, mock_connection):
+    """Test registering a new Connection ID (fallback mechanism)."""
+    original_cid = b"original_cid_2"
+    new_cid = b"new_cid_2"
+    addr = ("127.0.0.1", 12345)
+
+    # Register original connection
+    await registry.register_connection(original_cid, mock_connection, addr)
+
+    # Register new Connection ID using fallback mechanism
+    await registry.register_new_cid_for_existing_connection(
+        new_cid, mock_connection, addr
+    )
+
+    # Verify both Connection IDs work
+    conn1, _, _ = await registry.find_by_cid(original_cid)
+    conn2, _, _ = await registry.find_by_cid(new_cid)
+    assert conn1 is mock_connection
+    assert conn2 is mock_connection
+
+    # Verify address now maps to new Connection ID
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid == new_cid
+
+
+@pytest.mark.trio
+async def test_get_all_cids_for_connection(registry, mock_connection):
+    """Test getting all Connection IDs for a connection."""
+    cid1 = b"cid_1"
+    cid2 = b"cid_2"
+    cid3 = b"cid_3"
+    addr1 = ("127.0.0.1", 12345)
+
+    # Register connection with first Connection ID
+    await registry.register_connection(cid1, mock_connection, addr1)
+
+    # Add additional Connection IDs
+    await registry.add_connection_id(cid2, cid1)
+    await registry.add_connection_id(cid3, cid1)
+
+    # Get all Connection IDs for this connection
+    cids = await registry.get_all_cids_for_connection(mock_connection)
+
+    # Verify all Connection IDs are returned
+    assert len(cids) == 3
+    assert cid1 in cids
+    assert cid2 in cids
+    assert cid3 in cids
+
+
+@pytest.mark.trio
+async def test_find_by_address_fallback_search(registry, mock_connection):
+    """Test the fallback address search mechanism."""
+    cid = b"fallback_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid, mock_connection, addr)
+
+    # Remove address mapping to simulate stale mapping scenario
+    # (This tests the fallback linear search)
+    async with registry._lock:
+        registry._addr_to_cid.pop(addr, None)
+
+    # find_by_address should still find the connection via linear search
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid == cid
+
+
+@pytest.mark.trio
+async def test_remove_by_address(registry, mock_connection):
+    """Test removing a connection by address."""
+    cid = b"addr_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid, mock_connection, addr)
+
+    # Remove by address
+    removed_cid = await registry.remove_by_address(addr)
+
+    # Verify it's removed
+    assert removed_cid == cid
+    connection_obj, _, _ = await registry.find_by_cid(cid)
+    assert connection_obj is None
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is None
+    assert found_cid is None
+
+
+@pytest.mark.trio
+async def test_cleanup_stale_address_mapping(registry):
+    """Test cleaning up stale address mappings."""
+    addr = ("127.0.0.1", 12345)
+
+    # Create a stale mapping
+    async with registry._lock:
+        registry._addr_to_cid[addr] = b"stale_cid"
+
+    # Clean up stale mapping
+    await registry.cleanup_stale_address_mapping(addr)
+
+    # Verify mapping is removed
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is None
+    assert found_cid is None
+
+
+@pytest.mark.trio
+async def test_multiple_connections_same_address(registry):
+    """Test handling multiple connections (edge case - shouldn't happen but test it)."""
+    conn1 = Mock()
+    conn1._remote_addr = ("127.0.0.1", 12345)
+    conn2 = Mock()
+    conn2._remote_addr = ("127.0.0.1", 12345)
+
+    cid1 = b"cid_1"
+    cid2 = b"cid_2"
+    addr = ("127.0.0.1", 12345)
+
+    # Register first connection
+    await registry.register_connection(cid1, conn1, addr)
+
+    # Register second connection with same address (overwrites address mapping)
+    await registry.register_connection(cid2, conn2, addr)
+
+    # Address lookup should return the most recently registered connection
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is conn2
+    assert found_cid == cid2
+
+    # But both Connection IDs should still work
+    conn1_found, _, _ = await registry.find_by_cid(cid1)
+    conn2_found, _, _ = await registry.find_by_cid(cid2)
+    assert conn1_found is conn1
+    assert conn2_found is conn2
+
+
+@pytest.mark.trio
+async def test_get_all_established_cids(registry, mock_connection):
+    """Test getting all established Connection IDs."""
+    cid1 = b"established_1"
+    cid2 = b"established_2"
+    addr1 = ("127.0.0.1", 12345)
+    addr2 = ("127.0.0.1", 12346)
+
+    await registry.register_connection(cid1, mock_connection, addr1)
+    await registry.register_connection(cid2, mock_connection, addr2)
+
+    established_cids = await registry.get_all_established_cids()
+    assert len(established_cids) == 2
+    assert cid1 in established_cids
+    assert cid2 in established_cids
+
+
+@pytest.mark.trio
+async def test_get_all_pending_cids(registry, mock_pending_connection):
+    """Test getting all pending Connection IDs."""
+    cid1 = b"pending_1"
+    cid2 = b"pending_2"
+    addr1 = ("127.0.0.1", 12345)
+    addr2 = ("127.0.0.1", 12346)
+
+    await registry.register_pending(cid1, mock_pending_connection, addr1)
+    await registry.register_pending(cid2, mock_pending_connection, addr2)
+
+    pending_cids = await registry.get_all_pending_cids()
+    assert len(pending_cids) == 2
+    assert cid1 in pending_cids
+    assert cid2 in pending_cids
+
+
+@pytest.mark.trio
+async def test_get_stats(registry, mock_connection, mock_pending_connection):
+    """Test getting registry statistics."""
+    cid1 = b"stats_cid_1"
+    cid2 = b"stats_cid_2"
+    addr1 = ("127.0.0.1", 12345)
+    addr2 = ("127.0.0.1", 12346)
+
+    await registry.register_connection(cid1, mock_connection, addr1)
+    await registry.register_pending(cid2, mock_pending_connection, addr2)
+
+    stats = registry.get_stats()
+    assert stats["established_connections"] == 1
+    assert stats["pending_connections"] == 1
+    assert stats["total_connection_ids"] == 2
+    assert stats["address_mappings"] == 2
+
+
+@pytest.mark.trio
+async def test_len(registry, mock_connection, mock_pending_connection):
+    """Test __len__ method."""
+    cid1 = b"len_cid_1"
+    cid2 = b"len_cid_2"
+    addr1 = ("127.0.0.1", 12345)
+    addr2 = ("127.0.0.1", 12346)
+
+    assert len(registry) == 0
+
+    await registry.register_connection(cid1, mock_connection, addr1)
+    assert len(registry) == 1
+
+    await registry.register_pending(cid2, mock_pending_connection, addr2)
+    assert len(registry) == 2
+
+    await registry.remove_connection_id(cid1)
+    assert len(registry) == 1
+
+
+@pytest.mark.trio
+async def test_connection_id_retired_cleanup(registry, mock_connection):
+    """Test cleanup when Connection ID is retired but address mapping remains."""
+    original_cid = b"original_retired"
+    new_cid = b"new_not_retired"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection with original Connection ID
+    await registry.register_connection(original_cid, mock_connection, addr)
+
+    # Add new Connection ID
+    await registry.add_connection_id(new_cid, original_cid)
+
+    # Remove original Connection ID (simulating retirement)
+    await registry.remove_connection_id(original_cid)
+
+    # New Connection ID should still work
+    conn, _, _ = await registry.find_by_cid(new_cid)
+    assert conn is mock_connection
+
+    # Address should still map to new Connection ID
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid == new_cid

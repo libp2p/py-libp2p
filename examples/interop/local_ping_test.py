@@ -262,7 +262,7 @@ class PingTest:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                return stream.muxed_conn.peer_id
+                return str(stream.muxed_conn.peer_id)  # type: ignore
             except (AttributeError, Exception):
                 return "unknown"
 
@@ -294,7 +294,7 @@ class PingTest:
     def log_protocols(self) -> None:
         """Log registered protocols for debugging."""
         try:
-            protocols = self.host.get_mux().get_protocols()
+            protocols = self.host.get_mux().get_protocols()  # type: ignore
             protocols_str = [str(p) for p in protocols if p is not None]
             print(f"Registered protocols: {protocols_str}", file=sys.stderr)
         except Exception as e:
@@ -367,18 +367,18 @@ class PingTest:
         muxer_opt = self.create_muxer_options()
         listen_addrs = self.create_listen_addresses(self.port)
 
-        self.host = new_host(
+        self.host = new_host(  # type: ignore
             key_pair=key_pair,
             sec_opt=sec_opt,
             muxer_opt=muxer_opt,
             listen_addrs=listen_addrs,
             enable_quic=(self.transport == "quic-v1"),
         )
-        self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)
+        self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)  # type: ignore
         self.log_protocols()
 
-        async with self.host.run(listen_addrs=listen_addrs):
-            all_addrs = self.host.get_addrs()
+        async with self.host.run(listen_addrs=listen_addrs):  # type: ignore
+            all_addrs = self.host.get_addrs()  # type: ignore
             if not all_addrs:
                 raise RuntimeError("No listen addresses available")
 
@@ -401,7 +401,7 @@ class PingTest:
                         file=sys.stderr,
                     )
                     return
-                await trio.sleep(check_interval)
+                await trio.sleep(float(check_interval))  # type: ignore
                 elapsed += check_interval
 
             if not self.ping_received:
@@ -465,7 +465,7 @@ class PingTest:
 
         for attempt in range(max_retries):
             try:
-                stream = await self.host.new_stream(peer_id, [PING_PROTOCOL_ID])
+                stream = await self.host.new_stream(peer_id, [PING_PROTOCOL_ID])  # type: ignore
                 print("Ping stream created successfully", file=sys.stderr)
                 return stream
             except Exception as e:
@@ -525,11 +525,11 @@ class PingTest:
                 "enable_quic": (self.transport == "quic-v1"),
             }
             if dialer_listen_addrs:
-                host_kwargs["listen_addrs"] = dialer_listen_addrs
+                host_kwargs["listen_addrs"] = dialer_listen_addrs  # type: ignore
 
-            self.host = new_host(**host_kwargs)
+            self.host = new_host(**host_kwargs)  # type: ignore
 
-            async with self.host.run(listen_addrs=dialer_listen_addrs or []):
+            async with self.host.run(listen_addrs=dialer_listen_addrs or []):  # type: ignore
                 handshake_start = time.time()
                 maddr = multiaddr.Multiaddr(listener_addr)
                 info = info_from_p2p_addr(maddr)
@@ -540,7 +540,7 @@ class PingTest:
                         f"[DEBUG] About to call host.connect() for {info.peer_id}",
                         file=sys.stderr,
                     )
-                await self.host.connect(info)
+                await self.host.connect(info)  # type: ignore
                 print("Connected successfully", file=sys.stderr)
                 if self.debug:
                     print(
@@ -548,7 +548,7 @@ class PingTest:
                         file=sys.stderr,
                     )
 
-                self._debug_connection_state(self.host.get_network(), info.peer_id)
+                self._debug_connection_state(self.host.get_network(), info.peer_id)  # type: ignore
 
                 # Brief delay to ensure connection is fully ready for stream creation
                 await trio.sleep(0.1)

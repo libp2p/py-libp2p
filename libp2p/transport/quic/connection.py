@@ -1074,28 +1074,18 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             # Find the listener that owns this connection
             for listener in self._transport._listeners:
-                # Find this connection in the listener's tracking
-                for tracked_cid, tracked_conn in list(listener._connections.items()):
-                    if tracked_conn is self:
-                        # Found our connection - register the new CID
-                        async with listener._connection_lock:
-                            # Map new CID to the same address as the original CID
-                            original_addr = listener._cid_to_addr.get(tracked_cid)
-                            if original_addr:
-                                listener._cid_to_addr[new_cid] = original_addr
-                                listener._connections[new_cid] = self
-                                logger.debug(
-                                    f"Registered new CID {new_cid.hex()[:8]} "
-                                    f"for connection {tracked_cid.hex()[:8]} "
-                                    f"at address {original_addr}"
-                                )
-                            else:
-                                logger.warning(
-                                    f"Could not find address for CID "
-                                    f"{tracked_cid.hex()[:8]} when registering new CID "
-                                    f"{new_cid.hex()[:8]}"
-                                )
-                        return
+                # Find this connection in the listener's registry
+                cids = await listener._registry.get_all_cids_for_connection(self)
+                if cids:
+                    # Use the first Connection ID found as the original CID
+                    original_cid = cids[0]
+                    # Register new Connection ID using the registry
+                    await listener._registry.add_connection_id(new_cid, original_cid)
+                    logger.debug(
+                        f"Registered new Connection ID {new_cid.hex()[:8]} "
+                        f"for connection {original_cid.hex()[:8]}"
+                    )
+                    return
 
             logger.debug(
                 f"Could not find listener to register new CID {new_cid.hex()[:8]}"
@@ -1452,11 +1442,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Cleanup using connection ID as a fallback method."""
         try:
             for listener in self._transport._listeners:
-                for tracked_cid, tracked_conn in list(listener._connections.items()):
-                    if tracked_conn is self:
-                        await listener._remove_connection(tracked_cid)
-                        logger.debug(f"Removed connection {tracked_cid.hex()}")
-                        return
+                # Find this connection in the listener's registry
+                cids = await listener._registry.get_all_cids_for_connection(self)
+                if cids:
+                    # Remove using the first Connection ID found
+                    tracked_cid = cids[0]
+                    await listener._remove_connection(tracked_cid)
+                    logger.debug(f"Removed connection {tracked_cid.hex()}")
+                    return
 
             logger.debug("Fallback cleanup by connection ID completed")
         except Exception as e:

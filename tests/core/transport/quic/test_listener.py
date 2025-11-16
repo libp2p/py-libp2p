@@ -169,23 +169,144 @@ async def test_listener_fallback_routing_by_address():
     unknown_cid = b"\x02" * 8
 
     # Register connection with initial CID
-    async with listener._connection_lock:
-        listener._connections[initial_cid] = mock_connection
-        listener._cid_to_addr[initial_cid] = addr
-        listener._addr_to_cid[addr] = initial_cid
+    await listener._registry.register_connection(initial_cid, mock_connection, addr)
 
     # Simulate fallback mechanism: find by address when CID unknown
-    async with listener._connection_lock:
-        connection_found = None
-        for cid, conn in listener._connections.items():
-            if hasattr(conn, "_remote_addr") and conn._remote_addr == addr:
-                connection_found = conn
-                # Register the new CID
-                listener._connections[unknown_cid] = conn
-                listener._cid_to_addr[unknown_cid] = addr
-                break
+    connection_found, found_cid = await listener._registry.find_by_address(addr)
+    assert connection_found is mock_connection
+
+    # Register the new CID using the registry
+    await listener._registry.register_new_cid_for_existing_connection(
+        unknown_cid, mock_connection, addr
+    )
 
     # Verify connection was found and new CID registered
-    assert connection_found is mock_connection
-    assert listener._connections[unknown_cid] is mock_connection
-    assert listener._cid_to_addr[unknown_cid] == addr
+    conn, _, _ = await listener._registry.find_by_cid(unknown_cid)
+    assert conn is mock_connection
+
+
+@pytest.mark.trio
+async def test_connection_id_tracking_with_real_connection():
+    """Test that Connection ID tracking works with real QUIC connections."""
+    from libp2p.transport.quic.connection import QUICConnection
+    from libp2p.transport.quic.utils import create_quic_multiaddr
+
+    # Setup server
+    server_key = create_new_key_pair()
+    server_config = QUICTransportConfig(idle_timeout=10.0, connection_timeout=5.0)
+    server_transport = QUICTransport(server_key.private_key, server_config)
+
+    connection_established = False
+    initial_connection_ids = set()
+    new_connection_ids = set()
+
+    async def connection_handler(connection: QUICConnection) -> None:
+        """Handler that tracks Connection IDs."""
+        nonlocal connection_established, initial_connection_ids, new_connection_ids
+
+        connection_established = True
+
+        # Get initial Connection IDs from listener
+        # Find this connection in the listener's registry
+        for listener in server_transport._listeners:
+            cids = await listener._registry.get_all_cids_for_connection(connection)
+            initial_connection_ids.update(cids)
+
+        # Wait a bit for potential new Connection IDs to be issued
+        await trio.sleep(0.5)
+
+        # Check for new Connection IDs
+        for listener in server_transport._listeners:
+            cids = await listener._registry.get_all_cids_for_connection(connection)
+            for cid in cids:
+                if cid not in initial_connection_ids:
+                    new_connection_ids.add(cid)
+
+    # Create listener
+    listener = server_transport.create_listener(connection_handler)
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+
+    # Setup client
+    client_key = create_new_key_pair()
+    client_config = QUICTransportConfig(idle_timeout=10.0, connection_timeout=5.0)
+    client_transport = QUICTransport(client_key.private_key, client_config)
+
+    try:
+        async with trio.open_nursery() as nursery:
+            # Start server
+            server_transport.set_background_nursery(nursery)
+            success = await listener.listen(listen_addr, nursery)
+            assert success, "Failed to start server listener"
+
+            server_addrs = listener.get_addrs()
+            assert len(server_addrs) > 0, "Server should have listen addresses"
+
+            # Get server address with peer ID
+            import multiaddr
+
+            from libp2p.peer.id import ID
+
+            server_addr = multiaddr.Multiaddr(
+                f"{server_addrs[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
+            )
+
+            # Give server time to be ready
+            await trio.sleep(0.1)
+
+            # Connect client to server
+            client_transport.set_background_nursery(nursery)
+            client_connection = await client_transport.dial(server_addr)
+
+            # Wait for connection to be established and handler to run
+            await trio.sleep(1.0)
+
+            # Verify connection was established
+            assert connection_established, "Connection handler should have been called"
+
+            # Verify at least one Connection ID was tracked
+            assert len(initial_connection_ids) > 0, (
+                "At least one Connection ID should be tracked initially"
+            )
+
+            # Verify Connection ID mappings exist in listener
+            # Get the connection object from the handler
+            # We need to find the connection that was established
+            connection_found = None
+            for listener in server_transport._listeners:
+                cids = await listener._registry.get_all_established_cids()
+                if cids:
+                    conn, _, _ = await listener._registry.find_by_cid(cids[0])
+                    if conn:
+                        connection_found = conn
+                        break
+
+            assert connection_found is not None, "Connection should be established"
+
+            # Verify all initial Connection IDs are in mappings
+            for cid in initial_connection_ids:
+                conn, _, _ = await listener._registry.find_by_cid(cid)
+                assert conn is connection_found, (
+                    f"Connection ID {cid.hex()[:8]} should map to connection"
+                )
+
+            # Verify new Connection IDs (if any) are also tracked
+            for cid in new_connection_ids:
+                conn, _, _ = await listener._registry.find_by_cid(cid)
+                assert conn is connection_found, (
+                    f"New Connection ID {cid.hex()[:8]} should map to connection"
+                )
+
+            # Clean up
+            await client_connection.close()
+            await client_transport.close()
+
+            # Cancel nursery to stop server
+            nursery.cancel_scope.cancel()
+
+    finally:
+        # Cleanup
+        if not listener._closed:
+            await listener.close()
+        await server_transport.close()
+        if not client_transport._closed:
+            await client_transport.close()
