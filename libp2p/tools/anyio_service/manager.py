@@ -113,7 +113,7 @@ class AnyIOManager(InternalManagerAPI):
 
     @property
     def is_started(self) -> bool:
-        return self._started is not None and self._started.is_set()
+        return bool(self._started is not None and self._started.is_set())
 
     @property
     def is_running(self) -> bool:
@@ -125,7 +125,7 @@ class AnyIOManager(InternalManagerAPI):
 
     @property
     def is_finished(self) -> bool:
-        return self._finished is not None and self._finished.is_set()
+        return bool(self._finished is not None and self._finished.is_set())
 
     @property
     def did_error(self) -> bool:
@@ -461,7 +461,7 @@ class AnyIOManager(InternalManagerAPI):
         task = FunctionTask(
             name=get_task_name(async_fn, name),
             daemon=daemon,
-            parent=self._find_parent_task(anyio.get_current_task()),
+            parent=self._find_parent_task(anyio.get_current_task()),  # type: ignore[arg-type]
             async_fn=async_fn,
             async_fn_args=args,
             count_in_stats=count_in_stats,
@@ -499,7 +499,7 @@ class AnyIOManager(InternalManagerAPI):
         task = ChildServiceTask(
             name=get_task_name(service, name),
             daemon=daemon,
-            parent=self._find_parent_task(anyio.get_current_task()),
+            parent=self._find_parent_task(anyio.get_current_task()),  # type: ignore[arg-type]
             child_service=service,
         )
 

@@ -1,3 +1,4 @@
+import hashlib
 import random
 
 import base58
@@ -97,9 +98,10 @@ def test_id_from_public_key():
     public_key = key_pair.public_key
 
     key_bin = public_key.serialize()
-    algo = multihash.Func.sha2_256
-    mh_digest = multihash.digest(key_bin, algo)
-    expected = ID(mh_digest.encode())
+    # Use SHA2-256 hash (since key is larger than MAX_INLINE_KEY_LENGTH)
+    digest = hashlib.sha256(key_bin).digest()
+    mh_bytes = multihash.encode(digest, "sha2-256")
+    expected = ID(mh_bytes)
 
     actual = ID.from_pubkey(public_key)
 

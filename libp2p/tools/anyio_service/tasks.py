@@ -291,7 +291,7 @@ class FunctionTask(BaseTaskWithChildren):
 
     @property
     def is_done(self) -> bool:
-        return self._done is not None and self._done.is_set()
+        return bool(self._done is not None and self._done.is_set())
 
     async def wait_done(self) -> None:
         # Wait for task to be initialized and then wait for it to be done
