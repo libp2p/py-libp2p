@@ -305,6 +305,8 @@ async def test_trio_service_manager_run_task():
             task_event.set()
 
         manager.run_task(task_fn)
+        # Give the task a chance to run before finishing
+        await trio.lowlevel.checkpoint()
         await manager.wait_finished()
 
     async with background_trio_service(RunTaskService()):
