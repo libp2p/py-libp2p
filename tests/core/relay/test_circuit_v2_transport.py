@@ -12,9 +12,7 @@ from libp2p.network.stream.exceptions import (
     StreamReset,
 )
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.relay.circuit_v2.config import (
-    RelayConfig,
-)
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
     RelayInfo,
