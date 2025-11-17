@@ -58,10 +58,15 @@ from libp2p.peer.peerdata import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.pubsub.utils import maybe_consume_signed_record
-from libp2p.tools.anomaly_detector import (
-    AnomalyReport,
-    PeerAnomalyDetector,
-)
+try:
+    from libp2p.tools.anomaly_detector import (
+        AnomalyReport,
+        PeerAnomalyDetector,
+    )
+except ImportError:
+    # Fallback if anomaly detector is not available
+    AnomalyReport = None  # type: ignore
+    PeerAnomalyDetector = None  # type: ignore
 from libp2p.tools.async_service import (
     Service,
 )
@@ -225,7 +230,14 @@ class Pubsub(Service, IPubsub):
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
-        self._anomaly_detector = PeerAnomalyDetector()
+        if PeerAnomalyDetector is not None:
+            try:
+                self._anomaly_detector = PeerAnomalyDetector()
+            except Exception:
+                # Fallback if anomaly detector fails to initialize
+                self._anomaly_detector = None
+        else:
+            self._anomaly_detector = None
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
@@ -381,6 +393,8 @@ class Pubsub(Service, IPubsub):
         Feed activity metrics into the anomaly detector, blacklisting peers
         that significantly exceed expected behaviour.
         """
+        if self._anomaly_detector is None:
+            return
         try:
             report = self._anomaly_detector.record(peer_id, metric, float(amount))
         except Exception as exc:
