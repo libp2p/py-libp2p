@@ -231,11 +231,7 @@ class Pubsub(Service, IPubsub):
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
         if PeerAnomalyDetector is not None:
-            try:
-                self._anomaly_detector = PeerAnomalyDetector()
-            except Exception:
-                # Fallback if anomaly detector fails to initialize
-                self._anomaly_detector = None
+            self._anomaly_detector = PeerAnomalyDetector()
         else:
             self._anomaly_detector = None
 

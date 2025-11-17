@@ -71,6 +71,18 @@ class SlidingWindowRate:
 
 
 @dataclass
+class AnomalyConfig:
+    """Configuration for anomaly detection thresholds."""
+
+    window_seconds: float = 60.0
+    publish_threshold: float = 100.0
+    control_threshold: float = 50.0
+    z_score_threshold: float = 3.0
+    min_samples: int = 30
+    cooldown: float = 60.0
+
+
+@dataclass
 class AnomalyReport:
     peer_id: ID
     metric: str
@@ -83,16 +95,23 @@ class AnomalyReport:
 class PeerAnomalyDetector:
     def __init__(
         self,
+        config: AnomalyConfig | None = None,
         *,
-        window_seconds: float = 120.0,
-        std_threshold: float = 3.0,
-        min_samples: int = 30,
-        cooldown: float = 60.0,
+        window_seconds: float | None = None,
+        std_threshold: float | None = None,
+        min_samples: int | None = None,
+        cooldown: float | None = None,
     ) -> None:
-        self.window_seconds = window_seconds
-        self.std_threshold = std_threshold
-        self.min_samples = min_samples
-        self.cooldown = cooldown
+        if config is not None:
+            self.window_seconds = config.window_seconds
+            self.std_threshold = config.z_score_threshold
+            self.min_samples = config.min_samples
+            self.cooldown = config.cooldown
+        else:
+            self.window_seconds = window_seconds if window_seconds is not None else 120.0
+            self.std_threshold = std_threshold if std_threshold is not None else 3.0
+            self.min_samples = min_samples if min_samples is not None else 30
+            self.cooldown = cooldown if cooldown is not None else 60.0
         self._peer_metrics: Dict[ID, Dict[str, SlidingWindowRate]] = defaultdict(dict)
         self._baselines: Dict[str, RunningStats] = defaultdict(RunningStats)
         self._last_alert: Dict[Tuple[ID, str], float] = {}
