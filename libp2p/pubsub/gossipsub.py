@@ -132,6 +132,7 @@ class GossipSub(IPubsubRouter, Service):
         unsubscribe_back_off: int = 10,
         adaptive_tuning: bool = False,
         adaptive_config: AdaptiveTuningConfig | None = None,
+        score_params: ScoreParams | None = None,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -175,8 +176,10 @@ class GossipSub(IPubsubRouter, Service):
             GossipSubAdaptiveTuner(self, adaptive_config) if adaptive_tuning else None
         )
 
-        # Scoring
-        self.scorer: PeerScorer | None = PeerScorer(score_params or ScoreParams())
+        # Scoring (optional)
+        self.scorer: PeerScorer | None = (
+            PeerScorer(score_params) if score_params is not None else None
+        )
         # Gossipsub v1.2 features
         self.dont_send_message_ids = dict()
         self.max_idontwant_messages = max_idontwant_messages
