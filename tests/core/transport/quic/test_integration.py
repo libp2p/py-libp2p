@@ -331,11 +331,15 @@ class TestBasicQUICFlow:
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_yamux_stress_ping():
     STREAM_COUNT = 100
     listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
     latencies = []
     failures = []
+    completion_event = trio.Event()
+    completed_count: list[int] = [0]  # Use list to make it mutable for closures
+    completed_lock = trio.Lock()
 
     # === Server Setup ===
     server_host = new_host(listen_addrs=[listen_addr])
@@ -353,8 +357,9 @@ async def test_yamux_stress_ping():
     server_host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
     async with server_host.run(listen_addrs=[listen_addr]):
-        # Give server time to start
-        await trio.sleep(0.1)
+        # Wait for server to actually be listening
+        while not server_host.get_addrs():
+            await trio.sleep(0.01)
 
         # === Client Setup ===
         destination = str(server_host.get_addrs()[0])
@@ -367,58 +372,49 @@ async def test_yamux_stress_ping():
         async with client_host.run(listen_addrs=[client_listen_addr]):
             await client_host.connect(info)
 
-            # Wait for connection to be fully established
-            await trio.sleep(0.2)
+            # Wait for connection to be established (check actual connection state)
+            network = client_host.get_network()
+            connections_map = network.get_connections_map()
+            while (
+                info.peer_id not in connections_map or not connections_map[info.peer_id]
+            ):
+                await trio.sleep(0.01)
+                connections_map = network.get_connections_map()
 
             async def ping_stream(i: int):
                 stream = None
-                max_retries = 5
-                retry_delay = 0.05
+                try:
+                    start = trio.current_time()
 
-                for attempt in range(max_retries):
-                    try:
-                        start = trio.current_time()
+                    stream = await client_host.new_stream(
+                        info.peer_id, [PING_PROTOCOL_ID]
+                    )
 
-                        # Retry stream creation with exponential backoff
-                        if attempt > 0:
-                            await trio.sleep(retry_delay * (2**attempt))
+                    await stream.write(b"\x01" * PING_LENGTH)
 
-                        stream = await client_host.new_stream(
-                            info.peer_id, [PING_PROTOCOL_ID]
-                        )
+                    # Wait for response with timeout as safety net
+                    with trio.fail_after(30):
+                        response = await stream.read(PING_LENGTH)
 
-                        await stream.write(b"\x01" * PING_LENGTH)
-
-                        with trio.fail_after(5):
-                            response = await stream.read(PING_LENGTH)
-
-                        if response == b"\x01" * PING_LENGTH:
-                            latency_ms = int((trio.current_time() - start) * 1000)
-                            latencies.append(latency_ms)
-                            print(f"[Ping #{i}] Latency: {latency_ms} ms")
-                        await stream.close()
-                        return  # Success, exit retry loop
-                    except Exception as e:
-                        if attempt < max_retries - 1:
-                            # Will retry
-                            if stream:
-                                try:
-                                    await stream.reset()
-                                except Exception:
-                                    pass
-                            stream = None
-                            continue
-                        else:
-                            # Final attempt failed
-                            print(
-                                f"[Ping #{i}] Failed after {max_retries} attempts: {e}"
-                            )
-                            failures.append(i)
-                            if stream:
-                                try:
-                                    await stream.reset()
-                                except Exception:
-                                    pass
+                    if response == b"\x01" * PING_LENGTH:
+                        latency_ms = int((trio.current_time() - start) * 1000)
+                        latencies.append(latency_ms)
+                        print(f"[Ping #{i}] Latency: {latency_ms} ms")
+                    await stream.close()
+                except Exception as e:
+                    print(f"[Ping #{i}] Failed: {e}")
+                    failures.append(i)
+                    if stream:
+                        try:
+                            await stream.reset()
+                        except Exception:
+                            pass
+                finally:
+                    # Signal completion
+                    async with completed_lock:
+                        completed_count[0] += 1
+                        if completed_count[0] == STREAM_COUNT:
+                            completion_event.set()
 
             # Use a semaphore to limit concurrent stream openings
             # NOTE: This is a TEST-ONLY workaround, not a real connection limit.
@@ -431,7 +427,7 @@ async def test_yamux_stress_ping():
             # The semaphore throttles concurrent openings to make the test more
             # reliable. Real applications don't need this - they naturally throttle
             # based on their needs, and the connection handles the actual limits.
-            semaphore = trio.Semaphore(30)  # Max 30 concurrent stream openings
+            semaphore = trio.Semaphore(20)  # Max 20 concurrent stream openings
 
             async def ping_stream_with_semaphore(i: int):
                 async with semaphore:
@@ -441,9 +437,9 @@ async def test_yamux_stress_ping():
                 for i in range(STREAM_COUNT):
                     nursery.start_soon(ping_stream_with_semaphore, i)
 
-            # Wait a bit for any remaining streams to complete
-            # CI environments may need more time due to resource constraints
-            await trio.sleep(2.0)
+                # Wait for all streams to complete (event-driven, not polling)
+                with trio.fail_after(120):  # Safety timeout
+                    await completion_event.wait()
 
         # === Result Summary ===
         print("\n📊 Ping Stress Test Summary")
@@ -454,13 +450,8 @@ async def test_yamux_stress_ping():
             print(f"❌ Failed stream indices: {failures}")
 
         # === Assertions ===
-        # Allow for some failures in CI environments (90% success rate)
-        # Stress tests can be flaky due to resource constraints
-        min_success_rate = 0.90
-        min_successful = int(STREAM_COUNT * min_success_rate)
-        assert len(latencies) >= min_successful, (
-            f"Expected at least {min_successful} successful streams "
-            f"({min_success_rate * 100:.0f}%), got {len(latencies)}"
+        assert len(latencies) == STREAM_COUNT, (
+            f"Expected {STREAM_COUNT} successful streams, got {len(latencies)}"
         )
         assert all(isinstance(x, int) and x >= 0 for x in latencies), (
             "Invalid latencies"
