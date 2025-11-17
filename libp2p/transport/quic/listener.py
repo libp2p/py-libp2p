@@ -753,13 +753,20 @@ class QUICListener(IListener):
         """Promote pending connection - avoid duplicate creation."""
         try:
             # Check if connection already exists
-            connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
+            (
+                connection_obj,
+                pending_quic_conn,
+                is_pending,
+            ) = await self._registry.find_by_cid(dest_cid)
             if connection_obj:
-                logger.warning(
+                logger.debug(
                     f"Connection {dest_cid.hex()[:8]} already exists in "
                     f"_connections! Reusing existing connection."
                 )
                 connection = connection_obj
+                # If it was in pending, promote it (though it shouldn't be)
+                if is_pending:
+                    await self._registry.promote_pending(dest_cid, connection)
             else:
                 from .connection import QUICConnection
 
@@ -779,11 +786,12 @@ class QUICListener(IListener):
                     listener_socket=self._socket,
                 )
 
-                # Register the connection
-                await self._registry.register_connection(dest_cid, connection, addr)
-
-            # Promote in registry (moves from pending to established)
-            await self._registry.promote_pending(dest_cid, connection)
+                # If it was in pending, promote it; otherwise register as new
+                if is_pending:
+                    await self._registry.promote_pending(dest_cid, connection)
+                else:
+                    # New connection - register directly as established
+                    await self._registry.register_connection(dest_cid, connection, addr)
 
             if self._nursery:
                 connection._nursery = self._nursery

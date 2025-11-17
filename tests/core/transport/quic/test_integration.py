@@ -372,7 +372,8 @@ async def test_yamux_stress_ping():
         async with client_host.run(listen_addrs=[client_listen_addr]):
             await client_host.connect(info)
 
-            # Wait for connection to be established (check actual connection state)
+            # Wait for connection to be established and ready
+            # (check actual connection state)
             network = client_host.get_network()
             connections_map = network.get_connections_map()
             while (
@@ -380,6 +381,11 @@ async def test_yamux_stress_ping():
             ):
                 await trio.sleep(0.01)
                 connections_map = network.get_connections_map()
+
+            # Additional wait to ensure connection is fully ready for streams
+            # This is especially important in CI environments where connection
+            # establishment might be slower
+            await trio.sleep(0.1)
 
             async def ping_stream(i: int):
                 stream = None
