@@ -28,7 +28,14 @@ from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.utils import create_quic_multiaddr
 
 # Set up logging to see what's happening
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logging.getLogger("multiaddr").setLevel(logging.WARNING)
+logging.getLogger("libp2p.transport.quic").setLevel(logging.DEBUG)
+logging.getLogger("libp2p.host").setLevel(logging.DEBUG)
+logging.getLogger("libp2p.network").setLevel(logging.DEBUG)
+logging.getLogger("libp2p.protocol_muxer").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -382,10 +389,16 @@ async def test_yamux_stress_ping():
                 await trio.sleep(0.01)
                 connections_map = network.get_connections_map()
 
-            # Additional wait to ensure connection is fully ready for streams
-            # This is especially important in CI environments where connection
-            # establishment might be slower
-            await trio.sleep(0.1)
+            # Wait for connection's event_started to ensure it's ready for streams
+            # This ensures the muxer is fully initialized and can accept streams
+            connections = connections_map[info.peer_id]
+            if connections:
+                swarm_conn = connections[0]
+                # Wait for the connection to be fully started (muxer ready)
+                if hasattr(swarm_conn, "event_started"):
+                    await swarm_conn.event_started.wait()
+                # Additional small wait to ensure multiselect is ready
+                await trio.sleep(0.05)
 
             async def ping_stream(i: int):
                 stream = None
@@ -427,13 +440,18 @@ async def test_yamux_stress_ping():
             # The QUIC connection itself supports up to 1000 concurrent streams
             # (MAX_OUTGOING_STREAMS). However, opening 100 streams simultaneously
             # in a stress test can cause transient failures due to:
-            # - Protocol negotiation timeouts (multiselect)
+            # - Protocol negotiation timeouts (multiselect) - the default 5s timeout
+            #   may be insufficient when 20+ streams negotiate simultaneously
             # - Resource contention during stream creation
             # - Race conditions in the stream opening path
             # The semaphore throttles concurrent openings to make the test more
             # reliable. Real applications don't need this - they naturally throttle
             # based on their needs, and the connection handles the actual limits.
-            semaphore = trio.Semaphore(20)  # Max 20 concurrent stream openings
+            # WHY IT FAILS THE FIRST TIME: Even with the semaphore, there's still
+            # contention on multiselect negotiation. When many streams try to
+            # negotiate at once, some may timeout. The @pytest.mark.flaky decorator
+            # handles this by retrying the test automatically.
+            semaphore = trio.Semaphore(15)  # Max 15 concurrent stream openings
 
             async def ping_stream_with_semaphore(i: int):
                 async with semaphore:

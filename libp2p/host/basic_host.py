@@ -79,7 +79,7 @@ from multiaddr import Multiaddr
 
 
 logger = logging.getLogger("libp2p.network.basic_host")
-DEFAULT_NEGOTIATE_TIMEOUT = 5
+DEFAULT_NEGOTIATE_TIMEOUT = 10  # Increased from 5 to handle high-concurrency scenarios
 
 
 class BasicHost(IHost):
@@ -282,12 +282,32 @@ class BasicHost(IHost):
         net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
+        # For QUIC connections, use connection-level semaphore to limit
+        # concurrent negotiations and prevent contention
         try:
-            selected_protocol = await self.multiselect_client.select_one_of(
-                list(protocol_ids),
-                MultiselectCommunicator(net_stream),
-                self.negotiate_timeout,
-            )
+            # Check if this is a QUIC connection and use its negotiation semaphore
+            muxed_conn = getattr(net_stream, "muxed_conn", None)
+            negotiation_semaphore = None
+            if muxed_conn is not None:
+                negotiation_semaphore = getattr(
+                    muxed_conn, "_negotiation_semaphore", None
+                )
+
+            if negotiation_semaphore is not None:
+                # Use connection-level semaphore to throttle negotiations
+                async with negotiation_semaphore:
+                    selected_protocol = await self.multiselect_client.select_one_of(
+                        list(protocol_ids),
+                        MultiselectCommunicator(net_stream),
+                        self.negotiate_timeout,
+                    )
+            else:
+                # For non-QUIC connections, negotiate directly
+                selected_protocol = await self.multiselect_client.select_one_of(
+                    list(protocol_ids),
+                    MultiselectCommunicator(net_stream),
+                    self.negotiate_timeout,
+                )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
             await net_stream.reset()

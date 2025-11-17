@@ -123,6 +123,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._stream_accept_queue: list[QUICStream] = []
         self._stream_accept_event = trio.Event()
 
+        # Negotiation semaphore to limit concurrent multiselect negotiations
+        # This prevents overwhelming the connection with too many simultaneous
+        # negotiations, which can cause timeouts under high concurrency.
+        # Limit to 5 concurrent negotiations to match typical stream opening patterns
+        self._negotiation_semaphore = trio.Semaphore(5)
+
         # Connection state
         self._closed: bool = False
         self._established: bool = False
@@ -415,9 +421,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
         try:
+            consecutive_idle_iterations = 0
             while not self._closed:
-                # Batch process events
-                await self._process_quic_events_batched()
+                # Batch process events - returns True if events were processed
+                events_processed = await self._process_quic_events_batched()
 
                 # Handle timer events
                 await self._handle_timer_events()
@@ -425,8 +432,20 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Transmit any pending data
                 await self._transmit()
 
-                # Short sleep to prevent busy waiting
-                await trio.sleep(0.01)
+                # Adaptive sleep based on activity
+                # When processing events: use minimal sleep (just yield) for low latency
+                # When idle: use longer sleep to reduce CPU usage
+                if not events_processed:
+                    consecutive_idle_iterations += 1
+                    # Use longer sleep when idle to reduce CPU usage
+                    # Start with 1ms, increase to 10ms after several idle iterations
+                    sleep_time = 0.01 if consecutive_idle_iterations > 5 else 0.001
+                    await trio.sleep(sleep_time)
+                else:
+                    consecutive_idle_iterations = 0
+                    # Minimal sleep when processing events - just yield to allow
+                    # other tasks to run, but keep latency low
+                    await trio.sleep(0)  # Yield without sleeping
 
         except Exception as e:
             logger.error(f"Error in event processing loop: {e}")
@@ -850,12 +869,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
             logger.debug(f"Removed stream {stream_id} from connection")
 
     # Batched event processing to reduce overhead
-    async def _process_quic_events_batched(self) -> None:
-        """Process QUIC events in batches for better performance."""
+    async def _process_quic_events_batched(self) -> bool:
+        """
+        Process QUIC events in batches for better performance.
+
+        Returns:
+            True if events were processed, False if no events available
+
+        """
         if self._event_processing_active:
-            return  # Prevent recursion
+            return False  # Prevent recursion
 
         self._event_processing_active = True
+        result = False  # Default to False if no events processed
 
         try:
             current_time = time.time()
@@ -878,9 +904,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._process_event_batch()
                 self._event_batch.clear()
                 self._last_event_time = current_time
-
+                result = True
         finally:
             self._event_processing_active = False
+
+        return result
 
     async def _process_event_batch(self) -> None:
         """Process a batch of events efficiently."""
@@ -999,9 +1027,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
         await self._process_quic_events_batched()
 
     async def _handle_quic_event(self, event: events.QuicEvent) -> None:
-        """Handle a single QUIC event with COMPLETE event type coverage."""
+        """
+        Handle a single QUIC event with complete event type coverage.
+
+        NOTE: This is called by the connection's event loop for established connections.
+        For pending connections, the listener's _process_quic_events handles events
+        until the connection is promoted. This separation prevents double-processing
+        of events.
+        """
         logger.debug(f"Handling QUIC event: {type(event).__name__}")
-        logger.debug(f"QUIC event: {type(event).__name__}")
 
         try:
             if isinstance(event, events.ConnectionTerminated):
@@ -1014,12 +1048,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._handle_stream_reset(event)
             elif isinstance(event, events.DatagramFrameReceived):
                 await self._handle_datagram_received(event)
-            # *** NEW: Connection ID event handlers - CRITICAL FIX ***
+            # Connection ID event handlers - critical for proper packet routing
             elif isinstance(event, events.ConnectionIdIssued):
                 await self._handle_connection_id_issued(event)
             elif isinstance(event, events.ConnectionIdRetired):
                 await self._handle_connection_id_retired(event)
-            # *** NEW: Additional event handlers for completeness ***
+            # Additional event handlers for completeness
             elif isinstance(event, events.PingAcknowledged):
                 await self._handle_ping_acknowledged(event)
             elif isinstance(event, events.ProtocolNegotiated):
@@ -1028,7 +1062,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._handle_stop_sending_received(event)
             else:
                 logger.debug(f"Unhandled QUIC event type: {type(event).__name__}")
-                logger.debug(f"Unhandled QUIC event: {type(event).__name__}")
 
         except Exception as e:
             logger.error(f"Error handling QUIC event {type(event).__name__}: {e}")
