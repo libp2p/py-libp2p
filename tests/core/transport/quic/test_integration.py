@@ -451,7 +451,10 @@ async def test_yamux_stress_ping():
             # contention on multiselect negotiation. When many streams try to
             # negotiate at once, some may timeout. The @pytest.mark.flaky decorator
             # handles this by retrying the test automatically.
-            semaphore = trio.Semaphore(15)  # Max 15 concurrent stream openings
+            # NOTE: The negotiation semaphore in QUICConnection limits concurrent
+            # negotiations to 5, so we use a slightly higher limit here (8) to allow
+            # some streams to queue while others negotiate, reducing contention.
+            semaphore = trio.Semaphore(8)  # Max 8 concurrent stream openings
 
             async def ping_stream_with_semaphore(i: int):
                 async with semaphore:

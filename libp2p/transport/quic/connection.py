@@ -126,7 +126,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Negotiation semaphore to limit concurrent multiselect negotiations
         # This prevents overwhelming the connection with too many simultaneous
         # negotiations, which can cause timeouts under high concurrency.
-        # Limit to 5 concurrent negotiations to match typical stream opening patterns
+        # Limit to 5 concurrent negotiations to match typical stream opening patterns.
+        # In CI/CD environments with limited resources, this helps prevent contention.
         self._negotiation_semaphore = trio.Semaphore(5)
 
         # Connection state
