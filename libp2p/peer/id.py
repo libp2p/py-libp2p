@@ -30,11 +30,8 @@ if ENABLE_INLINING:
         def digest(self) -> bytes:
             return self._digest
 
-    # Register identity hash function if FuncReg is available
-    if hasattr(multihash, "FuncReg"):
-        multihash.FuncReg.register(
-            IDENTITY_MULTIHASH_CODE, "identity", hash_new=lambda: IdentityHash()
-        )
+    # Note: FuncReg is not available in pymultihash 0.8.2
+    # Identity hash is handled manually in from_pubkey method
 
 
 class ID:
@@ -84,11 +81,15 @@ class ID:
     @classmethod
     def from_pubkey(cls, key: PublicKey) -> "ID":
         serialized_key = key.serialize()
-        algo = multihash.Func.sha2_256
+        # Use identity hash (no hashing) for small keys, otherwise use SHA2-256
         if ENABLE_INLINING and len(serialized_key) <= MAX_INLINE_KEY_LENGTH:
-            algo = IDENTITY_MULTIHASH_CODE
-        mh_digest = multihash.digest(serialized_key, algo)
-        return cls(mh_digest.encode())
+            # Identity multihash: just encode the key directly with code 0x00
+            mh_bytes = multihash.encode(serialized_key, IDENTITY_MULTIHASH_CODE)
+        else:
+            # SHA2-256: hash first, then encode
+            digest = hashlib.sha256(serialized_key).digest()
+            mh_bytes = multihash.encode(digest, "sha2-256")
+        return cls(mh_bytes)
 
 
 def sha256_digest(data: str | bytes) -> bytes:
