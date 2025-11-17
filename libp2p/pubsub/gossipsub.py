@@ -42,6 +42,10 @@ from libp2p.tools.async_service import (
     Service,
 )
 
+from .adaptive_tuner import (
+    AdaptiveTuningConfig,
+    GossipSubAdaptiveTuner,
+)
 from .exceptions import (
     NoPubsubAttached,
 )
@@ -97,6 +101,7 @@ class GossipSub(IPubsubRouter, Service):
     back_off: dict[str, dict[ID, int]]
     prune_back_off: int
     unsubscribe_back_off: int
+    adaptive_tuner: GossipSubAdaptiveTuner | None
 
     def __init__(
         self,
@@ -116,6 +121,8 @@ class GossipSub(IPubsubRouter, Service):
         px_peers_count: int = 16,
         prune_back_off: int = 60,
         unsubscribe_back_off: int = 10,
+        adaptive_tuning: bool = False,
+        adaptive_config: AdaptiveTuningConfig | None = None,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -155,6 +162,9 @@ class GossipSub(IPubsubRouter, Service):
         self.back_off = dict()
         self.prune_back_off = prune_back_off
         self.unsubscribe_back_off = unsubscribe_back_off
+        self.adaptive_tuner = (
+            GossipSubAdaptiveTuner(self, adaptive_config) if adaptive_tuning else None
+        )
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -498,6 +508,26 @@ class GossipSub(IPubsubRouter, Service):
             )
 
             self.mcache.shift()
+
+            if self.adaptive_tuner:
+                mesh_sizes = {topic: len(peers) for topic, peers in self.mesh.items()}
+                fanout_sizes = {
+                    topic: len(peers) for topic, peers in self.fanout.items()
+                }
+                graft_total = sum(len(topics) for topics in peers_to_graft.values())
+                prune_total = sum(len(topics) for topics in peers_to_prune.values())
+                gossip_total = sum(
+                    len(topic_msgs)
+                    for peer_topics in peers_to_gossip.values()
+                    for topic_msgs in peer_topics.values()
+                )
+                self.adaptive_tuner.record_heartbeat(
+                    mesh_sizes=mesh_sizes,
+                    fanout_sizes=fanout_sizes,
+                    graft_total=graft_total,
+                    prune_total=prune_total,
+                    gossip_total=gossip_total,
+                )
 
             await trio.sleep(self.heartbeat_interval)
 

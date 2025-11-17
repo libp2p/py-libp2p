@@ -34,6 +34,9 @@ from .pb.kademlia_pb2 import (
 from .routing_table import (
     RoutingTable,
 )
+from .reputation import (
+    PeerReputationTracker,
+)
 from .utils import (
     maybe_consume_signed_record,
     sort_peer_ids_by_distance,
@@ -53,16 +56,23 @@ class PeerRouting(IPeerRouting):
     and helps maintain the routing table.
     """
 
-    def __init__(self, host: IHost, routing_table: RoutingTable):
+    def __init__(
+        self,
+        host: IHost,
+        routing_table: RoutingTable,
+        reputation_tracker: PeerReputationTracker | None = None,
+    ):
         """
         Initialize the peer routing service.
 
         :param host: The libp2p host
         :param routing_table: The Kademlia routing table
+        :param reputation_tracker: Optional tracker used to prioritize peers
 
         """
         self.host = host
         self.routing_table = routing_table
+        self.reputation_tracker = reputation_tracker or PeerReputationTracker()
 
     async def find_peer(self, peer_id: ID) -> PeerInfo | None:
         """
@@ -138,6 +148,11 @@ class PeerRouting(IPeerRouting):
         """
         try:
             result = await self._query_peer_for_closest(peer, target_key)
+            if result:
+                self.reputation_tracker.record_success(peer, weight=len(result))
+            else:
+                # Empty responses are treated as low-severity failures
+                self.reputation_tracker.record_failure(peer, weight=0.25)
             # Add deduplication to prevent duplicate peers
             for peer_id in result:
                 if peer_id not in new_peers:
@@ -150,6 +165,7 @@ class PeerRouting(IPeerRouting):
             )
         except Exception as e:
             logger.debug(f"Query to peer {peer} failed: {e}")
+            self.reputation_tracker.record_failure(peer)
 
     async def find_closest_peers_network(
         self, target_key: bytes, count: int = 20
@@ -183,6 +199,8 @@ class PeerRouting(IPeerRouting):
 
             # Find peers we haven't queried yet
             peers_to_query = [p for p in closest_peers if p not in queried_peers]
+            if peers_to_query:
+                peers_to_query = self.reputation_tracker.rank_peers(peers_to_query)
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
                 break  # No more peers to query
