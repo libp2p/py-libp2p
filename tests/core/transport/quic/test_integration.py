@@ -435,26 +435,12 @@ async def test_yamux_stress_ping():
                         if completed_count[0] == STREAM_COUNT:
                             completion_event.set()
 
-            # Use a semaphore to limit concurrent stream openings
-            # NOTE: This is a TEST-ONLY workaround, not a real connection limit.
-            # The QUIC connection itself supports up to 1000 concurrent streams
-            # (MAX_OUTGOING_STREAMS). However, opening 100 streams simultaneously
-            # in a stress test can cause transient failures due to:
-            # - Protocol negotiation timeouts (multiselect) - the default 5s timeout
-            #   may be insufficient when 20+ streams negotiate simultaneously
-            # - Resource contention during stream creation
-            # - Race conditions in the stream opening path
-            # The semaphore throttles concurrent openings to make the test more
-            # reliable. Real applications don't need this - they naturally throttle
-            # based on their needs, and the connection handles the actual limits.
-            # WHY IT FAILS THE FIRST TIME: Even with the semaphore, there's still
-            # contention on multiselect negotiation. When many streams try to
-            # negotiate at once, some may timeout. The @pytest.mark.flaky decorator
-            # handles this by retrying the test automatically.
-            # NOTE: The negotiation semaphore in QUICConnection limits concurrent
-            # negotiations to 5, so we use a slightly higher limit here (8) to allow
-            # some streams to queue while others negotiate, reducing contention.
-            semaphore = trio.Semaphore(8)  # Max 8 concurrent stream openings
+            # Throttle concurrent stream openings to prevent multiselect negotiation
+            # contention. QUICConnection limits concurrent negotiations to 5, so we
+            # use 8 here to allow some streams to queue while others negotiate.
+            # This is test-only - real apps don't need throttling.
+            # Note: Test may still be flaky; @pytest.mark.flaky handles retries.
+            semaphore = trio.Semaphore(8)
 
             async def ping_stream_with_semaphore(i: int):
                 async with semaphore:

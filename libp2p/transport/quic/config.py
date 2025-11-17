@@ -249,15 +249,18 @@ class QUICTransportConfig(ConnectionConfig):
         )
         if expected_stream_memory > self.STREAM_MEMORY_LIMIT_PER_CONNECTION * 2:
             # Allow some headroom, but warn if configuration seems inconsistent
+            # Note: This is a theoretical maximum - not all streams will use
+            # the full memory limit simultaneously. The warning is informational.
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "Stream memory configuration may be inconsistent: "
-                f"{self.MAX_CONCURRENT_STREAMS} streams ×"
-                "{self.STREAM_MEMORY_LIMIT_PER_STREAM} bytes "
-                "could exceed connection limit of"
-                f"{self.STREAM_MEMORY_LIMIT_PER_CONNECTION} bytes"
+            logger.debug(
+                "Stream memory configuration: "
+                f"{self.MAX_CONCURRENT_STREAMS} streams × "
+                f"{self.STREAM_MEMORY_LIMIT_PER_STREAM} bytes = "
+                f"{expected_stream_memory} bytes (theoretical max), "
+                f"connection limit: {self.STREAM_MEMORY_LIMIT_PER_CONNECTION} bytes. "
+                "This is normal - not all streams use maximum memory simultaneously."
             )
 
     def get_stream_config_dict(self) -> dict[str, Any]:

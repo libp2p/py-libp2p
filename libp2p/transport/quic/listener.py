@@ -889,33 +889,9 @@ class QUICListener(IListener):
                 logger.debug(f" TRANSMIT: Destination: {dest_addr}")
                 logger.debug(f" TRANSMIT: Expected destination: {addr}")
 
-                # Analyze datagram content
-                if len(datagram) > 0:
-                    # QUIC packet format analysis
-                    first_byte = datagram[0]
-                    header_form = (first_byte & 0x80) >> 7  # Bit 7
-
-                    # For long header packets (handshake), analyze further
-                    if header_form == 1:  # Long header
-                        # CRYPTO frame type is 0x06
-                        crypto_frame_found = False
-                        for offset in range(len(datagram)):
-                            if datagram[offset] == 0x06:
-                                crypto_frame_found = True
-                                break
-
-                        if not crypto_frame_found:
-                            logger.error("No CRYPTO frame found in datagram!")
-                            # Look for other frame types
-                            frame_types_found = set()
-                            for offset in range(len(datagram)):
-                                frame_type = datagram[offset]
-                                if frame_type in [0x00, 0x01]:  # PADDING/PING
-                                    frame_types_found.add("PADDING/PING")
-                                elif frame_type == 0x02:  # ACK
-                                    frame_types_found.add("ACK")
-                                elif frame_type == 0x06:  # CRYPTO
-                                    frame_types_found.add("CRYPTO")
+                # Note: We don't validate packet contents here. The QUIC library
+                # (aioquic) handles all packet parsing and validation. This function
+                # just transmits the datagrams that aioquic generates.
 
                 if self._socket:
                     try:
