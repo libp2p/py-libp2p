@@ -50,6 +50,8 @@ def create_sync_peerstore(
     db_path: str | Path | None = None,
     backend: SyncBackend = "sqlite",
     max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
     **backend_options: Any,
 ) -> SyncPersistentPeerStore:
     """
@@ -62,6 +64,8 @@ def create_sync_peerstore(
         backend: Backend type ("sqlite", "leveldb", "rocksdb", "memory").
                 Ignored if datastore is provided.
         max_records: Maximum number of peer records to store.
+        sync_interval: Minimum interval between sync operations (seconds).
+        auto_sync: Whether to automatically sync after writes.
         **backend_options: Additional options passed to the datastore backend.
 
     Returns:
@@ -113,7 +117,7 @@ def create_sync_peerstore(
                     f"Use backend='memory' for in-memory storage."
                 )
 
-    return SyncPersistentPeerStore(datastore, max_records)
+    return SyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_async_peerstore(
@@ -121,6 +125,8 @@ def create_async_peerstore(
     db_path: str | Path | None = None,
     backend: AsyncBackend = "sqlite",
     max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
     **backend_options: Any,
 ) -> AsyncPersistentPeerStore:
     """
@@ -133,6 +139,8 @@ def create_async_peerstore(
         backend: Backend type ("sqlite", "leveldb", "rocksdb", "memory").
                 Ignored if datastore is provided.
         max_records: Maximum number of peer records to store.
+        sync_interval: Minimum interval between sync operations (seconds).
+        auto_sync: Whether to automatically sync after writes.
         **backend_options: Additional options passed to the datastore backend.
 
     Returns:
@@ -184,14 +192,18 @@ def create_async_peerstore(
                     f"Use backend='memory' for in-memory storage."
                 )
 
-    return AsyncPersistentPeerStore(datastore, max_records)
+    return AsyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 # Convenience functions for specific backends
 
 
 def create_sync_sqlite_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> SyncPersistentPeerStore:
     """
     Create a synchronous persistent peerstore with SQLite backend.
@@ -199,6 +211,8 @@ def create_sync_sqlite_peerstore(
     Args:
         db_path: Path to the SQLite database file
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional SQLite options
 
     Returns:
@@ -206,11 +220,15 @@ def create_sync_sqlite_peerstore(
 
     """
     datastore = SQLiteDatastoreSync(db_path, **options)
-    return SyncPersistentPeerStore(datastore, max_records)
+    return SyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_async_sqlite_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> AsyncPersistentPeerStore:
     """
     Create an asynchronous persistent peerstore with SQLite backend.
@@ -218,6 +236,8 @@ def create_async_sqlite_peerstore(
     Args:
         db_path: Path to the SQLite database file
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional SQLite options
 
     Returns:
@@ -225,10 +245,12 @@ def create_async_sqlite_peerstore(
 
     """
     datastore = SQLiteDatastore(db_path, **options)
-    return AsyncPersistentPeerStore(datastore, max_records)
+    return AsyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
-def create_sync_memory_peerstore(max_records: int = 10000) -> SyncPersistentPeerStore:
+def create_sync_memory_peerstore(
+    max_records: int = 10000, sync_interval: float = 1.0, auto_sync: bool = True
+) -> SyncPersistentPeerStore:
     """
     Create a synchronous persistent peerstore with in-memory backend.
 
@@ -236,16 +258,20 @@ def create_sync_memory_peerstore(max_records: int = 10000) -> SyncPersistentPeer
 
     Args:
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
 
     Returns:
         SyncPersistentPeerStore instance with in-memory backend
 
     """
     datastore = MemoryDatastoreSync()
-    return SyncPersistentPeerStore(datastore, max_records)
+    return SyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
-def create_async_memory_peerstore(max_records: int = 10000) -> AsyncPersistentPeerStore:
+def create_async_memory_peerstore(
+    max_records: int = 10000, sync_interval: float = 1.0, auto_sync: bool = True
+) -> AsyncPersistentPeerStore:
     """
     Create an asynchronous persistent peerstore with in-memory backend.
 
@@ -253,17 +279,23 @@ def create_async_memory_peerstore(max_records: int = 10000) -> AsyncPersistentPe
 
     Args:
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
 
     Returns:
         AsyncPersistentPeerStore instance with in-memory backend
 
     """
     datastore = MemoryDatastore()
-    return AsyncPersistentPeerStore(datastore, max_records)
+    return AsyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_sync_leveldb_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> SyncPersistentPeerStore:
     """
     Create a synchronous persistent peerstore with LevelDB backend.
@@ -274,6 +306,8 @@ def create_sync_leveldb_peerstore(
     Args:
         db_path: Path to the LevelDB database directory
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional LevelDB options
 
     Returns:
@@ -290,11 +324,15 @@ def create_sync_leveldb_peerstore(
         )
 
     datastore = LevelDBDatastoreSync(db_path, **options)
-    return SyncPersistentPeerStore(datastore, max_records)
+    return SyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_async_leveldb_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> AsyncPersistentPeerStore:
     """
     Create an asynchronous persistent peerstore with LevelDB backend.
@@ -305,6 +343,8 @@ def create_async_leveldb_peerstore(
     Args:
         db_path: Path to the LevelDB database directory
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional LevelDB options
 
     Returns:
@@ -321,11 +361,15 @@ def create_async_leveldb_peerstore(
         )
 
     datastore = LevelDBDatastore(db_path, **options)
-    return AsyncPersistentPeerStore(datastore, max_records)
+    return AsyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_sync_rocksdb_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> SyncPersistentPeerStore:
     """
     Create a synchronous persistent peerstore with RocksDB backend.
@@ -336,6 +380,8 @@ def create_sync_rocksdb_peerstore(
     Args:
         db_path: Path to the RocksDB database directory
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional RocksDB options
 
     Returns:
@@ -352,11 +398,15 @@ def create_sync_rocksdb_peerstore(
         )
 
     datastore = RocksDBDatastoreSync(db_path, **options)
-    return SyncPersistentPeerStore(datastore, max_records)
+    return SyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)
 
 
 def create_async_rocksdb_peerstore(
-    db_path: str | Path, max_records: int = 10000, **options: Any
+    db_path: str | Path,
+    max_records: int = 10000,
+    sync_interval: float = 1.0,
+    auto_sync: bool = True,
+    **options: Any,
 ) -> AsyncPersistentPeerStore:
     """
     Create an asynchronous persistent peerstore with RocksDB backend.
@@ -367,6 +417,8 @@ def create_async_rocksdb_peerstore(
     Args:
         db_path: Path to the RocksDB database directory
         max_records: Maximum number of peer records to store
+        sync_interval: Minimum interval between sync operations (seconds)
+        auto_sync: Whether to automatically sync after writes
         **options: Additional RocksDB options
 
     Returns:
@@ -383,4 +435,4 @@ def create_async_rocksdb_peerstore(
         )
 
     datastore = RocksDBDatastore(db_path, **options)
-    return AsyncPersistentPeerStore(datastore, max_records)
+    return AsyncPersistentPeerStore(datastore, max_records, sync_interval, auto_sync)

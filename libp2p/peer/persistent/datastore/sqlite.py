@@ -55,6 +55,7 @@ class SQLiteDatastore(IBatchingDatastore):
     SQLite-based datastore implementation.
 
     This provides persistent storage using SQLite database files.
+    Supports context manager protocol for proper resource management.
     """
 
     def __init__(self, path: str | Path):
@@ -68,19 +69,47 @@ class SQLiteDatastore(IBatchingDatastore):
         self.path = Path(path)
         self.connection: sqlite3.Connection | None = None
         self._lock = trio.Lock()
+        self._closed = False
 
     async def _ensure_connection(self) -> None:
-        """Ensure database connection is established."""
+        """
+        Ensure database connection is established.
+
+        :raises RuntimeError: If datastore is closed
+        :raises sqlite3.Error: If database connection fails
+        """
+        if self._closed:
+            raise RuntimeError("Datastore is closed")
+
         if self.connection is None:
             async with self._lock:
                 if self.connection is None:
                     # Create directory if it doesn't exist
                     self.path.parent.mkdir(parents=True, exist_ok=True)
 
+                    # Set appropriate file permissions (readable/writable by owner only)
+                    if not self.path.exists():
+                        self.path.touch(mode=0o600)
+
                     self.connection = sqlite3.connect(
-                        str(self.path), check_same_thread=False
+                        str(self.path),
+                        check_same_thread=False,
+                        timeout=30.0,  # Add timeout for database locks
                     )
-                    self.connection.execute("""
+
+                    # Enable WAL mode for better concurrency
+                    cursor = self.connection.cursor()
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute(
+                        "PRAGMA synchronous=NORMAL"
+                    )  # Balance between safety and performance
+                    cursor.execute("PRAGMA cache_size=10000")  # Increase cache size
+                    cursor.execute(
+                        "PRAGMA temp_store=MEMORY"
+                    )  # Use memory for temp storage
+
+                    # Create table if it doesn't exist
+                    cursor.execute("""
                         CREATE TABLE IF NOT EXISTS datastore (
                             key BLOB PRIMARY KEY,
                             value BLOB NOT NULL
@@ -176,12 +205,24 @@ class SQLiteDatastore(IBatchingDatastore):
         self.connection.commit()
 
     async def close(self) -> None:
-        """Close the datastore connection."""
-        if self.connection:
-            self.connection.close()
-            self.connection = None
+        """
+        Close the datastore connection.
 
-    def __del__(self) -> None:
-        """Cleanup on deletion."""
-        if self.connection:
-            self.connection.close()
+        This method is idempotent and can be called multiple times safely.
+        """
+        async with self._lock:
+            if self.connection and not self._closed:
+                try:
+                    self.connection.close()
+                finally:
+                    self.connection = None
+                    self._closed = True
+
+    async def __aenter__(self) -> "SQLiteDatastore":
+        """Async context manager entry."""
+        await self._ensure_connection()
+        return self
+
+    async def __aexit__(self, exc_type: type, exc_val: Exception, exc_tb: object) -> None:
+        """Async context manager exit."""
+        await self.close()

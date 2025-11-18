@@ -15,7 +15,7 @@ from .base_sync import IBatchingDatastoreSync, IBatchSync
 class SQLiteBatchSync(IBatchSync):
     """Synchronous SQLite batch implementation."""
 
-    def __init__(self, connection: sqlite3.Connection, lock: threading.Lock):
+    def __init__(self, connection: sqlite3.Connection, lock: threading.RLock):
         self.connection = connection
         self.lock = lock
         self.operations: list[tuple[str, bytes, bytes | None]] = []
@@ -68,21 +68,49 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
         """
         self.path = Path(path)
         self.connection: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use RLock for better thread safety
+        self._closed = False
         self._ensure_connection()
 
     def _ensure_connection(self) -> None:
-        """Ensure database connection is established."""
+        """
+        Ensure database connection is established.
+
+        :raises RuntimeError: If datastore is closed
+        :raises sqlite3.Error: If database connection fails
+        """
+        if self._closed:
+            raise RuntimeError("Datastore is closed")
+
         if self.connection is None:
             with self._lock:
                 if self.connection is None:
                     # Create directory if it doesn't exist
                     self.path.parent.mkdir(parents=True, exist_ok=True)
 
+                    # Set appropriate file permissions (readable/writable by owner only)
+                    if not self.path.exists():
+                        self.path.touch(mode=0o600)
+
                     self.connection = sqlite3.connect(
-                        str(self.path), check_same_thread=False
+                        str(self.path),
+                        check_same_thread=False,
+                        timeout=30.0,  # Add timeout for database locks
                     )
-                    self.connection.execute("""
+
+                    # Enable WAL mode for better concurrency
+                    cursor = self.connection.cursor()
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    cursor.execute(
+                        "PRAGMA synchronous=NORMAL"
+                    )  # Balance between safety and performance
+                    cursor.execute("PRAGMA cache_size=10000")  # Increase cache size
+                    cursor.execute(
+                        "PRAGMA temp_store=MEMORY"
+                    )  # Use memory for temp storage
+
+                    # Create table if it doesn't exist
+                    cursor.execute("""
                         CREATE TABLE IF NOT EXISTS datastore (
                             key BLOB PRIMARY KEY,
                             value BLOB NOT NULL
@@ -176,13 +204,25 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
             self.connection.commit()
 
     def close(self) -> None:
-        """Close the datastore connection."""
-        with self._lock:
-            if self.connection:
-                self.connection.close()
-                self.connection = None
+        """
+        Close the datastore connection.
 
-    def __del__(self) -> None:
-        """Cleanup on deletion."""
-        if self.connection:
-            self.connection.close()
+        This method is idempotent and can be called multiple times safely.
+        """
+        with self._lock:
+            if self.connection and not self._closed:
+                try:
+                    self.connection.close()
+                finally:
+                    self.connection = None
+                    self._closed = True
+
+    def __enter__(self):
+        """Context manager entry."""
+        self._ensure_connection()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.close()
+        return False

@@ -9,8 +9,8 @@ All operations are purely synchronous without any async/await.
 from collections import defaultdict
 from collections.abc import Sequence
 import logging
-import pickle
 import threading
+import time
 from typing import Any
 
 from multiaddr import Multiaddr
@@ -24,6 +24,21 @@ from libp2p.peer.peerinfo import PeerInfo
 from libp2p.peer.peerstore import PeerRecordState, PeerStoreError
 
 from ..datastore.base_sync import IDatastoreSync
+from ..serialization import (
+    SerializationError,
+    deserialize_addresses,
+    deserialize_envelope,
+    deserialize_latency,
+    deserialize_metadata,
+    deserialize_protocols,
+    deserialize_record_state,
+    serialize_addresses,
+    serialize_envelope,
+    serialize_latency,
+    serialize_metadata,
+    serialize_protocols,
+    serialize_record_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +54,36 @@ class SyncPersistentPeerStore(IPeerStore):
     pstoreds implementation in go-libp2p.
     """
 
-    def __init__(self, datastore: IDatastoreSync, max_records: int = 10000) -> None:
+    def __init__(
+        self,
+        datastore: IDatastoreSync,
+        max_records: int = 10000,
+        sync_interval: float = 1.0,
+        auto_sync: bool = True,
+    ) -> None:
         """
         Initialize synchronous persistent peerstore.
 
         Args:
             datastore: The synchronous datastore backend to use for persistence
             max_records: Maximum number of peer records to store
+            sync_interval: Minimum interval between sync operations (seconds)
+            auto_sync: Whether to automatically sync after writes
+
+        :raises ValueError: If datastore is None or max_records is invalid
 
         """
+        if datastore is None:
+            raise ValueError("datastore cannot be None")
+        if max_records <= 0:
+            raise ValueError("max_records must be positive")
+
         self.datastore = datastore
         self.max_records = max_records
+        self.sync_interval = sync_interval
+        self.auto_sync = auto_sync
+        self._last_sync = time.time()
+        self._pending_sync = False
 
         # In-memory caches for frequently accessed data
         self.peer_data_map: dict[ID, PeerData] = defaultdict(PeerData)
@@ -94,6 +128,10 @@ class SyncPersistentPeerStore(IPeerStore):
         """Get the datastore key for additional peer data fields."""
         return b"additional:" + peer_id.to_bytes()
 
+    def _get_latency_key(self, peer_id: ID) -> bytes:
+        """Get datastore key for peer latency data."""
+        return b"latency:" + peer_id.to_bytes()
+
     def _load_peer_data(self, peer_id: ID) -> PeerData:
         """Load peer data from datastore, creating if not exists."""
         with self._lock:
@@ -105,42 +143,55 @@ class SyncPersistentPeerStore(IPeerStore):
                     addr_key = self._get_addr_key(peer_id)
                     addr_data = self.datastore.get(addr_key)
                     if addr_data:
-                        addrs = pickle.loads(addr_data)
-                        peer_data.addrs = addrs
+                        peer_data.addrs = deserialize_addresses(addr_data)
 
                     # Load keys
                     key_key = self._get_key_key(peer_id)
                     key_data = self.datastore.get(key_key)
                     if key_data:
-                        keys = pickle.loads(key_data)
-                        peer_data.pubkey = keys.get("pubkey")
-                        peer_data.privkey = keys.get("privkey")
+                        # For now, store keys as metadata until keypair serialization
+                        # keys_metadata = deserialize_metadata(key_data)
+                        # TODO: Implement proper keypair deserialization
+                        # peer_data.pubkey = deserialize_public_key(
+                        #     keys_metadata.get(b"pubkey", b"")
+                        # )
+                        # peer_data.privkey = deserialize_private_key(
+                        #     keys_metadata.get(b"privkey", b"")
+                        # )
+                        pass
 
                     # Load metadata
                     metadata_key = self._get_metadata_key(peer_id)
                     metadata_data = self.datastore.get(metadata_key)
                     if metadata_data:
-                        peer_data.metadata = pickle.loads(metadata_data)
+                        metadata_bytes = deserialize_metadata(metadata_data)
+                        # Convert bytes back to appropriate types
+                        peer_data.metadata = {
+                            k: v.decode("utf-8") if isinstance(v, bytes) else v
+                            for k, v in metadata_bytes.items()
+                        }
 
                     # Load protocols
                     protocol_key = self._get_protocol_key(peer_id)
                     protocol_data = self.datastore.get(protocol_key)
                     if protocol_data:
-                        peer_data.protocols = pickle.loads(protocol_data)
+                        peer_data.protocols = deserialize_protocols(protocol_data)
 
-                    # Load additional fields
-                    additional_key = self._get_additional_key(peer_id)
-                    additional_data = self.datastore.get(additional_key)
-                    if additional_data:
-                        additional = pickle.loads(additional_data)
-                        peer_data.last_identified = additional.get(
-                            "last_identified", peer_data.last_identified
-                        )
-                        peer_data.ttl = additional.get("ttl", peer_data.ttl)
-                        peer_data.latmap = additional.get("latmap", peer_data.latmap)
+                    # Load latency data
+                    latency_key = self._get_latency_key(peer_id)
+                    latency_data = self.datastore.get(latency_key)
+                    if latency_data:
+                        latency_ns = deserialize_latency(latency_data)
+                        # Convert nanoseconds back to seconds for latmap
+                        peer_data.latmap = latency_ns / 1_000_000_000
 
-                except Exception as e:
+                except (SerializationError, KeyError, ValueError, TypeError) as e:
                     logger.error(f"Failed to load peer data for {peer_id}: {e}")
+                    # Continue with empty peer data
+                except Exception:
+                    logger.exception(
+                        f"Unexpected error loading peer data for {peer_id}"
+                    )
                     # Continue with empty peer data
 
                 self.peer_data_map[peer_id] = peer_data
@@ -148,39 +199,79 @@ class SyncPersistentPeerStore(IPeerStore):
             return self.peer_data_map[peer_id]
 
     def _save_peer_data(self, peer_id: ID, peer_data: PeerData) -> None:
-        """Save peer data to datastore."""
+        """
+        Save peer data to datastore.
+
+        :param peer_id: The peer ID to save data for
+        :param peer_data: The peer data to save
+        :raises PeerStoreError: If saving to datastore fails
+        :raises SerializationError: If serialization fails
+        """
         try:
             # Save addresses
-            addr_key = self._get_addr_key(peer_id)
-            self.datastore.put(addr_key, pickle.dumps(peer_data.addrs))
+            if peer_data.addrs:
+                addr_key = self._get_addr_key(peer_id)
+                addr_data = serialize_addresses(peer_data.addrs)
+                self.datastore.put(addr_key, addr_data)
 
-            # Save keys
-            key_key = self._get_key_key(peer_id)
-            keys = {"pubkey": peer_data.pubkey, "privkey": peer_data.privkey}
-            self.datastore.put(key_key, pickle.dumps(keys))
+            # Save keys (temporarily as metadata until proper keypair serialization)
+            if peer_data.pubkey or peer_data.privkey:
+                key_key = self._get_key_key(peer_id)
+                keys_metadata = {}
+                if peer_data.pubkey:
+                    keys_metadata["pubkey"] = peer_data.pubkey.serialize()
+                if peer_data.privkey:
+                    keys_metadata["privkey"] = peer_data.privkey.serialize()
+                key_data = serialize_metadata(keys_metadata)
+                self.datastore.put(key_key, key_data)
 
             # Save metadata
-            metadata_key = self._get_metadata_key(peer_id)
-            self.datastore.put(metadata_key, pickle.dumps(peer_data.metadata))
+            if peer_data.metadata:
+                metadata_key = self._get_metadata_key(peer_id)
+                metadata_data = serialize_metadata(peer_data.metadata)
+                self.datastore.put(metadata_key, metadata_data)
 
             # Save protocols
-            protocol_key = self._get_protocol_key(peer_id)
-            self.datastore.put(protocol_key, pickle.dumps(peer_data.protocols))
+            if peer_data.protocols:
+                protocol_key = self._get_protocol_key(peer_id)
+                protocol_data = serialize_protocols(peer_data.protocols)
+                self.datastore.put(protocol_key, protocol_data)
 
-            # Save additional fields
-            additional_key = self._get_additional_key(peer_id)
-            additional_data = {
-                "last_identified": peer_data.last_identified,
-                "ttl": peer_data.ttl,
-                "latmap": peer_data.latmap,
-            }
-            self.datastore.put(additional_key, pickle.dumps(additional_data))
+            # Save latency data if available
+            if hasattr(peer_data, "latmap") and peer_data.latmap > 0:
+                latency_key = self._get_latency_key(peer_id)
+                # Convert seconds to nanoseconds for storage
+                latency_ns = int(peer_data.latmap * 1_000_000_000)
+                latency_data = serialize_latency(latency_ns)
+                self.datastore.put(latency_key, latency_data)
 
-            # Sync to ensure data is persisted
-            self.datastore.sync(b"")
+            # Conditionally sync to ensure data is persisted
+            self._maybe_sync()
 
+        except SerializationError:
+            raise
         except Exception as e:
             raise PeerStoreError(f"Failed to save peer data for {peer_id}") from e
+
+    def _maybe_sync(self) -> None:
+        """
+        Conditionally sync the datastore based on configuration.
+
+        :raises PeerStoreError: If sync operation fails
+        """
+        if not self.auto_sync:
+            return
+
+        current_time = time.time()
+        if current_time - self._last_sync >= self.sync_interval:
+            try:
+                self.datastore.sync(b"")
+                self._last_sync = current_time
+                self._pending_sync = False
+            except Exception as e:
+                raise PeerStoreError("Failed to sync datastore") from e
+        else:
+            self._pending_sync = True
 
     def _load_peer_record(self, peer_id: ID) -> PeerRecordState | None:
         """Load peer record from datastore."""
@@ -190,38 +281,63 @@ class SyncPersistentPeerStore(IPeerStore):
                     record_key = self._get_peer_record_key(peer_id)
                     record_data = self.datastore.get(record_key)
                     if record_data:
-                        record_state = pickle.loads(record_data)
+                        record_state = deserialize_record_state(record_data)
                         self.peer_record_map[peer_id] = record_state
                         return record_state
-                except Exception as e:
+                except (SerializationError, KeyError, ValueError) as e:
                     logger.error(f"Failed to load peer record for {peer_id}: {e}")
+                except Exception:
+                    logger.exception(
+                        f"Unexpected error loading peer record for {peer_id}"
+                    )
             return self.peer_record_map.get(peer_id)
 
     def _save_peer_record(self, peer_id: ID, record_state: PeerRecordState) -> None:
-        """Save peer record to datastore."""
+        """
+        Save peer record to datastore.
+
+        :param peer_id: The peer ID to save record for
+        :param record_state: The record state to save
+        :raises PeerStoreError: If saving to datastore fails
+        :raises SerializationError: If serialization fails
+        """
         try:
             record_key = self._get_peer_record_key(peer_id)
-            self.datastore.put(record_key, pickle.dumps(record_state))
+            record_data = serialize_record_state(record_state)
+            self.datastore.put(record_key, record_data)
             self.peer_record_map[peer_id] = record_state
-            self.datastore.sync(b"")
+            self._maybe_sync()
         except Exception as e:
             raise PeerStoreError(f"Failed to save peer record for {peer_id}") from e
 
     def _load_local_record(self) -> None:
-        """Load local peer record from datastore."""
+        """
+        Load local peer record from datastore.
+
+        :raises PeerStoreError: If loading fails unexpectedly
+        """
         try:
             local_data = self.datastore.get(self.LOCAL_RECORD_KEY)
             if local_data:
-                self.local_peer_record = pickle.loads(local_data)
-        except Exception as e:
+                self.local_peer_record = deserialize_envelope(local_data)
+        except (SerializationError, KeyError, ValueError) as e:
             logger.error(f"Failed to load local peer record: {e}")
+        except Exception:
+            logger.exception("Unexpected error loading local peer record")
 
     def _save_local_record(self, envelope: Envelope) -> None:
-        """Save local peer record to datastore."""
+        """
+        Save local peer record to datastore.
+
+        :param envelope: The envelope to save
+        :raises PeerStoreError: If saving to datastore fails
+        :raises SerializationError: If serialization fails
+        """
         try:
-            self.datastore.put(self.LOCAL_RECORD_KEY, pickle.dumps(envelope))
+            envelope_data = serialize_envelope(envelope)
+            self.datastore.put(self.LOCAL_RECORD_KEY, envelope_data)
             self.local_peer_record = envelope
-            self.datastore.sync(b"")
+            self._maybe_sync()
         except Exception as e:
             raise PeerStoreError("Failed to save local peer record") from e
 
@@ -693,3 +809,11 @@ class SyncPersistentPeerStore(IPeerStore):
             self.peer_data_map.clear()
             self.peer_record_map.clear()
             self.local_peer_record = None
+
+    def __enter__(self) -> "SyncPersistentPeerStore":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type: type, exc_val: Exception, exc_tb: object) -> None:
+        """Context manager exit."""
+        self.close()

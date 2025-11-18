@@ -176,7 +176,10 @@ class RocksDBDatastore(IBatchingDatastore):
             self.db.close()
             self.db = None
 
-    def __del__(self) -> None:
-        """Cleanup on deletion."""
-        if self.db:
-            self.db.close()
+    async def __aenter__(self) -> "RocksDBDatastore":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: type, exc_val: Exception, exc_tb: object) -> None:
+        """Async context manager exit."""
+        await self.close()

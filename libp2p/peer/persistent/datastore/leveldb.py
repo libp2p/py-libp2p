@@ -74,6 +74,7 @@ class LevelDBDatastore(IBatchingDatastore):
         self.path = Path(path)
         self.db: Any | None = None
         self._lock = trio.Lock()
+        self._closed = False
 
     async def _ensure_connection(self) -> None:
         """Ensure database connection is established."""
@@ -155,12 +156,22 @@ class LevelDBDatastore(IBatchingDatastore):
         await self._ensure_connection()
 
     async def close(self) -> None:
-        """Close the datastore connection."""
-        if self.db:
-            self.db.close()
-            self.db = None
+        """
+        Close the datastore connection.
 
-    def __del__(self) -> None:
-        """Cleanup on deletion."""
-        if self.db:
-            self.db.close()
+        This method is idempotent and can be called multiple times safely.
+        """
+        if self.db and not getattr(self, "_closed", False):
+            try:
+                self.db.close()
+            finally:
+                self.db = None
+                self._closed = True
+
+    async def __aenter__(self) -> "LevelDBDatastore":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type: type, exc_val: Exception, exc_tb: object) -> None:
+        """Async context manager exit."""
+        await self.close()

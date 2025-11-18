@@ -184,7 +184,11 @@ class LevelDBDatastoreSync(IBatchingDatastoreSync):
                 self.db.close()
                 self.db = None
 
-    def __del__(self) -> None:
-        """Cleanup on deletion."""
-        if self.db:
-            self.db.close()
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.close()
+        return False
