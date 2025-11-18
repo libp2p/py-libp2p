@@ -338,7 +338,6 @@ class TestBasicQUICFlow:
 
 
 @pytest.mark.trio
-@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_yamux_stress_ping():
     STREAM_COUNT = 100
     listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
