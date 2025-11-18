@@ -1,0 +1,5 @@
+Fixed critical Ed25519 cryptographic bugs (Issue #1005) ensuring proper signature verification and Noise protocol compatibility with other libp2p implementations. Achieved full Noise protocol specification compliance with proper X25519/Ed25519 key separation, spec-compliant protobuf schema, and stream muxer support.
+
+Added advanced features including Early Data (0-RTT) with handlers and callbacks, configurable rekeying policies with statistics, WebTransport certificate hash exchange, and static key caching for performance optimizations.
+
+Comprehensive test suite with 129+ test cases covering patterns, messages, integration, early data, rekeying, and WebTransport. Improved test reliability by replacing mock connections with real TCP connections for accurate integration testing.

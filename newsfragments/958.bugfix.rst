@@ -1,0 +1,5 @@
+Added peer ID validation in identify_push protocol to prevent forged peer records.
+
+This security enhancement ensures that the peer ID in signed peer records matches
+the sender's peer ID, preventing peer ID spoofing attacks. This addresses
+CVE-2023-40583 equivalent vulnerability.

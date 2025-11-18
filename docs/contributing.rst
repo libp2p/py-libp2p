@@ -261,6 +261,7 @@ To add a new example (e.g., identify):
                "echo-demo=examples.echo.echo:main",
                "ping-demo=examples.ping.ping:main",
                "identify-demo=examples.identify.identify:main",
+               "circuit-relay-demo=examples.circuit_relay.relay_example:main"
            ],
        }
 

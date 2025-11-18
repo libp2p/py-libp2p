@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from .transport import QUICTransport
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
@@ -968,7 +968,7 @@ class QUICListener(IListener):
             logger.error(f"Error closing listener: {e}")
 
     async def _remove_connection_by_object(
-        self, connection_obj: QUICConnection
+        self, connection_obj: "QUICConnection"
     ) -> None:
         """Remove a connection by object reference."""
         try:

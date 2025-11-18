@@ -1,0 +1,1 @@
+Fixed resource scope cleanup in SwarmConn close method to properly release connection resources when connections are closed.

@@ -53,7 +53,6 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamError,
-    StreamReset,
 )
 from libp2p.peer.id import (
     ID,
@@ -452,7 +451,7 @@ class Pubsub(Service, IPubsub):
 
         try:
             await self.continuously_read_stream(stream)
-        except (StreamEOF, StreamReset, ParseError, IncompleteReadError) as error:
+        except (StreamError, ParseError, IncompleteReadError) as error:
             logger.debug(
                 "fail to read from peer %s, error=%s,"
                 "closing the stream and remove the peer from record",
@@ -781,6 +780,18 @@ class Pubsub(Service, IPubsub):
         if self._is_msg_seen(msg):
             return
 
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                if not scorer.allow_publish(msg_forwarder, list(msg.topicIDs)):
+                    logger.debug(
+                        "Rejecting message from %s by publish score gate", msg_forwarder
+                    )
+                    return
+        except Exception:
+            # Router may not support scoring; ignore gracefully
+            pass
+
         # Check if signing is required and if so validate the signature
         if self.strict_signing:
             # Validate the signature of the message
@@ -793,6 +804,14 @@ class Pubsub(Service, IPubsub):
         try:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
+            # Scoring: count invalid messages
+            try:
+                scorer = getattr(self.router, "scorer", None)
+                if scorer is not None:
+                    for topic in msg.topicIDs:
+                        scorer.on_invalid_message(msg_forwarder, topic)
+            except Exception:
+                pass
             logger.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",  # noqa: E501
                 msg_forwarder,
@@ -804,6 +823,15 @@ class Pubsub(Service, IPubsub):
             return
 
         self._mark_msg_seen(msg)
+
+        # Scoring: first delivery for this sender per topic
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                for topic in msg.topicIDs:
+                    scorer.on_first_delivery(msg_forwarder, topic)
+        except Exception:
+            pass
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()

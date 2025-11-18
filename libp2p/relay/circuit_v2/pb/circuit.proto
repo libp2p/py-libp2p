@@ -15,6 +15,7 @@ message HopMessage {
   Reservation reservation = 3;
   Limit limit = 4;
   Status status = 5;
+  optional bytes senderRecord = 6;  // Envelope(PeerRecord)
 }
 
 message StopMessage {
@@ -26,6 +27,7 @@ message StopMessage {
   Type type = 1;
   bytes peer = 2;
   Status status = 3;
+  optional bytes senderRecord = 4;   // Envelope(PeerRecord) encoded
 }
 
 message Reservation {

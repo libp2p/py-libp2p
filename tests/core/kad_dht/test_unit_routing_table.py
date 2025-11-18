@@ -257,6 +257,9 @@ class TestRoutingTable:
         """Create a mock host for testing."""
         host = Mock()
         host.get_peerstore.return_value = Mock()
+        # Mock new_stream to raise an exception so ping fails in tests
+        # This allows peers to be added when bucket is full
+        host.new_stream = AsyncMock(side_effect=Exception("Mock stream error"))
         return host
 
     @pytest.fixture

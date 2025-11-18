@@ -1,16 +1,16 @@
-# Import exceptiongroup for Python 3.11+
-import builtins
 from collections.abc import Sequence
 import logging
 from typing import Any
 
 import pytest
 
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup  # type: ignore[misc]
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception  # type: ignore[misc]
+try:
+    from builtins import ExceptionGroup  # type: ignore[attr-defined]
+except ImportError:
+    try:
+        from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
+    except ImportError:  # pragma: no cover - fallback if dependency missing
+        ExceptionGroup = Exception  # type: ignore[assignment]
 from multiaddr import Multiaddr
 import trio
 

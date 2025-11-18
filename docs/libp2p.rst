@@ -7,6 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   libp2p.bitswap
    libp2p.crypto
    libp2p.discovery
    libp2p.host
@@ -17,6 +18,7 @@ Subpackages
    libp2p.peer
    libp2p.protocol_muxer
    libp2p.pubsub
+   libp2p.rcmgr
    libp2p.records
    libp2p.relay
    libp2p.security
