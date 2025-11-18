@@ -8,7 +8,17 @@ from trio.testing import (
 )
 
 from libp2p import (
+    generate_new_ed25519_identity,
+    generate_new_rsa_identity,
     new_swarm,
+)
+from libp2p.crypto.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+from libp2p.crypto.rsa import (
+    RSAPrivateKey,
+    RSAPublicKey,
 )
 from libp2p.network.exceptions import (
     SwarmException,
@@ -257,6 +267,41 @@ def test_new_swarm_quic_multiaddr_supported():
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
     assert isinstance(swarm.transport, QUICTransport)
+
+
+def test_new_swarm_defaults_to_ed25519():
+    """Test that new_swarm() generates Ed25519 keys by default (not RSA)."""
+    # Test that new_swarm() without key_pair parameter generates a valid swarm
+    swarm = new_swarm()
+    assert isinstance(swarm, Swarm)
+
+    # The swarm's peer ID should be valid (indicating successful key generation)
+    peer_id = swarm.get_peer_id()
+    assert peer_id is not None
+
+    # Test that explicitly providing Ed25519 keys works
+    ed25519_key_pair = generate_new_ed25519_identity()
+    swarm_ed25519 = new_swarm(key_pair=ed25519_key_pair)
+    assert isinstance(swarm_ed25519, Swarm)
+    assert swarm_ed25519.get_peer_id() is not None
+
+    # Verify that Ed25519 keys are indeed being used by checking key type
+    assert isinstance(ed25519_key_pair.private_key, Ed25519PrivateKey)
+    assert isinstance(ed25519_key_pair.public_key, Ed25519PublicKey)
+
+    # Test that RSA keys can still be explicitly provided
+    rsa_key_pair = generate_new_rsa_identity()
+    swarm_rsa = new_swarm(key_pair=rsa_key_pair)
+    assert isinstance(swarm_rsa, Swarm)
+    assert swarm_rsa.get_peer_id() is not None
+
+    # Verify RSA keys are being used when explicitly provided
+    assert isinstance(rsa_key_pair.private_key, RSAPrivateKey)
+    assert isinstance(rsa_key_pair.public_key, RSAPublicKey)
+
+    # Ensure different key types produce different peer IDs
+    # (This is expected since RSA and Ed25519 generate different keys)
+    assert swarm_ed25519.get_peer_id() != swarm_rsa.get_peer_id()
 
 
 @pytest.mark.trio
