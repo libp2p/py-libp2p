@@ -199,6 +199,7 @@ def new_swarm(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -214,6 +215,7 @@ def new_swarm(
     :param quic_transport_opt: options for transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key for PSK encryption in transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
@@ -324,8 +326,24 @@ def new_swarm(
         upgrader,
         transport,
         retry_config=retry_config,
-        connection_config=connection_config
+        connection_config=connection_config,
+        psk=psk
     )
+
+    # Set resource manager if provided
+    # Auto-create a default ResourceManager if one was not provided
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            resource_manager = None
+
+    if resource_manager is not None:
+        swarm.set_resource_manager(resource_manager)
+
+    return swarm
 
     # Set resource manager if provided
     # Auto-create a default ResourceManager if one was not provided
@@ -360,6 +378,7 @@ def new_host(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -379,6 +398,7 @@ def new_host(
     :param tls_server_config: optional TLS server configuration for WebSocket transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key (PSK)
     :return: return a host instance
     """
 
@@ -408,6 +428,7 @@ def new_host(
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
+        psk=psk
     )
 
     if disc_opt is not None:

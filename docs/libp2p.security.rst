@@ -9,6 +9,7 @@ Subpackages
 
    libp2p.security.insecure
    libp2p.security.noise
+   libp2p.security.pnet
    libp2p.security.secio
    libp2p.security.tls
 
