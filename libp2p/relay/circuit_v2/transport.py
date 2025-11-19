@@ -846,7 +846,6 @@ class CircuitV2Listener(Service, IListener):
     async def handle_incoming_connection(
         self,
         stream: INetStream,
-        remote_peer_id: ID,
     ) -> RawConnection:
         """
         Handle an incoming relay connection.
@@ -902,9 +901,7 @@ class CircuitV2Listener(Service, IListener):
             remote_peer_id = stream_with_peer_id.get_remote_peer_id()
 
             try:
-                connection = await self.handle_incoming_connection(
-                    stream, remote_peer_id
-                )
+                connection = await self.handle_incoming_connection(stream)
 
                 await self.handler_function(connection)
             except ConnectionError as e:
