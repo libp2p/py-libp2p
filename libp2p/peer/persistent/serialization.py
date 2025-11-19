@@ -151,37 +151,24 @@ def serialize_keypair(keypair: KeyPair) -> bytes:
 
         # Serialize public key
         if keypair.public_key:
-            from libp2p.peer.pb.crypto_pb2 import (
-                KeyType,
-                PublicKey as PBPublicKey,
-            )
+            from libp2p.peer.pb.crypto_pb2 import PublicKey as PBPublicKey
 
             pb_public_key = PBPublicKey()
 
             # Map key types
-            key_type_map = {
-                "rsa": KeyType.RSA,
-                "ed25519": KeyType.Ed25519,
-                "secp256k1": KeyType.Secp256k1,
-                "ecdsa": KeyType.ECDSA,
-            }
-
             key_type = keypair.public_key.get_type()
-            pb_public_key.Type = int(key_type.value)
+            pb_public_key.Type = key_type.value
             pb_public_key.Data = keypair.public_key.serialize()
             pb_keys.public_key.CopyFrom(pb_public_key)
 
         # Serialize private key
         if keypair.private_key:
-            from libp2p.peer.pb.crypto_pb2 import (
-                KeyType,
-                PrivateKey as PBPrivateKey,
-            )
+            from libp2p.peer.pb.crypto_pb2 import PrivateKey as PBPrivateKey
 
             pb_private_key = PBPrivateKey()
 
             key_type = keypair.private_key.get_type()
-            pb_private_key.Type = int(key_type.value)
+            pb_private_key.Type = key_type.value
             pb_private_key.Data = keypair.private_key.serialize()
             pb_keys.private_key.CopyFrom(pb_private_key)
 
@@ -365,9 +352,10 @@ def deserialize_record_state(data: bytes) -> "PeerRecordState":
         pb_state = PBPeerRecordState()
         pb_state.ParseFromString(data)
 
-        # Since we can't reconstruct the full PeerRecordState without envelope and seq,
-        # we'll need to return a placeholder. This is a limitation of the current design.
-        # In practice, the record state should be stored with its envelope and seq.
+        # Since we can't reconstruct the full PeerRecordState without the envelope
+        # and sequence number (seq), we'll need to return a placeholder. This is a
+        # limitation of the current design. In practice, the record state should
+        # be stored together with its envelope and seq.
         from libp2p.crypto.ed25519 import Ed25519PublicKey
         from libp2p.peer.envelope import Envelope
         from libp2p.peer.peerstore import PeerRecordState
