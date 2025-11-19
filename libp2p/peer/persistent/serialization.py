@@ -11,10 +11,8 @@ from typing import Any
 
 from multiaddr import Multiaddr
 
-from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.crypto.keys import KeyPair
 from libp2p.peer.envelope import Envelope
-from libp2p.peer.id import ID
-from libp2p.peer.peerdata import PeerData
 from libp2p.peer.peerstore import PeerRecordState
 
 from .pb import (
@@ -37,7 +35,7 @@ class SerializationError(Exception):
 def serialize_addresses(addresses: Sequence[Multiaddr]) -> bytes:
     """
     Serialize a sequence of multiaddresses to bytes.
-    
+
     :param addresses: Sequence of Multiaddr objects to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
@@ -53,7 +51,7 @@ def serialize_addresses(addresses: Sequence[Multiaddr]) -> bytes:
 def deserialize_addresses(data: bytes) -> list[Multiaddr]:
     """
     Deserialize addresses from bytes.
-    
+
     :param data: Serialized address data
     :return: List of Multiaddr objects
     :raises SerializationError: If deserialization fails
@@ -69,7 +67,7 @@ def deserialize_addresses(data: bytes) -> list[Multiaddr]:
 def serialize_protocols(protocols: Sequence[str]) -> bytes:
     """
     Serialize a sequence of protocol strings to bytes.
-    
+
     :param protocols: Sequence of protocol strings to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
@@ -85,7 +83,7 @@ def serialize_protocols(protocols: Sequence[str]) -> bytes:
 def deserialize_protocols(data: bytes) -> list[str]:
     """
     Deserialize protocols from bytes.
-    
+
     :param data: Serialized protocol data
     :return: List of protocol strings
     :raises SerializationError: If deserialization fails
@@ -101,7 +99,7 @@ def deserialize_protocols(data: bytes) -> list[str]:
 def serialize_metadata(metadata: dict[str, Any]) -> bytes:
     """
     Serialize metadata dictionary to bytes.
-    
+
     :param metadata: Dictionary of metadata to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
@@ -113,12 +111,12 @@ def serialize_metadata(metadata: dict[str, Any]) -> bytes:
             if isinstance(value, bytes):
                 pb_metadata.metadata[key] = value
             elif isinstance(value, str):
-                pb_metadata.metadata[key] = value.encode('utf-8')
+                pb_metadata.metadata[key] = value.encode("utf-8")
             elif isinstance(value, (int, float)):
-                pb_metadata.metadata[key] = str(value).encode('utf-8')
+                pb_metadata.metadata[key] = str(value).encode("utf-8")
             else:
                 # For other types, convert to string representation
-                pb_metadata.metadata[key] = str(value).encode('utf-8')
+                pb_metadata.metadata[key] = str(value).encode("utf-8")
         return pb_metadata.SerializeToString()
     except Exception as e:
         raise SerializationError(f"Failed to serialize metadata: {e}") from e
@@ -127,7 +125,7 @@ def serialize_metadata(metadata: dict[str, Any]) -> bytes:
 def deserialize_metadata(data: bytes) -> dict[str, bytes]:
     """
     Deserialize metadata from bytes.
-    
+
     :param data: Serialized metadata data
     :return: Dictionary of metadata (values as bytes)
     :raises SerializationError: If deserialization fails
@@ -143,19 +141,23 @@ def deserialize_metadata(data: bytes) -> dict[str, bytes]:
 def serialize_keypair(keypair: KeyPair) -> bytes:
     """
     Serialize a keypair to bytes.
-    
+
     :param keypair: KeyPair to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
     """
     try:
         pb_keys = PeerKeys()
-        
+
         # Serialize public key
         if keypair.public_key:
-            from libp2p.peer.pb.crypto_pb2 import PublicKey as PBPublicKey, KeyType
+            from libp2p.peer.pb.crypto_pb2 import (
+                KeyType,
+                PublicKey as PBPublicKey,
+            )
+
             pb_public_key = PBPublicKey()
-            
+
             # Map key types
             key_type_map = {
                 "rsa": KeyType.RSA,
@@ -163,22 +165,26 @@ def serialize_keypair(keypair: KeyPair) -> bytes:
                 "secp256k1": KeyType.Secp256k1,
                 "ecdsa": KeyType.ECDSA,
             }
-            
+
             key_type = keypair.public_key.get_type()
             pb_public_key.Type = int(key_type.value)
             pb_public_key.Data = keypair.public_key.serialize()
             pb_keys.public_key.CopyFrom(pb_public_key)
-        
+
         # Serialize private key
         if keypair.private_key:
-            from libp2p.peer.pb.crypto_pb2 import PrivateKey as PBPrivateKey, KeyType
+            from libp2p.peer.pb.crypto_pb2 import (
+                KeyType,
+                PrivateKey as PBPrivateKey,
+            )
+
             pb_private_key = PBPrivateKey()
-            
+
             key_type = keypair.private_key.get_type()
             pb_private_key.Type = int(key_type.value)
             pb_private_key.Data = keypair.private_key.serialize()
             pb_keys.private_key.CopyFrom(pb_private_key)
-        
+
         return pb_keys.SerializeToString()
     except Exception as e:
         raise SerializationError(f"Failed to serialize keypair: {e}") from e
@@ -187,7 +193,7 @@ def serialize_keypair(keypair: KeyPair) -> bytes:
 def deserialize_keypair(data: bytes) -> KeyPair:
     """
     Deserialize a keypair from bytes.
-    
+
     :param data: Serialized keypair data
     :return: KeyPair object
     :raises SerializationError: If deserialization fails
@@ -195,18 +201,21 @@ def deserialize_keypair(data: bytes) -> KeyPair:
     try:
         pb_keys = PeerKeys()
         pb_keys.ParseFromString(data)
-        
-        from libp2p.crypto.serialization import deserialize_public_key, deserialize_private_key
-        
+
+        from libp2p.crypto.serialization import (
+            deserialize_private_key,
+            deserialize_public_key,
+        )
+
         public_key = None
         private_key = None
-        
+
         if pb_keys.HasField("public_key"):
             public_key = deserialize_public_key(pb_keys.public_key.Data)
-        
+
         if pb_keys.HasField("private_key"):
             private_key = deserialize_private_key(pb_keys.private_key.Data)
-        
+
         # KeyPair requires both keys to be non-None
         if private_key is not None and public_key is not None:
             return KeyPair(private_key, public_key)
@@ -223,7 +232,7 @@ def deserialize_keypair(data: bytes) -> KeyPair:
 def serialize_latency(latency_ns: int) -> bytes:
     """
     Serialize latency to bytes.
-    
+
     :param latency_ns: Latency in nanoseconds
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
@@ -239,7 +248,7 @@ def serialize_latency(latency_ns: int) -> bytes:
 def deserialize_latency(data: bytes) -> int:
     """
     Deserialize latency from bytes.
-    
+
     :param data: Serialized latency data
     :return: Latency in nanoseconds
     :raises SerializationError: If deserialization fails
@@ -255,24 +264,26 @@ def deserialize_latency(data: bytes) -> int:
 def serialize_envelope(envelope: Envelope) -> bytes:
     """
     Serialize an envelope to bytes.
-    
+
     :param envelope: Envelope to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
     """
     try:
         pb_envelope_wrapper = PeerEnvelope()
-        
+
         # Use the existing envelope's marshal_envelope method if available
-        if hasattr(envelope, 'marshal_envelope'):
+        if hasattr(envelope, "marshal_envelope"):
             envelope_bytes = envelope.marshal_envelope()
             from libp2p.peer.pb.envelope_pb2 import Envelope as PBEnvelope
+
             pb_envelope = PBEnvelope()
             pb_envelope.ParseFromString(envelope_bytes)
             pb_envelope_wrapper.envelope.CopyFrom(pb_envelope)
         else:
             # Fallback: construct envelope manually
             from libp2p.peer.pb.envelope_pb2 import Envelope as PBEnvelope
+
             pb_envelope = PBEnvelope()
             pb_envelope.payload_type = envelope.payload_type
             pb_envelope.payload = envelope.raw_payload
@@ -280,9 +291,12 @@ def serialize_envelope(envelope: Envelope) -> bytes:
             if envelope.public_key:
                 # Convert the public key to protobuf format
                 from libp2p.peer.envelope import pub_key_to_protobuf
-                pb_envelope.public_key.CopyFrom(pub_key_to_protobuf(envelope.public_key))
+
+                pb_envelope.public_key.CopyFrom(
+                    pub_key_to_protobuf(envelope.public_key)
+                )
             pb_envelope_wrapper.envelope.CopyFrom(pb_envelope)
-        
+
         return pb_envelope_wrapper.SerializeToString()
     except Exception as e:
         raise SerializationError(f"Failed to serialize envelope: {e}") from e
@@ -291,7 +305,7 @@ def serialize_envelope(envelope: Envelope) -> bytes:
 def deserialize_envelope(data: bytes) -> Envelope:
     """
     Deserialize an envelope from bytes.
-    
+
     :param data: Serialized envelope data
     :return: Envelope object
     :raises SerializationError: If deserialization fails
@@ -299,20 +313,21 @@ def deserialize_envelope(data: bytes) -> Envelope:
     try:
         pb_envelope_wrapper = PeerEnvelope()
         pb_envelope_wrapper.ParseFromString(data)
-        
+
         # Construct envelope manually from protobuf data
         pb_envelope = pb_envelope_wrapper.envelope
-        
+
         # Convert protobuf public key back to crypto public key
         from libp2p.crypto.serialization import deserialize_public_key
+
         public_key_data = pb_envelope.public_key.SerializeToString()
         public_key = deserialize_public_key(public_key_data)
-        
+
         return Envelope(
             public_key=public_key,
             payload_type=pb_envelope.payload_type,
             raw_payload=pb_envelope.payload,
-            signature=pb_envelope.signature
+            signature=pb_envelope.signature,
         )
     except Exception as e:
         raise SerializationError(f"Failed to deserialize envelope: {e}") from e
@@ -321,14 +336,14 @@ def deserialize_envelope(data: bytes) -> Envelope:
 def serialize_record_state(state: "PeerRecordState") -> bytes:
     """
     Serialize a peer record state to bytes.
-    
+
     :param state: PeerRecordState to serialize
     :return: Serialized bytes
     :raises SerializationError: If serialization fails
     """
     try:
         pb_state = PBPeerRecordState()
-        
+
         # PeerRecordState is a simple class with envelope and seq
         # For now, we'll just mark it as VALID since we don't have state info
         # In the future, this could be extended to track actual state
@@ -341,7 +356,7 @@ def serialize_record_state(state: "PeerRecordState") -> bytes:
 def deserialize_record_state(data: bytes) -> "PeerRecordState":
     """
     Deserialize a peer record state from bytes.
-    
+
     :param data: Serialized record state data
     :return: PeerRecordState
     :raises SerializationError: If deserialization fails
@@ -349,23 +364,20 @@ def deserialize_record_state(data: bytes) -> "PeerRecordState":
     try:
         pb_state = PBPeerRecordState()
         pb_state.ParseFromString(data)
-        
+
         # Since we can't reconstruct the full PeerRecordState without envelope and seq,
         # we'll need to return a placeholder. This is a limitation of the current design.
         # In practice, the record state should be stored with its envelope and seq.
-        from libp2p.peer.peerstore import PeerRecordState
-        from libp2p.peer.envelope import Envelope
         from libp2p.crypto.ed25519 import Ed25519PublicKey
-        
+        from libp2p.peer.envelope import Envelope
+        from libp2p.peer.peerstore import PeerRecordState
+
         # Create a dummy envelope for now
-        dummy_key = Ed25519PublicKey.from_bytes(b'\x00' * 32)
+        dummy_key = Ed25519PublicKey.from_bytes(b"\x00" * 32)
         dummy_envelope = Envelope(
-            public_key=dummy_key,
-            payload_type=b'',
-            raw_payload=b'',
-            signature=b''
+            public_key=dummy_key, payload_type=b"", raw_payload=b"", signature=b""
         )
-        
+
         return PeerRecordState(dummy_envelope, 0)
     except Exception as e:
         raise SerializationError(f"Failed to deserialize record state: {e}") from e

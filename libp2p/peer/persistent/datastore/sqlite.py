@@ -223,6 +223,8 @@ class SQLiteDatastore(IBatchingDatastore):
         await self._ensure_connection()
         return self
 
-    async def __aexit__(self, exc_type: type, exc_val: Exception, exc_tb: object) -> None:
+    async def __aexit__(
+        self, exc_type: type, exc_val: Exception, exc_tb: object
+    ) -> None:
         """Async context manager exit."""
         await self.close()

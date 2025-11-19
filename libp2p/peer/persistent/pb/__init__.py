@@ -12,7 +12,7 @@ from .persistent_peerstore_pb2 import (
 
 __all__ = [
     "PeerAddresses",
-    "PeerEnvelope", 
+    "PeerEnvelope",
     "PeerKeys",
     "PeerLatency",
     "PeerMetadata",
