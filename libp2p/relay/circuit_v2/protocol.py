@@ -194,10 +194,10 @@ class CircuitV2Protocol(Service):
             # Unregister protocol handlers
             if self.allow_hop:
                 try:
-                    # Cast host to extended interface with remove_stream_handler
-                    host_with_handlers = cast(IHostWithStreamHandlers, self.host)
-                    host_with_handlers.remove_stream_handler(PROTOCOL_ID)
-                    host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
+                    if hasattr(self.host, "remove_stream_handler"):
+                        host_with_handlers = cast(IHostWithStreamHandlers, self.host)
+                        host_with_handlers.remove_stream_handler(PROTOCOL_ID)
+                        host_with_handlers.remove_stream_handler(STOP_PROTOCOL_ID)
                 except Exception as e:
                     logger.error("Error unregistering stream handlers: %s", str(e))
 
@@ -330,22 +330,11 @@ class CircuitV2Protocol(Service):
                     with trio.fail_after(STREAM_READ_TIMEOUT * 2):
                         msg_bytes = await stream.read(1024)
                         if not msg_bytes:
-                            logger.error(f"Empty read from stream from {remote_id}")
-
-                            pb_status = PbStatus()
-                            pb_status.code = PbStatus.Code.MALFORMED_MESSAGE
-                            pb_status.message = "Empty message received"
-                            signed_envelope, _ = env_to_send_in_RPC(self.host)
-                            response = HopMessage(
-                                type=HopMessage.STATUS,
-                                status=pb_status,
-                                senderRecord=signed_envelope,
+                            # EOF - stream closed normally
+                            logger.debug(
+                                f"Stream EOF from {remote_id} - connection closed"
                             )
-                            await stream.write(response.SerializeToString())
-                            await trio.sleep(
-                                0.5
-                            )  # Longer wait to ensure message is sent
-                            continue
+                            break
                 except trio.TooSlowError:
                     logger.error(f"Timeout reading from hop stream from {remote_id}")
                     # Create a proto Status directly
@@ -359,22 +348,37 @@ class CircuitV2Protocol(Service):
                         status=pb_status,
                         senderRecord=signed_envelope,
                     )
-                    await stream.write(response.SerializeToString())
-                    await trio.sleep(0.5)
+                    try:
+                        await stream.write(response.SerializeToString())
+                        await trio.sleep(0.5)
+                    except Exception:
+                        pass  # Stream might be closed, ignore write errors
+                    break
+                except (trio.ClosedResourceError, trio.BrokenResourceError) as e:
+                    # Stream closed or broken - this is normal during cleanup
+                    logger.debug(f"Stream closed from {remote_id}: {e}")
                     break
                 except Exception as e:
-                    print(f"Error reading from hop stream from {remote_id}: {str(e)}")
-                    pb_status = PbStatus()
-                    pb_status.code = PbStatus.Code.MALFORMED_MESSAGE
-                    pb_status.message = f"Read error: {str(e)}"
-                    signed_envelope, _ = env_to_send_in_RPC(self.host)
-                    response = HopMessage(
-                        type=HopMessage.STATUS,
-                        status=pb_status,
-                        senderRecord=signed_envelope,
+                    error_msg = str(e) if str(e) else f"{type(e).__name__}"
+                    logger.debug(
+                        f"Error reading from hop stream from {remote_id}: {error_msg}"
                     )
-                    await stream.write(response.SerializeToString())
-                    await trio.sleep(0.5)  # Longer wait to ensure the message is sent
+                    # Only send error response if stream is still writable
+                    try:
+                        pb_status = PbStatus()
+                        pb_status.code = PbStatus.Code.MALFORMED_MESSAGE
+                        pb_status.message = f"Read error: {error_msg}"
+                        signed_envelope, _ = env_to_send_in_RPC(self.host)
+                        response = HopMessage(
+                            type=HopMessage.STATUS,
+                            status=pb_status,
+                            senderRecord=signed_envelope,
+                        )
+                        await stream.write(response.SerializeToString())
+                        await trio.sleep(0.5)
+                    except Exception:
+                        # Stream might be closed, ignore write errors
+                        pass
                     break
                 # Parse the message
                 try:
@@ -570,6 +574,9 @@ class CircuitV2Protocol(Service):
                     status=status,
                     senderRecord=signed_envelope.marshal_envelope(),
                 )
+                status_msg.status.code = status.code
+                status_msg.status.message = status.message
+
                 await stream.write(status_msg.SerializeToString())
                 return
 
@@ -867,8 +874,9 @@ class CircuitV2Protocol(Service):
                 # Send destination records to source in case of HOP status OK message
                 status_msg = HopMessage(
                     type=HopMessage.STATUS,
-                    status=pb_status,
                 )
+                status_msg.status.code = pb_status.code
+                status_msg.status.message = pb_status.message
                 if envelope is not None:
                     status_msg.senderRecord = envelope.marshal_envelope()
 
@@ -904,8 +912,10 @@ class CircuitV2Protocol(Service):
 
                 status_msg = StopMessage(
                     type=StopMessage.STATUS,
-                    status=pb_status,
                 )
+                status_msg.status.code = pb_status.code
+                status_msg.status.message = pb_status.message
+
                 if senderRecord is not None:
                     status_msg.senderRecord = senderRecord.marshal_envelope()
 
