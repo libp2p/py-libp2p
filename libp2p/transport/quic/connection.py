@@ -152,6 +152,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._current_connection_id: bytes | None = None
         self._retired_connection_ids: set[bytes] = set()
         self._connection_id_sequence_numbers: set[int] = set()
+        # Sequence number counter for tracking Connection IDs (inspired by quinn)
+        # Starts at 0 for initial CID, increments for each new CID issued
+        self._connection_id_sequence_counter: int = 0
 
         # Event processing control with batching
         self._event_processing_active: bool = False
@@ -1074,9 +1077,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
         Handle new connection ID issued by peer.
 
         This is the CRITICAL missing functionality that was causing your issue!
+        Tracks sequence numbers for proper CID retirement ordering (inspired by quinn).
         """
         new_cid = event.connection_id
-        logger.debug(f"NEW CONNECTION ID ISSUED: {new_cid.hex()}")
+
+        # Increment sequence counter for this new CID
+        sequence = self._connection_id_sequence_counter
+        self._connection_id_sequence_counter += 1
+        self._connection_id_sequence_numbers.add(sequence)
+
+        logger.debug(f"NEW CONNECTION ID ISSUED: {new_cid.hex()} (sequence {sequence})")
 
         # Add to available connection IDs
         self._available_connection_ids.add(new_cid)
@@ -1086,21 +1096,26 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._current_connection_id = new_cid
             logger.debug(f"Set current connection ID to: {new_cid.hex()}")
 
-        # CRITICAL FIX: Notify listener to register this new CID
+        # CRITICAL FIX: Notify listener to register this new CID with sequence number
         # This ensures packets with the new CID can be routed correctly
-        await self._notify_listener_of_new_cid(new_cid)
+        await self._notify_listener_of_new_cid(new_cid, sequence)
 
         # Update statistics
         self._stats["connection_ids_issued"] += 1
 
         logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
 
-    async def _notify_listener_of_new_cid(self, new_cid: bytes) -> None:
+    async def _notify_listener_of_new_cid(self, new_cid: bytes, sequence: int) -> None:
         """
         Notify the parent listener to register a new Connection ID.
 
         This is critical for proper packet routing when the peer issues
         new Connection IDs after the handshake completes.
+
+        Args:
+            new_cid: New Connection ID to register
+            sequence: Sequence number for this Connection ID
+
         """
         try:
             if not self._transport:
@@ -1113,11 +1128,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 if cids:
                     # Use the first Connection ID found as the original CID
                     original_cid = cids[0]
-                    # Register new Connection ID using the registry
-                    await listener._registry.add_connection_id(new_cid, original_cid)
+                    # Register new Connection ID using the registry with sequence number
+                    await listener._registry.add_connection_id(
+                        new_cid, original_cid, sequence
+                    )
                     logger.debug(
                         f"Registered new Connection ID {new_cid.hex()[:8]} "
-                        f"for connection {original_cid.hex()[:8]}"
+                        f"(sequence {sequence}) for connection {original_cid.hex()[:8]}"
                     )
                     return
 
@@ -1447,17 +1464,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             if self._transport:
                 await self._transport._cleanup_terminated_connection(self)
                 logger.debug("Notified transport of connection termination")
+                # Also try to remove from listeners
+                for listener in self._transport._listeners:
+                    try:
+                        await listener._remove_connection_by_object(self)
+                        logger.debug(
+                            "Found and notified listener of connection termination"
+                        )
+                        break
+                    except Exception:
+                        continue
                 return
-
-            for listener in self._transport._listeners:
-                try:
-                    await listener._remove_connection_by_object(self)
-                    logger.debug(
-                        "Found and notified listener of connection termination"
-                    )
-                    return
-                except Exception:
-                    continue
 
             # Method 4: Use connection ID if we have one (most reliable)
             if self._current_connection_id:

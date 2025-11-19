@@ -111,7 +111,7 @@ async def test_add_connection_id(registry, mock_connection):
     await registry.register_connection(original_cid, mock_connection, addr)
 
     # Add new Connection ID
-    await registry.add_connection_id(new_cid, original_cid)
+    await registry.add_connection_id(new_cid, original_cid, sequence=1)
 
     # Verify both Connection IDs map to the same connection
     conn1, _, _ = await registry.find_by_cid(original_cid)
@@ -244,8 +244,8 @@ async def test_get_all_cids_for_connection(registry, mock_connection):
     await registry.register_connection(cid1, mock_connection, addr1)
 
     # Add additional Connection IDs
-    await registry.add_connection_id(cid2, cid1)
-    await registry.add_connection_id(cid3, cid1)
+    await registry.add_connection_id(cid2, cid1, sequence=1)
+    await registry.add_connection_id(cid3, cid1, sequence=2)
 
     # Get all Connection IDs for this connection
     cids = await registry.get_all_cids_for_connection(mock_connection)
@@ -429,7 +429,7 @@ async def test_connection_id_retired_cleanup(registry, mock_connection):
     await registry.register_connection(original_cid, mock_connection, addr)
 
     # Add new Connection ID
-    await registry.add_connection_id(new_cid, original_cid)
+    await registry.add_connection_id(new_cid, original_cid, sequence=1)
 
     # Remove original Connection ID (simulating retirement)
     await registry.remove_connection_id(original_cid)
@@ -442,3 +442,236 @@ async def test_connection_id_retired_cleanup(registry, mock_connection):
     found_connection, found_cid = await registry.find_by_address(addr)
     assert found_connection is mock_connection
     assert found_cid == new_cid
+
+
+# ============================================================================
+# New tests for quinn-inspired improvements
+# ============================================================================
+
+
+@pytest.mark.trio
+async def test_sequence_number_tracking(registry, mock_connection):
+    """Test sequence number tracking for Connection IDs (inspired by quinn)."""
+    cid1 = b"cid_seq_1"
+    cid2 = b"cid_seq_2"
+    cid3 = b"cid_seq_3"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection with sequence 0
+    await registry.register_connection(cid1, mock_connection, addr, sequence=0)
+    seq1 = await registry.get_sequence_for_cid(cid1)
+    assert seq1 == 0
+
+    # Add new Connection IDs with increasing sequences
+    await registry.add_connection_id(cid2, cid1, sequence=1)
+    seq2 = await registry.get_sequence_for_cid(cid2)
+    assert seq2 == 1
+
+    await registry.add_connection_id(cid3, cid1, sequence=2)
+    seq3 = await registry.get_sequence_for_cid(cid3)
+    assert seq3 == 2
+
+    # Verify all sequences are tracked
+    assert await registry.get_sequence_for_cid(cid1) == 0
+    assert await registry.get_sequence_for_cid(cid2) == 1
+    assert await registry.get_sequence_for_cid(cid3) == 2
+
+
+@pytest.mark.trio
+async def test_sequence_number_retirement_ordering(registry, mock_connection):
+    """Test proper retirement ordering using sequence numbers (inspired by quinn)."""
+    cid1 = b"cid_retire_1"
+    cid2 = b"cid_retire_2"
+    cid3 = b"cid_retire_3"
+    cid4 = b"cid_retire_4"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection with multiple CIDs
+    await registry.register_connection(cid1, mock_connection, addr, sequence=0)
+    await registry.add_connection_id(cid2, cid1, sequence=1)
+    await registry.add_connection_id(cid3, cid1, sequence=2)
+    await registry.add_connection_id(cid4, cid1, sequence=3)
+
+    # Get CIDs in sequence range (for retirement ordering)
+    cids_range_0_2 = await registry.get_cids_by_sequence_range(
+        mock_connection, start_seq=0, end_seq=2
+    )
+    assert len(cids_range_0_2) == 2
+    assert cid1 in cids_range_0_2
+    assert cid2 in cids_range_0_2
+
+    cids_range_2_4 = await registry.get_cids_by_sequence_range(
+        mock_connection, start_seq=2, end_seq=4
+    )
+    assert len(cids_range_2_4) == 2
+    assert cid3 in cids_range_2_4
+    assert cid4 in cids_range_2_4
+
+    # Verify sequences are in order
+    sequences = [await registry.get_sequence_for_cid(cid) for cid in cids_range_0_2]
+    assert sequences == sorted(sequences)
+
+
+@pytest.mark.trio
+async def test_initial_vs_established_cid_separation(registry, mock_pending_connection):
+    """
+    Test that initial and established CIDs are tracked separately
+    (inspired by quinn).
+    """
+    initial_cid = b"initial_cid"
+    established_cid = b"established_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register initial CID
+    await registry.register_initial_cid(
+        initial_cid, mock_pending_connection, addr, sequence=0
+    )
+
+    # Verify initial CID is found when is_initial=True
+    _, pending_conn, is_pending = await registry.find_by_cid(
+        initial_cid, is_initial=True
+    )
+    assert pending_conn is mock_pending_connection
+    assert is_pending is True
+
+    # Verify initial CID is NOT found when is_initial=False
+    # (it's not in established/pending)
+    _, pending_conn2, is_pending2 = await registry.find_by_cid(
+        initial_cid, is_initial=False
+    )
+    assert pending_conn2 is None
+    assert is_pending2 is False
+
+    # Register established connection with different CID
+    mock_connection = Mock()
+    mock_connection._remote_addr = addr
+    await registry.register_connection(
+        established_cid, mock_connection, addr, sequence=0
+    )
+
+    # Verify established CID is found
+    conn, _, _ = await registry.find_by_cid(established_cid, is_initial=False)
+    assert conn is mock_connection
+
+
+@pytest.mark.trio
+async def test_initial_cid_promotion(registry, mock_pending_connection):
+    """
+    Test moving initial CID to established when connection is promoted
+    (inspired by quinn).
+    """
+    initial_cid = b"initial_promote"
+    addr = ("127.0.0.1", 12345)
+
+    # Register initial CID
+    await registry.register_initial_cid(
+        initial_cid, mock_pending_connection, addr, sequence=0
+    )
+
+    # Verify it's in initial CIDs
+    _, pending_conn, is_pending = await registry.find_by_cid(
+        initial_cid, is_initial=True
+    )
+    assert pending_conn is mock_pending_connection
+
+    # Promote connection
+    mock_connection = Mock()
+    mock_connection._remote_addr = addr
+    await registry.promote_pending(initial_cid, mock_connection)
+
+    # Verify it's no longer in initial CIDs
+    _, pending_conn2, is_pending2 = await registry.find_by_cid(
+        initial_cid, is_initial=True
+    )
+    assert pending_conn2 is None
+
+    # Verify it's now in established connections
+    conn, _, _ = await registry.find_by_cid(initial_cid, is_initial=False)
+    assert conn is mock_connection
+
+
+@pytest.mark.trio
+async def test_reverse_address_mapping(registry, mock_connection):
+    """Test reverse mapping from connection to address for O(1) fallback routing."""
+    cid1 = b"reverse_cid_1"
+    cid2 = b"reverse_cid_2"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid1, mock_connection, addr, sequence=0)
+
+    # Add another CID for same connection
+    await registry.add_connection_id(cid2, cid1, sequence=1)
+
+    # Remove address-to-CID mapping to test reverse lookup
+    async with registry._lock:
+        registry._addr_to_cid.pop(addr, None)
+
+    # find_by_address should still find connection via reverse mapping
+    found_connection, found_cid = await registry.find_by_address(addr)
+    assert found_connection is mock_connection
+    assert found_cid in (cid1, cid2)
+
+
+@pytest.mark.trio
+async def test_fallback_routing_o1_performance(registry, mock_connection):
+    """Test that fallback routing uses O(1) lookups instead of O(n) search."""
+    # Create multiple connections to test performance
+    connections = []
+    for i in range(10):
+        conn = Mock()
+        conn._remote_addr = (f"127.0.0.{i + 1}", 12345 + i)
+        connections.append(conn)
+        cid = f"cid_{i}".encode()
+        await registry.register_connection(
+            cid, conn, (f"127.0.0.{i + 1}", 12345 + i), sequence=0
+        )
+
+    # Test that address lookup is fast (O(1) via reverse mapping)
+    # This test verifies the mechanism works, not actual performance
+    target_addr = ("127.0.0.5", 12349)
+    found_connection, found_cid = await registry.find_by_address(target_addr)
+    assert found_connection is connections[4]
+    assert found_cid == b"cid_4"
+
+
+@pytest.mark.trio
+async def test_concurrent_operations_with_sequences(registry):
+    """Test high concurrency with sequence tracking."""
+    import trio
+
+    async def register_connection_with_sequences(i: int):
+        """Register a connection and add multiple CIDs with sequences."""
+        conn = Mock()
+        conn._remote_addr = (f"127.0.0.{i}", 12345 + i)
+        cid_base = f"cid_base_{i}".encode()
+        addr = (f"127.0.0.{i}", 12345 + i)
+
+        # Register with sequence 0
+        await registry.register_connection(cid_base, conn, addr, sequence=0)
+
+        # Add multiple CIDs with increasing sequences
+        for seq in range(1, 5):
+            cid = f"cid_{i}_{seq}".encode()
+            await registry.add_connection_id(cid, cid_base, sequence=seq)
+
+        # Verify sequences
+        for seq in range(5):
+            if seq == 0:
+                cid = cid_base
+            else:
+                cid = f"cid_{i}_{seq}".encode()
+            found_seq = await registry.get_sequence_for_cid(cid)
+            assert found_seq == seq
+
+    # Run 20 concurrent registrations
+    async with trio.open_nursery() as nursery:
+        for i in range(20):
+            nursery.start_soon(register_connection_with_sequences, i)
+
+    # Verify all connections are registered
+    # Note: established_connections counts CIDs, not unique connections
+    # Each connection has 5 CIDs (1 base + 4 additional), so 20 connections = 100 CIDs
+    stats = registry.get_stats()
+    assert stats["established_connections"] == 100  # 20 connections * 5 CIDs each
+    assert stats["tracked_sequences"] >= 20 * 5  # At least 5 sequences per connection

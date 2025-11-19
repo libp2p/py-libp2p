@@ -97,6 +97,10 @@ class QUICListener(IListener):
         self._connection_lock = trio.Lock()
         self._registry = ConnectionIDRegistry(self._connection_lock)
 
+        # Sequence number tracking per connection (inspired by quinn)
+        # Maps connection CID to sequence counter (starts at 0 for initial CID)
+        self._connection_sequence_counters: dict[bytes, int] = {}
+
         # Version negotiation support
         self._supported_versions = self._get_supported_versions()
 
@@ -269,15 +273,19 @@ class QUICListener(IListener):
 
             dest_cid = packet_info.destination_cid
 
-            # Look up connection by Connection ID
+            # Determine if this is an initial packet (inspired by quinn)
+            is_initial = packet_info.packet_type == QuicPacketType.INITIAL
+
+            # Look up connection by Connection ID (check initial CIDs for
+            # initial packets)
             (
                 connection_obj,
                 pending_quic_conn,
                 is_pending,
-            ) = await self._registry.find_by_cid(dest_cid)
+            ) = await self._registry.find_by_cid(dest_cid, is_initial=is_initial)
 
             if not connection_obj and not pending_quic_conn:
-                if packet_info.packet_type == QuicPacketType.INITIAL:
+                if is_initial:
                     pending_quic_conn = await self._handle_new_connection(
                         data, addr, packet_info
                     )
@@ -525,7 +533,19 @@ class QUICListener(IListener):
             )
 
             # Store connection mapping using our generated CID
-            await self._registry.register_pending(destination_cid, quic_conn, addr)
+            # Initial CID has sequence number 0
+            sequence = 0
+            self._connection_sequence_counters[destination_cid] = sequence
+            await self._registry.register_pending(
+                destination_cid, quic_conn, addr, sequence
+            )
+
+            # Also register the initial destination CID (from client) in _initial_cids
+            # This allows proper routing of initial packets (inspired by quinn)
+            initial_dcid = packet_info.destination_cid
+            await self._registry.register_initial_cid(
+                initial_dcid, quic_conn, addr, sequence
+            )
 
             # Process initial packet
             quic_conn.receive_datagram(data, addr, now=time.time())
@@ -737,8 +757,16 @@ class QUICListener(IListener):
 
                 elif isinstance(event, events.ConnectionIdIssued):
                     new_cid = event.connection_id
+                    # Track sequence number for this connection
+                    # Increment sequence counter for this connection
+                    if dest_cid not in self._connection_sequence_counters:
+                        self._connection_sequence_counters[dest_cid] = 0
+                    sequence = self._connection_sequence_counters[dest_cid] + 1
+                    self._connection_sequence_counters[dest_cid] = sequence
+                    # Also track for the new CID
+                    self._connection_sequence_counters[new_cid] = sequence
                     # Add new Connection ID to the same address mapping and connection
-                    await self._registry.add_connection_id(new_cid, dest_cid)
+                    await self._registry.add_connection_id(new_cid, dest_cid, sequence)
 
                 elif isinstance(event, events.ConnectionIdRetired):
                     retired_cid = event.connection_id
@@ -791,7 +819,11 @@ class QUICListener(IListener):
                     await self._registry.promote_pending(dest_cid, connection)
                 else:
                     # New connection - register directly as established
-                    await self._registry.register_connection(dest_cid, connection, addr)
+                    # Get sequence number (should be 0 for initial CID)
+                    sequence = self._connection_sequence_counters.get(dest_cid, 0)
+                    await self._registry.register_connection(
+                        dest_cid, connection, addr, sequence
+                    )
 
             if self._nursery:
                 connection._nursery = self._nursery
