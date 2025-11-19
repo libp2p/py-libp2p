@@ -24,10 +24,12 @@ from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    FLAG_ACK,
     FLAG_FIN,
     FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
+    TYPE_DATA,
     TYPE_PING,
     TYPE_WINDOW_UPDATE,
     YAMUX_HEADER_FORMAT,
@@ -624,3 +626,150 @@ async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
         "accept_stream() should have raised MuxedConnUnavailable"
     )
     logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_data(yamux_pair):
+    """Test that data sent with SYN frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_syn_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with accompanying data
+    test_data = b"data with SYN frame"
+    stream_id = 1  # Client stream ID (odd number)
+
+    # Create SYN header with data length
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send SYN with data directly
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of data")
+
+    # Server should accept the stream and have data already buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify the data was buffered and is immediately available
+    received = await server_stream.read(len(test_data))
+    assert received == test_data, "Data sent with SYN should be immediately available"
+    logging.debug("test_yamux_syn_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_ack_with_data(yamux_pair):
+    """Test that data sent with ACK frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_ack_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Client opens a stream (sends SYN)
+    client_stream = await client_yamux.open_stream()
+    stream_id = client_stream.stream_id
+
+    # Wait for server to receive SYN and respond with ACK
+    await trio.sleep(0.1)
+
+    # Now manually send data with an ACK flag from server to client
+    test_data = b"data with ACK frame"
+    ack_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_ACK,  # flags (ACK flag set)
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send ACK with data from server to client
+    await server_yamux.secured_conn.write(ack_header + test_data)
+    logging.debug(f"Sent ACK with {len(test_data)} bytes of data")
+
+    # Wait for the data to be processed
+    await trio.sleep(0.1)
+
+    # Verify the data was buffered on the client side
+    # Since the stream is already open, the data should be in the buffer
+    async with client_yamux.streams_lock:
+        assert stream_id in client_yamux.stream_buffers
+        assert len(client_yamux.stream_buffers[stream_id]) >= len(test_data)
+        buffered_data = bytes(client_yamux.stream_buffers[stream_id][: len(test_data)])
+        # Remove the data we just checked
+        client_yamux.stream_buffers[stream_id] = client_yamux.stream_buffers[stream_id][
+            len(test_data) :
+        ]
+
+    assert buffered_data == test_data, "Data sent with ACK should be buffered"
+    logging.debug("test_yamux_ack_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_empty_data(yamux_pair):
+    """Test that SYN frame with zero-length data is handled correctly."""
+    logging.debug("Starting test_yamux_syn_with_empty_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with no data (length = 0)
+    stream_id = 3  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        0,  # length = 0, no accompanying data
+    )
+
+    # Send SYN with no data
+    await client_yamux.secured_conn.write(syn_header)
+    logging.debug("Sent SYN with no data")
+
+    # Server should accept the stream
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify no data is in the buffer
+    async with server_yamux.streams_lock:
+        assert len(server_yamux.stream_buffers[stream_id]) == 0
+
+    logging.debug("test_yamux_syn_with_empty_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_large_data(yamux_pair):
+    """Test that large data sent with SYN frame is properly handled."""
+    logging.debug("Starting test_yamux_syn_with_large_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Create large test data (but within window size)
+    test_data = b"X" * 1024  # 1KB of data
+    stream_id = 5  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),
+    )
+
+    # Send SYN with large data
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of large data")
+
+    # Server should accept the stream and have all data buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify all data was buffered correctly
+    received = await server_stream.read(len(test_data))
+    assert received == test_data
+    assert len(received) == 1024
+    logging.debug("test_yamux_syn_with_large_data complete")
