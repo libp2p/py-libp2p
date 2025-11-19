@@ -1,18 +1,20 @@
 """Tests for the Circuit Relay v2 protocol."""
 
 import logging
+import os
 import time
 from typing import Any
 
 import pytest
 import trio
 
-from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamError,
     StreamReset,
 )
+from libp2p.peer import peerstore
 from libp2p.peer.envelope import (
     Envelope,
     unmarshal_envelope,
@@ -24,6 +26,7 @@ from libp2p.peer.peerstore import (
     env_to_send_in_RPC,
 )
 from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
+from libp2p.relay.circuit_v2.pb.circuit_pb2 import Reservation as PbReservation
 from libp2p.relay.circuit_v2.protocol import (
     DEFAULT_RELAY_LIMITS,
     PROTOCOL_ID,
@@ -32,6 +35,7 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
+    RelayResourceManager,
 )
 from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
@@ -54,6 +58,58 @@ CONNECT_TIMEOUT = 15  # seconds (increased)
 STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
 SLEEP_TIME = 1.0  # seconds (increased)
+
+
+@pytest.fixture
+def key_pair():
+    return create_new_key_pair()
+
+
+@pytest.fixture
+def peer_store():
+    return peerstore.PeerStore()
+
+
+@pytest.fixture
+def peer_id(key_pair, peer_store):
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store.add_key_pair(peer_id, key_pair)
+    return peer_id
+
+
+@pytest.fixture
+def limits():
+    return RelayLimits(
+        duration=3600, data=1_000_000, max_circuit_conns=10, max_reservations=100
+    )
+
+
+@pytest.fixture
+def manager(limits, peer_store):
+    return RelayResourceManager(limits, peer_store)
+
+
+@pytest.fixture
+def reservation(manager, peer_id):
+    return manager.create_reservation(peer_id)
+
+
+def test_circuit_v2_verify_reservation(manager, peer_id, reservation, key_pair):
+    # Valid protobuf reservation
+    proto_res = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=reservation.voucher,
+        signature=key_pair.private_key.sign(reservation.voucher),
+    )
+    assert manager.verify_reservation(peer_id, proto_res) is True
+
+    # Invalid protobuf reservation
+    invalid_proto = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=os.urandom(32),
+        signature=key_pair.private_key.sign(os.urandom(32)),
+    )
+    assert manager.verify_reservation(peer_id, invalid_proto) is False
 
 
 async def assert_stream_response(
