@@ -40,6 +40,7 @@ from libp2p.peer.peerstore import (
     PeerStoreError,
 )
 from libp2p.rcmgr.manager import ResourceManager
+from libp2p.security.pnet.protector import new_protected_conn
 from libp2p.tools.async_service import (
     Service,
 )
@@ -104,11 +105,13 @@ class Swarm(Service, INetworkService):
         transport: ITransport,
         retry_config: RetryConfig | None = None,
         connection_config: ConnectionConfig | QUICTransportConfig | None = None,
+        psk: str | None = None,
     ):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.transport = transport
+        self.psk = psk
 
         # Enhanced: Initialize retry and connection configuration
         self.retry_config = retry_config or RetryConfig()
@@ -363,6 +366,10 @@ class Swarm(Service, INetworkService):
 
             addr = Multiaddr(f"{addr}/p2p/{peer_id}")
             raw_conn = await self.transport.dial(addr)
+
+            # Enable PNET if psk is provvided
+            if self.psk is not None:
+                raw_conn = new_protected_conn(raw_conn, self.psk)
         except OpenConnectionError as error:
             logger.debug("fail to dial peer %s over base transport", peer_id)
             # Release pre-upgrade scope on failure
@@ -686,6 +693,10 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
+        # Enable PNET is psk is provided
+        if self.psk is not None:
+            raw_conn = new_protected_conn(raw_conn, self.psk)
+
         # secure the conn and then mux the conn
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
