@@ -79,7 +79,8 @@ from multiaddr import Multiaddr
 
 
 logger = logging.getLogger("libp2p.network.basic_host")
-DEFAULT_NEGOTIATE_TIMEOUT = 10  # Increased from 5 to handle high-concurrency scenarios
+DEFAULT_NEGOTIATE_TIMEOUT = 15  # Increased to 15s for high-concurrency scenarios
+# Under load with 5 concurrent negotiations, some may take longer due to contention
 
 
 class BasicHost(IHost):
@@ -124,6 +125,15 @@ class BasicHost(IHost):
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
+
+        # Coordinate negotiate_timeout with transport config if available
+        # For QUIC transports, use the config value to ensure consistency
+        if negotiate_timeout == DEFAULT_NEGOTIATE_TIMEOUT:
+            # Try to detect timeout from QUIC transport config
+            detected_timeout = self._detect_negotiate_timeout_from_transport()
+            if detected_timeout is not None:
+                negotiate_timeout = int(detected_timeout)
+
         self.negotiate_timeout = negotiate_timeout
 
         # Set up resource manager if provided
@@ -188,6 +198,39 @@ class BasicHost(IHost):
         :return: peerstore of the host (same one as in its network instance)
         """
         return self.peerstore
+
+    def _detect_negotiate_timeout_from_transport(self) -> float | None:
+        """
+        Detect negotiate timeout from transport configuration.
+
+        Checks if the network uses a QUIC transport and returns its
+        NEGOTIATE_TIMEOUT config value for coordination.
+
+        :return: Negotiate timeout from transport config, or None if not available
+        """
+        try:
+            # Check if network has a transport attribute (Swarm pattern)
+            # Type ignore: transport exists on Swarm but not in INetworkService
+            if hasattr(self._network, "transport"):
+                transport = getattr(self._network, "transport", None)  # type: ignore
+                # Check if it's a QUIC transport
+                if (
+                    transport is not None
+                    and hasattr(transport, "_config")
+                    and hasattr(transport._config, "NEGOTIATE_TIMEOUT")
+                ):
+                    timeout = getattr(transport._config, "NEGOTIATE_TIMEOUT", None)  # type: ignore
+                    if timeout is not None:
+                        logger.debug(
+                            f"Detected negotiate timeout {timeout}s "
+                            "from QUIC transport config"
+                        )
+                        return float(timeout)
+        except Exception as e:
+            # Silently fail - this is optional coordination
+            logger.debug(f"Could not detect negotiate timeout from transport: {e}")
+
+        return None
 
     def get_mux(self) -> Multiselect:
         """
@@ -309,7 +352,69 @@ class BasicHost(IHost):
                     self.negotiate_timeout,
                 )
         except MultiselectClientError as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
+            # Enhanced error logging for debugging
+            error_msg = str(error)
+            connection_type = "unknown"
+            is_established = False
+            handshake_completed = False
+            registry_stats = None
+
+            # Get connection state if available
+            muxed_conn = getattr(net_stream, "muxed_conn", None)
+            if muxed_conn is not None:
+                connection_type = type(muxed_conn).__name__
+                if hasattr(muxed_conn, "is_established"):
+                    is_established = (
+                        muxed_conn.is_established
+                        if not callable(muxed_conn.is_established)
+                        else muxed_conn.is_established()
+                    )
+                if hasattr(muxed_conn, "_handshake_completed"):
+                    handshake_completed = muxed_conn._handshake_completed
+
+                # Get registry stats if QUIC connection
+                # Try to get stats from server listener (for server-side connections)
+                # or from client transport's listeners (if available)
+                if connection_type == "QUICConnection" and hasattr(
+                    muxed_conn, "_transport"
+                ):
+                    transport = getattr(muxed_conn, "_transport", None)
+                    if transport:
+                        # Try to get listener from transport
+                        listeners = getattr(transport, "_listeners", [])
+                        if listeners and len(listeners) > 0:
+                            listener = listeners[0]
+                            if listener and hasattr(listener, "_registry"):
+                                registry = getattr(listener, "_registry", None)
+                                if registry:
+                                    try:
+                                        registry_stats = registry.get_lock_stats()
+                                    except Exception:
+                                        registry_stats = None
+                        # Also try to get stats from connection's listener
+                        # if it's an inbound connection
+                        if registry_stats is None and hasattr(muxed_conn, "_listener"):
+                            listener = getattr(muxed_conn, "_listener", None)
+                            if listener and hasattr(listener, "_registry"):
+                                registry = getattr(listener, "_registry", None)
+                                if registry:
+                                    try:
+                                        registry_stats = registry.get_lock_stats()
+                                    except Exception:
+                                        registry_stats = None
+
+            # Log detailed error information
+            logger.error(
+                f"Failed to open stream to peer {peer_id}:\n"
+                f"  Error: {error_msg}\n"
+                f"  Protocols: {list(protocol_ids)}\n"
+                f"  Timeout: {self.negotiate_timeout}s\n"
+                f"  Connection: {connection_type}\n"
+                f"  Connection State: established={is_established}, "
+                f"handshake={handshake_completed}\n"
+                f"  Registry Stats: {registry_stats}"
+            )
+
             await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
 
@@ -372,10 +477,38 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
+        # For QUIC connections, use connection-level semaphore to limit
+        # concurrent negotiations and prevent server-side overload
+        # This matches the client-side protection for symmetric behavior
+        muxed_conn = getattr(net_stream, "muxed_conn", None)
+        negotiation_semaphore = None
+        if muxed_conn is not None:
+            negotiation_semaphore = getattr(muxed_conn, "_negotiation_semaphore", None)
+
         try:
-            protocol, handler = await self.multiselect.negotiate(
-                MultiselectCommunicator(net_stream), self.negotiate_timeout
-            )
+            if negotiation_semaphore is not None:
+                # Use connection-level server semaphore to throttle
+                # server-side negotiations. This prevents server overload
+                # when many streams arrive simultaneously.
+                # Use separate server semaphore to avoid deadlocks
+                # with client negotiations.
+                muxed_conn = getattr(net_stream, "muxed_conn", None)
+                server_semaphore = None
+                if muxed_conn is not None:
+                    server_semaphore = getattr(
+                        muxed_conn, "_server_negotiation_semaphore", None
+                    )
+                # Fallback to shared semaphore if server semaphore not available
+                semaphore_to_use = server_semaphore or negotiation_semaphore
+                async with semaphore_to_use:
+                    protocol, handler = await self.multiselect.negotiate(
+                        MultiselectCommunicator(net_stream), self.negotiate_timeout
+                    )
+            else:
+                # For non-QUIC connections, negotiate directly (no semaphore needed)
+                protocol, handler = await self.multiselect.negotiate(
+                    MultiselectCommunicator(net_stream), self.negotiate_timeout
+                )
             if protocol is None:
                 await net_stream.reset()
                 raise StreamFailure(

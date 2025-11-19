@@ -112,6 +112,26 @@ class QUICTransportConfig(ConnectionConfig):
     STREAM_CLOSE_TIMEOUT: float = 10.0
     """Timeout for graceful stream close (seconds)."""
 
+    # Negotiation coordination
+    NEGOTIATION_SEMAPHORE_LIMIT: int = 5
+    """Maximum concurrent multiselect negotiations per direction (client/server).
+
+    This limits the number of simultaneous protocol negotiations that can occur
+    on a QUIC connection to prevent resource exhaustion and contention. Separate
+    semaphores are used for client (outbound) and server (inbound) directions
+    to prevent deadlocks. This value should be coordinated with BasicHost's
+    negotiate_timeout for optimal performance.
+    """
+
+    NEGOTIATE_TIMEOUT: float = 15.0
+    """Timeout for multiselect protocol negotiation (seconds).
+
+    This is the maximum time allowed for a single protocol negotiation to complete.
+    Should be coordinated with NEGOTIATION_SEMAPHORE_LIMIT - with higher limits,
+    negotiations may take longer due to contention. This value is used by BasicHost
+    when negotiating protocols on QUIC streams.
+    """
+
     # Flow control configuration
     STREAM_FLOW_CONTROL_WINDOW: int = 1024 * 1024  # 1MB
     """Per-stream flow control window size."""

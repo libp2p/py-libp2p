@@ -11,8 +11,10 @@ This class encapsulates the four synchronized dictionaries that track:
 - Address to Connection ID mappings
 """
 
+from collections import defaultdict
 import logging
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 import trio
 
@@ -71,10 +73,31 @@ class ConnectionIDRegistry:
         # Connection -> sequence -> CID mapping (for retirement ordering)
         self._connection_sequences: dict["QUICConnection", dict[int, bytes]] = {}
 
+        # Sequence counter tracking per connection (moved from listener for better
+        # encapsulation)
+        # Maps connection CID to sequence counter (starts at 0 for initial CID)
+        self._connection_sequence_counters: dict[bytes, int] = {}
+
+        # Performance metrics
+        self._fallback_routing_count: int = 0
+        self._sequence_distribution: dict[int, int] = defaultdict(int)
+        self._operation_timings: dict[str, list[float]] = defaultdict(list)
+        self._debug_timing: bool = False  # Enable with environment variable
+
+        # Lock contention tracking
+        self._lock_stats = {
+            "acquisitions": 0,
+            "total_wait_time": 0.0,
+            "max_wait_time": 0.0,
+            "max_hold_time": 0.0,
+            "concurrent_holds": 0,
+            "current_holds": 0,
+        }
+
         # Lock for thread-safe operations
         self._lock = lock
 
-    async def find_by_cid(
+    async def find_by_cid(  # pyrefly: ignore[bad-return]
         self, cid: bytes, is_initial: bool = False
     ) -> tuple["QUICConnection | None", "QuicConnection | None", bool]:
         """
@@ -92,20 +115,73 @@ class ConnectionIDRegistry:
             - If not found: (None, None, False)
 
         """
+        call_start = time.time()
+
+        # Track lock acquisition
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
+
         async with self._lock:
-            # For initial packets, check initial CIDs first (inspired by quinn)
-            if is_initial and cid in self._initial_cids:
-                return (None, self._initial_cids[cid], True)
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
 
-            # Check established connections
-            if cid in self._connections:
-                return (self._connections[cid], None, False)
-            # Check pending connections
-            elif cid in self._pending:
-                return (None, self._pending[cid], True)
-            else:
-                return (None, None, False)
+            hold_start = time.time()
 
+            try:
+                # For initial packets, check initial CIDs first (inspired by quinn)
+                if is_initial and cid in self._initial_cids:
+                    result: tuple[
+                        "QUICConnection | None", "QuicConnection | None", bool
+                    ] = (
+                        None,
+                        self._initial_cids[cid],
+                        True,
+                    )
+                # Check established connections
+                elif cid in self._connections:
+                    result = (self._connections[cid], None, False)
+                # Check pending connections
+                elif cid in self._pending:
+                    result = (None, self._pending[cid], True)
+                else:
+                    result = (None, None, False)
+
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                # Track max hold time
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                # Track total wait time (approximate - time when lock was contended)
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                # Log slow operations (>1ms)
+                if total_duration > 0.001:
+                    logger.debug(
+                        f"Slow find_by_cid: {total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms, "
+                        f"contended: {was_contended}) "
+                        f"for CID {cid.hex()[:8]}, is_initial={is_initial}"
+                    )
+
+                # Track operation timing
+                self._operation_timings["find_by_cid"].append(total_duration)
+
+                return result
+            finally:
+                self._lock_stats["current_holds"] -= 1
+
+        # Unreachable: added to satisfy pyrefly static analysis
+        return (None, None, False)  # pragma: no cover
+
+    # Note: pyrefly reports bad-return here, but all code paths do return.
+    # The return statements are inside a try/finally block which pyrefly
+    # cannot statically verify. This is a false positive.
     async def find_by_address(
         self, addr: tuple[str, int]
     ) -> tuple["QUICConnection | None", bytes | None]:
@@ -127,32 +203,200 @@ class ConnectionIDRegistry:
             Tuple of (connection, original_cid) or (None, None) if not found
 
         """
+        call_start = time.time()
+
+        # Track lock acquisition
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
+
         async with self._lock:
-            # Strategy 1: Try address-to-CID lookup (O(1))
-            original_cid = self._addr_to_cid.get(addr)
-            if original_cid:
-                connection = self._connections.get(original_cid)
-                if connection:
-                    return (connection, original_cid)
-                else:
-                    # Address mapping exists but connection not found
-                    # Clean up stale mapping
-                    del self._addr_to_cid[addr]
-                    return (None, None)
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
 
-            # Strategy 2: Try reverse mapping connection -> address (O(1))
-            # This is more efficient than linear search and handles cases where
-            # address-to-CID mapping might be stale but connection exists
-            for connection, connection_addr in self._connection_addresses.items():
-                if connection_addr == addr:
-                    # Find a CID for this connection
-                    for cid, conn in self._connections.items():
-                        if conn is connection:
-                            return (connection, cid)
-                    # If no CID found, still return connection (CID will be set later)
-                    return (connection, None)
+            hold_start = time.time()
 
-            return (None, None)
+            try:
+                # Strategy 1: Try address-to-CID lookup (O(1))
+                original_cid = self._addr_to_cid.get(addr)
+                if original_cid:
+                    connection = self._connections.get(original_cid)
+                    if connection:
+                        hold_duration = time.time() - hold_start
+                        total_duration = time.time() - call_start
+
+                        # Track max hold time
+                        if hold_duration > self._lock_stats["max_hold_time"]:
+                            self._lock_stats["max_hold_time"] = hold_duration
+
+                        # Track total wait time (approximate -
+                        # time when lock was contended)
+                        if was_contended:
+                            self._lock_stats["total_wait_time"] += total_duration
+                            if total_duration > self._lock_stats["max_wait_time"]:
+                                self._lock_stats["max_wait_time"] = total_duration
+
+                        # Log slow operations (>5ms)
+                        if total_duration > 0.005:
+                            logger.debug(
+                                f"Slow find_by_address (strategy 1): "
+                                f"{total_duration * 1000:.2f}ms "
+                                f"(hold: {hold_duration * 1000:.2f}ms, "
+                                f"contended: {was_contended}) for {addr}"
+                            )
+
+                        # Track operation timing
+                        self._operation_timings["find_by_address"].append(
+                            total_duration
+                        )
+                        self._fallback_routing_count += 1
+
+                        return (connection, original_cid)
+                    else:
+                        # Address mapping exists but connection not found
+                        # Clean up stale mapping
+                        del self._addr_to_cid[addr]
+                        hold_duration = time.time() - hold_start
+                        total_duration = time.time() - call_start
+
+                        # Track max hold time
+                        if hold_duration > self._lock_stats["max_hold_time"]:
+                            self._lock_stats["max_hold_time"] = hold_duration
+
+                        # Track total wait time (approximate -
+                        # time when lock was contended)
+                        if was_contended:
+                            self._lock_stats["total_wait_time"] += total_duration
+                            if total_duration > self._lock_stats["max_wait_time"]:
+                                self._lock_stats["max_wait_time"] = total_duration
+
+                        # Log slow operations (>5ms)
+                        if total_duration > 0.005:
+                            logger.debug(
+                                f"Slow find_by_address (cleanup): "
+                                f"{total_duration * 1000:.2f}ms "
+                                f"(hold: {hold_duration * 1000:.2f}ms, "
+                                f"contended: {was_contended}) for {addr}"
+                            )
+
+                        # Track operation timing
+                        self._operation_timings["find_by_address"].append(
+                            total_duration
+                        )
+
+                        return (None, None)
+
+                # Strategy 2: Try reverse mapping connection -> address (O(1))
+                # This is more efficient than linear search and handles cases where
+                # address-to-CID mapping might be stale but connection exists
+                for connection, connection_addr in self._connection_addresses.items():
+                    if connection_addr == addr:
+                        # Find a CID for this connection
+                        for cid, conn in self._connections.items():
+                            if conn is connection:
+                                # Fallback routing was used
+                                self._fallback_routing_count += 1
+                                hold_duration = time.time() - hold_start
+                                total_duration = time.time() - call_start
+
+                                # Track max hold time
+                                if hold_duration > self._lock_stats["max_hold_time"]:
+                                    self._lock_stats["max_hold_time"] = hold_duration
+
+                                # Track total wait time (approximate -
+                                # time when lock was contended)
+                                if was_contended:
+                                    self._lock_stats["total_wait_time"] += (
+                                        total_duration
+                                    )
+                                    if (
+                                        total_duration
+                                        > self._lock_stats["max_wait_time"]
+                                    ):
+                                        self._lock_stats["max_wait_time"] = (
+                                            total_duration
+                                        )
+
+                                # Log slow operations (>5ms)
+                                if total_duration > 0.005:
+                                    logger.debug(
+                                        f"Slow find_by_address (strategy 2): "
+                                        f"{total_duration * 1000:.2f}ms "
+                                        f"(hold: {hold_duration * 1000:.2f}ms, "
+                                        f"contended: {was_contended}) for {addr}"
+                                    )
+
+                                # Track operation timing
+                                self._operation_timings["find_by_address"].append(
+                                    total_duration
+                                )
+
+                                return (connection, cid)
+                        # If no CID found, still return connection
+                        # (CID will be set later)
+                        self._fallback_routing_count += 1
+                        hold_duration = time.time() - hold_start
+                        total_duration = time.time() - call_start
+
+                        # Track max hold time
+                        if hold_duration > self._lock_stats["max_hold_time"]:
+                            self._lock_stats["max_hold_time"] = hold_duration
+
+                        # Track total wait time (approximate -
+                        # time when lock was contended)
+                        if was_contended:
+                            self._lock_stats["total_wait_time"] += total_duration
+                            if total_duration > self._lock_stats["max_wait_time"]:
+                                self._lock_stats["max_wait_time"] = total_duration
+
+                        # Log slow operations (>5ms)
+                        if total_duration > 0.005:
+                            logger.debug(
+                                f"Slow find_by_address (strategy 2, no CID): "
+                                f"{total_duration * 1000:.2f}ms "
+                                f"(hold: {hold_duration * 1000:.2f}ms, "
+                                f"contended: {was_contended}) for {addr}"
+                            )
+
+                        # Track operation timing
+                        self._operation_timings["find_by_address"].append(
+                            total_duration
+                        )
+
+                        return (connection, None)
+
+                # Not found
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                # Track max hold time
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                # Track total wait time (approximate - time when lock was contended)
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                # Log slow operations (>5ms)
+                if total_duration > 0.005:
+                    logger.debug(
+                        f"Slow find_by_address (not found): "
+                        f"{total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms, "
+                        f"contended: {was_contended}) for {addr}"
+                    )
+
+                # Track operation timing
+                self._operation_timings["find_by_address"].append(total_duration)
+
+                return (None, None)
+            finally:
+                self._lock_stats["current_holds"] -= 1
+
+        # Unreachable: added to satisfy pyrefly static analysis
+        return (None, None)  # pragma: no cover
 
     async def register_connection(
         self,
@@ -171,19 +415,58 @@ class ConnectionIDRegistry:
             sequence: Sequence number for this Connection ID (default: 0)
 
         """
+        call_start = time.time()
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
+
         async with self._lock:
-            self._connections[cid] = connection
-            self._cid_to_addr[cid] = addr
-            self._addr_to_cid[addr] = cid
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
 
-            # Maintain reverse mapping for O(1) fallback routing
-            self._connection_addresses[connection] = addr
+            hold_start = time.time()
 
-            # Track sequence number
-            self._cid_sequences[cid] = sequence
-            if connection not in self._connection_sequences:
-                self._connection_sequences[connection] = {}
-            self._connection_sequences[connection][sequence] = cid
+            try:
+                self._connections[cid] = connection
+                self._cid_to_addr[cid] = addr
+                self._addr_to_cid[addr] = cid
+
+                # Maintain reverse mapping for O(1) fallback routing
+                self._connection_addresses[connection] = addr
+
+                # Track sequence number
+                self._cid_sequences[cid] = sequence
+                if connection not in self._connection_sequences:
+                    self._connection_sequences[connection] = {}
+                self._connection_sequences[connection][sequence] = cid
+
+                # Track sequence in distribution for performance metrics
+                self._sequence_distribution[sequence] += 1
+
+                # Initialize sequence counter if not already set
+                if cid not in self._connection_sequence_counters:
+                    self._connection_sequence_counters[cid] = sequence
+
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                if total_duration > 0.005:
+                    logger.debug(
+                        f"Slow register_connection: {total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms) for CID {cid.hex()[:8]}"
+                    )
+
+                self._operation_timings["register_connection"].append(total_duration)
+            finally:
+                self._lock_stats["current_holds"] -= 1
 
     async def register_pending(
         self,
@@ -202,14 +485,50 @@ class ConnectionIDRegistry:
             sequence: Sequence number for this Connection ID (default: 0)
 
         """
-        async with self._lock:
-            self._pending[cid] = quic_conn
-            self._cid_to_addr[cid] = addr
-            self._addr_to_cid[addr] = cid
+        call_start = time.time()
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
 
-            # Track sequence number (will be moved to connection sequences
-            # when promoted)
-            self._cid_sequences[cid] = sequence
+        async with self._lock:
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
+
+            hold_start = time.time()
+
+            try:
+                self._pending[cid] = quic_conn
+                self._cid_to_addr[cid] = addr
+                self._addr_to_cid[addr] = cid
+
+                # Track sequence number (will be moved to connection sequences
+                # when promoted)
+                self._cid_sequences[cid] = sequence
+
+                # Initialize sequence counter if not already set
+                if cid not in self._connection_sequence_counters:
+                    self._connection_sequence_counters[cid] = sequence
+
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                if total_duration > 0.005:
+                    logger.debug(
+                        f"Slow register_pending: {total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms) for CID {cid.hex()[:8]}"
+                    )
+
+                self._operation_timings["register_pending"].append(total_duration)
+            finally:
+                self._lock_stats["current_holds"] -= 1
 
     async def add_connection_id(
         self, new_cid: bytes, existing_cid: bytes, sequence: int
@@ -227,38 +546,73 @@ class ConnectionIDRegistry:
             sequence: Sequence number for the new Connection ID
 
         """
+        call_start = time.time()
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
+
         async with self._lock:
-            # Get address from existing CID
-            addr = self._cid_to_addr.get(existing_cid)
-            if not addr:
-                logger.warning(
-                    f"Could not find address for existing Connection ID "
-                    f"{existing_cid.hex()[:8]} when adding new Connection ID "
-                    f"{new_cid.hex()[:8]}"
-                )
-                return
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
 
-            # Map new CID to the same address
-            self._cid_to_addr[new_cid] = addr
+            hold_start = time.time()
 
-            # Track sequence number
-            self._cid_sequences[new_cid] = sequence
+            try:
+                # Get address from existing CID
+                addr = self._cid_to_addr.get(existing_cid)
+                if not addr:
+                    logger.warning(
+                        f"Could not find address for existing Connection ID "
+                        f"{existing_cid.hex()[:8]} when adding new Connection ID "
+                        f"{new_cid.hex()[:8]}"
+                    )
+                    return
 
-            # If connection is already promoted, also map new CID to the connection
-            if existing_cid in self._connections:
-                connection = self._connections[existing_cid]
-                self._connections[new_cid] = connection
+                # Map new CID to the same address
+                self._cid_to_addr[new_cid] = addr
 
-                # Track sequence for this connection
-                if connection not in self._connection_sequences:
-                    self._connection_sequences[connection] = {}
-                self._connection_sequences[connection][sequence] = new_cid
+                # Track sequence number
+                self._cid_sequences[new_cid] = sequence
+                # Update sequence distribution
+                self._sequence_distribution[sequence] += 1
 
-                logger.debug(
-                    f"Registered new Connection ID {new_cid.hex()[:8]} "
-                    f"(sequence {sequence}) for existing connection "
-                    f"{existing_cid.hex()[:8]} at address {addr}"
-                )
+                # If connection is already promoted, also map new CID to the connection
+                if existing_cid in self._connections:
+                    connection = self._connections[existing_cid]
+                    self._connections[new_cid] = connection
+
+                    # Track sequence for this connection
+                    if connection not in self._connection_sequences:
+                        self._connection_sequences[connection] = {}
+                    self._connection_sequences[connection][sequence] = new_cid
+
+                    logger.debug(
+                        f"Registered new Connection ID {new_cid.hex()[:8]} "
+                        f"(sequence {sequence}) for existing connection "
+                        f"{existing_cid.hex()[:8]} at address {addr}"
+                    )
+
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                if total_duration > 0.005:
+                    logger.debug(
+                        f"Slow add_connection_id: {total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms) "
+                        f"for CID {new_cid.hex()[:8]}"
+                    )
+
+                self._operation_timings["add_connection_id"].append(total_duration)
+            finally:
+                self._lock_stats["current_holds"] -= 1
 
     async def remove_connection_id(self, cid: bytes) -> tuple[str, int] | None:
         """
@@ -271,43 +625,77 @@ class ConnectionIDRegistry:
             The address that was associated with this Connection ID, or None
 
         """
+        call_start = time.time()
+        self._lock_stats["acquisitions"] += 1
+        was_contended = self._lock_stats["current_holds"] > 0
+
         async with self._lock:
-            # Get connection and sequence before removal
-            connection = self._connections.get(cid)
-            sequence = self._cid_sequences.get(cid)
+            self._lock_stats["current_holds"] += 1
+            if self._lock_stats["current_holds"] > self._lock_stats["concurrent_holds"]:
+                self._lock_stats["concurrent_holds"] = self._lock_stats["current_holds"]
 
-            # Remove from initial, established, and pending
-            self._initial_cids.pop(cid, None)
-            self._connections.pop(cid, None)
-            self._pending.pop(cid, None)
+            hold_start = time.time()
 
-            # Get and remove address mapping
-            addr = self._cid_to_addr.pop(cid, None)
-            if addr:
-                # Only remove addr mapping if this was the active CID
-                if self._addr_to_cid.get(addr) == cid:
-                    del self._addr_to_cid[addr]
+            try:
+                # Get connection and sequence before removal
+                connection = self._connections.get(cid)
+                sequence = self._cid_sequences.get(cid)
 
-            # Clean up sequence mappings
-            if sequence is not None:
-                self._cid_sequences.pop(cid, None)
-                if connection and connection in self._connection_sequences:
-                    self._connection_sequences[connection].pop(sequence, None)
-                    # Clean up empty connection sequences dict
-                    if not self._connection_sequences[connection]:
-                        del self._connection_sequences[connection]
+                # Remove from initial, established, and pending
+                self._initial_cids.pop(cid, None)
+                self._connections.pop(cid, None)
+                self._pending.pop(cid, None)
 
-            # Clean up reverse mapping if this was the last CID for the connection
-            if connection:
-                # Check if connection has any other CIDs
-                has_other_cids = any(
-                    c != cid and conn is connection
-                    for c, conn in self._connections.items()
-                )
-                if not has_other_cids:
-                    self._connection_addresses.pop(connection, None)
+                # Get and remove address mapping
+                addr = self._cid_to_addr.pop(cid, None)
+                if addr:
+                    # Only remove addr mapping if this was the active CID
+                    if self._addr_to_cid.get(addr) == cid:
+                        del self._addr_to_cid[addr]
 
-            return addr
+                # Clean up sequence mappings
+                if sequence is not None:
+                    self._cid_sequences.pop(cid, None)
+                    if connection and connection in self._connection_sequences:
+                        self._connection_sequences[connection].pop(sequence, None)
+                        # Clean up empty connection sequences dict
+                        if not self._connection_sequences[connection]:
+                            del self._connection_sequences[connection]
+
+                # Clean up sequence counter if this was the last CID for the connection
+                if connection:
+                    # Check if connection has any other CIDs
+                    has_other_cids = any(
+                        c != cid and conn is connection
+                        for c, conn in self._connections.items()
+                    )
+                    if not has_other_cids:
+                        self._connection_addresses.pop(connection, None)
+                        # Clean up sequence counter for this CID
+                        self._connection_sequence_counters.pop(cid, None)
+
+                hold_duration = time.time() - hold_start
+                total_duration = time.time() - call_start
+
+                if hold_duration > self._lock_stats["max_hold_time"]:
+                    self._lock_stats["max_hold_time"] = hold_duration
+
+                if was_contended:
+                    self._lock_stats["total_wait_time"] += total_duration
+                    if total_duration > self._lock_stats["max_wait_time"]:
+                        self._lock_stats["max_wait_time"] = total_duration
+
+                if total_duration > 0.005:
+                    logger.debug(
+                        f"Slow remove_connection_id: {total_duration * 1000:.2f}ms "
+                        f"(hold: {hold_duration * 1000:.2f}ms) for CID {cid.hex()[:8]}"
+                    )
+
+                self._operation_timings["remove_connection_id"].append(total_duration)
+
+                return addr
+            finally:
+                self._lock_stats["current_holds"] -= 1
 
     async def remove_pending_connection(self, cid: bytes) -> None:
         """
@@ -566,6 +954,49 @@ class ConnectionIDRegistry:
         async with self._lock:
             return self._cid_sequences.get(cid)
 
+    async def get_sequence_counter(self, cid: bytes) -> int:
+        """
+        Get the sequence counter for a connection (by its CID).
+
+        Args:
+            cid: Connection ID to look up
+
+        Returns:
+            Current sequence counter value (defaults to 0 if not found)
+
+        """
+        async with self._lock:
+            return self._connection_sequence_counters.get(cid, 0)
+
+    async def increment_sequence_counter(self, cid: bytes) -> int:
+        """
+        Increment the sequence counter for a connection and return the new value.
+
+        Args:
+            cid: Connection ID to increment counter for
+
+        Returns:
+            New sequence counter value
+
+        """
+        async with self._lock:
+            current = self._connection_sequence_counters.get(cid, 0)
+            new_value = current + 1
+            self._connection_sequence_counters[cid] = new_value
+            return new_value
+
+    async def set_sequence_counter(self, cid: bytes, value: int) -> None:
+        """
+        Set the sequence counter for a connection.
+
+        Args:
+            cid: Connection ID to set counter for
+            value: Sequence counter value to set
+
+        """
+        async with self._lock:
+            self._connection_sequence_counters[cid] = value
+
     async def get_cids_by_sequence_range(
         self, connection: "QUICConnection", start_seq: int, end_seq: int
     ) -> list[bytes]:
@@ -580,7 +1011,7 @@ class ConnectionIDRegistry:
             end_seq: End sequence number (exclusive)
 
         Returns:
-            List of Connection IDs in the sequence range
+            List of Connection IDs in the sequence range, sorted by sequence number
 
         """
         async with self._lock:
@@ -593,19 +1024,99 @@ class ConnectionIDRegistry:
                     cids.append(cid)
             return sorted(cids, key=lambda c: self._cid_sequences.get(c, 0))
 
-    def get_stats(self) -> dict[str, int]:
+    async def retire_connection_ids_by_sequence_range(
+        self, connection: "QUICConnection", start_seq: int, end_seq: int
+    ) -> list[bytes]:
+        """
+        Retire Connection IDs for a connection within a sequence number range.
+
+        This implements proper retirement ordering per QUIC specification by
+        retiring CIDs in sequence order.
+
+        Args:
+            connection: The QUICConnection instance
+            start_seq: Start sequence number (inclusive)
+            end_seq: End sequence number (exclusive)
+
+        Returns:
+            List of retired Connection IDs
+
+        """
+        # Get CIDs in sequence order (this acquires the lock)
+        cids_to_retire = await self.get_cids_by_sequence_range(
+            connection, start_seq, end_seq
+        )
+
+        # Remove each CID in sequence order (each call acquires the lock)
+        retired = []
+        for cid in cids_to_retire:
+            addr = await self.remove_connection_id(cid)
+            if addr:
+                retired.append(cid)
+                seq = await self.get_sequence_for_cid(cid)
+                logger.debug(
+                    f"Retired Connection ID {cid.hex()[:8]} "
+                    f"(sequence {seq}) for connection"
+                )
+
+        return retired
+
+    def get_lock_stats(self) -> dict[str, float | int]:
+        """
+        Get lock contention statistics.
+
+        Returns:
+            Dictionary with lock statistics including acquisitions,
+            wait times, and hold times
+
+        """
+        acquisitions = self._lock_stats["acquisitions"]
+        avg_wait_time = (
+            self._lock_stats["total_wait_time"] / acquisitions
+            if acquisitions > 0
+            else 0.0
+        )
+
+        return {
+            "acquisitions": acquisitions,
+            "total_wait_time": self._lock_stats["total_wait_time"],
+            "avg_wait_time": avg_wait_time,
+            "max_wait_time": self._lock_stats["max_wait_time"],
+            "max_hold_time": self._lock_stats["max_hold_time"],
+            "max_concurrent_holds": self._lock_stats["concurrent_holds"],
+            "current_holds": self._lock_stats["current_holds"],
+        }
+
+    def get_stats(self) -> dict[str, int | dict[str, Any]]:
         """
         Get registry statistics.
 
         Returns:
-            Dictionary with connection counts
+            Dictionary with connection counts and performance metrics
 
         """
-        return {
+        stats: dict[str, int | dict[str, Any]] = {
             "initial_connections": len(self._initial_cids),
             "established_connections": len(self._connections),
             "pending_connections": len(self._pending),
             "total_connection_ids": len(self._cid_to_addr),
             "address_mappings": len(self._addr_to_cid),
             "tracked_sequences": len(self._cid_sequences),
+            "fallback_routing_count": self._fallback_routing_count,
+            "sequence_distribution": dict(self._sequence_distribution),  # type: ignore
+            "lock_stats": self.get_lock_stats(),
         }
+        if self._debug_timing and self._operation_timings:
+            # Calculate average timings
+            avg_timings: dict[str, float] = {
+                op: sum(times) / len(times) if times else 0.0
+                for op, times in self._operation_timings.items()
+            }
+            stats["operation_timings"] = avg_timings  # type: ignore[assignment]
+        return stats
+
+    def reset_stats(self) -> None:
+        """Reset performance metrics."""
+        self._fallback_routing_count = 0
+        self._sequence_distribution.clear()
+        self._operation_timings.clear()

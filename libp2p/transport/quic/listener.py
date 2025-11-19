@@ -97,9 +97,7 @@ class QUICListener(IListener):
         self._connection_lock = trio.Lock()
         self._registry = ConnectionIDRegistry(self._connection_lock)
 
-        # Sequence number tracking per connection (inspired by quinn)
-        # Maps connection CID to sequence counter (starts at 0 for initial CID)
-        self._connection_sequence_counters: dict[bytes, int] = {}
+        # Sequence counters are now managed by the registry for better encapsulation
 
         # Version negotiation support
         self._supported_versions = self._get_supported_versions()
@@ -117,6 +115,7 @@ class QUICListener(IListener):
             "bytes_received": 0,
             "packets_processed": 0,
             "invalid_packets": 0,
+            "fallback_routing_used": 0,
         }
 
     def _get_supported_versions(self) -> set[int]:
@@ -266,6 +265,25 @@ class QUICListener(IListener):
             self._stats["packets_processed"] += 1
             self._stats["bytes_received"] += len(data)
 
+            # Periodic stats logging every 1000 packets
+            if self._stats["packets_processed"] % 1000 == 0:
+                registry_stats = self._registry.get_stats()
+                lock_stats_raw = registry_stats.get("lock_stats", {})
+                # Type check: lock_stats should be a dict
+                lock_stats = lock_stats_raw if isinstance(lock_stats_raw, dict) else {}
+                logger.debug(
+                    f"Registry stats after {self._stats['packets_processed']} packets: "
+                    f"lock_acquisitions={lock_stats.get('acquisitions', 0)}, "
+                    f"max_wait_time="
+                    f"{lock_stats.get('max_wait_time', 0) * 1000:.2f}ms, "
+                    f"max_hold_time="
+                    f"{lock_stats.get('max_hold_time', 0) * 1000:.2f}ms, "
+                    f"max_concurrent_holds="
+                    f"{lock_stats.get('max_concurrent_holds', 0)}, "
+                    f"fallback_routing="
+                    f"{registry_stats.get('fallback_routing_count', 0)}"
+                )
+
             packet_info = self.parse_quic_packet(data)
             if packet_info is None:
                 self._stats["invalid_packets"] += 1
@@ -278,11 +296,19 @@ class QUICListener(IListener):
 
             # Look up connection by Connection ID (check initial CIDs for
             # initial packets)
+            find_cid_start = time.time()
             (
                 connection_obj,
                 pending_quic_conn,
                 is_pending,
             ) = await self._registry.find_by_cid(dest_cid, is_initial=is_initial)
+            find_cid_duration = time.time() - find_cid_start
+            if find_cid_duration > 0.001:  # Log slow find_by_cid (>1ms)
+                logger.debug(
+                    f"Slow find_by_cid in _process_packet: "
+                    f"{find_cid_duration * 1000:.2f}ms "
+                    f"for CID {dest_cid.hex()[:8]}, is_initial={is_initial}"
+                )
 
             if not connection_obj and not pending_quic_conn:
                 if is_initial:
@@ -294,11 +320,21 @@ class QUICListener(IListener):
                     # This handles the race condition where packets with new
                     # Connection IDs arrive before ConnectionIdIssued events
                     # are processed
+                    fallback_start = time.time()
                     connection_obj, original_cid = await self._registry.find_by_address(
                         addr
                     )
+                    fallback_duration = time.time() - fallback_start
+                    if fallback_duration > 0.01:  # Log slow fallback routing (>10ms)
+                        logger.debug(
+                            f"Slow fallback routing: {fallback_duration * 1000:.2f}ms "
+                            f"for CID {dest_cid.hex()[:8]} at {addr}"
+                        )
+
                     if connection_obj:
                         # Found connection by address - register new Connection ID
+                        # Track fallback routing usage
+                        self._stats["fallback_routing_used"] += 1
                         await self._registry.register_new_cid_for_existing_connection(
                             dest_cid, connection_obj, addr
                         )
@@ -535,7 +571,7 @@ class QUICListener(IListener):
             # Store connection mapping using our generated CID
             # Initial CID has sequence number 0
             sequence = 0
-            self._connection_sequence_counters[destination_cid] = sequence
+            await self._registry.set_sequence_counter(destination_cid, sequence)
             await self._registry.register_pending(
                 destination_cid, quic_conn, addr, sequence
             )
@@ -676,14 +712,26 @@ class QUICListener(IListener):
         try:
             # Check if connection is already promoted - if so, don't process events here
             # as the connection's event loop will handle them
+            find_cid_start = time.time()
             connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
+            find_cid_duration = time.time() - find_cid_start
+            if find_cid_duration > 0.001:  # Log slow find_by_cid (>1ms)
+                logger.debug(
+                    f"Slow find_by_cid in _process_quic_events: "
+                    f"{find_cid_duration * 1000:.2f}ms for CID {dest_cid.hex()[:8]}"
+                )
             if connection_obj:
                 return
 
+            batch_start = time.time()
+            event_count = 0
             while True:
                 event = quic_conn.next_event()
                 if event is None:
                     break
+
+                event_start = time.time()
+                event_count += 1
 
                 if isinstance(event, events.ConnectionTerminated):
                     logger.warning(
@@ -758,19 +806,53 @@ class QUICListener(IListener):
                 elif isinstance(event, events.ConnectionIdIssued):
                     new_cid = event.connection_id
                     # Track sequence number for this connection
-                    # Increment sequence counter for this connection
-                    if dest_cid not in self._connection_sequence_counters:
-                        self._connection_sequence_counters[dest_cid] = 0
-                    sequence = self._connection_sequence_counters[dest_cid] + 1
-                    self._connection_sequence_counters[dest_cid] = sequence
+                    # Increment sequence counter for this connection using registry
+                    sequence = await self._registry.increment_sequence_counter(dest_cid)
                     # Also track for the new CID
-                    self._connection_sequence_counters[new_cid] = sequence
+                    await self._registry.set_sequence_counter(new_cid, sequence)
                     # Add new Connection ID to the same address mapping and connection
                     await self._registry.add_connection_id(new_cid, dest_cid, sequence)
 
                 elif isinstance(event, events.ConnectionIdRetired):
                     retired_cid = event.connection_id
-                    await self._registry.remove_connection_id(retired_cid)
+                    # Find the connection for this CID
+                    connection_obj, _, _ = await self._registry.find_by_cid(retired_cid)
+                    if connection_obj:
+                        # Get sequence number of retired CID
+                        retired_seq = await self._registry.get_sequence_for_cid(
+                            retired_cid
+                        )
+                        if retired_seq is not None:
+                            # Retire CIDs in sequence order up to
+                            # (but not including) this one
+                            # This ensures proper retirement ordering per QUIC spec
+                            # We retire all CIDs with sequence < retired_seq
+                            await (
+                                self._registry.retire_connection_ids_by_sequence_range(
+                                    connection_obj, 0, retired_seq
+                                )
+                            )
+                        # Remove the specific retired CID
+                        await self._registry.remove_connection_id(retired_cid)
+                    else:
+                        # Connection not found, just remove the CID
+                        await self._registry.remove_connection_id(retired_cid)
+
+                # Log slow event processing
+                event_duration = time.time() - event_start
+                if event_duration > 0.01:  # Log slow events (>10ms)
+                    logger.debug(
+                        f"Slow event processing: {type(event).__name__} took "
+                        f"{event_duration * 1000:.2f}ms for CID {dest_cid.hex()[:8]}"
+                    )
+
+            # Log batch processing time
+            batch_duration = time.time() - batch_start
+            if batch_duration > 0.01 and event_count > 0:  # Log slow batches
+                logger.debug(
+                    f"Processed {event_count} events in {batch_duration * 1000:.2f}ms "
+                    f"for CID {dest_cid.hex()[:8]}"
+                )
 
         except Exception as e:
             logger.debug(f"Error processing events: {e}")
@@ -779,6 +861,7 @@ class QUICListener(IListener):
         self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
     ) -> None:
         """Promote pending connection - avoid duplicate creation."""
+        promotion_start = time.time()
         try:
             # Check if connection already exists
             (
@@ -819,8 +902,8 @@ class QUICListener(IListener):
                     await self._registry.promote_pending(dest_cid, connection)
                 else:
                     # New connection - register directly as established
-                    # Get sequence number (should be 0 for initial CID)
-                    sequence = self._connection_sequence_counters.get(dest_cid, 0)
+                    # Get sequence number from registry (should be 0 for initial CID)
+                    sequence = await self._registry.get_sequence_counter(dest_cid)
                     await self._registry.register_connection(
                         dest_cid, connection, addr, sequence
                     )
@@ -858,6 +941,14 @@ class QUICListener(IListener):
 
             self._stats["connections_accepted"] += 1
             logger.info(f"Enhanced connection {dest_cid.hex()} established from {addr}")
+
+            # Log promotion duration
+            promotion_duration = time.time() - promotion_start
+            if promotion_duration > 0.01:  # Log slow promotions (>10ms)
+                logger.debug(
+                    f"Slow connection promotion: {promotion_duration * 1000:.2f}ms "
+                    f"for CID {dest_cid.hex()[:8]}"
+                )
 
         except Exception as e:
             logger.error(f"Error promoting connection {dest_cid.hex()}: {e}")
@@ -1134,9 +1225,32 @@ class QUICListener(IListener):
             dict: Statistics dictionary with current state information
 
         """
-        stats = self._stats.copy()
+        stats: dict[str, int | bool] = dict(self._stats)
         stats["is_listening"] = self.is_listening()
         registry_stats = self._registry.get_stats()
-        stats["active_connections"] = registry_stats["established_connections"]
-        stats["pending_connections"] = registry_stats["pending_connections"]
+        # Extract integer values from registry stats (handle type checking)
+        established = registry_stats.get("established_connections", 0)
+        pending = registry_stats.get("pending_connections", 0)
+        if isinstance(established, int):
+            stats["active_connections"] = established
+        if isinstance(pending, int):
+            stats["pending_connections"] = pending
+        # Include registry performance metrics
+        fallback_count = registry_stats.get("fallback_routing_count", 0)
+        if isinstance(fallback_count, int):
+            stats["registry_fallback_routing"] = fallback_count
+        # Include lock stats
+        lock_stats_raw = registry_stats.get("lock_stats", {})
+        if isinstance(lock_stats_raw, dict):
+            lock_stats = lock_stats_raw
+            stats["registry_lock_acquisitions"] = lock_stats.get("acquisitions", 0)
+            stats["registry_max_wait_time_ms"] = int(
+                lock_stats.get("max_wait_time", 0.0) * 1000
+            )
+            stats["registry_max_hold_time_ms"] = int(
+                lock_stats.get("max_hold_time", 0.0) * 1000
+            )
+            stats["registry_max_concurrent_holds"] = lock_stats.get(
+                "max_concurrent_holds", 0
+            )
         return stats

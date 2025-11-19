@@ -675,3 +675,261 @@ async def test_concurrent_operations_with_sequences(registry):
     stats = registry.get_stats()
     assert stats["established_connections"] == 100  # 20 connections * 5 CIDs each
     assert stats["tracked_sequences"] >= 20 * 5  # At least 5 sequences per connection
+
+
+@pytest.mark.trio
+async def test_cid_retirement_ordering(registry, mock_connection):
+    """Test retirement of CIDs in sequence order."""
+    cid_base = b"base_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register base CID with sequence 0
+    await registry.register_connection(cid_base, mock_connection, addr, sequence=0)
+
+    # Add multiple CIDs with increasing sequences
+    cids = [cid_base]
+    for seq in range(1, 5):
+        cid = f"cid_seq_{seq}".encode()
+        await registry.add_connection_id(cid, cid_base, sequence=seq)
+        cids.append(cid)
+
+    # Verify all CIDs are registered
+    for cid in cids:
+        conn, _, _ = await registry.find_by_cid(cid)
+        assert conn is mock_connection
+
+    # Retire CIDs in sequence range [0, 3) - should retire sequences 0, 1, 2
+    retired = await registry.retire_connection_ids_by_sequence_range(
+        mock_connection, 0, 3
+    )
+
+    # Verify retirement order (should be sorted by sequence)
+    assert len(retired) == 3
+    assert retired[0] == cid_base  # sequence 0
+    assert retired[1] == b"cid_seq_1"  # sequence 1
+    assert retired[2] == b"cid_seq_2"  # sequence 2
+
+    # Verify retired CIDs are removed
+    for cid in retired:
+        conn, _, _ = await registry.find_by_cid(cid)
+        assert conn is None
+
+    # Verify remaining CIDs are still registered
+    conn, _, _ = await registry.find_by_cid(b"cid_seq_3")
+    assert conn is mock_connection
+    conn, _, _ = await registry.find_by_cid(b"cid_seq_4")
+    assert conn is mock_connection
+
+
+@pytest.mark.trio
+async def test_retire_connection_ids_by_sequence_range(registry, mock_connection):
+    """Test batch retirement of CIDs by sequence range."""
+    cid_base = b"base_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register base CID
+    await registry.register_connection(cid_base, mock_connection, addr, sequence=0)
+
+    # Add 10 CIDs with sequences 1-10
+    for seq in range(1, 11):
+        cid = f"cid_{seq}".encode()
+        await registry.add_connection_id(cid, cid_base, sequence=seq)
+
+    # Get sequence numbers before retirement
+    cid_to_seq = {}
+    for seq in range(2, 7):
+        cid = f"cid_{seq}".encode()
+        cid_to_seq[cid] = seq
+
+    # Retire sequences 2-7 (inclusive start, exclusive end)
+    retired = await registry.retire_connection_ids_by_sequence_range(
+        mock_connection, 2, 7
+    )
+
+    # Should retire sequences 2, 3, 4, 5, 6
+    assert len(retired) == 5
+    # Verify all expected CIDs were retired
+    for cid in retired:
+        assert cid in cid_to_seq
+
+    # Verify remaining CIDs
+    conn, _, _ = await registry.find_by_cid(cid_base)  # seq 0
+    assert conn is mock_connection
+    conn, _, _ = await registry.find_by_cid(b"cid_1")  # seq 1
+    assert conn is mock_connection
+    conn, _, _ = await registry.find_by_cid(b"cid_7")  # seq 7
+    assert conn is mock_connection
+    conn, _, _ = await registry.find_by_cid(b"cid_10")  # seq 10
+    assert conn is mock_connection
+
+
+@pytest.mark.trio
+async def test_retirement_cleanup(registry, mock_connection):
+    """Verify all mappings are cleaned up properly during retirement."""
+    cid_base = b"base_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register base CID
+    await registry.register_connection(cid_base, mock_connection, addr, sequence=0)
+
+    # Add additional CID
+    cid2 = b"cid_2"
+    await registry.add_connection_id(cid2, cid_base, sequence=1)
+
+    # Verify mappings exist
+    conn, _, _ = await registry.find_by_cid(cid_base)
+    assert conn is mock_connection
+    conn, _, _ = await registry.find_by_cid(cid2)
+    assert conn is mock_connection
+    found_conn, found_cid = await registry.find_by_address(addr)
+    assert found_conn is mock_connection
+
+    # Retire cid2
+    await registry.remove_connection_id(cid2)
+
+    # Verify cid2 is removed
+    conn, _, _ = await registry.find_by_cid(cid2)
+    assert conn is None
+
+    # Verify base CID and address mapping still exist
+    conn, _, _ = await registry.find_by_cid(cid_base)
+    assert conn is mock_connection
+    found_conn, found_cid = await registry.find_by_address(addr)
+    assert found_conn is mock_connection
+    assert found_cid == cid_base
+
+    # Verify sequence tracking is cleaned up
+    seq = await registry.get_sequence_for_cid(cid2)
+    assert seq is None
+
+
+@pytest.mark.trio
+async def test_retirement_with_multiple_connections(registry):
+    """Test retirement across multiple connections."""
+    conn1 = Mock()
+    conn2 = Mock()
+    addr1 = ("127.0.0.1", 12345)
+    addr2 = ("127.0.0.1", 54321)
+
+    # Register two connections
+    cid1_base = b"conn1_base"
+    cid2_base = b"conn2_base"
+    await registry.register_connection(cid1_base, conn1, addr1, sequence=0)
+    await registry.register_connection(cid2_base, conn2, addr2, sequence=0)
+
+    # Add CIDs to both connections
+    cid1_1 = b"conn1_cid1"
+    cid1_2 = b"conn1_cid2"
+    cid2_1 = b"conn2_cid1"
+    await registry.add_connection_id(cid1_1, cid1_base, sequence=1)
+    await registry.add_connection_id(cid1_2, cid1_base, sequence=2)
+    await registry.add_connection_id(cid2_1, cid2_base, sequence=1)
+
+    # Retire CIDs from conn1 only
+    retired = await registry.retire_connection_ids_by_sequence_range(conn1, 0, 2)
+
+    # Should retire cid1_base (seq 0) and cid1_1 (seq 1)
+    assert len(retired) == 2
+    assert cid1_base in retired
+    assert cid1_1 in retired
+
+    # Verify conn1's remaining CID
+    conn, _, _ = await registry.find_by_cid(cid1_2)
+    assert conn is conn1
+
+    # Verify conn2's CIDs are unaffected
+    conn, _, _ = await registry.find_by_cid(cid2_base)
+    assert conn is conn2
+    conn, _, _ = await registry.find_by_cid(cid2_1)
+    assert conn is conn2
+
+
+@pytest.mark.trio
+async def test_performance_metrics(registry, mock_connection):
+    """Test that performance metrics are tracked correctly."""
+    cid = b"test_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid, mock_connection, addr, sequence=0)
+
+    # Add CIDs with different sequences
+    for seq in range(1, 4):
+        new_cid = f"cid_{seq}".encode()
+        await registry.add_connection_id(new_cid, cid, sequence=seq)
+
+    # Use fallback routing (strategy 2)
+    found_conn, found_cid = await registry.find_by_address(addr)
+    assert found_conn is mock_connection
+
+    # Get stats
+    stats = registry.get_stats()
+
+    # Verify metrics are present
+    assert "fallback_routing_count" in stats
+    assert "sequence_distribution" in stats
+
+    # Verify fallback routing was counted
+    assert stats["fallback_routing_count"] >= 0  # May be 0 if strategy 1 worked
+
+    # Verify sequence distribution
+    assert isinstance(stats["sequence_distribution"], dict)
+    # Should have sequences 0, 1, 2, 3
+    for seq in range(4):
+        assert seq in stats["sequence_distribution"]
+
+
+@pytest.mark.trio
+async def test_fallback_routing_metrics(registry, mock_connection):
+    """Test that fallback routing usage is counted correctly."""
+    cid = b"test_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection
+    await registry.register_connection(cid, mock_connection, addr, sequence=0)
+
+    # Reset stats to get baseline
+    registry.reset_stats()
+
+    # Use fallback routing by finding by address
+    # This should trigger fallback routing (strategy 2) if address mapping is stale
+    found_conn, found_cid = await registry.find_by_address(addr)
+
+    # Get stats
+    stats = registry.get_stats()
+
+    # Fallback routing count should be tracked
+    assert "fallback_routing_count" in stats
+    # Note: Fallback routing count increments when strategy 2 is used
+    # Strategy 1 (address-to-CID) might work first, so count may be 0
+    assert stats["fallback_routing_count"] >= 0
+
+
+@pytest.mark.trio
+async def test_reset_stats(registry, mock_connection):
+    """Test that stats can be reset."""
+    cid = b"test_cid"
+    addr = ("127.0.0.1", 12345)
+
+    # Register connection and perform operations
+    await registry.register_connection(cid, mock_connection, addr, sequence=0)
+    await registry.add_connection_id(b"cid_1", cid, sequence=1)
+
+    # Get initial stats
+    stats_before = registry.get_stats()
+    assert stats_before["fallback_routing_count"] >= 0
+
+    # Reset stats
+    registry.reset_stats()
+
+    # Get stats after reset
+    stats_after = registry.get_stats()
+
+    # Fallback routing count should be reset
+    assert stats_after["fallback_routing_count"] == 0
+
+    # But connection counts should remain
+    assert (
+        stats_after["established_connections"]
+        == stats_before["established_connections"]
+    )

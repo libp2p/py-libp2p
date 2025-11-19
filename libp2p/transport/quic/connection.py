@@ -123,12 +123,27 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._stream_accept_queue: list[QUICStream] = []
         self._stream_accept_event = trio.Event()
 
-        # Negotiation semaphore to limit concurrent multiselect negotiations
+        # Negotiation semaphores to limit concurrent multiselect negotiations
+        # Separate semaphores for client (outbound) and server (inbound) to prevent
+        # deadlocks where client holds all slots and server can't respond.
         # This prevents overwhelming the connection with too many simultaneous
         # negotiations, which can cause timeouts under high concurrency.
-        # Limit to 5 concurrent negotiations to match typical stream opening patterns.
-        # In CI/CD environments with limited resources, this helps prevent contention.
-        self._negotiation_semaphore = trio.Semaphore(5)
+        # Limit is configurable via transport config to allow tuning for
+        # different use cases. The separate client/server semaphores prevent
+        # deadlocks while maintaining reasonable resource usage. In CI/CD
+        # environments with limited resources, this helps prevent contention.
+        # Get negotiation limit from config, defaulting to 5 if not available
+        # or if it's a Mock object (in tests)
+        negotiation_limit = getattr(
+            self._transport._config, "NEGOTIATION_SEMAPHORE_LIMIT", 5
+        )
+        # Ensure it's an int (handles Mock objects in tests)
+        if not isinstance(negotiation_limit, int):
+            negotiation_limit = 5
+        self._client_negotiation_semaphore = trio.Semaphore(negotiation_limit)
+        self._server_negotiation_semaphore = trio.Semaphore(negotiation_limit)
+        # Keep _negotiation_semaphore for backward compatibility (maps to client)
+        self._negotiation_semaphore = self._client_negotiation_semaphore
 
         # Connection state
         self._closed: bool = False
@@ -1117,6 +1132,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             sequence: Sequence number for this Connection ID
 
         """
+        notification_start = time.time()
         try:
             if not self._transport:
                 return
@@ -1132,6 +1148,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     await listener._registry.add_connection_id(
                         new_cid, original_cid, sequence
                     )
+                    notification_duration = time.time() - notification_start
+                    if notification_duration > 0.01:  # Log slow notifications (>10ms)
+                        logger.debug(
+                            f"Slow CID notification: "
+                            f"{notification_duration * 1000:.2f}ms "
+                            f"for CID {new_cid.hex()[:8]}"
+                        )
                     logger.debug(
                         f"Registered new Connection ID {new_cid.hex()[:8]} "
                         f"(sequence {sequence}) for connection {original_cid.hex()[:8]}"
@@ -1151,6 +1174,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         Handle connection ID retirement.
 
         This handles when the peer tells us to stop using a connection ID.
+        The listener will handle proper retirement ordering via the registry.
         """
         logger.debug(f"CONNECTION ID RETIRED: {event.connection_id.hex()}")
 
@@ -1176,6 +1200,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Update statistics
         self._stats["connection_ids_retired"] += 1
+
+        # Note: The listener's _process_quic_events() will handle proper
+        # retirement ordering via the registry's
+        # retire_connection_ids_by_sequence_range()
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""

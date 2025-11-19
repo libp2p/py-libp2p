@@ -39,16 +39,20 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
+            raise MultiselectClientError(f"handshake write failed: {error}") from error
 
         try:
             handshake_contents = await communicator.read()
 
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
+            raise MultiselectClientError(f"handshake read failed: {error}") from error
 
         if not is_valid_handshake(handshake_contents):
-            raise MultiselectClientError("multiselect protocol ID mismatch")
+            raise MultiselectClientError(
+                f"multiselect protocol ID mismatch: "
+                f"expected {MULTISELECT_PROTOCOL_ID}, "
+                f"got {handshake_contents!r}"
+            )
 
     async def select_one_of(
         self,
@@ -80,9 +84,15 @@ class MultiselectClient(IMultiselectClient):
                     except MultiselectClientError:
                         pass
 
-                raise MultiselectClientError("protocols not supported")
+                raise MultiselectClientError(
+                    f"protocols not supported: tried {list(protocols)}, "
+                    f"timeout={negotiate_timeout}s"
+                )
         except trio.TooSlowError:
-            raise MultiselectClientError("response timed out")
+            raise MultiselectClientError(
+                f"response timed out after {negotiate_timeout}s, "
+                f"protocols tried: {list(protocols)}"
+            )
 
     async def query_multistream_command(
         self,
@@ -108,7 +118,9 @@ class MultiselectClient(IMultiselectClient):
                     try:
                         await communicator.write("ls")
                     except MultiselectCommunicatorError as error:
-                        raise MultiselectClientError() from error
+                        raise MultiselectClientError(
+                            f"command write failed: {error}, command={command}"
+                        ) from error
                 else:
                     raise ValueError("Command not supported")
 
@@ -117,11 +129,16 @@ class MultiselectClient(IMultiselectClient):
                     response_list = response.strip().splitlines()
 
                 except MultiselectCommunicatorError as error:
-                    raise MultiselectClientError() from error
+                    raise MultiselectClientError(
+                        f"command read failed: {error}, command={command}"
+                    ) from error
 
                 return response_list
         except trio.TooSlowError:
-            raise MultiselectClientError("command response timed out")
+            raise MultiselectClientError(
+                f"command response timed out after {response_timeout}s, "
+                f"command={command}"
+            )
 
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
@@ -139,19 +156,28 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(protocol_str)
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
+            raise MultiselectClientError(
+                f"protocol write failed: {error}, protocol={protocol}"
+            ) from error
 
         try:
             response = await communicator.read()
 
         except MultiselectCommunicatorError as error:
-            raise MultiselectClientError() from error
+            raise MultiselectClientError(
+                f"protocol read failed: {error}, protocol={protocol}"
+            ) from error
 
         if response == protocol_str:
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
-            raise MultiselectClientError("protocol not supported")
-        raise MultiselectClientError(f"unrecognized response: {response}")
+            raise MultiselectClientError(
+                f"protocol not supported: {protocol}, response={response!r}"
+            )
+        raise MultiselectClientError(
+            f"unrecognized response: {response!r}, expected {protocol_str!r} "
+            f"or {PROTOCOL_NOT_FOUND_MSG!r}, protocol={protocol}"
+        )
 
 
 def is_valid_handshake(handshake_contents: str) -> bool:
