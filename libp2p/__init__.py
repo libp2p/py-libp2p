@@ -1,5 +1,7 @@
 """Libp2p Python implementation."""
 
+from __future__ import annotations
+
 import logging
 import ssl
 
@@ -27,11 +29,15 @@ from libp2p.abc import (
     ISecureTransport,
     ITransport,
 )
+from libp2p.rcmgr import ResourceManager
 from libp2p.crypto.keys import (
     KeyPair,
 )
+from libp2p.crypto.ed25519 import (
+    create_new_key_pair as create_new_ed25519_key_pair,
+)
 from libp2p.crypto.rsa import (
-    create_new_key_pair,
+    create_new_key_pair as create_new_rsa_key_pair,
 )
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
@@ -151,7 +157,17 @@ def create_mplex_muxer_option() -> TMuxerOptions:
 
 
 def generate_new_rsa_identity() -> KeyPair:
-    return create_new_key_pair()
+    return create_new_rsa_key_pair()
+
+
+def generate_new_ed25519_identity() -> KeyPair:
+    """
+    Generate a new Ed25519 identity key pair.
+
+    Ed25519 is preferred for better interoperability with other libp2p implementations
+    (e.g., Rust, Go) which often disable RSA support.
+    """
+    return create_new_ed25519_key_pair()
 
 
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
@@ -178,10 +194,12 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
-    retry_config: Optional["RetryConfig"] = None,
+    retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -195,15 +213,23 @@ def new_swarm(
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
     :param quic_transport_opt: options for transport
+    :param resource_manager: optional resource manager for connection/stream limits
+    :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key for PSK encryption in transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
           due to its improved performance and features.
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
+
+    Note: Ed25519 keys are used by default for better interoperability with
+          other libp2p implementations (Rust, Go) which often disable RSA support.
     """
     if key_pair is None:
-        key_pair = generate_new_rsa_identity()
+        # Use Ed25519 by default for better interoperability with Rust/Go libp2p
+        # which often compile without RSA support
+        key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
 
@@ -294,14 +320,45 @@ def new_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
-    return Swarm(
+    swarm = Swarm(
         id_opt,
         peerstore,
         upgrader,
         transport,
         retry_config=retry_config,
-        connection_config=connection_config
+        connection_config=connection_config,
+        psk=psk
     )
+
+    # Set resource manager if provided
+    # Auto-create a default ResourceManager if one was not provided
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            resource_manager = None
+
+    if resource_manager is not None:
+        swarm.set_resource_manager(resource_manager)
+
+    return swarm
+
+    # Set resource manager if provided
+    # Auto-create a default ResourceManager if one was not provided
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            resource_manager = None
+
+    if resource_manager is not None:
+        swarm.set_resource_manager(resource_manager)
+
+    return swarm
 
 
 def new_host(
@@ -313,12 +370,15 @@ def new_host(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_mDNS: bool = False,
+    enable_upnp: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
-    quic_transport_opt:  QUICTransportConfig | None = None,
+    quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -336,11 +396,25 @@ def new_host(
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
+    :param resource_manager: optional resource manager for connection/stream limits
+    :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key (PSK)
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
         logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+
+    # Enable automatic protection by default: if no resource manager is supplied,
+    # create a default instance so connections/streams are guarded out of the box.
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            # Fallback to leaving it None if creation fails for any reason.
+            resource_manager = None
 
     swarm = new_swarm(
         enable_quic=enable_quic,
@@ -352,17 +426,27 @@ def new_host(
         listen_addrs=listen_addrs,
         connection_config=quic_transport_opt if enable_quic else None,
         tls_client_config=tls_client_config,
-        tls_server_config=tls_server_config
+        tls_server_config=tls_server_config,
+        resource_manager=resource_manager,
+        psk=psk
     )
 
     if disc_opt is not None:
-        return RoutedHost(swarm, disc_opt, enable_mDNS, bootstrap)
+        return RoutedHost(
+            network=swarm,
+            router=disc_opt,
+            enable_mDNS=enable_mDNS,
+            enable_upnp=enable_upnp,
+            bootstrap=bootstrap,
+            resource_manager=resource_manager,
+        )
     return BasicHost(
         network=swarm,
         enable_mDNS=enable_mDNS,
         bootstrap=bootstrap,
-        negotiate_timeout=negotiate_timeout
+        enable_upnp=enable_upnp,
+        negotiate_timeout=negotiate_timeout,
+        resource_manager=resource_manager,
     )
-
 
 __version__ = __version("libp2p")

@@ -48,7 +48,7 @@ from libp2p.network.exceptions import (
 from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
-    StreamReset,
+    StreamError,
 )
 from libp2p.peer.id import (
     ID,
@@ -285,7 +285,9 @@ class Pubsub(Service, IPubsub):
                         logger.debug(
                             "received `publish` message %s from peer %s", msg, peer_id
                         )
-                        self.manager.run_task(self.push_msg, peer_id, msg)
+                        # Only schedule task if service is still running
+                        if self.manager.is_running:
+                            self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
                     # deal with RPC.subscriptions
@@ -437,7 +439,7 @@ class Pubsub(Service, IPubsub):
 
         try:
             await self.continuously_read_stream(stream)
-        except (StreamEOF, StreamReset, ParseError, IncompleteReadError) as error:
+        except (StreamError, ParseError, IncompleteReadError) as error:
             logger.debug(
                 "fail to read from peer %s, error=%s,"
                 "closing the stream and remove the peer from record",
@@ -766,6 +768,18 @@ class Pubsub(Service, IPubsub):
         if self._is_msg_seen(msg):
             return
 
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                if not scorer.allow_publish(msg_forwarder, list(msg.topicIDs)):
+                    logger.debug(
+                        "Rejecting message from %s by publish score gate", msg_forwarder
+                    )
+                    return
+        except Exception:
+            # Router may not support scoring; ignore gracefully
+            pass
+
         # Check if signing is required and if so validate the signature
         if self.strict_signing:
             # Validate the signature of the message
@@ -778,6 +792,14 @@ class Pubsub(Service, IPubsub):
         try:
             await self.validate_msg(msg_forwarder, msg)
         except ValidationError:
+            # Scoring: count invalid messages
+            try:
+                scorer = getattr(self.router, "scorer", None)
+                if scorer is not None:
+                    for topic in msg.topicIDs:
+                        scorer.on_invalid_message(msg_forwarder, topic)
+            except Exception:
+                pass
             logger.debug(
                 "Topic validation failed: sender %s sent data %s under topic IDs: %s %s:%s",  # noqa: E501
                 msg_forwarder,
@@ -789,6 +811,15 @@ class Pubsub(Service, IPubsub):
             return
 
         self._mark_msg_seen(msg)
+
+        # Scoring: first delivery for this sender per topic
+        try:
+            scorer = getattr(self.router, "scorer", None)
+            if scorer is not None:
+                for topic in msg.topicIDs:
+                    scorer.on_first_delivery(msg_forwarder, topic)
+        except Exception:
+            pass
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
@@ -820,6 +851,19 @@ class Pubsub(Service, IPubsub):
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
+
+    def get_message_id(self, msg: rpc_pb2.Message) -> bytes:
+        """
+        Get the message ID for a given message using the configured
+        message ID constructor.
+
+        This method provides a public interface for external components (like routers)
+        to access message ID construction functionality.
+
+        :param msg: the message to get the ID for
+        :return: the message ID as bytes
+        """
+        return self._msg_id_constructor(msg)
 
     async def write_msg(self, stream: INetStream, rpc_msg: rpc_pb2.RPC) -> bool:
         """
