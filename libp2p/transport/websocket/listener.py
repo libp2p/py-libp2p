@@ -39,8 +39,9 @@ class WebsocketListener(IListener):
         self._nursery: trio.Nursery | None = None
         self._listeners: Any = None
         self._is_wss = False  # Track whether this is a WSS listener
+        self._nursery_task: trio.CancelScope | None= None
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
 
         # Parse the WebSocket multiaddr to determine if it's secure
@@ -139,26 +140,45 @@ class WebsocketListener(IListener):
                 websocket_handler, host, port, ssl_context, task_status=task_status
             )
 
-        # Store the nursery for shutdown
-        self._nursery = nursery
-
         # Start the server using nursery.start() like TCP does
         logger.debug("Calling nursery.start()...")
-        started_listeners = await nursery.start(
-            serve_websocket_tcp,
-            None,  # No handler needed since it's defined inside serve_websocket_tcp
-            port,
-            host,
-        )
-        logger.debug(f"nursery.start() returned: {started_listeners}")
 
+        started_event = trio.Event()
+        started_listeners = None 
+        
+        async def nursery_runner():
+            nonlocal started_listeners
+            
+            try:
+                async with trio.open_nursery() as nursery:
+                    self._nursery_task = nursery.cancel_scope
+                    listener = await nursery.start(
+                        serve_websocket_tcp,
+                        None,  # No handler needed since it's defined inside serve_websocket_tcp
+                        port,
+                        host,
+                    )
+
+                    if listener:
+                        started_listeners = listener
+                        self._listeners.extend(started_listeners)
+                    
+                    started_event.set()
+                    await trio.sleep_forever()
+            except Exception as e:
+                logger.error(
+                    f"Exception while starting listener for {maddr}: {e}"
+                )
+                started_event.set()
+        
+        trio.lowlevel.spawn_system_task(nursery_runner)
+        await started_event.wait()
+
+        logger.debug(f"nursery.start() returned: {started_listeners}")
         if started_listeners is None:
             logger.error(f"Failed to start WebSocket listener for {maddr}")
             return False
 
-        # Store the listeners for get_addrs() and close() - these are real
-        # SocketListener objects
-        self._listeners = started_listeners
         logger.debug(
             "WebsocketListener.listen returning True with WebSocketServer object"
         )
@@ -187,7 +207,11 @@ class WebsocketListener(IListener):
 
     async def close(self) -> None:
         """Close the WebSocket listener and stop accepting new connections"""
-        logger.debug("WebsocketListener.close called")
+        
+        logger.debug("WebsocketListener.close called. Closing Websocket server")
+        if self._nursery_task:
+            self._nursery_task.cancel()
+
         if hasattr(self, "_listeners") and self._listeners:
             # Signal shutdown
             self._shutdown_event.set()

@@ -660,7 +660,7 @@ class Swarm(Service, INetworkService):
                     raise SwarmException("swarm instance hasn't been run")
                 assert self.listener_nursery is not None  # For type checker
                 logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
-                await listener.listen(maddr, self.listener_nursery)
+                await listener.listen(maddr)
                 logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")
 
                 # Call notifiers since event occurred

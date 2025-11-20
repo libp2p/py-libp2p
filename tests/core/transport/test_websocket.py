@@ -1191,12 +1191,12 @@ async def test_wss_listen_without_tls_config():
 
     # This should raise an error when TLS config is not provided
     try:
-        nursery = trio.lowlevel.current_task().parent_nursery
-        if nursery is None:
-            pytest.fail("No parent nursery available for test")
+        #nursery = trio.lowlevel.current_task().parent_nursery
+        #if nursery is None:
+        #    pytest.fail("No parent nursery available for test")
         # Type assertion to help the type checker understand nursery is not None
-        assert nursery is not None
-        await listener.listen(wss_maddr, nursery)
+        #assert nursery is not None
+        await listener.listen(wss_maddr)
         pytest.fail("WSS listen without TLS config should have failed")
     except ValueError as e:
         assert "without TLS configuration" in str(e)

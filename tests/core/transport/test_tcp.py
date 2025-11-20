@@ -19,7 +19,7 @@ from libp2p.transport.tcp.tcp import (
 
 
 @pytest.mark.trio
-async def test_tcp_listener(nursery):
+async def test_tcp_listener():
     transport = TCP()
 
     async def handler(tcp_stream):
@@ -27,14 +27,14 @@ async def test_tcp_listener(nursery):
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     assert len(listener.get_addrs()) == 2
 
 
 @pytest.mark.trio
-async def test_tcp_dial(nursery):
+async def test_tcp_dial():
     transport = TCP()
     raw_conn_other_side: RawConnection | None = None
     event = trio.Event()
@@ -51,7 +51,7 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     listen_addr = addrs[0]
