@@ -377,70 +377,9 @@ async def test_yamux_stress_ping():
         client_host = new_host(listen_addrs=[client_listen_addr])
 
         async with client_host.run(listen_addrs=[client_listen_addr]):
+            # connect() now automatically waits for connection to be fully established
+            # (QUIC handshake complete, muxer ready) before returning
             await client_host.connect(info)
-
-            # Wait for connection to be established and ready
-            # (check actual connection state)
-            network = client_host.get_network()
-            connections_map = network.get_connections_map()
-            while (
-                info.peer_id not in connections_map or not connections_map[info.peer_id]
-            ):
-                await trio.sleep(0.01)
-                connections_map = network.get_connections_map()
-
-            # Wait for connection's event_started to ensure it's ready for streams
-            # This ensures the muxer is fully initialized and can accept streams
-            connections = connections_map[info.peer_id]
-            if connections:
-                swarm_conn = connections[0]
-                # Wait for the connection to be fully started (muxer ready)
-                if hasattr(swarm_conn, "event_started"):
-                    await swarm_conn.event_started.wait()
-
-                # For QUIC connections, also wait for the underlying connection
-                # to be established (handshake completed)
-                if hasattr(swarm_conn, "muxed_conn"):
-                    muxed_conn = swarm_conn.muxed_conn
-                    # Use event-driven approach: wait for _connected_event if available
-                    # This is more efficient than polling is_established
-                    # Type ignore: _connected_event is QUICConnection-specific
-                    if hasattr(muxed_conn, "_connected_event"):
-                        connected_event = getattr(muxed_conn, "_connected_event", None)
-                        if connected_event is not None:
-                            with trio.move_on_after(10.0):
-                                await connected_event.wait()
-                    # Verify it's actually established
-                    # Type ignore: is_established is QUICConnection-specific
-                    is_established = getattr(muxed_conn, "is_established", None)
-                    if is_established is not None and not (
-                        is_established
-                        if not callable(is_established)
-                        else is_established()
-                    ):
-                        raise RuntimeError(
-                            "QUIC connection not established after _connected_event"
-                        )
-                    # Fallback: poll is_established if event not available
-                    # Type ignore: is_established is a QUICConnection-specific attribute
-                    elif hasattr(muxed_conn, "is_established"):
-                        is_established = getattr(muxed_conn, "is_established", None)
-                        if is_established is not None:
-                            is_established_fn = (
-                                is_established
-                                if callable(is_established)
-                                else lambda: is_established
-                            )
-                            with trio.move_on_after(10.0):
-                                while not is_established_fn():
-                                    await trio.sleep(0.01)
-                            if not is_established_fn():
-                                raise RuntimeError(
-                                    "QUIC connection not established within timeout"
-                                )
-
-                # Additional small wait to ensure multiselect is ready
-                await trio.sleep(0.1)
 
             async def ping_stream(i: int):
                 stream = None

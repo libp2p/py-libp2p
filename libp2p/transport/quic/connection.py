@@ -319,17 +319,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
             raise QUICConnectionError("Cannot start a closed connection")
 
         self._started = True
-        self.event_started.set()
         logger.debug(f"Starting QUIC connection to {self._remote_peer_id}")
 
         try:
             # If this is a client connection, we need to establish the connection
             if self._is_initiator:
                 await self._initiate_connection()
+                # event_started will be set in connect() after connection is established
             else:
                 # For server connections, we're already connected via the listener
                 self._established = True
                 self._connected_event.set()
+                # Set event_started after connection is established for server
+                self.event_started.set()
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} started")
 
@@ -411,6 +413,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 logger.debug(f"QUICConnection {id(self)}: Peer identity verified")
                 self._established = True
                 logger.debug(f"QUIC connection established with {self._remote_peer_id}")
+
+                # Set event_started after connection is fully established for initiator
+                if self._is_initiator:
+                    self.event_started.set()
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
