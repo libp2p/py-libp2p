@@ -820,9 +820,13 @@ async def test_wss_host_pair_data_exchange():
         subject = issuer = x509.Name(
             [
                 x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),  # type: ignore
-                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(  # type: ignore
+                    NameOID.STATE_OR_PROVINCE_NAME, "Test"
+                ),
                 x509.NameAttribute(NameOID.LOCALITY_NAME, "Test"),  # type: ignore
-                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Test"),  # type: ignore
+                x509.NameAttribute(  # type: ignore
+                    NameOID.ORGANIZATION_NAME, "Test"
+                ),
                 x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),  # type: ignore
             ]
         )

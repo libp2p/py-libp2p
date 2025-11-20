@@ -1633,6 +1633,75 @@ class INetwork(ABC):
 
         """
 
+    def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for a specific peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        """
+        return {}
+
+    def get_global_health_summary(self) -> dict[str, Any]:
+        """
+        Get global health summary across all peers.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing global health metrics across all connections.
+            Returns empty dict if health monitoring is disabled.
+
+        """
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        """
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        return {"enabled": False}
+
 
 class INetworkService(INetwork, ServiceAPI):
     pass
@@ -1932,6 +2001,75 @@ class IHost(ABC):
         Close the host and all underlying connections and services.
 
         """
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to get health information for.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health metrics for the peer's connections.
+            Returns empty dict if health monitoring is disabled or peer not found.
+
+        """
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing global health metrics across all connections.
+            Returns empty dict if health monitoring is disabled.
+
+        """
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+
+        Parameters
+        ----------
+        format : str
+            The format to export metrics in. Supported: "json", "prometheus"
+
+        Returns
+        -------
+        str
+            The health metrics in the requested format.
+            Returns empty string or object if health monitoring is disabled.
+
+        """
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+
+        Returns
+        -------
+        dict[str, Any]
+            A dictionary containing health monitor status information including:
+            - enabled: Whether health monitoring is active
+            - monitoring_task_started: Whether the monitoring task is running
+            - check_interval_seconds: Health check interval
+            - total_connections: Total number of connections
+            - monitored_connections: Number of monitored connections
+            - total_peers: Total number of peers
+            - monitored_peers: Number of peers being monitored
+            Returns {"enabled": False} if health monitoring is disabled.
+
+        """
+        return {"enabled": False}
 
     @abstractmethod
     async def upgrade_outbound_connection(

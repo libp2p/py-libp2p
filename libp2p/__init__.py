@@ -109,6 +109,7 @@ DEFAULT_NEGOTIATE_TIMEOUT = 5
 
 logger = logging.getLogger(__name__)
 
+
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     """
     Set the default multiplexer protocol to use.
@@ -186,6 +187,7 @@ def get_default_muxer_options() -> TMuxerOptions:
     else:  # YAMUX is default
         return create_yamux_muxer_option()
 
+
 def new_swarm(
     key_pair: KeyPair | None = None,
     muxer_opt: TMuxerOptions | None = None,
@@ -234,7 +236,11 @@ def new_swarm(
     id_opt = generate_peer_id_from(key_pair)
 
     transport: TCP | QUICTransport | ITransport
-    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
+    quic_transport_opt = (
+        connection_config
+        if isinstance(connection_config, QUICTransportConfig)
+        else None
+    )
 
     if listen_addrs is None:
         if enable_quic:
@@ -243,7 +249,6 @@ def new_swarm(
             transport = TCP()
     else:
         # Use transport registry to select the appropriate transport
-        from libp2p.transport.transport_registry import create_transport_for_multiaddr
 
         # Create a temporary upgrader for transport selection
         # We'll create the real upgrader later with the proper configuration
@@ -271,7 +276,10 @@ def new_swarm(
 
     # If enable_quic is True but we didn't get a QUIC transport, force QUIC
     if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
+        logger.debug(
+            "new_swarm: Forcing QUIC transport (enable_quic=True but got %s)",
+            type(transport),
+        )
         transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
@@ -314,7 +322,6 @@ def new_swarm(
         secure_transports_by_protocol=secure_transports_by_protocol,
         muxer_transports_by_protocol=muxer_transports_by_protocol,
     )
-
 
     peerstore = peerstore_opt or PeerStore()
     # Store our key pair in peerstore
@@ -377,6 +384,7 @@ def new_host(
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
+    connection_config: ConnectionConfig | None = None,
     resource_manager: ResourceManager | None = None,
     psk: str | None = None
 ) -> IHost:
@@ -396,6 +404,10 @@ def new_host(
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
+    :param connection_config: optional configuration for connection management
+        and health monitoring. When both connection_config and quic_transport_opt
+        are provided, health monitoring settings from connection_config are merged
+        into the QUIC config (QUICTransportConfig inherits from ConnectionConfig)
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
@@ -403,7 +415,53 @@ def new_host(
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning(
+            "QUIC config provided but QUIC not enabled, ignoring QUIC config"
+        )
+
+    # Determine which connection config to use
+    effective_connection_config: ConnectionConfig | QUICTransportConfig | None = None
+    if enable_quic and quic_transport_opt is not None:
+        # QUICTransportConfig inherits from ConnectionConfig,
+        # so it can handle health monitoring
+        effective_connection_config = quic_transport_opt
+
+        # If both connection_config and quic_transport_opt are provided,
+        # merge ALL connection and health monitoring settings
+        if connection_config is not None:
+            # Merge all ConnectionConfig attributes from connection_config
+            # into quic_transport_opt (which inherits from ConnectionConfig)
+            connection_config_attrs = [
+                "max_connections_per_peer",
+                "connection_timeout",
+                "load_balancing_strategy",
+                "enable_health_monitoring",
+                "health_initial_delay",
+                "health_warmup_window",
+                "health_check_interval",
+                "ping_timeout",
+                "min_health_threshold",
+                "min_connections_per_peer",
+                "latency_weight",
+                "success_rate_weight",
+                "stability_weight",
+                "max_ping_latency",
+                "min_ping_success_rate",
+                "max_failed_streams",
+                "unhealthy_grace_period",
+            ]
+
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+
+            logger.info(
+                "Merged all connection and health monitoring settings from "
+                "connection_config into QUIC config"
+            )
+    elif connection_config is not None:
+        # Use the provided ConnectionConfig for health monitoring
+        effective_connection_config = connection_config
 
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
@@ -424,7 +482,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_connection_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
