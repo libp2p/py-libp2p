@@ -16,6 +16,9 @@ from .exceptions import (
     MultiselectClientError,
     MultiselectCommunicatorError,
 )
+import logging        
+logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
+logger.setLevel(logging.DEBUG)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
@@ -67,9 +70,13 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
+        
         try:
             with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
+                
+                protocol_list = [str(p) for p in protocols]
+                logger.debug(f"Attempting to negotiate one of: {protocol_list}")
 
                 for protocol in protocols:
                     try:
@@ -77,9 +84,11 @@ class MultiselectClient(IMultiselectClient):
                             communicator, protocol
                         )
                         return selected_protocol
-                    except MultiselectClientError:
+                    except MultiselectClientError as e:
+                        logger.debug(f"Protocol {protocol} failed: {e}")
                         pass
 
+                logger.error(f"All protocols failed negotiation: {protocol_list}")
                 raise MultiselectClientError("protocols not supported")
         except trio.TooSlowError:
             raise MultiselectClientError("response timed out")
@@ -136,21 +145,28 @@ class MultiselectClient(IMultiselectClient):
         """
         # Represent `None` protocol as an empty string.
         protocol_str = protocol if protocol is not None else ""
+        logger.debug(f"Trying to select protocol: {protocol_str}")
         try:
             await communicator.write(protocol_str)
         except MultiselectCommunicatorError as error:
+            logger.debug(f"Failed to write protocol {protocol_str}: {error}")
             raise MultiselectClientError() from error
 
         try:
             response = await communicator.read()
+            logger.debug(f"Received response for protocol {protocol_str}: {response!r}")
 
         except MultiselectCommunicatorError as error:
+            logger.debug(f"Failed to read response for protocol {protocol_str}: {error}")
             raise MultiselectClientError() from error
 
         if response == protocol_str:
+            logger.debug(f"Protocol {protocol_str} successfully selected")
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
+            logger.debug(f"Protocol {protocol_str} not supported by peer (received 'na')")
             raise MultiselectClientError("protocol not supported")
+        logger.warning(f"Unrecognized response for protocol {protocol_str}: {response!r}")
         raise MultiselectClientError(f"unrecognized response: {response}")
 
 
