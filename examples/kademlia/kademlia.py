@@ -191,7 +191,7 @@ async def run_node(
             # Start the DHT service
             async with background_trio_service(dht):
                 logger.info(f"DHT service started in {dht_mode.value} mode")
-                val_key = create_key_from_binary(b"py-libp2p kademlia example value")
+                val_key = b"py-libp2p kademlia example value"
                 content = b"Hello from python node "
                 content_key = create_key_from_binary(content)
 
