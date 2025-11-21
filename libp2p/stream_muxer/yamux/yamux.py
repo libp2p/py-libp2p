@@ -33,6 +33,9 @@ from libp2p.abc import (
 from libp2p.io.exceptions import (
     IncompleteReadError,
 )
+from libp2p.io.utils import (
+    read_exactly,
+)
 from libp2p.network.connection.exceptions import (
     RawConnError,
 )
@@ -638,25 +641,35 @@ class Yamux(IMuxedConn):
         while not self.event_shutting_down.is_set():
             try:
                 logger.debug(
-                    f"Yamux handle_incoming() calling read({HEADER_SIZE}) "
+                    f"Yamux handle_incoming() calling read_exactly({HEADER_SIZE}) "
                     f"for peer {self.peer_id}"
                 )
-                header = await self.secured_conn.read(HEADER_SIZE)
-                if header is None:
+                try:
+                    header = await read_exactly(self.secured_conn, HEADER_SIZE)
+                except IncompleteReadError as e:
                     logger.debug(
-                        f"Connection closed (None returned) for peer {self.peer_id}"
+                        f"Connection closed (incomplete read) for peer {self.peer_id}: {e}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
                     break
+                except Exception as e:
+                    logger.debug(
+                        f"Error reading header for peer {self.peer_id}: {e}"
+                    )
+                    self.event_shutting_down.set()
+                    await self._cleanup_on_error()
+                    break
+
                 header_len = len(header)
                 logger.debug(
                     f"Yamux handle_incoming() received {header_len} bytes "
                     f"header for peer {self.peer_id}"
                 )
-                if not header or len(header) < HEADER_SIZE:
+                if len(header) != HEADER_SIZE:
                     logger.debug(
-                        f"Connection closed or incompleteheader for peer {self.peer_id}"
+                        f"Unexpected header size {header_len} != {HEADER_SIZE} "
+                        f"for peer {self.peer_id}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -679,13 +692,23 @@ class Yamux(IMuxedConn):
 
                             # Read any data that came with the SYN frame
                             if length > 0:
-                                data = await self.secured_conn.read(length)
-                                self.stream_buffers[stream_id].extend(data)
-                                self.stream_events[stream_id].set()
-                                logger.debug(
-                                    f"Read {length} bytes with SYN "
-                                    f"for stream {stream_id}"
-                                )
+                                try:
+                                    data = await read_exactly(self.secured_conn, length)
+                                    self.stream_buffers[stream_id].extend(data)
+                                    self.stream_events[stream_id].set()
+                                    logger.debug(
+                                        f"Read {length} bytes with SYN "
+                                        f"for stream {stream_id}"
+                                    )
+                                except IncompleteReadError as e:
+                                    logger.error(
+                                        f"Incomplete read for SYN data on stream {stream_id}: {e}"
+                                    )
+                                    # Mark stream as closed
+                                    stream.recv_closed = True
+                                    stream.closed = True
+                                    if stream_id in self.stream_events:
+                                        self.stream_events[stream_id].set()
 
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
@@ -716,13 +739,24 @@ class Yamux(IMuxedConn):
                         if stream_id in self.streams:
                             # Read any data that came with the ACK
                             if length > 0:
-                                data = await self.secured_conn.read(length)
-                                self.stream_buffers[stream_id].extend(data)
-                                self.stream_events[stream_id].set()
-                                logger.debug(
-                                    f"Received ACK with {length} bytes for stream "
-                                    f"{stream_id} for peer {self.peer_id}"
-                                )
+                                try:
+                                    data = await read_exactly(self.secured_conn, length)
+                                    self.stream_buffers[stream_id].extend(data)
+                                    self.stream_events[stream_id].set()
+                                    logger.debug(
+                                        f"Received ACK with {length} bytes for stream "
+                                        f"{stream_id} for peer {self.peer_id}"
+                                    )
+                                except IncompleteReadError as e:
+                                    logger.error(
+                                        f"Incomplete read for ACK data on stream {stream_id}: {e}"
+                                    )
+                                    # Mark stream as closed
+                                    stream = self.streams[stream_id]
+                                    stream.recv_closed = True
+                                    stream.closed = True
+                                    if stream_id in self.stream_events:
+                                        self.stream_events[stream_id].set()
                             else:
                                 logger.debug(
                                     f"Received ACK (no data) for stream {stream_id} "
@@ -772,9 +806,24 @@ class Yamux(IMuxedConn):
                             f"Yamux handle_incoming() reading {length} bytes "
                             f"data for stream {stream_id}, peer {self.peer_id}"
                         )
-                        data = (
-                            await self.secured_conn.read(length) if length > 0 else b""
-                        )
+                        try:
+                            data = (
+                                await read_exactly(self.secured_conn, length) if length > 0 else b""
+                            )
+                        except IncompleteReadError as e:
+                            logger.error(
+                                f"Incomplete read for data on stream {stream_id}: {e}"
+                            )
+                            # Mark stream as closed
+                            async with self.streams_lock:
+                                if stream_id in self.streams:
+                                    stream = self.streams[stream_id]
+                                    stream.recv_closed = True
+                                    stream.closed = True
+                                    if stream_id in self.stream_events:
+                                        self.stream_events[stream_id].set()
+                            continue
+
                         if data is None:
                             logger.debug(
                                 f"Connection closed (None returned) while reading data "

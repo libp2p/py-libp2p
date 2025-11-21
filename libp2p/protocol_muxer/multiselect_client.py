@@ -11,6 +11,9 @@ from .exceptions import (
     MultiselectCommunicatorError,
     ProtocolNotSupportedError,
 )
+import logging        
+logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
+logger.setLevel(logging.DEBUG)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
@@ -68,9 +71,13 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
+        
         try:
             with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
+                
+                protocol_list = [str(p) for p in protocols]
+                logger.debug(f"Attempting to negotiate one of: {protocol_list}")
 
                 unsupported_errors: list[str] = []
                 for protocol in protocols:
