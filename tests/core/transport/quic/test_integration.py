@@ -342,16 +342,40 @@ class TestBasicQUICFlow:
         print("✅ TIMEOUT TEST PASSED!")
 
 
+def _is_ci_environment() -> bool:
+    """Check if running in CI/CD environment."""
+    ci_vars = ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "CIRCLECI"]
+    return any(os.environ.get(var) for var in ci_vars)
+
+
 @pytest.mark.trio
 @pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_yamux_stress_ping():
+    # Enable debug logging in CI/CD for this test
+    is_ci = _is_ci_environment()
+    if is_ci:
+        # Enable debug logging for QUIC-related modules in CI/CD
+        debug_loggers = [
+            "libp2p.transport.quic",
+            "libp2p.host.basic_host",
+            "libp2p.network.swarm",
+            "libp2p.network.connection.swarm_connection",
+            "libp2p.protocol_muxer",
+        ]
+        for logger_name in debug_loggers:
+            logging.getLogger(logger_name).setLevel(logging.DEBUG)
+        print("\n🔍 CI/CD DEBUG MODE ENABLED for test_yamux_stress_ping")
+        print(f"   Debug loggers enabled: {', '.join(debug_loggers)}")
+
     STREAM_COUNT = 100
     listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
     latencies = []
     failures = []
+    failure_details = []  # Store detailed failure info for CI/CD
     completion_event = trio.Event()
     completed_count: list[int] = [0]  # Use list to make it mutable for closures
     completed_lock = trio.Lock()
+    stream_start_times = {}  # Track when each stream started
 
     # === Server Setup ===
     server_host = new_host(listen_addrs=[listen_addr])
@@ -389,31 +413,125 @@ async def test_yamux_stress_ping():
 
             # connect() now ensures connection is fully established and ready
             # (QUIC handshake complete, muxer ready, event_started set)
+            connect_start = trio.current_time()
             await client_host.connect(info)
+            connect_time = (trio.current_time() - connect_start) * 1000
+            if is_ci:
+                print(f"🔗 Connection established in {connect_time:.2f}ms")
+                # Log connection state
+                network = client_host.get_network()
+                connections = network.get_connections(info.peer_id)
+                if connections:
+                    swarm_conn = connections[0]
+                    if hasattr(swarm_conn, "muxed_conn"):
+                        muxed_conn = swarm_conn.muxed_conn
+                        if isinstance(muxed_conn, QUICConnection):
+                            established = muxed_conn.is_established
+                            print(
+                                f"   QUIC Connection state: established={established}"
+                            )
+                            outbound = muxed_conn._outbound_stream_count
+                            print(f"   Outbound streams: {outbound}")
+                            inbound = muxed_conn._inbound_stream_count
+                            print(f"   Inbound streams: {inbound}")
+                            # Get semaphore limit from config
+                            sem_limit = getattr(
+                                muxed_conn._transport._config,
+                                "NEGOTIATION_SEMAPHORE_LIMIT",
+                                5,
+                            )
+                            print(f"   Negotiation semaphore limit: {sem_limit}")
 
             async def ping_stream(i: int):
                 stream = None
+                stream_start = trio.current_time()
+                stream_start_times[i] = stream_start
                 try:
-                    start = trio.current_time()
+                    if is_ci and i % 10 == 0:  # Log every 10th stream start
+                        print(f"🚀 Starting stream #{i} at {stream_start:.3f}s")
 
+                    new_stream_start = trio.current_time()
                     stream = await client_host.new_stream(
                         info.peer_id, [PING_PROTOCOL_ID]
                     )
+                    new_stream_time = (trio.current_time() - new_stream_start) * 1000
 
+                    if is_ci and i % 10 == 0:
+                        print(f"   Stream #{i} opened in {new_stream_time:.2f}ms")
+
+                    write_start = trio.current_time()
                     await stream.write(b"\x01" * PING_LENGTH)
+                    write_time = (trio.current_time() - write_start) * 1000
+
+                    if is_ci and i % 10 == 0:
+                        print(f"   Stream #{i} write completed in {write_time:.2f}ms")
 
                     # Wait for response with timeout as safety net
+                    read_start = trio.current_time()
                     with trio.fail_after(30):
                         response = await stream.read(PING_LENGTH)
+                    read_time = (trio.current_time() - read_start) * 1000
 
                     if response == b"\x01" * PING_LENGTH:
-                        latency_ms = int((trio.current_time() - start) * 1000)
+                        total_time = (trio.current_time() - stream_start) * 1000
+                        latency_ms = int(total_time)
                         latencies.append(latency_ms)
-                        print(f"[Ping #{i}] Latency: {latency_ms} ms")
+                        if is_ci and i % 10 == 0:
+                            print(
+                                f"   Stream #{i} completed: "
+                                f"total={total_time:.2f}ms, read={read_time:.2f}ms"
+                            )
+                        elif not is_ci:
+                            print(f"[Ping #{i}] Latency: {latency_ms} ms")
                     await stream.close()
                 except Exception as e:
-                    print(f"[Ping #{i}] Failed: {e}")
+                    total_time = (trio.current_time() - stream_start) * 1000
+                    error_type = type(e).__name__
+                    error_msg = (
+                        f"[Ping #{i}] Failed after {total_time:.2f}ms: "
+                        f"{error_type}: {e}"
+                    )
+                    print(error_msg)
                     failures.append(i)
+
+                    # Store detailed failure info for CI/CD
+                    if is_ci:
+                        import traceback
+
+                        failure_details.append(
+                            {
+                                "stream_id": i,
+                                "error_type": type(e).__name__,
+                                "error_msg": str(e),
+                                "time_elapsed_ms": total_time,
+                                "traceback": traceback.format_exc(),
+                            }
+                        )
+                        # Log connection state on failure
+                        try:
+                            network = client_host.get_network()
+                            connections = network.get_connections(info.peer_id)
+                            if connections:
+                                swarm_conn = connections[0]
+                                if hasattr(swarm_conn, "muxed_conn"):
+                                    muxed_conn = swarm_conn.muxed_conn
+                                    if isinstance(muxed_conn, QUICConnection):
+                                        print(f"   ❌ Stream #{i} failure context:")
+                                        established = muxed_conn.is_established
+                                        msg = (
+                                            f"      Connection established: "
+                                            f"{established}"
+                                        )
+                                        print(msg)
+                                        outbound = muxed_conn._outbound_stream_count
+                                        print(f"      Outbound streams: {outbound}")
+                                        inbound = muxed_conn._inbound_stream_count
+                                        print(f"      Inbound streams: {inbound}")
+                                        active = len(muxed_conn._streams)
+                                        print(f"      Active streams: {active}")
+                        except Exception:
+                            pass
+
                     if stream:
                         try:
                             await stream.reset()
@@ -442,6 +560,14 @@ async def test_yamux_stress_ping():
         print(f"Failed Pings: {len(failures)}")
         if failures:
             print(f"❌ Failed stream indices: {failures}")
+            if is_ci and failure_details:
+                print("\n🔍 Detailed Failure Information (CI/CD):")
+                for detail in failure_details[:10]:  # Show first 10 failures
+                    print(f"\n  Stream #{detail['stream_id']}:")
+                    print(f"    Error: {detail['error_type']}: {detail['error_msg']}")
+                    print(f"    Time elapsed: {detail['time_elapsed_ms']:.2f}ms")
+                    if len(failure_details) > 10:
+                        print(f"\n  ... and {len(failure_details) - 10} more failures")
 
         # === Registry Performance Stats ===
         # Collect registry stats from server listener
