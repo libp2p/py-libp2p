@@ -142,7 +142,7 @@ class TestBasicQUICFlow:
 
             async with trio.open_nursery() as nursery:
                 # Start server listener
-                success = await listener.listen(listen_addr, nursery)
+                success = await listener.listen(listen_addr)
                 assert success, "Failed to start server listener"
 
                 # Get server address
@@ -282,7 +282,7 @@ class TestBasicQUICFlow:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
-                success = await listener.listen(listen_addr, nursery)
+                success = await listener.listen(listen_addr)
                 assert success
 
                 server_addr = multiaddr.Multiaddr(

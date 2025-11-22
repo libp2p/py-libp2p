@@ -43,6 +43,9 @@ class TCPListener(IListener):
         self.handler = handler_function
         self._nursery_task: trio.CancelScope | None= None
 
+        self._started = trio.Event()
+        self._nursery: trio.Nursery | None = None
+
     async def listen(self, maddr: Multiaddr) -> bool:
         """
         Put listener in listening mode and wait for incoming connections.
@@ -93,38 +96,31 @@ class TCPListener(IListener):
         # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        started_event = trio.Event()
-        started_listeners = None
-
-        async def nursery_runner():
-            nonlocal started_listeners
-
-            try:
-                async with trio.open_nursery() as nursery:
-                    self._nursery_task = nursery.cancel_scope
-                    listener = await nursery.start(
+        
+        async def run_server():
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                try:
+                    server = await self._nursery.start(
                         serve_tcp,
                         handler,
                         tcp_port,
                         ip4_host_str,
                     )
 
-                    if listener:
-                        started_listeners = listener
-                        self.listeners.extend(started_listeners)
+                    self.listeners.extend(server)
+                    self._started.set()
+                except Exception as e:
+                    logger.error(
+                        f"Exception while starting listener for {maddr}: {e}"
+                    )
+                    self._started.set()
+        self._started = trio.Event()
+        trio.lowlevel.spawn_system_task(run_server)
+        await self._started.wait()
+        
 
-                    started_event.set()
-                    await trio.sleep_forever()
-            except Exception as e:
-                logger.error(
-                    f"Exception while starting listener for {maddr}: {e}"
-                )
-                started_event.set()
-
-        trio.lowlevel.spawn_system_task(nursery_runner)
-        await started_event.wait()
-
-        if started_listeners is None:
+        if len(self.listeners) == 0:
             logger.error(
                 f"Failed to start TCP listener for {maddr}: "
                 f"`nursery.start` returned None. "
@@ -132,6 +128,9 @@ class TCPListener(IListener):
                 "being in use or invalid host."
             )
             return False
+        logger.debug(
+            "TCPListener now serving"
+        )
         return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
@@ -145,13 +144,18 @@ class TCPListener(IListener):
         )
 
     async def close(self) -> None:
-        if self._nursery_task:
-            self._nursery_task.cancel()
+        if self._nursery:
+            self._nursery.cancel_scope.cancel()
+            self._nursery = None 
         
         async with trio.open_nursery() as nursery:
             for listener in self.listeners:
                 nursery.start_soon(listener.aclose)
+
         self.listeners.clear()
+        logger.debug("TCPListener.close completed")
+        
+
 
 class TCP(ITransport):
     async def dial(self, maddr: Multiaddr) -> IRawConnection:

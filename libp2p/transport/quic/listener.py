@@ -87,6 +87,8 @@ class QUICListener(IListener):
         self._quic_configs = quic_configs
         self._config = config
         self._security_manager = security_manager
+        self._started = trio.Event()
+        self._nursery: trio.Nursery | None = None
 
         # Network components
         self._socket: trio.socket.SocketType | None = None
@@ -838,7 +840,7 @@ class QUICListener(IListener):
         except Exception as e:
             logger.debug(f"Transmission error: {e}")
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr) -> bool:
         """Start listening on the given multiaddr with enhanced connection handling."""
         if self._listening:
             raise QUICListenError("Already listening")
@@ -846,22 +848,9 @@ class QUICListener(IListener):
         if not is_quic_multiaddr(maddr):
             raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
 
-        if self._transport._background_nursery:
-            active_nursery = self._transport._background_nursery
-            logger.debug("Using transport background nursery for listener")
-        elif nursery:
-            active_nursery = nursery
-            self._transport._background_nursery = nursery
-            logger.debug("Using provided nursery for listener")
-        else:
-            raise QUICListenError("No nursery available")
-
         try:
             host, port = quic_multiaddr_to_endpoint(maddr)
-
-            # Create and configure socket
             self._socket = await self._create_socket(host, port)
-            self._nursery = active_nursery
 
             # Get the actual bound address
             bound_host, bound_port = self._socket.getsockname()
@@ -871,8 +860,24 @@ class QUICListener(IListener):
 
             self._listening = True
 
-            # Start packet handling loop
-            active_nursery.start_soon(self._handle_incoming_packets)
+            async def _run_background_listener():
+                """
+                Manages the internal nursery for the QUIC packet loop.
+                """
+                async with trio.open_nursery() as nursery:
+                    try:
+                        self._nursery = nursery
+                        self._nursery.start_soon(self._handle_incoming_packets)
+                        self._started.set()
+
+                        await trio.sleep_forever()
+                    except Exception as e:
+                        logger.exception("Failed to start QUIC listener")
+                        self._started.set()
+            
+            self._started = trio.Event()
+            trio.lowlevel.spawn_system_task(_run_background_listener)
+            await self._started.wait()
 
             logger.info(
                 f"QUIC listener started on {bound_maddr} with connection ID support"
@@ -880,6 +885,7 @@ class QUICListener(IListener):
             return True
 
         except Exception as e:
+            # Ensure cleanup if binding or spawning fails
             await self.close()
             raise QUICListenError(f"Failed to start listening: {e}") from e
 
@@ -946,8 +952,15 @@ class QUICListener(IListener):
         self._closed = True
         self._listening = False
 
-        try:
-            # Close all connections
+        try:            
+            if self._nursery:
+                self._nursery.cancel_scope.cancel()
+                self._nursery = None 
+
+            if self._socket:
+                self._socket.close()
+                self._socket = None
+
             async with self._connection_lock:
                 for dest_cid in list(self._connections.keys()):
                     await self._remove_connection(dest_cid)
@@ -955,12 +968,8 @@ class QUICListener(IListener):
                 for dest_cid in list(self._pending_connections.keys()):
                     await self._remove_pending_connection(dest_cid)
 
-            # Close socket
-            if self._socket:
-                self._socket.close()
-                self._socket = None
-
             self._bound_addresses.clear()
+            await trio.sleep(0)
 
             logger.info("QUIC listener closed")
 

@@ -1,8 +1,10 @@
 from collections.abc import Awaitable, Callable
 import logging
+from pdb import run
 import ssl
 from typing import Any
 
+from attr import has
 from multiaddr import Multiaddr
 import trio
 from trio_typing import TaskStatus
@@ -37,9 +39,9 @@ class WebsocketListener(IListener):
         self._server = None
         self._shutdown_event = trio.Event()
         self._nursery: trio.Nursery | None = None
-        self._listeners: Any = None
+        self._listeners: list[Any] = []
+        self._started = trio.Event()
         self._is_wss = False  # Track whether this is a WSS listener
-        self._nursery_task: trio.CancelScope | None= None
 
     async def listen(self, maddr: Multiaddr) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
@@ -143,101 +145,61 @@ class WebsocketListener(IListener):
         # Start the server using nursery.start() like TCP does
         logger.debug("Calling nursery.start()...")
 
-        started_event = trio.Event()
-        started_listeners = None 
-        
-        async def nursery_runner():
-            nonlocal started_listeners
-            
-            try:
-                async with trio.open_nursery() as nursery:
-                    self._nursery_task = nursery.cancel_scope
-                    listener = await nursery.start(
+        async def run_server():
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                try:
+                    server = await self._nursery.start(
                         serve_websocket_tcp,
-                        None,  # No handler needed since it's defined inside serve_websocket_tcp
+                        None,
                         port,
                         host,
                     )
-
-                    if listener:
-                        started_listeners = listener
-                        self._listeners.extend(started_listeners)
-                    
-                    started_event.set()
+                    self._listeners.append(server)
+                    self._started.set()
                     await trio.sleep_forever()
-            except Exception as e:
-                logger.error(
-                    f"Exception while starting listener for {maddr}: {e}"
-                )
-                started_event.set()
-        
-        trio.lowlevel.spawn_system_task(nursery_runner)
-        await started_event.wait()
 
-        logger.debug(f"nursery.start() returned: {started_listeners}")
-        if started_listeners is None:
+                except Exception as e:
+                    logger.exception("Failed to start WS server")
+                    self._started.set()
+
+        self._started = trio.Event()
+        trio.lowlevel.spawn_system_task(run_server)
+        await self._started.wait()
+
+        if len(self._listeners) == 0:
             logger.error(f"Failed to start WebSocket listener for {maddr}")
             return False
 
         logger.debug(
             "WebsocketListener.listen returning True with WebSocketServer object"
         )
-        return True
+        return True   
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
-        if not hasattr(self, "_listeners") or not self._listeners:
-            logger.debug("No listeners available for get_addrs()")
-            return ()
-
-        # Handle WebSocketServer objects
-        if hasattr(self._listeners, "port"):
-            # This is a WebSocketServer object
-            port = self._listeners.port
-            # Create a multiaddr from the port with correct WSS/WS protocol
+        if self._listeners and hasattr(self._listeners[0], "port"):
+            server = self._listeners[0]
+            port = server.port
             protocol = "wss" if self._is_wss else "ws"
             return (Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/{protocol}"),)
-        else:
-            # This is a list of listeners (like TCP)
-            listeners = self._listeners
-            # Get addresses from listeners like TCP does
-            return tuple(
-                _multiaddr_from_socket(listener.socket, self._is_wss)
-                for listener in listeners
-            )
+       
+        return tuple()
 
     async def close(self) -> None:
         """Close the WebSocket listener and stop accepting new connections"""
-        
         logger.debug("WebsocketListener.close called. Closing Websocket server")
-        if self._nursery_task:
-            self._nursery_task.cancel()
+        
+        if self._nursery:
+            self._nursery.cancel_scope.cancel()
+            self._nursery = None
 
-        if hasattr(self, "_listeners") and self._listeners:
-            # Signal shutdown
-            self._shutdown_event.set()
 
-            # Close the WebSocket server
-            if hasattr(self._listeners, "aclose"):
-                # This is a WebSocketServer object
-                logger.debug("Closing WebSocket server")
-                await self._listeners.aclose()
-                logger.debug("WebSocket server closed")
-            elif isinstance(self._listeners, (list, tuple)):
-                # This is a list of listeners (like TCP)
-                logger.debug("Closing TCP listeners")
-                for listener in self._listeners:
-                    await listener.aclose()
-                logger.debug("TCP listeners closed")
-            else:
-                # Unknown type, try to close it directly
-                logger.debug("Closing unknown listener type")
-                if hasattr(self._listeners, "close"):
-                    self._listeners.close()
-                logger.debug("Unknown listener closed")
+        async with trio.open_nursery() as nursery:
+            for listener in self._listeners:
+                nursery.start_soon(listener.aclose)
 
-            # Clear the listeners reference
-            self._listeners = None
-            logger.debug("WebsocketListener.close completed")
+        self._listeners.clear()
+        logger.debug("WebsocketListener.close completed")
 
 
 def _multiaddr_from_socket(

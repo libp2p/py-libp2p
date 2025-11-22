@@ -61,35 +61,31 @@ class TestQUICListener:
     @pytest.mark.trio
     async def test_listener_invalid_multiaddr(self, listener: QUICListener):
         """Test listener with invalid multiaddr."""
-        async with trio.open_nursery() as nursery:
-            invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+        invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
 
-            with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
-                await listener.listen(invalid_addr, nursery)
+        with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
+            await listener.listen(invalid_addr)
 
+           
     @pytest.mark.trio
     async def test_listener_basic_lifecycle(self, listener: QUICListener):
         """Test basic listener lifecycle."""
         listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")  # Port 0 = random
 
-        async with trio.open_nursery() as nursery:
-            # Start listening
-            success = await listener.listen(listen_addr, nursery)
-            assert success
-            assert listener.is_listening()
+        # Start listening
+        success = await listener.listen(listen_addr)
+        assert success
+        assert listener.is_listening()
 
-            # Check bound addresses
-            addrs = listener.get_addrs()
-            assert len(addrs) == 1
+        # Check bound addresses
+        addrs = listener.get_addrs()
+        assert len(addrs) == 1
 
-            # Check stats
-            stats = listener.get_stats()
-            assert stats["is_listening"] is True
-            assert stats["active_connections"] == 0
-            assert stats["pending_connections"] == 0
-
-            # Sender Cancel Signal
-            nursery.cancel_scope.cancel()
+        # Check stats
+        stats = listener.get_stats()
+        assert stats["is_listening"] is True
+        assert stats["active_connections"] == 0
+        assert stats["pending_connections"] == 0
 
         await listener.close()
         assert not listener.is_listening()
@@ -100,19 +96,15 @@ class TestQUICListener:
         listen_addr = create_quic_multiaddr("127.0.0.1", 9001, "/quic")
 
         try:
-            async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
-                await trio.sleep(0.01)
+            success = await listener.listen(listen_addr)
+            assert success
+            await trio.sleep(0.01)
 
-                addrs = listener.get_addrs()
-                assert len(addrs) > 0
-                async with trio.open_nursery() as nursery2:
-                    with pytest.raises(QUICListenError, match="Already listening"):
-                        await listener.listen(listen_addr, nursery2)
-                        nursery2.cancel_scope.cancel()
-
-                nursery.cancel_scope.cancel()
+            addrs = listener.get_addrs()
+            assert len(addrs) > 0
+            with pytest.raises(QUICListenError, match="Already listening"):
+                await listener.listen(listen_addr)
+                
         finally:
             await listener.close()
 
@@ -122,15 +114,12 @@ class TestQUICListener:
         listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
 
         try:
-            async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
-                await trio.sleep(0.5)
+            success = await listener.listen(listen_addr)
+            assert success
+            await trio.sleep(0.5)
 
-                addrs = listener.get_addrs()
-                assert len(addrs) > 0
-
-                nursery.cancel_scope.cancel()
+            addrs = listener.get_addrs()
+            assert len(addrs) > 0
         finally:
             await listener.close()
 
