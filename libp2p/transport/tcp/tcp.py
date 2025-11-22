@@ -5,7 +5,6 @@ from collections.abc import (
 )
 import logging
 
-from typing import List
 from multiaddr import (
     Multiaddr,
 )
@@ -94,8 +93,7 @@ class TCPListener(IListener):
         # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        
-        async def run_server():
+        async def run_server() -> None:
             async with trio.open_nursery() as nursery:
                 self._nursery = nursery
                 try:
@@ -109,14 +107,12 @@ class TCPListener(IListener):
                     self.listeners.extend(server)
                     self._started.set()
                 except Exception as e:
-                    logger.error(
-                        f"Exception while starting listener for {maddr}: {e}"
-                    )
+                    logger.error(f"Exception while starting listener for {maddr}: {e}")
                     self._started.set()
+
         self._started = trio.Event()
         trio.lowlevel.spawn_system_task(run_server)
         await self._started.wait()
-        
 
         if len(self.listeners) == 0:
             logger.error(
@@ -126,9 +122,7 @@ class TCPListener(IListener):
                 "being in use or invalid host."
             )
             return False
-        logger.debug(
-            "TCPListener now serving"
-        )
+        logger.debug("TCPListener now serving")
         return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
@@ -144,15 +138,14 @@ class TCPListener(IListener):
     async def close(self) -> None:
         if self._nursery:
             self._nursery.cancel_scope.cancel()
-            self._nursery = None 
-        
+            self._nursery = None
+
         async with trio.open_nursery() as nursery:
             for listener in self.listeners:
                 nursery.start_soon(listener.aclose)
 
         self.listeners.clear()
         logger.debug("TCPListener.close completed")
-        
 
 
 class TCP(ITransport):

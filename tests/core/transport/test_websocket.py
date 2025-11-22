@@ -11,8 +11,11 @@ except ImportError:
         from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
     except ImportError:  # pragma: no cover - fallback if dependency missing
         ExceptionGroup = Exception  # type: ignore[assignment]
+import ssl
+
 from multiaddr import Multiaddr
 import trio
+from trio_websocket import open_websocket_url
 
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
@@ -23,19 +26,13 @@ from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.upgrader import TransportUpgrader
+from libp2p.transport.websocket.connection import P2PWebSocketConnection
+from libp2p.transport.websocket.listener import WebsocketListener
 from libp2p.transport.websocket.multiaddr_utils import (
     is_valid_websocket_multiaddr,
     parse_websocket_multiaddr,
 )
 from libp2p.transport.websocket.transport import WebsocketTransport
-
-import trio
-import pytest
-import ssl
-from libp2p.transport.websocket.listener import WebsocketListener
-from libp2p.transport.websocket.connection import P2PWebSocketConnection
-from multiaddr import Multiaddr
-from trio_websocket import open_websocket_url
 
 logger = logging.getLogger(__name__)
 
@@ -794,8 +791,6 @@ async def test_websocket_host_pair_data_exchange():
 @pytest.mark.trio
 async def test_wss_host_pair_data_exchange():
     """Test WSS host pair with actual data exchange using host_pair_factory pattern"""
-    import ssl
-
     from libp2p import create_yamux_muxer_option, new_host
     from libp2p.crypto.secp256k1 import create_new_key_pair
     from libp2p.custom_types import TProtocol
@@ -1097,8 +1092,6 @@ def test_wss_multiaddr_parsing():
 @pytest.mark.trio
 async def test_wss_transport_creation():
     """Test WSS transport creation with TLS configuration."""
-    import ssl
-
     # Create TLS contexts
     client_ssl_context = ssl.create_default_context()
     server_ssl_context = ssl.create_default_context()
@@ -1199,11 +1192,11 @@ async def test_wss_listen_without_tls_config():
 
     # This should raise an error when TLS config is not provided
     try:
-        #nursery = trio.lowlevel.current_task().parent_nursery
-        #if nursery is None:
+        # nursery = trio.lowlevel.current_task().parent_nursery
+        # if nursery is None:
         #    pytest.fail("No parent nursery available for test")
         # Type assertion to help the type checker understand nursery is not None
-        #assert nursery is not None
+        # assert nursery is not None
         await listener.listen(wss_maddr)
         pytest.fail("WSS listen without TLS config should have failed")
     except ValueError as e:
@@ -1217,8 +1210,6 @@ async def test_wss_listen_without_tls_config():
 @pytest.mark.trio
 async def test_wss_listen_with_tls_config():
     """Test WSS listen with TLS configuration."""
-    import ssl
-
     # Create server TLS context
     server_ssl_context = ssl.create_default_context()
     server_ssl_context.check_hostname = False
@@ -1413,7 +1404,6 @@ async def test_handshake_timeout_creation():
 @pytest.mark.trio
 async def test_connection_state_tracking():
     """Test WebSocket connection state tracking."""
-    from libp2p.transport.websocket.connection import P2PWebSocketConnection
 
     # Create a mock WebSocket connection
     class MockWebSocketConnection:
@@ -1449,7 +1439,6 @@ async def test_connection_state_tracking():
 @pytest.mark.trio
 async def test_concurrent_close_handling():
     """Test concurrent close handling similar to Go implementation."""
-    from libp2p.transport.websocket.connection import P2PWebSocketConnection
 
     # Create a mock WebSocket connection that tracks close calls
     class MockWebSocketConnection:
@@ -1486,7 +1475,6 @@ async def test_concurrent_close_handling():
 @pytest.mark.trio
 async def test_zero_byte_write_handling():
     """Test zero-byte write handling similar to Go implementation."""
-    from libp2p.transport.websocket.connection import P2PWebSocketConnection
 
     # Create a mock WebSocket connection that tracks write calls
     class MockWebSocketConnection:
@@ -1561,7 +1549,6 @@ async def test_websocket_listener_addr_format():
     assert getattr(listener_ws, "_handshake_timeout") == 15.0  # Default timeout
 
     # Test WSS listener with TLS config
-    import ssl
 
     tls_config = ssl.create_default_context()
     transport_wss = WebsocketTransport(upgrader, tls_server_config=tls_config)
@@ -1639,29 +1626,29 @@ async def test_websocket_transport_can_dial():
             f"Address {addr_str} should be invalid"
         )
 
+
 def get_ws_maddr(port=0, secure=False):
     protocol = "wss" if secure else "ws"
     return Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/{protocol}")
+
 
 @pytest.mark.trio
 async def test_ws_listener_lifecycle_success():
     """
     Test successful start, serving, and clean shutdown of internal nursery (WS).
     """
+
     async def dummy_handler(conn):
         await trio.sleep(0)
 
-    listener = WebsocketListener(
-        handler=dummy_handler,
-        upgrader=create_upgrader()
-    )
+    listener = WebsocketListener(handler=dummy_handler, upgrader=create_upgrader())
     maddr = get_ws_maddr(0)
 
     success = await listener.listen(maddr)
     assert success is True
     assert len(listener._listeners) == 1
     assert listener._nursery is not None
-    
+
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     port = addrs[0].value_for_protocol("tcp")
@@ -1675,44 +1662,47 @@ async def test_ws_listener_lifecycle_success():
         pytest.fail(f"Failed to connect to WS listener: {e}")
 
     await listener.close()
-    
+
     assert listener._nursery is None
     assert len(listener._listeners) == 0
+
 
 @pytest.mark.trio
 async def test_wss_listener_configuration_error():
     """
     Test that WSS listener fails without TLS config.
     """
+
     async def dummy_handler(conn):
         await trio.sleep(0)
 
     listener = WebsocketListener(
-        handler=dummy_handler,
-        upgrader=create_upgrader(),
-        tls_config=None
+        handler=dummy_handler, upgrader=create_upgrader(), tls_config=None
     )
 
     maddr = get_ws_maddr(0, secure=True)
     with pytest.raises(ValueError, match="TLS configuration"):
         await listener.listen(maddr)
 
+
 @pytest.mark.trio
 async def test_ws_listener_double_close():
     """
     Test that calling close() multiple times is safe for WebSocketListener.
     """
+
     async def dummy_handler(conn):
         await trio.sleep(0)
 
     listener = WebsocketListener(handler=dummy_handler, upgrader=create_upgrader())
     await listener.listen(get_ws_maddr(0))
-    
+
     await listener.close()
     try:
         await listener.close()
     except Exception as e:
         pytest.fail(f"Second close() raised exception: {e}")
+
 
 @pytest.mark.trio
 async def test_ws_listener_bind_error():
@@ -1729,8 +1719,8 @@ async def test_ws_listener_bind_error():
 
     listener = WebsocketListener(handler=dummy_handler, upgrader=create_upgrader())
     maddr = get_ws_maddr(port)
-    
+
     success = await listener.listen(maddr)
-    
+
     assert success is False
     sock.close()

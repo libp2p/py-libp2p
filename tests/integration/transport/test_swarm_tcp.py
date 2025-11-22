@@ -1,7 +1,8 @@
-import trio
 import pytest
-from libp2p.transport.tcp.tcp import TCP
 from multiaddr import Multiaddr
+
+from libp2p.transport.tcp.tcp import TCP
+
 
 class MockSwarm:
     def __init__(self):
@@ -19,14 +20,16 @@ class MockSwarm:
         while True:
             try:
                 data = await stream.read(1024)
-                if not data: break
+                if not data:
+                    break
                 await stream.write(data)
-            except:
+            except Exception:
                 break
 
     async def shutdown(self):
         for listener in self.listeners:
             await listener.close()
+
 
 @pytest.mark.trio
 async def test_swarm_integration_flow():
@@ -38,12 +41,12 @@ async def test_swarm_integration_flow():
 
     success, listener = await swarm.add_listener(maddr)
     assert success is True
-    
+
     listen_addr = listener.get_addrs()[0]
 
     transport = TCP()
     conn = await transport.dial(listen_addr)
-    
+
     test_data = b"Hello"
     await conn.write(test_data)
     read_data = await conn.read(len(test_data))

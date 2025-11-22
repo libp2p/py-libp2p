@@ -115,7 +115,6 @@ class QUICListener(IListener):
         # Listener state
         self._closed = False
         self._listening = False
-        self._nursery: trio.Nursery | None = None
 
         # Performance tracking
         self._stats = {
@@ -860,7 +859,7 @@ class QUICListener(IListener):
 
             self._listening = True
 
-            async def _run_background_listener():
+            async def _run_background_listener() -> None:
                 """
                 Manages the internal nursery for the QUIC packet loop.
                 """
@@ -871,10 +870,10 @@ class QUICListener(IListener):
                         self._started.set()
 
                         await trio.sleep_forever()
-                    except Exception as e:
+                    except Exception:
                         logger.exception("Failed to start QUIC listener")
                         self._started.set()
-            
+
             self._started = trio.Event()
             trio.lowlevel.spawn_system_task(_run_background_listener)
             await self._started.wait()
@@ -952,10 +951,10 @@ class QUICListener(IListener):
         self._closed = True
         self._listening = False
 
-        try:            
+        try:
             if self._nursery:
                 self._nursery.cancel_scope.cancel()
-                self._nursery = None 
+                self._nursery = None
 
             if self._socket:
                 self._socket.close()

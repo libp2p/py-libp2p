@@ -17,6 +17,7 @@ from libp2p.transport.tcp.tcp import (
     TCP,
 )
 
+
 @pytest.mark.trio
 async def test_tcp_listener():
     transport = TCP()
@@ -66,6 +67,7 @@ async def test_tcp_dial():
 def get_local_maddr(port=0):
     return Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
 
+
 @pytest.mark.trio
 async def test_tcp_listener_lifecycle_success():
     """
@@ -85,7 +87,7 @@ async def test_tcp_listener_lifecycle_success():
     assert success is True
     assert len(listener.listeners) == 1
     assert listener._nursery is not None
-    
+
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     listen_port = addrs[0].value_for_protocol("tcp")
@@ -96,46 +98,50 @@ async def test_tcp_listener_lifecycle_success():
     await handler_called.wait()
     await client_conn.close()
     await listener.close()
-    
+
     assert listener._nursery is None or listener._nursery.cancel_scope.cancel_called
     assert len(listener.listeners) == 0
+
 
 @pytest.mark.trio
 async def test_tcp_listener_bind_error():
     """
     Test error propagation when binding to a used port.
     """
+
     async def dummy_handler(conn):
         await trio.sleep(0)
 
     transport = TCP()
     listener_a = transport.create_listener(dummy_handler)
-    
+
     await listener_a.listen(get_local_maddr(0))
     addr_a = listener_a.get_addrs()[0]
-    
+
     listener_b = transport.create_listener(dummy_handler)
-    
+
     success = await listener_b.listen(addr_a)
-    
+
     assert success is False
     assert len(listener_b.listeners) == 0
-    
+
     await listener_a.close()
     await listener_b.close()
+
 
 @pytest.mark.trio
 async def test_tcp_listener_double_close():
     """
     Test that calling close() multiple times is safe.
     """
+
     async def dummy_handler(conn):
         await trio.sleep(0)
 
     transport = TCP()
     listener = transport.create_listener(dummy_handler)
     await listener.listen(get_local_maddr(0))
-    
+
     await listener.close()
     try:
         await listener.close()

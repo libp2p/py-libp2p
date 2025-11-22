@@ -1,10 +1,8 @@
 from collections.abc import Awaitable, Callable
 import logging
-from pdb import run
 import ssl
 from typing import Any
 
-from attr import has
 from multiaddr import Multiaddr
 import trio
 from trio_typing import TaskStatus
@@ -145,7 +143,7 @@ class WebsocketListener(IListener):
         # Start the server using nursery.start() like TCP does
         logger.debug("Calling nursery.start()...")
 
-        async def run_server():
+        async def run_server() -> None:
             async with trio.open_nursery() as nursery:
                 self._nursery = nursery
                 try:
@@ -159,7 +157,7 @@ class WebsocketListener(IListener):
                     self._started.set()
                     await trio.sleep_forever()
 
-                except Exception as e:
+                except Exception:
                     logger.exception("Failed to start WS server")
                     self._started.set()
 
@@ -174,7 +172,7 @@ class WebsocketListener(IListener):
         logger.debug(
             "WebsocketListener.listen returning True with WebSocketServer object"
         )
-        return True   
+        return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         if self._listeners and hasattr(self._listeners[0], "port"):
@@ -182,13 +180,13 @@ class WebsocketListener(IListener):
             port = server.port
             protocol = "wss" if self._is_wss else "ws"
             return (Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/{protocol}"),)
-       
+
         return tuple()
 
     async def close(self) -> None:
         """Close the WebSocket listener and stop accepting new connections"""
         logger.debug("WebsocketListener.close called. Closing Websocket server")
-        
+
         if self._nursery:
             self._nursery.cancel_scope.cancel()
             self._nursery = None
