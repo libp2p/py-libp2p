@@ -314,6 +314,62 @@ class BasicHost(IHost):
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
 
+    def _preferred_protocol(
+        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+    ) -> TProtocol | None:
+        """
+        Check if peer already supports any of the requested protocols.
+
+        This queries the peerstore for cached protocol information from the
+        identify exchange. If the peer supports any of the requested protocols,
+        we can skip the multiselect negotiation entirely.
+
+        Note: Protocol caching only works for well-known protocols (ping, identify)
+        to avoid issues with protocols that require proper negotiation.
+
+        :param peer_id: peer ID to check
+        :param protocol_ids: list of protocol IDs to check
+        :return: first supported protocol, or None if not cached
+        """
+        # List of protocols safe for caching (don't require complex negotiation)
+        CACHEABLE_PROTOCOLS = {
+            "/ipfs/ping/1.0.0",
+            "/ipfs/id/1.0.0",
+            "/ipfs/id/push/1.0.0",
+        }
+
+        try:
+            # Check if peer exists in peerstore first (avoid auto-creation)
+            if peer_id not in self.peerstore.peer_ids():
+                return None
+
+            # Only use protocol caching if we have a connection to this peer
+            # This ensures identify has completed
+            connections = self._network.connections.get(peer_id, [])
+            if not connections:
+                return None
+
+            # Only cache protocols that are in the safe list
+            cacheable_ids = [p for p in protocol_ids if str(p) in CACHEABLE_PROTOCOLS]
+            if not cacheable_ids:
+                return None
+
+            # Query peerstore for supported protocols
+            # This returns protocols in the order they appear in protocol_ids
+            supported = self.peerstore.supports_protocols(
+                peer_id, [str(p) for p in cacheable_ids]
+            )
+            if supported:
+                # Return the first supported protocol (cast back to TProtocol)
+                return TProtocol(supported[0])
+        except Exception as e:
+            # If peer not in peerstore or any error, fall back to negotiation
+            logger.debug(
+                f"Could not query peerstore for peer {peer_id}: {e}. "
+                "Will negotiate protocol."
+            )
+        return None
+
     async def new_stream(
         self,
         peer_id: ID,
@@ -325,6 +381,17 @@ class BasicHost(IHost):
         :return: stream: new stream created
         """
         net_stream = await self._network.new_stream(peer_id)
+
+        # Check if we already know the peer supports any of these protocols
+        # from the identify exchange. If so, skip multiselect negotiation.
+        preferred = self._preferred_protocol(peer_id, protocol_ids)
+        if preferred is not None:
+            logger.debug(
+                f"Using cached protocol {preferred} for peer {peer_id}, "
+                "skipping negotiation"
+            )
+            net_stream.set_protocol(preferred)
+            return net_stream
 
         # Perform protocol muxing to determine protocol to use
         # For QUIC connections, use connection-level semaphore to limit
