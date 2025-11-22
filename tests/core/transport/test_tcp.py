@@ -162,16 +162,10 @@ async def test_tcp_yamux_stress_ping():
                         if completed_count[0] == STREAM_COUNT:
                             completion_event.set()
 
-            # Use same semaphore limit as QUIC test for fair comparison
-            semaphore = trio.Semaphore(8)
-
-            async def ping_stream_with_semaphore(i: int):
-                async with semaphore:
-                    await ping_stream(i)
-
+            # No semaphore limit - run all streams concurrently
             async with trio.open_nursery() as nursery:
                 for i in range(STREAM_COUNT):
-                    nursery.start_soon(ping_stream_with_semaphore, i)
+                    nursery.start_soon(ping_stream, i)
 
                 with trio.fail_after(120):
                     await completion_event.wait()

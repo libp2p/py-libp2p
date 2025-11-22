@@ -11,6 +11,7 @@ This test focuses on identifying where the accept_stream issue occurs.
 """
 
 import logging
+import os
 
 import pytest
 import multiaddr
@@ -27,15 +28,19 @@ from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.utils import create_quic_multiaddr
 
-# Set up logging to see what's happening
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger("libp2p.transport.quic").setLevel(logging.DEBUG)
-logging.getLogger("libp2p.host").setLevel(logging.DEBUG)
-logging.getLogger("libp2p.network").setLevel(logging.DEBUG)
-logging.getLogger("libp2p.protocol_muxer").setLevel(logging.DEBUG)
+# Set up logging - respect LIBP2P_DEBUG environment variable
+# Only configure basic logging if LIBP2P_DEBUG is not set
+if not os.environ.get("LIBP2P_DEBUG"):
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    logging.getLogger("multiaddr").setLevel(logging.WARNING)
+    # If LIBP2P_DEBUG is not set, we still want some visibility in tests
+    logging.getLogger("libp2p.transport.quic").setLevel(logging.INFO)
+    logging.getLogger("libp2p.host").setLevel(logging.INFO)
+    logging.getLogger("libp2p.network").setLevel(logging.INFO)
+    logging.getLogger("libp2p.protocol_muxer").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -361,6 +366,7 @@ async def test_yamux_stress_ping():
         except Exception:
             await stream.reset()
 
+    # Set handler before starting server
     server_host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
     async with server_host.run(listen_addrs=[listen_addr]):
@@ -377,8 +383,12 @@ async def test_yamux_stress_ping():
         client_host = new_host(listen_addrs=[client_listen_addr])
 
         async with client_host.run(listen_addrs=[client_listen_addr]):
-            # connect() now automatically waits for connection to be fully established
-            # (QUIC handshake complete, muxer ready) before returning
+            # Wait for client to be ready
+            while not client_host.get_addrs():
+                await trio.sleep(0.01)
+
+            # connect() now ensures connection is fully established and ready
+            # (QUIC handshake complete, muxer ready, event_started set)
             await client_host.connect(info)
 
             async def ping_stream(i: int):
@@ -416,41 +426,10 @@ async def test_yamux_stress_ping():
                         if completed_count[0] == STREAM_COUNT:
                             completion_event.set()
 
-            # Throttle concurrent stream openings to prevent multiselect negotiation
-            # contention. QUICConnection limits concurrent negotiations via
-            # _negotiation_semaphore (configurable via NEGOTIATION_SEMAPHORE_LIMIT),
-            # so we match that limit here to prevent timeouts. Default is 5.
-            # Using a higher limit causes streams to wait and timeout when
-            # they exceed the connection's capacity. This is test-only -
-            # real apps don't need throttling.
-            # Get semaphore limit from transport config if available
-            semaphore_limit = 5  # Default
-            network = server_host.get_network()
-            if hasattr(network, "listeners"):
-                # Type ignore: listeners attribute exists but not in interface
-                listeners = getattr(network, "listeners", {})  # type: ignore
-                for listener in listeners.values():
-                    # Type ignore: _transport and _config are QUIC-specific attributes
-                    if hasattr(listener, "_transport"):
-                        transport = getattr(listener, "_transport", None)  # type: ignore
-                        if transport and hasattr(transport, "_config"):
-                            config = getattr(transport, "_config", None)  # type: ignore
-                            if config and hasattr(
-                                config, "NEGOTIATION_SEMAPHORE_LIMIT"
-                            ):
-                                semaphore_limit = (
-                                    config.NEGOTIATION_SEMAPHORE_LIMIT  # type: ignore
-                                )
-                                break
-            semaphore = trio.Semaphore(semaphore_limit)
-
-            async def ping_stream_with_semaphore(i: int):
-                async with semaphore:
-                    await ping_stream(i)
-
+            # No semaphore limit - run all streams concurrently to test QUIC behavior
             async with trio.open_nursery() as nursery:
                 for i in range(STREAM_COUNT):
-                    nursery.start_soon(ping_stream_with_semaphore, i)
+                    nursery.start_soon(ping_stream, i)
 
                 # Wait for all streams to complete (event-driven, not polling)
                 with trio.fail_after(120):  # Safety timeout

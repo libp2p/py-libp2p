@@ -459,6 +459,13 @@ class BasicHost(IHost):
         connection, connect will issue a dial, and block until a connection is
         opened, or an error is returned.
 
+        This method ensures the connection is fully established and ready for
+        streams before returning, including:
+        - QUIC handshake completion
+        - Muxer initialization
+        - Connection registration in swarm
+        - Stream handler readiness
+
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
@@ -466,9 +473,29 @@ class BasicHost(IHost):
 
         # there is already a connection to this peer
         if peer_info.peer_id in self._network.connections:
-            return
+            connections = self._network.connections[peer_info.peer_id]
+            if connections:
+                # Verify existing connection is ready
+                swarm_conn = connections[0]
+                if (
+                    hasattr(swarm_conn, "event_started")
+                    and not swarm_conn.event_started.is_set()
+                ):
+                    await swarm_conn.event_started.wait()
+                return
 
-        await self._network.dial_peer(peer_info.peer_id)
+        # Dial the peer - this will call add_conn which waits for event_started
+        connections = await self._network.dial_peer(peer_info.peer_id)
+
+        # Ensure connection is fully ready before returning
+        # dial_peer returns INetConn (SwarmConn) objects which have event_started
+        if connections:
+            swarm_conn = connections[0]
+            # Wait for connection to be fully started and ready for streams
+            # SwarmConn has event_started which is set after muxer and
+            # stream handlers are ready
+            if hasattr(swarm_conn, "event_started"):
+                await swarm_conn.event_started.wait()
 
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)

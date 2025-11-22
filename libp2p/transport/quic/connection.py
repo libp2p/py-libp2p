@@ -1433,7 +1433,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:
-            # Close all streams gracefully
+            # Close all streams gracefully, but limit concurrency to prevent
+            # excessive CPU usage when many streams fail simultaneously
             stream_close_tasks = []
             for stream in list(self._streams.values()):
                 if stream.can_write() or stream.can_read():
@@ -1441,17 +1442,24 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             if stream_close_tasks and self._nursery:
                 try:
-                    # Close streams concurrently with timeout
+                    # Close streams in batches to prevent overwhelming the system
+                    # when many streams fail simultaneously (e.g., 100 streams)
+                    batch_size = 20  # Close streams in batches of 20
                     with trio.move_on_after(self.CONNECTION_CLOSE_TIMEOUT):
-                        async with trio.open_nursery() as close_nursery:
-                            for task in stream_close_tasks:
-                                close_nursery.start_soon(task)
+                        for i in range(0, len(stream_close_tasks), batch_size):
+                            batch = stream_close_tasks[i : i + batch_size]
+                            async with trio.open_nursery() as close_nursery:
+                                for task in batch:
+                                    close_nursery.start_soon(task)
                 except Exception as e:
                     logger.warning(f"Error during graceful stream close: {e}")
-                    # Force reset remaining streams
-                    for stream in self._streams.values():
+                    # Force reset remaining streams quickly without batching
+                    # to prevent resource leaks
+                    for stream in list(self._streams.values()):
                         try:
-                            await stream.reset(error_code=0)
+                            # Use move_on_after to prevent hanging on stuck streams
+                            with trio.move_on_after(0.1):  # 100ms per stream max
+                                await stream.reset(error_code=0)
                         except Exception:
                             pass
 
