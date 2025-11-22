@@ -126,7 +126,7 @@ class QUICTransportConfig(ConnectionConfig):
     negotiate_timeout for optimal performance.
     """
 
-    NEGOTIATE_TIMEOUT: float = 15.0
+    NEGOTIATE_TIMEOUT: float = 30.0
     """Timeout for multiselect protocol negotiation (seconds).
 
     This is the maximum time allowed for a single protocol negotiation to complete.

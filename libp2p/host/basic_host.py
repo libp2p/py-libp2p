@@ -79,7 +79,7 @@ from multiaddr import Multiaddr
 
 
 logger = logging.getLogger("libp2p.network.basic_host")
-DEFAULT_NEGOTIATE_TIMEOUT = 15  # Increased to 15s for high-concurrency scenarios
+DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
 
 

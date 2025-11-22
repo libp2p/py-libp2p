@@ -43,6 +43,9 @@ if not os.environ.get("LIBP2P_DEBUG"):
     logging.getLogger("libp2p.protocol_muxer").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Enable verbose QUIC stress test logging. Set to False once the test is stable.
+QUIC_STRESS_TEST_DEBUG = True
+
 
 class TestBasicQUICFlow:
     """Test basic QUIC client-server communication flow."""
@@ -342,18 +345,12 @@ class TestBasicQUICFlow:
         print("✅ TIMEOUT TEST PASSED!")
 
 
-def _is_ci_environment() -> bool:
-    """Check if running in CI/CD environment."""
-    ci_vars = ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "JENKINS_URL", "CIRCLECI"]
-    return any(os.environ.get(var) for var in ci_vars)
-
-
 @pytest.mark.trio
 @pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_yamux_stress_ping():
-    # Enable debug logging in CI/CD for this test
-    is_ci = _is_ci_environment()
-    if is_ci:
+    # Enable debug logging when QUICK_STRESS_TEST_DEBUG=true
+    debug_enabled = QUIC_STRESS_TEST_DEBUG
+    if debug_enabled:
         # Enable debug logging for QUIC-related modules in CI/CD
         debug_loggers = [
             "libp2p.transport.quic",
@@ -416,7 +413,7 @@ async def test_yamux_stress_ping():
             connect_start = trio.current_time()
             await client_host.connect(info)
             connect_time = (trio.current_time() - connect_start) * 1000
-            if is_ci:
+            if debug_enabled:
                 print(f"🔗 Connection established in {connect_time:.2f}ms")
                 # Log connection state
                 network = client_host.get_network()
@@ -447,7 +444,7 @@ async def test_yamux_stress_ping():
                 stream_start = trio.current_time()
                 stream_start_times[i] = stream_start
                 try:
-                    if is_ci and i % 10 == 0:  # Log every 10th stream start
+                    if debug_enabled and i % 10 == 0:  # Log every 10th stream start
                         print(f"🚀 Starting stream #{i} at {stream_start:.3f}s")
 
                     new_stream_start = trio.current_time()
@@ -456,14 +453,14 @@ async def test_yamux_stress_ping():
                     )
                     new_stream_time = (trio.current_time() - new_stream_start) * 1000
 
-                    if is_ci and i % 10 == 0:
+                    if debug_enabled and i % 10 == 0:
                         print(f"   Stream #{i} opened in {new_stream_time:.2f}ms")
 
                     write_start = trio.current_time()
                     await stream.write(b"\x01" * PING_LENGTH)
                     write_time = (trio.current_time() - write_start) * 1000
 
-                    if is_ci and i % 10 == 0:
+                    if debug_enabled and i % 10 == 0:
                         print(f"   Stream #{i} write completed in {write_time:.2f}ms")
 
                     # Wait for response with timeout as safety net
@@ -476,12 +473,12 @@ async def test_yamux_stress_ping():
                         total_time = (trio.current_time() - stream_start) * 1000
                         latency_ms = int(total_time)
                         latencies.append(latency_ms)
-                        if is_ci and i % 10 == 0:
+                        if debug_enabled and i % 10 == 0:
                             print(
                                 f"   Stream #{i} completed: "
                                 f"total={total_time:.2f}ms, read={read_time:.2f}ms"
                             )
-                        elif not is_ci:
+                        elif not debug_enabled:
                             print(f"[Ping #{i}] Latency: {latency_ms} ms")
                     await stream.close()
                 except Exception as e:
@@ -494,8 +491,8 @@ async def test_yamux_stress_ping():
                     print(error_msg)
                     failures.append(i)
 
-                    # Store detailed failure info for CI/CD
-                    if is_ci:
+                    # Store detailed failure info when debug logging is enabled
+                    if debug_enabled:
                         import traceback
 
                         failure_details.append(
@@ -560,7 +557,7 @@ async def test_yamux_stress_ping():
         print(f"Failed Pings: {len(failures)}")
         if failures:
             print(f"❌ Failed stream indices: {failures}")
-            if is_ci and failure_details:
+            if debug_enabled and failure_details:
                 print("\n🔍 Detailed Failure Information (CI/CD):")
                 for detail in failure_details[:10]:  # Show first 10 failures
                     print(f"\n  Stream #{detail['stream_id']}:")
