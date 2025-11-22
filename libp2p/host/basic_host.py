@@ -12,15 +12,19 @@ import logging
 from typing import (
     TYPE_CHECKING,
 )
+import weakref
 
 import multiaddr
+import trio
 
 from libp2p.abc import (
     IHost,
     IMuxedConn,
     INetConn,
     INetStream,
+    INetwork,
     INetworkService,
+    INotifee,
     IPeerStore,
     IRawConnection,
 )
@@ -40,6 +44,19 @@ from libp2p.host.defaults import (
 )
 from libp2p.host.exceptions import (
     StreamFailure,
+)
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+)
+from libp2p.identity.identify.identify import (
+    ID as IdentifyID,
+)
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify as IdentifyMsg,
+)
+from libp2p.identity.identify_push.identify_push import (
+    ID_PUSH as IdentifyPushID,
+    _update_peerstore_from_identify,
 )
 from libp2p.peer.id import (
     ID,
@@ -65,6 +82,10 @@ from libp2p.rcmgr import ResourceManager
 from libp2p.tools.async_service import (
     background_trio_service,
 )
+from libp2p.transport.quic.connection import QUICConnection
+from libp2p.utils.varint import (
+    read_length_prefixed_protobuf,
+)
 
 if TYPE_CHECKING:
     from collections import (
@@ -81,6 +102,51 @@ from multiaddr import Multiaddr
 logger = logging.getLogger("libp2p.network.basic_host")
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
+
+_SAFE_CACHED_PROTOCOLS: set[TProtocol] = {
+    PING_PROTOCOL_ID,
+    IdentifyID,
+    IdentifyPushID,
+}
+_IDENTIFY_PROTOCOLS: set[TProtocol] = {
+    IdentifyID,
+    IdentifyPushID,
+}
+
+
+class _IdentifyNotifee(INotifee):
+    """
+    Network notifee that triggers automatic identify when new connections arrive.
+    """
+
+    def __init__(self, host: BasicHost):
+        self._host_ref = weakref.ref(host)
+
+    async def connected(self, network: INetwork, conn: INetConn) -> None:
+        host = self._host_ref()
+        if host is None:
+            return
+        await host._on_notifee_connected(conn)
+
+    async def disconnected(self, network: INetwork, conn: INetConn) -> None:
+        host = self._host_ref()
+        if host is None:
+            return
+        host._on_notifee_disconnected(conn)
+
+    async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
+        return None
+
+    async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
+        return None
+
+    async def listen(self, network: INetwork, multiaddr: multiaddr.Multiaddr) -> None:
+        return None
+
+    async def listen_close(
+        self, network: INetwork, multiaddr: multiaddr.Multiaddr
+    ) -> None:
+        return None
 
 
 class BasicHost(IHost):
@@ -176,6 +242,11 @@ class BasicHost(IHost):
         self.upnp = None
         if enable_upnp:
             self.upnp = UpnpManager()
+
+        # Automatic identify coordination
+        self._identify_inflight: set[ID] = set()
+        self._identified_peers: set[ID] = set()
+        self._network.register_notifee(_IdentifyNotifee(self))
 
     def get_id(self) -> ID:
         """
@@ -318,11 +389,12 @@ class BasicHost(IHost):
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> TProtocol | None:
         """
-        Check if peer already supports any of the requested protocols.
+        Check if the peerstore says the remote peer supports any of the
+        requested protocols.
 
-        This queries the peerstore for cached protocol information from the
-        identify exchange. If the peer supports any of the requested protocols,
-        we can skip the multiselect negotiation entirely.
+        We still perform the multiselect negotiation, but if we already know the
+        matching protocol we can request it directly (instead of trying the full
+        list) which reduces time spent inside select_one_of.
 
         Note: Protocol caching only works for well-known protocols (ping, identify)
         to avoid issues with protocols that require proper negotiation.
@@ -331,13 +403,6 @@ class BasicHost(IHost):
         :param protocol_ids: list of protocol IDs to check
         :return: first supported protocol, or None if not cached
         """
-        # List of protocols safe for caching (don't require complex negotiation)
-        CACHEABLE_PROTOCOLS = {
-            "/ipfs/ping/1.0.0",
-            "/ipfs/id/1.0.0",
-            "/ipfs/id/push/1.0.0",
-        }
-
         try:
             # Check if peer exists in peerstore first (avoid auto-creation)
             if peer_id not in self.peerstore.peer_ids():
@@ -350,7 +415,11 @@ class BasicHost(IHost):
                 return None
 
             # Only cache protocols that are in the safe list
-            cacheable_ids = [p for p in protocol_ids if str(p) in CACHEABLE_PROTOCOLS]
+            cacheable_ids = [
+                p
+                for p in protocol_ids
+                if p in _SAFE_CACHED_PROTOCOLS and p not in _IDENTIFY_PROTOCOLS
+            ]
             if not cacheable_ids:
                 return None
 
@@ -362,6 +431,9 @@ class BasicHost(IHost):
             if supported:
                 # Return the first supported protocol (cast back to TProtocol)
                 return TProtocol(supported[0])
+            # If we reached here, we don't have cached entries yet. Kick off identify
+            # in the background so future streams can skip negotiation.
+            self._schedule_identify(peer_id, reason="preferred-protocol")
         except Exception as e:
             # If peer not in peerstore or any error, fall back to negotiation
             logger.debug(
@@ -382,16 +454,17 @@ class BasicHost(IHost):
         """
         net_stream = await self._network.new_stream(peer_id)
 
+        protocol_choices = list(protocol_ids)
         # Check if we already know the peer supports any of these protocols
-        # from the identify exchange. If so, skip multiselect negotiation.
+        # from the identify exchange. If so, request that protocol directly
+        # but still run the multiselect handshake to keep both sides in sync.
         preferred = self._preferred_protocol(peer_id, protocol_ids)
         if preferred is not None:
             logger.debug(
                 f"Using cached protocol {preferred} for peer {peer_id}, "
-                "skipping negotiation"
+                "requesting it directly"
             )
-            net_stream.set_protocol(preferred)
-            return net_stream
+            protocol_choices = [preferred]
 
         # Perform protocol muxing to determine protocol to use
         # For QUIC connections, use connection-level semaphore to limit
@@ -409,14 +482,14 @@ class BasicHost(IHost):
                 # Use connection-level semaphore to throttle negotiations
                 async with negotiation_semaphore:
                     selected_protocol = await self.multiselect_client.select_one_of(
-                        list(protocol_ids),
+                        protocol_choices,
                         MultiselectCommunicator(net_stream),
                         self.negotiate_timeout,
                     )
             else:
                 # For non-QUIC connections, negotiate directly
                 selected_protocol = await self.multiselect_client.select_one_of(
-                    list(protocol_ids),
+                    protocol_choices,
                     MultiselectCommunicator(net_stream),
                     self.negotiate_timeout,
                 )
@@ -564,11 +637,192 @@ class BasicHost(IHost):
             if hasattr(swarm_conn, "event_started"):
                 await swarm_conn.event_started.wait()
 
+            # Kick off identify in the background so protocol caching can engage.
+            self._schedule_identify(peer_info.peer_id, reason="connect")
+
+    async def _run_identify(self, peer_id: ID) -> None:
+        """
+        Run identify protocol with a peer to discover supported protocols.
+
+        This method opens an identify stream, receives the peer's information,
+        and stores the supported protocols in the peerstore for later use.
+        This enables protocol caching to skip multiselect negotiation.
+
+        :param peer_id: ID of the peer to identify
+        """
+        try:
+            # Import here to avoid circular dependency
+            from libp2p.identity.identify.identify import (
+                ID as IDENTIFY_ID,
+            )
+            from libp2p.identity.identify_push.identify_push import (
+                _update_peerstore_from_identify,
+                read_length_prefixed_protobuf,
+            )
+
+            # Open identify stream (this will use multiselect negotiation)
+            stream = await self.new_stream(peer_id, [IDENTIFY_ID])
+
+            # Read identify response (length-prefixed protobuf)
+            response = await read_length_prefixed_protobuf(
+                stream, use_varint_format=True
+            )
+            await stream.close()
+
+            # Parse the identify message
+            from libp2p.identity.identify.pb.identify_pb2 import Identify
+
+            identify_msg = Identify()
+            identify_msg.ParseFromString(response)
+
+            # Store protocols in peerstore
+            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
+
+            logger.debug(
+                f"Identify completed for peer {peer_id}, "
+                f"protocols: {list(identify_msg.protocols)}"
+            )
+        except Exception as e:
+            # Don't fail the connection if identify fails
+            # Protocol caching just won't be available for this peer
+            logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
+
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
         await self._network.close()
+
+    def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
+        """
+        Ensure identify is running for `peer_id`. If a task is already running or
+        cached protocols exist, this is a no-op.
+        """
+        if (
+            peer_id == self.get_id()
+            or self._has_cached_protocols(peer_id)
+            or peer_id in self._identify_inflight
+        ):
+            return
+        if not self._should_identify_peer(peer_id):
+            return
+        self._identify_inflight.add(peer_id)
+        trio.lowlevel.spawn_system_task(self._identify_task_entry, peer_id, reason)
+
+    async def _identify_task_entry(self, peer_id: ID, reason: str) -> None:
+        try:
+            await self._identify_peer(peer_id, reason=reason)
+        finally:
+            self._identify_inflight.discard(peer_id)
+
+    def _has_cached_protocols(self, peer_id: ID) -> bool:
+        """
+        Return True if the peerstore already lists any safe cached protocol for
+        the peer (e.g. ping/identify), meaning identify already succeeded.
+        """
+        if peer_id in self._identified_peers:
+            return True
+        cacheable = [str(p) for p in _SAFE_CACHED_PROTOCOLS]
+        try:
+            if peer_id not in self.peerstore.peer_ids():
+                return False
+            supported = self.peerstore.supports_protocols(peer_id, cacheable)
+            return bool(supported)
+        except Exception:
+            return False
+
+    async def _identify_peer(self, peer_id: ID, *, reason: str) -> None:
+        """
+        Open an identify stream to the peer and update the peerstore with the
+        advertised protocols and addresses.
+        """
+        connections = self._network.get_connections(peer_id)
+        if not connections:
+            return
+
+        swarm_conn = connections[0]
+        event_started = getattr(swarm_conn, "event_started", None)
+        if event_started is not None and not event_started.is_set():
+            try:
+                await event_started.wait()
+            except Exception:
+                return
+
+        try:
+            stream = await self.new_stream(peer_id, [IdentifyID])
+        except Exception as exc:
+            logger.debug("Identify[%s]: failed to open stream: %s", reason, exc)
+            return
+
+        try:
+            data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+            identify_msg = IdentifyMsg()
+            identify_msg.ParseFromString(data)
+            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
+            self._identified_peers.add(peer_id)
+            logger.debug(
+                "Identify[%s]: cached %s protocols for peer %s",
+                reason,
+                len(identify_msg.protocols),
+                peer_id,
+            )
+        except Exception as exc:
+            logger.debug("Identify[%s]: error reading response: %s", reason, exc)
+            try:
+                await stream.reset()
+            except Exception:
+                pass
+        finally:
+            try:
+                await stream.close()
+            except Exception:
+                pass
+
+    async def _on_notifee_connected(self, conn: INetConn) -> None:
+        peer_id = getattr(conn.muxed_conn, "peer_id", None)
+        if peer_id is None:
+            return
+        muxed_conn = getattr(conn, "muxed_conn", None)
+        is_initiator = False
+        if muxed_conn is not None and hasattr(muxed_conn, "is_initiator"):
+            try:
+                is_initiator = bool(muxed_conn.is_initiator())
+            except Exception:
+                is_initiator = False
+        if not is_initiator:
+            # Only the dialer (initiator) needs to actively run identify.
+            return
+        if not self._is_quic_muxer(muxed_conn):
+            return
+        event_started = getattr(conn, "event_started", None)
+        if event_started is not None and not event_started.is_set():
+            try:
+                await event_started.wait()
+            except Exception:
+                return
+        self._schedule_identify(peer_id, reason="notifee-connected")
+
+    def _on_notifee_disconnected(self, conn: INetConn) -> None:
+        peer_id = getattr(conn.muxed_conn, "peer_id", None)
+        if peer_id is None:
+            return
+        self._identified_peers.discard(peer_id)
+
+    def _get_first_connection(self, peer_id: ID) -> INetConn | None:
+        connections = self._network.get_connections(peer_id)
+        if connections:
+            return connections[0]
+        return None
+
+    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
+        return isinstance(muxed_conn, QUICConnection)
+
+    def _should_identify_peer(self, peer_id: ID) -> bool:
+        connection = self._get_first_connection(peer_id)
+        if connection is None:
+            return False
+        muxed_conn = getattr(connection, "muxed_conn", None)
+        return self._is_quic_muxer(muxed_conn)
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:

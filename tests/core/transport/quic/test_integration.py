@@ -439,6 +439,31 @@ async def test_yamux_stress_ping():
                             )
                             print(f"   Negotiation semaphore limit: {sem_limit}")
 
+            # Automatic identify should populate the peerstore with cached protocols.
+            identify_cached = False
+            identify_start = trio.current_time()
+            while trio.current_time() - identify_start < 5.0:
+                try:
+                    supported = client_host.get_peerstore().supports_protocols(
+                        info.peer_id, [str(PING_PROTOCOL_ID)]
+                    )
+                    if supported:
+                        identify_cached = True
+                        break
+                except Exception:
+                    pass
+                await trio.sleep(0.01)
+
+            if debug_enabled:
+                if identify_cached:
+                    print("   ✅ Automatic identify cached ping protocol")
+                else:
+                    print("   ⚠️  Automatic identify did not cache ping within 5s")
+
+            assert identify_cached, (
+                "Automatic identify should cache ping before running stress test"
+            )
+
             async def ping_stream(i: int):
                 stream = None
                 stream_start = trio.current_time()
