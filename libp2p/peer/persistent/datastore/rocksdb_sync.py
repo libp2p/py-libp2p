@@ -194,11 +194,15 @@ class RocksDBDatastoreSync(IBatchingDatastoreSync):
                 self.db.close()
                 self.db = None
 
-    def __enter__(self):
+    def __enter__(self) -> "RocksDBDatastoreSync":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Context manager exit."""
         self.close()
-        return False

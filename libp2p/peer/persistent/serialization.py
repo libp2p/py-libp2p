@@ -13,6 +13,11 @@ from multiaddr import Multiaddr
 
 from libp2p.crypto.keys import KeyPair
 from libp2p.peer.envelope import Envelope
+from libp2p.peer.pb.crypto_pb2 import (
+    KeyType as PBKeyType,
+    PrivateKey as PBPrivateKey,
+    PublicKey as PBPublicKey,
+)
 from libp2p.peer.peerstore import PeerRecordState
 
 from .pb import (
@@ -151,24 +156,39 @@ def serialize_keypair(keypair: KeyPair) -> bytes:
 
         # Serialize public key
         if keypair.public_key:
-            from libp2p.peer.pb.crypto_pb2 import PublicKey as PBPublicKey
-
             pb_public_key = PBPublicKey()
 
-            # Map key types
             key_type = keypair.public_key.get_type()
-            pb_public_key.Type = key_type.value
+            # Map from libp2p KeyType to protobuf KeyType
+            if key_type.value == 0:  # RSA
+                pb_public_key.Type = PBKeyType.RSA
+            elif key_type.value == 1:  # Ed25519
+                pb_public_key.Type = PBKeyType.Ed25519
+            elif key_type.value == 2:  # Secp256k1
+                pb_public_key.Type = PBKeyType.Secp256k1
+            elif key_type.value == 3:  # ECDSA
+                pb_public_key.Type = PBKeyType.ECDSA
+            else:
+                raise SerializationError(f"Unsupported key type: {key_type}")
             pb_public_key.Data = keypair.public_key.serialize()
             pb_keys.public_key.CopyFrom(pb_public_key)
 
         # Serialize private key
         if keypair.private_key:
-            from libp2p.peer.pb.crypto_pb2 import PrivateKey as PBPrivateKey
-
             pb_private_key = PBPrivateKey()
 
             key_type = keypair.private_key.get_type()
-            pb_private_key.Type = key_type.value
+            # Map from libp2p KeyType to protobuf KeyType
+            if key_type.value == 0:  # RSA
+                pb_private_key.Type = PBKeyType.RSA
+            elif key_type.value == 1:  # Ed25519
+                pb_private_key.Type = PBKeyType.Ed25519
+            elif key_type.value == 2:  # Secp256k1
+                pb_private_key.Type = PBKeyType.Secp256k1
+            elif key_type.value == 3:  # ECDSA
+                pb_private_key.Type = PBKeyType.ECDSA
+            else:
+                raise SerializationError(f"Unsupported key type: {key_type}")
             pb_private_key.Data = keypair.private_key.serialize()
             pb_keys.private_key.CopyFrom(pb_private_key)
 

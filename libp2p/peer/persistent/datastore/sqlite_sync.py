@@ -217,12 +217,16 @@ class SQLiteDatastoreSync(IBatchingDatastoreSync):
                     self.connection = None
                     self._closed = True
 
-    def __enter__(self):
+    def __enter__(self) -> "SQLiteDatastoreSync":
         """Context manager entry."""
         self._ensure_connection()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
         """Context manager exit."""
         self.close()
-        return False
