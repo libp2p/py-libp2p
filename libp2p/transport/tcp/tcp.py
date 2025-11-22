@@ -39,10 +39,8 @@ class TCPListener(IListener):
     listeners: list[trio.SocketListener]
 
     def __init__(self, handler_function: THandler) -> None:
-        self.listeners = []
         self.handler = handler_function
-        self._nursery_task: trio.CancelScope | None= None
-
+        self.listeners = []
         self._started = trio.Event()
         self._nursery: trio.Nursery | None = None
 

@@ -200,12 +200,3 @@ class WebsocketListener(IListener):
 
         self._listeners.clear()
         logger.debug("WebsocketListener.close completed")
-
-
-def _multiaddr_from_socket(
-    socket: trio.socket.SocketType, is_wss: bool = False
-) -> Multiaddr:
-    """Convert socket to multiaddr"""
-    ip, port = socket.getsockname()
-    protocol = "wss" if is_wss else "ws"
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")

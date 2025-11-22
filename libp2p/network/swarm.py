@@ -85,8 +85,6 @@ class Swarm(Service, INetworkService):
     connections: dict[ID, list[INetConn]]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
-    listener_nursery: trio.Nursery | None
-    event_listener_nursery_created: trio.Event
 
     notifees: list[INotifee]
 
@@ -125,9 +123,6 @@ class Swarm(Service, INetworkService):
 
         self.common_stream_handler = create_default_stream_handler(self)
 
-        self.listener_nursery = None
-        self.event_listener_nursery_created = trio.Event()
-
         # Load balancing state
         self._round_robin_index = {}
         self._resource_manager = None
@@ -138,10 +133,6 @@ class Swarm(Service, INetworkService):
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
-            # Create a nursery for listener tasks.
-            self.listener_nursery = nursery
-            self.event_listener_nursery_created.set()
-
             if isinstance(self.transport, QUICTransport):
                 self.transport.set_background_nursery(nursery)
                 self.transport.set_swarm(self)
@@ -151,8 +142,6 @@ class Swarm(Service, INetworkService):
             finally:
                 # The service ended. Cancel listener tasks.
                 nursery.cancel_scope.cancel()
-                # Indicate that the nursery has been cancelled.
-                self.listener_nursery = None
 
     def get_peer_id(self) -> ID:
         return self.self_id
@@ -611,9 +600,7 @@ class Swarm(Service, INetworkService):
               - Map multiaddr to listener
         """
         logger.debug(f"Swarm.listen called with multiaddrs: {multiaddrs}")
-        # We need to wait until `self.listener_nursery` is created.
         logger.debug("Starting to listen")
-        await self.event_listener_nursery_created.wait()
 
         success_count = 0
         for maddr in multiaddrs:
@@ -654,11 +641,6 @@ class Swarm(Service, INetworkService):
                 listener = self.transport.create_listener(conn_handler)
                 logger.debug(f"Swarm.listen: listener created for {maddr}")
                 self.listeners[str(maddr)] = listener
-                # TODO: `listener.listen` is not bounded with nursery. If we want to be
-                #   I/O agnostic, we should change the API.
-                if self.listener_nursery is None:
-                    raise SwarmException("swarm instance hasn't been run")
-                assert self.listener_nursery is not None  # For type checker
                 logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
                 await listener.listen(maddr)
                 logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")
