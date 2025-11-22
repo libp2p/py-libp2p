@@ -1,0 +1,13 @@
+py-libp2p>=0.1.0
+multiaddr>=0.0.9
+base58>=2.1.1
+
+aiortc>=1.6.0
+aioice>=0.9.0
+
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.1.0
+redis>=5.0.0
+
+python-dotenv>=1.0.0
