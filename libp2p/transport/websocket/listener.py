@@ -193,10 +193,10 @@ class WebsocketListener(IListener):
             self._nursery.cancel_scope.cancel()
             self._nursery = None
 
-
         async with trio.open_nursery() as nursery:
             for listener in self._listeners:
-                nursery.start_soon(listener.aclose)
+                if hasattr(listener, "aclose"):
+                    nursery.start_soon(listener.aclose)
 
         self._listeners.clear()
         logger.debug("WebsocketListener.close completed")

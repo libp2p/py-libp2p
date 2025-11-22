@@ -29,6 +29,14 @@ from libp2p.transport.websocket.multiaddr_utils import (
 )
 from libp2p.transport.websocket.transport import WebsocketTransport
 
+import trio
+import pytest
+import ssl
+from libp2p.transport.websocket.listener import WebsocketListener
+from libp2p.transport.websocket.connection import P2PWebSocketConnection
+from multiaddr import Multiaddr
+from trio_websocket import open_websocket_url
+
 logger = logging.getLogger(__name__)
 
 PLAINTEXT_PROTOCOL_ID = "/plaintext/1.0.0"
@@ -1630,3 +1638,99 @@ async def test_websocket_transport_can_dial():
         assert not is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be invalid"
         )
+
+def get_ws_maddr(port=0, secure=False):
+    protocol = "wss" if secure else "ws"
+    return Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/{protocol}")
+
+@pytest.mark.trio
+async def test_ws_listener_lifecycle_success():
+    """
+    Test successful start, serving, and clean shutdown of internal nursery (WS).
+    """
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = WebsocketListener(
+        handler=dummy_handler,
+        upgrader=create_upgrader()
+    )
+    maddr = get_ws_maddr(0)
+
+    success = await listener.listen(maddr)
+    assert success is True
+    assert len(listener._listeners) == 1
+    assert listener._nursery is not None
+    
+    addrs = listener.get_addrs()
+    assert len(addrs) == 1
+    port = addrs[0].value_for_protocol("tcp")
+    assert port != "0"
+
+    client_url = f"ws://127.0.0.1:{port}"
+    try:
+        async with open_websocket_url(client_url) as ws:
+            assert ws.closed is None
+    except Exception as e:
+        pytest.fail(f"Failed to connect to WS listener: {e}")
+
+    await listener.close()
+    
+    assert listener._nursery is None
+    assert len(listener._listeners) == 0
+
+@pytest.mark.trio
+async def test_wss_listener_configuration_error():
+    """
+    Test that WSS listener fails without TLS config.
+    """
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = WebsocketListener(
+        handler=dummy_handler,
+        upgrader=create_upgrader(),
+        tls_config=None
+    )
+
+    maddr = get_ws_maddr(0, secure=True)
+    with pytest.raises(ValueError, match="TLS configuration"):
+        await listener.listen(maddr)
+
+@pytest.mark.trio
+async def test_ws_listener_double_close():
+    """
+    Test that calling close() multiple times is safe for WebSocketListener.
+    """
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = WebsocketListener(handler=dummy_handler, upgrader=create_upgrader())
+    await listener.listen(get_ws_maddr(0))
+    
+    await listener.close()
+    try:
+        await listener.close()
+    except Exception as e:
+        pytest.fail(f"Second close() raised exception: {e}")
+
+@pytest.mark.trio
+async def test_ws_listener_bind_error():
+    """
+    Test error propagation when binding to a used port.
+    """
+    sock = trio.socket.socket()
+    await sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen()
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = WebsocketListener(handler=dummy_handler, upgrader=create_upgrader())
+    maddr = get_ws_maddr(port)
+    
+    success = await listener.listen(maddr)
+    
+    assert success is False
+    sock.close()

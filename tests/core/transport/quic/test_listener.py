@@ -19,6 +19,9 @@ from libp2p.transport.quic.utils import (
     create_quic_multiaddr,
 )
 
+# Helper to create a valid QUIC multiaddr
+def get_quic_maddr(port=0):
+    return Multiaddr(f"/ip4/127.0.0.1/udp/{port}/quic-v1")
 
 class TestQUICListener:
     """Test suite for QUIC listener functionality."""
@@ -137,3 +140,42 @@ class TestQUICListener:
         assert initial_stats["connections_rejected"] == 0
         assert initial_stats["bytes_received"] == 0
         assert initial_stats["packets_processed"] == 0
+
+
+    @pytest.mark.trio
+    async def test_quic_listener_lifecycle_success(self, listener: QUICListener):
+        """
+        Test successful start, serving, and clean shutdown of internal nursery (QUIC).
+        """
+        maddr = get_quic_maddr(0)
+
+        success = await listener.listen(maddr)
+        assert isinstance(listener, QUICListener)
+        assert success is True
+        assert listener._listening is True
+        assert listener._nursery is not None
+    
+        addrs = listener.get_addrs()
+        assert len(addrs) >= 1
+    
+        assert listener._socket is not None
+        assert listener._socket.fileno() != -1
+
+        await listener.close()
+    
+        assert listener._nursery is None or listener._nursery.cancel_scope.cancel_called
+        assert listener._listening is False
+
+    @pytest.mark.trio
+    async def test_quic_listener_double_listen_error(self, listener: QUICListener):
+        """
+        Test that calling listen twice raises an error.
+        """
+        assert isinstance(listener, QUICListener)
+        await listener.listen(get_quic_maddr(0))
+    
+        with pytest.raises(Exception) as excinfo:
+            await listener.listen(get_quic_maddr(0))
+    
+        assert "Already listening" in str(excinfo.value)
+        await listener.close()

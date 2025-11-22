@@ -235,7 +235,6 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 
 @asynccontextmanager
 async def raw_conn_factory(
-    nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
     conn_0: IRawConnection | None = None
     conn_1: IRawConnection | None = None
@@ -249,7 +248,7 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
@@ -281,7 +280,7 @@ async def noise_conn_factory(
         nonlocal remote_secure_conn
         remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
 
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         local_conn, remote_conn = conns
         async with trio.open_nursery() as nursery:
             nursery.start_soon(upgrade_local_conn)
