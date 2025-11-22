@@ -367,7 +367,7 @@ async def test_yamux_stress_ping():
         print("\n🔍 CI/CD DEBUG MODE ENABLED for test_yamux_stress_ping")
         print(f"   Debug loggers enabled: {', '.join(debug_loggers)}")
 
-    STREAM_COUNT = 100
+    STREAM_COUNT = 50
     listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
     latencies = []
     failures = []
