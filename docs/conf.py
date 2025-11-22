@@ -310,7 +310,7 @@ autodoc_mock_imports = [
     "tests.factories",
     # Mocked ONLY for Sphinx/autodoc: this module does not exist in the codebase
     # but some doc tools may try to import it. No real code references this import.
-    "libp2p.relay.circuit_v2.lib"
+    "libp2p.relay.circuit_v2.lib",
 ]
 
 # Documents to append as an appendix to all manuals.

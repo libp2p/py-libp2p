@@ -97,8 +97,11 @@ class QUICTransportConfig(ConnectionConfig):
     """Timeout for opening new connection (seconds)."""
 
     # Stream timeouts
-    STREAM_OPEN_TIMEOUT: float = 5.0
-    """Timeout for opening new streams (seconds)."""
+    STREAM_OPEN_TIMEOUT: float = 30.0
+    """Timeout for opening new streams (seconds).
+
+    Increased for high-concurrency scenarios.
+    """
 
     STREAM_ACCEPT_TIMEOUT: float = 30.0
     """Timeout for accepting incoming streams (seconds)."""
@@ -111,6 +114,26 @@ class QUICTransportConfig(ConnectionConfig):
 
     STREAM_CLOSE_TIMEOUT: float = 10.0
     """Timeout for graceful stream close (seconds)."""
+
+    # Negotiation coordination
+    NEGOTIATION_SEMAPHORE_LIMIT: int = 5
+    """Maximum concurrent multiselect negotiations per direction (client/server).
+
+    This limits the number of simultaneous protocol negotiations that can occur
+    on a QUIC connection to prevent resource exhaustion and contention. Separate
+    semaphores are used for client (outbound) and server (inbound) directions
+    to prevent deadlocks. This value should be coordinated with BasicHost's
+    negotiate_timeout for optimal performance.
+    """
+
+    NEGOTIATE_TIMEOUT: float = 15.0
+    """Timeout for multiselect protocol negotiation (seconds).
+
+    This is the maximum time allowed for a single protocol negotiation to complete.
+    Should be coordinated with NEGOTIATION_SEMAPHORE_LIMIT - with higher limits,
+    negotiations may take longer due to contention. This value is used by BasicHost
+    when negotiating protocols on QUIC streams.
+    """
 
     # Flow control configuration
     STREAM_FLOW_CONTROL_WINDOW: int = 1024 * 1024  # 1MB
@@ -249,15 +272,18 @@ class QUICTransportConfig(ConnectionConfig):
         )
         if expected_stream_memory > self.STREAM_MEMORY_LIMIT_PER_CONNECTION * 2:
             # Allow some headroom, but warn if configuration seems inconsistent
+            # Note: This is a theoretical maximum - not all streams will use
+            # the full memory limit simultaneously. The warning is informational.
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "Stream memory configuration may be inconsistent: "
-                f"{self.MAX_CONCURRENT_STREAMS} streams ×"
-                "{self.STREAM_MEMORY_LIMIT_PER_STREAM} bytes "
-                "could exceed connection limit of"
-                f"{self.STREAM_MEMORY_LIMIT_PER_CONNECTION} bytes"
+            logger.debug(
+                "Stream memory configuration: "
+                f"{self.MAX_CONCURRENT_STREAMS} streams × "
+                f"{self.STREAM_MEMORY_LIMIT_PER_STREAM} bytes = "
+                f"{expected_stream_memory} bytes (theoretical max), "
+                f"connection limit: {self.STREAM_MEMORY_LIMIT_PER_CONNECTION} bytes. "
+                "This is normal - not all streams use maximum memory simultaneously."
             )
 
     def get_stream_config_dict(self) -> dict[str, Any]:
