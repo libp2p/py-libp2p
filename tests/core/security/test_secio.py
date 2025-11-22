@@ -30,7 +30,7 @@ async def test_create_secure_session(nursery):
     remote_key_pair = create_new_key_pair(b"b")
     remote_peer = ID.from_pubkey(remote_key_pair.public_key)
 
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         local_conn, remote_conn = conns
 
         local_secure_conn: ISecureConn | None = None

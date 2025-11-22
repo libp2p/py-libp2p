@@ -259,7 +259,7 @@ class TestPatternXXHandshake:
         # Use raw connections to manually control the handshake
         from tests.utils.factories import raw_conn_factory
 
-        async with raw_conn_factory(nursery) as (init_conn, resp_conn):
+        async with raw_conn_factory() as (init_conn, resp_conn):
             # Start handshake - initiator expects wrong peer ID
             init_error: Exception | None = None
 
@@ -303,7 +303,7 @@ class TestPatternXXHandshake:
         # Use raw connection to manually control when connection closes
         from tests.utils.factories import raw_conn_factory
 
-        async with raw_conn_factory(nursery) as (init_conn, resp_conn):
+        async with raw_conn_factory() as (init_conn, resp_conn):
             # Start handshake but close connection early (before handshake completes)
             init_error: Exception | None = None
             resp_error: Exception | None = None

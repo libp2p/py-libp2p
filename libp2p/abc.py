@@ -1360,7 +1360,7 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr) -> bool:
         """
         Start listening on the specified multiaddress.
 
