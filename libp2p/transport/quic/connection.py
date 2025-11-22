@@ -185,6 +185,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._transport._config.CONNECTION_HANDSHAKE_TIMEOUT
         )
         self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
+        self.STREAM_OPEN_TIMEOUT = self._transport._config.STREAM_OPEN_TIMEOUT
 
         # Performance and monitoring
         self._connection_start_time = time.time()
@@ -737,12 +738,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     # Stream management methods (IMuxedConn interface)
 
-    async def open_stream(self, timeout: float = 5.0) -> QUICStream:
+    async def open_stream(self, timeout: float | None = None) -> QUICStream:
         """
         Open a new outbound stream
 
         Args:
             timeout: Timeout for stream creation
+                (defaults to STREAM_OPEN_TIMEOUT from config)
 
         Returns:
             New QUIC stream
@@ -758,6 +760,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         if not self._started:
             raise QUICConnectionError("Connection not started")
+
+        # Use config timeout if not specified
+        if timeout is None:
+            timeout = self.STREAM_OPEN_TIMEOUT
 
         # Use single lock for all stream operations
         with trio.move_on_after(timeout):

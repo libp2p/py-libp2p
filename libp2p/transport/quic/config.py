@@ -97,8 +97,11 @@ class QUICTransportConfig(ConnectionConfig):
     """Timeout for opening new connection (seconds)."""
 
     # Stream timeouts
-    STREAM_OPEN_TIMEOUT: float = 5.0
-    """Timeout for opening new streams (seconds)."""
+    STREAM_OPEN_TIMEOUT: float = 30.0
+    """Timeout for opening new streams (seconds).
+
+    Increased for high-concurrency scenarios.
+    """
 
     STREAM_ACCEPT_TIMEOUT: float = 30.0
     """Timeout for accepting incoming streams (seconds)."""
