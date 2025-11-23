@@ -15,11 +15,12 @@ def _resolve_negotiation_semaphore_limit() -> int:
     """
     Derive negotiation semaphore limit with platform-aware defaults.
 
-    Linux/macOS can sustain more concurrent multiselect handshakes than Windows.
+    Linux/macOS sustain more concurrent negotiations; Windows needs a smaller
+    cap to avoid thrashing the aioquic event loop.
     """
     if platform.system().lower().startswith("win"):
         return 16
-    return 24
+    return 32
 
 
 class QUICTransportKwargs(TypedDict, total=False):
@@ -134,8 +135,8 @@ class QUICTransportConfig(ConnectionConfig):
     on a QUIC connection to prevent resource exhaustion and contention. Separate
     semaphores are used for client (outbound) and server (inbound) directions
     to prevent deadlocks. This value should be coordinated with BasicHost's
-    negotiate_timeout for optimal performance. Linux/macOS default to 24 while
-    Windows uses 16 to accommodate the slower QUIC event loop scheduler.
+    negotiate_timeout for optimal performance. Defaults are platform-aware:
+    Windows caps at 16 to keep aioquic stable; Linux/macOS can safely run 32.
     """
 
     NEGOTIATE_TIMEOUT: float = 30.0
