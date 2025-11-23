@@ -2,15 +2,24 @@
 Configuration classes for QUIC transport.
 """
 
-from dataclasses import (
-    dataclass,
-    field,
-)
+from dataclasses import dataclass, field
+import platform
 import ssl
 from typing import Any, Literal, TypedDict
 
 from libp2p.custom_types import TProtocol
 from libp2p.network.config import ConnectionConfig
+
+
+def _resolve_negotiation_semaphore_limit() -> int:
+    """
+    Derive negotiation semaphore limit with platform-aware defaults.
+
+    Linux/macOS can sustain more concurrent multiselect handshakes than Windows.
+    """
+    if platform.system().lower().startswith("win"):
+        return 16
+    return 24
 
 
 class QUICTransportKwargs(TypedDict, total=False):
@@ -116,14 +125,17 @@ class QUICTransportConfig(ConnectionConfig):
     """Timeout for graceful stream close (seconds)."""
 
     # Negotiation coordination
-    NEGOTIATION_SEMAPHORE_LIMIT: int = 5
+    NEGOTIATION_SEMAPHORE_LIMIT: int = field(
+        default_factory=_resolve_negotiation_semaphore_limit
+    )
     """Maximum concurrent multiselect negotiations per direction (client/server).
 
     This limits the number of simultaneous protocol negotiations that can occur
     on a QUIC connection to prevent resource exhaustion and contention. Separate
     semaphores are used for client (outbound) and server (inbound) directions
     to prevent deadlocks. This value should be coordinated with BasicHost's
-    negotiate_timeout for optimal performance.
+    negotiate_timeout for optimal performance. Linux/macOS default to 24 while
+    Windows uses 16 to accommodate the slower QUIC event loop scheduler.
     """
 
     NEGOTIATE_TIMEOUT: float = 30.0
