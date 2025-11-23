@@ -241,6 +241,12 @@ class QUICStream(IMuxedStream):
                             self._timeline.record_first_data()
                             return data
 
+                        # Check if stream was reset (unblocking read loop)
+                        if self._state == StreamState.RESET:
+                            raise QUICStreamResetError(
+                                f"Stream {self.stream_id} was reset"
+                            )
+
                         # Check if stream was closed while waiting
                         if self._read_closed:
                             return b""

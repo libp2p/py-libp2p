@@ -452,6 +452,31 @@ class BasicHost(IHost):
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
+        semaphore_to_use: trio.Semaphore | None = None
+        semaphore_acquired = False
+
+        # Attempt to grab the negotiation semaphore before opening the stream so
+        # we don't create more QUIC streams than we can immediately negotiate.
+        existing_connection = self._get_first_connection(peer_id)
+        if existing_connection is not None:
+            existing_muxed_conn = getattr(existing_connection, "muxed_conn", None)
+            if existing_muxed_conn is not None:
+                semaphore_to_use = getattr(
+                    existing_muxed_conn, "_negotiation_semaphore", None
+                )
+        if semaphore_to_use is not None:
+            acquire_start = trio.current_time()
+            await semaphore_to_use.acquire()
+            semaphore_acquired = True
+            acquire_duration = (trio.current_time() - acquire_start) * 1000
+            if acquire_duration > 5 and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Waited %.2fms to acquire negotiation slot for peer %s "
+                    "before opening stream",
+                    acquire_duration,
+                    peer_id,
+                )
+
         net_stream = await self._network.new_stream(peer_id)
 
         protocol_choices = list(protocol_ids)
@@ -466,33 +491,40 @@ class BasicHost(IHost):
             )
             protocol_choices = [preferred]
 
-        # Perform protocol muxing to determine protocol to use
-        # For QUIC connections, use connection-level semaphore to limit
-        # concurrent negotiations and prevent contention
         try:
-            # Check if this is a QUIC connection and use its negotiation semaphore
             muxed_conn = getattr(net_stream, "muxed_conn", None)
-            negotiation_semaphore = None
-            if muxed_conn is not None:
-                negotiation_semaphore = getattr(
-                    muxed_conn, "_negotiation_semaphore", None
-                )
+            stream_semaphore = (
+                getattr(muxed_conn, "_negotiation_semaphore", None)
+                if muxed_conn is not None
+                else None
+            )
 
-            if negotiation_semaphore is not None:
-                # Use connection-level semaphore to throttle negotiations
-                async with negotiation_semaphore:
-                    selected_protocol = await self.multiselect_client.select_one_of(
-                        protocol_choices,
-                        MultiselectCommunicator(net_stream),
-                        self.negotiate_timeout,
-                    )
-            else:
-                # For non-QUIC connections, negotiate directly
-                selected_protocol = await self.multiselect_client.select_one_of(
-                    protocol_choices,
-                    MultiselectCommunicator(net_stream),
-                    self.negotiate_timeout,
-                )
+            if stream_semaphore is not None:
+                if semaphore_to_use is not stream_semaphore:
+                    if semaphore_acquired and semaphore_to_use is not None:
+                        semaphore_to_use.release()
+                    semaphore_to_use = stream_semaphore
+                    semaphore_acquired = False
+
+                if not semaphore_acquired and semaphore_to_use is not None:
+                    acquire_start = trio.current_time()
+                    await semaphore_to_use.acquire()
+                    semaphore_acquired = True
+                    acquire_duration = (trio.current_time() - acquire_start) * 1000
+                    if acquire_duration > 5 and logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Waited %.2fms to acquire negotiation slot for peer %s "
+                            "after stream creation",
+                            acquire_duration,
+                            peer_id,
+                        )
+
+            communicator = MultiselectCommunicator(net_stream)
+            selected_protocol = await self.multiselect_client.select_one_of(
+                protocol_choices,
+                communicator,
+                self.negotiate_timeout,
+            )
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
             error_msg = str(error)
@@ -559,6 +591,9 @@ class BasicHost(IHost):
 
             await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
+        finally:
+            if semaphore_acquired and semaphore_to_use is not None:
+                semaphore_to_use.release()
 
         net_stream.set_protocol(selected_protocol)
         return net_stream
