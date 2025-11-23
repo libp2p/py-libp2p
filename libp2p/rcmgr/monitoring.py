@@ -184,6 +184,20 @@ class Monitor:
                 metric.labels.get("error_type", "unknown")
                 # Could record error-based blocked resources
 
+            # Map connection latency metrics
+            elif metric.name == "libp2p_connection_latency_ms":
+                transport = metric.labels.get("transport", "unknown")
+                success = metric.labels.get("success", "false").lower() == "true"
+                self.prometheus_exporter.record_connection_latency(
+                    transport=transport,
+                    success=success,
+                    latency_ms=metric.value,
+                )
+
+            # Map active circuits metrics
+            elif metric.name == "libp2p_active_circuits":
+                self.prometheus_exporter.set_active_circuits(int(metric.value))
+
         except Exception as e:
             # Don't let Prometheus export failures affect main monitoring
             print(f"Warning: Failed to export metric to Prometheus: {e}")

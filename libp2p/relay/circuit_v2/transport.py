@@ -98,6 +98,10 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self.relay_counter = 0  # for round robin load balancing
+        # A lock to protect ``relay_counter`` from concurrent access since
+        # ``_select_relay`` may be invoked from multiple tasks concurrently.
+        self._relay_counter_lock = trio.Lock()
 
     async def dial(  # type: ignore[override]
         self,
@@ -292,9 +296,32 @@ class CircuitV2Transport(ITransport):
             # Get a relay from the list of discovered relays
             relays = self.discovery.get_relays()
             if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+                # Prioritize relays with active reservations
+                relays_with_reservations = []
+                other_relays = []
+
+                for relay_id in relays:
+                    relay_info = self.discovery.get_relay_info(relay_id)
+                    if relay_info and relay_info.has_reservation:
+                        relays_with_reservations.append(relay_id)
+                    else:
+                        other_relays.append(relay_id)
+
+                # Return first available relay with reservation, or fallback to others
+                candidate_list = (
+                    relays_with_reservations
+                    if relays_with_reservations
+                    else other_relays
+                )
+                if candidate_list:
+                    # Round-robin load-balancing protected by a lock to avoid race
+                    # conditions when multiple coroutines attempt relay selection
+                    # simultaneously.
+                    async with self._relay_counter_lock:
+                        index = self.relay_counter % len(candidate_list)
+                        relay_peer_id = candidate_list[index]
+                        self.relay_counter += 1
+                    return relay_peer_id
 
             # Wait and try discovery
             await trio.sleep(1)
