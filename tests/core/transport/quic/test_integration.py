@@ -276,52 +276,54 @@ class TestBasicQUICFlow:
         listener = server_transport.create_listener(timeout_test_handler)
         listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
 
-        client_transport = None
+        client_connected = False
+
         try:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
                 success = await listener.listen(listen_addr, nursery)
-                assert success, "Failed to start server listener"
+                assert success
 
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
                 )
                 print(f"🔧 SERVER: Listening on {server_addr}")
 
-                # Start client in the same nursery
-                client_transport = QUICTransport(client_key.private_key, client_config)
-                client_transport.set_background_nursery(nursery)
+                # Create client but DON'T open a stream
+                async with trio.open_nursery() as client_nursery:
+                    client_transport = QUICTransport(
+                        client_key.private_key, client_config
+                    )
+                    client_transport.set_background_nursery(client_nursery)
 
-                connection = None
-                try:
-                    print("📞 CLIENT: Connecting (but NOT opening stream)...")
-                    connection = await client_transport.dial(server_addr)
-                    print("✅ CLIENT: Connected (no stream opened)")
+                    try:
+                        print("📞 CLIENT: Connecting (but NOT opening stream)...")
+                        connection = await client_transport.dial(server_addr)
+                        client_connected = True
+                        print("✅ CLIENT: Connected (no stream opened)")
 
-                    # Wait for server timeout
-                    await trio.sleep(3.0)
+                        # Wait for server timeout
+                        await trio.sleep(3.0)
 
-                finally:
-                    await client_transport.close()
-                    if connection:
                         await connection.close()
                         print("🔒 CLIENT: Connection closed")
+
+                    finally:
+                        await client_transport.close()
 
                 nursery.cancel_scope.cancel()
 
         finally:
-            if client_transport and not client_transport._closed:
-                await client_transport.close()
-            if not listener._closed:
-                await listener.close()
-            if not server_transport._closed:
-                await server_transport.close()
+            await listener.close()
+            await server_transport.close()
 
         print("\n📊 TIMEOUT TEST RESULTS:")
+        print(f"   Client connected: {client_connected}")
         print(f"   accept_stream called: {accept_stream_called}")
         print(f"   accept_stream timeout: {accept_stream_timeout}")
 
+        assert client_connected, "Client should have connected"
         assert accept_stream_called, "accept_stream should have been called"
         assert accept_stream_timeout, (
             "accept_stream should have timed out when no stream was opened"
