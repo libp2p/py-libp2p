@@ -256,7 +256,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     # dht_a.peer_routing.routing_table.add_peer(dht_b.pe)
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
     # Generate a random key and value (use string key for API)
-    key = "rendom_key"
+    key = "random_key"
     key_bytes = key.encode("utf-8")
     value = b"test-value"
 
@@ -564,7 +564,7 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
 
     # Generate a random key and value
-    key = "rendom_key"  # String for API
+    key = "random_key"  # String for API
     key_bytes = key.encode("utf-8")  # Bytes for internal storage
     value = b"test-value"
 
