@@ -4,6 +4,7 @@ import logging
 import multiaddr
 import trio
 
+from examples.advanced.network_discover import get_optimal_binding_address
 from libp2p import (
     new_host,
 )
@@ -25,6 +26,7 @@ logging.getLogger("libp2p").setLevel(logging.WARNING)
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 RESP_TIMEOUT = 60
+PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
 
 
 async def handle_ping(stream: INetStream) -> None:
@@ -60,18 +62,27 @@ async def send_ping(stream: INetStream) -> None:
         print(f"error occurred : {e}")
 
 
-async def run(port: int, destination: str) -> None:
+async def run(port: int, destination: str, psk: int, transport: str) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
         get_available_interfaces,
-        get_optimal_binding_address,
     )
 
     if port <= 0:
         port = find_free_port()
 
-    listen_addrs = get_available_interfaces(port)
-    host = new_host(listen_addrs=listen_addrs)
+    _ = get_available_interfaces(8000)
+    _ = get_optimal_binding_address(8000)
+
+    if transport == "tcp":
+        listen_addrs = get_available_interfaces(port)
+    if transport == "ws":
+        listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
+
+    if psk == 1:
+        host = new_host(listen_addrs=listen_addrs, psk=PSK)
+    else:
+        host = new_host(listen_addrs=listen_addrs)
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
@@ -87,12 +98,9 @@ async def run(port: int, destination: str) -> None:
             for addr in all_addrs:
                 print(f"{addr}")
 
-            # Use optimal address for the client command
-            optimal_addr = get_optimal_binding_address(port)
-            optimal_addr_with_peer = f"{optimal_addr}/p2p/{host.get_id().to_string()}"
             print(
                 f"\nRun this from the same folder in another console:\n\n"
-                f"ping-demo -d {optimal_addr_with_peer}\n"
+                f"ping-demo -d {host.get_addrs()[0]} -psk {psk} -t {transport}\n"
             )
             print("Waiting for incoming connection...")
 
@@ -130,10 +138,23 @@ def main() -> None:
         type=str,
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
+
+    parser.add_argument(
+        "-psk", "--psk", default=0, type=int, help="Enable PSK in the transport layer"
+    )
+
+    parser.add_argument(
+        "-t",
+        "--transport",
+        default="tcp",
+        type=str,
+        help="Choose the transport layer for ping TCP/WS",
+    )
+
     args = parser.parse_args()
 
     try:
-        trio.run(run, *(args.port, args.destination))
+        trio.run(run, *(args.port, args.destination, args.psk, args.transport))
     except KeyboardInterrupt:
         pass
 
