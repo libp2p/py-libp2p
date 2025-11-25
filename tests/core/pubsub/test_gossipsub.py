@@ -207,8 +207,8 @@ async def test_handle_prune():
 
         # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
         # add alice back to his mesh after heartbeat.
-        # Wait for bob to `handle_prune`
-        await trio.sleep(0.1)
+        # Wait for bob to `handle_prune` - increased wait time for Windows compatibility
+        await trio.sleep(0.5)
 
         # Check that alice is no longer bob's mesh peer
         assert id_alice not in gossipsubs[index_bob].mesh[topic]
