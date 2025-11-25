@@ -584,6 +584,7 @@ class WebsocketTransport(ITransport):
 
             final_proxy_url = get_proxy_from_environment(ws_url)
             if final_proxy_url:
+                print(f"DEBUG: Found proxy from environment: {final_proxy_url}")
                 logger.debug(f"Using proxy from environment: {final_proxy_url}")
 
         try:

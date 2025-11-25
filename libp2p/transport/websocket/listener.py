@@ -241,14 +241,14 @@ class WebsocketListener(IListener):
 
             # Start the server in the nursery and capture the server info
             server_info = await nursery.start(websocket_server_task)
-            
+
             # Store the server for later cleanup
             self._server = server_info
 
             # Extract the actual listening port from the server
             # trio_websocket's WebSocketServer has a 'port' attribute
             actual_port = port
-            if port == 0:
+            if port == 0 and server_info is not None:
                 # Port was 0, get the actual assigned port from the server
                 if hasattr(server_info, "port"):
                     actual_port = server_info.port
@@ -261,6 +261,8 @@ class WebsocketListener(IListener):
                     # Last resort: use original port (shouldn't happen)
                     logger.warning("Could not determine actual port, using original")
                     actual_port = port
+            else:
+                actual_port = port
 
             # Create new multiaddr with actual port
             if proto_info.is_wss:
