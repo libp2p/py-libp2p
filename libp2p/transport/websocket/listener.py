@@ -241,34 +241,47 @@ class WebsocketListener(IListener):
 
             # Start the server in the nursery and capture the server info
             server_info = await nursery.start(websocket_server_task)
+            
+            # Store the server for later cleanup
+            self._server = server_info
 
-            # Update the listen address with the actual port if port was 0
-            if port == 0 and hasattr(server_info, "port"):
-                actual_port = getattr(server_info, "port")
-                # Create new multiaddr with actual port
-                if proto_info.is_wss:
-                    protocol_part = "/wss"
+            # Extract the actual listening port from the server
+            # trio_websocket's WebSocketServer has a 'port' attribute
+            actual_port = port
+            if port == 0:
+                # Port was 0, get the actual assigned port from the server
+                if hasattr(server_info, "port"):
+                    actual_port = server_info.port
+                elif hasattr(server_info, "socket"):
+                    # Fallback: get port from socket
+                    sock = server_info.socket
+                    if hasattr(sock, "getsockname"):
+                        _, actual_port = sock.getsockname()
                 else:
-                    protocol_part = "/ws"
+                    # Last resort: use original port (shouldn't happen)
+                    logger.warning("Could not determine actual port, using original")
+                    actual_port = port
 
-                if "ip4" in str(proto_info.rest_multiaddr):
-                    self._listen_maddr = Multiaddr(
-                        f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
-                    )
-                elif "ip6" in str(proto_info.rest_multiaddr):
-                    self._listen_maddr = Multiaddr(
-                        f"/ip6/{host}/tcp/{actual_port}{protocol_part}"
-                    )
-                else:
-                    self._listen_maddr = Multiaddr(
-                        f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
-                    )
+            # Create new multiaddr with actual port
+            if proto_info.is_wss:
+                protocol_part = "/wss"
+            else:
+                protocol_part = "/ws"
 
-                logger.info(
-                    f"WebSocket listener updated address to {self._listen_maddr}"
+            # Determine IP version from original multiaddr
+            if "ip4" in str(proto_info.rest_multiaddr):
+                self._listen_maddr = Multiaddr(
+                    f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
+                )
+            elif "ip6" in str(proto_info.rest_multiaddr):
+                self._listen_maddr = Multiaddr(
+                    f"/ip6/{host}/tcp/{actual_port}{protocol_part}"
                 )
             else:
-                self._listen_maddr = maddr
+                # Default to IPv4
+                self._listen_maddr = Multiaddr(
+                    f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
+                )
 
             logger.info(f"WebSocket listener started on {self._listen_maddr}")
             return True

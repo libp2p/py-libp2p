@@ -786,10 +786,9 @@ class WebsocketTransport(ITransport):
             proto_info = parse_websocket_multiaddr(maddr)
             conn = await self._create_connection(proto_info)
 
-            # Upgrade the connection
+            # Return RawConnection - connection upgrading (security + muxing)
+            # is handled by the Swarm layer via TransportUpgrader
             try:
-                # For now, just return the connection directly
-                # TODO: Implement proper connection upgrading
                 return RawConnection(conn, True)  # True for initiator
             except Exception as e:
                 await conn.close()

@@ -173,7 +173,7 @@ class PyWebSocketNode:
             logger.warning(f"WebSocket dial failed: {e}, trying HTTP...")
 
         try:
-            import requests
+            import requests  # type: ignore[import-untyped]
 
             http_resp: requests.Response = requests.post(
                 f"http://127.0.0.1:{port}", data=message, timeout=10
