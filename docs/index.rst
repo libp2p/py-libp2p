@@ -10,6 +10,7 @@ The Python implementation of the libp2p networking stack
     introduction
     install
     getting_started
+    ai_features
     release_notes
 
 .. toctree::

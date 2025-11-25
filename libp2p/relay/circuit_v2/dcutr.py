@@ -239,6 +239,9 @@ class DCUtRProtocol(Service):
 
                 # Perform hole punch
                 success = await self._perform_hole_punch(remote_peer_id, peer_addrs)
+                self._reachability_checker.record_connection_result(
+                    remote_peer_id, success=success, via_relay=False
+                )
 
                 if success:
                     logger.info(
@@ -265,7 +268,7 @@ class DCUtRProtocol(Service):
             logger.error("Error handling DCUtR stream: %s", str(e))
             await stream.close()
 
-    async def initiate_hole_punch(self, peer_id: ID) -> bool:
+    async def initiate_hole_punch(self, peer_id: ID, *, force: bool = False) -> bool:
         """
         Initiate a hole punch with a peer.
 
@@ -294,6 +297,19 @@ class DCUtRProtocol(Service):
         attempts = self._hole_punch_attempts.get(peer_id, 0)
         if attempts >= MAX_HOLE_PUNCH_ATTEMPTS:
             logger.warning("Maximum hole punch attempts reached for peer %s", peer_id)
+            return False
+
+        decision = self._reachability_checker.predict_relay_strategy(peer_id)
+        if (
+            not force
+            and decision.recommendation == "prefer_relay"
+            and decision.probability >= 0.7
+        ):
+            logger.info(
+                "Predictor recommends staying on relay for %s (score=%.2f); skipping hole punch",
+                peer_id,
+                decision.probability,
+            )
             return False
 
         # Mark as in progress and increment attempt counter
@@ -373,6 +389,10 @@ class DCUtRProtocol(Service):
                 # Perform the synchronized hole punch
                 success = await self._perform_hole_punch(
                     peer_id, peer_addrs, punch_time
+                )
+
+                self._reachability_checker.record_connection_result(
+                    peer_id, success=success, via_relay=False, latency=rtt if success else None
                 )
 
                 if success:
@@ -494,8 +514,14 @@ class DCUtRProtocol(Service):
 
         except trio.TooSlowError:
             logger.debug("Timeout dialing %s at %s", peer_id, addr)
+            self._reachability_checker.record_connection_result(
+                peer_id, success=False, via_relay=False
+            )
         except Exception as e:
             logger.debug("Error dialing %s at %s: %s", peer_id, addr, str(e))
+            self._reachability_checker.record_connection_result(
+                peer_id, success=False, via_relay=False
+            )
 
     async def _have_direct_connection(self, peer_id: ID) -> bool:
         """
