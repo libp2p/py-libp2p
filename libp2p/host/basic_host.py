@@ -239,7 +239,7 @@ class BasicHost(IHost):
                     if await upnp_manager.discover():
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.add_port_mapping(port, "TCP")
+                                await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
@@ -254,7 +254,7 @@ class BasicHost(IHost):
                         logger.debug("Removing UPnP port mappings")
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(port, "TCP")
+                                await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
                         self.bootstrap.stop()
 
@@ -284,11 +284,22 @@ class BasicHost(IHost):
         net_stream = await self._network.new_stream(peer_id)
 
         # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (outbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.outbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
+
         try:
             selected_protocol = await self.multiselect_client.select_one_of(
                 list(protocol_ids),
                 MultiselectCommunicator(net_stream),
-                self.negotiate_timeout,
+                negotiate_timeout,
             )
         except MultiselectClientError as error:
             logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
@@ -354,9 +365,20 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (inbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.inbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
+
         try:
             protocol, handler = await self.multiselect.negotiate(
-                MultiselectCommunicator(net_stream), self.negotiate_timeout
+                MultiselectCommunicator(net_stream), negotiate_timeout
             )
             if protocol is None:
                 await net_stream.reset()
