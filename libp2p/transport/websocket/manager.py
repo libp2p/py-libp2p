@@ -36,16 +36,15 @@ class WebSocketConnectionManager:
 
     async def __aenter__(self) -> "WebSocketConnectionManager":
         """Context manager entry."""
-        async with trio.open_nursery() as nursery:
-            self._nursery = nursery
-            nursery.start_soon(self._cleanup_loop)
+        # Note: The nursery must be managed by the caller's context manager
+        # This method just returns self - the caller should use this manager
+        # within a nursery context where cleanup_loop can run
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
-        if self._nursery:
-            self._nursery.cancel_scope.cancel()
-            self._nursery = None
+        # Close all connections when exiting
+        await self.close_all()
 
     async def add_connection(
         self, conn_id: str, connection: P2PWebSocketConnection
