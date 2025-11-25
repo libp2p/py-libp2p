@@ -1205,8 +1205,7 @@ async def test_blacklist_tears_down_existing_connection():
     calling add_to_blacklist(peer_id) immediately resets its stream and
     removes it from both places.
     """
-    # Create two pubsub instances (gosscreate_batch_with_gossipsub),
-    # so they can connect to each other
+    # Create two pubsub instances (floodsub), so they can connect to each other
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         pubsub0, pubsub1 = pubsubs_fsub
 
