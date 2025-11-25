@@ -234,9 +234,7 @@ def default_muxer_transport_factory() -> TMuxerOptions:
 
 
 @asynccontextmanager
-async def raw_conn_factory(
-    nursery: trio.Nursery,
-) -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
+async def raw_conn_factory() -> AsyncIterator[tuple[IRawConnection, IRawConnection]]:
     conn_0: IRawConnection | None = None
     conn_1: IRawConnection | None = None
     event = trio.Event()
@@ -249,7 +247,7 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     listening_maddr = listener.get_addrs()[0]
     conn_0 = await tcp_transport.dial(listening_maddr)
     await event.wait()
@@ -281,7 +279,7 @@ async def noise_conn_factory(
         nonlocal remote_secure_conn
         remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
 
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         local_conn, remote_conn = conns
         async with trio.open_nursery() as nursery:
             nursery.start_soon(upgrade_local_conn)
@@ -320,7 +318,7 @@ async def pattern_handshake_factory(
     responder_secure_conn: ISecureConn | None = None
 
     # Use raw_conn_factory to get TCP connections
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         init_conn, resp_conn = conns
 
         async def perform_initiator_handshake() -> None:
@@ -374,7 +372,7 @@ async def transport_handshake_factory(
     responder_secure_conn: ISecureConn | None = None
 
     # Use raw_conn_factory to get TCP connections
-    async with raw_conn_factory(nursery) as conns:
+    async with raw_conn_factory() as conns:
         init_conn, resp_conn = conns
 
         async def upgrade_initiator_conn() -> None:
@@ -428,7 +426,7 @@ async def tls_conn_factory(
         nonlocal remote_secure_conn
         remote_secure_conn = await remote_transport.secure_inbound(remote_conn)
 
-    async with raw_conn_factory(nursery) as (local_conn, remote_conn):
+    async with raw_conn_factory() as (local_conn, remote_conn):
         async with trio.open_nursery() as n:
             n.start_soon(upgrade_local_conn, local_conn)
             n.start_soon(upgrade_remote_conn, remote_conn)

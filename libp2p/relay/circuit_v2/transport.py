@@ -441,7 +441,7 @@ class CircuitV2Listener(Service, IListener):
         """Run the listener service."""
         # Implementation would go here
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> bool:
         """
         Start listening on the given multiaddr.
 
