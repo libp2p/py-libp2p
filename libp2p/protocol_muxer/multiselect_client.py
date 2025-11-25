@@ -1,6 +1,7 @@
 from collections.abc import (
     Sequence,
 )
+import logging
 
 import trio
 
@@ -16,7 +17,7 @@ from .exceptions import (
     MultiselectClientError,
     MultiselectCommunicatorError,
 )
-import logging        
+
 logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
 logger.setLevel(logging.DEBUG)
 
@@ -70,11 +71,10 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
-        
         try:
             with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
-                
+
                 protocol_list = [str(p) for p in protocols]
                 logger.debug(f"Attempting to negotiate one of: {protocol_list}")
 
@@ -157,16 +157,22 @@ class MultiselectClient(IMultiselectClient):
             logger.debug(f"Received response for protocol {protocol_str}: {response!r}")
 
         except MultiselectCommunicatorError as error:
-            logger.debug(f"Failed to read response for protocol {protocol_str}: {error}")
+            logger.debug(
+                f"Failed to read response for protocol {protocol_str}: {error}"
+            )
             raise MultiselectClientError() from error
 
         if response == protocol_str:
             logger.debug(f"Protocol {protocol_str} successfully selected")
             return protocol
         if response == PROTOCOL_NOT_FOUND_MSG:
-            logger.debug(f"Protocol {protocol_str} not supported by peer (received 'na')")
+            logger.debug(
+                f"Protocol {protocol_str} not supported by peer (received 'na')"
+            )
             raise MultiselectClientError("protocol not supported")
-        logger.warning(f"Unrecognized response for protocol {protocol_str}: {response!r}")
+        logger.warning(
+            f"Unrecognized response for protocol {protocol_str}: {response!r}"
+        )
         raise MultiselectClientError(f"unrecognized response: {response}")
 
 

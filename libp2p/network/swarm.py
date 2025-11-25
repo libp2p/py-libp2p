@@ -414,9 +414,7 @@ class Swarm(Service, INetworkService):
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
         except SecurityUpgradeFailure as error:
-            logger.error(
-                "failed to upgrade security for peer %s: %s", peer_id, error
-            )
+            logger.error("failed to upgrade security for peer %s: %s", peer_id, error)
             await raw_conn.close()
             raise SwarmException(
                 f"failed to upgrade security for peer {peer_id}: {error}"
