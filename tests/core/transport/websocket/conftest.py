@@ -28,6 +28,7 @@ except ValueError:
 # 2. Monkeypatch address_string_to_bytes to support dns family and tls
 original_address_string_to_bytes = multiaddr.codec.address_string_to_bytes
 
+
 def patched_address_string_to_bytes(proto, addr_string):
     if proto.name in ("dns", "dns4", "dns6", "dnsaddr"):
         # Size is -1 (variable), so we must prefix with length
@@ -42,10 +43,12 @@ def patched_address_string_to_bytes(proto, addr_string):
         return b""
     return original_address_string_to_bytes(proto, addr_string)
 
+
 multiaddr.codec.address_string_to_bytes = patched_address_string_to_bytes
 
 # 3. Monkeypatch address_bytes_to_string to support dns family
 original_address_bytes_to_string = multiaddr.codec.address_bytes_to_string
+
 
 def patched_address_bytes_to_string(proto, buf):
     if proto.name in ("dns", "dns4", "dns6", "dnsaddr"):
@@ -53,8 +56,10 @@ def patched_address_bytes_to_string(proto, buf):
         try:
             return binascii.unhexlify(buf).decode("utf-8")
         except Exception:
-            # Fallback to original if decoding fails (though it likely won't work for dns)
+            # Fallback to original if decoding fails
+            # (though it likely won't work for dns)
             pass
     return original_address_bytes_to_string(proto, buf)
+
 
 multiaddr.codec.address_bytes_to_string = patched_address_bytes_to_string
