@@ -209,4 +209,9 @@ class FloodSub(IPubsubRouter):
                     continue
                 if peer_id not in pubsub.peers:
                     continue
+                if peer_id not in self.peer_protocol:
+                    continue
+
+                if self.peer_protocol[peer_id] != PROTOCOL_ID:
+                    continue
                 yield peer_id
