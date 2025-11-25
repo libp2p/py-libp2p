@@ -252,7 +252,7 @@ class QUICTransport(ITransport):
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
-            remote_peer_id = maddr.get_peer_id()
+            remote_peer_id = maddr.value_for_protocol("p2p")
             if remote_peer_id is not None:
                 remote_peer_id = ID.from_base58(remote_peer_id)
 

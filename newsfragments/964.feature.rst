@@ -3,4 +3,3 @@ AutoTLS for browser integration, connection management, and comprehensive config
 options. The implementation adds production-ready features like connection pooling,
 statistics tracking, and advanced TLS configuration for improved reliability and
 monitoring capabilities.
-
