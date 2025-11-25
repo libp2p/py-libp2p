@@ -648,15 +648,14 @@ class Yamux(IMuxedConn):
                     header = await read_exactly(self.secured_conn, HEADER_SIZE)
                 except IncompleteReadError as e:
                     logger.debug(
-                        f"Connection closed (incomplete read) for peer {self.peer_id}: {e}"
+                        "Connection closed (incomplete read) for peer "
+                        f"{self.peer_id}: {e}"
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
                     break
                 except Exception as e:
-                    logger.debug(
-                        f"Error reading header for peer {self.peer_id}: {e}"
-                    )
+                    logger.debug(f"Error reading header for peer {self.peer_id}: {e}")
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
                     break
@@ -702,7 +701,8 @@ class Yamux(IMuxedConn):
                                     )
                                 except IncompleteReadError as e:
                                     logger.error(
-                                        f"Incomplete read for SYN data on stream {stream_id}: {e}"
+                                        "Incomplete read for SYN data on stream "
+                                        f"{stream_id}: {e}"
                                     )
                                     # Mark stream as closed
                                     stream.recv_closed = True
@@ -749,7 +749,8 @@ class Yamux(IMuxedConn):
                                     )
                                 except IncompleteReadError as e:
                                     logger.error(
-                                        f"Incomplete read for ACK data on stream {stream_id}: {e}"
+                                        "Incomplete read for ACK data on stream "
+                                        f"{stream_id}: {e}"
                                     )
                                     # Mark stream as closed
                                     stream = self.streams[stream_id]
@@ -808,7 +809,9 @@ class Yamux(IMuxedConn):
                         )
                         try:
                             data = (
-                                await read_exactly(self.secured_conn, length) if length > 0 else b""
+                                await read_exactly(self.secured_conn, length)
+                                if length > 0
+                                else b""
                             )
                         except IncompleteReadError as e:
                             logger.error(
