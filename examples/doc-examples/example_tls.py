@@ -13,7 +13,6 @@ Usage:
 import argparse
 from datetime import datetime
 
-import multiaddr
 import trio
 
 from libp2p import generate_new_rsa_identity, new_host
