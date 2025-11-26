@@ -582,7 +582,7 @@ class SyncPersistentPeerStore(IPeerStore):
             return False
 
         # Store the new record
-        new_addrs = set(record.addrs)
+        new_addrs = list({addr.to_bytes(): addr for addr in record.addrs}.values())
         record_state = PeerRecordState(envelope, record.seq)
         self._save_peer_record(peer_id, record_state)
 
