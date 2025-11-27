@@ -198,9 +198,18 @@ class ConnectionHealthMonitor(Service):
 
         Uses a simple stream creation test as a health check.
         In a production implementation, this could use a dedicated ping protocol.
+
+        Note: When active streams are present, we skip the ping to avoid
+        interfering with active communication. This is a performance optimization
+        that assumes active streams indicate the connection is functional.
+        However, this may mask connection issues in some edge cases where streams
+        are open but the connection is degraded. For more aggressive health
+        checking, consider performing lightweight pings even with active streams.
         """
         try:
             # If there are active streams, avoid intrusive ping; assume healthy
+            # This is a performance optimization to avoid interfering with
+            # active communication, but may mask some connection issues
             if len(conn.get_streams()) > 0:
                 return True
 
@@ -285,14 +294,40 @@ class ConnectionHealthMonitor(Service):
             current_connections = self.swarm.connections.get(peer_id, [])
             remaining_after_removal = len(current_connections) - 1
 
-            # Only remove if we have more than the minimum required
-            if remaining_after_removal < self.config.min_connections_per_peer:
+            # Check if connection is critically unhealthy (very low health score)
+            is_critically_unhealthy = False
+            if self._has_health_data(peer_id, old_conn):
+                health = self.swarm.health_data[peer_id][old_conn]
+                # Consider critically unhealthy if health score is very low
+                # (e.g., < 0.1) or ping success rate is 0
+                critical_threshold = getattr(
+                    self.config, "critical_health_threshold", 0.1
+                )
+                is_critically_unhealthy = (
+                    health.health_score < critical_threshold
+                    or health.ping_success_rate == 0.0
+                )
+
+            # Only remove if we have more than the minimum required,
+            # OR if the connection is critically unhealthy (allow replacement
+            # even at minimum to maintain quality)
+            if (
+                remaining_after_removal < self.config.min_connections_per_peer
+                and not is_critically_unhealthy
+            ):
                 logger.warning(
                     f"Not replacing connection to {peer_id}: would go below minimum "
                     f"({remaining_after_removal} < "
-                    f"{self.config.min_connections_per_peer})"
+                    f"{self.config.min_connections_per_peer}) and connection is not "
+                    f"critically unhealthy"
                 )
                 return
+
+            if is_critically_unhealthy:
+                logger.info(
+                    f"Allowing replacement of critically unhealthy connection to "
+                    f"{peer_id} even at minimum connections"
+                )
 
             # Clean up health tracking first
             self.swarm.cleanup_connection_health(peer_id, old_conn)
@@ -318,6 +353,25 @@ class ConnectionHealthMonitor(Service):
                     logger.info(
                         f"Successfully established replacement connection to {peer_id}"
                     )
+                    # Verify connection was added to swarm tracking
+                    # (dial_peer_replacement should handle this via add_conn,
+                    # but we verify to ensure health tracking is initialized)
+                    if (
+                        peer_id in self.swarm.connections
+                        and new_conn in self.swarm.connections[peer_id]
+                    ):
+                        # Ensure health tracking is initialized for the new connection
+                        if not self._has_health_data(peer_id, new_conn):
+                            self.swarm.initialize_connection_health(peer_id, new_conn)
+                            logger.debug(
+                                f"Initialized health tracking for replacement "
+                                f"connection to {peer_id}"
+                            )
+                    else:
+                        logger.warning(
+                            f"Replacement connection to {peer_id} was not properly "
+                            f"added to swarm connections tracking"
+                        )
                 else:
                     logger.warning(
                         f"Failed to establish replacement connection to {peer_id}"

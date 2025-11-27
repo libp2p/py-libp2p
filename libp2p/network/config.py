@@ -96,6 +96,9 @@ class ConnectionConfig:
     max_failed_streams: int = 5
     # Require N consecutive unhealthy evaluations before replacement
     unhealthy_grace_period: int = 3
+    # Health score threshold below which a connection is considered critically
+    # unhealthy and can be replaced even at minimum connections
+    critical_health_threshold: float = 0.1  # 0.0 to 1.0
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""

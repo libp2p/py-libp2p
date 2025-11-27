@@ -1633,6 +1633,7 @@ class INetwork(ABC):
 
         """
 
+    @abstractmethod
     def get_peer_health_summary(self, peer_id: ID) -> dict[str, Any]:
         """
         Get health summary for a specific peer.
@@ -1648,22 +1649,38 @@ class INetwork(ABC):
             A dictionary containing health metrics for the peer's connections.
             Returns empty dict if health monitoring is disabled or peer not found.
 
-        """
-        return {}
+        Note
+        ----
+        This method is marked as abstract to ensure all network implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
 
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def get_global_health_summary(self) -> dict[str, Any]:
         """
         Get global health summary across all peers.
 
-        Returns
+        Returns:
         -------
         dict[str, Any]
             A dictionary containing global health metrics across all connections.
             Returns empty dict if health monitoring is disabled.
 
-        """
-        return {}
+        Note:
+        ----
+        This method is marked as abstract to ensure all network implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
 
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def export_health_metrics(self, format: str = "json") -> str:
         """
         Export health metrics in specified format.
@@ -1680,8 +1697,9 @@ class INetwork(ABC):
             Returns empty string or object if health monitoring is disabled.
 
         """
-        return "{}" if format == "json" else ""
+        raise NotImplementedError
 
+    @abstractmethod
     async def get_health_monitor_status(self) -> dict[str, Any]:
         """
         Get status information about the health monitoring service.
@@ -1700,7 +1718,7 @@ class INetwork(ABC):
             Returns {"enabled": False} if health monitoring is disabled.
 
         """
-        return {"enabled": False}
+        raise NotImplementedError
 
 
 class INetworkService(INetwork, ServiceAPI):
@@ -2002,6 +2020,7 @@ class IHost(ABC):
 
         """
 
+    @abstractmethod
     def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
         """
         Get health summary for peer connections.
@@ -2017,22 +2036,38 @@ class IHost(ABC):
             A dictionary containing health metrics for the peer's connections.
             Returns empty dict if health monitoring is disabled or peer not found.
 
-        """
-        return {}
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
 
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def get_network_health_summary(self) -> dict[str, Any]:
         """
         Get overall network health summary.
 
-        Returns
+        Returns:
         -------
         dict[str, Any]
             A dictionary containing global health metrics across all connections.
             Returns empty dict if health monitoring is disabled.
 
-        """
-        return {}
+        Note:
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty dictionaries when health monitoring is disabled, effectively
+        providing "optional" health monitoring with a consistent API.
 
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def export_health_metrics(self, format: str = "json") -> str:
         """
         Export health metrics in specified format.
@@ -2048,9 +2083,17 @@ class IHost(ABC):
             The health metrics in the requested format.
             Returns empty string or object if health monitoring is disabled.
 
-        """
-        return "{}" if format == "json" else ""
+        Note
+        ----
+        This method is marked as abstract to ensure all host implementations
+        provide health monitoring support. However, implementations may return
+        empty strings when health monitoring is disabled, effectively providing
+        "optional" health monitoring with a consistent API.
 
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def get_health_monitor_status(self) -> dict[str, Any]:
         """
         Get status information about the health monitoring service.
@@ -2069,7 +2112,7 @@ class IHost(ABC):
             Returns {"enabled": False} if health monitoring is disabled.
 
         """
-        return {"enabled": False}
+        raise NotImplementedError
 
     @abstractmethod
     async def upgrade_outbound_connection(
