@@ -110,15 +110,28 @@ class ConnectionHealth:
     def update_health_score(self) -> None:
         """Calculate overall health score based on metrics with configurable weights."""
         # Weighted scoring algorithm
-        latency_score = max(0.0, 1.0 - (self.ping_latency / 1000.0))  # Normalize to 1s
-        success_score = self.ping_success_rate
-        stability_score = self.connection_stability
+        # Handle edge cases: clamp latency to reasonable bounds
+        # Negative latency is invalid, set to 0
+        # Very high latency (> 1000ms) should result in 0 score
+        clamped_latency = max(0.0, self.ping_latency)
+        if clamped_latency > 1000.0:
+            latency_score = 0.0
+        else:
+            # Normalize latency to a 1s baseline; higher latency reduces score
+            latency_score = max(0.0, 1.0 - (clamped_latency / 1000.0))
+
+        # Ensure scores are in valid range [0.0, 1.0]
+        success_score = max(0.0, min(1.0, self.ping_success_rate))
+        stability_score = max(0.0, min(1.0, self.connection_stability))
 
         self.health_score = (
             latency_score * self.latency_weight
             + success_score * self.success_rate_weight
             + stability_score * self.stability_weight
         )
+
+        # Final validation: ensure health_score is in valid range
+        self.health_score = max(0.0, min(1.0, self.health_score))
 
     def update_ping_metrics(self, latency: float, success: bool) -> None:
         """Update ping-related metrics."""
@@ -165,7 +178,15 @@ class ConnectionHealth:
         current_time = time.time()
         self.error_history.append((current_time, error_type))
 
-        # Keep only recent errors (last 100)
+        # Time-based cleanup: Remove errors older than 24 hours
+        max_age_seconds = 24 * 3600  # 24 hours
+        self.error_history = [
+            (timestamp, error)
+            for timestamp, error in self.error_history
+            if current_time - timestamp < max_age_seconds
+        ]
+
+        # Count-based cleanup: Keep only recent errors (last 100)
         if len(self.error_history) > 100:
             self.error_history = self.error_history[-100:]
 
