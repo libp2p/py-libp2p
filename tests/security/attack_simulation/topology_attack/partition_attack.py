@@ -1,5 +1,4 @@
-import math
-from typing import Any, List, Tuple, Dict
+from typing import Any
 
 import trio
 
@@ -9,25 +8,25 @@ from ..utils.attack_metrics import AttackMetrics
 class NetworkPartitioner:
     def __init__(
         self,
-        node_ids: List[str],
-        partitions: List[List[str]],
+        node_ids: list[str],
+        partitions: list[list[str]],
         intensity: float = 1.0,
     ):
         self.node_ids = node_ids
         self.partitions = partitions
         self.intensity = intensity
-        self.cut_edges: List[Tuple[str, str]] = []
-        self.remaining_edges: List[Tuple[str, str]] = []
+        self.cut_edges: list[tuple[str, str]] = []
+        self.remaining_edges: list[tuple[str, str]] = []
 
-    def _build_full_mesh(self) -> List[Tuple[str, str]]:
-        edges: List[Tuple[str, str]] = []
+    def _build_full_mesh(self) -> list[tuple[str, str]]:
+        edges: list[tuple[str, str]] = []
         for i in range(len(self.node_ids)):
             for j in range(i + 1, len(self.node_ids)):
                 edges.append((self.node_ids[i], self.node_ids[j]))
         return edges
 
-    def _partition_index(self) -> Dict[str, int]:
-        mapping: Dict[str, int] = {}
+    def _partition_index(self) -> dict[str, int]:
+        mapping: dict[str, int] = {}
         for idx, group in enumerate(self.partitions):
             for n in group:
                 mapping[n] = idx
@@ -36,7 +35,9 @@ class NetworkPartitioner:
             mapping.setdefault(n, 0)
         return mapping
 
-    async def apply_partition(self) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    async def apply_partition(
+        self,
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
         part_map = self._partition_index()
         edges = self._build_full_mesh()
         self.cut_edges = []
@@ -53,12 +54,12 @@ class NetworkPartitioner:
 
 
 class TopologyPartitionScenario:
-    def __init__(self, node_ids: List[str], attacker: NetworkPartitioner):
+    def __init__(self, node_ids: list[str], attacker: NetworkPartitioner):
         self.node_ids = node_ids
         self.attacker = attacker
         self.metrics = AttackMetrics()
 
-    async def run(self) -> Dict[str, Any]:
+    async def run(self) -> dict[str, Any]:
         cut_edges, remaining_edges = await self.attacker.apply_partition()
         total_edges = len(cut_edges) + len(remaining_edges)
         cut_ratio = cut_edges_count = 0.0
@@ -73,9 +74,7 @@ class TopologyPartitionScenario:
             affected_nodes.add(u)
             affected_nodes.add(v)
         affected_nodes_percentage = (
-            len(affected_nodes) / len(self.node_ids) * 100.0
-            if self.node_ids
-            else 0.0
+            len(affected_nodes) / len(self.node_ids) * 100.0 if self.node_ids else 0.0
         )
 
         # ----------------------------
@@ -123,7 +122,7 @@ class TopologyPartitionScenario:
         resilience_score = max(0.0, 1.0 - cut_ratio * 1.5)
         self.metrics.resilience_score = resilience_score
 
-        attack_metrics: Dict[str, Any] = {
+        attack_metrics: dict[str, Any] = {
             "partition_cut_ratio": cut_ratio,
             "routing_incorrect_rate": routing_incorrect_rate,
             "lookup_failure_rate": lookup_failure_rate,

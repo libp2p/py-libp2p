@@ -97,7 +97,7 @@ async def test_partition_full_mesh_edge_count_consistency():
 @pytest.mark.trio
 async def test_partition_no_cut_when_single_partition():
     nodes = [f"p{i}" for i in range(5)]
-    partitions = [nodes[:] ]  # all in one group
+    partitions = [nodes[:]]  # all in one group
 
     attacker = NetworkPartitioner(nodes, partitions, intensity=1.0)
     cut_edges, remaining_edges = await attacker.apply_partition()

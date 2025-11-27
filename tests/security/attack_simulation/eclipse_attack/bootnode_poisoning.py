@@ -225,7 +225,9 @@ class BootnodePoisoningScenario:
         # Peer table contamination (higher for bootnode attacks)
         contamination = min(isolation_rate * 1.2, 1.0)
         self.metrics.peer_table_contamination = [
-            0.0, contamination, contamination * 0.6
+            0.0,
+            contamination,
+            contamination * 0.6,
         ]
 
         # Network connectivity severely impacted by bootnode poisoning
@@ -362,4 +364,3 @@ async def run_bootnode_poisoning_simulation(
     results = await scenario.execute_bootnode_poisoning_attack(attack_duration)
 
     return results
-

@@ -445,4 +445,3 @@ if __name__ == "__main__":
     print("🧪 Running Finality Stall Attack Simulation Tests")
     trio.run(test_run_finality_stall_simulation)
     print("✅ Tests completed successfully!")
-

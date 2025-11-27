@@ -41,11 +41,13 @@ def test_block_initialization():
 
 def test_block_invalidity_types():
     """Test all block invalidity types"""
-    types = [BlockInvalidityType.INVALID_STATE_TRANSITION,
-             BlockInvalidityType.DOUBLE_SPEND,
-             BlockInvalidityType.INVALID_MERKLE_ROOT,
-             BlockInvalidityType.CONSENSUS_VIOLATION,
-             BlockInvalidityType.INVALID_TRANSACTION]
+    types = [
+        BlockInvalidityType.INVALID_STATE_TRANSITION,
+        BlockInvalidityType.DOUBLE_SPEND,
+        BlockInvalidityType.INVALID_MERKLE_ROOT,
+        BlockInvalidityType.CONSENSUS_VIOLATION,
+        BlockInvalidityType.INVALID_TRANSACTION,
+    ]
     assert len(types) >= 5
     assert BlockInvalidityType.INVALID_STATE_TRANSITION in types
     assert BlockInvalidityType.DOUBLE_SPEND in types
@@ -98,9 +100,8 @@ async def test_propagate_invalid_block_to_light_clients():
     assert "accepted_peers" in result
     assert "rejected_peers" in result
     assert "acceptance_rate" in result
-    assert (
-        len(result["accepted_peers"]) + len(result["rejected_peers"])
-        == len(light_clients)
+    assert len(result["accepted_peers"]) + len(result["rejected_peers"]) == len(
+        light_clients
     )
     assert validator.propagation_attempts == 1
 
@@ -432,4 +433,3 @@ if __name__ == "__main__":
     print("🧪 Running Invalid Block Propagation Attack Simulation Tests")
     trio.run(test_run_invalid_block_simulation)
     print("✅ Tests completed successfully!")
-

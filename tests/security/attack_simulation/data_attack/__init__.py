@@ -1,2 +1,1 @@
 """Data Attack Simulation Module"""
-

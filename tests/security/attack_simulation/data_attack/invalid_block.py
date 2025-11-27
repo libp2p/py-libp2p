@@ -310,15 +310,17 @@ class InvalidBlockScenario:
 
         while trio.current_time() - start_time < duration:
             # Create invalid block
-            invalidity_type = random.choice([
-                BlockInvalidityType.INVALID_STATE_TRANSITION,
-                BlockInvalidityType.DOUBLE_SPEND,
-                BlockInvalidityType.INVALID_MERKLE_ROOT,
-                BlockInvalidityType.CONSENSUS_VIOLATION,
-                BlockInvalidityType.INVALID_TRANSACTION,
-            ])
+            invalidity_type = random.choice(
+                [
+                    BlockInvalidityType.INVALID_STATE_TRANSITION,
+                    BlockInvalidityType.DOUBLE_SPEND,
+                    BlockInvalidityType.INVALID_MERKLE_ROOT,
+                    BlockInvalidityType.CONSENSUS_VIOLATION,
+                    BlockInvalidityType.INVALID_TRANSACTION,
+                ]
+            )
             block = validator.create_invalid_block(
-                block_num, f"parent_{block_num-1}", invalidity_type
+                block_num, f"parent_{block_num - 1}", invalidity_type
             )
             block_num += 1
 
@@ -381,7 +383,7 @@ class InvalidBlockScenario:
 
         if light_client_acceptance > 0.5:
             analysis.append(
-                f"CRITICAL: {light_client_acceptance*100:.1f}% of light clients "
+                f"CRITICAL: {light_client_acceptance * 100:.1f}% of light clients "
                 f"accepted invalid blocks pre-finality"
             )
 
@@ -481,4 +483,3 @@ async def run_invalid_block_simulation(
     )
 
     return results
-

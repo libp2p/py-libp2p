@@ -41,9 +41,9 @@ class MemoryTracker:
         """Calculate memory growth rate (MB per sample)"""
         if len(self.memory_samples) < 2:
             return 0.0
-        return (
-            self.memory_samples[-1] - self.memory_samples[0]
-        ) / len(self.memory_samples)
+        return (self.memory_samples[-1] - self.memory_samples[0]) / len(
+            self.memory_samples
+        )
 
 
 class LightClientNode:
@@ -347,14 +347,12 @@ class FinalityStallScenario:
             return {"peak_memory": 0, "avg_memory": 0, "growth_rate": 0, "samples": []}
 
         peak_memory = max(lc.memory_tracker.peak_memory_mb for lc in self.light_clients)
-        avg_memory = (
-            sum(lc.memory_tracker.memory_usage_mb for lc in self.light_clients)
-            / len(self.light_clients)
-        )
-        avg_growth_rate = (
-            sum(lc.memory_tracker.get_memory_growth_rate() for lc in self.light_clients)
-            / len(self.light_clients)
-        )
+        avg_memory = sum(
+            lc.memory_tracker.memory_usage_mb for lc in self.light_clients
+        ) / len(self.light_clients)
+        avg_growth_rate = sum(
+            lc.memory_tracker.get_memory_growth_rate() for lc in self.light_clients
+        ) / len(self.light_clients)
 
         # Collect sample data from first client for visualization
         sample_client = self.light_clients[0]
@@ -425,7 +423,7 @@ class FinalityStallScenario:
 
         if exhaustion_rate > 0.5:
             insights.append(
-                f"CRITICAL: {exhaustion_rate*100:.1f}% of light clients "
+                f"CRITICAL: {exhaustion_rate * 100:.1f}% of light clients "
                 f"exhausted memory"
             )
 
@@ -439,14 +437,14 @@ class FinalityStallScenario:
         )
         if timeout_rate < 0.7:
             insights.append(
-                f"WARNING: Only {timeout_rate*100:.1f}% of clients detected "
+                f"WARNING: Only {timeout_rate * 100:.1f}% of clients detected "
                 f"stall via timeout"
             )
 
         if recovery_metrics["recovery_rate"] < 0.8:
             insights.append(
                 f"CONCERN: Recovery rate only "
-                f"{recovery_metrics['recovery_rate']*100:.1f}%"
+                f"{recovery_metrics['recovery_rate'] * 100:.1f}%"
             )
 
         if not insights:
@@ -538,8 +536,8 @@ async def run_finality_stall_simulation(
 
     # Create attackers
     attackers = [
-         FinalityStallAttacker(f"attacker_{i}", attack_intensity)
-         for i in range(num_attackers)
+        FinalityStallAttacker(f"attacker_{i}", attack_intensity)
+        for i in range(num_attackers)
     ]
 
     # Execute attack scenario
@@ -549,4 +547,3 @@ async def run_finality_stall_simulation(
     )
 
     return results
-

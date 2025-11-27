@@ -37,6 +37,7 @@ async def test_time_drift_scenario_execution():
     assert "attack_metrics" in result
     assert result["clock_difference_ms"] >= 0
 
+
 @pytest.mark.trio
 async def test_time_drift_at_least_one_node_drifted():
     nodes = [f"n{i}" for i in range(4)]
@@ -50,6 +51,7 @@ async def test_time_drift_at_least_one_node_drifted():
     drifted_nodes, _ = await attacker.apply_drift(rounds=1)
     assert len(drifted_nodes) >= 1
     assert drifted_nodes[0] in nodes
+
 
 @pytest.mark.trio
 async def test_time_drift_clock_skew_occurs():
@@ -65,6 +67,7 @@ async def test_time_drift_clock_skew_occurs():
     times = list(clocks.values())
 
     assert max(times) != min(times), "Clock skew should exist if drift was applied"
+
 
 @pytest.mark.trio
 async def test_time_drift_resilience_decreases_with_drift():
@@ -85,6 +88,7 @@ async def test_time_drift_resilience_decreases_with_drift():
 
     assert resilience <= 1.0
     assert resilience < 0.8  # heavy drift should reduce resilience
+
 
 @pytest.mark.trio
 async def test_time_drift_metrics_fields_present():
@@ -113,6 +117,7 @@ async def test_time_drift_metrics_fields_present():
     for field in required_fields:
         assert field in report, f"Missing metric field: {field}"
 
+
 @pytest.mark.trio
 async def test_time_drift_values_not_identical():
     nodes = [f"n{i}" for i in range(8)]
@@ -127,5 +132,3 @@ async def test_time_drift_values_not_identical():
     unique_values = len(set(clocks.values()))
 
     assert unique_values > 1, "At least one node must differ in clock value"
-
-

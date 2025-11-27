@@ -311,12 +311,13 @@ class LongRangeForkScenario:
 
         if success_rate > 0.5:
             insights.append(
-                f"HIGH RISK: {success_rate*100:.1f}% of fork replay attempts succeeded"
+                f"HIGH RISK: {success_rate * 100:.1f}% of fork replay "
+                "attempts succeeded"
             )
 
         if detection_results["false_acceptance_rate"] > 0.2:
             insights.append(
-                f"CONCERN: {detection_results['false_acceptance_rate']*100:.1f}% "
+                f"CONCERN: {detection_results['false_acceptance_rate'] * 100:.1f}% "
                 f"false acceptance rate for stale forks"
             )
 
@@ -398,9 +399,7 @@ async def run_long_range_fork_simulation(
         (
             f"offline_peer_{i}",
             avg_offline_duration
-            + random.uniform(
-                -avg_offline_duration * 0.3, avg_offline_duration * 0.3
-            ),
+            + random.uniform(-avg_offline_duration * 0.3, avg_offline_duration * 0.3),
         )
         for i in range(num_offline_peers)
     ]
@@ -426,9 +425,9 @@ async def run_long_range_fork_simulation(
 
     # Create fork attackers
     fork_attackers = [
-         ForkAttacker(
-             f"fork_attacker_{i}", stale_fork, canonical_chain, attack_intensity
-         )
+        ForkAttacker(
+            f"fork_attacker_{i}", stale_fork, canonical_chain, attack_intensity
+        )
         for i in range(num_fork_attackers)
     ]
 
@@ -437,4 +436,3 @@ async def run_long_range_fork_simulation(
     results = await scenario.execute_long_range_fork_attack(attack_duration)
 
     return results
-

@@ -267,4 +267,3 @@ if __name__ == "__main__":
     print("🧪 Running Bootnode Poisoning Attack Simulation Tests")
     trio.run(test_run_bootnode_poisoning_simulation)
     print("✅ Tests completed successfully!")
-

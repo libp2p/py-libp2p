@@ -1,5 +1,5 @@
 import random
-from typing import Any, Dict, List
+from typing import Any
 
 import trio
 
@@ -9,8 +9,8 @@ from ..utils.attack_metrics import AttackMetrics
 class GossipDelayAttacker:
     def __init__(
         self,
-        topics: List[str],
-        delayed_topics: List[str],
+        topics: list[str],
+        delayed_topics: list[str],
         max_delay_ms: float,
         intensity: float = 1.0,
     ):
@@ -18,9 +18,9 @@ class GossipDelayAttacker:
         self.delayed_topics = set(delayed_topics)
         self.max_delay_ms = max_delay_ms
         self.intensity = intensity
-        self.messages: List[Dict[str, Any]] = []
+        self.messages: list[dict[str, Any]] = []
 
-    async def generate_messages(self, count: int) -> List[Dict[str, Any]]:
+    async def generate_messages(self, count: int) -> list[dict[str, Any]]:
         self.messages = []
         for _ in range(count):
             topic = random.choice(self.topics)
@@ -51,7 +51,7 @@ class GossipDelayScenario:
         self.attacker = attacker
         self.metrics = AttackMetrics()
 
-    async def run(self, count: int = 50) -> Dict[str, Any]:
+    async def run(self, count: int = 50) -> dict[str, Any]:
         messages = await self.attacker.generate_messages(count)
 
         if not messages:
@@ -103,7 +103,7 @@ class GossipDelayScenario:
         resilience_score = max(0.0, 1.0 - delayed_ratio * 1.5)
         self.metrics.resilience_score = resilience_score
 
-        attack_metrics: Dict[str, Any] = {
+        attack_metrics: dict[str, Any] = {
             "delayed_ratio": delayed_ratio,
             "max_latency_spike_ms": max_spike,
             "lookup_success_degradation": lookup_success_degradation,

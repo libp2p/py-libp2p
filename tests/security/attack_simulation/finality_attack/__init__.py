@@ -1,2 +1,1 @@
 """Finality Attack Simulation Module"""
-
