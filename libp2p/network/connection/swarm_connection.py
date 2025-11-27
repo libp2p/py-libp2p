@@ -64,6 +64,7 @@ class SwarmConn(INetConn):
                 f"for peer {muxed_conn.peer_id}: {e}"
             )
             # optional conveniences
+        # Attach close hook if possible; tolerate implementations without it
         if hasattr(muxed_conn, "on_close"):
             logging.debug(f"Setting on_close for peer {muxed_conn.peer_id}")
             setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
