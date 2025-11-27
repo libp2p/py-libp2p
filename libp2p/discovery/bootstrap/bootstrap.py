@@ -104,7 +104,7 @@ class BootstrapDiscovery:
                     logger.warning(f"DNS resolution returned None for: {addr_str}")
                     return
 
-                peer_id_str = multiaddr.get_peer_id()
+                peer_id_str = multiaddr.value_for_protocol("p2p")
                 if peer_id_str is None:
                     logger.warning(f"Missing peer ID in DNS address: {addr_str}")
                     return
