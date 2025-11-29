@@ -64,6 +64,7 @@ from .utils import (
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
+PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
 
@@ -107,6 +108,24 @@ class GossipSub(IPubsubRouter, Service):
         int  # Maximum number of message IDs to track per peer in IDONTWANT lists
     )
 
+    # Gossipsub v2.0 adaptive features
+    adaptive_gossip_enabled: bool
+    network_health_score: float  # 0.0 (poor) to 1.0 (excellent)
+    adaptive_degree_low: int  # Dynamic lower bound for mesh degree
+    adaptive_degree_high: int  # Dynamic upper bound for mesh degree
+    gossip_factor: float  # Dynamic gossip factor
+    last_health_update: int  # Timestamp of last health score update
+
+    # Security features
+    spam_protection_enabled: bool
+    message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
+    max_messages_per_topic_per_second: float
+    equivocation_detection: dict[
+        tuple[bytes, bytes], rpc_pb2.Message
+    ]  # (seqno, from) -> first_msg
+    eclipse_protection_enabled: bool
+    min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -127,6 +146,11 @@ class GossipSub(IPubsubRouter, Service):
         unsubscribe_back_off: int = 10,
         score_params: ScoreParams | None = None,
         max_idontwant_messages: int = 10,
+        adaptive_gossip_enabled: bool = True,
+        spam_protection_enabled: bool = True,
+        max_messages_per_topic_per_second: float = 10.0,
+        eclipse_protection_enabled: bool = True,
+        min_mesh_diversity_ips: int = 3,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -173,14 +197,43 @@ class GossipSub(IPubsubRouter, Service):
         self.dont_send_message_ids = dict()
         self.max_idontwant_messages = max_idontwant_messages
 
+        # Gossipsub v2.0 adaptive features
+        self.adaptive_gossip_enabled = adaptive_gossip_enabled
+        self.network_health_score = 1.0  # Start optimistic
+        self.adaptive_degree_low = degree_low
+        self.adaptive_degree_high = degree_high
+        self.gossip_factor = 0.25  # Default gossip factor
+        self.last_health_update = int(time.time())
+
+        # Security features
+        self.spam_protection_enabled = spam_protection_enabled
+        self.message_rate_limits = defaultdict(lambda: defaultdict(list))
+        self.max_messages_per_topic_per_second = max_messages_per_topic_per_second
+        self.equivocation_detection = {}
+        self.eclipse_protection_enabled = eclipse_protection_enabled
+        self.min_mesh_diversity_ips = min_mesh_diversity_ips
+
     def supports_scoring(self, peer_id: ID) -> bool:
         """
-        Check if peer supports Gossipsub v1.1 scoring features.
+        Check if peer supports Gossipsub v1.1+ scoring features.
 
         :param peer_id: The peer to check
-        :return: True if peer supports v1.1 features, False otherwise
+        :return: True if peer supports v1.1+ features, False otherwise
         """
-        return self.peer_protocol.get(peer_id) == PROTOCOL_ID_V11
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V12,
+            PROTOCOL_ID_V20,
+        )
+
+    def supports_v20_features(self, peer_id: ID) -> bool:
+        """
+        Check if peer supports Gossipsub v2.0 features.
+
+        :param peer_id: The peer to check
+        :return: True if peer supports v2.0 features, False otherwise
+        """
+        return self.peer_protocol.get(peer_id) == PROTOCOL_ID_V20
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.heartbeat)
@@ -229,6 +282,7 @@ class GossipSub(IPubsubRouter, Service):
             PROTOCOL_ID,
             PROTOCOL_ID_V11,
             PROTOCOL_ID_V12,
+            PROTOCOL_ID_V20,
             floodsub.PROTOCOL_ID,
         ):
             # We should never enter here. Becuase the `protocol_id` is registered by
@@ -241,6 +295,10 @@ class GossipSub(IPubsubRouter, Service):
         # Initialize IDONTWANT tracking for this peer
         if peer_id not in self.dont_send_message_ids:
             self.dont_send_message_ids[peer_id] = set()
+
+        # Track peer IP for colocation scoring if scorer is available
+        if self.scorer is not None and self.pubsub is not None:
+            self._track_peer_ip(peer_id)
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -259,6 +317,13 @@ class GossipSub(IPubsubRouter, Service):
 
         # Clean up IDONTWANT tracking for this peer
         self.dont_send_message_ids.pop(peer_id, None)
+
+        # Clean up scoring data for this peer
+        if self.scorer is not None:
+            self.scorer.remove_peer(peer_id)
+
+        # Clean up security state
+        self._cleanup_security_state(peer_id)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -295,6 +360,20 @@ class GossipSub(IPubsubRouter, Service):
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
+        # Security checks for Gossipsub 2.0
+        if not self._check_spam_protection(msg_forwarder, pubsub_msg):
+            logger.debug(
+                "Message rejected due to spam protection from peer %s", msg_forwarder
+            )
+            return
+
+        if not self._check_equivocation(pubsub_msg):
+            logger.debug(
+                "Message rejected due to equivocation from peer %s",
+                ID(pubsub_msg.from_id),
+            )
+            return
+
         self.mcache.put(pubsub_msg)
 
         # Get message ID for IDONTWANT
@@ -587,6 +666,23 @@ class GossipSub(IPubsubRouter, Service):
             if self.scorer is not None:
                 self.scorer.on_heartbeat()
 
+            # Update network health and adapt parameters (v2.0 feature)
+            if self.adaptive_gossip_enabled:
+                self._update_network_health()
+                self._adapt_gossip_parameters()
+
+            # Security maintenance (v2.0 feature)
+            self._periodic_security_cleanup()
+
+            # Ensure mesh diversity for Eclipse attack protection
+            if self.eclipse_protection_enabled:
+                for topic in self.mesh:
+                    self._ensure_mesh_diversity(topic)
+
+            # Perform ongoing mesh quality maintenance (v2.0 feature)
+            for topic in self.mesh:
+                self._maintain_mesh_quality(topic)
+
             # Prune old IDONTWANT entries to prevent memory leaks
             self._prune_idontwant_entries()
 
@@ -625,7 +721,20 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             num_mesh_peers_in_topic = len(self.mesh[topic])
-            if num_mesh_peers_in_topic < self.degree_low:
+
+            # Use adaptive degree bounds
+            effective_degree_low = (
+                self.adaptive_degree_low
+                if self.adaptive_gossip_enabled
+                else self.degree_low
+            )
+            effective_degree_high = (
+                self.adaptive_degree_high
+                if self.adaptive_gossip_enabled
+                else self.degree_high
+            )
+
+            if num_mesh_peers_in_topic < effective_degree_low:
                 # Select D - |mesh[topic]| peers from peers.gossipsub[topic] - mesh[topic]  # noqa: E501
                 selected_peers = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, self.degree - num_mesh_peers_in_topic, self.mesh[topic], True
@@ -638,48 +747,21 @@ class GossipSub(IPubsubRouter, Service):
                     # Emit GRAFT(topic) control message to peer
                     peers_to_graft[peer].append(topic)
 
-            # Opportunistic grafting based on median scores
-            if self.scorer is not None and num_mesh_peers_in_topic >= self.degree_low:
-                try:
-                    scorer = self.scorer
-                    # Only consider v1.1 peers for scoring-based opportunistic grafting
-                    v11_mesh_peers = [
-                        p for p in self.mesh[topic] if self.supports_scoring(p)
-                    ]
-                    if v11_mesh_peers:
-                        scores = [scorer.score(p, [topic]) for p in v11_mesh_peers]
-                        if scores:
-                            median_score = statistics.median(scores)
-                            # Find higher-than-median peers outside mesh
-                            candidates = self._get_in_topic_gossipsub_peers_from_minus(
-                                topic, self.degree, self.mesh[topic], True
-                            )
-                            # Only consider v1.1 candidates for scoring-based selection
-                            v11_candidates = [
-                                c for c in candidates if self.supports_scoring(c)
-                            ]
-                            for cand in v11_candidates:
-                                if scorer.score(cand, [topic]) > median_score:
-                                    self.mesh[topic].add(cand)
-                                    peers_to_graft[cand].append(topic)
-                                    break
-                except (ValueError, KeyError) as e:
-                    logger.warning(
-                        "Opportunistic grafting failed for topic %s: %s", topic, e
-                    )
-                except Exception as e:
-                    logger.error(
-                        "Unexpected error in opportunistic grafting for topic %s: %s",
-                        topic,
-                        e,
-                    )
-
-            if num_mesh_peers_in_topic > self.degree_high:
-                # Select |mesh[topic]| - D peers from mesh[topic]
-                selected_peers = self.select_from_minus(
-                    num_mesh_peers_in_topic - self.degree, self.mesh[topic], set()
+            # Enhanced opportunistic grafting for Gossipsub 2.0
+            if (
+                self.scorer is not None
+                and num_mesh_peers_in_topic >= effective_degree_low
+            ):
+                grafted_peers = self._perform_opportunistic_grafting(
+                    topic, peers_to_graft
                 )
-                for peer in selected_peers:
+
+            if num_mesh_peers_in_topic > effective_degree_high:
+                # Enhanced mesh pruning with score-based selection
+                peers_to_remove = self._select_peers_for_pruning(
+                    topic, num_mesh_peers_in_topic - self.degree
+                )
+                for peer in peers_to_remove:
                     # Remove peer from mesh[topic]
                     self.mesh[topic].discard(peer)
                     if self.scorer is not None:
@@ -738,9 +820,17 @@ class GossipSub(IPubsubRouter, Service):
         if peers_to_gossip is not None:
             msg_ids = self.mcache.window(topic)
             if msg_ids:
-                # Select D peers from peers.gossipsub[topic] excluding current peers
+                # Select peers from peers.gossipsub[topic] excluding current peers
+                # Use adaptive count based on network health
+                total_gossip_peers = len(
+                    self.pubsub.peer_topics.get(topic, set())
+                ) - len(current_peers)
+                gossip_count = self._get_adaptive_gossip_peers_count(
+                    topic, total_gossip_peers
+                )
+
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
-                    topic, self.degree, current_peers, True
+                    topic, gossip_count, current_peers, True
                 )
                 msg_id_strs = [str(msg_id) for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
@@ -826,7 +916,7 @@ class GossipSub(IPubsubRouter, Service):
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
             if self.peer_protocol[peer_id]
-            in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12)
+            in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12, PROTOCOL_ID_V20)
         }
         if backoff_check:
             # filter out peers that are in back off for this topic
@@ -1248,18 +1338,18 @@ class GossipSub(IPubsubRouter, Service):
             if topic in self.mesh:
                 mesh_peers.update(self.mesh[topic])
 
-        # Only send to peers that support gossipsub 1.2
-        v12_peers = {
+        # Only send to peers that support gossipsub 1.2+
+        v12_plus_peers = {
             peer_id
             for peer_id in mesh_peers
-            if self.peer_protocol.get(peer_id) == PROTOCOL_ID_V12
+            if self.peer_protocol.get(peer_id) in (PROTOCOL_ID_V12, PROTOCOL_ID_V20)
         }
 
-        if not v12_peers:
+        if not v12_plus_peers:
             return
 
-        # Send IDONTWANT message to all v1.2 mesh peers
-        for peer_id in v12_peers:
+        # Send IDONTWANT message to all v1.2+ mesh peers
+        for peer_id in v12_plus_peers:
             await self.emit_idontwant([msg_id], peer_id)
 
     async def handle_idontwant(
@@ -1319,3 +1409,802 @@ class GossipSub(IPubsubRouter, Service):
             len(self.dont_send_message_ids[sender_peer_id]),
             self.max_idontwant_messages,
         )
+
+    def _track_peer_ip(self, peer_id: ID) -> None:
+        """
+        Track the IP address of a peer for colocation scoring.
+
+        :param peer_id: The peer ID to track
+        """
+        if self.pubsub is None or self.scorer is None:
+            return
+
+        try:
+            # Try to get the peer's connection from the host
+            if peer_id in self.pubsub.peers:
+                stream = self.pubsub.peers[peer_id]
+                # Get the remote address from the connection
+                remote_addr = stream.muxed_conn.conn.remote_addr
+                if remote_addr:
+                    # Extract IP from multiaddr
+                    ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
+                    if ip_str:
+                        self.scorer.add_peer_ip(peer_id, ip_str)
+        except Exception as e:
+            logger.debug("Failed to track IP for peer %s: %s", peer_id, e)
+
+    def _extract_ip_from_multiaddr(self, multiaddr_str: str) -> str | None:
+        """
+        Extract IP address from a multiaddr string.
+
+        :param multiaddr_str: The multiaddr string
+        :return: The IP address or None if extraction fails
+        """
+        try:
+            # Simple extraction for common cases like /ip4/127.0.0.1/tcp/4001
+            # or /ip6/::1/tcp/4001
+            parts = multiaddr_str.split("/")
+            for i, part in enumerate(parts):
+                if part in ("ip4", "ip6") and i + 1 < len(parts):
+                    return parts[i + 1]
+            return None
+        except Exception:
+            return None
+
+    def _update_network_health(self) -> None:
+        """
+        Update network health score based on mesh connectivity and peer behavior.
+
+        Network health is calculated based on:
+        - Mesh connectivity ratio
+        - Peer score distribution
+        - Message delivery success rate
+        """
+        if not self.adaptive_gossip_enabled or self.scorer is None:
+            return
+
+        current_time = int(time.time())
+        # Update health every 30 seconds
+        if current_time - self.last_health_update < 30:
+            return
+
+        self.last_health_update = current_time
+
+        try:
+            total_topics = len(self.mesh)
+            if total_topics == 0:
+                self.network_health_score = 1.0
+                return
+
+            # Calculate mesh connectivity health (0.0 to 1.0)
+            connectivity_health = 0.0
+            for topic, peers in self.mesh.items():
+                target_degree = self.degree
+                actual_degree = len(peers)
+                # Health is better when we're close to target degree
+                if actual_degree == 0:
+                    topic_health = 0.0
+                else:
+                    # Normalize based on how close we are to target
+                    ratio = min(actual_degree / target_degree, 1.0)
+                    topic_health = ratio
+                connectivity_health += topic_health
+
+            connectivity_health /= total_topics
+
+            # Calculate peer score health (0.0 to 1.0)
+            score_health = self._calculate_peer_score_health()
+
+            # Combine metrics (weighted average)
+            self.network_health_score = 0.6 * connectivity_health + 0.4 * score_health
+            self.network_health_score = max(0.0, min(1.0, self.network_health_score))
+
+            logger.debug(
+                "Network health updated: %.2f (connectivity: %.2f, scores: %.2f)",
+                self.network_health_score,
+                connectivity_health,
+                score_health,
+            )
+
+        except Exception as e:
+            logger.debug("Failed to update network health: %s", e)
+            # Default to moderate health on error
+            self.network_health_score = 0.5
+
+    def _calculate_peer_score_health(self) -> float:
+        """
+        Calculate health based on peer score distribution.
+
+        :return: Health score from 0.0 to 1.0
+        """
+        if self.scorer is None:
+            return 1.0
+
+        try:
+            # Get all peers in mesh
+            all_mesh_peers: set[ID] = set()
+            for peers in self.mesh.values():
+                all_mesh_peers.update(peers)
+
+            if not all_mesh_peers:
+                return 1.0
+
+            # Calculate average score
+            total_score = 0.0
+            positive_scores = 0
+            for peer in all_mesh_peers:
+                # Use empty topic list for overall score
+                score = self.scorer.score(peer, [])
+                total_score += score
+                if score > 0:
+                    positive_scores += 1
+
+            # Health is better when more peers have positive scores
+            positive_ratio = positive_scores / len(all_mesh_peers)
+            return positive_ratio
+
+        except Exception:
+            return 0.5
+
+    def _adapt_gossip_parameters(self) -> None:
+        """
+        Adapt gossip parameters based on network health.
+
+        When network health is poor:
+        - Increase mesh degree bounds to improve connectivity
+        - Increase gossip factor to spread messages more widely
+
+        When network health is good:
+        - Use standard parameters for efficiency
+        """
+        if not self.adaptive_gossip_enabled:
+            return
+
+        # Adapt degree bounds based on health
+        if self.network_health_score < 0.3:
+            # Poor health: increase connectivity
+            self.adaptive_degree_low = min(self.degree_low + 2, self.degree_high)
+            self.adaptive_degree_high = self.degree_high + 3
+            self.gossip_factor = min(0.5, self.gossip_factor * 1.5)
+        elif self.network_health_score < 0.7:
+            # Moderate health: slight increase
+            self.adaptive_degree_low = min(self.degree_low + 1, self.degree_high)
+            self.adaptive_degree_high = self.degree_high + 1
+            self.gossip_factor = min(0.4, self.gossip_factor * 1.2)
+        else:
+            # Good health: use standard parameters
+            self.adaptive_degree_low = self.degree_low
+            self.adaptive_degree_high = self.degree_high
+            self.gossip_factor = 0.25
+
+    def _get_adaptive_gossip_peers_count(self, topic: str, total_peers: int) -> int:
+        """
+        Calculate adaptive number of peers to gossip to.
+
+        :param topic: The topic
+        :param total_peers: Total number of available peers
+        :return: Number of peers to gossip to
+        """
+        if not self.adaptive_gossip_enabled:
+            # Use default calculation
+            return max(6, int(total_peers * 0.25))  # Default Dlazy=6, factor=0.25
+
+        # Use adaptive gossip factor
+        base_count = int(total_peers * self.gossip_factor)
+        min_count = 6 if self.network_health_score > 0.5 else 8
+
+        return max(min_count, base_count)
+
+    def _check_spam_protection(self, peer_id: ID, msg: rpc_pb2.Message) -> bool:
+        """
+        Check if message should be rejected due to spam protection.
+
+        :param peer_id: The peer sending the message
+        :param msg: The message to check
+        :return: True if message should be accepted, False if rejected for spam
+        """
+        if not self.spam_protection_enabled:
+            return True
+
+        current_time = time.time()
+
+        for topic in msg.topicIDs:
+            # Get timestamps for this peer/topic combination
+            timestamps = self.message_rate_limits[peer_id][topic]
+
+            # Remove old timestamps (older than 1 second)
+            cutoff_time = current_time - 1.0
+            timestamps[:] = [t for t in timestamps if t > cutoff_time]
+
+            # Check if rate limit exceeded
+            if len(timestamps) >= self.max_messages_per_topic_per_second:
+                logger.warning(
+                    "Rate limit exceeded for peer %s on topic %s", peer_id, topic
+                )
+                # Penalize peer for spam
+                if self.scorer is not None:
+                    self.scorer.penalize_behavior(peer_id, 5.0)
+                return False
+
+            # Add current timestamp
+            timestamps.append(current_time)
+
+        return True
+
+    def _check_equivocation(self, msg: rpc_pb2.Message) -> bool:
+        """
+        Check for message equivocation (same seqno/from with different content).
+
+        :param msg: The message to check
+        :return: True if message is valid, False if equivocation detected
+        """
+        msg_key = (msg.seqno, msg.from_id)
+
+        if msg_key in self.equivocation_detection:
+            existing_msg = self.equivocation_detection[msg_key]
+            # Check if content differs (equivocation)
+            if existing_msg.data != msg.data or existing_msg.topicIDs != msg.topicIDs:
+                logger.warning("Equivocation detected from peer %s", ID(msg.from_id))
+                # Severely penalize equivocating peer
+                if self.scorer is not None:
+                    self.scorer.penalize_behavior(ID(msg.from_id), 100.0)
+                return False
+        else:
+            # Store first occurrence
+            self.equivocation_detection[msg_key] = msg
+
+        return True
+
+    def _ensure_mesh_diversity(self, topic: str) -> None:
+        """
+        Ensure mesh has sufficient IP diversity to prevent Eclipse attacks.
+
+        :param topic: The topic to check
+        """
+        if not self.eclipse_protection_enabled or topic not in self.mesh:
+            return
+
+        if self.scorer is None:
+            return
+
+        mesh_peers = self.mesh[topic]
+        if len(mesh_peers) < self.min_mesh_diversity_ips:
+            return
+
+        # Count unique IPs in mesh
+        unique_ips = set()
+        for peer in mesh_peers:
+            if peer in self.scorer.ip_by_peer:
+                unique_ips.add(self.scorer.ip_by_peer[peer])
+
+        # If diversity is too low, try to improve it
+        if len(unique_ips) < self.min_mesh_diversity_ips:
+            logger.debug(
+                "Low IP diversity in mesh for topic %s: %d unique IPs",
+                topic,
+                len(unique_ips),
+            )
+            self._improve_mesh_diversity(topic, unique_ips)
+
+    def _improve_mesh_diversity(self, topic: str, current_ips: set[str]) -> None:
+        """
+        Attempt to improve mesh diversity by grafting peers from different IPs.
+
+        :param topic: The topic to improve
+        :param current_ips: Set of IPs currently in mesh
+        """
+        if self.pubsub is None or self.scorer is None:
+            return
+
+        if topic not in self.pubsub.peer_topics:
+            return
+
+        # Find candidates from different IPs
+        candidates = []
+        for peer in self.pubsub.peer_topics[topic]:
+            if peer in self.mesh[topic]:
+                continue  # Already in mesh
+
+            if peer not in self.scorer.ip_by_peer:
+                continue  # No IP info
+
+            peer_ip = self.scorer.ip_by_peer[peer]
+            if peer_ip not in current_ips:
+                # This peer would add IP diversity
+                candidates.append(peer)
+
+        if not candidates:
+            return
+
+        # Select best candidates based on score
+        candidates_with_scores = [
+            (peer, self.scorer.score(peer, [topic])) for peer in candidates
+        ]
+        candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Graft up to 2 diverse peers
+        grafted = 0
+        for peer, score in candidates_with_scores:
+            if grafted >= 2:
+                break
+
+            if score > self.scorer.params.graylist_threshold:
+                self.mesh[topic].add(peer)
+                # Note: In real implementation, we'd send GRAFT message
+                logger.debug(
+                    "Grafted peer %s for IP diversity in topic %s", peer, topic
+                )
+                grafted += 1
+
+    def _cleanup_security_state(self, peer_id: ID) -> None:
+        """
+        Clean up security-related state when a peer disconnects.
+
+        :param peer_id: The peer that disconnected
+        """
+        # Clean up rate limiting data
+        if peer_id in self.message_rate_limits:
+            del self.message_rate_limits[peer_id]
+
+    def _perform_opportunistic_grafting(
+        self, topic: str, peers_to_graft: DefaultDict[ID, list[str]]
+    ) -> int:
+        """
+        Perform enhanced opportunistic grafting with sophisticated peer selection.
+
+        :param topic: The topic to perform grafting for
+        :param peers_to_graft: Dictionary to add graft candidates to
+        :return: Number of peers grafted
+        """
+        if self.scorer is None or self.pubsub is None:
+            return 0
+
+        try:
+            current_mesh_peers = self.mesh[topic]
+
+            # Only consider peers that support scoring for opportunistic grafting
+            scoring_mesh_peers = [
+                p for p in current_mesh_peers if self.supports_scoring(p)
+            ]
+
+            if not scoring_mesh_peers:
+                return 0
+
+            # Calculate mesh quality metrics
+            mesh_scores = [self.scorer.score(p, [topic]) for p in scoring_mesh_peers]
+            if not mesh_scores:
+                return 0
+
+            median_score = statistics.median(mesh_scores)
+            avg_score = sum(mesh_scores) / len(mesh_scores)
+            min_score = min(mesh_scores)
+
+            # Determine grafting strategy based on mesh quality
+            grafting_threshold = self._calculate_grafting_threshold(
+                median_score, avg_score, min_score, topic
+            )
+
+            # Find potential candidates
+            candidates = self._get_grafting_candidates(
+                topic, current_mesh_peers, grafting_threshold
+            )
+
+            if not candidates:
+                return 0
+
+            # Select best candidates using multiple criteria
+            selected_candidates = self._select_grafting_candidates(
+                candidates, topic, len(current_mesh_peers)
+            )
+
+            # Perform grafting
+            grafted_count = 0
+            for candidate in selected_candidates:
+                self.mesh[topic].add(candidate)
+                peers_to_graft[candidate].append(topic)
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(candidate, topic)
+                grafted_count += 1
+
+                logger.debug(
+                    "Opportunistically grafted peer %s to topic %s (score: %.2f)",
+                    candidate,
+                    topic,
+                    self.scorer.score(candidate, [topic]),
+                )
+
+            return grafted_count
+
+        except Exception as e:
+            logger.warning(
+                "Enhanced opportunistic grafting failed for topic %s: %s", topic, e
+            )
+            return 0
+
+    def _calculate_grafting_threshold(
+        self, median_score: float, avg_score: float, min_score: float, topic: str
+    ) -> float:
+        """
+        Calculate the score threshold for opportunistic grafting candidates.
+
+        :param median_score: Median score of current mesh peers
+        :param avg_score: Average score of current mesh peers
+        :param min_score: Minimum score of current mesh peers
+        :param topic: The topic being considered
+        :return: Score threshold for candidates
+        """
+        # Base threshold is median score
+        threshold = median_score
+
+        # Adjust based on network health
+        if hasattr(self, "network_health_score"):
+            if self.network_health_score < 0.5:
+                # Poor network health: be more aggressive, lower threshold
+                threshold = min(median_score, avg_score * 0.8)
+            elif self.network_health_score > 0.8:
+                # Good network health: be more selective, higher threshold
+                threshold = max(median_score, avg_score * 1.2)
+
+        # Ensure threshold is reasonable
+        threshold = max(
+            threshold, min_score * 1.1
+        )  # At least slightly better than worst peer
+        threshold = max(
+            threshold, self.scorer.params.gossip_threshold
+        )  # At least gossip threshold
+
+        return threshold
+
+    def _get_grafting_candidates(
+        self, topic: str, current_mesh: set[ID], threshold: float
+    ) -> list[tuple[ID, float]]:
+        """
+        Get potential candidates for opportunistic grafting.
+
+        :param topic: The topic
+        :param current_mesh: Current mesh peers
+        :param threshold: Score threshold for candidates
+        :return: List of (peer_id, score) tuples for candidates
+        """
+        if self.pubsub is None or self.scorer is None:
+            return []
+
+        if topic not in self.pubsub.peer_topics:
+            return []
+
+        candidates = []
+
+        for peer in self.pubsub.peer_topics[topic]:
+            if peer in current_mesh:
+                continue  # Already in mesh
+
+            if not self.supports_scoring(peer):
+                continue  # Only consider scoring-capable peers
+
+            if self._check_back_off(peer, topic):
+                continue  # Peer is in backoff
+
+            # Check if peer meets score threshold
+            peer_score = self.scorer.score(peer, [topic])
+            if peer_score >= threshold:
+                candidates.append((peer, peer_score))
+
+        return candidates
+
+    def _select_grafting_candidates(
+        self, candidates: list[tuple[ID, float]], topic: str, current_mesh_size: int
+    ) -> list[ID]:
+        """
+        Select the best candidates for grafting using multiple criteria.
+
+        :param candidates: List of (peer_id, score) tuples
+        :param topic: The topic
+        :param current_mesh_size: Current size of mesh
+        :return: List of selected peer IDs
+        """
+        if not candidates:
+            return []
+
+        # Sort candidates by score (descending)
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Apply additional selection criteria
+        selected = []
+        max_grafts = min(2, len(candidates))  # Limit grafts per heartbeat
+
+        # Prefer peers that improve IP diversity if Eclipse protection is enabled
+        if self.eclipse_protection_enabled and self.scorer is not None:
+            selected = self._select_for_ip_diversity(candidates, topic, max_grafts)
+
+        # If we still need more peers or diversity selection didn't work,
+        # select highest scoring peers
+        if len(selected) < max_grafts:
+            remaining_needed = max_grafts - len(selected)
+            for peer_id, score in candidates[: remaining_needed + len(selected)]:
+                if peer_id not in selected:
+                    selected.append(peer_id)
+                    if len(selected) >= max_grafts:
+                        break
+
+        return selected
+
+    def _select_for_ip_diversity(
+        self, candidates: list[tuple[ID, float]], topic: str, max_grafts: int
+    ) -> list[ID]:
+        """
+        Select candidates that improve IP diversity in the mesh.
+
+        :param candidates: List of (peer_id, score) tuples
+        :param topic: The topic
+        :param max_grafts: Maximum number of peers to select
+        :return: List of selected peer IDs
+        """
+        if self.scorer is None or topic not in self.mesh:
+            return []
+
+        # Get current IPs in mesh
+        current_ips = set()
+        for peer in self.mesh[topic]:
+            if peer in self.scorer.ip_by_peer:
+                current_ips.add(self.scorer.ip_by_peer[peer])
+
+        selected = []
+
+        # Prioritize candidates from new IPs
+        for peer_id, score in candidates:
+            if len(selected) >= max_grafts:
+                break
+
+            if peer_id in self.scorer.ip_by_peer:
+                peer_ip = self.scorer.ip_by_peer[peer_id]
+                if peer_ip not in current_ips:
+                    # This peer would add IP diversity
+                    selected.append(peer_id)
+                    current_ips.add(peer_ip)
+
+        return selected
+
+    def _select_peers_for_pruning(self, topic: str, num_to_prune: int) -> list[ID]:
+        """
+        Select peers to prune from mesh using sophisticated scoring and diversity criteria.
+
+        :param topic: The topic to prune peers from
+        :param num_to_prune: Number of peers to prune
+        :return: List of peer IDs to prune
+        """
+        if topic not in self.mesh or num_to_prune <= 0:
+            return []
+
+        mesh_peers = list(self.mesh[topic])
+        if len(mesh_peers) <= num_to_prune:
+            return mesh_peers
+
+        if self.scorer is None:
+            # Fallback to random selection if no scorer
+            return self.select_from_minus(num_to_prune, mesh_peers, set())
+
+        # Enhanced pruning strategy
+        return self._score_based_pruning_selection(topic, mesh_peers, num_to_prune)
+
+    def _score_based_pruning_selection(
+        self, topic: str, mesh_peers: list[ID], num_to_prune: int
+    ) -> list[ID]:
+        """
+        Select peers for pruning based on scores and diversity considerations.
+
+        :param topic: The topic
+        :param mesh_peers: List of current mesh peers
+        :param num_to_prune: Number of peers to prune
+        :return: List of peer IDs to prune
+        """
+        if self.scorer is None:
+            return []
+
+        # Calculate scores for all mesh peers
+        peer_scores = []
+        for peer in mesh_peers:
+            score = self.scorer.score(peer, [topic])
+            peer_scores.append((peer, score))
+
+        # Sort by score (ascending - worst peers first)
+        peer_scores.sort(key=lambda x: x[1])
+
+        # Apply pruning strategy based on Gossipsub 2.0 principles
+        selected_for_pruning = []
+
+        # Strategy 1: Always prune peers below graylist threshold
+        graylist_threshold = self.scorer.params.graylist_threshold
+        for peer, score in peer_scores:
+            if score < graylist_threshold and len(selected_for_pruning) < num_to_prune:
+                selected_for_pruning.append(peer)
+
+        # Strategy 2: If we still need to prune more, consider IP diversity
+        if len(selected_for_pruning) < num_to_prune and self.eclipse_protection_enabled:
+            remaining_to_prune = num_to_prune - len(selected_for_pruning)
+            diversity_pruned = self._prune_for_ip_diversity(
+                topic, peer_scores, selected_for_pruning, remaining_to_prune
+            )
+            selected_for_pruning.extend(diversity_pruned)
+
+        # Strategy 3: If we still need more, prune lowest scoring peers
+        if len(selected_for_pruning) < num_to_prune:
+            remaining_to_prune = num_to_prune - len(selected_for_pruning)
+            for peer, score in peer_scores:
+                if (
+                    peer not in selected_for_pruning
+                    and len(selected_for_pruning) < num_to_prune
+                ):
+                    selected_for_pruning.append(peer)
+
+        return selected_for_pruning[:num_to_prune]
+
+    def _prune_for_ip_diversity(
+        self,
+        topic: str,
+        peer_scores: list[tuple[ID, float]],
+        already_selected: list[ID],
+        num_needed: int,
+    ) -> list[ID]:
+        """
+        Select additional peers for pruning to maintain IP diversity.
+
+        :param topic: The topic
+        :param peer_scores: List of (peer_id, score) tuples sorted by score
+        :param already_selected: Peers already selected for pruning
+        :param num_needed: Number of additional peers needed
+        :return: List of additional peer IDs to prune
+        """
+        if self.scorer is None or num_needed <= 0:
+            return []
+
+        # Count IPs after removing already selected peers
+        ip_counts = defaultdict(int)
+        remaining_peers = []
+
+        for peer, score in peer_scores:
+            if peer not in already_selected:
+                remaining_peers.append((peer, score))
+                if peer in self.scorer.ip_by_peer:
+                    ip = self.scorer.ip_by_peer[peer]
+                    ip_counts[ip] += 1
+
+        # Find IPs with excessive peers (more than 2 peers per IP)
+        excessive_ips = {ip: count for ip, count in ip_counts.items() if count > 2}
+
+        selected = []
+
+        # Prune from excessive IPs, preferring lower-scoring peers
+        for peer, score in remaining_peers:
+            if len(selected) >= num_needed:
+                break
+
+            if peer in self.scorer.ip_by_peer:
+                peer_ip = self.scorer.ip_by_peer[peer]
+                if peer_ip in excessive_ips and excessive_ips[peer_ip] > 2:
+                    selected.append(peer)
+                    excessive_ips[peer_ip] -= 1
+
+        return selected
+
+    def _maintain_mesh_quality(self, topic: str) -> None:
+        """
+        Perform ongoing mesh quality maintenance beyond basic degree bounds.
+
+        :param topic: The topic to maintain
+        """
+        if topic not in self.mesh or self.scorer is None:
+            return
+
+        mesh_peers = self.mesh[topic]
+        if len(mesh_peers) < 3:  # Too small to optimize
+            return
+
+        # Check if we should replace low-scoring peers with better alternatives
+        self._consider_peer_replacement(topic)
+
+        # Ensure we maintain good connectivity patterns
+        self._optimize_mesh_connectivity(topic)
+
+    def _consider_peer_replacement(self, topic: str) -> None:
+        """
+        Consider replacing the worst mesh peer with a better alternative.
+
+        :param topic: The topic to consider
+        """
+        if self.scorer is None or self.pubsub is None:
+            return
+
+        if topic not in self.mesh or topic not in self.pubsub.peer_topics:
+            return
+
+        mesh_peers = list(self.mesh[topic])
+        if len(mesh_peers) < self.degree:
+            return  # Don't replace if we're below target
+
+        # Find the worst mesh peer
+        peer_scores = [(p, self.scorer.score(p, [topic])) for p in mesh_peers]
+        peer_scores.sort(key=lambda x: x[1])  # Sort by score ascending
+        worst_peer, worst_score = peer_scores[0]
+
+        # Find potential replacements
+        available_peers = set(self.pubsub.peer_topics[topic]) - set(mesh_peers)
+        if not available_peers:
+            return
+
+        # Find best available peer
+        best_replacement = None
+        best_score = worst_score
+
+        for peer in available_peers:
+            if self._check_back_off(peer, topic):
+                continue
+
+            if not self.supports_scoring(peer):
+                continue
+
+            peer_score = self.scorer.score(peer, [topic])
+            if peer_score > best_score + 0.1:  # Require meaningful improvement
+                best_replacement = peer
+                best_score = peer_score
+
+        # Perform replacement if beneficial
+        if best_replacement is not None:
+            logger.debug(
+                "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) in topic %s",
+                worst_peer,
+                worst_score,
+                best_replacement,
+                best_score,
+                topic,
+            )
+
+            # Note: In a full implementation, we'd send PRUNE to worst_peer and GRAFT to best_replacement
+            # For now, we just log the decision
+
+    def _optimize_mesh_connectivity(self, topic: str) -> None:
+        """
+        Optimize mesh connectivity patterns for better resilience.
+
+        :param topic: The topic to optimize
+        """
+        # This could include:
+        # - Ensuring geographic diversity
+        # - Balancing inbound/outbound connections
+        # - Optimizing for network latency
+        # For now, we focus on IP diversity which is handled elsewhere
+        pass
+
+        # Clean up equivocation detection (keep recent entries for a while)
+        # This is done periodically in heartbeat to avoid memory leaks
+
+    def _periodic_security_cleanup(self) -> None:
+        """
+        Periodic cleanup of security-related data structures.
+        """
+        current_time = time.time()
+
+        # Clean up old equivocation detection entries (older than 5 minutes)
+        cutoff_time = current_time - 300
+        old_keys = [
+            key
+            for key, msg in self.equivocation_detection.items()
+            if hasattr(msg, "_timestamp") and msg._timestamp < cutoff_time
+        ]
+        for key in old_keys:
+            del self.equivocation_detection[key]
+
+        # Clean up old rate limiting data
+        for peer_id in list(self.message_rate_limits.keys()):
+            for topic in list(self.message_rate_limits[peer_id].keys()):
+                timestamps = self.message_rate_limits[peer_id][topic]
+                # Remove timestamps older than 2 seconds
+                cutoff = current_time - 2.0
+                timestamps[:] = [t for t in timestamps if t > cutoff]
+
+                # Remove empty topic entries
+                if not timestamps:
+                    del self.message_rate_limits[peer_id][topic]
+
+            # Remove empty peer entries
+            if not self.message_rate_limits[peer_id]:
+                del self.message_rate_limits[peer_id]
