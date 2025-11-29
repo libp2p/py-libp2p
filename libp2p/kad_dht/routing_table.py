@@ -25,7 +25,11 @@ from libp2p.peer.peerinfo import (
 )
 
 from .common import (
+    BUCKET_SIZE,
+    MAXIMUM_BUCKETS,
+    PEER_REFRESH_INTERVAL,
     PROTOCOL_ID,
+    STALE_PEER_THRESHOLD,
 )
 from .pb.kademlia_pb2 import (
     Message,
@@ -33,12 +37,6 @@ from .pb.kademlia_pb2 import (
 
 # logger = logging.getLogger("libp2p.kademlia.routing_table")
 logger = logging.getLogger("kademlia-example.routing_table")
-
-# Default parameters
-BUCKET_SIZE = 20  # k in the Kademlia paper
-MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
-PEER_REFRESH_INTERVAL = 60  # Interval to refresh peers in seconds
-STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
 
 
 def peer_id_to_key(peer_id: ID) -> bytes:

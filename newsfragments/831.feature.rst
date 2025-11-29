@@ -1,9 +1,0 @@
-Add TLS transport support for libp2p.
-
-- Implements TLS 1.3 transport with self-signed certificates
-- Adds libp2p identity binding in X.509 extensions
-- Supports peer ID verification through certificate chain
-- Enables ALPN protocol negotiation for stream muxers
-- Provides secure handshake and message encryption
-- Compatible with other libp2p implementations
-- Includes comprehensive test coverage
