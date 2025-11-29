@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import math
 from typing import DefaultDict
@@ -40,6 +41,9 @@ class ScoreParams:
     p6_appl_slack_decay: float = 1.0
 
     p7_ip_colocation_weight: float = 0.0
+    p7_ip_colocation_threshold: int = (
+        10  # Number of peers from same IP before penalty applies
+    )
 
     # Acceptance thresholds (permissive defaults for initial implementation)
     # These defaults allow all messages initially. In production environments,
@@ -52,6 +56,9 @@ class ScoreParams:
     gossip_threshold: float = -math.inf
     graylist_threshold: float = -math.inf
     accept_px_threshold: float = -math.inf
+
+    # Application-specific scoring callback
+    app_specific_score_fn: Callable[[ID], float] | None = None
 
 
 class PeerScorer:
@@ -80,6 +87,14 @@ class PeerScorer:
         # Global state
         self.behavior_penalty: dict[ID, float] = defaultdict(float)
 
+        # IP colocation tracking: IP -> set of peer IDs
+        self.peer_ips: dict[str, set[ID]] = defaultdict(set)
+        # Peer ID -> IP mapping for efficient lookups
+        self.ip_by_peer: dict[ID, str] = {}
+
+        # Application-specific scores cache
+        self.app_specific_scores: dict[ID, float] = defaultdict(float)
+
     # ---- Update hooks ----
     def on_heartbeat(self, dt_seconds: float = 1.0) -> None:
         # Apply decay to all counters
@@ -107,6 +122,10 @@ class PeerScorer:
         for peer in list(self.behavior_penalty.keys()):
             self.behavior_penalty[peer] *= self.params.p5_behavior_penalty_decay
 
+        # Apply decay to application-specific scores
+        for peer in list(self.app_specific_scores.keys()):
+            self.app_specific_scores[peer] *= self.params.p6_appl_slack_decay
+
     def on_join_mesh(self, peer: ID, topic: str) -> None:
         # Start counting time in mesh for the peer
         self.time_in_mesh[peer][topic] += 1.0
@@ -114,6 +133,31 @@ class PeerScorer:
     def on_leave_mesh(self, peer: ID, topic: str) -> None:
         # No-op; counters decay over time.
         pass
+
+    def remove_peer(self, peer: ID) -> None:
+        """
+        Remove all scoring data for a peer when they disconnect.
+
+        :param peer: The peer ID to remove
+        """
+        # Remove from all topic-specific tracking
+        if peer in self.time_in_mesh:
+            del self.time_in_mesh[peer]
+        if peer in self.first_message_deliveries:
+            del self.first_message_deliveries[peer]
+        if peer in self.mesh_message_deliveries:
+            del self.mesh_message_deliveries[peer]
+        if peer in self.invalid_messages:
+            del self.invalid_messages[peer]
+
+        # Remove from global tracking
+        if peer in self.behavior_penalty:
+            del self.behavior_penalty[peer]
+        if peer in self.app_specific_scores:
+            del self.app_specific_scores[peer]
+
+        # Remove IP association
+        self.remove_peer_ip(peer)
 
     def on_first_delivery(self, peer: ID, topic: str) -> None:
         self.first_message_deliveries[peer][topic] += 1.0
@@ -126,6 +170,50 @@ class PeerScorer:
 
     def penalize_behavior(self, peer: ID, amount: float = 1.0) -> None:
         self.behavior_penalty[peer] += amount
+
+    def add_peer_ip(self, peer: ID, ip_str: str) -> None:
+        """
+        Associate a peer with an IP address for colocation tracking.
+
+        :param peer: The peer ID
+        :param ip_str: The IP address as a string
+        """
+        # Remove peer from old IP if it exists
+        if peer in self.ip_by_peer:
+            old_ip = self.ip_by_peer[peer]
+            self.peer_ips[old_ip].discard(peer)
+            if not self.peer_ips[old_ip]:
+                del self.peer_ips[old_ip]
+
+        # Add peer to new IP
+        self.peer_ips[ip_str].add(peer)
+        self.ip_by_peer[peer] = ip_str
+
+    def remove_peer_ip(self, peer: ID) -> None:
+        """
+        Remove a peer's IP association.
+
+        :param peer: The peer ID to remove
+        """
+        if peer in self.ip_by_peer:
+            ip_str = self.ip_by_peer[peer]
+            self.peer_ips[ip_str].discard(peer)
+            if not self.peer_ips[ip_str]:
+                del self.peer_ips[ip_str]
+            del self.ip_by_peer[peer]
+
+    def update_app_specific_score(self, peer: ID) -> None:
+        """
+        Update the application-specific score for a peer.
+
+        :param peer: The peer ID to update
+        """
+        if self.params.app_specific_score_fn is not None:
+            try:
+                self.app_specific_scores[peer] = self.params.app_specific_score_fn(peer)
+            except Exception:
+                # If app-specific scoring fails, default to 0
+                self.app_specific_scores[peer] = 0.0
 
     # ---- Scoring ----
     def topic_score(self, peer: ID, topic: str) -> float:
@@ -146,6 +234,26 @@ class PeerScorer:
         )
         return s
 
+    def ip_colocation_penalty(self, peer: ID) -> float:
+        """
+        Calculate the IP colocation penalty for a peer.
+
+        :param peer: The peer ID
+        :return: The IP colocation penalty (positive value that will be subtracted)
+        """
+        if peer not in self.ip_by_peer:
+            return 0.0
+
+        ip_str = self.ip_by_peer[peer]
+        peer_count = len(self.peer_ips[ip_str])
+
+        if peer_count <= self.params.p7_ip_colocation_threshold:
+            return 0.0
+
+        # Penalty increases quadratically with excess peers
+        excess_peers = peer_count - self.params.p7_ip_colocation_threshold
+        return self.params.p7_ip_colocation_weight * (excess_peers**2)
+
     def score(self, peer: ID, topics: list[str]) -> float:
         score = 0.0
         for t in topics:
@@ -157,11 +265,15 @@ class PeerScorer:
                 self.behavior_penalty[peer] - self.params.p5_behavior_penalty_threshold
             ) * self.params.p5_behavior_penalty_weight
 
-        # TODO: P6 (Application-specific penalty) and P7 (IP colocation penalty)
-        # These require application-specific logic and will be implemented
-        # when concrete use cases are identified.
-        # P6: App-specific scoring based on custom application metrics
-        # P7: IP colocation penalty to prevent Sybil attacks from same IP ranges
+        # P6: Application-specific scoring
+        if self.params.app_specific_score_fn is not None:
+            self.update_app_specific_score(peer)
+            score += self.app_specific_scores[peer] * self.params.p6_appl_slack_weight
+
+        # P7: IP colocation penalty
+        ip_penalty = self.ip_colocation_penalty(peer)
+        score -= ip_penalty
+
         return score
 
     # ---- Gates ----
@@ -274,6 +386,9 @@ class PeerScorer:
             "mesh_deliveries": self.mesh_message_deliveries[peer][topic],
             "invalid_messages": self.invalid_messages[peer][topic],
             "behavior_penalty": self.behavior_penalty[peer],
+            "app_specific_score": self.app_specific_scores[peer],
+            "ip_colocation_penalty": self.ip_colocation_penalty(peer),
+            "peer_ip": self.ip_by_peer.get(peer, "unknown"),
             "total_score": self.score(peer, [topic]),
         }
 
