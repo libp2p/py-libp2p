@@ -1,0 +1,1 @@
+Fixed Yamux.accept_stream() hanging indefinitely when connection is closed.
