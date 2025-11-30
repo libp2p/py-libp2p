@@ -14,8 +14,8 @@ from tests.utils.factories import (
     (b"", b"data", pytest.param(b"A" * MAX_NOISE_MESSAGE_LEN, id="maximum length")),
 )
 @pytest.mark.trio
-async def test_noise_msg_read_write_round_trip(nursery, noise_msg):
-    async with raw_conn_factory(nursery) as conns:
+async def test_noise_msg_read_write_round_trip(noise_msg):
+    async with raw_conn_factory() as conns:
         reader, writer = (
             NoisePacketReadWriter(conns[0]),
             NoisePacketReadWriter(conns[1]),
@@ -25,8 +25,8 @@ async def test_noise_msg_read_write_round_trip(nursery, noise_msg):
 
 
 @pytest.mark.trio
-async def test_noise_msg_write_too_long(nursery):
-    async with raw_conn_factory(nursery) as conns:
+async def test_noise_msg_write_too_long():
+    async with raw_conn_factory() as conns:
         writer = NoisePacketReadWriter(conns[0])
         with pytest.raises(ValueError):
             await writer.write_msg(b"1" * (MAX_NOISE_MESSAGE_LEN + 1))

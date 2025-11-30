@@ -38,11 +38,12 @@ class TCPListener(IListener):
     listeners: list[trio.SocketListener]
 
     def __init__(self, handler_function: THandler) -> None:
-        self.listeners = []
         self.handler = handler_function
+        self.listeners = []
+        self._started = trio.Event()
+        self._nursery: trio.Nursery | None = None
 
-    # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr) -> bool:
         """
         Put listener in listening mode and wait for incoming connections.
 
@@ -92,16 +93,28 @@ class TCPListener(IListener):
         # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        started_listeners = await nursery.start(
-            serve_tcp,
-            handler,
-            tcp_port,
-            ip4_host_str,
-        )
+        async def run_server() -> None:
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                try:
+                    server = await self._nursery.start(
+                        serve_tcp,
+                        handler,
+                        tcp_port,
+                        ip4_host_str,
+                    )
 
-        if started_listeners is None:
-            # This implies that task_status.started() was not called within serve_tcp,
-            # likely because trio.serve_tcp itself failed to start (e.g., port in use).
+                    self.listeners.extend(server)
+                    self._started.set()
+                except Exception as e:
+                    logger.error(f"Exception while starting listener for {maddr}: {e}")
+                    self._started.set()
+
+        self._started = trio.Event()
+        trio.lowlevel.spawn_system_task(run_server)
+        await self._started.wait()
+
+        if len(self.listeners) == 0:
             logger.error(
                 f"Failed to start TCP listener for {maddr}: "
                 f"`nursery.start` returned None. "
@@ -109,8 +122,7 @@ class TCPListener(IListener):
                 "being in use or invalid host."
             )
             return False
-
-        self.listeners.extend(started_listeners)
+        logger.debug("TCPListener now serving")
         return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
@@ -124,9 +136,16 @@ class TCPListener(IListener):
         )
 
     async def close(self) -> None:
+        if self._nursery:
+            self._nursery.cancel_scope.cancel()
+            self._nursery = None
+
         async with trio.open_nursery() as nursery:
             for listener in self.listeners:
                 nursery.start_soon(listener.aclose)
+
+        self.listeners.clear()
+        logger.debug("TCPListener.close completed")
 
 
 class TCP(ITransport):

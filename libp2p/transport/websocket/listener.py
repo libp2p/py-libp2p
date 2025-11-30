@@ -37,10 +37,11 @@ class WebsocketListener(IListener):
         self._server = None
         self._shutdown_event = trio.Event()
         self._nursery: trio.Nursery | None = None
-        self._listeners: Any = None
+        self._listeners: list[Any] = []
+        self._started = trio.Event()
         self._is_wss = False  # Track whether this is a WSS listener
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr) -> bool:
         logger.debug(f"WebsocketListener.listen called with {maddr}")
 
         # Parse the WebSocket multiaddr to determine if it's secure
@@ -139,87 +140,61 @@ class WebsocketListener(IListener):
                 websocket_handler, host, port, ssl_context, task_status=task_status
             )
 
-        # Store the nursery for shutdown
-        self._nursery = nursery
-
         # Start the server using nursery.start() like TCP does
         logger.debug("Calling nursery.start()...")
-        started_listeners = await nursery.start(
-            serve_websocket_tcp,
-            None,  # No handler needed since it's defined inside serve_websocket_tcp
-            port,
-            host,
-        )
-        logger.debug(f"nursery.start() returned: {started_listeners}")
 
-        if started_listeners is None:
+        async def run_server() -> None:
+            async with trio.open_nursery() as nursery:
+                self._nursery = nursery
+                try:
+                    server = await self._nursery.start(
+                        serve_websocket_tcp,
+                        None,
+                        port,
+                        host,
+                    )
+                    self._listeners.append(server)
+                    self._started.set()
+                    await trio.sleep_forever()
+
+                except Exception:
+                    logger.exception("Failed to start WS server")
+                    self._started.set()
+
+        self._started = trio.Event()
+        trio.lowlevel.spawn_system_task(run_server)
+        await self._started.wait()
+
+        if len(self._listeners) == 0:
             logger.error(f"Failed to start WebSocket listener for {maddr}")
             return False
 
-        # Store the listeners for get_addrs() and close() - these are real
-        # SocketListener objects
-        self._listeners = started_listeners
         logger.debug(
             "WebsocketListener.listen returning True with WebSocketServer object"
         )
         return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
-        if not hasattr(self, "_listeners") or not self._listeners:
-            logger.debug("No listeners available for get_addrs()")
-            return ()
-
-        # Handle WebSocketServer objects
-        if hasattr(self._listeners, "port"):
-            # This is a WebSocketServer object
-            port = self._listeners.port
-            # Create a multiaddr from the port with correct WSS/WS protocol
+        if self._listeners and hasattr(self._listeners[0], "port"):
+            server = self._listeners[0]
+            port = server.port
             protocol = "wss" if self._is_wss else "ws"
             return (Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/{protocol}"),)
-        else:
-            # This is a list of listeners (like TCP)
-            listeners = self._listeners
-            # Get addresses from listeners like TCP does
-            return tuple(
-                _multiaddr_from_socket(listener.socket, self._is_wss)
-                for listener in listeners
-            )
+
+        return tuple()
 
     async def close(self) -> None:
         """Close the WebSocket listener and stop accepting new connections"""
-        logger.debug("WebsocketListener.close called")
-        if hasattr(self, "_listeners") and self._listeners:
-            # Signal shutdown
-            self._shutdown_event.set()
+        logger.debug("WebsocketListener.close called. Closing Websocket server")
 
-            # Close the WebSocket server
-            if hasattr(self._listeners, "aclose"):
-                # This is a WebSocketServer object
-                logger.debug("Closing WebSocket server")
-                await self._listeners.aclose()
-                logger.debug("WebSocket server closed")
-            elif isinstance(self._listeners, (list, tuple)):
-                # This is a list of listeners (like TCP)
-                logger.debug("Closing TCP listeners")
-                for listener in self._listeners:
-                    await listener.aclose()
-                logger.debug("TCP listeners closed")
-            else:
-                # Unknown type, try to close it directly
-                logger.debug("Closing unknown listener type")
-                if hasattr(self._listeners, "close"):
-                    self._listeners.close()
-                logger.debug("Unknown listener closed")
+        if self._nursery:
+            self._nursery.cancel_scope.cancel()
+            self._nursery = None
 
-            # Clear the listeners reference
-            self._listeners = None
-            logger.debug("WebsocketListener.close completed")
+        async with trio.open_nursery() as nursery:
+            for listener in self._listeners:
+                if hasattr(listener, "aclose"):
+                    nursery.start_soon(listener.aclose)
 
-
-def _multiaddr_from_socket(
-    socket: trio.socket.SocketType, is_wss: bool = False
-) -> Multiaddr:
-    """Convert socket to multiaddr"""
-    ip, port = socket.getsockname()
-    protocol = "wss" if is_wss else "ws"
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}/{protocol}")
+        self._listeners.clear()
+        logger.debug("WebsocketListener.close completed")
