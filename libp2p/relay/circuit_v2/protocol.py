@@ -654,17 +654,16 @@ class CircuitV2Protocol(Service):
 
         except Exception as e:
             logger.error("Error handling reservation request: %s", str(e))
-            if cast(INetStreamWithExtras, stream).is_open():
-                try:
-                    # Send error response
-                    await self._send_status(
-                        stream,
-                        StatusCode.CONNECTION_FAILED,
-                        f"Failed to process reservation: {str(e)}",
-                        signed_envelope,
-                    )
-                except Exception as send_err:
-                    logger.error("Failed to send error response: %s", str(send_err))
+            try:
+                # Send error response if stream is still usable
+                await self._send_status(
+                    stream,
+                    StatusCode.CONNECTION_FAILED,
+                    f"Failed to process reservation: {str(e)}",
+                    signed_envelope,
+                )
+            except Exception as send_err:
+                logger.error("Failed to send error response: %s", str(send_err))
         # finally:
         #     # Always close the stream when done with reservation
         #     try:
@@ -804,6 +803,8 @@ class CircuitV2Protocol(Service):
                 resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
 
+                # Extract destination's SPR from response to forward to source
+                dest_envelope = None
                 if resp.HasField("senderRecord"):
                     if not maybe_consume_signed_record(resp, self.host, peer_id):
                         logger.error(
@@ -812,6 +813,8 @@ class CircuitV2Protocol(Service):
                         )
                         await self._close_stream(stream)
                         return
+                    # Get the envelope to forward to source
+                    dest_envelope = unmarshal_envelope(resp.senderRecord)
 
                 # Handle status attributes from the response
                 if resp.HasField("status"):
@@ -848,8 +851,10 @@ class CircuitV2Protocol(Service):
                     reservation.limits.max_circuit_conns,
                 )
 
-            # Get destination peer's SPR to send to source
-            signed_envelope = self.host.get_peerstore().get_peer_record(peer_id)
+            # Use destination's SPR from STOP response, or try peerstore as fallback
+            signed_envelope = (
+                dest_envelope or self.host.get_peerstore().get_peer_record(peer_id)
+            )
 
             # Send success status
             logger.debug("Sending OK status to source")
@@ -1002,22 +1007,10 @@ class CircuitV2Protocol(Service):
                     reservation.limits.max_circuit_conns,
                 )
 
-            # Remove from active relays if both streams are closed
+            # Remove from active relays - streams are being cleaned up
             if peer_id in self._active_relays:
-                relay_src, relay_dst = self._active_relays[peer_id]
-
-                # Check if both streams are closed or reset
-                src_closed = not cast(INetStreamWithExtras, relay_src).is_open()
-                dst_closed = (
-                    relay_dst is None
-                    or not cast(INetStreamWithExtras, relay_dst).is_open()
-                )
-
-                if src_closed and dst_closed:
-                    del self._active_relays[peer_id]
-                    logger.debug(
-                        "Removed relay for peer %s from active relays", peer_id
-                    )
+                del self._active_relays[peer_id]
+                logger.debug("Removed relay for peer %s from active relays", peer_id)
 
     async def _send_status(
         self,
