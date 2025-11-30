@@ -379,16 +379,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             with QUICErrorContext("connection_establishment", "connection"):
                 # Start the connection if not already started
-                logger.debug("STARTING TO CONNECT")
                 if not self._started:
                     await self.start()
 
                 # Start background event processing
                 if not self._background_tasks_started:
-                    logger.debug("STARTING BACKGROUND TASK")
                     await self._start_background_tasks()
-                else:
-                    logger.debug("BACKGROUND TASK ALREADY STARTED")
 
                 # Wait for handshake completion with timeout
                 with trio.move_on_after(
@@ -556,7 +552,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             QUICPeerVerificationError: If peer verification fails
 
         """
-        logger.debug("VERIFYING PEER IDENTITY")
         if not self._security_manager:
             logger.debug("No security manager available for peer verification")
             return None

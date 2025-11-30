@@ -990,41 +990,34 @@ class QUICListener(IListener):
     async def _transmit_for_connection(
         self, quic_conn: QuicConnection, addr: tuple[str, int]
     ) -> None:
-        """Enhanced transmission diagnostics to analyze datagram content."""
+        """Transmit datagrams for a QUIC connection."""
         try:
-            logger.debug(f" TRANSMIT: Starting transmission to {addr}")
-
             # Get current timestamp for timing
             import time
 
             now = time.time()
 
             datagrams = quic_conn.datagrams_to_send(now=now)
-            logger.debug(f" TRANSMIT: Got {len(datagrams)} datagrams to send")
 
             if not datagrams:
-                logger.debug("No datagrams to send")
                 return
 
-            for i, (datagram, dest_addr) in enumerate(datagrams):
-                logger.debug(f" TRANSMIT: Analyzing datagram {i}")
-                logger.debug(f" TRANSMIT: Datagram size: {len(datagram)} bytes")
-                logger.debug(f" TRANSMIT: Destination: {dest_addr}")
-                logger.debug(f" TRANSMIT: Expected destination: {addr}")
+            # Note: We don't validate packet contents here. The QUIC library
+            # (aioquic) handles all packet parsing and validation. This function
+            # just transmits the datagrams that aioquic generates.
 
-                # Note: We don't validate packet contents here. The QUIC library
-                # (aioquic) handles all packet parsing and validation. This function
-                # just transmits the datagrams that aioquic generates.
+            socket = self._socket
+            if socket is None:
+                logger.error("No socket available!")
+                return
 
-                if self._socket:
-                    try:
-                        await self._socket.sendto(datagram, addr)
-                    except Exception as send_error:
-                        logger.error(f"Socket send failed: {send_error}")
-                else:
-                    logger.error("No socket available!")
+            for datagram, dest_addr in datagrams:
+                try:
+                    await socket.sendto(datagram, addr)
+                except Exception as send_error:
+                    logger.error(f"Socket send failed: {send_error}")
         except Exception as e:
-            logger.debug(f"Transmission error: {e}")
+            logger.error(f"Transmission error: {e}", exc_info=True)
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
         """Start listening on the given multiaddr with enhanced connection handling."""
