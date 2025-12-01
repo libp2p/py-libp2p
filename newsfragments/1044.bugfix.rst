@@ -1,0 +1,1 @@
+Fixed QUIC interop issue where Go-to-Python ping would fail after identify stream closes. The listener now properly tracks new Connection IDs issued after connection establishment, enabling correct packet routing for subsequent streams.
