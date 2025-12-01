@@ -45,10 +45,17 @@ async def test_idontwant_data_structures():
 
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.1)
+
+        # Wait for pubsub to be ready
+        await pubsubs_gsub[0].wait_until_ready()
+
+        # Wait until peer is added via queue processing
+        peer_id = pubsubs_gsub[1].host.get_id()
+        with trio.fail_after(1.0):
+            while peer_id not in pubsubs_gsub[0].peers:
+                await trio.sleep(0.01)
 
         # Verify peer tracking is initialized
-        peer_id = pubsubs_gsub[1].host.get_id()
         assert peer_id in router.dont_send_message_ids
         assert isinstance(router.dont_send_message_ids[peer_id], set)
         assert len(router.dont_send_message_ids[peer_id]) == 0
@@ -65,9 +72,15 @@ async def test_handle_idontwant_message():
 
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
-        await trio.sleep(0.1)
 
+        # Wait for pubsub to be ready
+        await pubsubs_gsub[0].wait_until_ready()
+
+        # Wait until peer is added via queue processing
         sender_peer_id = pubsubs_gsub[1].host.get_id()
+        with trio.fail_after(1.0):
+            while sender_peer_id not in pubsubs_gsub[0].peers:
+                await trio.sleep(0.01)
 
         # Create IDONTWANT message
         msg_ids = [b"msg1", b"msg2", b"msg3"]
@@ -97,7 +110,16 @@ async def test_message_filtering_with_idontwant():
         # Connect all peers
         hosts = [pubsub.host for pubsub in pubsubs_gsub]
         await one_to_all_connect(hosts, 0)
-        await trio.sleep(0.1)
+
+        # Wait for pubsub to be ready
+        await pubsubs_gsub[0].wait_until_ready()
+
+        # Wait until peers are added via queue processing
+        for i in range(1, len(pubsubs_gsub)):
+            peer_id = pubsubs_gsub[i].host.get_id()
+            with trio.fail_after(1.0):
+                while peer_id not in pubsubs_gsub[0].peers:
+                    await trio.sleep(0.01)
 
         # Subscribe all to the topic
         for pubsub in pubsubs_gsub:
