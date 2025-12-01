@@ -1,5 +1,7 @@
+import hashlib
 import json
 import logging
+import threading
 from typing import Any, cast
 
 from aiortc import (
@@ -154,6 +156,20 @@ class WebRTCRawConnection(IRawConnection):
         self.receive_channel: MemoryReceiveChannel[bytes]
         self.send_channel, self.receive_channel = trio.open_memory_channel(1000)
 
+        # Read buffer for partial reads (required for read(n) to return exactly n bytes)
+        self._read_buffer = b""
+        self._read_lock = trio.Lock()
+
+        # Track if handlers are already registered to prevent duplicate registration
+        self._handlers_registered = False
+
+        # Track recent message hashes to prevent duplicate processing
+        # Use a simple set with a lock to prevent race conditions
+        self._processed_messages: set[bytes] = set()
+        self._message_dedup_lock = threading.Lock()
+        # Keep only last 1000 message hashes to prevent memory growth
+        self._max_dedup_cache = 1000
+
         # Store trio token for async callback handling
         try:
             self._trio_token: Any | None = trio.lowlevel.current_trio_token()
@@ -166,59 +182,173 @@ class WebRTCRawConnection(IRawConnection):
         self._bridge = WebRTCAsyncBridge()
 
         # Setup channel event handlers with proper async bridging
+        logger.info(
+            f"Setting up channel handlers for WebRTC connection to {peer_id} "
+            f"(channel state: {data_channel.readyState})"
+        )
         self._setup_channel_handlers()
 
-        logger.info(f"WebRTC connection created to {peer_id}")
+        # Verify handlers were registered
+        logger.info(
+            f"WebRTC connection created to {peer_id} "
+            f"(channel state: {self.data_channel.readyState}, "
+            f"closed: {self._closed})"
+        )
 
     @property
     def channel(self) -> RTCDataChannel:
         """Backward compatibility property."""
         return self.data_channel
 
+    def _schedule_sync(self, fn: Any, *args: Any) -> None:
+        """
+        Schedule a synchronous function to run in trio context.
+
+        Since send_nowait on trio channels is thread-safe, we can call it directly
+        from any context (trio or asyncio callback thread).
+        """
+        # send_nowait is thread-safe and can be called from any context
+        # No need to bridge - just call directly
+        try:
+            fn(*args)
+        except Exception as e:
+            logger.error(f"Failed to execute sync function: {e}", exc_info=True)
+            raise
+
+    def _schedule_async(self, async_fn: Any, *args: Any) -> None:
+        """Schedule an async function to run in trio context"""
+        if self._trio_token:
+            try:
+                trio.from_thread.run(
+                    async_fn,
+                    *args,
+                    trio_token=self._trio_token,
+                )
+                return
+            except RuntimeError:
+                # Fall back to best-effort scheduling if token unusable
+                pass
+        trio.lowlevel.spawn_system_task(async_fn, *args)
+
     def _setup_channel_handlers(self) -> None:
         """Setup WebRTC channel event handlers with proper trio integration"""
+        # Prevent duplicate handler registration
+        if self._handlers_registered:
+            logger.warning(
+                "Handlers already registered, skipping duplicate registration"
+            )
+            return
+
+        def _deliver_raw_message(data: bytes) -> None:
+            """Deliver incoming raw message to send_channel"""
+            try:
+                self.send_channel.send_nowait(data)
+                logger.debug(f"Delivered {len(data)} bytes to send_channel")
+            except trio.WouldBlock:
+                logger.warning("Message dropped - send_channel full!")
+            except trio.ClosedResourceError:
+                logger.debug("send_channel closed, message dropped")
+            except Exception as e:
+                logger.error(
+                    f"Failed to deliver raw message to send_channel: {e}", exc_info=True
+                )
+
+        def _deliver_stream_message(stream: "WebRTCStream", data: bytes) -> None:
+            """Deliver incoming stream message to stream's send_channel"""
+            try:
+                stream.send_channel.send_nowait(data)
+                logger.debug(
+                    "Delivered stream %s message to send_channel (%d bytes)",
+                    stream.stream_id,
+                    len(data),
+                )
+            except trio.WouldBlock:
+                logger.warning(
+                    f"Stream {stream.stream_id} message dropped: send_channel full"
+                )
+            except trio.ClosedResourceError:
+                logger.debug(f"Stream {stream.stream_id} send_channel closed")
 
         def on_message(message: Any) -> None:
             """Handle incoming message from WebRTC data channel"""
-            if not self._closed:
+            if self._closed:
+                logger.debug("Connection is closed, ignoring message")
+                return
+
+            try:
+                # aiortc may pass the data directly as bytes,
+                # or as an object with .data attribute
+                if hasattr(message, "data"):
+                    # Event-like object (similar to js-libp2p MessageEvent)
+                    data = message.data
+                    if isinstance(data, bytes):
+                        pass  # Already bytes
+                    elif hasattr(data, "tobytes"):
+                        data = data.tobytes()
+                    else:
+                        data = bytes(data) if data else b""
+                elif isinstance(message, bytes):
+                    data = message
+                else:
+                    # Try to convert to bytes
+                    try:
+                        data = bytes(message)
+                    except (TypeError, ValueError):
+                        data = str(message).encode()
+
+                if not data:
+                    logger.debug("Received empty message, ignoring")
+                    return
+
+                # Deduplicate messages to prevent processing
+                #  the same message multiple times
+                # This can happen if aiortc calls the callback multiple times
+                message_hash = hashlib.sha256(data).digest()
+                with self._message_dedup_lock:
+                    if message_hash in self._processed_messages:
+                        logger.debug(f"Ignoring duplicate message ({len(data)} bytes)")
+                        return
+                    # Add to processed set
+                    self._processed_messages.add(message_hash)
+                    # Limit cache size to prevent memory growth
+                    if len(self._processed_messages) > self._max_dedup_cache:
+                        # Remove oldest entries (simple approach: clear and rebuild)
+                        # In practice, this should rarely happen
+                        self._processed_messages.clear()
+                        self._processed_messages.add(message_hash)
+
+                logger.debug(
+                    "WebRTC on_message received (%d bytes): %.64r%s",
+                    len(data),
+                    data[:64],
+                    "…" if len(data) > 64 else "",
+                )
+
+                # Try to parse as muxed stream data
                 try:
-                    # Convert message to bytes if needed
-                    data = (
-                        message if isinstance(message, bytes) else str(message).encode()
+                    parsed_msg = json.loads(data.decode("utf-8"))
+                    if isinstance(parsed_msg, dict) and "stream_id" in parsed_msg:
+                        logger.debug(
+                            "Parsed as muxed stream message: stream_id=%s, type=%s",
+                            parsed_msg.get("stream_id"),
+                            parsed_msg.get("type"),
+                        )
+                        self._handle_muxed_message(parsed_msg)
+                        return
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Not a muxed message, treat as raw data
+                    pass
+
+                # Deliver raw message - call directly since send_nowait is thread-safe
+                try:
+                    _deliver_raw_message(data)
+                except Exception as deliver_err:
+                    logger.error(
+                        f"Failed to deliver raw message: {deliver_err}", exc_info=True
                     )
 
-                    # Try to parse as muxed stream data
-                    try:
-                        parsed_msg = json.loads(data.decode("utf-8"))
-                        if isinstance(parsed_msg, dict) and "stream_id" in parsed_msg:
-                            self._handle_muxed_message(parsed_msg)
-                            return
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        # Not a muxed message, treat as raw data
-                        pass
-
-                    # Use trio.from_thread to safely send from asyncio callback to trio
-                    if self._trio_token:
-                        try:
-                            trio.from_thread.run_sync(
-                                self.send_channel.send_nowait,
-                                data,
-                                trio_token=self._trio_token,
-                            )
-                        except trio.WouldBlock:
-                            logger.warning("Message dropped: channel full")
-                        except RuntimeError as e:
-                            if "sniffio" in str(e).lower():
-                                # Fallback for context detection issues
-                                self._send_message_fallback(data)
-                            else:
-                                raise
-                    else:
-                        # Fallback when trio token is not available
-                        self._send_message_fallback(data)
-
-                except Exception as e:
-                    logger.error(f"Error handling WebRTC message: {e}")
+            except Exception as e:
+                logger.critical(f"Error handling WebRTC message: {e}", exc_info=True)
 
         def on_open() -> None:
             """Handle channel open event"""
@@ -229,15 +359,10 @@ class WebRTCRawConnection(IRawConnection):
             logger.info(f"WebRTC channel closed to {self.peer_id}")
             self._closed = True
             # Close trio channels safely
-            if self._trio_token:
-                try:
-                    _ = trio.from_thread.run(
-                        self._close_trio_channels, trio_token=self._trio_token
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Error closing trio channels from WebRTC callback: {e}"
-                    )
+            try:
+                self._schedule_async(self._close_trio_channels)
+            except Exception as e:
+                logger.warning(f"Error closing trio channels from WebRTC callback: {e}")
 
         def on_error(error: Any) -> None:
             """Handle channel error event"""
@@ -245,10 +370,38 @@ class WebRTCRawConnection(IRawConnection):
             self._closed = True
 
         # Set up WebRTC event handlers
-        self.data_channel.on("message", on_message)
-        self.data_channel.on("open", on_open)
-        self.data_channel.on("close", on_close)
-        self.data_channel.on("error", on_error)
+        logger.info(
+            "Register event handlers for data channel ",
+            f"(state: {self.data_channel.readyState}, "
+            f"id: {getattr(self.data_channel, 'id', 'unknown')}, "
+            f"label: {getattr(self.data_channel, 'label', 'unknown')})",
+        )
+
+        # Register handlers - aiortc uses .on() for event registration
+        try:
+            self.data_channel.on("message", on_message)
+            self.data_channel.on("open", on_open)
+            self.data_channel.on("close", on_close)
+            self.data_channel.on("error", on_error)
+            logger.info("WebRTC event handlers registered successfully")
+
+            if self.data_channel.readyState == "open":
+                logger.info("Data channel already open when handlers registered")
+                try:
+                    on_open()
+                except Exception as e:
+                    logger.warning(
+                        f"Error triggering on_open for already-open channel: {e}"
+                    )
+
+            # Mark handlers as registered
+            self._handlers_registered = True
+            logger.info(
+                f"Handler complete. Channel state: {self.data_channel.readyState}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to register event handlers: {e}", exc_info=True)
+            raise
 
     def _handle_muxed_message(self, message: dict[str, Any]) -> None:
         """Handle muxed stream message"""
@@ -272,48 +425,32 @@ class WebRTCRawConnection(IRawConnection):
                 data = message.get("data", "").encode("utf-8")
                 stream = self._streams.get(stream_id)
                 if stream and not stream._closed:
-                    if self._trio_token:
-                        try:
-                            trio.from_thread.run_sync(
-                                stream.send_channel.send_nowait,
-                                data,
-                                trio_token=self._trio_token,
-                            )
-                        except trio.WouldBlock:
-                            logger.warning(
-                                f"Stream {stream_id} message dropped: channel full"
-                            )
-                        except Exception as e:
-                            logger.error(f"Error sending to stream {stream_id}: {e}")
-                    else:
-                        # Fallback: store in a buffer or drop
-                        logger.warning(
-                            f"Cannot deliver msg to stream {stream_id}: no trio token"
+                    # Deliver directly to stream's send_channel
+                    try:
+                        stream.send_channel.send_nowait(data)
+                        logger.debug(
+                            "WebRTC stream %s received (%d bytes)",
+                            stream_id,
+                            len(data),
                         )
+                    except trio.WouldBlock:
+                        logger.warning(
+                            f"Stream {stream_id} message dropped: send_channel full"
+                        )
+                    except trio.ClosedResourceError:
+                        logger.debug(f"Stream {stream_id} send_channel closed")
 
             elif msg_type == "close":
                 # Stream close message
                 stream = self._streams.get(stream_id)
-                if stream and self._trio_token:
+                if stream:
                     try:
-                        _ = trio.from_thread.run(
-                            stream.close, trio_token=self._trio_token
-                        )
+                        self._schedule_async(stream.close)
                     except Exception as e:
                         logger.error(f"Error closing stream {stream_id}: {e}")
 
         except Exception as e:
             logger.error(f"Error handling muxed message: {e}")
-
-    def _send_message_fallback(self, data: bytes) -> None:
-        """Fallback message sending when trio context detection fails"""
-        try:
-            # Store message for later retrieval if channel is full
-            self.send_channel.send_nowait(data)
-        except trio.WouldBlock:
-            logger.warning("Message dropped in fallback: channel full")
-        except Exception as e:
-            logger.error(f"Error in message fallback: {e}")
 
     async def _close_trio_channels(self) -> None:
         """Close trio channels safely"""
@@ -360,6 +497,11 @@ class WebRTCRawConnection(IRawConnection):
             "type": "data",
             "data": data.decode("utf-8", errors="replace"),
         }
+        logger.debug(
+            "WebRTC sending stream %s payload (%d bytes)",
+            stream_id,
+            len(data),
+        )
 
         # Send through WebRTC data channel using async bridge
         try:
@@ -389,30 +531,91 @@ class WebRTCRawConnection(IRawConnection):
                 logger.debug(f"Stream close notification failed (non-critical): {e}")
 
     async def read(self, n: int | None = None) -> bytes:
-        """Read data from the WebRTC data channel (raw mode)"""
+        """
+        Read data from the WebRTC data channel (raw mode).
+
+        Args:
+            n: Maximum number of bytes to read. If None, read all available data.
+               Returns up to n bytes .
+               (not necessarily exactly n, matching TCP semantics).
+
+        Returns:
+            Data read from the channel (up to n bytes if n is specified)
+
+        """
         if self._closed:
+            logger.debug("Read called on closed connection")
             return b""
 
-        try:
-            return await self.receive_channel.receive()
-        except trio.ClosedResourceError:
-            self._closed = True
-            return b""
-        except Exception as e:
-            logger.error(f"Error reading from WebRTC connection: {e}")
-            return b""
+        async with self._read_lock:
+            # If n is None, return all buffered data or wait
+            if n is None:
+                if not self._read_buffer:
+                    try:
+                        # Wait for data from channel
+                        data = await self.receive_channel.receive()
+                        self._read_buffer = data
+                    except trio.ClosedResourceError:
+                        self._closed = True
+                        return b""
+                    except Exception as e:
+                        logger.error(
+                            f"Error reading from WebRTC connection: {e}", exc_info=True
+                        )
+                        return b""
+
+                # Return all buffered data
+                result = self._read_buffer
+                self._read_buffer = b""
+                return result
+
+            # For specific byte count requests, return UP TO n bytes from buffer
+            # If buffer is empty, read from channel first
+            if not self._read_buffer:
+                try:
+                    # Wait for data from channel
+                    data = await self.receive_channel.receive()
+                    self._read_buffer = data
+                except trio.ClosedResourceError:
+                    self._closed = True
+                    return b""
+                except Exception as e:
+                    logger.error(
+                        f"Error reading from WebRTC connection: {e}", exc_info=True
+                    )
+                    return b""
+
+            # Return up to n bytes from buffer
+            result = self._read_buffer[:n]
+            self._read_buffer = self._read_buffer[n:]
+            return result
 
     async def write(self, data: bytes) -> None:
         """Write data to the WebRTC data channel (raw mode)"""
         if self._closed:
             raise RuntimeError("Connection is closed")
 
+        # Check data channel state before writing
+        if self.data_channel.readyState != "open":
+            logger.warning(
+                f"Attempt write to data channel in: {self.data_channel.readyState}"
+            )
+
+        logger.info(
+            "WebRTC raw write (%d bytes): %.64r%s (channel state: %s)",
+            len(data),
+            data[:64],
+            "…" if len(data) > 64 else "",
+            self.data_channel.readyState,
+        )
+
         try:
             # Use async bridge for robust trio-asyncio integration
             async with self._bridge:
                 await self._bridge.send_data(self.data_channel, data)
+            logger.debug("WebRTC raw write completed successfully")
         except Exception as e:
-            logger.error(f"Error writing to WebRTC connection: {e}")
+            logger.error(f"Error writing to WebRTC connection: {e}", exc_info=True)
             self._closed = True
             raise
 

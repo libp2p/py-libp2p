@@ -33,10 +33,94 @@ if TYPE_CHECKING:
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
 
+async def _extract_and_add_ice_candidates_from_sdp(
+    rtc_pc: Any, sdp: str, bridge: Any, role: str = "unknown"
+) -> int:
+    """
+    Extract ICE candidates from SDP and add them to the peer connection.
+
+    aiortc includes ICE candidates in the SDP, but we need to extract
+    and add them explicitly to ensure ICE processing starts.
+
+    Returns the number of candidates added.
+    """
+    sdp_lines = sdp.splitlines()
+    candidates_added = 0
+
+    # Find media lines (m=) to determine sdpMLineIndex for candidates
+    media_line_indices = []
+    for i, line in enumerate(sdp_lines):
+        if line.startswith("m="):
+            media_line_indices.append(i)
+
+    # If no media lines found, default to 0 (shouldn't happen, but be safe)
+    if not media_line_indices:
+        media_line_indices = [0]
+
+    # Find candidate lines and determine which media line they belong to
+    candidate_lines = []
+    current_media_index = 0
+    for i, line in enumerate(sdp_lines):
+        if line.startswith("m="):
+            # Update current media index
+            current_media_index = (
+                media_line_indices.index(i) if i in media_line_indices else 0
+            )
+        elif line.startswith("a=candidate:"):
+            # Store candidate line with its media index
+            candidate_lines.append((line, current_media_index))
+
+    logger.debug(
+        f"{role} SDP contains {len(candidate_lines)} candidate lines "
+        f"(SDP length: {len(sdp)} chars,"
+        f" lines: {len(sdp_lines)}, media lines: {len(media_line_indices)})"
+    )
+
+    if not candidate_lines:
+        logger.warning(
+            f"{role} No ICE candidates found in SDP! SDP preview: {sdp[:200]}..."
+        )
+        return 0
+
+    async with bridge:
+        for line, mline_index in candidate_lines:
+            cand_str = line[len("a=") :].strip()
+            try:
+                candidate_obj = candidate_from_aioice(Candidate.from_sdp(cand_str))
+                # CRITICAL: Set sdpMLineIndex - aiortc requires this!
+                candidate_obj.sdpMLineIndex = mline_index
+                if not hasattr(candidate_obj, "sdpMid") or candidate_obj.sdpMid is None:
+                    candidate_obj.sdpMid = str(mline_index)
+                await bridge.add_ice_candidate(rtc_pc, candidate_obj)
+                candidates_added += 1
+                logger.debug(
+                    f"{role} added ICE candidate"
+                    f" (mline={mline_index}): {cand_str[:80]}.."
+                )
+            except Exception as e:
+                logger.warning(
+                    f"{role} Failed to parse ICE candidate '{cand_str[:50]}...': {e}",
+                    exc_info=True,
+                )
+                continue
+
+        # Add end-of-candidates marker if we added any candidates
+        if candidates_added > 0:
+            await bridge.add_ice_candidate(rtc_pc, None)
+            logger.info(f"{role} Added {candidates_added} ICE candidates from SDP")
+        else:
+            logger.warning(
+                f"{role} Found candidate lines in SDP but failed to add any candidates"
+            )
+
+    return candidates_added
+
+
 # pyright: ignore[reportMissingReturnStatement]
 async def connect(
     peer_connection: DirectPeerConnection,
     ufrag: str,
+    ice_pwd: str,
     role: str,
     remote_addr: Multiaddr | None = None,
     remote_peer_id: ID | None = None,
@@ -56,16 +140,25 @@ async def connect(
     Establish a WebRTC-Direct connection, perform the noise handshake,
     and return the upgraded connection.
     """
-    # Create data channel for noise handshake (negotiated, id=0)
-    rtc_pc = peer_connection.peer_connection
+    # CRITICAL: Create data channel BEFORE createOffer() on peer_conn
+    # This is required for ICE gathering to start
+    # - RTCPeerConnection needs a media component to gather candidates.
+    #  js-libp2p does this: createDataChannel() -> createOffer()
     bridge = get_webrtc_bridge()
     cleanup_handlers: list[
         tuple[str, Callable[[dict[str, Any], str], Awaitable[None]]]
     ] = []
 
-    handshake_channel: RTCDataChannel = rtc_pc.createDataChannel(
+    handshake_channel: RTCDataChannel = peer_connection.createDataChannel(
         "", negotiated=True, id=0
     )
+
+    # Get the underlying peer connection for ICE candidate handling
+    rtc_pc = peer_connection.peer_connection
+
+    # Track whether remote description has been set (for queuing remote candidates)
+    remote_description_set = trio.Event()
+    queued_remote_candidates: list[dict[str, Any]] = []
 
     if signal_service is not None and remote_peer_id is not None:
         remote_peer_str = remote_peer_id.to_base58()
@@ -93,7 +186,10 @@ async def connect(
                 extra={"ufrag": ufrag},
             )
 
-        rtc_pc.on("icecandidate", _queue_local_candidate)
+        # Set up ICE candidate handler on peer_connection (DirectPeerConnection)
+        # Note: aiortc doesn't emit icecandidate events (candidates are in SDP),
+        # but we set this up for compatibility and in case future versions do
+        peer_connection.on("icecandidate", _queue_local_candidate)
 
         async def _handle_remote_ice(
             message: dict[str, Any], sender_peer_id: str
@@ -103,17 +199,26 @@ async def connect(
             msg_ufrag = message.get("ufrag")
             if msg_ufrag is not None and msg_ufrag != ufrag:
                 return
+
+            # Wait for remote description to be set before adding candidates
+            if not remote_description_set.is_set():
+                logger.debug(f"{role} Queuing remote ICE candidate ")
+                queued_remote_candidates.append(message)
+                return
+
             candidate_payload = message.get("candidate")
             async with bridge:
                 if candidate_payload is None:
-                    await bridge.add_ice_candidate(rtc_pc, None)
+                    # Add ICE candidate to peer_connection (DirectPeerConnection)
+                    await bridge.add_ice_candidate(peer_connection, None)
                     return
                 candidate_obj = candidate_from_aioice(
                     Candidate.from_sdp(candidate_payload.get("candidate", ""))
                 )
                 candidate_obj.sdpMid = candidate_payload.get("sdpMid")
                 candidate_obj.sdpMLineIndex = candidate_payload.get("sdpMLineIndex")
-                await bridge.add_ice_candidate(rtc_pc, candidate_obj)
+                # Add ICE candidate to peer_connection (DirectPeerConnection)
+                await bridge.add_ice_candidate(peer_connection, candidate_obj)
 
         signal_service.add_handler("ice", _handle_remote_ice)
         cleanup_handlers.append(("ice", _handle_remote_ice))
@@ -122,11 +227,77 @@ async def connect(
         if role == "client":
             logger.debug("client creating local offer")
             offer = await peer_connection.createOffer()
-            logger.debug("client created local offer %s", offer.sdp)
-            munged_offer = SDP.munge_offer(offer.sdp, ufrag)
-            logger.debug("client setting local offer %s", munged_offer)
-            munged_desc = RTCSessionDescription(sdp=munged_offer, type=offer.type)
-            await aio_as_trio(peer_connection.setLocalDescription(munged_desc))
+
+            # Wait for ICE gathering to complete
+            logger.debug("client waiting for ICE gathering to complete...")
+            logger.debug(
+                f"client ICE gathering state before wait:"
+                f" {peer_connection.iceGatheringState}"
+            )
+            with trio.move_on_after(10):  # 10s timeout for ICE gathering
+                while peer_connection.iceGatheringState != "complete":
+                    await trio.sleep(0.1)
+            logger.debug(
+                f"client ICE gathering state: {peer_connection.iceGatheringState}"
+            )
+
+            # Get the SDP from localDescription (should be set by createOffer)
+            # Check peer_connection (DirectPeerConnection) not rtc_pc
+            local_desc = peer_connection.localDescription
+            if local_desc is not None:
+                offer_sdp_with_candidates = local_desc.sdp
+                logger.debug("client using SDP from localDescription")
+            else:
+                # Fallback: use offer SDP (might not have candidates yet)
+                offer_sdp_with_candidates = offer.sdp
+                logger.warning("client localDesc None, using offer SDP")
+
+            offer_candidates = [
+                line
+                for line in offer_sdp_with_candidates.splitlines()
+                if line.startswith("a=candidate:")
+            ]
+            logger.warning(
+                f"client SDP has {len(offer_candidates)} candidates "
+                f"(SDP length: {len(offer_sdp_with_candidates)} chars, "
+                f"iceGatheringState: {peer_connection.iceGatheringState})"
+            )
+            if len(offer_candidates) == 0:
+                logger.error(
+                    f"client WARNING: No ICE candidates in offer SDP! "
+                    f"This will cause ICE connection to fail. "
+                    f"iceGatheringState: {peer_connection.iceGatheringState}, "
+                    f"connectionState: {peer_connection.connectionState}"
+                )
+            else:
+                # Log candidates for debugging
+                for i, cand_line in enumerate[Any](offer_candidates):
+                    logger.warning(f"client candidate {i}: {cand_line}")
+
+            # Extract and send candidates via signal service if we have them
+            if (
+                offer_candidates
+                and signal_service is not None
+                and remote_peer_id is not None
+            ):
+                logger.debug(
+                    f"client extracting {len(offer_candidates)} candidates"
+                    f" from SDP to send via signal service"
+                )
+                for line in offer_candidates:
+                    cand_str = line[len("a=") :].strip()
+                    try:
+                        # Parse and send candidate
+                        signal_service.enqueue_local_candidate(
+                            remote_peer_id,
+                            {"candidate": cand_str, "sdpMLineIndex": 0},
+                            extra={"ufrag": ufrag},
+                        )
+                    except Exception as e:
+                        logger.debug(f"client failed to queue candidate: {e}")
+
+            # Munge the SDP for sending
+            munged_offer = SDP.munge_offer(offer_sdp_with_candidates, ufrag, ice_pwd)
 
             if remote_addr is None:
                 raise Exception("Remote address is required for client role")
@@ -137,12 +308,17 @@ async def connect(
                 except Exception:
                     certhash = None
 
+            # Create offer description with updated SDP (includes candidates)
+            offer_desc_with_candidates = RTCSessionDescription(
+                sdp=munged_offer, type=offer.type
+            )
+
             if offer_handler is not None:
-                answer_desc = await offer_handler(munged_desc, ufrag)
+                answer_desc = await offer_handler(offer_desc_with_candidates, ufrag)
             elif signal_service is not None and remote_peer_id is not None:
                 answer_desc = await signal_service.negotiate_connection(
                     remote_peer_id,
-                    munged_desc,
+                    offer_desc_with_candidates,
                     certhash or "",
                     extra={"ufrag": ufrag},
                 )
@@ -150,7 +326,63 @@ async def connect(
                 raise Exception(
                     "Signal service or offer_handler required for WebRTC-Direct dialing"
                 )
+            # Set remote description - aiortc automatically processes candidates in SDP
+            answer_candidates_in_sdp = [
+                line
+                for line in answer_desc.sdp.splitlines()
+                if line.startswith("a=candidate:")
+            ]
+            logger.warning(
+                f"client setting remote description (answer) with "
+                f" {len(answer_candidates_in_sdp)} candidates, "
+                f"current state: {peer_connection.connectionState}, "
+                f"ICE: {peer_connection.iceConnectionState}"
+            )
             await aio_as_trio(peer_connection.setRemoteDescription(answer_desc))
+            logger.warning(
+                f"client set remote description, connection state: "
+                f"{peer_connection.connectionState}, "
+                f"ICE: {peer_connection.iceConnectionState}, "
+                f"iceGatheringState: {peer_connection.iceGatheringState}"
+            )
+
+            # Signal that remote description is set
+            # - now we can process queued candidates
+            remote_description_set.set()
+
+            # Process any queued remote candidates that arrived before
+            # remote description was set
+            if signal_service is not None and queued_remote_candidates:
+                logger.debug(
+                    f"client processing {len(queued_remote_candidates)} "
+                    "queued remote candidates"
+                )
+                async with bridge:
+                    for queued_msg in queued_remote_candidates:
+                        candidate_payload = queued_msg.get("candidate")
+                        if candidate_payload is None:
+                            await bridge.add_ice_candidate(peer_connection, None)
+                        else:
+                            candidate_obj = candidate_from_aioice(
+                                Candidate.from_sdp(
+                                    candidate_payload.get("candidate", "")
+                                )
+                            )
+                            candidate_obj.sdpMid = candidate_payload.get("sdpMid")
+                            candidate_obj.sdpMLineIndex = candidate_payload.get(
+                                "sdpMLineIndex"
+                            )
+                            await bridge.add_ice_candidate(
+                                peer_connection, candidate_obj
+                            )
+                queued_remote_candidates.clear()
+
+            # Note: aiortc automatically extracts and processes ICE candidates from SDP
+            # when setRemoteDescription() is called.
+            # Additional candidates may arrive via signal service (trickling).
+
+            # Give ICE a moment to process the remote description and candidates
+            await trio.sleep(0.3)
         else:
             if incoming_offer is not None:
                 offer_desc = incoming_offer
@@ -158,11 +390,144 @@ async def connect(
                 raise Exception(
                     "Server role requires incoming SDP offer via signaling service"
                 )
+            # Set remote description - aiortc automatically processes candidates in SDP
+            offer_candidates_in_sdp = [
+                line
+                for line in offer_desc.sdp.splitlines()
+                if line.startswith("a=candidate:")
+            ]
+            logger.warning(
+                f"server setting remote description (offer) "
+                f"with {len(offer_candidates_in_sdp)} candidates, "
+                f" current state: {peer_connection.connectionState}, "
+                f"current state: {peer_connection.connectionState}, "
+                f" ICE: {peer_connection.iceConnectionState}"
+            )
             await aio_as_trio(peer_connection.setRemoteDescription(offer_desc))
+            logger.warning(
+                f"server set remote description, "
+                f" connection state: {peer_connection.connectionState}, "
+                f"ICE: {peer_connection.iceConnectionState}, "
+                f"iceGatheringState: {peer_connection.iceGatheringState}"
+            )
+
+            # Signal that remote description is set -
+            #  now we can process queued candidates
+            remote_description_set.set()
+
+            # Process any queued remote candidates that arrived
+            # before remote description was set
+            if signal_service is not None and queued_remote_candidates:
+                logger.debug(
+                    f"server processing {len(queued_remote_candidates)}"
+                    " queued remote candidates"
+                )
+                async with bridge:
+                    for queued_msg in queued_remote_candidates:
+                        candidate_payload = queued_msg.get("candidate")
+                        if candidate_payload is None:
+                            await bridge.add_ice_candidate(peer_connection, None)
+                        else:
+                            candidate_obj = candidate_from_aioice(
+                                Candidate.from_sdp(
+                                    candidate_payload.get("candidate", "")
+                                )
+                            )
+                            candidate_obj.sdpMid = candidate_payload.get("sdpMid")
+                            candidate_obj.sdpMLineIndex = candidate_payload.get(
+                                "sdpMLineIndex"
+                            )
+                            await bridge.add_ice_candidate(
+                                peer_connection, candidate_obj
+                            )
+                queued_remote_candidates.clear()
+
+            # Note: aiortc automatically extracts and processes ICE candidates from SDP
+            # when setRemoteDescription() is called.
+            # Additional candidates may arrive via signal service (trickling).
+
+            # Give ICE a moment to process the remote description and candidates
+            await trio.sleep(0.3)
 
             logger.debug("server creating local answer")
+            # Note: DirectPeerConnection.createAnswer() already
+            #  sets local description internally
             answer_desc = await peer_connection.createAnswer()
-            logger.debug("server created local answer")
+
+            # Wait for ICE gathering to complete AFTER answer is created
+            # Check on peer_connection (DirectPeerConnection)
+            # not rtc_pc (stored peer_connection)
+            logger.debug("server waiting for ICE gathering to complete...")
+            logger.debug(
+                f"server ICE gathering state before wait:"
+                f" {peer_connection.iceGatheringState}"
+            )
+            with trio.move_on_after(10):  # 10s timeout for ICE gathering
+                while peer_connection.iceGatheringState != "complete":
+                    await trio.sleep(0.1)
+            logger.debug(
+                f"server ICE gathering state: {peer_connection.iceGatheringState}"
+            )
+
+            # Get the SDP from localDescription (should be set by createAnswer)
+            # Check peer_connection (DirectPeerConnection) not rtc_pc
+            local_desc = peer_connection.localDescription
+            if local_desc is not None:
+                answer_sdp_with_candidates = local_desc.sdp
+                logger.debug("server using SDP from localDescription")
+            else:
+                # Fallback: use answer SDP (might not have candidates yet)
+                answer_sdp_with_candidates = answer_desc.sdp
+                logger.warning("server localDescription None, using answer SDP")
+
+            answer_candidates = [
+                line
+                for line in answer_sdp_with_candidates.splitlines()
+                if line.startswith("a=candidate:")
+            ]
+            logger.warning(
+                f"server SDP has {len(answer_candidates)} candidates "
+                f"(SDP length: {len(answer_sdp_with_candidates)} chars, "
+                f"iceGatheringState: {peer_connection.iceGatheringState})"
+            )
+            if len(answer_candidates) == 0:
+                logger.error(
+                    f"server WARNING: No ICE candidates in answer SDP! "
+                    f"This will cause ICE connection to fail. "
+                    f"iceGatheringState: {peer_connection.iceGatheringState}, "
+                    f"connectionState: {peer_connection.connectionState}"
+                )
+            else:
+                # Log candidates for debugging
+                for i, cand_line in enumerate(answer_candidates):
+                    logger.warning(f"server candidate {i}: {cand_line}")
+
+            # Extract and send candidates via signal service if we have them
+            if (
+                answer_candidates
+                and signal_service is not None
+                and remote_peer_id is not None
+            ):
+                logger.debug(
+                    f"server extracting {len(answer_candidates)} candidates from"
+                    " SDP to send via signal service"
+                )
+                for line in answer_candidates:
+                    cand_str = line[len("a=") :].strip()
+                    try:
+                        # Parse and send candidate
+                        signal_service.enqueue_local_candidate(
+                            remote_peer_id,
+                            {"candidate": cand_str, "sdpMLineIndex": 0},
+                            extra={"ufrag": ufrag},
+                        )
+                    except Exception as e:
+                        logger.debug(f"server failed to queue candidate: {e}")
+
+            # Update answer_desc with the SDP that includes candidates
+            answer_desc = RTCSessionDescription(
+                sdp=answer_sdp_with_candidates, type=answer_desc.type
+            )
             if answer_handler is not None:
                 await answer_handler(answer_desc, ufrag)
             elif signal_service is not None and remote_peer_id is not None:
@@ -178,8 +543,197 @@ async def connect(
                     "Signal service or ans_handler required for WebRTC-Direct answer"
                 )
 
-        # TODO: Check if this is the best way
-        # Wait for handshake channel to open
+        # Flush ICE candidates after SDP exchange to ensure they're sent
+        # Note: We've already extracted candidates from SDP above, but we also need to
+        # send any additional candidates that were gathered after SDP was created
+        # IMPORTANT: Wait a bit before flushing to
+        # ensure remote peer has set remote description
+        # This prevents "addIceCandidate called without remote description" warnings
+        if signal_service is not None and remote_peer_id is not None:
+            # Ensure signaling stream is established before flushing
+            peer_id_str = str(remote_peer_id)
+            if peer_id_str not in signal_service.active_streams:
+                logger.debug(f"{role} signaling stream not ready, waiting...")
+                # Wait a bit for stream to be established
+                for _ in range(10):  # Wait up to 1 second
+                    if peer_id_str in signal_service.active_streams:
+                        break
+                    await trio.sleep(0.1)
+
+            # Wait for remote peer to process SDP and set remote description
+            # This prevents candidates from being added before remote description is set
+            await trio.sleep(0.5)  # Give remote peer time to set remote description
+
+            # Flush queued candidates (gathered after SDP was sent)
+            await signal_service.flush_ice_candidates(remote_peer_id)
+            logger.debug(f"{role} flushed queued ICE candidates after SDP exchange")
+
+            # Also flush local ICE candidates that might have been queued
+            await signal_service.flush_local_ice(remote_peer_id)
+
+            # Give ICE candidates time to be exchanged and processed
+            # This is important for the connection to transition
+            # from "new" to "connecting"
+            await trio.sleep(0.5)  # Wait for candidates to be sent and received
+
+        # Wait for peer connection to be established before data channel can open
+        connection_established = trio.Event()
+        connection_failed = trio.Event()
+        ice_connected = trio.Event()
+
+        def on_connection_state_change() -> None:
+            state = peer_connection.connectionState
+            logger.debug(f"{role} peer connection state changed to: {state}")
+            if state == "connected":
+                connection_established.set()
+            elif state == "failed" or state == "disconnected":
+                connection_failed.set()
+            elif state == "connecting":
+                # Connection is in progress, log but don't fail yet
+                logger.debug(f"{role} peer connection is connecting...")
+
+        def on_ice_connection_state_change() -> None:
+            ice_state = peer_connection.iceConnectionState
+            logger.warning(
+                f"{role} ICE connection state changed to: {ice_state} "
+                f"(connectionState: {peer_connection.connectionState}, "
+                f"iceGatheringState: {peer_connection.iceGatheringState})"
+            )
+            if ice_state == "connected" or ice_state == "completed":
+                ice_connected.set()
+            elif ice_state == "failed":
+                logger.error(
+                    f"{role} ICE connection FAILED! "
+                    f"connectionState: {peer_connection.connectionState}, "
+                    f"iceGatheringState: {peer_connection.iceGatheringState}"
+                )
+                # ICE failure means connection cannot succeed - fail immediately
+                connection_failed.set()
+            elif ice_state == "checking":
+                logger.debug(f"{role} ICE connection checking...")
+            elif ice_state == "disconnected":
+                logger.warning(f"{role} ICE connection disconnected")
+                # Disconnected might recover, but log it
+
+        # Set up connection state handlers on peer_connection (DirectPeerConnection)
+        # This is the peer connection that's actually being used for offers/answers
+        peer_connection.on("connectionstatechange", on_connection_state_change)
+        peer_connection.on("iceconnectionstatechange", on_ice_connection_state_change)
+
+        # Check current state (might already be connected or connecting)
+        current_state = peer_connection.connectionState
+        ice_state = peer_connection.iceConnectionState
+        logger.debug(
+            f"{role} initial peer connection state: {current_state}, "
+            f"ICE connection state: {ice_state}"
+        )
+        if current_state == "connected":
+            connection_established.set()
+        elif current_state in ("failed", "disconnected"):
+            connection_failed.set()
+        elif ice_state in ("connected", "completed"):
+            ice_connected.set()
+        elif current_state == "new" and ice_state == "new":
+            # Both states are "new" - ICE processing hasn't started
+            # This means ICE candidates might not have been added yet
+            logger.debug(
+                f"{role} connection and ICE both 'new' -"
+                " waiting for ICE processing to start..."
+            )
+            # Give ICE candidates time to be added and processed
+            # After setting remote description, ICE should start processing candidates
+            await trio.sleep(0.5)  # Brief wait for ICE to start processing
+
+        # Wait for connection to be established (with timeout)
+        # Monitor both connection state and ICE connection state
+        if not connection_established.is_set() and not connection_failed.is_set():
+            logger.debug(
+                f"{role} waiting for peer connection to establish... "
+                f"(current: {peer_connection.connectionState}, "
+                f" ICE: {peer_connection.iceConnectionState})"
+            )
+            with trio.move_on_after(30):  # 30s timeout
+                # Wait for either connection established or failed
+                done_event = trio.Event()
+
+                async def wait_established() -> None:
+                    await connection_established.wait()
+                    done_event.set()
+
+                async def wait_failed() -> None:
+                    await connection_failed.wait()
+                    done_event.set()
+
+                async def wait_ice_connected() -> None:
+                    await ice_connected.wait()
+                    logger.debug(f"{role} ICE connected, checking connection state...")
+                    # Check if connectionState already updated
+                    if peer_connection.connectionState == "connected":
+                        connection_established.set()
+                        done_event.set()
+                    else:
+                        # Give it a moment for connectionState to catch up
+                        await trio.sleep(1.0)
+                        if peer_connection.connectionState == "connected":
+                            connection_established.set()
+                        done_event.set()  # Signal that we've checked
+
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(wait_established)
+                    nursery.start_soon(wait_failed)
+                    nursery.start_soon(wait_ice_connected)
+                    await done_event.wait()
+                    nursery.cancel_scope.cancel()
+
+        if connection_failed.is_set():
+            raise Exception(
+                f"Peer connection failed or disconnected "
+                f"(state: {peer_connection.connectionState}, "
+                f" ICE: {peer_connection.iceConnectionState})"
+            )
+
+        if not connection_established.is_set():
+            # Check if ICE connected but connectionState didn't update
+            if ice_connected.is_set():
+                logger.debug(
+                    f"{role} ICE connected but connectionState is "
+                    f" {peer_connection.connectionState}, "
+                    "waiting a bit longer..."
+                )
+                await trio.sleep(1.0)  # Give connectionState time to update
+                if peer_connection.connectionState == "connected":
+                    connection_established.set()
+                else:
+                    raise Exception(
+                        f"ICE connected but peer connection did not establish "
+                        f"(state: {peer_connection.connectionState}, "
+                        " ICE: {peer_connection.iceConnectionState})"
+                    )
+            else:
+                raise Exception(
+                    f"Peer connection did not establish in time "
+                    f"(state: {peer_connection.connectionState}, "
+                    " ICE: {peer_connection.iceConnectionState})"
+                )
+
+        logger.debug(f"{role} peer connection established")
+
+        # Validate ICE connection state before proceeding
+        # Ensure ICE connection is actually connected, not closed
+        ice_state = peer_connection.iceConnectionState
+        if ice_state == "closed":
+            raise Exception(
+                f"ICE connection is closed before data channel setup "
+                f"(connectionState: {peer_connection.connectionState}, "
+                f"iceConnectionState: {ice_state})"
+            )
+        if ice_state not in ("connected", "completed"):
+            logger.warning(
+                f"{role} ICE connection state is {ice_state}, not connected/completed. "
+                f"Proceeding with caution..."
+            )
+
+        # Now wait for handshake channel to open
         if handshake_channel.readyState != "open":
             logger.debug(
                 "%s wait for handshake channel to open, starting status %s",
@@ -193,12 +747,68 @@ async def connect(
                 open_event.set()
 
             handshake_channel.on("open", on_open)
-            with trio.move_on_after(30):  # 30s timeout
-                await open_event.wait()
+            # Check if already open
+            # (might have opened while we were waiting for conn)
+            if handshake_channel.readyState == "open":
+                open_event.set()
+            else:
+                with trio.move_on_after(30):  # 30s timeout
+                    await open_event.wait()
             if handshake_channel.readyState != "open":
-                raise Exception("Handshake data channel did not open in time")
+                raise Exception(
+                    f"Handshake data channel did not open in time"
+                    " (state: {handshake_channel.readyState}, "
+                    f"peer connection state: {rtc_pc.connectionState})"
+                )
 
         logger.debug("%s handshake channel opened", role)
+
+        # Verifying data channel can actually send data
+        # This prevents false positives where channel appears open but data doesn't flow
+        logger.debug("%s verifying data channel can send data...", role)
+        try:
+            # Verify channel state is still open
+            if handshake_channel.readyState != "open":
+                raise Exception(
+                    f"Data channel not open for verification "
+                    f"(state: {handshake_channel.readyState})"
+                )
+
+            # Check channel properties to ensure it's operational
+            # bufferedAmount should be accessible (indicates channel is ready)
+            try:
+                buffered = handshake_channel.bufferedAmount
+                logger.debug("%s data channel bufferedAmount: %d bytes", role, buffered)
+            except Exception as e:
+                logger.warning(
+                    "%s could not check data channel bufferedAmount: %s", role, e
+                )
+
+            # Verify ICE connection is still good
+            current_ice_state = peer_connection.iceConnectionState
+            if current_ice_state == "closed":
+                raise Exception(
+                    f"ICE connection closed during data channel verification "
+                    f"(state: {current_ice_state})"
+                )
+
+            logger.info(
+                "%s data channel verified (channel state: %s, ICE state: %s)",
+                role,
+                handshake_channel.readyState,
+                current_ice_state,
+            )
+
+        except Exception as e:
+            logger.error(
+                "%s data channel verification failed: %s", role, e, exc_info=True
+            )
+            raise Exception(
+                f"Data channel verification failed: {e}. "
+                f"Channel state: {handshake_channel.readyState}, "
+                f"ICE state: {peer_connection.iceConnectionState}, "
+                f"Connection state: {peer_connection.connectionState}"
+            ) from e
 
         rtc_pc = peer_connection.peer_connection
 
@@ -227,12 +837,21 @@ async def connect(
                     remote_fingerprint = None
 
         # Get local fingerprint
-        local_desc = rtc_pc.localDescription
+        local_desc = peer_connection.localDescription
         local_fingerprint = SDP.get_fingerprint_from_sdp(
             local_desc.sdp if local_desc is not None else None
         )
         if local_fingerprint is None:
+            logger.error(
+                "%s unable to extract local fingerprint;"
+                " localDescription present=%s, sdp=%r",
+                role,
+                local_desc is not None,
+                local_desc.sdp if local_desc is not None else None,
+            )
             raise Exception("Could not get fingerprint from local description sdp")
+
+        logger.warning("%s local fingerprint extracted: %s", role, local_fingerprint)
 
         if remote_fingerprint is None:
             try:
@@ -244,6 +863,11 @@ async def connect(
                 if fp_value:
                     algorithm = getattr(fp_obj, "algorithm", "sha-256")
                     remote_fingerprint = f"{algorithm} {fp_value.upper()}"
+        logger.warning(
+            "%s remote fingerprint as seen in SDP/DTLS: %s",
+            role,
+            remote_fingerprint,
+        )
 
         expected_certhash: str | None = certhash
         if expected_certhash is None and remote_addr is not None:
@@ -259,6 +883,12 @@ async def connect(
             except Exception:
                 actual_certhash = None
 
+        logger.warning(
+            "%s expected certhash=%s actual certhash=%s",
+            role,
+            expected_certhash,
+            actual_certhash,
+        )
         if expected_certhash is not None and actual_certhash is not None:
             if expected_certhash != actual_certhash:
                 raise Exception(
@@ -279,12 +909,25 @@ async def connect(
         if remote_peer_id is None:
             raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
 
+        # Verify data channel is open and ready before creating connection wrapper
+        if handshake_channel.readyState != "open":
+            raise Exception(
+                f"{role} handshake channel not open when creating WebRTCRawConnection "
+                f"(state: {handshake_channel.readyState})"
+            )
+        logger.info(
+            f"{role} creating WebRTCRawConn with"
+            f" channel state: {handshake_channel.readyState}"
+        )
+
         raw_connection = WebRTCRawConnection(
             remote_peer_id,
             rtc_pc,
             handshake_channel,
             is_initiator=(role == "client"),
         )
+
+        logger.info(f"{role} WebRTCRawConnection created successfully")
 
         raw_connection.remote_multiaddr = remote_addr
         raw_connection.remote_fingerprint = remote_fingerprint

@@ -1,8 +1,9 @@
+import base64
 import types
 from typing import Any, cast
 
 import pytest
-from aiortc import RTCSessionDescription
+from aiortc import RTCIceCandidate, RTCSessionDescription
 from multiaddr import Multiaddr
 
 from libp2p import generate_peer_id_from
@@ -15,9 +16,7 @@ from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.transport.webrtc.private_to_public import connect as connect_module
 from libp2p.transport.webrtc.private_to_public.connect import connect
 from libp2p.transport.webrtc.private_to_public.transport import WebRTCDirectTransport
-from libp2p.transport.webrtc.private_to_public.util import (
-    fingerprint_to_certhash,
-)
+from libp2p.transport.webrtc.private_to_public.util import fingerprint_to_certhash
 
 
 def fingerprint_components() -> tuple[str, str]:
@@ -47,9 +46,10 @@ class StubChannel:
 
 class StubRTCPeerConnection:
     def __init__(self) -> None:
-        self.localDescription = None
-        self.remoteDescription = None
+        self.localDescription = RTCSessionDescription(sdp="", type="offer")
+        self.remoteDescription = RTCSessionDescription(sdp="", type="answer")
         self._callbacks: dict[str, list[Any]] = {}
+        self.iceCandidates: list[RTCIceCandidate] = []
 
     def createDataChannel(self, *_args: Any, **_kwargs: Any) -> StubChannel:
         return StubChannel()
@@ -65,25 +65,45 @@ class StubDirectPeerConnection:
         self._local_fp_hex = local_fp_full.split(" ", 1)[1]
         self._remote_fp_hex = remote_fp_full.split(" ", 1)[1]
         self.peer_connection = StubRTCPeerConnection()
+        self.localDescription = RTCSessionDescription(sdp="", type="offer")
+        self.remoteDescription = RTCSessionDescription(sdp="", type="answer")
+        self.iceGatheringState = "complete"
+        self.iceConnectionState = "connected"
+        self.connectionState = "connected"
+        self.iceCandidates: list[RTCIceCandidate] = []
 
     async def createOffer(self) -> Any:
-        return RTCSessionDescription(
+        desc = RTCSessionDescription(
             sdp=f"v=0\r\na=fingerprint:{self._local_fp_full}\r\n", type="offer"
         )
+        self.localDescription = desc
+        self.peer_connection.localDescription = desc
+        return desc
 
     async def createAnswer(self) -> Any:
-        return RTCSessionDescription(
+        desc = RTCSessionDescription(
             sdp=f"v=0\r\na=fingerprint:{self._remote_fp_full}\r\n", type="answer"
         )
+        self.localDescription = desc
+        self.peer_connection.localDescription = desc
+        return desc
 
     async def setLocalDescription(self, desc: Any) -> None:
+        self.localDescription = desc
         self.peer_connection.localDescription = desc
 
     async def setRemoteDescription(self, desc: Any) -> None:
+        self.remoteDescription = desc
         self.peer_connection.remoteDescription = desc
 
     def remoteFingerprint(self) -> Any:
         return types.SimpleNamespace(algorithm="sha-256", value=self._remote_fp_hex)
+
+    def createDataChannel(self, *args: Any, **kwargs: Any) -> StubChannel:
+        return self.peer_connection.createDataChannel(*args, **kwargs)
+
+    def on(self, event: str, callback: Any) -> None:
+        self.peer_connection.on(event, callback)
 
 
 class StubSecureConn(ISecureConn):
@@ -231,7 +251,7 @@ async def test_connect_uses_security_multistream(
 
     monkeypatch.setattr(connect_module, "aio_as_trio", fake_aio_as_trio)
 
-    def fake_munge_offer(sdp: str, _ufrag: str) -> str:
+    def fake_munge_offer(sdp: str, _ufrag: str, _pwd: str) -> str:
         return sdp
 
     def fake_munge_answer(sdp: str, _ufrag: str) -> str:
@@ -289,6 +309,7 @@ async def test_connect_uses_security_multistream(
     secure_conn, _ = await connect(
         peer_connection=cast(Any, stub_peer),
         ufrag="testufrag",
+        ice_pwd="testpassword1234567890test",
         role="client",
         remote_addr=remote_addr,
         remote_peer_id=remote_peer_id,
@@ -308,6 +329,17 @@ async def test_connect_uses_security_multistream(
         getattr(secure_conn_any, "local_fingerprint", None)
         or local_fp_full.split(" ", 1)[1]
     )
+
+
+def test_fingerprint_to_certhash_matches_digest() -> None:
+    hex_part, fp_full = fingerprint_components()
+    certhash = fingerprint_to_certhash(fp_full)
+    expected = (
+        base64.urlsafe_b64encode(bytes.fromhex(hex_part.replace(":", "")))
+        .decode("utf-8")
+        .rstrip("=")
+    )
+    assert certhash == f"uEi{expected}"
 
 
 @pytest.mark.trio

@@ -120,15 +120,13 @@ class Multiselect(IMultiselectMuxer):
         """
         Perform handshake to agree on multiselect protocol.
 
+        For the server side, we read the client's handshake first, then respond.
+
         :param communicator: communicator to use
         :raise MultiselectError: raised when handshake failed
         """
         try:
-            await communicator.write(MULTISELECT_PROTOCOL_ID)
-        except MultiselectCommunicatorError as error:
-            raise MultiselectError() from error
-
-        try:
+            # Server reads client's handshake first
             handshake_contents = await communicator.read()
         except MultiselectCommunicatorError as error:
             raise MultiselectError() from error
@@ -138,6 +136,12 @@ class Multiselect(IMultiselectMuxer):
                 "multiselect protocol ID mismatch: "
                 f"received handshake_contents={handshake_contents}"
             )
+
+        try:
+            # Server responds with handshake
+            await communicator.write(MULTISELECT_PROTOCOL_ID)
+        except MultiselectCommunicatorError as error:
+            raise MultiselectError() from error
 
 
 def is_valid_handshake(handshake_contents: str) -> bool:

@@ -25,6 +25,7 @@ from .util import (
     canonicalize_certhash,
     extract_from_multiaddr,
     fingerprint_to_certhash,
+    generate_ice_credentials,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ class UDPMuxServer:
 class PendingSession:
     ufrag: str
     peer_connection: DirectPeerConnection | None = None
+    ice_pwd: str | None = None
     remote_host: str | None = None
     remote_port: int | None = None
     remote_peer_id: ID | None = None
@@ -59,6 +61,7 @@ class PendingSession:
     ice_listener_registered: bool = False
     finalized: bool = False
     finalizing: bool = False
+    queued_remote_candidates: list[dict[str, Any]] | None = None
 
 
 UDP_MUX_LISTENERS: list[UDPMuxServer] = []
@@ -103,7 +106,55 @@ class WebRTCDirectListener(IListener):
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
         Return the advertised listening addresses for this listener.
+
+        Uses NAT detection to optimize address advertisement:
+        - Advertises public addresses when available
+        - Falls back to all addresses when behind NAT
         """
+        # If transport has NAT checker, use it for smart advertisement
+        transport = getattr(self, "transport", None)
+        if transport and hasattr(transport, "_reachability_checker"):
+            checker = transport._reachability_checker
+            if checker and self.host:
+                try:
+                    # Get all host addresses
+                    all_host_addrs = list(self.host.get_addrs())
+                    # Filter for public addresses
+                    public_addrs = checker.get_public_addrs(all_host_addrs)
+
+                    if public_addrs:
+                        # Advertise public addresses preferentially
+                        webrtc_addrs = []
+                        peer_id = self.transport.host.get_id()
+                        certhash = self.cert.certhash
+
+                        for addr in public_addrs:
+                            try:
+                                # Extract IP and port from address
+                                ip = addr.value_for_protocol(
+                                    "ip4"
+                                ) or addr.value_for_protocol("ip6")
+                                port = addr.value_for_protocol(
+                                    "udp"
+                                ) or addr.value_for_protocol("tcp")
+
+                                if ip and port:
+                                    proto = "ip6" if ":" in ip else "ip4"
+                                    webrtc_addr = Multiaddr(
+                                        f"/{proto}/{ip}/udp/{port}"
+                                        f"/webrtc-direct/certhash/{certhash}/p2p/{peer_id}"
+                                    )
+                                    webrtc_addrs.append(webrtc_addr)
+                            except Exception:
+                                continue
+
+                        if webrtc_addrs:
+                            # Return public addresses + existing addresses as fallback
+                            return tuple(webrtc_addrs + self._listen_addrs)
+                except Exception as e:
+                    logger.debug(f"Error in NAT-aware address advertisement: {e}")
+
+        # Fallback to existing addresses
         return tuple(self._listen_addrs)
 
     async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
@@ -315,10 +366,13 @@ class WebRTCDirectListener(IListener):
 
         if session.peer_connection is None:
             logger.info("Create peer connection for session %s", ufrag)
+            if session.ice_pwd is None:
+                _, session.ice_pwd = generate_ice_credentials()
             session.peer_connection = (
                 await DirectPeerConnection.create_dialer_rtc_peer_connection(
                     role="server",
                     ufrag=ufrag,
+                    ice_pwd=session.ice_pwd,
                     rtc_configuration=self.rtc_configuration,
                     certificate=self.cert,
                 )
@@ -356,9 +410,8 @@ class WebRTCDirectListener(IListener):
                         extra={"ufrag": session.ufrag},
                     )
 
-                session.peer_connection.peer_connection.on(
-                    "icecandidate", _queue_local_candidate
-                )
+                # Use session.peer_connection (DirectPeerConnection)
+                session.peer_connection.on("icecandidate", _queue_local_candidate)
                 session.ice_listener_registered = True
 
         if session.remote_info is None:
@@ -419,7 +472,6 @@ class WebRTCDirectListener(IListener):
             sdp=message.get("sdp", ""),
             type=message.get("sdpType", "offer"),
         )
-        session.certhash = message.get("certhash", session.certhash)
         if session.remote_peer_id is None:
             session.remote_peer_id = sender_id
 
@@ -450,24 +502,20 @@ class WebRTCDirectListener(IListener):
         ):
             return
 
-        candidate_payload = message.get("candidate")
-        bridge = get_webrtc_bridge()
-        peer_conn = session.peer_connection.peer_connection
-        async with bridge:
-            if candidate_payload is None:
-                await bridge.add_ice_candidate(peer_conn, None)
-                return
-            try:
-                candidate_obj = candidate_from_aioice(
-                    Candidate.from_sdp(candidate_payload.get("candidate", ""))
-                )
-                candidate_obj.sdpMid = candidate_payload.get("sdpMid")
-                candidate_obj.sdpMLineIndex = candidate_payload.get("sdpMLineIndex")
-                await bridge.add_ice_candidate(peer_conn, candidate_obj)
-            except Exception:
-                logger.debug(
-                    "Failed to add ICE candidate from %s", sender_peer_id, exc_info=True
-                )
+        if session.finalizing or session.finalized:
+            logger.debug(
+                "Ignoring ICE candidate for session %s while finalizing", ufrag
+            )
+            return
+
+        if session.queued_remote_candidates is None:
+            session.queued_remote_candidates = []
+        session.queued_remote_candidates.append(message)
+        logger.debug(
+            "Queued ICE candidate for session %s (queued=%d)",
+            ufrag,
+            len(session.queued_remote_candidates),
+        )
 
     async def _handle_signal_connection_state(
         self, message: dict[str, Any], sender_peer_id: str
@@ -514,18 +562,58 @@ class WebRTCDirectListener(IListener):
             security_multistream = (
                 swarm.upgrader.security_multistream if swarm is not None else None
             )
+
             async with open_loop():
                 connection, _ = await connect(
                     session.peer_connection,
                     session.ufrag,
+                    session.ice_pwd or "",
                     role="server",
                     remote_addr=session.client_multiaddr,
                     remote_peer_id=session.remote_peer_id,
                     incoming_offer=session.offer,
                     certhash=session.certhash,
                     answer_handler=send_answer,
+                    signal_service=signal_service,
                     security_multistream=security_multistream,
                 )
+
+            # Process any queued remote candidates before connect() was called
+            if session.queued_remote_candidates:
+                logger.debug(
+                    "Processing %d queued remote candidates for session %s",
+                    len(session.queued_remote_candidates),
+                    session.ufrag,
+                )
+                bridge = get_webrtc_bridge()
+                async with bridge:
+                    for queued_msg in session.queued_remote_candidates:
+                        candidate_payload = queued_msg.get("candidate")
+                        if candidate_payload is None:
+                            await bridge.add_ice_candidate(
+                                session.peer_connection, None
+                            )
+                        else:
+                            try:
+                                candidate_obj = candidate_from_aioice(
+                                    Candidate.from_sdp(
+                                        candidate_payload.get("candidate", "")
+                                    )
+                                )
+                                candidate_obj.sdpMid = candidate_payload.get("sdpMid")
+                                candidate_obj.sdpMLineIndex = candidate_payload.get(
+                                    "sdpMLineIndex"
+                                )
+                                await bridge.add_ice_candidate(
+                                    session.peer_connection, candidate_obj
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    "Failed to add queued ICE candidate: %s",
+                                    e,
+                                    exc_info=True,
+                                )
+                session.queued_remote_candidates.clear()
 
             connection_any = cast(Any, connection)
 

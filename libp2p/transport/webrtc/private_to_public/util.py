@@ -11,7 +11,7 @@ from multiaddr import Multiaddr
 from ..constants import MAX_MESSAGE_SIZE
 
 _fingerprint_regex = re.compile(
-    r"^a=fingerprint:(?:\w+-[0-9]+)\s(?P<fingerprint>(:?([0-9a-fA-F]{2}:?)+))$",
+    r"^a=fingerprint:(?:\w+-[0-9]+)\s(?P<fingerprint>(?:[0-9A-Fa-f]{2}:)*[0-9A-Fa-f]{2})\r?$",
     re.MULTILINE,
 )
 log = logging.getLogger("libp2p.transport.webrtc")
@@ -23,7 +23,7 @@ class SDP:
     """
 
     @staticmethod
-    def munge_offer(sdp: str, ufrag: str) -> str:
+    def munge_offer(sdp: str, ufrag: str, ice_pwd: str) -> str:
         """
         Munge SDP offer
 
@@ -33,6 +33,8 @@ class SDP:
             The SDP string to be munged.
         ufrag : str
             The ICE username fragment to insert.
+        ice_pwd : str
+            The ICE password to insert (must satisfy RFC 8445 length requirements).
 
         Returns
         -------
@@ -54,7 +56,7 @@ class SDP:
             if line.startswith("a=ice-ufrag:"):
                 new_lines.append(f"a=ice-ufrag:{ufrag}{line_break}")
             elif line.startswith("a=ice-pwd:"):
-                new_lines.append(f"a=ice-pwd:{ufrag}{line_break}")
+                new_lines.append(f"a=ice-pwd:{ice_pwd}{line_break}")
             else:
                 new_lines.append(line)
 
@@ -215,9 +217,9 @@ def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
         encoded = bytes.fromhex(hex_part)
     except ValueError as exc:  # pragma: no cover - defensive
         raise ValueError(f"Invalid fingerprint hex data: {hex_part}") from exc
-    digest = hashlib.sha256(encoded).digest()
-    # Multibase base64url, no padding, prefix "uEi" (libp2p convention)
-    b64 = base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
+    # Fingerprint already represents the SHA-256 digest of the certificate.
+    # We just need to base64url encode the raw digest bytes.
+    b64 = base64.urlsafe_b64encode(encoded).decode("utf-8").rstrip("=")
     certhash = f"uEi{b64}"
     return Multiaddr(f"/certhash/{certhash}")
 
@@ -388,13 +390,25 @@ def certhash_encode(s: str) -> tuple[int, bytes]:
     if len(raw_bytes) < 2:
         raise Exception("Decoded certhash is too short to contain multihash header")
 
-    # Multihash format: <code><length><digest>
-    code = raw_bytes[0]
-    length = raw_bytes[1]
-    digest = raw_bytes[2:]
+    # Try multihash format: <code><length><digest>
+    if len(raw_bytes) >= 2:
+        code = raw_bytes[0]
+        length = raw_bytes[1]
+        digest = raw_bytes[2:]
+        if len(digest) == length:
+            return code, digest
 
-    if len(digest) != length:
-        raise Exception(f"Digest length mismatch: expected {length}, got {len(digest)}")
+    # Fallback: treat entire payload as digest (legacy format)
+    digest = raw_bytes
+    digest_len = len(digest)
+    if digest_len == 20:
+        code = 0x11  # sha-1
+    elif digest_len == 32:
+        code = 0x12  # sha-256
+    elif digest_len == 64:
+        code = 0x13  # sha-512
+    else:
+        raise Exception(f"Unsupported certhash digest length: {digest_len}")
 
     return code, digest
 
@@ -477,6 +491,9 @@ def pick_random_ice_servers(
     return ice_servers[:num_servers]
 
 
+ICE_ALLOWED_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789+/"
+
+
 def generate_ufrag(length: int = 4) -> str:
     """
     Generate a random username fragment (ufrag) for SDP munging.
@@ -492,8 +509,27 @@ def generate_ufrag(length: int = 4) -> str:
         The generated ufrag string.
 
     """
-    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+    if length < 4:
+        raise ValueError("ICE ufrag length must be at least 4 characters")
+    alphabet = ICE_ALLOWED_CHARS
     return "".join(random.choices(alphabet, k=length))
+
+
+def generate_ice_credentials(
+    ufrag_length: int = 16, pwd_length: int = 32
+) -> tuple[str, str]:
+    """
+    Generate a random ICE username fragment and password per RFC 8445.
+
+    The ICE password MUST be between 22 and 256 characters. The ufrag must be at least 4
+    characters. We default to longer values to reduce collision risk.
+    """
+    if pwd_length < 22:
+        raise ValueError("ICE password length must be at least 22 characters")
+    ufrag = generate_ufrag(ufrag_length)
+    alphabet = ICE_ALLOWED_CHARS
+    ice_pwd = "".join(random.choices(alphabet, k=pwd_length))
+    return ufrag, ice_pwd
 
 
 def extract_from_multiaddr(ma: Multiaddr) -> tuple[str, int, int | None]:

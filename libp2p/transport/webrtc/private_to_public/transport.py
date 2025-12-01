@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from aiortc import (
     RTCConfiguration,
+    RTCIceServer,
     RTCPeerConnection,
     RTCSessionDescription,
 )
@@ -13,6 +14,7 @@ from trio_asyncio import aio_as_trio, open_loop
 from libp2p.abc import IHost, IListener, IRawConnection, ISecureConn, ITransport
 from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
+from libp2p.relay.circuit_v2.nat import ReachabilityChecker
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..constants import (
@@ -32,7 +34,7 @@ from .util import (
     canonicalize_certhash,
     extract_certhash,
     fingerprint_to_certhash,
-    generate_ufrag,
+    generate_ice_credentials,
 )
 
 if TYPE_CHECKING:
@@ -59,6 +61,8 @@ class WebRTCDirectTransport(ITransport):
         self._renewal_task = None
         self.supported_protocols: set[str] = {"webrtc-direct", "p2p"}
         self.signal_service: SignalService | None = None
+        # NAT traversal detection
+        self._reachability_checker: ReachabilityChecker | None = None
         logger.info("WebRTC-Direct Transport initialized")
 
     async def start(self, nursery: trio.Nursery) -> None:
@@ -85,6 +89,10 @@ class WebRTCDirectTransport(ITransport):
         except Exception:
             logger.warning("Failed to start WebRTC signaling service", exc_info=True)
 
+        if self.host:
+            self._reachability_checker = ReachabilityChecker(self.host)
+            logger.debug("NAT reachability checker initialized for WebRTC-Direct")
+
         self._started = True
         logger.info("WebRTC-Direct Transport started")
 
@@ -102,6 +110,8 @@ class WebRTCDirectTransport(ITransport):
         if self._renewal_task is not None:
             # TODO: Implement proper task cancellation
             self._renewal_task = None
+
+        self._reachability_checker = None
 
         self._started = False
         logger.info("WebRTC-Direct Transport stopped")
@@ -141,7 +151,7 @@ class WebRTCDirectTransport(ITransport):
 
             logger.info(f"Dialing WebRTC-Direct to {peer_id} at {ip}:{port}")
 
-            ufrag = generate_ufrag()
+            ufrag, ice_pwd = generate_ice_credentials()
 
             if self.cert_mgr is None:
                 raise WebRTCError(
@@ -150,6 +160,50 @@ class WebRTCDirectTransport(ITransport):
             if self.host is None:
                 raise WebRTCError("Transport host must be set before dialing")
 
+            # Store peer address in peerstore before dialing
+            # This is required for signal_service to create streams to the peer
+            peerstore = self.host.get_peerstore()
+            try:
+                # Extract base address (without webrtc-direct and p2p components)
+                ip_proto = "ip6" if ":" in ip else "ip4"
+                base_addr = Multiaddr(f"/{ip_proto}/{ip}/udp/{port}")
+                peerstore.add_addr(peer_id, base_addr, 3600)
+                logger.debug(f"Stored peer address {base_addr} for {peer_id}")
+            except Exception as e:
+                logger.debug(f"Failed to store peer address in peerstore: {e}")
+                # Continue anyway - might already be stored
+
+            # NAT detection: Check peer and self-reachability
+            is_peer_reachable = False
+            is_self_reachable = False
+            public_addrs_self: list[Multiaddr] = []
+
+            if self._reachability_checker:
+                try:
+                    # Check peer reachability
+                    is_peer_reachable = (
+                        await self._reachability_checker.check_peer_reachability(
+                            peer_id
+                        )
+                    )
+                    logger.debug(f"Peer {peer_id} reachable: {is_peer_reachable}")
+
+                    # Check self-reachability
+                    (
+                        is_self_reachable,
+                        public_addrs_self,
+                    ) = await self._reachability_checker.check_self_reachability()
+                    logger.debug(
+                        f"Self reachable: {is_self_reachable}, "
+                        f"public addresses: {len(public_addrs_self)}"
+                    )
+                except Exception as nat_exc:
+                    logger.debug(f"NAT detection check failed: {nat_exc}")
+                    # Continue with conservative approach (assume NAT)
+
+            # Determine if UDP hole punching is needed
+            needs_hole_punching = not (is_peer_reachable and is_self_reachable)
+
             punch_metadata = {
                 "ufrag": ufrag,
                 "peer_id": str(self.host.get_id()),
@@ -157,24 +211,63 @@ class WebRTCDirectTransport(ITransport):
                 "fingerprint": self.cert_mgr.fingerprint,
                 "role": "client",
             }
+            logger.warning(
+                "Dialer using certificate fingerprint=%s certhash=%s",
+                self.cert_mgr.fingerprint,
+                self.cert_mgr.certhash,
+            )
 
-            print(f"UDP punch toward {ip}:{port} with metadata {punch_metadata}")
-            try:
-                await self.udp_puncher.punch_hole(ip, port, punch_metadata)
-            except Exception as punch_exc:
-                logger.warning(
-                    "UDP hole punching failed prior to dialing: %s", punch_exc
+            # Attempt UDP hole punching only when needed
+            hole_punch_success = False
+            if needs_hole_punching:
+                logger.debug(
+                    f"Attempting UDP punching (peer reachable: {is_peer_reachable}, "
+                    f"self reachable: {is_self_reachable})"
                 )
+                print(f"UDP punch toward {ip}:{port} with metadata {punch_metadata}")
+                try:
+                    await self.udp_puncher.punch_hole(ip, port, punch_metadata)
+                    hole_punch_success = True
+                    await trio.sleep(0.2)
+                except Exception as punch_exc:
+                    logger.warning(
+                        "UDP hole punching failed prior to dialing: %s", punch_exc
+                    )
+                    # Will fallback to Circuit Relay v2 if both peers behind NAT
             else:
-                # Give the remote listener a brief moment to register the punch metadata
-                await trio.sleep(0.2)
+                logger.debug("Both peers appear reachable, skipping UDP hole punching")
+
+            # Configure ICE servers based on NAT status
+            ice_servers_dict: list[dict[str, str]] = []
+            if not is_self_reachable:
+                # Behind NAT - use STUN/TURN servers
+                ice_servers_dict = DEFAULT_ICE_SERVERS
+                logger.debug("Configured ICE servers for NAT traversal")
+            else:
+                # Public IP - minimal ICE servers (STUN only for discovery)
+                ice_servers_dict = (
+                    [{"urls": "stun:stun.l.google.com:19302"}]
+                    if DEFAULT_ICE_SERVERS
+                    else []
+                )
+                logger.debug("Configured minimal ICE servers for public IP")
+
+            # Convert dict list to RTCIceServer list
+            rtc_ice_servers = [
+                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                for s in ice_servers_dict
+            ]
 
             async with open_loop():
                 conn_id = str(peer_id)
-                rtc_config = RTCConfiguration(iceServers=[])
+                rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
                 direct_peer_connection = (
                     await DirectPeerConnection.create_dialer_rtc_peer_connection(
-                        role="client", ufrag=ufrag, rtc_configuration=rtc_config
+                        role="client",
+                        ufrag=ufrag,
+                        ice_pwd=ice_pwd,
+                        rtc_configuration=rtc_config,
+                        certificate=self.cert_mgr,
                     )
                 )
 
@@ -198,10 +291,11 @@ class WebRTCDirectTransport(ITransport):
                     secure_conn, _ = await connect(
                         role="client",
                         ufrag=ufrag,
+                        ice_pwd=ice_pwd,
                         peer_connection=direct_peer_connection,
                         remote_addr=maddr,
                         remote_peer_id=peer_id,
-                        signal_service=None,
+                        signal_service=self.signal_service,
                         certhash=certhash,
                         offer_handler=handle_offer,
                         security_multistream=swarm.upgrader.security_multistream,
@@ -266,7 +360,34 @@ class WebRTCDirectTransport(ITransport):
                     return secure_conn
                 except Exception as e:
                     logger.error(f"Failed to connect as client: {e}")
-                    await direct_peer_connection.close()
+                    # Close peer connection with async compatibility handling
+                    try:
+                        await aio_as_trio(direct_peer_connection.close())
+                    except Exception as close_err:
+                        logger.warning(
+                            f"Error closing peer connection during cleanup: {close_err}"
+                        )
+
+                    # Fallback to Circuit Relay v2 if both peers behind NAT
+                    #  and UDP hole punching failed
+                    if (
+                        not is_self_reachable
+                        and not is_peer_reachable
+                        and not hole_punch_success
+                        and self._reachability_checker
+                    ):
+                        logger.info(
+                            "UDP hole punching failed for NAT peers, "
+                            "attempting Circuit Relay v2 fallback"
+                        )
+                        try:
+                            return await self._dial_via_relay_fallback(maddr, peer_id)
+                        except Exception as relay_exc:
+                            logger.warning(
+                                f"Circuit Relay v2 fallback also failed: {relay_exc}"
+                            )
+                            # Continue to raise original error
+
                     raise OpenConnectionError(
                         f"Failed to connect as client: {e}"
                     ) from e
@@ -279,7 +400,15 @@ class WebRTCDirectTransport(ITransport):
         """Create a WebRTC-Direct listener for incoming connections."""
         if self.cert_mgr is None:
             raise OpenConnectionError("Cert_mgr not present")
-        rtc_config = RTCConfiguration()
+
+        # Configure ICE servers for the listener (server side)
+        # Use default ICE servers for NAT traversal support
+        rtc_ice_servers = [
+            RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+            for s in self.ice_servers
+        ]
+        rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
+
         listener = WebRTCDirectListener(
             transport=self,
             cert=self.cert_mgr,
@@ -400,3 +529,53 @@ class WebRTCDirectTransport(ITransport):
     def is_started(self) -> bool:
         """Check if transport is started."""
         return self._started
+
+    async def _dial_via_relay_fallback(
+        self, maddr: Multiaddr, peer_id: ID
+    ) -> IRawConnection:
+        """
+        Fallback to Circuit Relay v2 when UDP hole punching fails.
+
+        This method uses the private-to-private WebRTC transport as a fallback
+        when both peers are behind NAT and direct connection fails.
+        """
+        logger.info(f"Attempting Circuit Relay v2 fallback for {peer_id}")
+
+        # Import here to avoid circular dependency
+        from ..private_to_private.transport import WebRTCTransport
+
+        # Create a temporary private-to-private transport instance
+        if self.host is None:
+            raise WebRTCError("Host must be set for Circuit Relay v2 fallback")
+
+        relay_transport = WebRTCTransport({})
+        relay_transport.set_host(self.host)
+
+        try:
+            # Start the relay transport
+            await relay_transport.start()
+
+            # Try to find a relay address for the peer
+            peerstore = self.host.get_peerstore() if self.host else None
+            if peerstore:
+                # Look for existing relay addresses
+                relay_addrs = peerstore.addrs(peer_id)
+                for relay_addr in relay_addrs:
+                    if "/p2p-circuit" in str(relay_addr):
+                        # Found a relay address, use it
+                        relay_maddr = relay_addr.encapsulate(
+                            Multiaddr(f"/webrtc/p2p/{peer_id.to_base58()}")
+                        )
+                        logger.debug(f"Using existing relay address: {relay_maddr}")
+                        return await relay_transport.dial(relay_maddr)
+
+            # If no relay address found, we can't proceed with fallback
+            raise OpenConnectionError(
+                f"No relay addr available for {peer_id} for relay fallback"
+            )
+
+        finally:
+            try:
+                await relay_transport.stop()
+            except Exception:
+                pass

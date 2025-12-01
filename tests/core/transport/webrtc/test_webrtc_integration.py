@@ -246,6 +246,679 @@ async def test_webrtc_direct_listen_on_localhost():
     await host_a.close()
 
 
+@pytest.mark.trio
+async def test_webrtc_direct_data_channel_read_write():
+    """
+    Test WebRTC-Direct data channel read/write functionality.
+
+    This test verifies that:
+    1. Data channel can send data
+    2. Data channel can receive data
+    3. Messages are properly delivered to receive_channel (not send_channel)
+    4. Connection.read() can successfully read data from the channel
+    5. Noise handshake completes (connection is ISecureConn)
+    """
+    logger.info("=== Testing WebRTC-Direct data channel read/write ===")
+
+    # Create two hosts for peer-to-peer connection
+    # TCP transport is needed for signal service to exchange SDP offers/answers
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+    host_a = new_host(
+        key_pair=key_pair_a,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+    host_b = new_host(
+        key_pair=key_pair_b,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+
+    transport_a = WebRTCDirectTransport()
+    transport_a.set_host(host_a)
+
+    transport_b = WebRTCDirectTransport()
+    transport_b.set_host(host_b)
+
+    # Track received data on host B
+    received_data = b""
+    data_received_event = trio.Event()
+
+    async def data_handler(stream):
+        """Handler that receives data and echoes it back"""
+        nonlocal received_data, data_received_event
+        try:
+            received_data = await stream.read()
+            logger.info(
+                f"Host B received {len(received_data)} bytes: {received_data[:50]}"
+            )
+            await stream.write(received_data)
+            data_received_event.set()
+            await stream.close()
+        except Exception as e:
+            logger.error(f"Error in data handler: {e}")
+            raise
+
+    connection = None
+    stream = None
+
+    try:
+        # Start hosts listening on TCP (needed for signal service)
+        async with (
+            host_a.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+            host_b.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+        ):
+            async with trio.open_nursery() as nursery:
+                # Start transports
+                await transport_a.start(nursery)
+                await transport_b.start(nursery)
+
+                # Register echo protocol handler on host B
+                async def echo_protocol_handler(stream):
+                    """Echo protocol handler for stream multiplexing"""
+                    data = await stream.read()
+                    await stream.write(data)
+                    await stream.close()
+
+                host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
+
+                # Create listener on host B
+                listener_b = transport_b.create_listener(data_handler)
+                listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
+                listen_success = await listener_b.listen(listen_maddr, nursery)
+                assert listen_success, "Host B failed to listen"
+
+                await trio.sleep(0.5)  # Give listener time to advertise
+
+                # Get listening address from host B
+                listen_addrs = listener_b.get_addrs()
+                assert listen_addrs, "Host B did not advertise any addresses"
+                webrtc_addr = listen_addrs[0]
+                logger.info(f"Host B listening on: {webrtc_addr}")
+
+                # Wait for hosts to be fully started and addresses to be available
+                await trio.sleep(0.2)
+
+                # Store peer B's address in host A
+                peer_b_id = host_b.get_id()
+                peerstore_a = host_a.get_peerstore()
+                # Extract base address (without webrtc-direct and p2p components)
+                try:
+                    ip = webrtc_addr.value_for_protocol(
+                        "ip4"
+                    ) or webrtc_addr.value_for_protocol("ip6")
+                    udp_port = webrtc_addr.value_for_protocol("udp")
+                    if ip and udp_port:
+                        ip_proto = "ip4" if ":" not in ip else "ip6"
+                        base_addr = Multiaddr(f"/{ip_proto}/{ip}/udp/{udp_port}")
+                    else:
+                        base_addr = webrtc_addr
+                except Exception:
+                    base_addr = webrtc_addr
+
+                peerstore_a.add_addr(peer_b_id, base_addr, 3600)
+                logger.debug(f"Stored address {base_addr} for peer B in host A")
+
+                # Store peer B's TCP address in peerstore for signal_service
+                # Signal service needs TCP connection to exchange SDP offers/answers
+                peer_b_tcp_addrs = [
+                    addr for addr in host_b.get_addrs() if "/tcp/" in str(addr)
+                ]
+                if peer_b_tcp_addrs:
+                    for tcp_addr in peer_b_tcp_addrs:
+                        # Remove /p2p/ component to get base TCP address
+                        try:
+                            base_tcp_addr = tcp_addr.decapsulate(
+                                Multiaddr(f"/p2p/{peer_b_id}")
+                            )
+                            peerstore_a.add_addr(peer_b_id, base_tcp_addr, 3600)
+                            logger.debug(
+                                f"Stored TCP address {base_tcp_addr} for B in host A"
+                            )
+                        except Exception:
+                            # If decapsulation fails, try storing as-is
+                            peerstore_a.add_addr(peer_b_id, tcp_addr, 3600)
+                            logger.debug(
+                                f"  Stored TCP address {tcp_addr}for B in host A"
+                            )
+
+                # Dial from host A to host B
+                # This should complete Noise handshake and return ISecureConn
+                logger.info(
+                    "Host A dialing host B (Noise handshake should complete)..."
+                )
+                with trio.move_on_after(TEST_TIMEOUT) as dial_scope:
+                    secure_connection = await transport_a.dial(webrtc_addr)
+
+                if dial_scope.cancelled_caught:
+                    pytest.fail("Timeout during dial - Noise handshake may have failed")
+
+                assert secure_connection is not None, (
+                    "Failed to establish WebRTC-Direct connection"
+                )
+                logger.info("✅ WebRTC-Direct connection established")
+
+                # Verify connection is secured (ISecureConn after Noise handshake)
+                from libp2p.abc import INetConn
+
+                assert isinstance(secure_connection, INetConn), (
+                    "Connection should be secured after Noise handshake"
+                )
+                logger.info("✅ Connection is secured (Noise handshake completed)")
+
+                # Verify connection has underlying WebRTCRawConnection attributes
+                # The secure connection wraps the raw connection
+                if hasattr(secure_connection, "muxed_conn"):
+                    # Try to access underlying connection
+                    underlying = secure_connection.muxed_conn.accept_stream()
+                    if hasattr(underlying, "data_channel"):
+                        logger.debug("✅ Underlying connection has data_channel")
+                    if hasattr(underlying, "receive_channel"):
+                        logger.debug("✅ Underlying connection has receive_channel")
+
+                # Test data exchange through the swarm (after Noise handshake)
+                network_a = host_a.get_network()
+                connections_to_b = network_a.get_connections(peer_b_id)
+                assert connections_to_b, "No connections to peer B in host A's network"
+                logger.info("✅ Connection registered in swarm")
+
+                # Open a stream and test data exchange
+                logger.info("Testing data exchange over secure connection...")
+                stream = connections_to_b[0].get_streams()[0]
+                assert stream is not None, "Failed to open stream"
+
+                test_message = b"__webrtc_data_channel_test__"
+                logger.info(f"Testing write: sending {len(test_message)} bytes")
+                await stream.write(test_message)
+                logger.info("✅ Write successful")
+
+                # Wait for data to be received and echoed back
+                logger.info("Waiting for data to be received and echoed...")
+                with trio.move_on_after(TEST_TIMEOUT) as cancel_scope:
+                    await data_received_event.wait()
+                    await trio.sleep(0.2)
+
+                if cancel_scope.cancelled_caught:
+                    pytest.fail("Timeout waiting for data to be received by handler")
+
+                # Verify data was received by host B
+                assert received_data == test_message, (
+                    f"Data mismatch: sent {test_message}, received {received_data}"
+                )
+                logger.info("✅ Host B received data correctly")
+
+                # Read echoed data from stream
+                logger.info("Reading echoed data from stream...")
+                with trio.move_on_after(5.0) as read_scope:
+                    echoed_data = await stream.read(len(test_message))
+
+                if read_scope.cancelled_caught:
+                    pytest.fail("Timeout reading echoed data from stream")
+
+                # Verify echoed data matches
+                assert echoed_data == test_message, (
+                    f"Echoed data mismatch: sent {test_message}, received {echoed_data}"
+                )
+                logger.info("✅ Data channel read/write test passed")
+
+                # Test multiple read/write cycles
+                for i in range(3):
+                    test_data = f"test_message_{i}".encode()
+                    await stream.write(test_data)
+                    await trio.sleep(0.1)
+                    received = await stream.read(len(test_data))
+                    assert received == test_data, f"Round {i + 1} data mismatch"
+                    logger.debug(f"✅ Round {i + 1} read/write successful")
+
+                await stream.close()
+                stream = None
+
+                await listener_b.close()
+
+    except Exception as e:
+        logger.error(f"Test failed with error: {e}", exc_info=True)
+        raise
+    finally:
+        if stream is not None:
+            with trio.move_on_after(1):
+                await stream.close()
+        if connection is not None:
+            with trio.move_on_after(1):
+                await connection.close()
+        await transport_a.stop()
+        await transport_b.stop()
+        await host_a.close()
+        await host_b.close()
+
+    logger.info("✅ WebRTC-Direct data channel read/write test completed")
+
+
+@pytest.mark.trio
+async def test_webrtc_direct_noise_handshake_completion():
+    """
+    Test that Noise handshake completes successfully over WebRTC-Direct.
+
+    This test verifies that:
+    1. WebRTC-Direct connection is established
+    2. Data channel is operational
+    3. Noise handshake completes without timeout
+    4. Connection can be used for secure data exchange after handshake
+    """
+    logger.info("=== Testing WebRTC-Direct Noise handshake completion ===")
+
+    # Create two hosts
+    # TCP transport is needed for signal service to exchange SDP offers/answers
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+    host_a = new_host(
+        key_pair=key_pair_a,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+    host_b = new_host(
+        key_pair=key_pair_b,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+
+    transport_a = WebRTCDirectTransport()
+    transport_a.set_host(host_a)
+
+    transport_b = WebRTCDirectTransport()
+    transport_b.set_host(host_b)
+
+    handshake_completed = trio.Event()
+    secure_data_received = b""
+
+    async def secure_handler(stream):
+        """Handler that receives secure data after Noise handshake"""
+        nonlocal secure_data_received, handshake_completed
+        try:
+            secure_data_received = await stream.read()
+            logger.info(
+                f"Host B received secure data: {len(secure_data_received)} bytes"
+            )
+            await stream.write(secure_data_received)
+            handshake_completed.set()
+            await stream.close()
+        except Exception as e:
+            logger.error(f"Error in secure handler: {e}")
+            raise
+
+    connection = None
+
+    try:
+        # Start hosts listening on TCP (needed for signal service)
+        async with (
+            host_a.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+            host_b.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+        ):
+            async with trio.open_nursery() as nursery:
+                # Start transports
+                await transport_a.start(nursery)
+                await transport_b.start(nursery)
+
+                # Register echo protocol handler on host B
+                async def echo_protocol_handler(stream):
+                    """Echo protocol handler for secure streams"""
+                    data = await stream.read()
+                    await stream.write(data)
+                    await stream.close()
+
+                host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
+
+                # Create listener on host B with secure handler
+                listener_b = transport_b.create_listener(secure_handler)
+                listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
+                listen_success = await listener_b.listen(listen_maddr, nursery)
+                assert listen_success, "Host B failed to listen"
+
+                await trio.sleep(0.5)
+
+                # Get listening address
+                listen_addrs = listener_b.get_addrs()
+                assert listen_addrs, "Host B did not advertise addresses"
+                webrtc_addr = listen_addrs[0]
+                logger.info(f"Host B listening on: {webrtc_addr}")
+
+                # Wait for hosts to be fully started and addresses to be available
+                await trio.sleep(0.2)
+
+                # Store peer address
+                peer_b_id = host_b.get_id()
+                peerstore_a = host_a.get_peerstore()
+                try:
+                    base_addr = webrtc_addr.decapsulate(
+                        Multiaddr(
+                            f"/webrtc-direct/certhash/{webrtc_addr.value_for_protocol('certhash')}/p2p/{peer_b_id}"
+                        )
+                    )
+                except Exception:
+                    try:
+                        ip = webrtc_addr.value_for_protocol(
+                            "ip4"
+                        ) or webrtc_addr.value_for_protocol("ip6")
+                        udp_port = webrtc_addr.value_for_protocol("udp")
+                        if ip and udp_port:
+                            ip_proto = "ip4" if ":" not in ip else "ip6"
+                            base_addr = Multiaddr(f"/{ip_proto}/{ip}/udp/{udp_port}")
+                        else:
+                            base_addr = webrtc_addr
+                    except Exception:
+                        base_addr = webrtc_addr
+
+                peerstore_a.add_addr(peer_b_id, base_addr, 3600)
+
+                # Store peer B's TCP address in peerstore for signal_service
+                # Signal service needs TCP connection to exchange SDP offers/answers
+                peer_b_tcp_addrs = [
+                    addr for addr in host_b.get_addrs() if "/tcp/" in str(addr)
+                ]
+                if peer_b_tcp_addrs:
+                    for tcp_addr in peer_b_tcp_addrs:
+                        # Remove /p2p/ component to get base TCP address
+                        try:
+                            base_tcp_addr = tcp_addr.decapsulate(
+                                Multiaddr(f"/p2p/{peer_b_id}")
+                            )
+                            peerstore_a.add_addr(peer_b_id, base_tcp_addr, 3600)
+                            logger.debug(
+                                f"Stored TCP address {base_tcp_addr} for B in host A"
+                            )
+                        except Exception:
+                            # If decapsulation fails, try storing as-is
+                            peerstore_a.add_addr(peer_b_id, tcp_addr, 3600)
+                            logger.debug(
+                                f"Stored TCP address {tcp_addr} for B in host A"
+                            )
+
+                # Dial from host A to host B
+                # This should complete Noise handshake internally
+                logger.info(
+                    "Host A dialing host B (Noise handshake should complete)..."
+                )
+                with trio.move_on_after(TEST_TIMEOUT) as dial_scope:
+                    raw_connection = await transport_a.dial(webrtc_addr)
+
+                if dial_scope.cancelled_caught:
+                    pytest.fail("Timeout during WebRTC-Direct dial")
+
+                assert raw_connection is not None, "Failed to establish connection"
+                logger.info("✅ Connection established (Noise handshake completed)")
+
+                from libp2p.abc import ISecureConn
+
+                assert isinstance(raw_connection, ISecureConn), (
+                    "Connection should be secured after Noise handshake"
+                )
+                logger.info("✅ Connection is secured (ISecureConn)")
+
+                # Test that we can use the connection for data exchange
+                # The connection should have been upgraded through the swarm
+                # and registered, so we can open streams on it
+                network_a = host_a.get_network()
+                connections_to_b = network_a.get_connections(peer_b_id)
+                assert connections_to_b, "No connections to peer B in host A's network"
+
+                # Open a stream and test data exchange
+                logger.info("Testing secure data exchange...")
+                stream = connections_to_b[0].get_streams()[0]
+                assert stream is not None, "Failed to open stream on secure connection"
+
+                test_data = b"__noise_handshake_test__"
+                await stream.write(test_data)
+
+                # Wait for data to be received and echoed
+                with trio.move_on_after(5.0) as read_scope:
+                    received = await stream.read(len(test_data))
+
+                if read_scope.cancelled_caught:
+                    pytest.fail("Timeout reading data from secure stream")
+
+                assert received == test_data, (
+                    f"Secure data mismatch: sent {test_data}, received {received}"
+                )
+                logger.info("✅ Secure data exchange successful")
+
+                # Wait for handshake completion event (from handler)
+                with trio.move_on_after(2.0):
+                    await handshake_completed.wait()
+
+                assert secure_data_received == test_data, (
+                    "Handler received different data than sent"
+                )
+
+                await stream.close()
+                await listener_b.close()
+
+    except Exception as e:
+        logger.error(f"Noise handshake test failed: {e}", exc_info=True)
+        raise
+    finally:
+        if connection is not None:
+            with trio.move_on_after(1):
+                await connection.close()
+        await transport_a.stop()
+        await transport_b.stop()
+        await host_a.close()
+        await host_b.close()
+
+    logger.info("✅ WebRTC-Direct Noise handshake completion test passed")
+
+
+@pytest.mark.trio
+async def test_webrtc_direct_data_channel_message_handling():
+    """
+    Test that data channel message handler correctly delivers to receive_channel.
+
+    This test specifically verifies the fix for the bug where messages were
+    delivered to send_channel instead of receive_channel, causing read() to block.
+
+    The test verifies that:
+    1. Multiple messages can be sent and received
+    2. Messages arrive in correct order
+    3. No timeouts occur during read() operations
+    4. Data flows correctly through the secure connection
+    """
+    logger.info("=== Testing WebRTC-Direct data channel message handling ===")
+
+    # TCP transport is needed for signal service to exchange SDP offers/answers
+    key_pair_a = create_new_key_pair()
+    key_pair_b = create_new_key_pair()
+    host_a = new_host(
+        key_pair=key_pair_a,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+    host_b = new_host(
+        key_pair=key_pair_b,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+    )
+
+    transport_a = WebRTCDirectTransport()
+    transport_a.set_host(host_a)
+
+    transport_b = WebRTCDirectTransport()
+    transport_b.set_host(host_b)
+
+    messages_received = []
+
+    async def message_handler(stream):
+        """Handler that receives and echoes messages"""
+        nonlocal messages_received
+        try:
+            data = await stream.read()
+            messages_received.append(data)
+            logger.info(
+                f"Handler received message {len(messages_received)}: {len(data)} bytes"
+            )
+            await stream.write(data)  # Echo back
+            await stream.close()
+        except Exception as e:
+            logger.error(f"Error in message handler: {e}")
+            raise
+
+    connection = None
+    stream = None
+
+    try:
+        # Start hosts listening on TCP (needed for signal service)
+        async with (
+            host_a.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+            host_b.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
+        ):
+            async with trio.open_nursery() as nursery:
+                await transport_a.start(nursery)
+                await transport_b.start(nursery)
+
+                # Register echo protocol handler on host B
+                async def echo_protocol_handler(stream):
+                    """Echo protocol handler for message handling test"""
+                    data = await stream.read()
+                    await stream.write(data)
+                    await stream.close()
+
+                host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
+
+                listener_b = transport_b.create_listener(message_handler)
+                listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
+                await listener_b.listen(listen_maddr, nursery)
+
+                await trio.sleep(0.5)
+
+                listen_addrs = listener_b.get_addrs()
+                assert listen_addrs, "No listening addresses"
+                webrtc_addr = listen_addrs[0]
+
+                # Wait for hosts to be fully started and addresses to be available
+                await trio.sleep(0.2)
+
+                # Store peer address
+                peer_b_id = host_b.get_id()
+                peerstore_a = host_a.get_peerstore()
+                try:
+                    ip = webrtc_addr.value_for_protocol(
+                        "ip4"
+                    ) or webrtc_addr.value_for_protocol("ip6")
+                    udp_port = webrtc_addr.value_for_protocol("udp")
+                    if ip and udp_port:
+                        ip_proto = "ip4" if ":" not in ip else "ip6"
+                        base_addr = Multiaddr(f"/{ip_proto}/{ip}/udp/{udp_port}")
+                    else:
+                        base_addr = webrtc_addr
+                except Exception:
+                    base_addr = webrtc_addr
+
+                peerstore_a.add_addr(peer_b_id, base_addr, 3600)
+
+                # Store peer B's TCP address in peerstore for signal_service
+                # Signal service needs TCP connection to exchange SDP offers/answers
+                peer_b_tcp_addrs = [
+                    addr for addr in host_b.get_addrs() if "/tcp/" in str(addr)
+                ]
+                if peer_b_tcp_addrs:
+                    for tcp_addr in peer_b_tcp_addrs:
+                        # Remove /p2p/ component to get base TCP address
+                        try:
+                            base_tcp_addr = tcp_addr.decapsulate(
+                                Multiaddr(f"/p2p/{peer_b_id}")
+                            )
+                            peerstore_a.add_addr(peer_b_id, base_tcp_addr, 3600)
+                            logger.debug(
+                                f"Stored TCP addr {base_tcp_addr} for B in host A"
+                            )
+                        except Exception:
+                            # If decapsulation fails, try storing as-is
+                            peerstore_a.add_addr(peer_b_id, tcp_addr, 3600)
+                            logger.debug(f"Stored TCP addr {tcp_addr} for B in host A")
+
+                # Dial - this completes Noise handshake
+                logger.info("Dialing (Noise handshake should complete)...")
+                secure_connection = await transport_a.dial(webrtc_addr)
+                assert secure_connection is not None, "Connection failed"
+                logger.info("✅ Connection established (Noise handshake completed)")
+
+                # Verify connection is secured
+                from libp2p.abc import ISecureConn
+
+                assert isinstance(secure_connection, ISecureConn), (
+                    "Connection should be secured"
+                )
+
+                # Get connection from swarm for stream operations
+                network_a = host_a.get_network()
+                connections_to_b = network_a.get_connections(peer_b_id)
+                assert connections_to_b, "No connections to peer B"
+
+                # Test multiple messages through streams
+                test_messages = [
+                    b"message_1",
+                    b"message_2",
+                    b"message_3",
+                ]
+
+                for i, test_msg in enumerate(test_messages):
+                    logger.info(f"Sending message {i + 1}: {len(test_msg)} bytes")
+
+                    # Open a new stream for each message
+                    stream = connections_to_b[0].get_streams()[0]
+                    assert stream is not None, (
+                        f"Failed to open stream for message {i + 1}"
+                    )
+
+                    # Send message
+                    await stream.write(test_msg)
+
+                    # Wait for message to be received (should not block indefinitely)
+                    logger.info(f"Waiting for message {i + 1} to be received...")
+                    with trio.move_on_after(5.0) as read_scope:
+                        received = await stream.read(len(test_msg))
+
+                    if read_scope.cancelled_caught:
+                        pytest.fail(
+                            f"Timeout reading message {i + 1} - "
+                            "data channel receive_channel may not be working correctly"
+                        )
+
+                    assert received == test_msg, (
+                        f"Msg {i + 1} mismatch: sent {test_msg}, received {received}"
+                    )
+                    logger.info(f"✅ Message {i + 1} received correctly")
+
+                    await stream.close()
+                    stream = None
+
+                    # Give handler time to process
+                    await trio.sleep(0.1)
+
+                # Verify all messages were received by handler
+                assert len(messages_received) == len(test_messages), (
+                    f"Handler received {len(messages_received)} messages, "
+                    f"expected {len(test_messages)}"
+                )
+
+                # Verify message order
+                for i, (sent, received) in enumerate(
+                    zip(test_messages, messages_received)
+                ):
+                    assert sent == received, f"Message {i + 1} order/content mismatch"
+
+                await listener_b.close()
+
+    except Exception as e:
+        logger.error(f"Message handling test failed: {e}", exc_info=True)
+        raise
+    finally:
+        if stream is not None:
+            with trio.move_on_after(1):
+                await stream.close()
+        if connection is not None:
+            with trio.move_on_after(1):
+                await connection.close()
+        await transport_a.stop()
+        await transport_b.stop()
+        await host_a.close()
+        await host_b.close()
+
+    logger.info("✅ Data channel message handling test passed")
+
+
 # ============================================================================
 # INTEGRATION TESTS - WebRTC via Circuit Relay (Private-to-Private)
 # ============================================================================

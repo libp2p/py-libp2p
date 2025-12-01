@@ -16,6 +16,10 @@ from libp2p.abc import (
     INotifee,
     TProtocol,
 )
+from libp2p.network.stream.exceptions import (
+    StreamEOF,
+    StreamReset,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -100,23 +104,115 @@ class SignalService(INotifee):
             try:
                 data = await reader.read(4096)
                 if not data:
+                    # EOF - stream closed normally
+                    logger.debug("Signal stream EOF for %s", peer_id)
                     break
-                msg = json.loads(data.decode())
+
+                # Handle multiple JSON messages in one chunk
+                # Messages are separated by newlines or can be concatenated
+                data_str = data.decode()
+
+                try:
+                    msg = json.loads(data_str)
+                    msg_type = msg.get("type")
+                except json.JSONDecodeError as json_err:
+                    # Multiple JSON objects might be concatenated
+                    # splitting by newlines or parsing incrementally
+                    logger.debug(
+                        "JSON decode error: %s, data length: ",
+                        json_err,
+                        len(data_str),
+                    )
+
+                    messages = []
+                    decoder = json.JSONDecoder()
+                    idx = 0
+                    while idx < len(data_str):
+                        # Skip whitespace
+                        while idx < len(data_str) and data_str[idx].isspace():
+                            idx += 1
+                        if idx >= len(data_str):
+                            break
+
+                        try:
+                            msg, end_idx = decoder.raw_decode(data_str, idx)
+                            messages.append(msg)
+                            idx = end_idx
+                        except json.JSONDecodeError:
+                            # If we can't parse, log and skip this chunk
+                            logger.warning(
+                                "Failed to parse JSON message at position %d: %s",
+                                idx,
+                                data_str[idx : idx + 100],
+                            )
+                            break
+
+                    if not messages:
+                        logger.error("Could not parse any JSON messages from data")
+                        continue
+
+                    # Process all parsed messages
+                    for msg in messages:
+                        msg_type = msg.get("type")
+                        handlers = self._handlers.get(msg_type, [])
+                        if handlers:
+                            for handler in list(handlers):
+                                try:
+                                    await handler(msg, str(peer_id))
+                                except Exception as handler_exc:
+                                    logger.exception(
+                                        "Signal handler for %s raised exception: ",
+                                        peer_id,
+                                        msg_type,
+                                        handler_exc,
+                                        exc_info=True,
+                                    )
+                        else:
+                            logger.debug(
+                                "No handler for signal message type %s", msg_type
+                            )
+                    continue
+
                 msg_type = msg.get("type")
                 handlers = self._handlers.get(msg_type, [])
                 if handlers:
                     for handler in list(handlers):
                         try:
                             await handler(msg, str(peer_id))
-                        except Exception:
+                        except Exception as handler_exc:
                             logger.exception(
-                                "Signal handler for %s raised an exception", msg_type
+                                "Signal handler for %s raised an exception: ",
+                                peer_id,
+                                msg_type,
+                                handler_exc,
+                                exc_info=True,
                             )
                 else:
                     logger.debug("No handler for signal message type %s", msg_type)
-            except Exception as e:
-                logger.error("Error in signal handler for %s: %s", peer_id, e)
+            except (StreamEOF, StreamReset) as stream_err:
+                # Stream closed/reset - this is normal during cleanup
+                # Don't log as error, just debug
+                logger.debug(
+                    "Signal stream closed/reset for %s: %s", peer_id, stream_err
+                )
                 break
+            except Exception as e:
+                # Only log unexpected errors
+                error_str = str(e).lower()
+                if "stream" in error_str and (
+                    "closed" in error_str or "reset" in error_str
+                ):
+                    # Stream-related errors are normal during cleanup
+                    logger.debug("Signal stream error for %s: %s", peer_id, e)
+                    break
+                logger.error(
+                    "Unexpected error in signal handler for %s: %s",
+                    peer_id,
+                    e,
+                    exc_info=True,
+                )
+                # Continue processing other messages if possible
+                continue
 
     async def send_signal(self, peer_id: ID, message: dict[str, Any]) -> None:
         """Send a signaling message to a peer"""
@@ -225,9 +321,18 @@ class SignalService(INotifee):
         peer_id_str = str(peer_id)
         if peer_id_str in self.ice_candidate_queues:
             candidates = self.ice_candidate_queues.pop(peer_id_str)
+            logger.debug(
+                f"Flushing {len(candidates)} queued ICE candidates for {peer_id} "
+                f"(stream ready: {peer_id_str in self.active_streams})"
+            )
             for candidate_msg in candidates:
-                await self.send_signal(peer_id, candidate_msg)
+                try:
+                    await self.send_signal(peer_id, candidate_msg)
+                except Exception as e:
+                    logger.debug(f"Failed to send ICE candidate: {e}")
             logger.debug(f"Flushed {len(candidates)} ICE candidates for {peer_id}")
+        else:
+            logger.debug(f"No queued ICE candidates to flush for {peer_id}")
 
     def enqueue_local_candidate(
         self,
@@ -267,6 +372,13 @@ class SignalService(INotifee):
         extra: dict[str, Any] | None = None,
     ) -> RTCSessionDescription:
         """Complete SDP offer/answer exchange with error handling and timeouts"""
+        # Initialize handler backup variables before try block
+        # so they're available in finally block even if exception occurs early
+        prev_answer_handlers: list[
+            Callable[[dict[str, Any], str], Awaitable[None]]
+        ] = []
+        prev_error_handlers: list[Callable[[dict[str, Any], str], Awaitable[None]]] = []
+
         try:
             # Send offer
             await self.send_offer(peer_id, offer.sdp, offer.type, certhash, extra)
@@ -292,6 +404,7 @@ class SignalService(INotifee):
                         error_occurred = msg.get("message", "Unknown error")
                         answer_received.set()
 
+            # Backup current handlers before replacing them
             prev_answer_handlers = list(self._handlers.get("answer", []))
             prev_error_handlers = list(self._handlers.get("error", []))
 

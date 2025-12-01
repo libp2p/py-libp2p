@@ -22,6 +22,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayLimits, RelayRole
 from libp2p.relay.circuit_v2.discovery import RelayDiscovery
+from libp2p.relay.circuit_v2.nat import ReachabilityChecker
 from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
 from libp2p.relay.circuit_v2.transport import CircuitV2Transport
 from libp2p.stream_muxer.yamux.yamux import YamuxStream
@@ -95,6 +96,9 @@ class WebRTCTransport(ITransport):
         self._signaling_ready: set[ID] = set()
         self._advertised_addrs: list[Multiaddr] = []
 
+        # NAT traversal detection
+        self._reachability_checker: ReachabilityChecker | None = None
+
         logger.info("WebRTC Transport initialized")
 
     async def start(self) -> None:
@@ -127,6 +131,11 @@ class WebRTCTransport(ITransport):
             logger.info(f"Registered signaling protocol handler: {SIGNALING_PROTOCOL}")
 
             await self._setup_circuit_relay_support()
+
+            # Initialize NAT traversal detection
+            if self.host:
+                self._reachability_checker = ReachabilityChecker(self.host)
+                logger.debug("NAT reachability checker initialized")
 
             self._started = True
             logger.info("WebRTC Transport started successfully")
@@ -165,6 +174,7 @@ class WebRTCTransport(ITransport):
             self._relay_discovery = None
             self._signaling_ready.clear()
             self._advertised_addrs = []
+            self._reachability_checker = None
 
         except Exception as e:
             logger.error(f"Error stopping WebRTC transport: {e}")
@@ -219,9 +229,11 @@ class WebRTCTransport(ITransport):
         logger.info(f"Dialing WebRTC connection to {maddr}")
 
         try:
+            # Ensure signaling connection through Circuit Relay v2
+            # NAT detection is handled within ensure_signaling_connection()
             await self.ensure_signaling_connection(maddr)
 
-            # Configure peer connection with ICE servers
+            # Configure ICE servers (using configured servers)
             ice_servers = pick_random_ice_servers(self.ice_servers)
             rtc_ice_servers = [
                 RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
@@ -388,6 +400,11 @@ class WebRTCTransport(ITransport):
             )
 
     async def ensure_signaling_connection(self, maddr: Multiaddr) -> None:
+        """
+        Ensure signaling connection to target peer through Circuit Relay v2.
+
+        Uses NAT detection to optimize relay usage and provide better logging.
+        """
         if self.host is None:
             raise WebRTCError("Transport host not configured")
 
@@ -395,6 +412,24 @@ class WebRTCTransport(ITransport):
 
         circuit_addr, target_peer_id = split_addr(maddr)
         peerstore = self.host.get_peerstore()
+
+        # Check peer reachability for logging and optimization
+        if self._reachability_checker:
+            try:
+                is_reachable = await self._reachability_checker.check_peer_reachability(
+                    target_peer_id
+                )
+                if is_reachable:
+                    logger.debug(
+                        f"Peer {target_peer_id} appears reachable, "
+                        "but using relay for signaling (private-to-private design)"
+                    )
+                else:
+                    logger.debug(
+                        f"Peer {target_peer_id} behind NAT, using Circuit Relay v2"
+                    )
+            except Exception as nat_exc:
+                logger.debug(f"NAT detection check failed: {nat_exc}")
 
         target_component = Multiaddr(f"/p2p/{target_peer_id.to_base58()}")
         try:
@@ -414,6 +449,7 @@ class WebRTCTransport(ITransport):
         existing = swarm.get_connections(target_peer_id)
         if existing:
             self._signaling_ready.add(target_peer_id)
+            logger.debug(f"Signaling connection to {target_peer_id} already exists")
             return
 
         if self._relay_transport is None:
@@ -426,18 +462,21 @@ class WebRTCTransport(ITransport):
 
         try:
             await swarm.dial_peer(relay_peer)
+            logger.debug(f"Connected to relay {relay_peer}")
         except Exception as exc:
             raise WebRTCError(f"Failed to dial relay {relay_peer}: {exc}") from exc
 
         if self._relay_discovery:
             try:
                 await self._relay_discovery.make_reservation(relay_peer)
+                logger.debug(f"Made reservation with relay {relay_peer}")
             except Exception:
-                pass
+                logger.debug(f"Reservation with relay {relay_peer} failed or skipped")
 
         try:
             peer_info = PeerInfo(target_peer_id, [circuit_addr])
             raw_conn = await self._relay_transport.dial_peer_info(peer_info)
+            logger.debug(f"Established relay connection to {target_peer_id}")
         except Exception as exc:
             raise WebRTCError(f"Failed to dial target via relay: {exc}") from exc
 
@@ -450,6 +489,7 @@ class WebRTCTransport(ITransport):
             )
             await swarm.add_conn(muxed_conn)
             self._signaling_ready.add(target_peer_id)
+            logger.debug(f"Signaling connection to {target_peer_id} ready")
         except Exception as exc:
             await raw_conn.close()
             raise WebRTCError(
@@ -515,6 +555,17 @@ class WebRTCTransport(ITransport):
         print("advertised listener addrs:", advertised_list)
 
     def _refresh_listener_addresses(self) -> None:
+        """
+        Refresh listener addresses with NAT-aware advertisement.
+
+        This method:
+        1. Checks self-reachability using NAT detection (synchronous check)
+        2. Advertises public addresses if available
+        3. Falls back to relay addresses when behind NAT
+
+        Note: NAT detection uses synchronous checks where possible to avoid
+        making this method async, which would require changes to callers.
+        """
         if not self.host:
             return
 
@@ -524,6 +575,37 @@ class WebRTCTransport(ITransport):
         advertised: list[Multiaddr] = []
         seen: set[str] = set()
 
+        # Check self-reachability for smart address advertisement
+        # Use synchronous check via get_public_addrs() to avoid async complexity
+        has_public_addrs = False
+        if self._reachability_checker:
+            try:
+                # Get all host addresses and filter for public ones
+                all_addrs = list(self.host.get_addrs())
+                public_addrs = self._reachability_checker.get_public_addrs(all_addrs)
+
+                if public_addrs:
+                    # Advertise public addresses when available
+                    has_public_addrs = True
+                    for public_addr in public_addrs:
+                        try:
+                            webrtc_addr = public_addr.encapsulate(
+                                Multiaddr(f"/webrtc/p2p/{local_peer.to_base58()}")
+                            )
+                            addr_str = str(webrtc_addr)
+                            if addr_str not in seen:
+                                seen.add(addr_str)
+                                advertised.append(webrtc_addr)
+                                logger.debug(
+                                    f"Advertised public WebRTC address: {webrtc_addr}"
+                                )
+                        except Exception as exc:
+                            logger.debug(f"Failed to compose public WebRTC addr: {exc}")
+            except Exception as e:
+                logger.debug(f"Error checking self-reachability: {e}")
+
+        # Always include relay addresses as fallback (even if public addresses exist)
+        # This ensures connectivity when public addresses are not reachable
         relay_ids: list[ID]
         if self._relay_discovery:
             relay_ids = self._relay_discovery.get_relays()
@@ -567,6 +649,16 @@ class WebRTCTransport(ITransport):
                     pass
 
         self._advertised_addrs = advertised
+
+        if has_public_addrs:
+            logger.info(
+                f"Advertised {len(advertised)} WebRTC addresses "
+                f"({len([a for a in advertised if '/p2p-circuit' not in str(a)])} "
+                f"public, "
+                f"{len([a for a in advertised if '/p2p-circuit' in str(a)])} relay)"
+            )
+        else:
+            logger.info(f"Advertised {len(advertised)} relay-based WebRTC addr")
 
     @staticmethod
     def _build_relay_base_addr(relay_addr: Multiaddr, relay_id: ID) -> Multiaddr | None:
