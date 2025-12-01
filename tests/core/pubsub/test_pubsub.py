@@ -1277,3 +1277,29 @@ async def test_get_message_id():
             expected_custom_id = msg.data + msg.from_id
 
             assert custom_msg_id == expected_custom_id
+
+
+@pytest.mark.trio
+async def test_handle_peer_queue_exception_handling():
+    """Test that _handle_new_peer_safe gracefully handles exceptions."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+
+        original_handle_new_peer = pubsub._handle_new_peer
+
+        async def mock_handle_new_peer(peer_id):
+            raise Exception("Protocol negotiation failed")
+
+        pubsub._handle_new_peer = mock_handle_new_peer
+
+        test_peer = IDFactory()
+
+        # Directly call the safe wrapper that's used by handle_peer_queue
+        await pubsub._handle_new_peer_safe(test_peer)
+
+        # The key test: service should still be running despite the exception
+        assert pubsub.manager.is_running, (
+            "Pubsub service should continue running even when peer negotiation fails"
+        )
+
+        pubsub._handle_new_peer = original_handle_new_peer
