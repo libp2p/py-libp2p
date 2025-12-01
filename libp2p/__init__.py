@@ -33,8 +33,11 @@ from libp2p.rcmgr import ResourceManager
 from libp2p.crypto.keys import (
     KeyPair,
 )
+from libp2p.crypto.ed25519 import (
+    create_new_key_pair as create_new_ed25519_key_pair,
+)
 from libp2p.crypto.rsa import (
-    create_new_key_pair,
+    create_new_key_pair as create_new_rsa_key_pair,
 )
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
@@ -61,6 +64,18 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStore,
     create_signed_peer_record,
+)
+from libp2p.peer.persistent import (
+    create_sync_peerstore,
+    create_async_peerstore,
+    create_sync_sqlite_peerstore,
+    create_async_sqlite_peerstore,
+    create_sync_memory_peerstore,
+    create_async_memory_peerstore,
+    create_sync_leveldb_peerstore,
+    create_async_leveldb_peerstore,
+    create_sync_rocksdb_peerstore,
+    create_async_rocksdb_peerstore,
 )
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
@@ -154,7 +169,17 @@ def create_mplex_muxer_option() -> TMuxerOptions:
 
 
 def generate_new_rsa_identity() -> KeyPair:
-    return create_new_key_pair()
+    return create_new_rsa_key_pair()
+
+
+def generate_new_ed25519_identity() -> KeyPair:
+    """
+    Generate a new Ed25519 identity key pair.
+
+    Ed25519 is preferred for better interoperability with other libp2p implementations
+    (e.g., Rust, Go) which often disable RSA support.
+    """
+    return create_new_ed25519_key_pair()
 
 
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
@@ -186,6 +211,7 @@ def new_swarm(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -201,15 +227,21 @@ def new_swarm(
     :param quic_transport_opt: options for transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key for PSK encryption in transport
     :return: return a default swarm instance
 
     Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
           due to its improved performance and features.
           Mplex (/mplex/6.7.0) is retained for backward compatibility
           but may be deprecated in the future.
+
+    Note: Ed25519 keys are used by default for better interoperability with
+          other libp2p implementations (Rust, Go) which often disable RSA support.
     """
     if key_pair is None:
-        key_pair = generate_new_rsa_identity()
+        # Use Ed25519 by default for better interoperability with Rust/Go libp2p
+        # which often compile without RSA support
+        key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
 
@@ -306,8 +338,24 @@ def new_swarm(
         upgrader,
         transport,
         retry_config=retry_config,
-        connection_config=connection_config
+        connection_config=connection_config,
+        psk=psk
     )
+
+    # Set resource manager if provided
+    # Auto-create a default ResourceManager if one was not provided
+    if resource_manager is None:
+        try:
+            from libp2p.rcmgr import new_resource_manager as _new_rm
+
+            resource_manager = _new_rm()
+        except Exception:
+            resource_manager = None
+
+    if resource_manager is not None:
+        swarm.set_resource_manager(resource_manager)
+
+    return swarm
 
     # Set resource manager if provided
     # Auto-create a default ResourceManager if one was not provided
@@ -342,6 +390,7 @@ def new_host(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
+    psk: str | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -361,6 +410,7 @@ def new_host(
     :param tls_server_config: optional TLS server configuration for WebSocket transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+    :param psk: optional pre-shared key (PSK)
     :return: return a host instance
     """
 
@@ -390,6 +440,7 @@ def new_host(
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
+        psk=psk
     )
 
     if disc_opt is not None:
