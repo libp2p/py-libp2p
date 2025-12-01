@@ -42,7 +42,7 @@ async def test_register_connection(registry, mock_connection):
     await registry.register_connection(cid, mock_connection, addr)
 
     # Verify connection is registered
-    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    connection_obj, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert connection_obj is mock_connection
     assert pending_conn is None
     assert is_pending is False
@@ -62,7 +62,7 @@ async def test_register_pending(registry, mock_pending_connection):
     await registry.register_pending(cid, mock_pending_connection, addr)
 
     # Verify pending connection is registered
-    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    connection_obj, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert connection_obj is None
     assert pending_conn is mock_pending_connection
     assert is_pending is True
@@ -74,17 +74,17 @@ async def test_register_pending(registry, mock_pending_connection):
     # find_by_address only searches established connections, so it won't find pending
     assert found_connection is None
     # But we can verify the CID is registered by checking directly
-    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    _, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert pending_conn is mock_pending_connection
     assert is_pending is True
 
 
 @pytest.mark.trio
-async def test_find_by_cid_not_found(registry):
+async def test_find_by_connection_id_not_found(registry):
     """Test finding a non-existent Connection ID."""
     cid = b"nonexistent_cid"
 
-    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    connection_obj, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert connection_obj is None
     assert pending_conn is None
     assert is_pending is False
@@ -114,8 +114,8 @@ async def test_add_connection_id(registry, mock_connection):
     await registry.add_connection_id(new_cid, original_cid, sequence=1)
 
     # Verify both Connection IDs map to the same connection
-    conn1, _, _ = await registry.find_by_cid(original_cid)
-    conn2, _, _ = await registry.find_by_cid(new_cid)
+    conn1, _, _ = await registry.find_by_connection_id(original_cid)
+    conn2, _, _ = await registry.find_by_connection_id(new_cid)
     assert conn1 is mock_connection
     assert conn2 is mock_connection
 
@@ -136,14 +136,14 @@ async def test_remove_connection_id(registry, mock_connection):
     await registry.register_connection(cid, mock_connection, addr)
 
     # Verify it exists
-    connection_obj, _, _ = await registry.find_by_cid(cid)
+    connection_obj, _, _ = await registry.find_by_connection_id(cid)
     assert connection_obj is mock_connection
 
     # Remove Connection ID
     removed_addr = await registry.remove_connection_id(cid)
 
     # Verify it's removed
-    connection_obj, _, _ = await registry.find_by_cid(cid)
+    connection_obj, _, _ = await registry.find_by_connection_id(cid)
     assert connection_obj is None
     assert removed_addr == addr
 
@@ -163,7 +163,7 @@ async def test_remove_pending_connection(registry, mock_pending_connection):
     await registry.register_pending(cid, mock_pending_connection, addr)
 
     # Verify it exists
-    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    _, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert pending_conn is mock_pending_connection
     assert is_pending is True
 
@@ -171,7 +171,7 @@ async def test_remove_pending_connection(registry, mock_pending_connection):
     await registry.remove_pending_connection(cid)
 
     # Verify it's removed
-    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    _, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert pending_conn is None
     assert is_pending is False
 
@@ -186,7 +186,7 @@ async def test_promote_pending(registry, mock_connection, mock_pending_connectio
     await registry.register_pending(cid, mock_pending_connection, addr)
 
     # Verify it's pending
-    _, pending_conn, is_pending = await registry.find_by_cid(cid)
+    _, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert pending_conn is mock_pending_connection
     assert is_pending is True
 
@@ -194,7 +194,7 @@ async def test_promote_pending(registry, mock_connection, mock_pending_connectio
     await registry.promote_pending(cid, mock_connection)
 
     # Verify it's now established
-    connection_obj, pending_conn, is_pending = await registry.find_by_cid(cid)
+    connection_obj, pending_conn, is_pending = await registry.find_by_connection_id(cid)
     assert connection_obj is mock_connection
     assert pending_conn is None
     assert is_pending is False
@@ -216,13 +216,13 @@ async def test_register_new_cid_for_existing_connection(registry, mock_connectio
     await registry.register_connection(original_cid, mock_connection, addr)
 
     # Register new Connection ID using fallback mechanism
-    await registry.register_new_cid_for_existing_connection(
+    await registry.register_new_connection_id_for_existing_connection(
         new_cid, mock_connection, addr
     )
 
     # Verify both Connection IDs work
-    conn1, _, _ = await registry.find_by_cid(original_cid)
-    conn2, _, _ = await registry.find_by_cid(new_cid)
+    conn1, _, _ = await registry.find_by_connection_id(original_cid)
+    conn2, _, _ = await registry.find_by_connection_id(new_cid)
     assert conn1 is mock_connection
     assert conn2 is mock_connection
 
@@ -269,7 +269,7 @@ async def test_find_by_address_fallback_search(registry, mock_connection):
     # Remove address mapping to simulate stale mapping scenario
     # (This tests the fallback linear search)
     async with registry._lock:
-        registry._addr_to_cid.pop(addr, None)
+        registry._addr_to_connection_id.pop(addr, None)
 
     # find_by_address should still find the connection via linear search
     found_connection, found_cid = await registry.find_by_address(addr)
@@ -291,7 +291,7 @@ async def test_remove_by_address(registry, mock_connection):
 
     # Verify it's removed
     assert removed_cid == cid
-    connection_obj, _, _ = await registry.find_by_cid(cid)
+    connection_obj, _, _ = await registry.find_by_connection_id(cid)
     assert connection_obj is None
     found_connection, found_cid = await registry.find_by_address(addr)
     assert found_connection is None
@@ -305,7 +305,7 @@ async def test_cleanup_stale_address_mapping(registry):
 
     # Create a stale mapping
     async with registry._lock:
-        registry._addr_to_cid[addr] = b"stale_cid"
+        registry._addr_to_connection_id[addr] = b"stale_cid"
 
     # Clean up stale mapping
     await registry.cleanup_stale_address_mapping(addr)
@@ -340,8 +340,8 @@ async def test_multiple_connections_same_address(registry):
     assert found_cid == cid2
 
     # But both Connection IDs should still work
-    conn1_found, _, _ = await registry.find_by_cid(cid1)
-    conn2_found, _, _ = await registry.find_by_cid(cid2)
+    conn1_found, _, _ = await registry.find_by_connection_id(cid1)
+    conn2_found, _, _ = await registry.find_by_connection_id(cid2)
     assert conn1_found is conn1
     assert conn2_found is conn2
 
@@ -435,7 +435,7 @@ async def test_connection_id_retired_cleanup(registry, mock_connection):
     await registry.remove_connection_id(original_cid)
 
     # New Connection ID should still work
-    conn, _, _ = await registry.find_by_cid(new_cid)
+    conn, _, _ = await registry.find_by_connection_id(new_cid)
     assert conn is mock_connection
 
     # Address should still map to new Connection ID
@@ -459,22 +459,22 @@ async def test_sequence_number_tracking(registry, mock_connection):
 
     # Register connection with sequence 0
     await registry.register_connection(cid1, mock_connection, addr, sequence=0)
-    seq1 = await registry.get_sequence_for_cid(cid1)
+    seq1 = await registry.get_sequence_for_connection_id(cid1)
     assert seq1 == 0
 
     # Add new Connection IDs with increasing sequences
     await registry.add_connection_id(cid2, cid1, sequence=1)
-    seq2 = await registry.get_sequence_for_cid(cid2)
+    seq2 = await registry.get_sequence_for_connection_id(cid2)
     assert seq2 == 1
 
     await registry.add_connection_id(cid3, cid1, sequence=2)
-    seq3 = await registry.get_sequence_for_cid(cid3)
+    seq3 = await registry.get_sequence_for_connection_id(cid3)
     assert seq3 == 2
 
     # Verify all sequences are tracked
-    assert await registry.get_sequence_for_cid(cid1) == 0
-    assert await registry.get_sequence_for_cid(cid2) == 1
-    assert await registry.get_sequence_for_cid(cid3) == 2
+    assert await registry.get_sequence_for_connection_id(cid1) == 0
+    assert await registry.get_sequence_for_connection_id(cid2) == 1
+    assert await registry.get_sequence_for_connection_id(cid3) == 2
 
 
 @pytest.mark.trio
@@ -508,7 +508,9 @@ async def test_sequence_number_retirement_ordering(registry, mock_connection):
     assert cid4 in cids_range_2_4
 
     # Verify sequences are in order
-    sequences = [await registry.get_sequence_for_cid(cid) for cid in cids_range_0_2]
+    sequences = [
+        await registry.get_sequence_for_connection_id(cid) for cid in cids_range_0_2
+    ]
     assert sequences == sorted(sequences)
 
 
@@ -523,12 +525,12 @@ async def test_initial_vs_established_cid_separation(registry, mock_pending_conn
     addr = ("127.0.0.1", 12345)
 
     # Register initial CID
-    await registry.register_initial_cid(
+    await registry.register_initial_connection_id(
         initial_cid, mock_pending_connection, addr, sequence=0
     )
 
     # Verify initial CID is found when is_initial=True
-    _, pending_conn, is_pending = await registry.find_by_cid(
+    _, pending_conn, is_pending = await registry.find_by_connection_id(
         initial_cid, is_initial=True
     )
     assert pending_conn is mock_pending_connection
@@ -536,7 +538,7 @@ async def test_initial_vs_established_cid_separation(registry, mock_pending_conn
 
     # Verify initial CID is NOT found when is_initial=False
     # (it's not in established/pending)
-    _, pending_conn2, is_pending2 = await registry.find_by_cid(
+    _, pending_conn2, is_pending2 = await registry.find_by_connection_id(
         initial_cid, is_initial=False
     )
     assert pending_conn2 is None
@@ -550,7 +552,7 @@ async def test_initial_vs_established_cid_separation(registry, mock_pending_conn
     )
 
     # Verify established CID is found
-    conn, _, _ = await registry.find_by_cid(established_cid, is_initial=False)
+    conn, _, _ = await registry.find_by_connection_id(established_cid, is_initial=False)
     assert conn is mock_connection
 
 
@@ -564,12 +566,12 @@ async def test_initial_cid_promotion(registry, mock_pending_connection):
     addr = ("127.0.0.1", 12345)
 
     # Register initial CID
-    await registry.register_initial_cid(
+    await registry.register_initial_connection_id(
         initial_cid, mock_pending_connection, addr, sequence=0
     )
 
     # Verify it's in initial CIDs
-    _, pending_conn, is_pending = await registry.find_by_cid(
+    _, pending_conn, is_pending = await registry.find_by_connection_id(
         initial_cid, is_initial=True
     )
     assert pending_conn is mock_pending_connection
@@ -580,13 +582,13 @@ async def test_initial_cid_promotion(registry, mock_pending_connection):
     await registry.promote_pending(initial_cid, mock_connection)
 
     # Verify it's no longer in initial CIDs
-    _, pending_conn2, is_pending2 = await registry.find_by_cid(
+    _, pending_conn2, is_pending2 = await registry.find_by_connection_id(
         initial_cid, is_initial=True
     )
     assert pending_conn2 is None
 
     # Verify it's now in established connections
-    conn, _, _ = await registry.find_by_cid(initial_cid, is_initial=False)
+    conn, _, _ = await registry.find_by_connection_id(initial_cid, is_initial=False)
     assert conn is mock_connection
 
 
@@ -605,7 +607,7 @@ async def test_reverse_address_mapping(registry, mock_connection):
 
     # Remove address-to-CID mapping to test reverse lookup
     async with registry._lock:
-        registry._addr_to_cid.pop(addr, None)
+        registry._addr_to_connection_id.pop(addr, None)
 
     # find_by_address should still find connection via reverse mapping
     found_connection, found_cid = await registry.find_by_address(addr)
@@ -661,7 +663,7 @@ async def test_concurrent_operations_with_sequences(registry):
                 cid = cid_base
             else:
                 cid = f"cid_{i}_{seq}".encode()
-            found_seq = await registry.get_sequence_for_cid(cid)
+            found_seq = await registry.get_sequence_for_connection_id(cid)
             assert found_seq == seq
 
     # Run 20 concurrent registrations
@@ -695,7 +697,7 @@ async def test_cid_retirement_ordering(registry, mock_connection):
 
     # Verify all CIDs are registered
     for cid in cids:
-        conn, _, _ = await registry.find_by_cid(cid)
+        conn, _, _ = await registry.find_by_connection_id(cid)
         assert conn is mock_connection
 
     # Retire CIDs in sequence range [0, 3) - should retire sequences 0, 1, 2
@@ -711,13 +713,13 @@ async def test_cid_retirement_ordering(registry, mock_connection):
 
     # Verify retired CIDs are removed
     for cid in retired:
-        conn, _, _ = await registry.find_by_cid(cid)
+        conn, _, _ = await registry.find_by_connection_id(cid)
         assert conn is None
 
     # Verify remaining CIDs are still registered
-    conn, _, _ = await registry.find_by_cid(b"cid_seq_3")
+    conn, _, _ = await registry.find_by_connection_id(b"cid_seq_3")
     assert conn is mock_connection
-    conn, _, _ = await registry.find_by_cid(b"cid_seq_4")
+    conn, _, _ = await registry.find_by_connection_id(b"cid_seq_4")
     assert conn is mock_connection
 
 
@@ -753,13 +755,13 @@ async def test_retire_connection_ids_by_sequence_range(registry, mock_connection
         assert cid in cid_to_seq
 
     # Verify remaining CIDs
-    conn, _, _ = await registry.find_by_cid(cid_base)  # seq 0
+    conn, _, _ = await registry.find_by_connection_id(cid_base)  # seq 0
     assert conn is mock_connection
-    conn, _, _ = await registry.find_by_cid(b"cid_1")  # seq 1
+    conn, _, _ = await registry.find_by_connection_id(b"cid_1")  # seq 1
     assert conn is mock_connection
-    conn, _, _ = await registry.find_by_cid(b"cid_7")  # seq 7
+    conn, _, _ = await registry.find_by_connection_id(b"cid_7")  # seq 7
     assert conn is mock_connection
-    conn, _, _ = await registry.find_by_cid(b"cid_10")  # seq 10
+    conn, _, _ = await registry.find_by_connection_id(b"cid_10")  # seq 10
     assert conn is mock_connection
 
 
@@ -777,9 +779,9 @@ async def test_retirement_cleanup(registry, mock_connection):
     await registry.add_connection_id(cid2, cid_base, sequence=1)
 
     # Verify mappings exist
-    conn, _, _ = await registry.find_by_cid(cid_base)
+    conn, _, _ = await registry.find_by_connection_id(cid_base)
     assert conn is mock_connection
-    conn, _, _ = await registry.find_by_cid(cid2)
+    conn, _, _ = await registry.find_by_connection_id(cid2)
     assert conn is mock_connection
     found_conn, found_cid = await registry.find_by_address(addr)
     assert found_conn is mock_connection
@@ -788,18 +790,18 @@ async def test_retirement_cleanup(registry, mock_connection):
     await registry.remove_connection_id(cid2)
 
     # Verify cid2 is removed
-    conn, _, _ = await registry.find_by_cid(cid2)
+    conn, _, _ = await registry.find_by_connection_id(cid2)
     assert conn is None
 
     # Verify base CID and address mapping still exist
-    conn, _, _ = await registry.find_by_cid(cid_base)
+    conn, _, _ = await registry.find_by_connection_id(cid_base)
     assert conn is mock_connection
     found_conn, found_cid = await registry.find_by_address(addr)
     assert found_conn is mock_connection
     assert found_cid == cid_base
 
     # Verify sequence tracking is cleaned up
-    seq = await registry.get_sequence_for_cid(cid2)
+    seq = await registry.get_sequence_for_connection_id(cid2)
     assert seq is None
 
 
@@ -834,13 +836,13 @@ async def test_retirement_with_multiple_connections(registry):
     assert cid1_1 in retired
 
     # Verify conn1's remaining CID
-    conn, _, _ = await registry.find_by_cid(cid1_2)
+    conn, _, _ = await registry.find_by_connection_id(cid1_2)
     assert conn is conn1
 
     # Verify conn2's CIDs are unaffected
-    conn, _, _ = await registry.find_by_cid(cid2_base)
+    conn, _, _ = await registry.find_by_connection_id(cid2_base)
     assert conn is conn2
-    conn, _, _ = await registry.find_by_cid(cid2_1)
+    conn, _, _ = await registry.find_by_connection_id(cid2_1)
     assert conn is conn2
 
 

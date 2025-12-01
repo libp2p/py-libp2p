@@ -787,7 +787,7 @@ async def test_connection_id_registry_high_concurrency():
                 cid = cid_base
             else:
                 cid = f"cid_{i}_{seq}".encode()
-            found_conn, _, _ = await registry.find_by_cid(cid)
+            found_conn, _, _ = await registry.find_by_connection_id(cid)
             assert found_conn is conn
 
         # Address lookup - may find a different connection if multiple share address
@@ -954,10 +954,12 @@ async def test_quic_cid_retirement_integration():
             for listener in server_transport._listeners:
                 # Find connection in registry
                 for cid in cids_tracked[:2]:  # Retire first 2 CIDs
-                    conn_obj, _, _ = await listener._registry.find_by_cid(cid)
+                    conn_obj, _, _ = await listener._registry.find_by_connection_id(cid)
                     if conn_obj is conn:
                         # Get sequence number
-                        seq = await listener._registry.get_sequence_for_cid(cid)
+                        seq = await listener._registry.get_sequence_for_connection_id(
+                            cid
+                        )
                         if seq is not None and seq < 2:
                             # Retire CIDs with sequence < 2
                             registry = listener._registry

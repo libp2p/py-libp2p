@@ -176,12 +176,12 @@ async def test_listener_fallback_routing_by_address():
     assert connection_found is mock_connection
 
     # Register the new CID using the registry
-    await listener._registry.register_new_cid_for_existing_connection(
+    await listener._registry.register_new_connection_id_for_existing_connection(
         unknown_cid, mock_connection, addr
     )
 
     # Verify connection was found and new CID registered
-    conn, _, _ = await listener._registry.find_by_cid(unknown_cid)
+    conn, _, _ = await listener._registry.find_by_connection_id(unknown_cid)
     assert conn is mock_connection
 
 
@@ -275,7 +275,7 @@ async def test_connection_id_tracking_with_real_connection():
             for listener in server_transport._listeners:
                 cids = await listener._registry.get_all_established_cids()
                 if cids:
-                    conn, _, _ = await listener._registry.find_by_cid(cids[0])
+                    conn, _, _ = await listener._registry.find_by_connection_id(cids[0])
                     if conn:
                         connection_found = conn
                         break
@@ -284,14 +284,14 @@ async def test_connection_id_tracking_with_real_connection():
 
             # Verify all initial Connection IDs are in mappings
             for cid in initial_connection_ids:
-                conn, _, _ = await listener._registry.find_by_cid(cid)
+                conn, _, _ = await listener._registry.find_by_connection_id(cid)
                 assert conn is connection_found, (
                     f"Connection ID {cid.hex()[:8]} should map to connection"
                 )
 
             # Verify new Connection IDs (if any) are also tracked
             for cid in new_connection_ids:
-                conn, _, _ = await listener._registry.find_by_cid(cid)
+                conn, _, _ = await listener._registry.find_by_connection_id(cid)
                 assert conn is connection_found, (
                     f"New Connection ID {cid.hex()[:8]} should map to connection"
                 )

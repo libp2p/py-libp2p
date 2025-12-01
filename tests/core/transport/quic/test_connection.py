@@ -597,5 +597,5 @@ async def test_connection_id_issued_notifies_listener():
     await conn._handle_connection_id_issued(event)
 
     # Verify listener was notified and registered the new CID
-    conn_found, _, _ = await mock_listener._registry.find_by_cid(new_cid)
+    conn_found, _, _ = await mock_listener._registry.find_by_connection_id(new_cid)
     assert conn_found is conn

@@ -1099,35 +1099,41 @@ class QUICConnection(IRawConnection, IMuxedConn):
         Handle new connection ID issued by peer.
 
         This is the CRITICAL missing functionality that was causing your issue!
-        Tracks sequence numbers for proper CID retirement ordering (inspired by quinn).
+        Tracks sequence numbers for proper Connection ID retirement ordering
+        (inspired by quinn).
         """
-        new_cid = event.connection_id
+        new_connection_id = event.connection_id
 
-        # Increment sequence counter for this new CID
+        # Increment sequence counter for this new Connection ID
         sequence = self._connection_id_sequence_counter
         self._connection_id_sequence_counter += 1
         self._connection_id_sequence_numbers.add(sequence)
 
-        logger.debug(f"NEW CONNECTION ID ISSUED: {new_cid.hex()} (sequence {sequence})")
+        logger.debug(
+            f"NEW CONNECTION ID ISSUED: {new_connection_id.hex()} (sequence {sequence})"
+        )
 
         # Add to available connection IDs
-        self._available_connection_ids.add(new_cid)
+        self._available_connection_ids.add(new_connection_id)
 
         # If we don't have a current connection ID, use this one
         if self._current_connection_id is None:
-            self._current_connection_id = new_cid
-            logger.debug(f"Set current connection ID to: {new_cid.hex()}")
+            self._current_connection_id = new_connection_id
+            logger.debug(f"Set current connection ID to: {new_connection_id.hex()}")
 
-        # CRITICAL FIX: Notify listener to register this new CID with sequence number
-        # This ensures packets with the new CID can be routed correctly
-        await self._notify_listener_of_new_cid(new_cid, sequence)
+        # CRITICAL FIX: Notify listener to register this new Connection ID
+        # with sequence number. This ensures packets with the new Connection ID
+        # can be routed correctly
+        await self._notify_listener_of_new_connection_id(new_connection_id, sequence)
 
         # Update statistics
         self._stats["connection_ids_issued"] += 1
 
         logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
 
-    async def _notify_listener_of_new_cid(self, new_cid: bytes, sequence: int) -> None:
+    async def _notify_listener_of_new_connection_id(
+        self, new_connection_id: bytes, sequence: int
+    ) -> None:
         """
         Notify the parent listener to register a new Connection ID.
 
@@ -1135,7 +1141,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         new Connection IDs after the handshake completes.
 
         Args:
-            new_cid: New Connection ID to register
+            new_connection_id: New Connection ID to register
             sequence: Sequence number for this Connection ID
 
         """
@@ -1149,27 +1155,29 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Find this connection in the listener's registry
                 cids = await listener._registry.get_all_cids_for_connection(self)
                 if cids:
-                    # Use the first Connection ID found as the original CID
-                    original_cid = cids[0]
+                    # Use the first Connection ID found as the original Connection ID
+                    original_connection_id = cids[0]
                     # Register new Connection ID using the registry with sequence number
                     await listener._registry.add_connection_id(
-                        new_cid, original_cid, sequence
+                        new_connection_id, original_connection_id, sequence
                     )
                     notification_duration = time.time() - notification_start
                     if notification_duration > 0.01:  # Log slow notifications (>10ms)
                         logger.debug(
-                            f"Slow CID notification: "
+                            f"Slow Connection ID notification: "
                             f"{notification_duration * 1000:.2f}ms "
-                            f"for CID {new_cid.hex()[:8]}"
+                            f"for Connection ID {new_connection_id.hex()[:8]}"
                         )
                     logger.debug(
-                        f"Registered new Connection ID {new_cid.hex()[:8]} "
-                        f"(sequence {sequence}) for connection {original_cid.hex()[:8]}"
+                        f"Registered new Connection ID {new_connection_id.hex()[:8]} "
+                        f"(sequence {sequence}) for connection "
+                        f"{original_connection_id.hex()[:8]}"
                     )
                     return
 
             logger.debug(
-                f"Could not find listener to register new CID {new_cid.hex()[:8]}"
+                f"Could not find listener to register new Connection ID "
+                f"{new_connection_id.hex()[:8]}"
             )
         except Exception as e:
             logger.error(f"Error notifying listener of new CID: {e}")

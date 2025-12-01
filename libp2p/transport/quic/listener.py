@@ -147,16 +147,17 @@ class QUICListener(IListener):
             is_long_header = (first_byte & 0x80) != 0
 
             if not is_long_header:
-                cid_length = 8  # We are using standard CID length everywhere
+                # We are using standard Connection ID length everywhere
+                connection_id_length = 8
 
-                if len(data) < 1 + cid_length:
+                if len(data) < 1 + connection_id_length:
                     return None
 
-                dest_cid = data[1 : 1 + cid_length]
+                destination_connection_id = data[1 : 1 + connection_id_length]
 
                 return QUICPacketInfo(
                     version=1,  # Assume QUIC v1 for established connections
-                    destination_cid=dest_cid,
+                    destination_cid=destination_connection_id,
                     source_cid=b"",  # Not available in short header
                     packet_type=QuicPacketType.ONE_RTT,
                     token=b"",
@@ -174,24 +175,26 @@ class QUICListener(IListener):
             # Extract destination connection ID length and value
             if len(data) < offset + 1:
                 return None
-            dest_cid_len = data[offset]
+            destination_connection_id_length = data[offset]
             offset += 1
 
-            if len(data) < offset + dest_cid_len:
+            if len(data) < offset + destination_connection_id_length:
                 return None
-            dest_cid = data[offset : offset + dest_cid_len]
-            offset += dest_cid_len
+            destination_connection_id = data[
+                offset : offset + destination_connection_id_length
+            ]
+            offset += destination_connection_id_length
 
             # Extract source connection ID length and value
             if len(data) < offset + 1:
                 return None
-            src_cid_len = data[offset]
+            source_connection_id_length = data[offset]
             offset += 1
 
-            if len(data) < offset + src_cid_len:
+            if len(data) < offset + source_connection_id_length:
                 return None
-            src_cid = data[offset : offset + src_cid_len]
-            offset += src_cid_len
+            source_connection_id = data[offset : offset + source_connection_id_length]
+            offset += source_connection_id_length
 
             # Determine packet type from first byte
             packet_type_value = (first_byte & 0x30) >> 4
@@ -220,8 +223,8 @@ class QUICListener(IListener):
 
             return QUICPacketInfo(
                 version=version,
-                destination_cid=dest_cid,
-                source_cid=src_cid,
+                destination_cid=destination_connection_id,
+                source_cid=source_connection_id,
                 packet_type=packet_value_to_type_mapping.get(packet_type_value)
                 or QuicPacketType.INITIAL,
                 token=token,
@@ -289,25 +292,30 @@ class QUICListener(IListener):
                 self._stats["invalid_packets"] += 1
                 return
 
-            dest_cid = packet_info.destination_cid
+            destination_connection_id = packet_info.destination_cid
 
             # Determine if this is an initial packet (inspired by quinn)
             is_initial = packet_info.packet_type == QuicPacketType.INITIAL
 
-            # Look up connection by Connection ID (check initial CIDs for
+            # Look up connection by Connection ID (check initial Connection IDs for
             # initial packets)
-            find_cid_start = time.time()
+            find_connection_id_start = time.time()
             (
                 connection_obj,
                 pending_quic_conn,
                 is_pending,
-            ) = await self._registry.find_by_cid(dest_cid, is_initial=is_initial)
-            find_cid_duration = time.time() - find_cid_start
-            if find_cid_duration > 0.001:  # Log slow find_by_cid (>1ms)
+            ) = await self._registry.find_by_connection_id(
+                destination_connection_id, is_initial=is_initial
+            )
+            find_connection_id_duration = time.time() - find_connection_id_start
+            if (
+                find_connection_id_duration > 0.001
+            ):  # Log slow find_by_connection_id (>1ms)
                 logger.debug(
-                    f"Slow find_by_cid in _process_packet: "
-                    f"{find_cid_duration * 1000:.2f}ms "
-                    f"for CID {dest_cid.hex()[:8]}, is_initial={is_initial}"
+                    f"Slow find_by_connection_id in _process_packet: "
+                    f"{find_connection_id_duration * 1000:.2f}ms "
+                    f"for Connection ID {destination_connection_id.hex()[:8]}, "
+                    f"is_initial={is_initial}"
                 )
 
             if not connection_obj and not pending_quic_conn:
@@ -321,34 +329,42 @@ class QUICListener(IListener):
                     # Connection IDs arrive before ConnectionIdIssued events
                     # are processed
                     fallback_start = time.time()
-                    connection_obj, original_cid = await self._registry.find_by_address(
-                        addr
-                    )
+                    (
+                        connection_obj,
+                        original_connection_id,
+                    ) = await self._registry.find_by_address(addr)
                     fallback_duration = time.time() - fallback_start
                     if fallback_duration > 0.01:  # Log slow fallback routing (>10ms)
                         logger.debug(
                             f"Slow fallback routing: {fallback_duration * 1000:.2f}ms "
-                            f"for CID {dest_cid.hex()[:8]} at {addr}"
+                            f"for Connection ID {destination_connection_id.hex()[:8]} "
+                            f"at {addr}"
                         )
 
                     if connection_obj:
                         # Found connection by address - register new Connection ID
                         # Track fallback routing usage
                         self._stats["fallback_routing_used"] += 1
-                        await self._registry.register_new_cid_for_existing_connection(
-                            dest_cid, connection_obj, addr
+                        registry = self._registry
+                        await (
+                            registry.register_new_connection_id_for_existing_connection(
+                                destination_connection_id, connection_obj, addr
+                            )
                         )
-                        if original_cid:
+                        if original_connection_id:
                             logger.debug(
-                                f"Registered new Connection ID {dest_cid.hex()[:8]} "
-                                f"for existing connection {original_cid.hex()[:8]} "
-                                f"at address {addr} (fallback mechanism)"
+                                f"Registered new Connection ID "
+                                f"{destination_connection_id.hex()[:8]} "
+                                f"for existing connection "
+                                f"{original_connection_id.hex()[:8]} "
+                                f"at address {addr} "
+                                f"(fallback mechanism)"
                             )
                     else:
                         # No connection found - drop packet
                         logger.debug(
                             f"No connection found for Connection ID "
-                            f"{dest_cid.hex()[:8]} at address {addr}, "
+                            f"{destination_connection_id.hex()[:8]} at address {addr}, "
                             f"dropping packet"
                         )
                         return
@@ -356,11 +372,11 @@ class QUICListener(IListener):
             # Process outside the lock
             if connection_obj:
                 await self._handle_established_connection_packet(
-                    connection_obj, data, addr, dest_cid
+                    connection_obj, data, addr, destination_connection_id
                 )
             elif pending_quic_conn:
                 await self._handle_pending_connection_packet(
-                    pending_quic_conn, data, addr, dest_cid
+                    pending_quic_conn, data, addr, destination_connection_id
                 )
 
         except Exception as e:
@@ -371,7 +387,7 @@ class QUICListener(IListener):
         connection_obj: QUICConnection,
         data: bytes,
         addr: tuple[str, int],
-        dest_cid: bytes,
+        destination_connection_id: bytes,
     ) -> None:
         """Handle packet for established connection WITHOUT holding connection lock."""
         try:
@@ -385,13 +401,14 @@ class QUICListener(IListener):
         quic_conn: QuicConnection,
         data: bytes,
         addr: tuple[str, int],
-        dest_cid: bytes,
+        destination_connection_id: bytes,
     ) -> None:
         """Handle packet for pending connection WITHOUT holding connection lock."""
         try:
             logger.debug(
                 f"[PENDING] Handling packet for pending connection "
-                f"{dest_cid.hex()[:8]}... ({len(data)} bytes from {addr}), "
+                f"{destination_connection_id.hex()[:8]}... "
+                f"({len(data)} bytes from {addr}), "
                 f"handshake_complete={quic_conn._handshake_complete}"
             )
 
@@ -400,23 +417,28 @@ class QUICListener(IListener):
             # handles all events
             if quic_conn._handshake_complete:
                 logger.debug(
-                    f"[PENDING] Handshake already complete for {dest_cid.hex()[:8]}, "
+                    f"[PENDING] Handshake already complete for "
+                    f"{destination_connection_id.hex()[:8]}, "
                     f"promoting connection immediately"
                 )
-                await self._promote_pending_connection(quic_conn, addr, dest_cid)
+                await self._promote_pending_connection(
+                    quic_conn, addr, destination_connection_id
+                )
                 # After promotion, route this packet to the connection
                 # so it processes events. The connection will call
                 # receive_datagram and process events in its event loop
-                connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
+                connection_obj, _, _ = await self._registry.find_by_connection_id(
+                    destination_connection_id
+                )
                 if connection_obj:
                     logger.debug(
                         f"[PENDING] Routing packet to newly promoted connection "
-                        f"{dest_cid.hex()[:8]}"
+                        f"{destination_connection_id.hex()[:8]}"
                     )
                     await self._route_to_connection(connection_obj, data, addr)
                 else:
                     logger.warning(
-                        f"[PENDING] Connection {dest_cid.hex()[:8]} "
+                        f"[PENDING] Connection {destination_connection_id.hex()[:8]} "
                         f"not found after promotion!"
                     )
                 return
@@ -432,7 +454,7 @@ class QUICListener(IListener):
             logger.debug(
                 "[PENDING] Processing QUIC events for handshake progression..."
             )
-            await self._process_quic_events(quic_conn, addr, dest_cid)
+            await self._process_quic_events(quic_conn, addr, destination_connection_id)
 
             # Send any outgoing packets
             logger.debug("[PENDING] Transmitting handshake response...")
@@ -442,23 +464,26 @@ class QUICListener(IListener):
             if quic_conn._handshake_complete:
                 logger.debug(
                     f"[PENDING] Handshake completed after event processing for "
-                    f"{dest_cid.hex()[:8]}, promoting connection"
+                    f"{destination_connection_id.hex()[:8]}, promoting connection"
                 )
-                await self._promote_pending_connection(quic_conn, addr, dest_cid)
+                await self._promote_pending_connection(
+                    quic_conn, addr, destination_connection_id
+                )
             else:
                 logger.debug(
-                    f"[PENDING] Handshake still in progress for {dest_cid.hex()[:8]}"
+                    f"[PENDING] Handshake still in progress for "
+                    f"{destination_connection_id.hex()[:8]}"
                 )
 
         except Exception as e:
             logger.error(
                 f"[PENDING] Error handling pending connection "
-                f"{dest_cid.hex()[:8]}: {e}",
+                f"{destination_connection_id.hex()[:8]}: {e}",
                 exc_info=True,
             )
 
     async def _send_version_negotiation(
-        self, addr: tuple[str, int], source_cid: bytes
+        self, addr: tuple[str, int], source_connection_id: bytes
     ) -> None:
         """Send version negotiation packet to client."""
         try:
@@ -474,10 +499,10 @@ class QUICListener(IListener):
             packet.extend(struct.pack("!I", 0))
 
             # Destination connection ID (echo source CID from client)
-            packet.append(len(source_cid))
-            packet.extend(source_cid)
+            packet.append(len(source_connection_id))
+            packet.extend(source_connection_id)
 
-            # Source connection ID (empty for version negotiation)
+            # Source Connection ID (empty for version negotiation)
             packet.append(0)
 
             # Supported versions
@@ -515,7 +540,9 @@ class QUICListener(IListener):
                 logger.error(
                     f"No configuration found for version 0x{packet_info.version:08x}"
                 )
-                await self._send_version_negotiation(addr, packet_info.source_cid)
+                await self._send_version_negotiation(
+                    addr, packet_info.source_cid
+                )  # source_cid is from QUICPacketInfo struct
                 return None
 
             if not quic_config:
@@ -542,7 +569,8 @@ class QUICListener(IListener):
                     logger.error("Certificate missing libp2p extension!")
 
             logger.debug(
-                f"Original destination CID: {packet_info.destination_cid.hex()}"
+                f"Original destination Connection ID: "
+                f"{packet_info.destination_cid.hex()}"
             )
 
             quic_conn = QuicConnection(
@@ -553,33 +581,43 @@ class QUICListener(IListener):
             quic_conn._replenish_connection_ids()
             # Use the first host CID as our routing CID
             if quic_conn._host_cids:
-                destination_cid = quic_conn._host_cids[0].cid
-                logger.debug(f"Using host CID as routing CID: {destination_cid.hex()}")
+                destination_connection_id = quic_conn._host_cids[0].cid
+                logger.debug(
+                    f"Using host Connection ID as routing Connection ID: "
+                    f"{destination_connection_id.hex()}"
+                )
             else:
                 # Fallback to random if no host CIDs generated
                 import secrets
 
-                destination_cid = secrets.token_bytes(8)
-                logger.debug(f"Fallback to random CID: {destination_cid.hex()}")
+                destination_connection_id = secrets.token_bytes(8)
+                logger.debug(
+                    f"Fallback to random Connection ID: "
+                    f"{destination_connection_id.hex()}"
+                )
 
             logger.debug(f"Generated {len(quic_conn._host_cids)} host CIDs for client")
 
             logger.debug(
-                f"QUIC connection created for destination CID {destination_cid.hex()}"
+                f"QUIC connection created for destination Connection ID "
+                f"{destination_connection_id.hex()}"
             )
 
-            # Store connection mapping using our generated CID
-            # Initial CID has sequence number 0
+            # Store connection mapping using our generated Connection ID
+            # Initial Connection ID has sequence number 0
             sequence = 0
-            await self._registry.set_sequence_counter(destination_cid, sequence)
+            await self._registry.set_sequence_counter(
+                destination_connection_id, sequence
+            )
             await self._registry.register_pending(
-                destination_cid, quic_conn, addr, sequence
+                destination_connection_id, quic_conn, addr, sequence
             )
 
-            # Also register the initial destination CID (from client) in _initial_cids
+            # Also register the initial destination Connection ID (from client)
+            # in _initial_connection_ids
             # This allows proper routing of initial packets (inspired by quinn)
             initial_dcid = packet_info.destination_cid
-            await self._registry.register_initial_cid(
+            await self._registry.register_initial_connection_id(
                 initial_dcid, quic_conn, addr, sequence
             )
 
@@ -596,12 +634,13 @@ class QUICListener(IListener):
                         logger.error(f"FAILED to apply request_client_certificate: {e}")
 
             # Process events and send response
-            await self._process_quic_events(quic_conn, addr, destination_cid)
+            await self._process_quic_events(quic_conn, addr, destination_connection_id)
             await self._transmit_for_connection(quic_conn, addr)
 
             logger.debug(
                 f"Started handshake for new connection from {addr} "
-                f"(version: 0x{packet_info.version:08x}, cid: {destination_cid.hex()})"
+                f"(version: 0x{packet_info.version:08x}, "
+                f"Connection ID: {destination_connection_id.hex()})"
             )
 
             return quic_conn
@@ -619,19 +658,22 @@ class QUICListener(IListener):
             logger.debug(f" SHORT_HDR: Handling short header packet from {addr}")
 
             # Try to find connection by address
-            connection, dest_cid = await self._registry.find_by_address(addr)
+            connection, connection_id = await self._registry.find_by_address(addr)
             if connection:
                 await self._route_to_connection(connection, data, addr)
                 return
 
-            # Fallback: try to extract CID from packet
-            if len(data) >= 9:  # 1 byte header + 8 byte CID
-                potential_cid = data[1:9]
-                connection, _, _ = await self._registry.find_by_cid(potential_cid)
+            # Fallback: try to extract Connection ID from packet
+            if len(data) >= 9:  # 1 byte header + 8 byte Connection ID
+                potential_connection_id = data[1:9]
+                connection, _, _ = await self._registry.find_by_connection_id(
+                    potential_connection_id
+                )
                 if connection:
                     # Update mappings for future packets
-                    await self._registry.register_new_cid_for_existing_connection(
-                        potential_cid, connection, addr
+                    registry = self._registry
+                    await registry.register_new_connection_id_for_existing_connection(
+                        potential_connection_id, connection, addr
                     )
                     await self._route_to_connection(connection, data, addr)
                     return
@@ -669,11 +711,14 @@ class QUICListener(IListener):
         quic_conn: QuicConnection,
         data: bytes,
         addr: tuple[str, int],
-        dest_cid: bytes,
+        destination_connection_id: bytes,
     ) -> None:
         """Handle packet for a pending (handshaking) connection."""
         try:
-            logger.debug(f"Handling packet for pending connection {dest_cid.hex()}")
+            logger.debug(
+                f"Handling packet for pending connection "
+                f"{destination_connection_id.hex()}"
+            )
 
             # Feed data to QUIC connection
             quic_conn.receive_datagram(data, addr, now=time.time())
@@ -682,7 +727,7 @@ class QUICListener(IListener):
                 logger.debug(f"TLS state after: {quic_conn.tls.state}")
 
             # Process events - this is crucial for handshake progression
-            await self._process_quic_events(quic_conn, addr, dest_cid)
+            await self._process_quic_events(quic_conn, addr, destination_connection_id)
 
             # Send any outgoing packets - this is where the response should be sent
             await self._transmit_for_connection(quic_conn, addr)
@@ -690,17 +735,27 @@ class QUICListener(IListener):
             # Check if handshake completed
             if quic_conn._handshake_complete:
                 logger.debug("PENDING: Handshake completed, promoting connection")
-                await self._promote_pending_connection(quic_conn, addr, dest_cid)
+                await self._promote_pending_connection(
+                    quic_conn, addr, destination_connection_id
+                )
 
         except Exception as e:
-            logger.error(f"Error handling pending connection {dest_cid.hex()}: {e}")
+            logger.error(
+                f"Error handling pending connection "
+                f"{destination_connection_id.hex()}: {e}"
+            )
 
             # Remove problematic pending connection
-            logger.error(f"Removing problematic connection {dest_cid.hex()}")
-            await self._remove_pending_connection(dest_cid)
+            logger.error(
+                f"Removing problematic connection {destination_connection_id.hex()}"
+            )
+            await self._remove_pending_connection(destination_connection_id)
 
     async def _process_quic_events(
-        self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
+        self,
+        quic_conn: QuicConnection,
+        addr: tuple[str, int],
+        destination_connection_id: bytes,
     ) -> None:
         """
         Process QUIC events with enhanced debugging.
@@ -712,13 +767,18 @@ class QUICListener(IListener):
         try:
             # Check if connection is already promoted - if so, don't process events here
             # as the connection's event loop will handle them
-            find_cid_start = time.time()
-            connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
-            find_cid_duration = time.time() - find_cid_start
-            if find_cid_duration > 0.001:  # Log slow find_by_cid (>1ms)
+            find_connection_id_start = time.time()
+            connection_obj, _, _ = await self._registry.find_by_connection_id(
+                destination_connection_id
+            )
+            find_connection_id_duration = time.time() - find_connection_id_start
+            if (
+                find_connection_id_duration > 0.001
+            ):  # Log slow find_by_connection_id (>1ms)
                 logger.debug(
-                    f"Slow find_by_cid in _process_quic_events: "
-                    f"{find_cid_duration * 1000:.2f}ms for CID {dest_cid.hex()[:8]}"
+                    f"Slow find_by_connection_id in _process_quic_events: "
+                    f"{find_connection_id_duration * 1000:.2f}ms for Connection ID "
+                    f"{destination_connection_id.hex()[:8]}"
                 )
             if connection_obj:
                 return
@@ -737,23 +797,30 @@ class QUICListener(IListener):
                     logger.warning(
                         f"ConnectionTerminated - code={event.error_code}, "
                         f"reason={event.reason_phrase} for "
-                        f"{dest_cid.hex()[:8]} from {addr}"
+                        f"{destination_connection_id.hex()[:8]} "
+                        f"from {addr}"
                     )
-                    await self._remove_connection(dest_cid)
+                    await self._remove_connection(destination_connection_id)
                     break
 
                 elif isinstance(event, events.HandshakeCompleted):
-                    await self._promote_pending_connection(quic_conn, addr, dest_cid)
+                    await self._promote_pending_connection(
+                        quic_conn, addr, destination_connection_id
+                    )
 
                 elif isinstance(event, events.ProtocolNegotiated):
                     # If handshake is complete, promote connection immediately
                     # This can happen before HandshakeCompleted event in some cases
-                    _, pending_conn, is_pending = await self._registry.find_by_cid(
-                        dest_cid
+                    (
+                        _,
+                        pending_conn,
+                        is_pending,
+                    ) = await self._registry.find_by_connection_id(
+                        destination_connection_id
                     )
                     if quic_conn._handshake_complete and is_pending and pending_conn:
                         await self._promote_pending_connection(
-                            quic_conn, addr, dest_cid
+                            quic_conn, addr, destination_connection_id
                         )
 
                 elif isinstance(event, events.StreamDataReceived):
@@ -765,7 +832,9 @@ class QUICListener(IListener):
                         connection_obj,
                         pending_conn,
                         is_pending,
-                    ) = await self._registry.find_by_cid(dest_cid)
+                    ) = await self._registry.find_by_connection_id(
+                        destination_connection_id
+                    )
                     if connection_obj:
                         # Don't process here - the connection's event loop
                         # will handle it
@@ -773,14 +842,14 @@ class QUICListener(IListener):
                     elif is_pending and pending_conn:
                         if quic_conn._handshake_complete:
                             await self._promote_pending_connection(
-                                quic_conn, addr, dest_cid
+                                quic_conn, addr, destination_connection_id
                             )
                             # Connection's event loop will process this event
                         else:
                             logger.warning(
                                 f"StreamDataReceived on stream {event.stream_id} "
                                 f"but handshake not complete yet for "
-                                f"{dest_cid.hex()[:8]}! "
+                                f"{destination_connection_id.hex()[:8]}! "
                                 f"This may indicate early stream data."
                             )
 
@@ -789,41 +858,57 @@ class QUICListener(IListener):
                         connection_obj,
                         pending_conn,
                         is_pending,
-                    ) = await self._registry.find_by_cid(dest_cid)
+                    ) = await self._registry.find_by_connection_id(
+                        destination_connection_id
+                    )
                     if connection_obj:
                         await connection_obj._handle_stream_reset(event)
                     elif is_pending and pending_conn and quic_conn._handshake_complete:
                         # Promote connection to handle stream reset
                         await self._promote_pending_connection(
-                            quic_conn, addr, dest_cid
+                            quic_conn, addr, destination_connection_id
                         )
-                        connection_obj, _, _ = await self._registry.find_by_cid(
-                            dest_cid
+                        (
+                            connection_obj,
+                            _,
+                            _,
+                        ) = await self._registry.find_by_connection_id(
+                            destination_connection_id
                         )
                         if connection_obj:
                             await connection_obj._handle_stream_reset(event)
 
                 elif isinstance(event, events.ConnectionIdIssued):
-                    new_cid = event.connection_id
+                    new_connection_id = event.connection_id
                     # Track sequence number for this connection
                     # Increment sequence counter for this connection using registry
-                    sequence = await self._registry.increment_sequence_counter(dest_cid)
-                    # Also track for the new CID
-                    await self._registry.set_sequence_counter(new_cid, sequence)
+                    sequence = await self._registry.increment_sequence_counter(
+                        destination_connection_id
+                    )
+                    # Also track for the new Connection ID
+                    await self._registry.set_sequence_counter(
+                        new_connection_id, sequence
+                    )
                     # Add new Connection ID to the same address mapping and connection
-                    await self._registry.add_connection_id(new_cid, dest_cid, sequence)
+                    await self._registry.add_connection_id(
+                        new_connection_id, destination_connection_id, sequence
+                    )
 
                 elif isinstance(event, events.ConnectionIdRetired):
-                    retired_cid = event.connection_id
-                    # Find the connection for this CID
-                    connection_obj, _, _ = await self._registry.find_by_cid(retired_cid)
+                    retired_connection_id = event.connection_id
+                    # Find the connection for this Connection ID
+                    connection_obj, _, _ = await self._registry.find_by_connection_id(
+                        retired_connection_id
+                    )
                     if connection_obj:
-                        # Get sequence number of retired CID
-                        retired_seq = await self._registry.get_sequence_for_cid(
-                            retired_cid
+                        # Get sequence number of retired Connection ID
+                        retired_seq = (
+                            await self._registry.get_sequence_for_connection_id(
+                                retired_connection_id
+                            )
                         )
                         if retired_seq is not None:
-                            # Retire CIDs in sequence order up to
+                            # Retire Connection IDs in sequence order up to
                             # (but not including) this one
                             # This ensures proper retirement ordering per QUIC spec
                             # We retire all CIDs with sequence < retired_seq
@@ -833,17 +918,18 @@ class QUICListener(IListener):
                                 )
                             )
                         # Remove the specific retired CID
-                        await self._registry.remove_connection_id(retired_cid)
+                        await self._registry.remove_connection_id(retired_connection_id)
                     else:
                         # Connection not found, just remove the CID
-                        await self._registry.remove_connection_id(retired_cid)
+                        await self._registry.remove_connection_id(retired_connection_id)
 
                 # Log slow event processing
                 event_duration = time.time() - event_start
                 if event_duration > 0.01:  # Log slow events (>10ms)
                     logger.debug(
                         f"Slow event processing: {type(event).__name__} took "
-                        f"{event_duration * 1000:.2f}ms for CID {dest_cid.hex()[:8]}"
+                        f"{event_duration * 1000:.2f}ms for Connection ID "
+                        f"{destination_connection_id.hex()[:8]}"
                     )
 
             # Log batch processing time
@@ -851,14 +937,17 @@ class QUICListener(IListener):
             if batch_duration > 0.01 and event_count > 0:  # Log slow batches
                 logger.debug(
                     f"Processed {event_count} events in {batch_duration * 1000:.2f}ms "
-                    f"for CID {dest_cid.hex()[:8]}"
+                    f"for Connection ID {destination_connection_id.hex()[:8]}"
                 )
 
         except Exception as e:
             logger.debug(f"Error processing events: {e}")
 
     async def _promote_pending_connection(
-        self, quic_conn: QuicConnection, addr: tuple[str, int], dest_cid: bytes
+        self,
+        quic_conn: QuicConnection,
+        addr: tuple[str, int],
+        destination_connection_id: bytes,
     ) -> None:
         """Promote pending connection - avoid duplicate creation."""
         promotion_start = time.time()
@@ -868,16 +957,19 @@ class QUICListener(IListener):
                 connection_obj,
                 pending_quic_conn,
                 is_pending,
-            ) = await self._registry.find_by_cid(dest_cid)
+            ) = await self._registry.find_by_connection_id(destination_connection_id)
             if connection_obj:
                 logger.debug(
-                    f"Connection {dest_cid.hex()[:8]} already exists in "
+                    f"Connection {destination_connection_id.hex()[:8]} "
+                    f"already exists in "
                     f"_connections! Reusing existing connection."
                 )
                 connection = connection_obj
                 # If it was in pending, promote it (though it shouldn't be)
                 if is_pending:
-                    await self._registry.promote_pending(dest_cid, connection)
+                    await self._registry.promote_pending(
+                        destination_connection_id, connection
+                    )
             else:
                 from .connection import QUICConnection
 
@@ -899,13 +991,17 @@ class QUICListener(IListener):
 
                 # If it was in pending, promote it; otherwise register as new
                 if is_pending:
-                    await self._registry.promote_pending(dest_cid, connection)
+                    await self._registry.promote_pending(
+                        destination_connection_id, connection
+                    )
                 else:
                     # New connection - register directly as established
                     # Get sequence number from registry (should be 0 for initial CID)
-                    sequence = await self._registry.get_sequence_counter(dest_cid)
+                    sequence = await self._registry.get_sequence_counter(
+                        destination_connection_id
+                    )
                     await self._registry.register_connection(
-                        dest_cid, connection, addr, sequence
+                        destination_connection_id, connection, addr, sequence
                     )
 
             if self._nursery:
@@ -919,11 +1015,13 @@ class QUICListener(IListener):
                     if peer_id:
                         connection.peer_id = peer_id
                     logger.info(
-                        f"Security verification successful for {dest_cid.hex()}"
+                        f"Security verification successful for "
+                        f"{destination_connection_id.hex()}"
                     )
                 except Exception as e:
                     logger.error(
-                        f"Security verification failed for {dest_cid.hex()}: {e}"
+                        f"Security verification failed for "
+                        f"{destination_connection_id.hex()}: {e}"
                     )
                     await connection.close()
                     return
@@ -933,57 +1031,77 @@ class QUICListener(IListener):
             # process all events from the QUIC connection.
 
             try:
-                logger.debug(f"Invoking user callback {dest_cid.hex()}")
+                logger.debug(
+                    f"Invoking user callback {destination_connection_id.hex()}"
+                )
                 await self._handler(connection)
 
             except Exception as e:
                 logger.error(f"Error in user callback: {e}")
 
             self._stats["connections_accepted"] += 1
-            logger.info(f"Enhanced connection {dest_cid.hex()} established from {addr}")
+            logger.info(
+                f"Enhanced connection {destination_connection_id.hex()} "
+                f"established from {addr}"
+            )
 
             # Log promotion duration
             promotion_duration = time.time() - promotion_start
             if promotion_duration > 0.01:  # Log slow promotions (>10ms)
                 logger.debug(
                     f"Slow connection promotion: {promotion_duration * 1000:.2f}ms "
-                    f"for CID {dest_cid.hex()[:8]}"
+                    f"for Connection ID {destination_connection_id.hex()[:8]}"
                 )
 
         except Exception as e:
-            logger.error(f"Error promoting connection {dest_cid.hex()}: {e}")
-            await self._remove_connection(dest_cid)
+            logger.error(
+                f"Error promoting connection {destination_connection_id.hex()}: {e}"
+            )
+            await self._remove_connection(destination_connection_id)
 
-    async def _remove_connection(self, dest_cid: bytes) -> None:
+    async def _remove_connection(self, destination_connection_id: bytes) -> None:
         """Remove connection by connection ID."""
         try:
             # Get connection before removing from registry
-            connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
+            connection_obj, _, _ = await self._registry.find_by_connection_id(
+                destination_connection_id
+            )
             if connection_obj:
                 await connection_obj.close()
 
             # Remove from registry (cleans up all mappings)
-            await self._registry.remove_connection_id(dest_cid)
+            await self._registry.remove_connection_id(destination_connection_id)
 
-            logger.debug(f"Removed connection {dest_cid.hex()}")
+            logger.debug(f"Removed connection {destination_connection_id.hex()}")
 
         except Exception as e:
-            logger.error(f"Error removing connection {dest_cid.hex()}: {e}")
+            logger.error(
+                f"Error removing connection {destination_connection_id.hex()}: {e}"
+            )
 
-    async def _remove_pending_connection(self, dest_cid: bytes) -> None:
+    async def _remove_pending_connection(
+        self, destination_connection_id: bytes
+    ) -> None:
         """Remove pending connection by connection ID."""
         try:
-            await self._registry.remove_pending_connection(dest_cid)
-            logger.debug(f"Removed pending connection {dest_cid.hex()}")
+            await self._registry.remove_pending_connection(destination_connection_id)
+            logger.debug(
+                f"Removed pending connection {destination_connection_id.hex()}"
+            )
         except Exception as e:
-            logger.error(f"Error removing pending connection {dest_cid.hex()}: {e}")
+            logger.error(
+                f"Error removing pending connection "
+                f"{destination_connection_id.hex()}: {e}"
+            )
 
     async def _remove_connection_by_addr(self, addr: tuple[str, int]) -> None:
         """Remove connection by address (fallback method)."""
-        dest_cid = await self._registry.remove_by_address(addr)
-        if dest_cid:
+        connection_id = await self._registry.remove_by_address(addr)
+        if connection_id:
             # Get connection before removing
-            connection_obj, _, _ = await self._registry.find_by_cid(dest_cid)
+            connection_obj, _, _ = await self._registry.find_by_connection_id(
+                connection_id
+            )
             if connection_obj:
                 await connection_obj.close()
 
@@ -1160,12 +1278,14 @@ class QUICListener(IListener):
         """Remove a connection by object reference."""
         try:
             # Find the connection ID for this object
-            cids = await self._registry.get_all_cids_for_connection(connection_obj)
-            if cids:
+            connection_ids = await self._registry.get_all_cids_for_connection(
+                connection_obj
+            )
+            if connection_ids:
                 # Remove using the first Connection ID found
-                connection_cid = cids[0]
-                await self._remove_connection(connection_cid)
-                logger.debug(f"Removed connection {connection_cid.hex()}")
+                connection_connection_id = connection_ids[0]
+                await self._remove_connection(connection_connection_id)
+                logger.debug(f"Removed connection {connection_connection_id.hex()}")
             else:
                 logger.warning("Connection object not found in tracking")
 
