@@ -82,8 +82,6 @@ class PrometheusExporter:
         self.previous_peer_memory: Histogram
         self.conn_memory: Histogram
         self.previous_conn_memory: Histogram
-        self.connection_latency: Histogram
-        self.active_circuits: Gauge
 
         # Initialize Prometheus metrics (compatible with go-libp2p)
         self._init_metrics()
@@ -210,25 +208,6 @@ class PrometheusExporter:
             "libp2p_rcmgr_previous_conn_memory",
             "How many connections have previously reserved this bucket of memory",
             buckets=mem_buckets,
-            registry=self.registry,
-        )
-
-        # Connection latency histogram
-        # Buckets: 10ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s
-        latency_buckets = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
-        self.connection_latency = Histogram(
-            "libp2p_connection_latency_ms",
-            "Connection establishment latency in milliseconds",
-            ["transport", "success"],
-            buckets=latency_buckets,
-            registry=self.registry,
-        )
-
-        # Active circuits gauge
-        self.active_circuits = Gauge(
-            "libp2p_active_circuits",
-            "Number of currently active circuit relay connections",
-            [],
             registry=self.registry,
         )
 
@@ -402,37 +381,6 @@ class PrometheusExporter:
                     self.conn_memory.observe(new_bytes)
 
             self._conn_memory[conn_id] = new_bytes
-
-    def record_connection_latency(
-        self,
-        transport: str,
-        success: bool,
-        latency_ms: float,
-    ) -> None:
-        """
-        Record connection latency metric.
-
-        Args:
-            transport: Transport type (tcp, quic, circuit_v2, etc.)
-            success: Whether connection succeeded
-            latency_ms: Latency in milliseconds
-
-        """
-        with self._lock:
-            self.connection_latency.labels(
-                transport=transport, success="true" if success else "false"
-            ).observe(latency_ms)
-
-    def set_active_circuits(self, count: int) -> None:
-        """
-        Set the active circuits count.
-
-        Args:
-            count: Number of active circuits
-
-        """
-        with self._lock:
-            self.active_circuits.set(count)
 
     def start_server(self) -> None:
         """Start the Prometheus metrics HTTP server."""
