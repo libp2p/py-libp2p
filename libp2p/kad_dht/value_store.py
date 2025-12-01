@@ -72,7 +72,7 @@ class ValueStore:
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex(), validity
         )
-        record = make_put_record(key.decode("utf-8"), value)
+        record = make_put_record(key, value)
         record.timeReceived = str(time.time)
 
         self.store[key] = (record, validity)
