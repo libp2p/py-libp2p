@@ -231,10 +231,8 @@ class RelayPerformanceTracker:
 
         Args:
             available_relays: List of relay peer IDs to choose from
-            require_reservation: If True, only consider relays with active
-                reservations
-            relay_info_getter: Optional callable to get relay info (for
-                reservation check)
+            require_reservation: If True, only consider relays with active reservations
+            relay_info_getter: Optional callable to get relay info for reservation check
 
         Returns:
             Selected relay ID, or None if no suitable relay found
