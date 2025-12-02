@@ -178,7 +178,6 @@ class MultiselectClient(IMultiselectClient):
                     f"protocol write failed: {error}, protocol={protocol}"
                 ) from error
 
-<<<<<<< HEAD
             try:
                 response = await communicator.read()
             except MultiselectCommunicatorError as error:
