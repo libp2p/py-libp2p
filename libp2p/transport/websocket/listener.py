@@ -18,7 +18,6 @@ except ImportError:
     WebSocketServer = None  # type: ignore
 
 from libp2p.abc import IListener
-from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
@@ -333,24 +332,18 @@ class WebsocketListener(IListener):
             # Track connection
             self._track_connection(conn)
 
-            # Wrap connection in RawConnection before passing to handler
-            # The handler (Swarm's conn_handler) expects IRawConnection,
-            # not ReadWriteCloser. This matches the pattern used in dial() method
-            raw_conn = RawConnection(conn, False)  # False for non-initiator (inbound)
-
-            # Upgrade connection
-            # The handler (Swarm's conn_handler) will:
-            # 1. Upgrade security (multistream negotiation)
-            # 2. Upgrade to muxed connection
-            # 3. Add connection to swarm and wait for service to finish
+            # Pass connection directly to handler
+            # The handler (Swarm's conn_handler) expects ReadWriteCloser and will
+            # wrap it in RawConnection itself. This matches the pattern used in
+            # other transports (TCP, etc.)
             try:
-                await self._handler(raw_conn)
+                await self._handler(conn)
             except Exception as e:
                 logger.error(f"Connection upgrade failed: {e}")
                 self._failed_connections += 1
                 # Ensure connection is closed on failure
                 try:
-                    await raw_conn.close()
+                    await conn.close()
                 except Exception:
                     pass  # Ignore errors during cleanup
             finally:
