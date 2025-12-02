@@ -20,7 +20,9 @@ from libp2p.security.noise.transport import (
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
 
-REQUIRED_NODE_MAJOR = 16
+REQUIRED_NODE_MAJOR = (
+    22  # Required for Promise.withResolvers in @chainsafe/libp2p-noise v17+
+)
 
 
 @pytest.mark.trio
