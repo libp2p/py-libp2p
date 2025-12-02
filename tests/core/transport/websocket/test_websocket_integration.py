@@ -46,9 +46,11 @@ logger = logging.getLogger(__name__)
 
 def create_noise_upgrader(key_pair):
     """Create TransportUpgrader with Noise security."""
+    from libp2p.crypto.x25519 import X25519PrivateKey
+
     noise_transport = NoiseTransport(
         libp2p_keypair=key_pair,
-        noise_privkey=create_new_key_pair().private_key,
+        noise_privkey=X25519PrivateKey.new(),
         early_data=None,
     )
     return TransportUpgrader(

@@ -24,4 +24,7 @@ async def read_exactly(
 
         else:
             return bytes(buffer)
-    raise IncompleteReadError({"requested_count": n, "received_count": len(buffer)})
+    raise IncompleteReadError(
+        f"Connection closed: expected {n} bytes but received {len(buffer)} "
+        f"(connection may have been reset by peer)"
+    )
