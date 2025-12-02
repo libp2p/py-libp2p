@@ -28,6 +28,7 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.transport import (
     CircuitV2Transport,
+    TrackedRawConnection,
 )
 from libp2p.tools.constants import (
     MAX_READ_LEN,
@@ -890,3 +891,151 @@ async def test_circuit_v2_transport_no_relay_found():
         assert selected is None, "Should return None when no relays are available"
 
         logger.info("No relay found test passed")
+
+
+# Tests for TrackedRawConnection
+class TestTrackedRawConnection:
+    """Test suite for TrackedRawConnection wrapper."""
+
+    @pytest.mark.trio
+    async def test_tracked_connection_calls_record_circuit_closed_on_close(self):
+        """Test that closing a TrackedRawConnection calls record_circuit_closed."""
+        from unittest.mock import AsyncMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.close = AsyncMock()
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Record circuit opened first
+        tracker.record_circuit_opened(relay_id)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 1
+
+        # Close the connection
+        await tracked_conn.close()
+
+        # Verify stream.close was called
+        mock_stream.close.assert_called_once()
+
+        # Verify circuit was closed (active_circuits decremented)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 0
+
+    @pytest.mark.trio
+    async def test_tracked_connection_double_close_does_not_double_count(self):
+        """Test that closing a TrackedRawConnection twice doesn't double-count."""
+        from unittest.mock import AsyncMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.close = AsyncMock()
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Record circuit opened first
+        tracker.record_circuit_opened(relay_id)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 1
+
+        # Close the connection twice
+        await tracked_conn.close()
+        await tracked_conn.close()
+
+        # Verify stream.close was called at least once (first close)
+        # Second close is prevented by _closed flag to avoid double-counting
+        assert mock_stream.close.call_count >= 1
+
+        # Verify circuit was closed only once (active_circuits = 0, not -1)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 0
+
+    @pytest.mark.trio
+    async def test_tracked_connection_delegates_methods(self):
+        """Test that TrackedRawConnection properly delegates all methods."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.write = AsyncMock()
+        mock_stream.read = AsyncMock(return_value=b"test data")
+        mock_stream.get_remote_address = MagicMock(return_value=("127.0.0.1", 12345))
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Test write delegation
+        await tracked_conn.write(b"test")
+        mock_stream.write.assert_called_once_with(b"test")
+
+        # Test read delegation
+        data = await tracked_conn.read(10)
+        assert data == b"test data"
+        mock_stream.read.assert_called_once_with(10)
+
+        # Test get_remote_address delegation
+        addr = tracked_conn.get_remote_address()
+        assert addr == ("127.0.0.1", 12345)
+        mock_stream.get_remote_address.assert_called_once()
+
+        # Test property access
+        assert tracked_conn.stream == mock_stream
+        assert tracked_conn.is_initiator is True

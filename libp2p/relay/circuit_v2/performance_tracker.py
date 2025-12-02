@@ -25,7 +25,8 @@ class RelayStats:
     """Performance statistics for a single relay."""
 
     relay_id: ID
-    latency_ema_ms: float = 0.0  # Exponential moving average latency
+    # Exponential moving average latency (-1.0 = no data yet)
+    latency_ema_ms: float = -1.0
     success_count: int = 0
     failure_count: int = 0
     active_circuits: int = 0
@@ -120,8 +121,8 @@ class RelayPerformanceTracker:
             stats = self._relay_stats[relay_id]
 
             # Update latency EMA
-            if stats.latency_ema_ms == 0.0:
-                # First measurement - use it directly
+            if stats.latency_ema_ms < 0.0:
+                # First measurement - use it directly (sentinel value -1.0)
                 stats.latency_ema_ms = latency_ms
             else:
                 # Update EMA: new = alpha * current + (1 - alpha) * old
@@ -202,6 +203,10 @@ class RelayPerformanceTracker:
                 return float("inf")  # Overloaded relay
 
             # Calculate base score from latency
+            # If no latency data yet (sentinel -1.0), use unknown_relay_score
+            if stats.latency_ema_ms < 0.0:
+                return self.unknown_relay_score
+
             latency_score = stats.latency_ema_ms * self.latency_penalty_ms
 
             # Add penalty for active circuits (load balancing)

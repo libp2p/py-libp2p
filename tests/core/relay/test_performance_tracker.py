@@ -124,6 +124,31 @@ class TestRelayPerformanceTracker:
         assert stats is not None
         assert stats.latency_ema_ms == 100.0
 
+    def test_record_connection_attempt_zero_latency(self):
+        """Test that 0ms latency is handled correctly (not treated as sentinel)."""
+        tracker = RelayPerformanceTracker(ema_alpha=0.5)
+        relay_id = create_test_peer_id("relay1")
+
+        # First measurement with 0ms latency (e.g., localhost)
+        tracker.record_connection_attempt(relay_id, latency_ms=0.0, success=True)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.latency_ema_ms == 0.0
+
+        # Second measurement with 0ms latency - should update EMA correctly
+        # EMA = 0.5 * 0.0 + 0.5 * 0.0 = 0.0
+        tracker.record_connection_attempt(relay_id, latency_ms=0.0, success=True)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.latency_ema_ms == 0.0
+
+        # Third measurement with non-zero latency - should update EMA
+        # EMA = 0.5 * 100.0 + 0.5 * 0.0 = 50.0
+        tracker.record_connection_attempt(relay_id, latency_ms=100.0, success=True)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.latency_ema_ms == 50.0
+
     def test_record_connection_attempt_success_failure(self):
         """Test tracking success and failure counts."""
         tracker = RelayPerformanceTracker()
@@ -202,6 +227,21 @@ class TestRelayPerformanceTracker:
 
         score = tracker.get_relay_score(relay_id)
         assert score == tracker.unknown_relay_score  # Default score
+
+    def test_get_relay_score_no_latency_data(self):
+        """Test scoring for relay with stats but no latency data (sentinel -1.0)."""
+        tracker = RelayPerformanceTracker()
+        relay_id = create_test_peer_id("no_latency")
+
+        # Create stats via circuit_opened (no connection attempts = no latency data)
+        tracker.record_circuit_opened(relay_id)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.latency_ema_ms == -1.0  # Sentinel value
+
+        # Should return unknown_relay_score since no latency data
+        score = tracker.get_relay_score(relay_id)
+        assert score == tracker.unknown_relay_score
 
     def test_get_relay_score_unhealthy_relay(self):
         """Test that unhealthy relays (low success rate) get infinite score."""

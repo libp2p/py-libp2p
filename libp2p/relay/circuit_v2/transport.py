@@ -6,6 +6,7 @@ allowing peers to establish connections through relay nodes.
 """
 
 import logging
+from typing import Any
 
 import multiaddr
 import trio
@@ -15,6 +16,7 @@ from libp2p.abc import (
     IListener,
     INetConn,
     INetStream,
+    IRawConnection,
     ITransport,
 )
 from libp2p.custom_types import (
@@ -60,6 +62,63 @@ from .utils import (
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
+
+
+class TrackedRawConnection(IRawConnection):
+    """
+    Wrapper around RawConnection that tracks circuit closure.
+
+    Automatically calls record_circuit_closed() when the connection is closed.
+    This ensures that active circuit counts are properly decremented when
+    connections are closed, preventing unbounded growth of circuit counts.
+    """
+
+    _wrapped: RawConnection
+    _relay_id: ID
+    _tracker: RelayPerformanceTracker
+    _closed: bool = False
+
+    def __init__(
+        self,
+        wrapped: RawConnection,
+        relay_id: ID,
+        tracker: RelayPerformanceTracker,
+    ) -> None:
+        """
+        Initialize the tracked connection wrapper.
+
+        Args:
+            wrapped: The RawConnection to wrap
+            relay_id: The relay peer ID for tracking
+            tracker: The performance tracker to notify on closure
+
+        """
+        self._wrapped = wrapped
+        self._relay_id = relay_id
+        self._tracker = tracker
+
+    async def close(self) -> None:
+        """Close the connection and record circuit closure."""
+        if not self._closed:
+            self._closed = True
+            await self._wrapped.close()
+            self._tracker.record_circuit_closed(self._relay_id)
+
+    async def write(self, data: bytes) -> None:
+        """Write data to the wrapped connection."""
+        return await self._wrapped.write(data)
+
+    async def read(self, n: int | None = None) -> bytes:
+        """Read data from the wrapped connection."""
+        return await self._wrapped.read(n)
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        """Get remote address from the wrapped connection."""
+        return self._wrapped.get_remote_address()
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to wrapped connection."""
+        return getattr(self._wrapped, name)
 
 
 class CircuitV2Transport(ITransport):
@@ -186,7 +245,7 @@ class CircuitV2Transport(ITransport):
         dest_info: PeerInfo,
         *,
         relay_info: PeerInfo | None = None,
-    ) -> RawConnection:
+    ) -> IRawConnection:
         """
         Dial a destination peer using a relay.
 
@@ -298,12 +357,13 @@ class CircuitV2Transport(ITransport):
             # Record circuit opened
             self.performance_tracker.record_circuit_opened(relay_peer_id)
 
-            # Create raw connection from stream
-            # Note: Circuit closure tracking can be enhanced by hooking into
-            # connection lifecycle events. For now, active_circuits is incremented
-            # on open and can be manually decremented via record_circuit_closed()
-            # when connections are known to close.
-            return RawConnection(stream=relay_stream, initiator=True)
+            # Create raw connection from stream and wrap it to track closure
+            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            return TrackedRawConnection(
+                wrapped=raw_conn,
+                relay_id=relay_peer_id,
+                tracker=self.performance_tracker,
+            )
 
         except Exception as e:
             # Record failed connection attempt
