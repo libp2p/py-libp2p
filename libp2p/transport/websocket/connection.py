@@ -198,8 +198,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
         Returns:
             bytes: Received data
 
-        Raises:
-            IOException: If connection is closed or read fails
+        :raises IOException: If connection is closed or read fails
+        :raises WebSocketConnectionError: If WebSocket connection error occurs
+        :raises WebSocketMessageError: If message processing fails
 
         """
         if self._closed:
@@ -365,8 +366,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
         Args:
             data: The bytes to write
 
-        Raises:
-            IOException: If connection is closed or write fails
+        :raises IOException: If connection is closed or write fails
+        :raises WebSocketConnectionError: If WebSocket connection error occurs
+        :raises WebSocketProtocolError: If protocol violation occurs
 
         """
         if self._closed:
@@ -397,7 +399,11 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 raise IOException(f"Write failed: {str(e)}")
 
     async def close(self) -> None:
-        """Close the WebSocket connection. This method is idempotent."""
+        """
+        Close the WebSocket connection. This method is idempotent.
+
+        :raises WebSocketConnectionError: If closing the connection fails
+        """
         async with self._close_lock:
             if self._closed:
                 return  # Already closed

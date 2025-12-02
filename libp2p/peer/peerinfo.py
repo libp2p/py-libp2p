@@ -9,6 +9,9 @@ import multiaddr
 from multiaddr import (
     protocols,
 )
+from multiaddr.protocols import (
+    Protocol,
+)
 
 from .id import (
     ID,
@@ -35,11 +38,11 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
         raise InvalidAddrError("`addr` should not be `None`")
 
-    addr_protocols = addr.protocols()
+    addr_protocols = list(addr.protocols())
     if not addr_protocols:
         raise InvalidAddrError("Address has no protocols")
 
-    last_protocol = addr_protocols[-1]
+    last_protocol: Protocol = addr_protocols[-1]
     # multiaddr.protocols.P_P2P is 421
     if last_protocol.code != protocols.P_P2P:
         raise InvalidAddrError(

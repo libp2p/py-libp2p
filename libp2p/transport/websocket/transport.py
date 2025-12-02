@@ -772,9 +772,9 @@ class WebsocketTransport(ITransport):
         Returns:
             An upgraded RawConnection
 
-        Raises:
-            OpenConnectionError: If connection fails
-            ValueError: If multiaddr is invalid
+        :raises OpenConnectionError: If connection fails, cannot dial the multiaddr,
+            connection upgrade fails, or maximum connections reached
+        :raises ValueError: If multiaddr is invalid or cannot be parsed
 
         """
         logger.debug(f"WebsocketTransport.dial called with {maddr}")
@@ -808,6 +808,8 @@ class WebsocketTransport(ITransport):
 
         Returns:
             A WebSocket listener
+
+        :raises ValueError: If configuration validation fails
 
         """
         logger.debug("WebsocketTransport.create_listener called")

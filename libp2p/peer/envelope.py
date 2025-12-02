@@ -1,7 +1,5 @@
 from typing import Any, cast
 
-import multiaddr
-
 from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.rsa import RSAPublicKey

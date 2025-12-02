@@ -177,8 +177,10 @@ class WebsocketListener(IListener):
         Returns:
             bool: True if listening started successfully
 
-        Raises:
-            OpenConnectionError: If listening fails
+        :raises OpenConnectionError: If listening fails, listener is closed,
+            invalid WebSocket multiaddr, or connection limit reached
+        :raises ValueError: If WSS (secure WebSocket) requires TLS configuration
+            but none was provided
 
         """
         logger.debug(f"WebsocketListener.listen called with {maddr}")
@@ -338,7 +340,11 @@ class WebsocketListener(IListener):
             self._failed_connections += 1
 
     async def close(self) -> None:
-        """Close the listener and all connections."""
+        """
+        Close the listener and all connections.
+
+        :raises WebSocketConnectionError: If closing connections fails
+        """
         if self._closed:
             return
 
