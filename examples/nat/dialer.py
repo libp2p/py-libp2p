@@ -1,27 +1,20 @@
-#!/usr/bin/env python3
 """
-NAT'd Dialer Node with Circuit Relay v2 + DCUtR + AutoNAT
+NAT Traversal Dialer Node Example.
 
-This script demonstrates a peer behind NAT that:
-1. Uses AutoNAT to detect its reachability status
-2. Connects to other peers via Circuit Relay v2
-3. Attempts DCUtR hole punching for direct connections
-4. Shows the complete NAT traversal flow
+This module implements a NAT'd peer that:
+- Connects to a destination through a Circuit Relay v2 relay
+- Attempts DCUtR (Direct Connection Upgrade through Relay) hole punching
+- Uses AutoNAT to detect and report reachability status
+- Logs the connection path (direct or relayed)
 
 Usage:
-    python dialer.py -r /ip4/RELAY_IP/tcp/RELAY_PORT/p2p/RELAY_PEER_ID \\
-                     -d /ip4/RELAY_IP/tcp/RELAY_PORT/p2p/RELAY_PEER_ID/p2p-circuit/p2p/LISTENER_PEER_ID
-
-The dialer will:
-- Detect it's behind NAT using AutoNAT
-- Connect to the listener via relay initially
-- Attempt DCUtR hole punching for direct connection
-- Send test messages to demonstrate the connection
+    python dialer.py --relay-addr /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID \
+        --listener-id LISTENER_PEER_ID
 """
 
 import argparse
 import logging
-import secrets
+import os
 import sys
 
 import multiaddr
@@ -29,418 +22,421 @@ import trio
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
-from libp2p.host.basic_host import BasicHost
-from typing import cast
 from libp2p.custom_types import TProtocol
-from libp2p.network.stream.net_stream import NetStream
-from libp2p.abc import INetStream, IHost
-from libp2p.host.autonat import AutoNATService
+from libp2p.host.autonat import AutoNATService, AutoNATStatus
 from libp2p.host.autonat.autonat import AUTONAT_PROTOCOL_ID
-from libp2p.relay.circuit_v2.dcutr import PROTOCOL_ID as DCUTR_PROTOCOL_ID
-from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.id import ID
-from libp2p.relay.circuit_v2 import (
-    CircuitV2Protocol,
-    DCUtRProtocol,
-    ReachabilityChecker,
-    RelayDiscovery,
-    RelayLimits,
-)
+from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
-from libp2p.utils.address_validation import (
-    find_free_port,
-    get_available_interfaces,
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
+from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+from libp2p.relay.circuit_v2.protocol import (
+    PROTOCOL_ID,
+    STOP_PROTOCOL_ID,
+    CircuitV2Protocol,
 )
+from libp2p.relay.circuit_v2.resources import RelayLimits
+from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+from libp2p.tools.async_service import background_trio_service
+from libp2p.utils.logging import setup_logging as libp2p_setup_logging
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
-logger = logging.getLogger("dialer-node")
+logger = logging.getLogger("nat-dialer")
 
-# Suppress noisy logs
-logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger("libp2p.network").setLevel(logging.WARNING)
-
-# Demo protocol
-DEMO_PROTOCOL_ID = TProtocol("/relay-demo/1.0.0")
+# Application protocol for testing
+EXAMPLE_PROTOCOL_ID = TProtocol("/nat-example/1.0.0")
+MAX_READ_LEN = 2**16  # 64KB
 
 
-async def test_connection(host: IHost, target_peer_id: ID, dcutr_protocol: DCUtRProtocol) -> None:
-    """
-    Test connection to target peer and demonstrate DCUtR hole punching.
-    
-    Parameters
-    ----------
-    host : IHost
-        The libp2p host
-    target_peer_id : ID
-        Peer ID of the target to connect to
-    dcutr_protocol : DCUtRProtocol
-        DCUtR protocol instance for hole punching
+def generate_fixed_private_key(seed: int | None) -> bytes:
+    """Generate a fixed private key from a seed for reproducible peer IDs."""
+    import random
 
-    """
-    logger.info(f"🎯 Testing connection to {target_peer_id}")
+    if seed is None:
+        # Generate random bytes if no seed provided
+        return random.getrandbits(32 * 8).to_bytes(length=32, byteorder="big")
 
+    random.seed(seed)
+    return random.getrandbits(32 * 8).to_bytes(length=32, byteorder="big")
+
+
+def get_autonat_status_string(status: int) -> str:
+    """Convert AutoNAT status to human-readable string."""
+    if status == AutoNATStatus.PUBLIC:
+        return "PUBLIC"
+    elif status == AutoNATStatus.PRIVATE:
+        return "PRIVATE"
+    else:
+        return "UNKNOWN"
+
+
+def is_connection_direct(host, peer_id: ID) -> bool:
+    """Check if we have a direct connection to a peer."""
     try:
-        # First, establish connection (will be relayed initially)
-        stream = await host.new_stream(target_peer_id, [DEMO_PROTOCOL_ID])
+        network = host.get_network()
+        conn_or_conns = network.connections.get(peer_id)
+        if not conn_or_conns:
+            return False
 
-        # Check connection type
-        connection_type = "UNKNOWN"
-        try:
-            conn = stream.muxed_conn
-            # Use string representation to check for circuit relay
-            addrs = []
-            try:
-                # Convert connection info to string to check for p2p-circuit
-                conn_str = str(conn)
-                is_relayed = "/p2p-circuit" in conn_str
-                if is_relayed:
-                    addrs = ["/p2p-circuit"]  # Just need something to detect as relayed
-            except Exception:
-                pass
-            is_relayed = any("/p2p-circuit" in str(addr) for addr in addrs)
-            connection_type = "RELAYED" if is_relayed else "DIRECT"
-        except Exception:
-            pass
+        # Handle both single connection and list of connections
+        if isinstance(conn_or_conns, list):
+            connections = conn_or_conns
+        else:
+            connections = [conn_or_conns]
 
-        logger.info(f"📞 Initial connection type: {connection_type}")
+        # Check if any connection is direct (not relayed)
+        for conn in connections:
+            addrs = conn.get_transport_addresses()
+            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                return True
 
-        # Send test message
-        test_message = "Hello from dialer!"
-        await stream.write(test_message.encode('utf-8'))
-        logger.info(f"📤 Sent: '{test_message}' via {connection_type} connection")
-
-        # Read response
-        response_data = await stream.read()
-        if response_data:
-            response = response_data.decode('utf-8')
-            logger.info(f"📩 Received: '{response}'")
-
-        await stream.close()
-
-        # If connection was relayed, attempt DCUtR hole punching
-        if connection_type == "RELAYED":
-            logger.info("🕳️  Attempting DCUtR hole punching...")
-
-            # Wait a moment for the connection to settle
-            await trio.sleep(2)
-
-            # Attempt hole punch
-            success = await dcutr_protocol.initiate_hole_punch(target_peer_id)
-
-            if success:
-                logger.info("✅ DCUtR hole punching successful!")
-
-                # Test the new direct connection
-                await trio.sleep(1)  # Give time for connection to establish
-
-                try:
-                    direct_stream = await host.new_stream(target_peer_id, [DEMO_PROTOCOL_ID])
-
-                    # Check if this connection is now direct
-                    conn = direct_stream.muxed_conn
-                    # Use string representation to check for circuit relay
-                    addrs = []
-                    try:
-                        # Convert connection info to string to check for p2p-circuit
-                        conn_str = str(conn)
-                        is_relayed = "/p2p-circuit" in conn_str
-                        if is_relayed:
-                            addrs = ["/p2p-circuit"]  # Just need something to detect as relayed
-                    except Exception:
-                        pass
-                    is_now_direct = not any("/p2p-circuit" in str(addr) for addr in addrs)
-
-                    if is_now_direct:
-                        logger.info("🎉 Connection upgraded to DIRECT!")
-
-                        # Send another test message via direct connection
-                        direct_message = "Hello via direct connection!"
-                        await direct_stream.write(direct_message.encode('utf-8'))
-                        logger.info(f"📤 Sent: '{direct_message}' via DIRECT connection")
-
-                        # Read response
-                        direct_response_data = await direct_stream.read()
-                        if direct_response_data:
-                            direct_response = direct_response_data.decode('utf-8')
-                            logger.info(f"📩 Received: '{direct_response}'")
-                    else:
-                        logger.warning("⚠️  Connection still appears to be relayed")
-
-                    await direct_stream.close()
-
-                except Exception as e:
-                    logger.error(f"❌ Error testing direct connection: {e}")
-            else:
-                logger.warning("❌ DCUtR hole punching failed")
-                logger.info("🔄 Connection remains relayed (this is normal in some NAT configurations)")
-
-    except Exception as e:
-        logger.error(f"❌ Error testing connection: {e}")
+        return False
+    except Exception:
+        return False
 
 
-async def run_dialer_node(port: int, relay_addr: str, destination_addr: str) -> None:
+async def setup_dialer_node(
+    relay_addr: str, listener_id: str, seed: int | None = None
+) -> None:
     """
-    Run the NAT'd dialer node with full NAT traversal capabilities.
-    
-    Parameters
-    ----------
-    port : int
-        Local port to bind to
-    relay_addr : str
-        Multiaddr of the relay node to use
-    destination_addr : str
-        Relay circuit address of the destination peer
-
+    Set up and run a dialer node that connects through relay and attempts hole punching.
     """
-    if port <= 0:
-        port = find_free_port()
+    logger.info("Starting dialer node (behind NAT)...")
 
-    # Generate key pair
-    secret = secrets.token_bytes(32)
-    key_pair = create_new_key_pair(secret)
-
-    # Create host
-    host = new_host(key_pair=key_pair)
-
-    # Parse addresses
-    try:
-        relay_maddr = multiaddr.Multiaddr(relay_addr)
-        relay_info = info_from_p2p_addr(relay_maddr)
-
-        dest_maddr = multiaddr.Multiaddr(destination_addr)
-        dest_info = info_from_p2p_addr(dest_maddr)
-    except Exception as e:
-        logger.error(f"❌ Invalid address: {e}")
+    if not relay_addr:
+        logger.error("Relay address is required")
         return
 
-    # Configure relay as CLIENT (can make relay connections)
-    relay_limits = RelayLimits(
-        duration=3600,
-        data=50 * 1024 * 1024,  # 50MB
-        max_circuit_conns=5,
-        max_reservations=2,
+    if not listener_id:
+        logger.error("Listener peer ID is required")
+        return
+
+    # Create host with a fixed key if seed is provided
+    key_pair = create_new_key_pair(generate_fixed_private_key(seed) if seed else None)
+    logger.debug("[DIALER] created key_pair=%s", type(key_pair).__name__)
+    host = new_host(key_pair=key_pair)
+    logger.debug("[DIALER] host initialized | peer_id=%s", host.get_id())
+
+    # Configure the circuit relay client
+    limits = RelayLimits(
+        duration=3600,  # 1 hour
+        data=1024 * 1024 * 100,  # 100 MB
+        max_circuit_conns=10,
+        max_reservations=5,
     )
 
     relay_config = RelayConfig(
-        roles=RelayRole.CLIENT,  # Only client role for dialer
-        limits=relay_limits,
-        bootstrap_relays=[relay_info],
+        roles=RelayRole.STOP | RelayRole.CLIENT,  # Accept connections and use relays
+        limits=limits,
     )
 
-    # Create protocols
-    relay_protocol = CircuitV2Protocol(
-        host=host,
-        limits=relay_limits,
-        allow_hop=False,  # This node doesn't act as relay for others
+    # Initialize the protocol
+    protocol = CircuitV2Protocol(host, limits=limits, allow_hop=False)
+    logger.debug(
+        "[DIALER] CircuitV2Protocol initialized | allow_hop=%s",
+        False,
     )
 
-    dcutr_protocol = DCUtRProtocol(host=host)
+    # Initialize AutoNAT service
+    autonat_service = AutoNATService(host)
+    logger.info("[DIALER] AutoNAT service initialized")
 
-    autonat_service = AutoNATService(host=cast(BasicHost, host))
-    reachability_checker = ReachabilityChecker(host)
+    # Initialize DCUtR protocol
+    dcutr_protocol = DCUtRProtocol(host)
+    logger.info("[DIALER] DCUtR protocol initialized")
 
-    # Set up relay discovery
-    relay_discovery = RelayDiscovery(
-        host=host,
-        auto_reserve=True,  # Automatically make reservations
-        max_relays=3,
-    )
+    # Start the host
+    async with host.run(
+        listen_addrs=[multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")]
+    ):  # Use ephemeral port
+        # Print information about this node
+        peer_id = host.get_id()
+        logger.info(f"Dialer node started with ID: {peer_id}")
 
-    # Get listen addresses
-    listen_addrs = get_available_interfaces(port)
+        # Get assigned address for debugging
+        addrs = host.get_addrs()
+        if addrs:
+            logger.info(f"Dialer node listening on: {addrs[0]}")
 
-    logger.info("🚀 Starting NAT'd Dialer Node")
-    logger.info("=" * 60)
+        # Start the relay protocol service
+        async with background_trio_service(protocol):
+            logger.info("Circuit relay protocol started")
 
-    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
+            # Create and initialize transport
+            transport = CircuitV2Transport(host, protocol, relay_config)
+            logger.info(
+                "Circuit relay transport initialized | "
+                "enable_hop=%r enable_stop=%r enable_client=%r",
+                relay_config.enable_hop,
+                relay_config.enable_stop,
+                relay_config.enable_client,
+            )
 
-        async def basic_dcutr_handler(stream: INetStream) -> None:
-            logger.info(f"🕳️ DCUtR request from {stream.muxed_conn.peer_id}")
-            await stream.write(b"DCUtR acknowledged")
-            await stream.close()
+            # Create discovery service
+            discovery = RelayDiscovery(host, auto_reserve=True)
+            transport.discovery = discovery
+            logger.info(
+                "[DIALER] Relay discovery service created | auto_reserve=%s",
+                True,
+            )
 
-        host.set_stream_handler(DCUTR_PROTOCOL_ID, basic_dcutr_handler)
-        logger.info("✅ Dialer protocol handlers registered")
+            # Start discovery service
+            async with background_trio_service(discovery):
+                logger.info("Relay discovery service started")
 
+                # Start DCUtR protocol service
+                async with background_trio_service(dcutr_protocol):
+                    logger.info("DCUtR protocol service started")
 
-        
-        async def autonat_handler(stream: INetStream) -> None:
-            await autonat_service.handle_stream(cast(NetStream, stream))
-            
-        host.set_stream_handler(AUTONAT_PROTOCOL_ID, autonat_handler)
+                    # Connect to the relay
+                    logger.info(f"Connecting to relay at {relay_addr}")
+                    try:
+                        # Handle both peer ID only or full multiaddr formats
+                        if relay_addr.startswith("/"):
+                            # Full multiaddr format
+                            relay_maddr = multiaddr.Multiaddr(relay_addr)
+                            relay_info = info_from_p2p_addr(relay_maddr)
+                        else:
+                            # Assume it's just a peer ID
+                            relay_peer_id = ID.from_base58(relay_addr)
+                            relay_info = PeerInfo(
+                                relay_peer_id,
+                                [
+                                    multiaddr.Multiaddr(
+                                        f"/ip4/127.0.0.1/tcp/8000/p2p/{relay_addr}"
+                                    )
+                                ],
+                            )
+                            logger.info(f"Using constructed address: {relay_info.addrs[0]}")
 
-        # Connect to relay
-        logger.info(f"🔗 Connecting to relay: {relay_info.peer_id}")
-        try:
-            await host.connect(relay_info)
-            logger.info("✅ Connected to relay successfully")
+                        logger.debug(
+                            "[DIALER] attempting host.connect to relay %s",
+                            relay_info.peer_id,
+                        )
+                        await host.connect(relay_info)
+                        logger.info(f"Connected to relay {relay_info.peer_id}")
 
-            # Make reservation
-            success = await relay_discovery.make_reservation(relay_info.peer_id)
-            if success:
-                logger.info("📝 Reservation made with relay")
-            else:
-                logger.warning("⚠️  Failed to make reservation with relay")
+                        # Wait for relay discovery to find the relay
+                        await trio.sleep(2)
+                        try:
+                            relays = transport.discovery.get_relays()
+                            logger.debug("[DIALER] discovered relays: %s", relays)
+                        except Exception:
+                            pass
 
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to relay: {e}")
-            return
+                        # Convert listener ID string to peer ID
+                        listener_peer_id = ID.from_base58(listener_id)
 
-        # Check reachability
-        is_reachable, public_addrs = await reachability_checker.check_self_reachability()
-        autonat_service.update_status()
+                        # Step 1: Connect to listener through relay
+                        logger.info(
+                            f"Step 1: Connecting to listener {listener_peer_id} through relay"
+                        )
 
-        # Display node information
-        peer_id = host.get_id().to_string()
-        all_addrs = host.get_addrs()
+                        # Create a proper circuit address
+                        # The format should be: /ip4/.../tcp/.../p2p/RELAY_PEER_ID/p2p-circuit/p2p/DEST_PEER_ID
+                        # First, get a proper relay address (replace 0.0.0.0 with 127.0.0.1 for localhost)
+                        relay_addr_str = str(relay_info.addrs[0])
+                        if "0.0.0.0" in relay_addr_str:
+                            relay_addr_str = relay_addr_str.replace("0.0.0.0", "127.0.0.1")
+                        
+                        # Ensure the relay peer ID is in the address before p2p-circuit
+                        relay_peer_id_str = str(relay_info.peer_id)
+                        if f"/p2p/{relay_peer_id_str}" not in relay_addr_str:
+                            # Add the relay peer ID if not present
+                            relay_addr_str = f"{relay_addr_str}/p2p/{relay_peer_id_str}"
+                        
+                        # Construct the circuit address
+                        circuit_addr = multiaddr.Multiaddr(
+                            f"{relay_addr_str}/p2p-circuit/p2p/{listener_peer_id}"
+                        )
+                        listener_peer_info = PeerInfo(listener_peer_id, [circuit_addr])
+                        logger.info(f"Using circuit address: {circuit_addr}")
 
-        print("\n" + "🎯 DIALER NODE READY" + "\n" + "=" * 60)
-        print(f"Peer ID: {peer_id}")
-        print(f"AutoNAT Status: {autonat_service.get_status()}")
-        print(f"Reachable: {is_reachable}")
-        print(f"Target: {dest_info.peer_id}")
+                        # Dial through the relay
+                        try:
+                            logger.info(
+                                f"Attempting to dial listener {listener_peer_id} "
+                                f"through relay {relay_info.peer_id}"
+                            )
 
-        print("\nLocal addresses:")
-        for addr in all_addrs:
-            print(f"  {addr}")
+                            logger.debug(
+                                "[DIALER] dialing via transport: dest=%s relay=%s",
+                                listener_peer_id,
+                                relay_info.peer_id,
+                            )
+                            connection = await transport.dial(circuit_addr)
+                            logger.info("Established relay connection: %s", connection)
 
-        if public_addrs:
-            print("\nPublic addresses:")
-            for addr in public_addrs:
-                print(f"  {addr}")
+                            logger.info(
+                                "✓ Successfully connected to listener through relay!"
+                            )
 
-        print("\n" + "🔄 CONNECTION TEST SEQUENCE" + "\n" + "-" * 60)
-        print("The dialer will now:")
-        print("  1. 🔗 Connect to listener via relay")
-        print("  2. 📤 Send test message through relay")
-        print("  3. 🕳️  Attempt DCUtR hole punching")
-        print("  4. 🎯 Test direct connection (if successful)")
-        print("  5. 📊 Compare relayed vs direct performance")
+                            # Wait a bit for the connection to stabilize
+                            await trio.sleep(1)
 
-        # Wait a moment for everything to settle
-        await trio.sleep(2)
+                            # Step 2: Attempt DCUtR hole punching
+                            logger.info(
+                                "Step 2: Attempting DCUtR hole punching for direct connection..."
+                            )
+                            
+                            # Wait for DCUtR protocol to be ready
+                            await dcutr_protocol.event_started.wait()
+                            
+                            # Attempt hole punch
+                            hole_punch_success = await dcutr_protocol.initiate_hole_punch(
+                                listener_peer_id
+                            )
 
-        # Connect to destination peer via relay circuit
-        logger.info(f"🎯 Connecting to destination: {dest_info.peer_id}")
-        try:
-            await host.connect(dest_info)
-            logger.info("✅ Connected to destination via relay circuit")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to destination: {e}")
-            return
+                            if hole_punch_success:
+                                logger.info(
+                                    "✓ Successfully established direct connection via DCUtR!"
+                                )
+                            else:
+                                logger.info(
+                                    "⚠ Hole punching failed or not possible, continuing with relay connection"
+                                )
 
-        print("\n" + "🧪 RUNNING CONNECTION TESTS" + "\n" + "-" * 60)
+                            # Wait a bit more
+                            await trio.sleep(2)
 
-        # Run connection tests
-        for i in range(3):
-            print(f"\n--- Test {i+1}/3 ---")
-            await test_connection(host, dest_info.peer_id, dcutr_protocol)
+                            # Check final connection type
+                            is_direct = is_connection_direct(host, listener_peer_id)
+                            connection_type = "DIRECT" if is_direct else "RELAYED"
+                            logger.info(
+                                f"Final connection type to listener: {connection_type}"
+                            )
 
-            if i < 2:  # Don't sleep after the last test
-                await trio.sleep(5)  # Wait between tests
+                            # Step 3: Open a stream and send a message
+                            logger.info(
+                                "Step 3: Opening stream to listener and sending message..."
+                            )
+                            logger.debug(
+                                "[DIALER] opening app stream to %s with %s",
+                                listener_peer_id,
+                                EXAMPLE_PROTOCOL_ID,
+                            )
+                            stream = await host.new_stream(
+                                listener_peer_id, [EXAMPLE_PROTOCOL_ID]
+                            )
+                            if stream:
+                                logger.info(
+                                    f"✓ Opened stream to listener with protocol "
+                                    f"{EXAMPLE_PROTOCOL_ID} (via {connection_type} connection)"
+                                )
 
-        print("\n" + "✅ CONNECTION TESTS COMPLETED" + "\n" + "=" * 60)
-        print("Summary:")
-        print("  • Demonstrated Circuit Relay v2 connectivity")
-        print("  • Tested DCUtR hole punching capability")
-        print("  • Showed AutoNAT reachability detection")
-        print("  • Compared relayed vs direct connections")
+                                # Send a message
+                                msg = f"Hello from dialer {peer_id}!".encode()
+                                logger.debug(
+                                    "[DIALER] writing %d bytes on app stream", len(msg)
+                                )
+                                await stream.write(msg)
+                                logger.info("Sent message to listener")
 
-        # Show final connection status
-        direct_count = len(dcutr_protocol._direct_connections)
-        if direct_count > 0:
-            print(f"  🎉 Successfully established {direct_count} direct connection(s)")
-        else:
-            print("  🔄 Connections remain relayed (normal for some NAT types)")
+                                # Wait for response
+                                logger.debug(
+                                    "[DIALER] waiting to read up to %d bytes on app stream",
+                                    MAX_READ_LEN,
+                                )
+                                response = await stream.read(MAX_READ_LEN)
+                                logger.info(
+                                    f"✓ Received response: "
+                                    f"{response.decode() if response else 'No response'}"
+                                )
 
-        print("\nPress Ctrl+C to stop the dialer")
-        print("=" * 60)
+                                # Close the stream
+                                await stream.close()
+                            else:
+                                logger.error("Failed to open stream to listener")
 
-        logger.info("✅ Dialer tests completed successfully")
+                            # Log AutoNAT status
+                            autonat_status = autonat_service.get_status()
+                            status_str = get_autonat_status_string(autonat_status)
+                            logger.info(f"[AutoNAT] Reachability status: {status_str}")
 
-        # Keep running to maintain connections
-        try:
-            await trio.sleep_forever()
-        except KeyboardInterrupt:
-            logger.info("🛑 Dialer node shutting down...")
-            print("\n👋 Dialer node stopped")
+                            print("\n" + "=" * 60)
+                            print("Connection Summary")
+                            print("=" * 60)
+                            print(f"Dialer Peer ID: {peer_id}")
+                            print(f"Listener Peer ID: {listener_peer_id}")
+                            print(f"Connection Type: {connection_type}")
+                            print(f"AutoNAT Status: {status_str}")
+                            print("=" * 60)
+
+                            # Keep running for a bit to allow messages to be processed
+                            await trio.sleep(5)
+
+                        except Exception as e:
+                            logger.exception(
+                                "[DIALER] Failed to dial through relay: %s", e
+                            )
+                            logger.error(f"Exception type: {type(e).__name__}")
+                            raise
+
+                    except Exception as e:
+                        logger.exception("[DIALER] Error: %s", e)
+
+                    print("\nDialer operation completed")
+                    # Keep running for a bit to allow messages to be processed
+                    await trio.sleep(5)
 
 
 def main() -> None:
-    """Main entry point."""
-    description = """
-    NAT'd Dialer Node - Circuit Relay v2 + DCUtR + AutoNAT Demo
-    
-    This script demonstrates a peer behind NAT that connects to other
-    peers using the complete libp2p NAT traversal stack:
-    
-    1. AutoNAT: Detects reachability status (public/private)
-    2. Circuit Relay v2: Connects via relay for initial connectivity
-    3. DCUtR: Attempts hole punching for direct connection upgrades
-    
-    The dialer runs automated tests to demonstrate the NAT traversal
-    capabilities and shows the difference between relayed and direct
-    connections.
-    
-    Example:
-        # First start a relay node
-        python relay.py -p 8000
-        
-        # Then start a listener
-        python listener.py -r /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID
-        
-        # Finally run this dialer
-        python dialer.py -r /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID \\
-                        -d /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID/p2p-circuit/p2p/LISTENER_PEER_ID
-    """
-
-    parser = argparse.ArgumentParser(
-        description=description,
-        formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    """Parse arguments and run the dialer node."""
+    parser = argparse.ArgumentParser(description="NAT Traversal Dialer Node")
     parser.add_argument(
-        "-r", "--relay",
+        "--relay-addr",
         type=str,
         required=True,
-        help="Relay node multiaddr (e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)"
+        help="Multiaddress or peer ID of relay node (e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)",
     )
     parser.add_argument(
-        "-d", "--destination",
+        "--listener-id",
         type=str,
         required=True,
-        help="Destination relay circuit address (e.g., /ip4/.../p2p/RELAY_ID/p2p-circuit/p2p/DEST_ID)"
+        help="Peer ID of listener node",
     )
     parser.add_argument(
-        "-p", "--port",
+        "--seed",
         type=int,
-        default=0,
-        help="Local port to bind to (default: random free port)"
+        help="Random seed for reproducible peer IDs",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "--debug",
         action="store_true",
-        help="Enable verbose logging"
+        help="Enable debug logging",
     )
 
     args = parser.parse_args()
 
-    if args.verbose:
+    # Set log level and libp2p structured logging
+    if args.debug:
+        # Enable verbose console logs
         logging.getLogger().setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
+        logging.getLogger("libp2p").setLevel(logging.DEBUG)
+        # Also enable libp2p file+console logging via env control, if not set
+        os.environ.setdefault("LIBP2P_DEBUG", "DEBUG")
+        try:
+            libp2p_setup_logging()
+            logger.debug("libp2p logging initialized via utils.logging.setup_logging")
+        except Exception as e:
+            logger.debug(
+                "libp2p logging setup failed: %s — continuing with basicConfig", e
+            )
 
     try:
-        trio.run(run_dialer_node, args.port, args.relay, args.destination)
+        trio.run(setup_dialer_node, args.relay_addr, args.listener_id, args.seed)
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-        sys.exit(0)
+        print("\nExiting...")
     except Exception as e:
-        logger.error(f"❌ Dialer node failed: {e}")
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
+
