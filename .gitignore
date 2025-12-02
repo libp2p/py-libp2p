@@ -45,6 +45,11 @@ coverage.xml
 *.cover
 .pytest_cache/
 
+# Test result files
+tests/**/results/*.json
+tests/**/results/*.xml
+tests/**/results/*.html
+
 # Translations
 *.mo
 *.pot
