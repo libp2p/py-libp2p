@@ -123,14 +123,13 @@ class CircuitV2Transport(ITransport):
 
         """
         # Extract peer ID from multiaddr - P_P2P code is 0x01A5 (421)
-        relay_id_str: str | None = None
-        relay_maddr: multiaddr.Multiaddr | None = None
-        dest_id_str: str | None = None
+        relay_id_str = None
+        relay_maddr = None
+        dest_id_str = None
         found_circuit = False
         relay_maddr_end_index = None
 
-        for idx, proto in enumerate(maddr.protocols()):
-            value = maddr.value_for_protocol(proto.code)
+        for idx, (proto, value) in enumerate(maddr.items()):
             if proto.name == "p2p-circuit":
                 found_circuit = True
                 relay_maddr_end_index = idx
@@ -141,11 +140,6 @@ class CircuitV2Transport(ITransport):
                     dest_id_str = value
 
         if relay_id_str is not None and relay_maddr_end_index is not None:
-            # Reconstruct relay multiaddr manually since split/slice isn't available
-            # This is a fallback if decapsulate logic is too complex here
-            # But actually we can try to use decapsulation if we know the structure
-            # For now, let's stick to string manipulation as a fallback which is
-            # what the original code tried with split
             relay_maddr = multiaddr.Multiaddr(
                 "/".join(str(maddr).split("/")[: relay_maddr_end_index * 2 + 1])
             )
