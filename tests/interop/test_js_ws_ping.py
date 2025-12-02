@@ -7,22 +7,18 @@ from multiaddr import Multiaddr
 import trio
 from trio.lowlevel import open_process
 
+from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
-from libp2p.host.basic_host import BasicHost
 from libp2p.network.exceptions import SwarmException
-from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerStore
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
-from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.transport.websocket.transport import WebsocketTransport
 
 REQUIRED_NODE_MAJOR = 16
 
@@ -133,38 +129,43 @@ async def test_ping_with_js_node():
     print("--- JS stdout (partial) ---\n" + "".join(captured_out)[-2000:])
     print("--- JS stderr (partial) ---\n" + "".join(captured_err)[-2000:])
 
-    # Set up Python host
+    # Set up Python host using new_host() factory - same approach as test-plans
+    # This properly handles WebSocket transport for dialing
     key_pair = create_new_key_pair()
-    py_peer_id = ID.from_pubkey(key_pair.public_key)
-    peer_store = PeerStore()
-    peer_store.add_key_pair(py_peer_id, key_pair)
-
-    # Use Noise to match JS libp2p defaults
-    # Noise protocol requires X25519 keys for static key (as per Noise spec)
     noise_key_pair = create_new_x25519_key_pair()
-    noise_transport = NoiseTransport(
-        libp2p_keypair=key_pair,
-        noise_privkey=noise_key_pair.private_key,
-        early_data=None,
+
+    # Create security options with Noise (matching JS libp2p defaults)
+    sec_opt = {
+        NOISE_PROTOCOL_ID: NoiseTransport(
+            libp2p_keypair=key_pair,
+            noise_privkey=noise_key_pair.private_key,
+            early_data=None,
+        )
+    }
+
+    # Create muxer options with Yamux (matching JS libp2p defaults)
+    muxer_opt = {TProtocol("/yamux/1.0.0"): Yamux}
+
+    # Use new_host() factory with WebSocket listen address to register transport
+    # This is the pattern used in test-plans for WS dialing
+    ws_listen_addr = Multiaddr("/ip4/0.0.0.0/tcp/0/ws")
+    host = new_host(
+        key_pair=key_pair,
+        sec_opt=sec_opt,
+        muxer_opt=muxer_opt,
+        listen_addrs=[ws_listen_addr],
     )
-    upgrader = TransportUpgrader(
-        secure_transports_by_protocol={TProtocol(NOISE_PROTOCOL_ID): noise_transport},
-        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
-    )
-    transport = WebsocketTransport(upgrader)
-    swarm = Swarm(py_peer_id, peer_store, upgrader, transport)
-    host = BasicHost(swarm)
 
     # Connect to JS node
     peer_info = PeerInfo(peer_id, [maddr])
 
     # Add peer info to peerstore before connecting
-    peer_store.add_addrs(peer_id, [maddr], 60)  # 60 second TTL
+    host.get_peerstore().add_addrs(peer_id, [maddr], 60)  # 60 second TTL
 
     print(f"Python trying to connect to: {peer_info}")
 
     # Use the host as a context manager
-    async with host.run(listen_addrs=[]):
+    async with host.run(listen_addrs=[ws_listen_addr]):
         # Give the host time to fully start
         await trio.sleep(2)
 
@@ -192,9 +193,12 @@ async def test_ping_with_js_node():
 
         assert host.get_network().connections.get(peer_id) is not None
 
-        # Ping protocol
+        # Ping protocol - libp2p ping echoes back whatever is sent
+        # The protocol uses 32 random bytes, but we test with a simple message
         with trio.fail_after(30):
             stream = await host.new_stream(peer_id, [TProtocol("/ipfs/ping/1.0.0")])
-            await stream.write(b"ping")
-            data = await stream.read(4)
-            assert data == b"pong"
+            ping_data = b"ping"
+            await stream.write(ping_data)
+            data = await stream.read(len(ping_data))
+            # Ping protocol echoes back the same data
+            assert data == ping_data, f"Expected echo of {ping_data!r}, got {data!r}"
