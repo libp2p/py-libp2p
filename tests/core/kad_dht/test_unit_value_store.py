@@ -116,7 +116,7 @@ class TestValueStore:
         expired_validity = time.time() - 1  # 1 second ago
 
         # Manually insert expired value
-        record = make_put_record(key.decode("utf-8"), value)
+        record = make_put_record(key, value)
         store.store[key] = (record, expired_validity)
 
         retrieved_value = store.get(key)
@@ -172,7 +172,7 @@ class TestValueStore:
         value = b"test_value"
         expired_validity = time.time() - 1
 
-        record = make_put_record(key.decode("utf-8"), value)
+        record = make_put_record(key, value)
         # Manually insert expired value
         store.store[key] = (record, expired_validity)
 
@@ -205,8 +205,8 @@ class TestValueStore:
         value = b"value"
         expired_validity = time.time() - 1
 
-        record2 = make_put_record(key2.decode("utf-8"), value)
-        record3 = make_put_record(key3.decode("utf-8"), value)
+        record2 = make_put_record(key2, value)
+        record3 = make_put_record(key3, value)
 
         store.put(key1, value)  # Valid
         store.store[key2] = (record2, expired_validity)  # Expired
@@ -233,7 +233,7 @@ class TestValueStore:
         # Valid expiration
         store.put(key2, value, validity=time.time() + 3600)
         # Expired
-        record3 = make_put_record(key3.decode("utf-8"), value)
+        record3 = make_put_record(key3, value)
         store.store[key3] = (record3, time.time() - 1)
 
         expired_count = store.cleanup_expired()
@@ -263,7 +263,7 @@ class TestValueStore:
         store.put(key1, value)
         store.put(key2, value)
 
-        record3 = make_put_record(key3.decode("utf-8"), value)
+        record3 = make_put_record(key3, value)
         store.store[key3] = (record3, time.time() - 1)  # Expired
 
         keys = store.get_keys()
@@ -292,7 +292,7 @@ class TestValueStore:
         store.put(key1, value)
         store.put(key2, value)
 
-        record3 = make_put_record(key3.decode("utf-8"), value)
+        record3 = make_put_record(key3, value)
         store.store[key3] = (record3, time.time() - 1)  # Expired
 
         size = store.size()
@@ -397,9 +397,9 @@ class TestValueStore:
         value = b"value"
         current_time = time.time()
 
-        record1 = make_put_record(key1.decode("utf-8"), value)
-        record2 = make_put_record(key2.decode("utf-8"), value)
-        record3 = make_put_record(key3.decode("utf-8"), value)
+        record1 = make_put_record(key1, value)
+        record2 = make_put_record(key2, value)
+        record3 = make_put_record(key3, value)
         # Just expired
         store.store[key1] = (record1, current_time - 0.001)
         # Valid for a longer time to account for test execution time
