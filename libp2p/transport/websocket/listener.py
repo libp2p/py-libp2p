@@ -18,6 +18,7 @@ except ImportError:
     WebSocketServer = None  # type: ignore
 
 from libp2p.abc import IListener
+from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
@@ -247,24 +248,25 @@ class WebsocketListener(IListener):
             # Store the server for later cleanup
             self._server = server_info
 
-            # Extract the actual listening port from the server
-            # trio_websocket's WebSocketServer has a 'port' attribute
+            # Extract the actual listening address and port from the server socket
+            # This ensures we get the real bound address, especially for port 0 or DNS
+            actual_host = host
             actual_port = port
-            if port == 0 and server_info is not None:
-                # Port was 0, get the actual assigned port from the server
-                if hasattr(server_info, "port"):
-                    actual_port = server_info.port
-                elif hasattr(server_info, "socket"):
-                    # Fallback: get port from socket
+            if server_info is not None:
+                # Try to get actual bound address from socket
+                if hasattr(server_info, "socket"):
                     sock = server_info.socket
                     if hasattr(sock, "getsockname"):
-                        _, actual_port = sock.getsockname()
-                else:
-                    # Last resort: use original port (shouldn't happen)
+                        sock_addr, sock_port = sock.getsockname()
+                        actual_host = sock_addr
+                        actual_port = sock_port
+                elif hasattr(server_info, "port"):
+                    # If we can't get socket, at least get the port
+                    actual_port = server_info.port
+                elif port == 0:
+                    # Port was 0 but we can't determine actual port
                     logger.warning("Could not determine actual port, using original")
                     actual_port = port
-            else:
-                actual_port = port
 
             # Create new multiaddr with actual port
             if proto_info.is_wss:
@@ -272,20 +274,35 @@ class WebsocketListener(IListener):
             else:
                 protocol_part = "/ws"
 
-            # Determine IP version from original multiaddr
-            if "ip4" in str(proto_info.rest_multiaddr):
-                self._listen_maddr = Multiaddr(
-                    f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
-                )
-            elif "ip6" in str(proto_info.rest_multiaddr):
-                self._listen_maddr = Multiaddr(
-                    f"/ip6/{host}/tcp/{actual_port}{protocol_part}"
-                )
-            else:
-                # Default to IPv4
-                self._listen_maddr = Multiaddr(
-                    f"/ip4/{host}/tcp/{actual_port}{protocol_part}"
-                )
+            # Determine IP version from actual bound address
+            # Use IPv4 or IPv6 based on actual socket address, not original multiaddr
+            try:
+                # Check if actual_host is an IPv6 address
+                if ":" in actual_host:
+                    self._listen_maddr = Multiaddr(
+                        f"/ip6/{actual_host}/tcp/{actual_port}{protocol_part}"
+                    )
+                else:
+                    # IPv4 address
+                    self._listen_maddr = Multiaddr(
+                        f"/ip4/{actual_host}/tcp/{actual_port}{protocol_part}"
+                    )
+            except Exception as e:
+                # Fallback: use original multiaddr structure if socket info unavailable
+                logger.warning(f"Could not create listen address from socket: {e}")
+                if "ip4" in str(proto_info.rest_multiaddr):
+                    self._listen_maddr = Multiaddr(
+                        f"/ip4/{actual_host}/tcp/{actual_port}{protocol_part}"
+                    )
+                elif "ip6" in str(proto_info.rest_multiaddr):
+                    self._listen_maddr = Multiaddr(
+                        f"/ip6/{actual_host}/tcp/{actual_port}{protocol_part}"
+                    )
+                else:
+                    # Default to IPv4
+                    self._listen_maddr = Multiaddr(
+                        f"/ip4/{actual_host}/tcp/{actual_port}{protocol_part}"
+                    )
 
             logger.info(f"WebSocket listener started on {self._listen_maddr}")
             return True
@@ -316,20 +333,24 @@ class WebsocketListener(IListener):
             # Track connection
             self._track_connection(conn)
 
+            # Wrap connection in RawConnection before passing to handler
+            # The handler (Swarm's conn_handler) expects IRawConnection,
+            # not ReadWriteCloser. This matches the pattern used in dial() method
+            raw_conn = RawConnection(conn, False)  # False for non-initiator (inbound)
+
             # Upgrade connection
             # The handler (Swarm's conn_handler) will:
-            # 1. Wrap connection in RawConnection
-            # 2. Upgrade security (multistream negotiation)
-            # 3. Upgrade to muxed connection
-            # 4. Add connection to swarm and wait for service to finish
+            # 1. Upgrade security (multistream negotiation)
+            # 2. Upgrade to muxed connection
+            # 3. Add connection to swarm and wait for service to finish
             try:
-                await self._handler(conn)
+                await self._handler(raw_conn)
             except Exception as e:
                 logger.error(f"Connection upgrade failed: {e}")
                 self._failed_connections += 1
                 # Ensure connection is closed on failure
                 try:
-                    await conn.close()
+                    await raw_conn.close()
                 except Exception:
                     pass  # Ignore errors during cleanup
             finally:
