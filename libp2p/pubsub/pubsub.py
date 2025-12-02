@@ -797,8 +797,9 @@ class Pubsub(Service, IPubsub):
         cached_result = self.validation_cache.get(msg_id)
         if cached_result is not None:
             if not cached_result.is_valid:
+                error_msg = cached_result.error_message or "unknown error"
                 raise ValidationError(
-                    f"Cached validation failed for msg={msg}: {cached_result.error_message}"
+                    f"Cached validation failed for msg={msg}: {error_msg}"
                 )
             return
 

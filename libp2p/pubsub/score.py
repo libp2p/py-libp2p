@@ -370,7 +370,7 @@ class PeerScorer:
         return self.score(peer, topics) >= self.params.accept_px_threshold
 
     # ---- Observability ----
-    def get_score_stats(self, peer: ID, topic: str) -> dict[str, float]:
+    def get_score_stats(self, peer: ID, topic: str) -> dict[str, float | str]:
         """
         Get detailed score statistics for a peer in a specific topic.
 

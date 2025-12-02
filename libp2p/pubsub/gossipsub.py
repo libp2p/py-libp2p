@@ -752,9 +752,7 @@ class GossipSub(IPubsubRouter, Service):
                 self.scorer is not None
                 and num_mesh_peers_in_topic >= effective_degree_low
             ):
-                grafted_peers = self._perform_opportunistic_grafting(
-                    topic, peers_to_graft
-                )
+                self._perform_opportunistic_grafting(topic, peers_to_graft)
 
             if num_mesh_peers_in_topic > effective_degree_high:
                 # Enhanced mesh pruning with score-based selection
@@ -1424,12 +1422,17 @@ class GossipSub(IPubsubRouter, Service):
             if peer_id in self.pubsub.peers:
                 stream = self.pubsub.peers[peer_id]
                 # Get the remote address from the connection
-                remote_addr = stream.muxed_conn.conn.remote_addr
-                if remote_addr:
-                    # Extract IP from multiaddr
-                    ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
-                    if ip_str:
-                        self.scorer.add_peer_ip(peer_id, ip_str)
+                # Note: Accessing connection through muxed_conn may vary
+                muxed_conn = stream.muxed_conn
+                if hasattr(muxed_conn, "conn") and hasattr(
+                    muxed_conn.conn, "remote_addr"
+                ):
+                    remote_addr = muxed_conn.conn.remote_addr
+                    if remote_addr:
+                        # Extract IP from multiaddr
+                        ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
+                        if ip_str:
+                            self.scorer.add_peer_ip(peer_id, ip_str)
         except Exception as e:
             logger.debug("Failed to track IP for peer %s: %s", peer_id, e)
 
@@ -1520,6 +1523,7 @@ class GossipSub(IPubsubRouter, Service):
         if self.scorer is None:
             return 1.0
 
+        scorer = self.scorer  # Type narrowing
         try:
             # Get all peers in mesh
             all_mesh_peers: set[ID] = set()
@@ -1534,7 +1538,7 @@ class GossipSub(IPubsubRouter, Service):
             positive_scores = 0
             for peer in all_mesh_peers:
                 # Use empty topic list for overall score
-                score = self.scorer.score(peer, [])
+                score = scorer.score(peer, [])
                 total_score += score
                 if score > 0:
                     positive_scores += 1
@@ -1673,9 +1677,10 @@ class GossipSub(IPubsubRouter, Service):
 
         # Count unique IPs in mesh
         unique_ips = set()
-        for peer in mesh_peers:
-            if peer in self.scorer.ip_by_peer:
-                unique_ips.add(self.scorer.ip_by_peer[peer])
+        if self.scorer is not None:
+            for peer in mesh_peers:
+                if peer in self.scorer.ip_by_peer:
+                    unique_ips.add(self.scorer.ip_by_peer[peer])
 
         # If diversity is too low, try to improve it
         if len(unique_ips) < self.min_mesh_diversity_ips:
@@ -1701,14 +1706,18 @@ class GossipSub(IPubsubRouter, Service):
 
         # Find candidates from different IPs
         candidates = []
+        if self.scorer is None:
+            return
+
+        scorer = self.scorer  # Type narrowing
         for peer in self.pubsub.peer_topics[topic]:
             if peer in self.mesh[topic]:
                 continue  # Already in mesh
 
-            if peer not in self.scorer.ip_by_peer:
+            if peer not in scorer.ip_by_peer:
                 continue  # No IP info
 
-            peer_ip = self.scorer.ip_by_peer[peer]
+            peer_ip = scorer.ip_by_peer[peer]
             if peer_ip not in current_ips:
                 # This peer would add IP diversity
                 candidates.append(peer)
@@ -1718,7 +1727,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Select best candidates based on score
         candidates_with_scores = [
-            (peer, self.scorer.score(peer, [topic])) for peer in candidates
+            (peer, scorer.score(peer, [topic])) for peer in candidates
         ]
         candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -1728,7 +1737,7 @@ class GossipSub(IPubsubRouter, Service):
             if grafted >= 2:
                 break
 
-            if score > self.scorer.params.graylist_threshold:
+            if score > scorer.params.graylist_threshold:
                 self.mesh[topic].add(peer)
                 # Note: In real implementation, we'd send GRAFT message
                 logger.debug(
@@ -1806,12 +1815,13 @@ class GossipSub(IPubsubRouter, Service):
                     self.scorer.on_join_mesh(candidate, topic)
                 grafted_count += 1
 
-                logger.debug(
-                    "Opportunistically grafted peer %s to topic %s (score: %.2f)",
-                    candidate,
-                    topic,
-                    self.scorer.score(candidate, [topic]),
-                )
+                if self.scorer is not None:
+                    logger.debug(
+                        "Opportunistically grafted peer %s to topic %s (score: %.2f)",
+                        candidate,
+                        topic,
+                        self.scorer.score(candidate, [topic]),
+                    )
 
             return grafted_count
 
@@ -1849,9 +1859,10 @@ class GossipSub(IPubsubRouter, Service):
         threshold = max(
             threshold, min_score * 1.1
         )  # At least slightly better than worst peer
-        threshold = max(
-            threshold, self.scorer.params.gossip_threshold
-        )  # At least gossip threshold
+        if self.scorer is not None:
+            threshold = max(
+                threshold, self.scorer.params.gossip_threshold
+            )  # At least gossip threshold
 
         return threshold
 
@@ -1869,10 +1880,11 @@ class GossipSub(IPubsubRouter, Service):
         if self.pubsub is None or self.scorer is None:
             return []
 
+        scorer = self.scorer  # Type narrowing
         if topic not in self.pubsub.peer_topics:
             return []
 
-        candidates = []
+        candidates: list[tuple[ID, float]] = []
 
         for peer in self.pubsub.peer_topics[topic]:
             if peer in current_mesh:
@@ -1885,7 +1897,7 @@ class GossipSub(IPubsubRouter, Service):
                 continue  # Peer is in backoff
 
             # Check if peer meets score threshold
-            peer_score = self.scorer.score(peer, [topic])
+            peer_score = scorer.score(peer, [topic])
             if peer_score >= threshold:
                 candidates.append((peer, peer_score))
 
@@ -1943,20 +1955,23 @@ class GossipSub(IPubsubRouter, Service):
             return []
 
         # Get current IPs in mesh
-        current_ips = set()
-        for peer in self.mesh[topic]:
-            if peer in self.scorer.ip_by_peer:
-                current_ips.add(self.scorer.ip_by_peer[peer])
+        current_ips: set[str] = set()
+        scorer = self.scorer
+        if scorer is not None:
+            for peer in self.mesh[topic]:
+                if peer in scorer.ip_by_peer:
+                    current_ips.add(scorer.ip_by_peer[peer])
 
-        selected = []
+        selected: list[ID] = []
 
         # Prioritize candidates from new IPs
-        for peer_id, score in candidates:
-            if len(selected) >= max_grafts:
-                break
+        if scorer is not None:
+            for peer_id, score in candidates:
+                if len(selected) >= max_grafts:
+                    break
 
-            if peer_id in self.scorer.ip_by_peer:
-                peer_ip = self.scorer.ip_by_peer[peer_id]
+                if peer_id in scorer.ip_by_peer:
+                    peer_ip = scorer.ip_by_peer[peer_id]
                 if peer_ip not in current_ips:
                     # This peer would add IP diversity
                     selected.append(peer_id)
@@ -1966,7 +1981,8 @@ class GossipSub(IPubsubRouter, Service):
 
     def _select_peers_for_pruning(self, topic: str, num_to_prune: int) -> list[ID]:
         """
-        Select peers to prune from mesh using sophisticated scoring and diversity criteria.
+        Select peers to prune from mesh using sophisticated scoring and
+        diversity criteria.
 
         :param topic: The topic to prune peers from
         :param num_to_prune: Number of peers to prune
@@ -2010,7 +2026,7 @@ class GossipSub(IPubsubRouter, Service):
         peer_scores.sort(key=lambda x: x[1])
 
         # Apply pruning strategy based on Gossipsub 2.0 principles
-        selected_for_pruning = []
+        selected_for_pruning: list[ID] = []
 
         # Strategy 1: Always prune peers below graylist threshold
         graylist_threshold = self.scorer.params.graylist_threshold
@@ -2057,29 +2073,30 @@ class GossipSub(IPubsubRouter, Service):
         if self.scorer is None or num_needed <= 0:
             return []
 
+        scorer = self.scorer  # Type narrowing
         # Count IPs after removing already selected peers
-        ip_counts = defaultdict(int)
-        remaining_peers = []
+        ip_counts: defaultdict[str, int] = defaultdict(int)
+        remaining_peers: list[tuple[ID, float]] = []
 
         for peer, score in peer_scores:
             if peer not in already_selected:
                 remaining_peers.append((peer, score))
-                if peer in self.scorer.ip_by_peer:
-                    ip = self.scorer.ip_by_peer[peer]
+                if peer in scorer.ip_by_peer:
+                    ip = scorer.ip_by_peer[peer]
                     ip_counts[ip] += 1
 
         # Find IPs with excessive peers (more than 2 peers per IP)
         excessive_ips = {ip: count for ip, count in ip_counts.items() if count > 2}
 
-        selected = []
+        selected: list[ID] = []
 
         # Prune from excessive IPs, preferring lower-scoring peers
         for peer, score in remaining_peers:
             if len(selected) >= num_needed:
                 break
 
-            if peer in self.scorer.ip_by_peer:
-                peer_ip = self.scorer.ip_by_peer[peer]
+            if peer in scorer.ip_by_peer:
+                peer_ip = scorer.ip_by_peer[peer]
                 if peer_ip in excessive_ips and excessive_ips[peer_ip] > 2:
                     selected.append(peer)
                     excessive_ips[peer_ip] -= 1
@@ -2122,7 +2139,8 @@ class GossipSub(IPubsubRouter, Service):
             return  # Don't replace if we're below target
 
         # Find the worst mesh peer
-        peer_scores = [(p, self.scorer.score(p, [topic])) for p in mesh_peers]
+        scorer = self.scorer  # Type narrowing
+        peer_scores = [(p, scorer.score(p, [topic])) for p in mesh_peers]
         peer_scores.sort(key=lambda x: x[1])  # Sort by score ascending
         worst_peer, worst_score = peer_scores[0]
 
@@ -2142,7 +2160,7 @@ class GossipSub(IPubsubRouter, Service):
             if not self.supports_scoring(peer):
                 continue
 
-            peer_score = self.scorer.score(peer, [topic])
+            peer_score = scorer.score(peer, [topic])
             if peer_score > best_score + 0.1:  # Require meaningful improvement
                 best_replacement = peer
                 best_score = peer_score
@@ -2150,7 +2168,8 @@ class GossipSub(IPubsubRouter, Service):
         # Perform replacement if beneficial
         if best_replacement is not None:
             logger.debug(
-                "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) in topic %s",
+                "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) "
+                "in topic %s",
                 worst_peer,
                 worst_score,
                 best_replacement,
@@ -2158,8 +2177,8 @@ class GossipSub(IPubsubRouter, Service):
                 topic,
             )
 
-            # Note: In a full implementation, we'd send PRUNE to worst_peer and GRAFT to best_replacement
-            # For now, we just log the decision
+            # Note: In a full implementation, we'd send PRUNE to worst_peer
+            # and GRAFT to best_replacement. For now, we just log the decision
 
     def _optimize_mesh_connectivity(self, topic: str) -> None:
         """
@@ -2183,15 +2202,14 @@ class GossipSub(IPubsubRouter, Service):
         """
         current_time = time.time()
 
-        # Clean up old equivocation detection entries (older than 5 minutes)
-        cutoff_time = current_time - 300
-        old_keys = [
-            key
-            for key, msg in self.equivocation_detection.items()
-            if hasattr(msg, "_timestamp") and msg._timestamp < cutoff_time
-        ]
-        for key in old_keys:
-            del self.equivocation_detection[key]
+        # Clean up old equivocation detection entries
+        # Note: Message objects don't have _timestamp, so we'll just clear old entries
+        # based on a simple size limit instead
+        if len(self.equivocation_detection) > 1000:
+            # Keep only the most recent 500 entries
+            keys_to_remove = list(self.equivocation_detection.keys())[:-500]
+            for key in keys_to_remove:
+                del self.equivocation_detection[key]
 
         # Clean up old rate limiting data
         for peer_id in list(self.message_rate_limits.keys()):
