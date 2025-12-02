@@ -91,9 +91,22 @@ def is_connection_direct(host, peer_id: ID) -> bool:
 
         # Check if any connection is direct (not relayed)
         for conn in connections:
-            addrs = conn.get_transport_addresses()
-            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
-                return True
+            try:
+                addrs = conn.get_transport_addresses()
+                if addrs and any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                    return True
+            except Exception:
+                # If we can't get addresses, try checking the raw connection
+                try:
+                    if hasattr(conn, 'muxed_conn') and hasattr(conn.muxed_conn, 'raw_conn'):
+                        raw_conn = conn.muxed_conn.raw_conn
+                        raw_addrs = raw_conn.get_transport_addresses()
+                        if raw_addrs and any(not str(addr).startswith("/p2p-circuit") for addr in raw_addrs):
+                            return True
+                except Exception:
+                    pass
+                # If we can't verify, assume it's relayed
+                continue
 
         return False
     except Exception:
@@ -304,12 +317,19 @@ async def setup_dialer_node(
                             # Wait a bit more
                             await trio.sleep(2)
 
-                            # Check final connection type
-                            is_direct = is_connection_direct(host, listener_peer_id)
+                            # Check final connection type using DCUtR's verification
+                            # This is more reliable than our simple check
+                            is_direct = await dcutr_protocol._verify_direct_connection(listener_peer_id)
+                            if not is_direct:
+                                # Fallback to our check
+                                is_direct = is_connection_direct(host, listener_peer_id)
                             connection_type = "DIRECT" if is_direct else "RELAYED"
                             logger.info(
                                 f"Final connection type to listener: {connection_type}"
                             )
+                            
+                            # Also check what the stream actually uses
+                            # We'll verify this when we open the stream
 
                             # Step 3: Open a stream and send a message
                             logger.info(
@@ -324,10 +344,36 @@ async def setup_dialer_node(
                                 listener_peer_id, [EXAMPLE_PROTOCOL_ID]
                             )
                             if stream:
+                                # Verify the actual stream connection type
+                                actual_connection_type = "RELAYED"  # Default
+                                try:
+                                    conn = stream.muxed_conn.raw_conn
+                                    addrs = conn.get_transport_addresses()
+                                    if addrs:
+                                        # Check if any address indicates circuit
+                                        if any("/p2p-circuit" in str(addr) for addr in addrs):
+                                            actual_connection_type = "RELAYED"
+                                        elif any("127.0.0.1" in str(addr) and "8000" in str(addr) for addr in addrs):
+                                            # If it's connecting to relay port, it's likely relayed
+                                            actual_connection_type = "RELAYED"
+                                        else:
+                                            actual_connection_type = "DIRECT"
+                                except Exception:
+                                    pass
+                                
                                 logger.info(
                                     f"✓ Opened stream to listener with protocol "
-                                    f"{EXAMPLE_PROTOCOL_ID} (via {connection_type} connection)"
+                                    f"{EXAMPLE_PROTOCOL_ID} (detected: {actual_connection_type}, "
+                                    f"reported: {connection_type})"
                                 )
+                                
+                                # Update connection type based on actual stream
+                                if actual_connection_type != connection_type:
+                                    logger.warning(
+                                        f"Connection type mismatch: reported {connection_type} "
+                                        f"but stream indicates {actual_connection_type}"
+                                    )
+                                    connection_type = actual_connection_type
 
                                 # Send a message
                                 msg = f"Hello from dialer {peer_id}!".encode()

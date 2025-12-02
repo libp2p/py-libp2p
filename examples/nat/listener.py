@@ -65,9 +65,22 @@ async def handle_example_protocol(stream: INetStream) -> None:
     try:
         conn = stream.muxed_conn.raw_conn
         addrs = conn.get_transport_addresses()
-        is_direct = any(not str(addr).startswith("/p2p-circuit") for addr in addrs)
-    except Exception:
-        pass
+        if addrs:
+            is_direct = any(not str(addr).startswith("/p2p-circuit") for addr in addrs)
+        else:
+            # If no addresses, check connection string or assume relayed
+            # In local testing, connections might not have addresses in peerstore
+            # Check if it's a circuit connection by inspecting the connection
+            conn_str = str(conn)
+            if "/p2p-circuit" in conn_str:
+                is_direct = False
+            else:
+                # Can't determine, default to relayed for safety
+                is_direct = False
+    except Exception as e:
+        logger.debug("Could not determine connection type: %s", str(e))
+        # Default to relayed if we can't determine
+        is_direct = False
     
     connection_type = "DIRECT" if is_direct else "RELAYED"
     logger.info(
