@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
@@ -13,7 +12,10 @@ from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
-from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
+from libp2p.transport.websocket.multiaddr_utils import (
+    ParsedWebSocketMultiaddr,
+    parse_websocket_multiaddr,
+)
 
 from .autotls import AutoTLSConfig, AutoTLSManager, initialize_autotls
 from .connection import P2PWebSocketConnection
@@ -533,7 +535,7 @@ class WebsocketTransport(ITransport):
                 self._current_connections -= 1
 
     async def _create_connection(
-        self, proto_info: Any, proxy_url: str | None = None
+        self, proto_info: ParsedWebSocketMultiaddr, proxy_url: str | None = None
     ) -> P2PWebSocketConnection:
         """
         Create a new WebSocket connection.
@@ -643,7 +645,7 @@ class WebsocketTransport(ITransport):
             raise OpenConnectionError(f"Failed to connect to {ws_url}: {str(e)}")
 
     async def _create_direct_connection(
-        self, proto_info: Any, ssl_context: ssl.SSLContext | None
+        self, proto_info: ParsedWebSocketMultiaddr, ssl_context: ssl.SSLContext | None
     ) -> P2PWebSocketConnection:
         """Create a direct WebSocket connection."""
         # Extract host and port from the rest_multiaddr
@@ -691,7 +693,10 @@ class WebsocketTransport(ITransport):
             return conn
 
     async def _create_proxy_connection(
-        self, proto_info: Any, proxy_url: str, ssl_context: ssl.SSLContext | None
+        self,
+        proto_info: ParsedWebSocketMultiaddr,
+        proxy_url: str,
+        ssl_context: ssl.SSLContext | None,
     ) -> P2PWebSocketConnection:
         """
         Create a WebSocket connection through SOCKS proxy.
