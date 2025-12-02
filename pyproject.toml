@@ -61,6 +61,7 @@ identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
+floodsub-demo = "examples.pubsub.floodsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 
@@ -142,7 +143,10 @@ warn_unused_ignores = false
 addopts = "-v --showlocals --durations 50 --maxfail 10"
 log_date_format = "%m-%d %H:%M:%S"
 log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
-markers = ["slow: mark test as slow"]
+markers = [
+    "slow: mark test as slow",
+    "flaky: mark test as flaky (may fail intermittently)",
+]
 xfail_strict = true
 
 [tool.towncrier]

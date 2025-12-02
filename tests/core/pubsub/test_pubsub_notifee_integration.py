@@ -9,7 +9,7 @@ from tests.utils.factories import PubsubFactory
 
 @pytest.mark.trio
 async def test_connected_enqueues_and_adds_peer():
-    async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
+    async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         # Wait until peer is added via queue processing
@@ -21,7 +21,7 @@ async def test_connected_enqueues_and_adds_peer():
 
 @pytest.mark.trio
 async def test_disconnected_enqueues_and_removes_peer():
-    async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
+    async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         # Ensure present first
@@ -39,7 +39,7 @@ async def test_disconnected_enqueues_and_removes_peer():
 @pytest.mark.trio
 async def test_channel_closed_is_swallowed_in_notifee(monkeypatch) -> None:
     # Ensure PubsubNotifee catches BrokenResourceError from its send channel
-    async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
+    async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         # Find the PubsubNotifee registered on the network
         from libp2p.pubsub.pubsub_notifee import PubsubNotifee
 
@@ -66,7 +66,7 @@ async def test_channel_closed_is_swallowed_in_notifee(monkeypatch) -> None:
 
 @pytest.mark.trio
 async def test_duplicate_connection_does_not_duplicate_peer_state():
-    async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
+    async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         await connect(p0.host, p1.host)
         await p0.wait_until_ready()
         with trio.fail_after(1.0):
@@ -80,7 +80,7 @@ async def test_duplicate_connection_does_not_duplicate_peer_state():
 
 @pytest.mark.trio
 async def test_blacklist_blocks_peer_added_by_notifee():
-    async with PubsubFactory.create_batch_with_floodsub(2) as (p0, p1):
+    async with PubsubFactory.create_batch_with_gossipsub(2) as (p0, p1):
         # Blacklist before connecting
         p0.add_to_blacklist(p1.my_id)
         await connect(p0.host, p1.host)

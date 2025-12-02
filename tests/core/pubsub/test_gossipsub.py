@@ -604,7 +604,7 @@ async def test_sparse_connect():
 async def test_connect_some_with_fewer_hosts_than_degree():
     """Test connect_some when there are fewer hosts than degree."""
     # Create 3 hosts with degree=5
-    async with PubsubFactory.create_batch_with_floodsub(3) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(3) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 5
 
@@ -625,7 +625,7 @@ async def test_connect_some_with_fewer_hosts_than_degree():
 async def test_connect_some_degree_limit_enforced():
     """Test that connect_some enforces degree limits and creates expected topology."""
     # Test with small network where we can verify exact behavior
-    async with PubsubFactory.create_batch_with_floodsub(6) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(6) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 2
 
@@ -673,7 +673,7 @@ async def test_connect_some_degree_limit_enforced():
 async def test_connect_some_degree_zero():
     """Test edge case: degree=0 should result in no connections."""
     # Create 5 hosts with degree=0
-    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(5) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 0
 
@@ -693,7 +693,7 @@ async def test_connect_some_degree_zero():
 async def test_connect_some_negative_degree():
     """Test edge case: negative degree should be handled gracefully."""
     # Create 5 hosts with degree=-1
-    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(5) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = -1
 
@@ -712,7 +712,7 @@ async def test_connect_some_negative_degree():
 @pytest.mark.trio
 async def test_sparse_connect_degree_zero():
     """Test sparse_connect with degree=0."""
-    async with PubsubFactory.create_batch_with_floodsub(8) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(8) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 0
 
@@ -748,7 +748,7 @@ async def test_empty_host_list():
 @pytest.mark.trio
 async def test_single_host():
     """Test edge case: single host should be handled gracefully."""
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
 
         # All functions should handle single host gracefully
