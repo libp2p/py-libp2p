@@ -662,7 +662,6 @@ async def test_yamux_stress_ping():
 
 
 @pytest.mark.trio
-@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_quic_concurrent_streams():
     """Test QUIC handles 20-50 concurrent streams (focused on transport layer only)."""
     from libp2p.crypto.secp256k1 import create_new_key_pair
