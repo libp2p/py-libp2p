@@ -22,7 +22,7 @@ from examples.advanced.network_discover import get_optimal_binding_address
 from libp2p import (
     new_host,
 )
-from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -75,6 +75,141 @@ async def send_ping(stream: INetStream) -> None:
 
     except Exception as e:
         print(f"error occurred : {e}")
+
+def pubkey_to_protobuf_bytes(pub: PublicKey) -> bytes:
+    return pub.serialize()  # already protobuf-encoded
+
+def encode_auth_params(params: dict) -> str:
+    # JS does "key=value" pairs, comma-separated
+    parts = []
+    for k, v in params.items():
+        parts.append(f'{k}="{v}"')
+    return ", ".join(parts)
+
+import re
+
+def decode_auth_header(header: str) -> dict:
+    # strip scheme prefix
+    if header.startswith("libp2p-PeerID "):
+        header = header[len("libp2p-PeerID "):]
+
+    # match key="value" patterns safely
+    pattern = r'(\w[\w-]*)="([^"]*)"'
+    matches = re.findall(pattern, header)
+
+    return {k: v for k, v in matches}
+
+PEER_ID_AUTH_SCHEME = "libp2p-PeerID="
+
+def make_signature_payload(fields: list[tuple[str, bytes | str]]) -> bytes:
+    out = bytearray()
+    out.extend(PEER_ID_AUTH_SCHEME.encode())
+    for k, v in fields:
+        out.extend(k.encode())
+        if isinstance(v, str):
+            out.extend(v.encode())
+        else:
+            out.extend(v)
+    return bytes(out)
+
+def pubkey_from_protobuf_bytes(b: bytes) -> PublicKey:
+    pb = PublicKey.deserialize_from_protobuf(b)
+    # Now construct a proper PublicKey instance:
+    key_type = KeyType(pb.key_type)
+    if key_type == KeyType.Ed25519:
+        from libp2p.crypto.ed25519 import Ed25519PublicKey
+        return Ed25519PublicKey(pb.data)
+    else:
+        raise ValueError("Unsupported key type yet")
+
+import base64
+import requests
+from urllib.parse import urlparse
+
+class ClientInitiatedHandshake:
+    def __init__(self, private_key: PrivateKey, hostname: str):
+        self.private_key = private_key
+        self.hostname = hostname
+        self.challenge = os.urandom(32).hex()
+        self.state = "init"
+        self.server_id = None
+
+    def get_challenge_header(self) -> str:
+        self.state = "challenge-server"
+
+        pub_pb = pubkey_to_protobuf_bytes(self.private_key.get_public_key())
+        pub_b64 = base64.urlsafe_b64encode(pub_pb).decode()
+
+        params = encode_auth_params({
+            "challenge-server": self.challenge,
+            "public-key": pub_b64,
+        })
+
+        return f"libp2p-PeerID {params}"
+
+
+    def verify_server(self, header: str) -> str:
+        from libp2p.peer.id import ID
+
+        if self.state != "challenge-server":
+            raise Exception("Handshake order wrong")
+
+        msg = decode_auth_header(header)
+        print("\n\n", msg)
+
+        server_pub_b64 = msg["public-key"]
+        chall_client   = msg["challenge-client"]
+        sig_b64        = msg["sig"]
+
+        server_pub_pb = base64.urlsafe_b64decode(server_pub_b64)
+        server_pub = pubkey_from_protobuf_bytes(server_pub_pb)
+        sig = base64.urlsafe_b64decode(sig_b64)
+        
+        
+        # server_pub_pb = base64.urlsafe_b64decode("CAESIGPVrjE0ugQtRwdZhPaBYrNx3-RhH8Mr8urce9Ue7o76")
+        # server_pub = pubkey_from_protobuf_bytes(server_pub_pb)
+        # sig = base64.urlsafe_b64decode(sig_b64)
+        
+        # print("\n\nawsServer: ", server_pub_pb)
+
+
+        # marshal our public key (protobuf)
+        client_pub_pb = pubkey_to_protobuf_bytes(self.private_key.get_public_key())
+        
+
+        # if not server_pub.verify(payload, sig):
+        #     raise Exception("Server signature invalid")
+        
+        # compute peer id
+        self.server_id = ID.from_pubkey(server_pub)
+        print("\n\nChall client: ", chall_client)
+        # sign back to server
+        
+        # payload = make_signature_payload([
+        #     ("challenge-client=", "Nvz2cjWEvFN1kKfcMZtHrasJzkbCFP0MYZGmVLxIZd8="),
+        #     ("#hostname=", "registration.libp2p.direct6"),            
+        #     ("server-public-key=", server_pub_pb),
+        # ])
+        
+        # print("\n\nHOPE: ", payload)
+        # print([b for b in payload])
+        
+        response_payload = make_signature_payload([
+            ("challenge-client=", chall_client),
+            ("#hostname=", "registration.libp2p.direct6"),            
+            ("server-public-key=", server_pub_pb),
+        ])
+        
+
+        client_sig = self.private_key.sign(response_payload)
+        client_sig_b64 = base64.urlsafe_b64encode(client_sig).decode()
+
+        self.state = "respond-to-server"
+
+        return encode_auth_params({
+            "opaque": msg["opaque"],
+            "sig": client_sig_b64,
+        })
 
 
 async def run(port: int, destination: str, psk: int, transport: str) -> None:
@@ -162,10 +297,6 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 )
                 return key
             
-            def load_rsa_key_pem(pem_path: str, password: bytes | None = None):
-                with open(pem_path, "rb") as fh:
-                    return serialization.load_pem_private_key(fh.read(), password=password, backend=default_backend())
-
             def jwk_from_rsa_private_key(priv_key):
                 pub = priv_key.public_key()
                 numbers = pub.public_numbers()
@@ -423,58 +554,84 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 digest = hashlib.sha256(jwk_json.encode("utf-8")).digest()
                 return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
             
+            def build_sig_message(challenge_client, broker_pubkey_bytes, hostname, client_pubkey_bytes):
+                def varint(n):
+                    out = []
+                    while True:
+                        to_write = n & 0x7f
+                        n >>= 7
+                        if n:
+                            out.append(to_write | 0x80)
+                        else:
+                            out.append(to_write)
+                            break
+                    return bytes(out)
+
+                msg = b"libp2p-PeerID="
+
+                # 1. challenge-client
+                chunk = b"challenge-client=" + challenge_client.encode()
+                msg += chunk + varint(len(chunk))
+
+                # 2. server-public-key
+                chunk = b"server-public-key=" + broker_pubkey_bytes
+                msg += chunk + varint(len(chunk))
+
+                # 3. hostname
+                chunk = b"hostname=" + hostname.encode()
+                msg += chunk + varint(len(chunk))
+
+                return msg
+
             
-            def send_autotls_challenge_libp2p(key_authorization, peer_privkey: PrivateKey, multiaddrs: list):
+            def send_autotls_challenge_libp2p(key_authorization = None, peer_privkey: PrivateKey = None, multiaddrs: list = None):
                 import base64
                 import os
                 import requests
 
                 def base64url_encode(b: bytes) -> str:
                     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
-
                 broker_url = "https://registration.libp2p.direct/v1/_acme-challenge"
 
                 # Fetch challenge from broker (WWW-Authenticate)
                 resp = requests.get(broker_url, timeout=10)
+            
+
                 print(resp.headers)
                 if resp.status_code != 401:
                     raise RuntimeError(f"Expected 401 challenge, got {resp.status_code}")
 
-                www_auth = resp.headers.get("Www-Authenticate", "")
-                print("Raw WWW-Authenticate:", www_auth)
+                auth = resp.headers.get("Www-Authenticate", "")
+                parts = dict(p.strip().split("=", 1) for p in auth.split(","))
+                challenge_client = parts["libp2p-PeerID challenge-client"].strip('"')
+                broker_pubkey_b64 = parts["public-key"].strip('"')
+                opaque = parts["opaque"].strip('"')
 
-                # parse key=value pairs safely
-                parts = {}
-                for part in www_auth.split(","):
-                    if "=" in part:
-                        k, v = part.strip().split("=", 1)
-                        parts[k.strip()] = v.strip('"')
-
-                # now check which key exists
-                challenge_node = parts.get("libp2p-PeerID challenge-client") or parts.get("challenge-client")
-                if not challenge_node:
-                    raise RuntimeError("Could not find challenge node in WWW-Authenticate header")
-
-                broker_pubkey = parts.get("public-key")
-                opaque = parts.get("opaque")
-
-                print("\n\n\nchallenge: ", challenge_node )
-                print("broker: ", broker_pubkey)
-                print("opaque: ", opaque)
-
-                # Random 32-char challenge
-                challenge_server = base64url_encode(os.urandom(24))
-
-                # Signature
-                sig_message = (
-                    f"challenge-node={challenge_node}".encode() +
-                    f"hostname=registration.libp2p.direct".encode() +
-                    f"server-public-key={broker_pubkey}".encode()
+                # Decode broker's public key BASE64 -> BYTES
+                broker_pubkey_bytes = base64.urlsafe_b64decode(
+                    broker_pubkey_b64 + "=="
                 )
-                sig_bytes = peer_privkey.sign(sig_message)
+                peer_pubkey = peer_privkey.get_public_key()
+                # === STEP 2: Build signature ===
+                # Random challenge for server (client challenge)
+                challenge_server = base64url_encode(os.urandom(24))
+                marshalled_pubkey = peer_pubkey._serialize_to_protobuf()
+
+                # SPEC-COMPLIANT signature payload
+
+                sig_payload = [
+                    ("challenge-server", challenge_server),
+                    ("client-public-key", marshalled_pubkey),
+                    ("hostname", "registration.libp2p.direct"),
+                ]
+
+                sig_bytes = peer_privkey.sign(sig_payload)
                 sig_b64 = base64url_encode(sig_bytes)
                 
-                peer_pubkey = peer_privkey.get_public_key()
+                
+                print("\n\n\nchallenge: ", challenge_client )
+                print("broker: ", broker_pubkey_bytes)
+                print("opaque: ", opaque)
 
                 # Authorization header
                 headers = {
@@ -489,28 +646,27 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 }
 
                 payload = {
-                    "value": key_authorization,
-                    "addresses": multiaddrs
+                    "Value": key_authorization,
+                    "Addresses": multiaddrs
                 }
 
-                # POST to broker
-                resp = requests.post(broker_url, json=payload, headers=headers, timeout=10)
-                
                 print("\n\n")
 
-                print("HTTP", resp.status_code)
-                
-                try:
-                    print("Response headers:", resp.headers)
-                    print("Response body:", resp.text)
-                except Exception:
-                    print("Could not decode response body")
-                
-                # order_url = resp.headers["Location"]
+                # === STEP 4: POST with JSON body ===
+                # r2 = requests.post(broker_url, headers=headers, timeout=10)
+                r2 = requests.post(broker_url, json=payload, headers=headers, timeout=10)
+
+                print("HTTP", r2.status_code)
+                print("Headers:", r2.headers)
+                print("Body:", r2.text)
                 
                 print("\n\n")
           
-                resp.raise_for_status()
+                r2.raise_for_status()
+                
+                
+                if r2.status_code == 401:
+                    raise RuntimeError("Signature validation failed at broker")
 
                 # # Extract bearer token
                 # auth_info = resp.headers.get("Authentication-Info", "")
@@ -524,40 +680,90 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
                 # print("Bearer token from broker:", token)
                 # return token
+                
+            def peerid_authenticate(private_key: PrivateKey):
+                
+                url = "https://registration.libp2p.direct/v1/_acme-challenge"
+                hostname = urlparse(url).hostname
+                hs = ClientInitiatedHandshake(private_key, hostname)
+                
+                # print(hs.get_challenge_header(), "\n\n")
+
+                # Step 1 — send challenge
+                header={
+                    "Authorization": hs.get_challenge_header()
+                }
+                print("\nHeader 1: ", header, "\n")
+                resp = requests.options(url, headers=header)
+                
+                # resp = requests.options(url)
+                
+                www = resp.headers.get("Www-Authenticate")
+                if not www:
+                    raise Exception("Missing WWW-Authenticate")
+
+                # Step 2 — verify server and respond
+                print(www)
+                answer ="libp2p-PeerID " + hs.verify_server(www)
+                
+                print("\n\n", answer)
+
+                header={
+                    "Authorization": answer
+                }
+                print("\nHeader 2: ", header, "\n")
+                
+                resp = requests.post(url, headers=header)
+                
+                print("\n\n")
+                print(resp.status_code)
+                print(resp.headers)
+
+                # # extract bearer token
+                # auth_info = resp2.headers.get("Authentication-Info")
+                # bearer = None
+                # if auth_info:
+                #     bearer = decode_auth_header(auth_info).get("bearer")
+
+                # return {
+                #     "peer_id": hs.server_id,
+                #     "bearer": bearer,
+                # }
+            
                         
             priv = generate_rsa_key(2048)
 
             try:
-                acme_new_account_example(priv, contact_emails=["abhinavagarwalla6@gmail.com"])
-                resp, account_url, key, directory = acme_new_account_example(priv, contact_emails=[])
-                print("Success. Account URL:", account_url, "\n")
+                # acme_new_account_example(priv, contact_emails=["abhinavagarwalla6@gmail.com"])
+                # resp, account_url, key, directory = acme_new_account_example(priv, contact_emails=[])
+                # print("Success. Account URL:", account_url, "\n")
                 
-                new_order_response, order_url = acme_new_order_for_peerid(b36_peer_id, directory, priv, account_url)
-                print("New order response: ", new_order_response)
+                # new_order_response, order_url = acme_new_order_for_peerid(b36_peer_id, directory, priv, account_url)
+                # print("New order response: ", new_order_response)
                 
-                jwk = jwk_from_rsa_private_key(priv)
-                jwk_thumprint = compute_jwk_thumbprint(jwk)
-                auth_url = new_order_response["authorizations"][0]
-                finalize_url = new_order_response["finalize"]
+                # jwk = jwk_from_rsa_private_key(priv)
+                # jwk_thumprint = compute_jwk_thumbprint(jwk)
+                # auth_url = new_order_response["authorizations"][0]
+                # finalize_url = new_order_response["finalize"]
                 
-                dns01, key_auth, chall_url = acme_get_dns01_challenge(auth_url, directory, priv, account_url, jwk_thumprint)
+                # dns01, key_auth, chall_url = acme_get_dns01_challenge(auth_url, directory, priv, account_url, jwk_thumprint)
                 
-                print("\n\n")
+                # print("\n\n")
                 
-                print("DNS-01: ", dns01)
-                print("Key-Authorization: ", key_auth)
+                # print("DNS-01: ", dns01)
+                # print("Key-Authorization: ", key_auth)
                 
-                print("\n\n")
+                # print("\n\n")
                 
-                print("orderUrl: ", order_url)
-                print("chalUrl: ", chall_url)
-                print("finalizeUrl: ", finalize_url)
+                # print("orderUrl: ", order_url)
+                # print("chalUrl: ", chall_url)
+                # print("finalizeUrl: ", finalize_url)
                 
-                print("\n\nNOW STARTS THE BROKER THING")
+                # print("\n\nNOW STARTS THE BROKER THING")
                 
-                host_private_key = host.get_private_key()
-                bearer_token = send_autotls_challenge_libp2p(key_auth, host_private_key, [])
-        
+                # bearer_token = send_autotls_challenge_libp2p(key_auth, host_private_key, [])
+                peerid_authenticate(host.get_private_key())
+                print()
                 
             except Exception as e:
                 print("Error:", e)
