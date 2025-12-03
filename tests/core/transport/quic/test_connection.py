@@ -7,6 +7,7 @@ error handling, and concurrent operations.
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from aioquic.quic.events import ConnectionIdIssued
 from multiaddr.multiaddr import Multiaddr
 import trio
 
@@ -551,3 +552,50 @@ async def test_invalid_certificate_verification():
         QUICPeerVerificationError, match="Certificate verification failed"
     ):
         manager.verify_peer_identity(corrupted_cert, peer_id1)
+
+
+@pytest.mark.trio
+async def test_connection_id_issued_notifies_listener():
+    """Test that ConnectionIdIssued events notify listener to register new CID."""
+    # Setup mock transport with listener
+    mock_quic_conn = Mock()
+    mock_quic_conn.next_event.return_value = None
+    mock_quic_conn.datagrams_to_send.return_value = []
+
+    mock_transport = Mock()
+    mock_transport._config = QUICTransportConfig()
+
+    from libp2p.transport.quic.connection_id_registry import ConnectionIDRegistry
+
+    mock_listener = Mock()
+    mock_listener._connection_lock = trio.Lock()
+    mock_listener._registry = ConnectionIDRegistry(mock_listener._connection_lock)
+    mock_transport._listeners = [mock_listener]
+
+    private_key = create_new_key_pair().private_key
+    peer_id = ID.from_pubkey(private_key.get_public_key())
+
+    conn = QUICConnection(
+        quic_connection=mock_quic_conn,
+        remote_addr=("127.0.0.1", 9999),
+        remote_peer_id=None,
+        local_peer_id=peer_id,
+        is_initiator=True,
+        maddr=Multiaddr("/ip4/127.0.0.1/udp/9999/quic"),
+        transport=mock_transport,
+    )
+
+    # Register connection with initial CID
+    initial_cid = b"\x01" * 8
+    await mock_listener._registry.register_connection(
+        initial_cid, conn, ("127.0.0.1", 9999)
+    )
+
+    # Issue new CID
+    new_cid = b"\x02" * 8
+    event = ConnectionIdIssued(connection_id=new_cid)
+    await conn._handle_connection_id_issued(event)
+
+    # Verify listener was notified and registered the new CID
+    conn_found, _, _ = await mock_listener._registry.find_by_connection_id(new_cid)
+    assert conn_found is conn
