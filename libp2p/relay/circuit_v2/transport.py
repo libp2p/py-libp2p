@@ -6,6 +6,7 @@ allowing peers to establish connections through relay nodes.
 """
 
 import logging
+from typing import Any
 
 import multiaddr
 import trio
@@ -15,6 +16,7 @@ from libp2p.abc import (
     IListener,
     INetConn,
     INetStream,
+    IRawConnection,
     ITransport,
 )
 from libp2p.custom_types import (
@@ -44,6 +46,9 @@ from .discovery import (
 from .pb.circuit_pb2 import (
     HopMessage,
 )
+from .performance_tracker import (
+    RelayPerformanceTracker,
+)
 from .protocol import (
     PROTOCOL_ID,
     STREAM_READ_TIMEOUT,
@@ -57,6 +62,63 @@ from .utils import (
 )
 
 logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
+
+
+class TrackedRawConnection(IRawConnection):
+    """
+    Wrapper around RawConnection that tracks circuit closure.
+
+    Automatically calls record_circuit_closed() when the connection is closed.
+    This ensures that active circuit counts are properly decremented when
+    connections are closed, preventing unbounded growth of circuit counts.
+    """
+
+    _wrapped: RawConnection
+    _relay_id: ID
+    _tracker: RelayPerformanceTracker
+    _closed: bool = False
+
+    def __init__(
+        self,
+        wrapped: RawConnection,
+        relay_id: ID,
+        tracker: RelayPerformanceTracker,
+    ) -> None:
+        """
+        Initialize the tracked connection wrapper.
+
+        Args:
+            wrapped: The RawConnection to wrap
+            relay_id: The relay peer ID for tracking
+            tracker: The performance tracker to notify on closure
+
+        """
+        self._wrapped = wrapped
+        self._relay_id = relay_id
+        self._tracker = tracker
+
+    async def close(self) -> None:
+        """Close the connection and record circuit closure."""
+        if not self._closed:
+            self._closed = True
+            await self._wrapped.close()
+            self._tracker.record_circuit_closed(self._relay_id)
+
+    async def write(self, data: bytes) -> None:
+        """Write data to the wrapped connection."""
+        return await self._wrapped.write(data)
+
+    async def read(self, n: int | None = None) -> bytes:
+        """Read data from the wrapped connection."""
+        return await self._wrapped.read(n)
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        """Get remote address from the wrapped connection."""
+        return self._wrapped.get_remote_address()
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to wrapped connection."""
+        return getattr(self._wrapped, name)
 
 
 class CircuitV2Transport(ITransport):
@@ -98,6 +160,13 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        self.relay_counter = 0  # for round robin load balancing
+        # A lock to protect ``relay_counter`` from concurrent access since
+        # ``_select_relay`` may be invoked from multiple tasks concurrently.
+        self._relay_counter_lock = trio.Lock()
+
+        # Performance tracker for intelligent relay selection
+        self.performance_tracker = RelayPerformanceTracker()
 
     async def dial(  # type: ignore[override]
         self,
@@ -176,7 +245,7 @@ class CircuitV2Transport(ITransport):
         dest_info: PeerInfo,
         *,
         relay_info: PeerInfo | None = None,
-    ) -> RawConnection:
+    ) -> IRawConnection:
         """
         Dial a destination peer using a relay.
 
@@ -198,14 +267,20 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established.
 
         """
+        # Track connection start time for latency measurement
+        connection_start_time = trio.current_time()
+
         # If no specific relay is provided, try to find one
         if relay_info is None:
             relay_peer_id = await self._select_relay(dest_info)
             if not relay_peer_id:
                 raise ConnectionError("No suitable relay found")
             relay_info = self.host.get_peerstore().peer_info(relay_peer_id)
+        else:
+            relay_peer_id = relay_info.peer_id
+
         await self.host.connect(relay_info)
-        relay_peer_id = relay_info.peer_id
+
         # Get a stream to the relay
         try:
             logger.debug(
@@ -262,18 +337,53 @@ class CircuitV2Transport(ITransport):
             status_msg = getattr(resp.status, "message", "Unknown error")
 
             if status_code != StatusCode.OK:
+                # Record failed connection attempt
+                latency_ms = (trio.current_time() - connection_start_time) * 1000
+                self.performance_tracker.record_connection_attempt(
+                    relay_id=relay_peer_id,
+                    latency_ms=latency_ms,
+                    success=False,
+                )
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            # Create raw connection from stream
-            return RawConnection(stream=relay_stream, initiator=True)
+            # Record successful connection attempt
+            latency_ms = (trio.current_time() - connection_start_time) * 1000
+            self.performance_tracker.record_connection_attempt(
+                relay_id=relay_peer_id,
+                latency_ms=latency_ms,
+                success=True,
+            )
+
+            # Record circuit opened
+            self.performance_tracker.record_circuit_opened(relay_peer_id)
+
+            # Create raw connection from stream and wrap it to track closure
+            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            return TrackedRawConnection(
+                wrapped=raw_conn,
+                relay_id=relay_peer_id,
+                tracker=self.performance_tracker,
+            )
 
         except Exception as e:
+            # Record failed connection attempt
+            latency_ms = (trio.current_time() - connection_start_time) * 1000
+            self.performance_tracker.record_connection_attempt(
+                relay_id=relay_peer_id,
+                latency_ms=latency_ms,
+                success=False,
+            )
             await relay_stream.close()
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
 
     async def _select_relay(self, peer_info: PeerInfo) -> ID | None:
         """
         Select an appropriate relay for the given peer.
+
+        Uses performance tracking to select the best relay based on:
+        - Connection latency (lower is better)
+        - Active circuit count (fewer is better)
+        - Success rate (higher is better)
 
         Parameters
         ----------
@@ -292,9 +402,56 @@ class CircuitV2Transport(ITransport):
             # Get a relay from the list of discovered relays
             relays = self.discovery.get_relays()
             if relays:
-                # TODO: Implement more sophisticated relay selection
-                # For now, just return the first available relay
-                return relays[0]
+                # Prioritize relays with active reservations
+                relays_with_reservations = []
+                other_relays = []
+
+                for relay_id in relays:
+                    relay_info = self.discovery.get_relay_info(relay_id)
+                    if relay_info and relay_info.has_reservation:
+                        relays_with_reservations.append(relay_id)
+                    else:
+                        other_relays.append(relay_id)
+
+                # Use performance tracker to select best relay
+                # First try to get a relay with reservation preference
+                candidate_list = (
+                    relays_with_reservations
+                    if relays_with_reservations
+                    else other_relays
+                )
+
+                if candidate_list:
+                    selected_relay = self.performance_tracker.select_best_relay(
+                        available_relays=candidate_list,
+                        require_reservation=False,  # Already filtered
+                        relay_info_getter=self.discovery.get_relay_info,
+                    )
+
+                    if selected_relay:
+                        # When multiple relays have the same score (e.g., no
+                        # performance data yet), use round-robin to maintain
+                        # backward compatibility and ensure load distribution.
+                        # This ensures we don't always pick the same relay when
+                        # all relays are equally good (or equally unknown).
+                        best_score = self.performance_tracker.get_relay_score(
+                            selected_relay
+                        )
+                        equal_score_relays = [
+                            r
+                            for r in candidate_list
+                            if self.performance_tracker.get_relay_score(r) == best_score
+                            and best_score != float("inf")
+                        ]
+
+                        # If multiple relays have the same score, use round-robin
+                        if len(equal_score_relays) > 1:
+                            async with self._relay_counter_lock:
+                                index = self.relay_counter % len(equal_score_relays)
+                                selected_relay = equal_score_relays[index]
+                                self.relay_counter += 1
+
+                        return selected_relay
 
             # Wait and try discovery
             await trio.sleep(1)
