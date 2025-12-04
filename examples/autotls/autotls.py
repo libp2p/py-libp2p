@@ -4,8 +4,6 @@ import hashlib
 import json
 import logging
 import os
-
-import multihash
 import base58
 import multiaddr
 import multibase
@@ -87,8 +85,14 @@ def print_identify_response(identify_response: Identify):
 
     debug_dump_envelope(signed_peer_record)
 
-# --------------
+# -------------
 
+def dns01_key_authorization_to_txt(key_auth: str) -> str:
+
+    digest = hashlib.sha256(key_auth.encode("utf-8")).digest()
+    txt = base64.urlsafe_b64encode(digest).decode("utf-8")
+    txt = txt.rstrip("=")
+    return txt
 
 async def handle_ping(stream: INetStream) -> None:
     while True:
@@ -313,15 +317,16 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     if transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
 
+    if psk == 1:
+        host = new_host(listen_addrs=listen_addrs, psk=PSK)
+    else:
+        host = new_host(listen_addrs=listen_addrs)
+        
     # Set up identify handler with specified format
         # Set use_varint_format = False, if want to checkout the Signed-PeerRecord
     identify_handler = identify_handler_for(
         host, use_varint_format=True
     )
-    if psk == 1:
-        host = new_host(listen_addrs=listen_addrs, psk=PSK)
-    else:
-        host = new_host(listen_addrs=listen_addrs)
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
@@ -478,7 +483,8 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 token = dns01["token"]
                 chall_url = dns01["url"]
                 key_auth = f"{token}.{jwk_thumbprint}"
-                
+                key_auth = dns01_key_authorization_to_txt(key_auth)
+
                 print("\nCHALL-URL: ", chall_url)
                 print("DNS-TOKEN: ", token)
                 print("JWK-THUMBPRINT: ", jwk_thumbprint)
@@ -498,7 +504,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 digest = hashlib.sha256(jwk_json.encode("utf-8")).digest()
                 return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
             
-            def http_peer_id_auth(private_key: PrivateKey):
+            def http_peer_id_auth(private_key: PrivateKey, key_auth, addrs):
                 
                 print("\nINITIATION PEER-ID AUTHENTICATION WITH AUTO-TLS BROKER...")
                 
@@ -516,10 +522,17 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                     raise Exception("Missing WWW-Authenticate")
 
                 # Verify server and respond
+                body = {
+                    "value": key_auth,
+                    "addresses": addrs
+                }
+                
                 header={
+                    "User-Agent": "py-libp2p/example/autotls",
                     "Authorization": "libp2p-PeerID " + hs.verify_server(www)
                 }                
-                resp = requests.post(url, headers=header)
+                resp = requests.post(url, headers=header, data=json.dumps(body))
+                print("\n\n", resp.request.headers, resp.request.body)
             
                 # Extract BEARER-TOKEN
                 auth_info = resp.headers.get("Authentication-Info")
@@ -530,10 +543,32 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print("\nSERVER_PEER_ID: ", hs.server_id)
                 print("BEARER TOKEN: ", bearer)
 
-                return {
-                    "peer_id": hs.server_id,
-                    "bearer": bearer,
-                }        
+                return hs.server_id, bearer     
+ 
+            def send_dns_challenge(bearer, auth_url, chall_url, key_auth, public_addrs):
+                # url = "https://registration.libp2p.direct/v1/dns01"
+                url = "https://registration.libp2p.direct/v1/_acme-challenge"
+
+                headers = {
+                    "Authorization": f"Bearer {bearer}",
+                    "Content-Type": "application/json",
+                }
+
+                # body = {
+                #     "auth_url": auth_url,
+                #     "challenge_url": chall_url,
+                #     "key_authorization": key_auth,
+                # }
+                
+                body = {
+                  "value": key_auth,
+                  "addresses": public_addrs  
+                }
+
+                r = requests.post(url, headers=headers, json=body)
+                print("\nBROKER RESPONSE:", r, r.status_code, r.headers)
+                return r
+
  
             try:
                 account_url, priv_key = acme_new_account(None)
@@ -542,8 +577,13 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 jwk = jwk_from_rsa_private_key(priv_key)
                 jwk_thumprint = compute_jwk_thumbprint(jwk)
                 
-                dns01, key_auth, chall_url = acme_get_dns01_challenge(auth_url, priv_key, account_url, jwk_thumprint)                                          
-                bearer_n_server_id = http_peer_id_auth(host.get_private_key())
+                dns01, key_auth, chall_url = acme_get_dns01_challenge(auth_url, priv_key, account_url, jwk_thumprint)     
+                public_addrs = [f"/ip4/13.126.88.127/tcp/{port}/p2p/{host.get_id()}"]
+                                     
+                server_id, bearer = http_peer_id_auth(host.get_private_key(), key_auth, public_addrs)
+                                
+                # response = send_dns_challenge(bearer, auth_url, chall_url, key_auth, public_addrs)
+                
                 
                                 
             except Exception as e:
