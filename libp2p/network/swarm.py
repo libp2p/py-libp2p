@@ -693,7 +693,7 @@ class Swarm(Service, INetworkService):
         try:
             secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
         except SecurityUpgradeFailure as error:
-            print("INBOUND CONNECTION CAME AND THREW ERROR")
+            print("\nINBOUND CONNECTION CAME AND THREW ERROR")
             logger.error("failed to upgrade security for peer at %s", maddr)
             await raw_conn.close()
             raise SwarmException(
