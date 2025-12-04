@@ -53,5 +53,6 @@ class TrioTCPStream(ReadWriteCloser):
         try:
             return self.stream.socket.getpeername()
         except (AttributeError, OSError) as e:
+            print("\nERROR IN REMOTE-ADDR CAME FROM TRIO")
             logger.error("Error getting remote address: %s", e)
             return None
