@@ -1,0 +1,1 @@
+Fixed pubsub service crashes when protocol negotiation fails by adding proper exception handling.

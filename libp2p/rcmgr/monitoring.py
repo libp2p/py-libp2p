@@ -332,7 +332,8 @@ class Monitor:
             # Update protocol metrics
             if protocol not in self._protocol_metrics:
                 self._protocol_metrics[protocol] = {}
-            self._protocol_metrics[protocol][metric_name] = value
+            protocol_metrics: dict[str, Any] = self._protocol_metrics[protocol]
+            protocol_metrics[metric_name] = value
 
             # Create metric
             metric_labels = labels or {}
