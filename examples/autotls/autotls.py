@@ -316,6 +316,8 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
         listen_addrs = get_available_interfaces(port)
     if transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
+        
+    print("\nAvailable listen_addrs: ", listen_addrs)
 
     if psk == 1:
         host = new_host(listen_addrs=listen_addrs, psk=PSK)
