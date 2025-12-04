@@ -460,6 +460,12 @@ class BasicHost(IHost):
 
         await self._network.dial_peer(peer_info.peer_id)
 
+        # TEST MEASURE: Also trigger identify directly from connect() as a fallback
+        # to the notifee system. This ensures identify runs even if the notifee
+        # callback has timing issues or doesn't fire reliably.
+        # TODO: Remove this if notifee system proves reliable, or keep as fallback
+        self._schedule_identify(peer_info.peer_id, reason="connect")
+
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
