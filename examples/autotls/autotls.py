@@ -325,7 +325,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     # Set up identify handler with specified format
         # Set use_varint_format = False, if want to checkout the Signed-PeerRecord
     identify_handler = identify_handler_for(
-        host, use_varint_format=True
+        host, use_varint_format=False
     )
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
