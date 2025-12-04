@@ -12,7 +12,6 @@ import trio
 
 from libp2p.abc import IHost
 from libp2p.kad_dht import KadDHT
-from libp2p.kad_dht.utils import create_key_from_binary
 from libp2p.peer.peerinfo import PeerInfo
 
 from .metrics_collector import AttackMetrics
@@ -35,7 +34,8 @@ class RealAttackMetrics(AttackMetrics):
         # Generate test keys for lookups
         self.test_keys = []
         for i in range(num_test_keys):
-            key = create_key_from_binary(f"test_key_{i}".encode())
+            # Use string keys as KadDHT expects strings
+            key = f"test_key_{i}"
             self.test_keys.append(key)
 
         # First, populate some values in the DHT

@@ -37,8 +37,8 @@ class RealMaliciousPeer(MaliciousPeer):
             # Add fake peer to the target's routing table
             await target_dht.routing_table.add_peer(fake_peer_info)
 
-            # Store fake routing information
-            fake_key = f"fake_route_{fake_peer_info.peer_id}".encode()
+            # Inject fake routing table entries
+            fake_key = f"fake_route_{fake_peer_info.peer_id}"
             fake_value = f"malicious_route_{self.peer_id}".encode()
             await target_dht.put_value(fake_key, fake_value)
 
