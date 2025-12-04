@@ -131,6 +131,7 @@ def identify_handler_for(
                 observed_multiaddr = _remote_address_to_multiaddr(remote_address)
 
         except Exception as e:
+            print("ERROR IN IDENTIFY HADNLER FOR SOME INBOUND")
             logger.error("Error getting remote address: %s", e)
             remote_address = None
 
