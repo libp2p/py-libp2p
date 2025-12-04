@@ -30,9 +30,12 @@ from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.identity.identify.identify import identify_handler_for, ID as IDENTIFY_PROTOCOL_ID
+from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
+from libp2p.peer.envelope import debug_dump_envelope, unmarshal_envelope
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -49,6 +52,43 @@ PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
 DIRECTORY = {}
 ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 PEER_ID_AUTH_SCHEME = "libp2p-PeerID="
+
+# --------------
+# IDENTIFY-UTILS
+def decode_multiaddrs(raw_addrs):
+    """Convert raw listen addresses into human-readable multiaddresses."""
+    decoded_addrs = []
+    for addr in raw_addrs:
+        try:
+            decoded_addrs.append(str(multiaddr.Multiaddr(addr)))
+        except Exception as e:
+            decoded_addrs.append(f"Invalid Multiaddr ({addr}): {e}")
+    return decoded_addrs
+
+def print_identify_response(identify_response: Identify):
+    """Pretty-print Identify response."""
+    public_key_b64 = base64.b64encode(identify_response.public_key).decode("utf-8")
+    listen_addrs = decode_multiaddrs(identify_response.listen_addrs)
+    signed_peer_record = unmarshal_envelope(identify_response.signedPeerRecord)
+    try:
+        observed_addr_decoded = decode_multiaddrs([identify_response.observed_addr])
+    except Exception:
+        observed_addr_decoded = identify_response.observed_addr
+    print(
+        f"Identify response:\n"
+        f"  Public Key (Base64): {public_key_b64}\n"
+        f"  Listen Addresses: {listen_addrs}\n"
+        f"  Protocols: {list(identify_response.protocols)}\n"
+        f"  Observed Address: "
+        f"{observed_addr_decoded if identify_response.observed_addr else 'None'}\n"
+        f"  Protocol Version: {identify_response.protocol_version}\n"
+        f"  Agent Version: {identify_response.agent_version}"
+    )
+
+    debug_dump_envelope(signed_peer_record)
+
+# --------------
+
 
 async def handle_ping(stream: INetStream) -> None:
     while True:
@@ -256,7 +296,6 @@ class ClientInitiatedHandshake:
             "sig": client_sig_b64,
         })
 
-
 async def run(port: int, destination: str, psk: int, transport: str) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
@@ -274,6 +313,11 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     if transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
 
+    # Set up identify handler with specified format
+        # Set use_varint_format = False, if want to checkout the Signed-PeerRecord
+    identify_handler = identify_handler_for(
+        host, use_varint_format=True
+    )
     if psk == 1:
         host = new_host(listen_addrs=listen_addrs, psk=PSK)
     else:
@@ -284,6 +328,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
         if not destination:
+            host.set_stream_handler(IDENTIFY_PROTOCOL_ID, identify_handler)
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
             # Get all available addresses with peer ID
@@ -488,105 +533,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 return {
                     "peer_id": hs.server_id,
                     "bearer": bearer,
-                }
-            
-            def send_autotls_challenge_libp2p(key_authorization = None, peer_privkey: PrivateKey = None, multiaddrs: list = None):
-                import base64
-                import os
-                import requests
-
-                def base64url_encode(b: bytes) -> str:
-                    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
-                broker_url = "https://registration.libp2p.direct/v1/_acme-challenge"
-
-                # Fetch challenge from broker (WWW-Authenticate)
-                resp = requests.get(broker_url, timeout=10)
-            
-
-                print(resp.headers)
-                if resp.status_code != 401:
-                    raise RuntimeError(f"Expected 401 challenge, got {resp.status_code}")
-
-                auth = resp.headers.get("Www-Authenticate", "")
-                parts = dict(p.strip().split("=", 1) for p in auth.split(","))
-                challenge_client = parts["libp2p-PeerID challenge-client"].strip('"')
-                broker_pubkey_b64 = parts["public-key"].strip('"')
-                opaque = parts["opaque"].strip('"')
-
-                # Decode broker's public key BASE64 -> BYTES
-                broker_pubkey_bytes = base64.urlsafe_b64decode(
-                    broker_pubkey_b64 + "=="
-                )
-                peer_pubkey = peer_privkey.get_public_key()
-                # === STEP 2: Build signature ===
-                # Random challenge for server (client challenge)
-                challenge_server = base64url_encode(os.urandom(24))
-                marshalled_pubkey = peer_pubkey._serialize_to_protobuf()
-
-                # SPEC-COMPLIANT signature payload
-
-                sig_payload = [
-                    ("challenge-server", challenge_server),
-                    ("client-public-key", marshalled_pubkey),
-                    ("hostname", "registration.libp2p.direct"),
-                ]
-
-                sig_bytes = peer_privkey.sign(sig_payload)
-                sig_b64 = base64url_encode(sig_bytes)
-                
-                
-                print("\n\n\nchallenge: ", challenge_client )
-                print("broker: ", broker_pubkey_bytes)
-                print("opaque: ", opaque)
-
-                # Authorization header
-                headers = {
-                    "Content-Type": "application/json",
-                    "User-Agent": "helia/2.0.0",
-                    "Authorization": (
-                        f'libp2p-PeerID public-key="{base64url_encode(peer_pubkey.to_bytes())}", '
-                        f'opaque="{opaque}", '
-                        f'challenge-server="{challenge_server}", '
-                        f'sig="{sig_b64}"'
-                    )
-                }
-
-                payload = {
-                    "Value": key_authorization,
-                    "Addresses": multiaddrs
-                }
-
-                print("\n\n")
-
-                # === STEP 4: POST with JSON body ===
-                # r2 = requests.post(broker_url, headers=headers, timeout=10)
-                r2 = requests.post(broker_url, json=payload, headers=headers, timeout=10)
-
-                print("HTTP", r2.status_code)
-                print("Headers:", r2.headers)
-                print("Body:", r2.text)
-                
-                print("\n\n")
-          
-                r2.raise_for_status()
-                
-                
-                if r2.status_code == 401:
-                    raise RuntimeError("Signature validation failed at broker")
-
-                # # Extract bearer token
-                # auth_info = resp.headers.get("Authentication-Info", "")
-                # token = None
-                # for part in auth_info.split(","):
-                #     if part.strip().startswith("bearer="):
-                #         token = part.split("=", 1)[1].strip('"')
-                #         break
-                # if not token:
-                #     raise RuntimeError("Bearer token not found in broker response")
-
-                # print("Bearer token from broker:", token)
-                # return token
-                
+                }        
  
             try:
                 account_url, priv_key = acme_new_account(None)
