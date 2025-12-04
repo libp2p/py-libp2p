@@ -522,17 +522,17 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                     raise Exception("Missing WWW-Authenticate")
 
                 # Verify server and respond
-                # body = {
-                #     "value": key_auth,
-                #     "addresses": addrs
-                # }
+                body = {
+                    "value": key_auth,
+                    "addresses": addrs
+                }
                 
                 header={
                     "User-Agent": "py-libp2p/example/autotls",
                     "Authorization": "libp2p-PeerID " + hs.verify_server(www)
                 }                
-                resp = requests.post(url, headers=header)
-                # resp = requests.post(url, headers=header, data=json.dumps(body))
+                # resp = requests.post(url, headers=header)
+                resp = requests.post(url, headers=header, data=json.dumps(body))
                 print("\n\n", resp.request.headers, resp.request.body)
             
                 # Extract BEARER-TOKEN
