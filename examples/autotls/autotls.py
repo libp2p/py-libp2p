@@ -503,7 +503,31 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 jwk_json = json.dumps(ordered, separators=(",", ":"), sort_keys=True)
                 digest = hashlib.sha256(jwk_json.encode("utf-8")).digest()
                 return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-            
+                
+            def send_dns_challenge(bearer, auth_url, chall_url, key_auth, public_addrs):
+                # url = "https://registration.libp2p.direct/v1/dns01"
+                url = "https://registration.libp2p.direct/v1/_acme-challenge"
+
+                headers = {
+                    "Authorization": f"Bearer {bearer}",
+                    "Content-Type": "application/json",
+                }
+
+                # body = {
+                #     "auth_url": auth_url,
+                #     "challenge_url": chall_url,
+                #     "key_authorization": key_auth,
+                # }
+                
+                body = {
+                  "value": key_auth,
+                  "addresses": public_addrs  
+                }
+
+                r = requests.post(url, headers=headers, json=body)
+                print("\nBROKER RESPONSE:", r, r.status_code, r.headers)
+                return r
+       
             def http_peer_id_auth(private_key: PrivateKey, key_auth, addrs):
                 
                 print("\nINITIATION PEER-ID AUTHENTICATION WITH AUTO-TLS BROKER...")
@@ -533,7 +557,8 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 }                
                 # resp = requests.post(url, headers=header)
                 resp = requests.post(url, headers=header, data=json.dumps(body))
-                print("\n\n", resp.request.headers, resp.request.body)
+                print("\n", resp.request.headers)
+                print("\n", resp.request.body)
             
                 # Extract BEARER-TOKEN
                 auth_info = resp.headers.get("Authentication-Info")
@@ -545,31 +570,6 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print("BEARER TOKEN: ", bearer)
 
                 return hs.server_id, bearer     
- 
-            def send_dns_challenge(bearer, auth_url, chall_url, key_auth, public_addrs):
-                # url = "https://registration.libp2p.direct/v1/dns01"
-                url = "https://registration.libp2p.direct/v1/_acme-challenge"
-
-                headers = {
-                    "Authorization": f"Bearer {bearer}",
-                    "Content-Type": "application/json",
-                }
-
-                # body = {
-                #     "auth_url": auth_url,
-                #     "challenge_url": chall_url,
-                #     "key_authorization": key_auth,
-                # }
-                
-                body = {
-                  "value": key_auth,
-                  "addresses": public_addrs  
-                }
-
-                r = requests.post(url, headers=headers, json=body)
-                print("\nBROKER RESPONSE:", r, r.status_code, r.headers)
-                return r
-
  
             try:
                 account_url, priv_key = acme_new_account(None)
