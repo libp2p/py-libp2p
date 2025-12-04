@@ -1665,13 +1665,13 @@ class INetwork(ABC):
         Get global health summary across all peers.
 
         Returns:
-        --------
+        -------
         dict[str, Any]
             A dictionary containing global health metrics across all connections.
             Returns empty dict if health monitoring is disabled.
 
         Note:
-        -----
+        ----
         This method is marked as abstract to ensure all network implementations
         provide health monitoring support. However, implementations may return
         empty dictionaries when health monitoring is disabled, effectively
@@ -2070,13 +2070,13 @@ class IHost(ABC):
         Get overall network health summary.
 
         Returns:
-        --------
+        -------
         dict[str, Any]
             A dictionary containing global health metrics across all connections.
             Returns empty dict if health monitoring is disabled.
 
         Note:
-        -----
+        ----
         This method is marked as abstract to ensure all host implementations
         provide health monitoring support. However, implementations may return
         empty dictionaries when health monitoring is disabled, effectively
