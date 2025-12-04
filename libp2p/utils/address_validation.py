@@ -85,7 +85,8 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     # Fallback if nothing discovered
     if not addrs:
         addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
-
+        
+    addrs.append(Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}"))
     return addrs
 
 
