@@ -11,6 +11,7 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 import weakref
 
@@ -331,12 +332,16 @@ class BasicHost(IHost):
         return list(self._network.connections.keys())
 
     def run(
-        self, listen_addrs: Sequence[multiaddr.Multiaddr]
+        self,
+        listen_addrs: Sequence[multiaddr.Multiaddr],
+        *,
+        task_status: Any = trio.TASK_STATUS_IGNORED,
     ) -> AbstractAsyncContextManager[None]:
         """
         Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
+        :param task_status: task status for trio nursery compatibility (ignored)
         """
 
         @asynccontextmanager

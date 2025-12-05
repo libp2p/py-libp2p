@@ -1,0 +1,1 @@
+Fixed BasicHost.run() to accept task_status keyword argument for compatibility with modern pytest-trio (>=0.8.0) and trio (>=0.26.0).
