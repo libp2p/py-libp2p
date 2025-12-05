@@ -353,7 +353,7 @@ class BasicHost(IHost):
                     if await upnp_manager.discover():
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.add_port_mapping(port, "TCP")
+                                await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
@@ -368,7 +368,7 @@ class BasicHost(IHost):
                         logger.debug("Removing UPnP port mappings")
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(port, "TCP")
+                                await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
                         self.bootstrap.stop()
 
