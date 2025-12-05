@@ -150,6 +150,7 @@ markers = [
     "flaky: mark test as flaky (may fail intermittently)",
 ]
 xfail_strict = true
+trio_mode = true
 
 [tool.towncrier]
 # Read https://github.com/libp2p/py-libp2p/blob/main/newsfragments/README.md for instructions
