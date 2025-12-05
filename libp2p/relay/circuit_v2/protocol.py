@@ -162,7 +162,9 @@ class CircuitV2Protocol(Service):
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self.close_timeout = close_timeout
-        self.resource_manager = RelayResourceManager(self.limits)
+        self.resource_manager = RelayResourceManager(
+            self.limits, self.host.get_peerstore()
+        )
         self._active_relays: dict[ID, tuple[INetStream, INetStream | None]] = {}
         self.event_started = trio.Event()
 
@@ -550,38 +552,46 @@ class CircuitV2Protocol(Service):
     async def _handle_reserve(self, stream: INetStream, msg: HopMessage) -> None:
         """Handle a reservation request."""
         peer_id = None
+        signed_envelope = None
         try:
             peer_id = ID(msg.peer)
             logger.debug("Handling reservation request from peer %s", peer_id)
             signed_envelope_bytes, _ = env_to_send_in_RPC(self.host)
             signed_envelope = unmarshal_envelope(signed_envelope_bytes)
 
-            # Check if we can accept more reservations
-            if not self.resource_manager.can_accept_reservation(peer_id):
-                logger.debug("Reservation limit exceeded for peer %s", peer_id)
-                # Send status message with STATUS type
-                status = create_status(
-                    code=StatusCode.RESOURCE_LIMIT_EXCEEDED,
-                    message="Reservation limit exceeded",
-                )
+            # Check if peer already has a reservation
+            if self.resource_manager.has_reservation(peer_id):
+                logger.debug("Peer %s already has a reservation — refreshing", peer_id)
+                ttl = self.resource_manager.refresh_reservation(peer_id)
+                status_code = StatusCode.OK
+                status_msg_text = "Reservation refreshed"
+            else:
+                # Check if we can accept more reservations
+                if not self.resource_manager.can_accept_reservation(peer_id):
+                    logger.debug("Reservation limit exceeded for peer %s", peer_id)
+                    # Send status message with STATUS type
+                    status = create_status(
+                        code=StatusCode.RESOURCE_LIMIT_EXCEEDED,
+                        message="Reservation limit exceeded",
+                    )
 
-                status_msg = HopMessage(
-                    type=HopMessage.STATUS,
-                    status=status,
-                    senderRecord=signed_envelope.marshal_envelope(),
-                )
-                await stream.write(status_msg.SerializeToString())
-                return
+                    status_msg = HopMessage(
+                        type=HopMessage.STATUS,
+                        status=status,
+                        senderRecord=signed_envelope.marshal_envelope(),
+                    )
+                    await stream.write(status_msg.SerializeToString())
+                    return
 
-            # Accept reservation
-            logger.debug("Accepting reservation from peer %s", peer_id)
-            ttl = self.resource_manager.reserve(peer_id)
+                # Accept reservation
+                logger.debug("Accepting new reservation from peer %s", peer_id)
+                ttl = self.resource_manager.reserve(peer_id)
+                status_code = StatusCode.OK
+                status_msg_text = "Reservation accepted"
 
             # Send reservation success response
             with trio.fail_after(self.write_timeout):
-                status = create_status(
-                    code=StatusCode.OK, message="Reservation accepted"
-                )
+                status = create_status(code=status_code, message=status_msg_text)
 
                 response = HopMessage(
                     type=HopMessage.STATUS,

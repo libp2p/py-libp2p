@@ -170,7 +170,24 @@ class TransportRegistry:
                     return None
                 # Use explicit QUICTransport to avoid type issues
                 QUICTransport = _get_quic_transport()
+                from libp2p.transport.quic.config import QUICTransportConfig
+
+                # Get or create config
                 config = kwargs.get("config")
+                if config is None:
+                    config = QUICTransportConfig()
+                elif not isinstance(config, QUICTransportConfig):
+                    # If config is not QUICTransportConfig, create new one
+                    config = QUICTransportConfig()
+
+                # Allow negotiation config to be passed via kwargs for coordination
+                if "negotiation_semaphore_limit" in kwargs:
+                    config.NEGOTIATION_SEMAPHORE_LIMIT = kwargs[
+                        "negotiation_semaphore_limit"
+                    ]
+                if "negotiate_timeout" in kwargs:
+                    config.NEGOTIATE_TIMEOUT = kwargs["negotiate_timeout"]
+
                 return QUICTransport(private_key, config)
             else:
                 # TCP transport doesn't require upgrader

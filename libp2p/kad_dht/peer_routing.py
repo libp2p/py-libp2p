@@ -43,6 +43,7 @@ from .utils import (
 logger = logging.getLogger("kademlia-example.peer_routing")
 
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
+MIN_PEERS_THRESHOLD = 5  # Minimum peers threshold for fallback to connected peers
 
 
 class PeerRouting(IPeerRouting):
@@ -158,6 +159,9 @@ class PeerRouting(IPeerRouting):
         Find the closest peers to a target key in the entire network.
 
         Performs an iterative lookup by querying peers for their closest peers.
+        If the routing table has fewer peers than MIN_PEERS_THRESHOLD, it falls
+        back to using connected peers first, then peers from the peerstore if
+        needed, to gather up to 'count' initial query targets.
 
         Returns
         -------
@@ -168,6 +172,47 @@ class PeerRouting(IPeerRouting):
         # Start with closest peers from our routing table
         closest_peers = self.routing_table.find_local_closest_peers(target_key, count)
         logger.debug("Local closest peers: %d found", len(closest_peers))
+
+        # Fallback to connected peers and peerstore if routing table has
+        # insufficient peers
+        if len(closest_peers) < MIN_PEERS_THRESHOLD:
+            # First, try connected peers
+            connected_peers = self.host.get_connected_peers()
+            if connected_peers:
+                logger.debug(
+                    "Routing table has insufficient peers (%d < %d), "
+                    "adding %d connected peers",
+                    len(closest_peers),
+                    MIN_PEERS_THRESHOLD,
+                    len(connected_peers),
+                )
+                closest_peers.extend(connected_peers)
+
+            # If still not enough, get peers from peerstore
+            if len(closest_peers) < count:
+                try:
+                    peerstore_peers = self.host.get_peerstore().peer_ids()
+                    # Filter out our own ID and already included peers
+                    local_id = self.host.get_id()
+                    existing_peers = set(closest_peers)
+                    new_peerstore_peers = [
+                        p
+                        for p in peerstore_peers
+                        if p != local_id and p not in existing_peers
+                    ]
+                    if new_peerstore_peers:
+                        logger.debug(
+                            "Adding %d peers from peerstore", len(new_peerstore_peers)
+                        )
+                        closest_peers.extend(new_peerstore_peers)
+                except Exception as e:
+                    logger.debug(f"Failed to get peers from peerstore: {e}")
+
+            # Deduplicate and sort by distance, keeping closest peers
+            closest_peers = sort_peer_ids_by_distance(
+                target_key, list(dict.fromkeys(closest_peers))
+            )[:count]
+
         queried_peers: set[ID] = set()
         rounds = 0
 

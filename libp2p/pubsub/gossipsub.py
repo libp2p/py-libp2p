@@ -1085,12 +1085,14 @@ class GossipSub(IPubsubRouter, Service):
             px_peers.append(peer)
 
         # Remove peer from mesh for topic
-        if topic in self.mesh:
-            if backoff_till > 0:
-                self._add_back_off(sender_peer_id, topic, False, backoff_till)
-            else:
-                self._add_back_off(sender_peer_id, topic, False)
+        # Always add backoff, even if topic is not currently in mesh
+        if backoff_till > 0:
+            self._add_back_off(sender_peer_id, topic, False, backoff_till)
+        else:
+            self._add_back_off(sender_peer_id, topic, False)
 
+        # Remove sender from mesh if topic exists in mesh
+        if topic in self.mesh:
             self.mesh[topic].discard(sender_peer_id)
             if self.scorer is not None:
                 self.scorer.on_leave_mesh(sender_peer_id, topic)

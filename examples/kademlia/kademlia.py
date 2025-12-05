@@ -13,7 +13,6 @@ import random
 import secrets
 import sys
 
-import base58
 from multiaddr import (
     Multiaddr,
 )
@@ -31,9 +30,6 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
-)
-from libp2p.kad_dht.utils import (
-    create_key_from_binary,
 )
 from libp2p.tools.async_service import (
     background_trio_service,
@@ -191,57 +187,46 @@ async def run_node(
             # Start the DHT service
             async with background_trio_service(dht):
                 logger.info(f"DHT service started in {dht_mode.value} mode")
-                val_key = create_key_from_binary(b"py-libp2p kademlia example value")
-                content = b"Hello from python node "
-                content_key = create_key_from_binary(content)
+
+                # Example 1: Simple Key-Value Storage
+                # Just use a string key directly - DHT API accepts strings!
+                key = "my-example-key"
+                value = b"Hello from py-libp2p!"
+
+                # Example 2: Content Provider Advertisement
+                content_id = "my-content-identifier"
 
                 if dht_mode == DHTMode.SERVER:
-                    # Store a value in the DHT
-                    msg = "Hello message from Sumanjeet"
-                    val_data = msg.encode()
-                    await dht.put_value(val_key, val_data)
-                    logger.info(
-                        f"Stored value '{val_data.decode()}'"
-                        f"with key: {base58.b58encode(val_key).decode()}"
-                    )
+                    # Store key-value pair in the DHT
+                    await dht.put_value(key, value)
+                    logger.info(f"Stored value: {value.decode()} with key: {key}")
 
-                    # Advertise as content server
-                    success = await dht.provider_store.provide(content_key)
+                    # Advertise as a provider for content
+                    success = await dht.provide(content_id)
                     if success:
-                        logger.info(
-                            "Successfully advertised as server"
-                            f"for content: {content_key.hex()}"
-                        )
+                        logger.info(f"Advertised as provider for content: {content_id}")
                     else:
-                        logger.warning("Failed to advertise as content server")
+                        logger.warning("Failed to advertise as provider")
 
                 else:
-                    # retrieve the value
-                    logger.info(
-                        "Looking up key: %s", base58.b58encode(val_key).decode()
-                    )
-                    val_data = await dht.get_value(val_key)
-                    if val_data:
-                        try:
-                            logger.info(f"Retrieved value: {val_data.decode()}")
-                        except UnicodeDecodeError:
-                            logger.info(f"Retrieved value (bytes): {val_data!r}")
+                    # Retrieve value from DHT using the same key
+                    logger.info(f"Looking up key: {key}")
+                    retrieved_value = await dht.get_value(key)
+                    if retrieved_value:
+                        logger.info(f"Retrieved value: {retrieved_value.decode()}")
                     else:
                         logger.warning("Failed to retrieve value")
 
-                    # Also check if we can find servers for our own content
-                    logger.info("Looking for servers of content: %s", content_key.hex())
-                    providers = await dht.provider_store.find_providers(content_key)
+                    # Find providers for content
+                    logger.info(f"Looking for providers of content: {content_id}")
+                    providers = await dht.find_providers(content_id)
                     if providers:
                         logger.info(
-                            "Found %d servers for content: %s",
-                            len(providers),
-                            [p.peer_id.pretty() for p in providers],
+                            f"Found {len(providers)} providers: "
+                            f"{[p.peer_id.pretty() for p in providers]}"
                         )
                     else:
-                        logger.warning(
-                            "No servers found for content %s", content_key.hex()
-                        )
+                        logger.warning("No providers found")
 
                 # Keep the node running
                 while True:
