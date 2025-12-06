@@ -1820,6 +1820,18 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_transport_addrs(self) -> list[Multiaddr]:
+        """
+        Retrieve all transport multiaddresses on which the host is listening.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of transport multiaddresses (without peer ID suffix).
+
+        """
+
+    @abstractmethod
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host

@@ -34,39 +34,34 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
         raise InvalidAddrError("`addr` should not be `None`")
 
-    parts: list[multiaddr.Multiaddr] = addr.split()
-    if not parts:
+    # Manual parsing because multiaddr==0.0.11 doesn't have .split()
+    protocols = addr.protocols()
+    if not protocols:
+        raise InvalidAddrError("Address has no protocols")
+
+    last_protocol = protocols[-1]
+    
+    # P_IPFS = 421, P_P2P = 421
+    if last_protocol.code != 421:
         raise InvalidAddrError(
-            f"`parts`={parts} should at least have a protocol `P_P2P`"
+            f"The last protocol should be `P_P2P` instead of `{last_protocol.code}`"
         )
 
-    p2p_part = parts[-1]
-    p2p_protocols = p2p_part.protocols()
-    if not p2p_protocols:
-        raise InvalidAddrError("The last part of the address has no protocols")
-    last_protocol = cast(Protocol, p2p_part.protocols()[0])
-
-    if last_protocol is None:
-        raise InvalidAddrError("The last protocol is None")
-
-    last_protocol_code = last_protocol.code
-    if last_protocol_code != multiaddr.multiaddr.protocols.P_P2P:
-        raise InvalidAddrError(
-            f"The last protocol should be `P_P2P` instead of `{last_protocol_code}`"
-        )
-
-    # make sure the /p2p value parses as a peer.ID
-    peer_id_str = p2p_part.value_for_protocol(multiaddr.multiaddr.protocols.P_P2P)
+    peer_id_str = addr.value_for_protocol(last_protocol.code)
     if peer_id_str is None:
         raise InvalidAddrError("Missing value for /p2p protocol in multiaddr")
 
-    peer_id: ID = ID.from_base58(peer_id_str)
+    peer_id = ID.from_base58(peer_id_str)
 
-    # we might have received just an / p2p part, which means there's no addr.
-    if len(parts) > 1:
-        addr = multiaddr.Multiaddr.join(*parts[:-1])
-
-    return PeerInfo(peer_id, [addr])
+    if len(protocols) > 1:
+        # Reconstruct the p2p part to decapsulate it
+        # We use the name from the protocol to be safe (ipfs vs p2p)
+        p2p_part = multiaddr.Multiaddr(f"/{last_protocol.name}/{peer_id_str}")
+        transport_addr = addr.decapsulate(p2p_part)
+        return PeerInfo(peer_id, [transport_addr])
+    else:
+        # Only p2p part exists
+        return PeerInfo(peer_id, [addr])
 
 
 def peer_info_to_bytes(peer_info: PeerInfo) -> bytes:
