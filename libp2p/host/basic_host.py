@@ -313,11 +313,13 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Retrieve all multiaddresses this host is listening to, including the peer ID suffix.
+        Retrieve all multiaddresses this host is listening to, including the peer ID
+        suffix.
 
         .. note::
             This method is deprecated and will be removed in a future release.
-            Please use :meth:`get_transport_addrs` instead if you need the raw transport addresses.
+            Please use :meth:`get_transport_addrs` instead if you need the raw
+            transport addresses.
 
         :return: all the multiaddr addresses this host is listening to
         """
@@ -334,7 +336,8 @@ class BasicHost(IHost):
         """
         Retrieve all transport multiaddresses this host is listening to.
 
-        This method returns the raw transport addresses without the ``/p2p/{peer_id}`` suffix.
+        This method returns the raw transport addresses without the
+        ``/p2p/{peer_id}`` suffix.
 
         :return: all the transport multiaddr addresses this host is listening to
         """
@@ -372,7 +375,7 @@ class BasicHost(IHost):
                     if await upnp_manager.discover():
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.add_port_mapping(port, "TCP")
+                                await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
@@ -387,7 +390,7 @@ class BasicHost(IHost):
                         logger.debug("Removing UPnP port mappings")
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(port, "TCP")
+                                await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
                         self.bootstrap.stop()
 

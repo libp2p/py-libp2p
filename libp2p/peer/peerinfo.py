@@ -3,11 +3,9 @@ from collections.abc import (
 )
 from typing import (
     Any,
-    cast,
 )
 
 import multiaddr
-from multiaddr.protocols import Protocol
 
 from .id import (
     ID,
@@ -40,7 +38,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
         raise InvalidAddrError("Address has no protocols")
 
     last_protocol = protocols[-1]
-    
+
     # P_IPFS = 421, P_P2P = 421
     if last_protocol.code != 421:
         raise InvalidAddrError(

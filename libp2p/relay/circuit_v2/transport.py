@@ -10,6 +10,7 @@ import time
 from typing import cast
 
 import multiaddr
+from multiaddr.util import split
 import trio
 
 from libp2p.abc import (
@@ -145,11 +146,13 @@ class CircuitV2Transport(ITransport):
         found_circuit = False
         relay_maddr_end_index = None
 
-        for idx, (proto, value) in enumerate(maddr.items()):
+        for idx, part in enumerate(split(maddr)):
+            proto = part.protocols()[0]
             if proto.name == "p2p-circuit":
                 found_circuit = True
                 relay_maddr_end_index = idx
-            elif proto.name == "p2p":
+            elif proto.name == "p2p" or proto.name == "ipfs":
+                value = part.value_for_protocol(proto.code)
                 if not found_circuit and relay_id_str is None:
                     relay_id_str = value
                 elif found_circuit and dest_id_str is None:
@@ -339,17 +342,20 @@ class CircuitV2Transport(ITransport):
             ValueError: if the Multiaddr is not a valid circuit address
 
         """
-        parts = ma.items()
+        parts = split(ma)
 
         if len(parts) < 2:
             raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
 
-        proto_name, _ = parts[-2]
-        if proto_name.name != "p2p-circuit":
+        part_minus_2 = parts[-2]
+        proto_minus_2 = part_minus_2.protocols()[0]
+        if proto_minus_2.name != "p2p-circuit":
             raise ValueError(f"Missing /p2p-circuit in Multiaddr: {ma}")
 
-        proto_name, val = parts[-1]
-        if proto_name.name != "p2p":
+        part_minus_1 = parts[-1]
+        proto_minus_1 = part_minus_1.protocols()[0]
+        val = part_minus_1.value_for_protocol(proto_minus_1.code)
+        if proto_minus_1.name != "p2p" and proto_minus_1.name != "ipfs":
             raise ValueError(f"Missing /p2p/<peerID> at the end: {ma}")
 
         try:

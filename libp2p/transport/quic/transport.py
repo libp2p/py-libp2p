@@ -252,7 +252,10 @@ class QUICTransport(ITransport):
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
-            remote_peer_id = maddr.get_peer_id()
+            try:
+                remote_peer_id = maddr.value_for_protocol(421)
+            except Exception:
+                remote_peer_id = None
             if remote_peer_id is not None:
                 remote_peer_id = ID.from_base58(remote_peer_id)
 
