@@ -23,6 +23,10 @@ from libp2p.peer.peerstore import (
     IPeerStore,
 )
 
+from .predictor import (
+    AutoNATDecisionModel,
+)
+
 AUTONAT_PROTOCOL_ID = TProtocol("/ipfs/autonat/1.0.0")
 
 logger = logging.getLogger("libp2p.host.autonat")
@@ -68,7 +72,9 @@ class AutoNATService:
         self.host = host
         self.peerstore: IPeerStore = host.get_peerstore()
         self.status = AutoNATStatus.UNKNOWN
+        self.status_confidence = 0.0
         self.dial_results: dict[ID, bool] = {}
+        self._predictor = AutoNATDecisionModel()
 
     async def handle_stream(self, stream: NetStream) -> None:
         """
@@ -156,6 +162,7 @@ class AutoNATService:
             else:
                 success = await self._try_dial(peer_id)
                 self.dial_results[peer_id] = success
+            self._predictor.record_probe(success=success)
 
             peer_info = PeerInfo()
             peer_info.id = peer_id.to_bytes()
@@ -164,6 +171,7 @@ class AutoNATService:
             dial_response.peers.append(peer_info)
 
         response.dial_response.CopyFrom(dial_response)
+        self.update_status()
         return response
 
     async def _try_dial(self, peer_id: ID) -> bool:
@@ -212,6 +220,13 @@ class AutoNATService:
         node is publicly reachable. The node is considered public if at
         least two successful dial attempts have been recorded.
         """
+        status_pred, probability = self._predictor.classify()
+        self.status_confidence = probability
+
+        if status_pred != AutoNATStatus.UNKNOWN:
+            self.status = status_pred
+            return
+
         if not self.dial_results:
             self.status = AutoNATStatus.UNKNOWN
             return
@@ -221,3 +236,9 @@ class AutoNATService:
             self.status = AutoNATStatus.PUBLIC
         else:
             self.status = AutoNATStatus.PRIVATE
+
+    def get_status_prediction(self) -> tuple[int, float]:
+        """
+        Returns the current status and the predictor confidence.
+        """
+        return self.status, self.status_confidence
