@@ -113,7 +113,7 @@ def test_ceritified_addr_book():
     assert isinstance(retrieved, Envelope)
 
     addr_list = store.addrs(peer_id)
-    assert set(addr_list) == set(addrs)
+    assert {str(a) for a in addr_list} == {str(a) for a in addrs}
 
     # Now try to push an older record (should be rejected)
     old_record = PeerRecord(peer_id, [Multiaddr("/ip4/10.0.0.1/tcp/4001")], 20)
@@ -134,6 +134,6 @@ def test_ceritified_addr_book():
     assert latest.record().seq == 23
 
     # Merged addresses = old addres + new_addrs
-    expected_addrs = set(new_addrs)
-    actual_addrs = set(store.addrs(peer_id))
+    expected_addrs = {str(a) for a in new_addrs}
+    actual_addrs = {str(a) for a in store.addrs(peer_id)}
     assert actual_addrs == expected_addrs

@@ -80,8 +80,8 @@ async def test_identify_push_protocol(security_protocol):
         assert peer_id in peerstore.peer_ids()
 
         # Check that the addresses have been updated
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
 
         # The peerstore might have additional addresses from the connection
         # So we just check that all of host_a's addresses are in the peerstore
@@ -139,8 +139,8 @@ async def test_identify_push_handler(security_protocol):
         assert peer_id in peerstore.peer_ids()
 
         # Check that the addresses have been updated
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
 
         # The peerstore might have additional addresses from the connection
         # So we just check that all of host_a's addresses are in the peerstore
@@ -350,8 +350,8 @@ async def test_update_peerstore_from_identify(security_protocol):
         assert peer_id in peerstore.peer_ids()
 
         # Check that the addresses have been updated
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
 
         # The peerstore might have additional addresses from the connection
         # So we just check that all of host_a's addresses are in the peerstore
@@ -431,8 +431,8 @@ async def test_partial_update_peerstore_from_identify(security_protocol):
         assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
 
         # The addresses should still be in the peerstore
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
         assert all(addr in peerstore_addrs for addr in host_a_addrs)
 
         # The public key should still be in the peerstore
@@ -636,8 +636,8 @@ async def test_identify_push_default_varint_format(security_protocol):
         assert peer_id in peerstore.peer_ids()
 
         # Check that addresses have been updated
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
         assert all(addr in peerstore_addrs for addr in host_a_addrs)
 
         # Check that protocols have been updated
@@ -688,8 +688,8 @@ async def test_identify_push_legacy_raw_format(security_protocol):
         assert peer_id in peerstore.peer_ids()
 
         # Check that addresses have been updated
-        host_a_addrs = set(host_a.get_addrs())
-        peerstore_addrs = set(peerstore.addrs(peer_id))
+        host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+        peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
         assert all(addr in peerstore_addrs for addr in host_a_addrs)
 
         # Check that protocols have been updated
@@ -732,7 +732,7 @@ async def test_identify_push_rejects_mismatched_peer_id(security_protocol):
             # Verify host_c's addresses are not in host_b's peerstore initially
             # Handle case where peer ID doesn't exist yet
             try:
-                addrs_before = set(peerstore_b.addrs(peer_id_c))
+                addrs_before = {str(addr) for addr in peerstore_b.addrs(peer_id_c)}
             except PeerStoreError:
                 addrs_before = set()
 
@@ -750,7 +750,7 @@ async def test_identify_push_rejects_mismatched_peer_id(security_protocol):
             # Verify host_c's addresses were NOT added to host_b's peerstore
             # (because the peer ID mismatch should cause rejection)
             try:
-                addrs_after = set(peerstore_b.addrs(peer_id_c))
+                addrs_after = {str(addr) for addr in peerstore_b.addrs(peer_id_c)}
             except PeerStoreError:
                 addrs_after = set()
 
