@@ -73,6 +73,8 @@ dev = [
     "mypy>=1.15.0",
     "pre-commit>=3.4.0",
     "tox>=4.0.0",
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
     "twine",
     "wheel",
     "setuptools>=42",
@@ -105,6 +107,10 @@ test = [
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
+]
+webrtc = [
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
 ]
 
 [tool.setuptools]
@@ -298,4 +304,5 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "libp2p/transport/webrtc/**",  # Optional WebRTC transport dependencies
 ]
