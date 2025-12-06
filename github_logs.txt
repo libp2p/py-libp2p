@@ -125,22 +125,22 @@
 2025-12-06T05:36:18.9658781Z ##[group]Checking out the ref
 2025-12-06T05:36:18.9662345Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/1077/merge
 2025-12-06T05:36:19.0124999Z Note: switching to 'refs/remotes/pull/1077/merge'.
-2025-12-06T05:36:19.0125494Z 
+2025-12-06T05:36:19.0125494Z
 2025-12-06T05:36:19.0125828Z You are in 'detached HEAD' state. You can look around, make experimental
 2025-12-06T05:36:19.0126403Z changes and commit them, and you can discard any commits you make in this
 2025-12-06T05:36:19.0126943Z state without impacting any branches by switching back to a branch.
-2025-12-06T05:36:19.0127291Z 
+2025-12-06T05:36:19.0127291Z
 2025-12-06T05:36:19.0127509Z If you want to create a new branch to retain commits you create, you may
 2025-12-06T05:36:19.0128016Z do so (now or later) by using -c with the switch command. Example:
-2025-12-06T05:36:19.0128317Z 
+2025-12-06T05:36:19.0128317Z
 2025-12-06T05:36:19.0128468Z   git switch -c <new-branch-name>
-2025-12-06T05:36:19.0128673Z 
+2025-12-06T05:36:19.0128673Z
 2025-12-06T05:36:19.0128809Z Or undo this operation with:
-2025-12-06T05:36:19.0128997Z 
+2025-12-06T05:36:19.0128997Z
 2025-12-06T05:36:19.0129104Z   git switch -
-2025-12-06T05:36:19.0129275Z 
+2025-12-06T05:36:19.0129275Z
 2025-12-06T05:36:19.0129516Z Turn off this advice by setting config variable advice.detachedHead to false
-2025-12-06T05:36:19.0129842Z 
+2025-12-06T05:36:19.0129842Z
 2025-12-06T05:36:19.0130251Z HEAD is now at d970898 Merge e4d4a3bd514e22e2976996a38736a976b9b870cb into a720fed2a2d659fa6254912e47489a34e0093287
 2025-12-06T05:36:19.0134264Z ##[endgroup]
 2025-12-06T05:36:19.0168846Z [command]/usr/bin/git log -1 --format=%H
@@ -294,7 +294,7 @@
 2025-12-06T05:37:38.7239918Z run pyrefly typecheck locally............................................Failed
 2025-12-06T05:37:38.7240634Z - hook id: pyrefly-local
 2025-12-06T05:37:38.7241036Z - exit code: 1
-2025-12-06T05:37:38.7241209Z 
+2025-12-06T05:37:38.7241209Z
 2025-12-06T05:37:38.7242410Z WARN PYTHONPATH environment variable is set to `/home/runner/work/py-libp2p/py-libp2p/.tox/py310-lint/lib/python3.10/site-packages:`. Checks in other environments may not include these paths.
 2025-12-06T05:37:38.7243972Z  INFO Checking project configured at `/home/runner/work/py-libp2p/py-libp2p/pyproject.toml`
 2025-12-06T05:37:38.7245520Z  WARN PYTHONPATH environment variable is set to `/home/runner/work/py-libp2p/py-libp2p/.tox/py310-lint/lib/python3.10/site-packages:`. Checks in other environments may not include these paths.
@@ -302,7 +302,7 @@
 2025-12-06T05:37:38.7247923Z ERROR /home/runner/work/py-libp2p/py-libp2p/libp2p/kad_dht/utils.py:104:12-60: Object of class `Multihash` has no attribute `digest` [missing-attribute]
 2025-12-06T05:37:38.7248999Z ERROR /home/runner/work/py-libp2p/py-libp2p/libp2p/kad_dht/utils.py:160:21-76: Object of class `Multihash` has no attribute `digest` [missing-attribute]
 2025-12-06T05:37:38.7250391Z  INFO 3 errors shown, 96 errors ignored, 513 modules, 1,591 transitive dependencies, 611,816 lines, took 1.13s, peak memory physical 213.6 MiB
-2025-12-06T05:37:38.7250835Z 
+2025-12-06T05:37:38.7250835Z
 2025-12-06T05:37:38.7601260Z Check for .rst files in the top-level directory..........................Passed
 2025-12-06T05:37:38.7774580Z py310-lint: exit 1 (28.32 seconds) /home/runner/work/py-libp2p/py-libp2p> pre-commit run --all-files --show-diff-on-failure pid=2568
 2025-12-06T05:37:38.7798628Z   py310-lint: FAIL code 1 (74.71=setup[46.18]+cmd[0.21,28.32] seconds)
