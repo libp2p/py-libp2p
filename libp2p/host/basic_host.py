@@ -42,6 +42,15 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+)
+from libp2p.identity.identify.identify import (
+    ID as IdentifyID,
+)
+from libp2p.identity.identify_push.identify_push import (
+    ID_PUSH as IdentifyPushID,
+)
 from libp2p.network.transport_manager import TransportManager
 from libp2p.peer.id import (
     ID,
@@ -82,6 +91,16 @@ from multiaddr import Multiaddr
 
 logger = logging.getLogger("libp2p.network.basic_host")
 DEFAULT_NEGOTIATE_TIMEOUT = 5
+
+_SAFE_CACHED_PROTOCOLS: set[TProtocol] = {
+    PING_PROTOCOL_ID,
+    IdentifyID,
+    IdentifyPushID,
+}
+_IDENTIFY_PROTOCOLS: set[TProtocol] = {
+    IdentifyID,
+    IdentifyPushID,
+}
 
 
 class BasicHost(IHost):

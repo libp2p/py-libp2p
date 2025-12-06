@@ -2,12 +2,12 @@
 WebRTC Stream implementation for py-libp2p.
 """
 
+from datetime import datetime, timedelta
 from enum import Enum
 import logging
 import time
 from types import TracebackType
-from typing import TYPE_CHECKING, Optional
-from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from aiortc import RTCDataChannel
 import trio
@@ -111,7 +111,10 @@ class WebRTCStream(IMuxedStream):
         ready_state = self._channel.readyState.lower()
         if ready_state == StreamState.OPEN.value.lower():
             self._state = StreamState.OPEN
-        elif ready_state in (StreamState.CLOSED.value.lower(), StreamState.CLOSING.value.lower()):
+        elif ready_state in (
+            StreamState.CLOSED.value.lower(),
+            StreamState.CLOSING.value.lower(),
+        ):
             if self._timeline.closed_at is None or self._timeline.closed_at == 0:
                 self._timeline.record_close()
         elif ready_state == StreamState.CONNECTING.value.lower():
@@ -122,8 +125,8 @@ class WebRTCStream(IMuxedStream):
             raise WebRTCStreamStateError("Unknown datachannel state")
 
         # Deadline tracking for stream operations
-        self._read_deadline: Optional[datetime] = None
-        self._write_deadline: Optional[datetime] = None
+        self._read_deadline: datetime | None = None
+        self._write_deadline: datetime | None = None
 
         # Stream-specific channels
         self.send_channel: trio.MemorySendChannel[bytes]
@@ -183,7 +186,7 @@ class WebRTCStream(IMuxedStream):
         async with self._state_lock:
             if self._state in (StreamState.CLOSED, StreamState.RESET):
                 raise WebRTCStreamClosedError(f"Stream {self.stream_id} is closed")
-            
+
         if self._check_read_deadline():
             logger.warning(f"Read deadline exceeded on stream {self.stream_id}")
             raise WebRTCStreamTimeoutError(
@@ -234,7 +237,7 @@ class WebRTCStream(IMuxedStream):
         async with self._state_lock:
             if self._state in (StreamState.CLOSED, StreamState.RESET):
                 raise WebRTCStreamClosedError(f"Stream {self.stream_id} is closed")
-            
+
         if self._check_write_deadline():
             logger.warning(f"Write deadline exceeded on stream {self.stream_id}")
             raise WebRTCStreamTimeoutError(
@@ -536,7 +539,7 @@ class WebRTCStream(IMuxedStream):
         # Update state and cleanup
         async with self._state_lock:
             self._state = StreamState.CLOSED
-        
+
         self._read_deadline = None
         self._write_deadline = None
 
@@ -561,30 +564,31 @@ class WebRTCStream(IMuxedStream):
     def set_deadline(self, ttl: int) -> bool:
         """
         Set a deadline for stream operations.
-        
+
         Args:
             ttl: Time-to-live in seconds
-            
+
         Returns:
             True if deadline was set successfully, False otherwise
+
         """
         try:
             if self.is_closed():
                 logger.warning(f"Cannot set deadline on closed stream {self.stream_id}")
                 return False
-            
+
             deadline = datetime.now() + timedelta(seconds=ttl)
-            
+
             self._read_deadline = deadline
             self._write_deadline = deadline
-            
+
             logger.debug(
                 f"Stream {self.stream_id} deadline set to {ttl}s "
                 f"(expires at {deadline})"
             )
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to set stream deadline: {e}")
             return False
@@ -592,58 +596,60 @@ class WebRTCStream(IMuxedStream):
     def _check_read_deadline(self) -> bool:
         """
         Check if read deadline has been exceeded.
-        
+
         Returns:
             True if deadline is exceeded, False otherwise
+
         """
         if self._read_deadline is None:
             return False
-        
+
         return datetime.now() >= self._read_deadline
-    
+
     def _check_write_deadline(self) -> bool:
         """
         Check if write deadline has been exceeded.
-        
+
         Returns:
             True if deadline is exceeded, False otherwise
+
         """
         if self._write_deadline is None:
             return False
-        
+
         return datetime.now() >= self._write_deadline
-    
+
     @property
-    def read_deadline(self) -> Optional[datetime]:
+    def read_deadline(self) -> datetime | None:
         """Get the read deadline for this stream."""
         return self._read_deadline
-    
+
     @property
-    def write_deadline(self) -> Optional[datetime]:
+    def write_deadline(self) -> datetime | None:
         """Get the write deadline for this stream."""
         return self._write_deadline
-    
-    def _get_remaining_deadline(self) -> Optional[float]:
+
+    def _get_remaining_deadline(self) -> float | None:
         """
         Get the remaining time until deadline expires (in seconds).
-        
+
         Returns the minimum of read and write deadlines, or None if no deadlines set.
         """
         remaining_times = []
-        
+
         if self._read_deadline:
             remaining = (self._read_deadline - datetime.now()).total_seconds()
             if remaining > 0:
                 remaining_times.append(remaining)
-        
+
         if self._write_deadline:
             remaining = (self._write_deadline - datetime.now()).total_seconds()
             if remaining > 0:
                 remaining_times.append(remaining)
-        
+
         if remaining_times:
             return min(remaining_times)
-        
+
         return None
 
     def get_remote_address(self) -> tuple[str, int] | None:
