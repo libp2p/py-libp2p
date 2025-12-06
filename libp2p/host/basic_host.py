@@ -46,6 +46,17 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+)
+from libp2p.identity.identify.identify import (
+    ID as IdentifyID,
+)
+from libp2p.identity.identify.pb.identify_pb2 import Identify
+from libp2p.identity.identify_push.identify_push import (
+    ID_PUSH as IdentifyPushID,
+    _update_peerstore_from_identify,
+)
 from libp2p.network.transport_manager import TransportManager
 from libp2p.peer.id import (
     ID,
@@ -388,7 +399,7 @@ class BasicHost(IHost):
         """Remove the stream handler registered for `protocol_id`, if any."""
         if hasattr(self.multiselect, "remove_handler"):
             self.multiselect.remove_handler(protocol_id)
-            
+
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
     ) -> TProtocol | None:
@@ -795,7 +806,7 @@ class BasicHost(IHost):
 
         try:
             data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
-            identify_msg = IdentifyMsg()
+            identify_msg = Identify()
             identify_msg.ParseFromString(data)
             await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
             self._identified_peers.add(peer_id)
