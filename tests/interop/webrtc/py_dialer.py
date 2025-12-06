@@ -36,7 +36,7 @@ class WebRTCDialer:
         self.peer_connection: Optional[RTCPeerConnection] = None
         self.data_channel = None
         
-    async def connect_redis(self):
+    async def connect_redis(self) -> None:
         """Connect to Redis"""
         try:
             logger.info("Connecting to Redis at %s", self.redis_url)
@@ -47,7 +47,7 @@ class WebRTCDialer:
             logger.error("✗ Failed to connect to Redis: %s", e)
             raise
     
-    async def setup_webrtc(self):
+    async def setup_webrtc(self) -> None:
         """Initialize WebRTC peer connection"""
         try:
             logger.info("Setting up WebRTC peer connection...")
@@ -112,33 +112,64 @@ class WebRTCDialer:
                     return offer.decode('utf-8')
                 
                 # Check for Go listener (multiaddr)
-                go_multiaddr = await self.redis_client.get("interop:webrtc:go:listener:multiaddr")
+                go_multiaddr = await self.redis_client.get(
+                    "interop:webrtc:go:listener:multiaddr"
+                )
                 if go_multiaddr:
-                    logger.info("✓ Found Go listener: %s", go_multiaddr.decode('utf-8'))
+                    logger.info(
+                        "✓ Found Go listener: %s", go_multiaddr.decode('utf-8')
+                    )
                     # Signal connection for interop with libp2p peers
-                    await self.redis_client.set("interop:webrtc:dialer:connected", "1")
-                    await self.redis_client.set("interop:webrtc:ping:success", "1")
-                    logger.info("✓ Go/libp2p interop test passed (signaling layer)")
+                    await self.redis_client.set(
+                        "interop:webrtc:dialer:connected", "1"
+                    )
+                    await self.redis_client.set(
+                        "interop:webrtc:ping:success", "1"
+                    )
+                    logger.info(
+                        "✓ Go/libp2p interop test passed (signaling layer)"
+                    )
                     return None  # No SDP offer needed
                 
                 # Check for JavaScript listener (multiaddr)
-                js_multiaddr = await self.redis_client.get("interop:webrtc:js:listener:multiaddr")
+                js_multiaddr = await self.redis_client.get(
+                    "interop:webrtc:js:listener:multiaddr"
+                )
                 if js_multiaddr:
-                    logger.info("✓ Found JavaScript listener: %s", js_multiaddr.decode('utf-8'))
+                    logger.info(
+                        "✓ Found JavaScript listener: %s",
+                        js_multiaddr.decode('utf-8')
+                    )
                     # Signal connection for interop with libp2p peers
-                    await self.redis_client.set("interop:webrtc:dialer:connected", "1")
-                    await self.redis_client.set("interop:webrtc:ping:success", "1")
-                    logger.info("✓ JavaScript/libp2p interop test passed (signaling layer)")
+                    await self.redis_client.set(
+                        "interop:webrtc:dialer:connected", "1"
+                    )
+                    await self.redis_client.set(
+                        "interop:webrtc:ping:success", "1"
+                    )
+                    logger.info(
+                        "✓ JavaScript/libp2p interop test passed (signaling layer)"
+                    )
                     return None  # No SDP offer needed
                 
                 # Check for Rust listener (multiaddr)
-                rs_multiaddr = await self.redis_client.get("interop:webrtc:rs:listener:multiaddr")
+                rs_multiaddr = await self.redis_client.get(
+                    "interop:webrtc:rs:listener:multiaddr"
+                )
                 if rs_multiaddr:
-                    logger.info("✓ Found Rust listener: %s", rs_multiaddr.decode('utf-8'))
+                    logger.info(
+                        "✓ Found Rust listener: %s", rs_multiaddr.decode('utf-8')
+                    )
                     # Signal connection for interop with libp2p peers
-                    await self.redis_client.set("interop:webrtc:dialer:connected", "1")
-                    await self.redis_client.set("interop:webrtc:ping:success", "1")
-                    logger.info("✓ Rust/libp2p interop test passed (signaling layer)")
+                    await self.redis_client.set(
+                        "interop:webrtc:dialer:connected", "1"
+                    )
+                    await self.redis_client.set(
+                        "interop:webrtc:ping:success", "1"
+                    )
+                    logger.info(
+                        "✓ Rust/libp2p interop test passed (signaling layer)"
+                    )
                     return None  # No SDP offer needed
                 
                 await asyncio.sleep(0.1)
@@ -150,7 +181,7 @@ class WebRTCDialer:
             logger.error("✗ Error getting listener offer: %s", e, exc_info=True)
             return None
     
-    async def connect_to_listener(self, listener_offer_json: str):
+    async def connect_to_listener(self, listener_offer_json: str) -> None:
         """Connect to listener using their offer"""
         try:
             logger.info("Processing listener offer...")
@@ -220,8 +251,12 @@ class WebRTCDialer:
         """Send ping and wait for pong"""
         try:
             if not self.data_channel or self.data_channel.readyState != "open":
-                logger.error("✗ Data channel not open (state: %s)", 
-                           self.data_channel.readyState if self.data_channel else "None")
+                state = (
+                    self.data_channel.readyState
+                    if self.data_channel
+                    else "None"
+                )
+                logger.error("✗ Data channel not open (state: %s)", state)
                 return False
             
             logger.info("Sending PING...")
@@ -237,7 +272,7 @@ class WebRTCDialer:
             logger.error("✗ Failed to send PING: %s", e, exc_info=True)
             return False
     
-    async def run(self):
+    async def run(self) -> None:
         """Run the dialer"""
         logger.info("\n" + "=" * 70)
         logger.info("Starting Python WebRTC Dialer")
@@ -309,7 +344,7 @@ class WebRTCDialer:
             logger.info("=" * 70 + "\n")
 
 
-async def main():
+async def main() -> None:
     """Main entry point"""
     dialer = WebRTCDialer()
     await dialer.run()

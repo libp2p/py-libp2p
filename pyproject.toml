@@ -36,7 +36,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
-    "zeroconf (>=0.147.0,<0.148.0)"
+    "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -55,7 +55,7 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
-echo-quic-demo="examples.echo.echo_quic:main"
+echo-quic-demo = "examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
@@ -108,10 +108,7 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
 ]
-webrtc = [
-    "aiortc>=1.14.0",
-    "trio-asyncio>=0.15.0",
-]
+webrtc = ["aiortc>=1.14.0", "trio-asyncio>=0.15.0", "redis>=5.0.0"]
 
 [tool.setuptools]
 include-package-data = true
@@ -304,5 +301,5 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
-    "libp2p/transport/webrtc/**",  # Optional WebRTC transport dependencies
+    "libp2p/transport/webrtc/**", # Optional WebRTC transport dependencies
 ]

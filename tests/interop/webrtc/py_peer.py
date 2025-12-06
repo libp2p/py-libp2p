@@ -13,8 +13,6 @@ from libp2p import new_host
 from libp2p.abc import INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.id import ID as PeerID
-from libp2p.transport.webrtc.private_to_private.transport import WebRTCTransport
-from libp2p.transport.tcp.tcp import TCP
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,23 +32,21 @@ class PyLibp2pPeer:
         self.peer_id = None
         self.listen_port = listen_port
 
-    async def setup_host(self):
+    async def setup_host(self) -> None:
         key_pair = create_new_key_pair()
         self.peer_id = PeerID.from_pubkey(key_pair.public_key)
 
-        stun_server = os.getenv("STUN_SERVER", "stun:stun.l.google.com:19302")
-        webrtc_config = {"ice_servers": [{"urls": stun_server}]}
-
         self.host = await new_host(
             key_pair=key_pair,
-            transports=[
-                WebRTCTransport(config=webrtc_config),
-                TCP()
-            ],
+            listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
         )
-        return self.host
 
-    async def start_listener(self):
+    async def start_listener(self) -> None:
+        if self.host is None:
+            raise RuntimeError("Host not initialized")
+        if self.peer_id is None:
+            raise RuntimeError("Peer ID not initialized")
+
         webrtc_addr = Multiaddr(f"/ip4/0.0.0.0/udp/{self.listen_port}/webrtc")
         await self.host.get_network().listen(webrtc_addr)
 
@@ -58,7 +54,7 @@ class PyLibp2pPeer:
 
         addrs = self.host.get_addrs()
         if addrs:
-            addr_with_peer = f"{addrs}/p2p/{self.peer_id}"
+            addr_with_peer = f"{addrs[0]}/p2p/{self.peer_id}"
             await self.redis.set(
                 f"{COORDINATION_KEY_PREFIX}:listener:addr",
                 addr_with_peer,
@@ -77,7 +73,7 @@ class PyLibp2pPeer:
         except asyncio.CancelledError:
             pass
 
-    async def ping_handler(self, stream: INetStream):
+    async def ping_handler(self, stream: INetStream) -> None:
         try:
             payload = await stream.read(32)
             await stream.write(payload)
@@ -85,7 +81,10 @@ class PyLibp2pPeer:
         except Exception:
             pass
 
-    async def start_dialer(self):
+    async def start_dialer(self) -> None:
+        if self.host is None:
+            raise RuntimeError("Host not initialized")
+
         max_wait = 60
         for _ in range(max_wait):
             ready = await self.redis.get(f"{COORDINATION_KEY_PREFIX}:listener:ready")
@@ -137,7 +136,10 @@ class PyLibp2pPeer:
             )
             raise
 
-    async def test_ping(self, peer_id: PeerID):
+    async def test_ping(self, peer_id: PeerID) -> None:
+        if self.host is None:
+            raise RuntimeError("Host not initialized")
+
         try:
             stream = await self.host.new_stream(peer_id, [PING_PROTOCOL])
 
@@ -170,7 +172,7 @@ class PyLibp2pPeer:
             )
             raise
 
-    async def run(self):
+    async def run(self) -> None:
         await self.setup_host()
 
         if self.role == "listener":
@@ -181,7 +183,7 @@ class PyLibp2pPeer:
             raise ValueError("Invalid role")
 
 
-async def main():
+async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", choices=["listener", "dialer"], required=True)
     parser.add_argument("--port", type=int, default=9090)

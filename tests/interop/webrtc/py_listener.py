@@ -39,7 +39,7 @@ class WebRTCListener:
         self.listen_addr = "/ip4/127.0.0.1/udp/8000/webrtc"
         self.peer_id = "QmListener12D3Koo5678901234567890123456"
         
-    async def connect_redis(self):
+    async def connect_redis(self) -> None:
         """Connect to Redis for signaling"""
         try:
             logger.info("Connecting to Redis at %s", self.redis_url)
@@ -50,7 +50,7 @@ class WebRTCListener:
             logger.error("✗ Failed to connect to Redis: %s", e)
             raise
     
-    async def setup_webrtc(self):
+    async def setup_webrtc(self) -> None:
         """Initialize WebRTC peer connection"""
         try:
             logger.info("Setting up WebRTC peer connection...")
@@ -132,7 +132,7 @@ class WebRTCListener:
             logger.error("✗ Failed to create offer: %s", e, exc_info=True)
             raise
     
-    async def handle_answer(self, answer_json: str):
+    async def handle_answer(self, answer_json: str) -> None:
         """Handle WebRTC answer from remote peer"""
         try:
             logger.info("Processing remote answer...")
@@ -155,7 +155,7 @@ class WebRTCListener:
             logger.error("✗ Failed to handle answer: %s", e, exc_info=True)
             raise
     
-    async def signal_readiness(self):
+    async def signal_readiness(self) -> None:
         """Signal that listener is ready via Redis"""
         try:
             logger.info("Signaling listener readiness to Redis...")
@@ -200,7 +200,7 @@ class WebRTCListener:
             logger.error("✗ Error waiting for answer: %s", e, exc_info=True)
             return None
     
-    async def run(self):
+    async def run(self) -> None:
         """Run the listener"""
         logger.info("\n" + "=" * 70)
         logger.info("Starting Python WebRTC Listener")
@@ -252,7 +252,7 @@ class WebRTCListener:
             logger.info("=" * 70 + "\n")
 
 
-async def main():
+async def main() -> None:
     """Main entry point"""
     listener = WebRTCListener()
     await listener.run()
