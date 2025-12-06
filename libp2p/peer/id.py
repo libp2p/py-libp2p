@@ -84,7 +84,7 @@ class ID:
     @classmethod
     def from_pubkey(cls, key: PublicKey) -> "ID":
         serialized_key = key.serialize()
-        algo: multihash.Func | int = multihash.Func.sha2_256
+        algo = multihash.Func.sha2_256
         if ENABLE_INLINING and len(serialized_key) <= MAX_INLINE_KEY_LENGTH:
             algo = IDENTITY_MULTIHASH_CODE
         mh_digest = multihash.digest(serialized_key, algo)
