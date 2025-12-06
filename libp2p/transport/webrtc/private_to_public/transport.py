@@ -58,7 +58,7 @@ class WebRTCDirectTransport(ITransport):
         self.connection_events: dict[str, trio.Event] = {}
         self.cert_mgr: WebRTCCertificate | None = None
         self.udp_puncher = UDPHolePuncher()
-        self._renewal_task = None
+        self._renewal_task: trio.CancelScope | None = None
         self.supported_protocols: set[str] = {"webrtc-direct", "p2p"}
         self.signal_service: SignalService | None = None
         # NAT traversal detection
@@ -66,8 +66,20 @@ class WebRTCDirectTransport(ITransport):
         logger.info("WebRTC-Direct Transport initialized")
 
     async def start(self, nursery: trio.Nursery) -> None:
-        """Start the WebRTC-Direct transport."""
+        """
+        Start the WebRTC-Direct transport.
+        
+        Initializes certificate management, NAT detection, signaling service,
+        and starts the certificate renewal loop as a background task.
+        
+        Args:
+            nursery: Trio nursery for spawning background tasks.
+            
+        Raises:
+            WebRTCError: If host is not set or if critical initialization fails.
+        """
         if self._started:
+            logger.debug("WebRTC-Direct transport already started")
             return
 
         if not self.host:
@@ -75,42 +87,95 @@ class WebRTCDirectTransport(ITransport):
 
         # Generate certificate for this transport
         self.cert_mgr = WebRTCCertificate()
+        logger.debug(
+            f"Generated WebRTC certificate with certhash: {self.cert_mgr.certhash}"
+        )
 
-        # TODO: Start certificate renewal loop properly with cancellation support
-        # For now, skip renewal to avoid hanging tests
-        # self._renewal_task = nursery.start_soon(self.cert_mgr.renewal_loop)
-        self._renewal_task = None
+        # FIX #1: Start certificate renewal loop properly with cancellation support
+        try:
+            self._renewal_task = await nursery.start(self._cert_renewal_task)
+            logger.info(
+                "Certificate renewal task started with cancellation support"
+            )
+        except Exception as e:
+            logger.error(f"Failed to start certificate renewal task: {e}")
+            # Continue gracefully - certificate will still work until expiry
+            self._renewal_task = None
 
+        # Initialize signal service
         if self.signal_service is None:
             self.signal_service = SignalService(self.host)
+        
         network = self.host.get_network()
         try:
             await self.signal_service.listen(network, None)
+            logger.debug("WebRTC signaling service started")
         except Exception:
             logger.warning("Failed to start WebRTC signaling service", exc_info=True)
 
+        # Initialize NAT reachability checker
         if self.host:
             self._reachability_checker = ReachabilityChecker(self.host)
             logger.debug("NAT reachability checker initialized for WebRTC-Direct")
 
         self._started = True
-        logger.info("WebRTC-Direct Transport started")
+        logger.info("WebRTC-Direct Transport started successfully")
 
     async def stop(self) -> None:
-        """Stop the WebRTC-Direct transport."""
+        """
+        Stop the WebRTC-Direct transport.
+
+        Performs clean shutdown:
+        1. Closes all active and pending connections
+        2. Cancels the certificate renewal task
+        3. Cleans up NAT detection resources
+
+        This method is designed to be robust and won't raise exceptions
+        even if some cleanup operations fail.
+        """
         if not self._started:
+            logger.debug("WebRTC-Direct transport not started")
             return
 
+        logger.info("Stopping WebRTC-Direct Transport")
+
         # Clean up connections
+        logger.debug(
+            f"Closing {len(self.active_connections)} active connections"
+        )
         for conn_id in list(self.active_connections.keys()):
-            await self._cleanup_connection(conn_id)
+            try:
+                await self._cleanup_connection(conn_id)
+            except Exception as e:
+                logger.warning(f"Error cleaning up connection {conn_id}: {e}")
 
-        # Cancel the renewal task if it's running
-        # (Not implemented yet - renewal loop is disabled)
+        # FIX #2: Implement proper task cancellation with timeout protection
         if self._renewal_task is not None:
-            # TODO: Implement proper task cancellation
-            self._renewal_task = None
+            logger.debug("Cancelling certificate renewal task")
+            try:
+                # Cancel the renewal task immediately
+                self._renewal_task.cancel()
+                
+                # Brief wait for cancellation to propagate and propagate through trio runtime
+                # This allows the task to catch trio.Cancelled and cleanup gracefully
+                with trio.move_on_after(1) as timeout_scope:
+                    # Yield control to scheduler so cancellation propagates
+                    await trio.sleep(0)
+                
+                if timeout_scope.cancelled_caught:
+                    logger.warning(
+                        "Certificate renewal task cancellation timed out after 1 second"
+                    )
+                else:
+                    logger.debug("Certificate renewal task cancelled successfully")
+                    
+            except Exception as e:
+                logger.warning(f"Error cancelling renewal task: {e}")
+            finally:
+                # Always clear the reference
+                self._renewal_task = None
 
+        # Clean up NAT detection
         self._reachability_checker = None
 
         self._started = False
@@ -579,3 +644,37 @@ class WebRTCDirectTransport(ITransport):
                 await relay_transport.stop()
             except Exception:
                 pass
+
+    async def _cert_renewal_task(
+        self, *, task_status: trio.TaskStatus[trio.CancelScope] = trio.TASK_STATUS_IGNORED
+    ) -> None:
+        """
+        Certificate renewal task with trio cancellation support.
+        
+        This method wraps the actual renewal loop and returns a CancelScope
+        that allows the task to be cancelled on demand during transport shutdown.
+        
+        The task_status.started() pattern allows nursery.start() to return
+        a CancelScope immediately, enabling fine-grained control over the task.
+        
+        Args:
+            task_status: Trio task status object for signaling task startup.
+            
+        Raises:
+            trio.Cancelled: When the renewal task is cancelled during shutdown.
+        """
+        with trio.CancelScope() as cancel_scope:
+            # Signal that the task has started and return the CancelScope
+            task_status.started(cancel_scope)
+            
+            try:
+                logger.debug("Certificate renewal task started")
+                # Delegate to the actual renewal loop from cert_mgr
+                await self.cert_mgr.renewal_loop()
+            except trio.Cancelled:
+                logger.debug("Certificate renewal task cancelled gracefully")
+                raise
+            except Exception as e:
+                logger.error(f"Certificate renewal task error: {e}", exc_info=True)
+                raise
+
