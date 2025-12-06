@@ -11,6 +11,7 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 import weakref
 
@@ -385,63 +386,6 @@ class BasicHost(IHost):
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
 
-    def _preferred_protocol(
-        self, peer_id: ID, protocol_ids: Sequence[TProtocol]
-    ) -> TProtocol | None:
-        """
-        Check if the peerstore says the remote peer supports any of the
-        requested protocols.
-
-        We still perform the multiselect negotiation, but if we already know the
-        matching protocol we can request it directly (instead of trying the full
-        list) which reduces time spent inside select_one_of.
-
-        Note: Protocol caching only works for well-known protocols (ping, identify)
-        to avoid issues with protocols that require proper negotiation.
-
-        :param peer_id: peer ID to check
-        :param protocol_ids: list of protocol IDs to check
-        :return: first supported protocol, or None if not cached
-        """
-        try:
-            # Check if peer exists in peerstore first (avoid auto-creation)
-            if peer_id not in self.peerstore.peer_ids():
-                return None
-
-            # Only use protocol caching if we have a connection to this peer
-            # This ensures identify has completed
-            connections = self._network.connections.get(peer_id, [])
-            if not connections:
-                return None
-
-            # Only cache protocols that are in the safe list
-            cacheable_ids = [
-                p
-                for p in protocol_ids
-                if p in _SAFE_CACHED_PROTOCOLS and p not in _IDENTIFY_PROTOCOLS
-            ]
-            if not cacheable_ids:
-                return None
-
-            # Query peerstore for supported protocols
-            # This returns protocols in the order they appear in protocol_ids
-            supported = self.peerstore.supports_protocols(
-                peer_id, [str(p) for p in cacheable_ids]
-            )
-            if supported:
-                # Return the first supported protocol (cast back to TProtocol)
-                return TProtocol(supported[0])
-            # If we reached here, we don't have cached entries yet. Kick off identify
-            # in the background so future streams can skip negotiation.
-            self._schedule_identify(peer_id, reason="preferred-protocol")
-        except Exception as e:
-            # If peer not in peerstore or any error, fall back to negotiation
-            logger.debug(
-                f"Could not query peerstore for peer {peer_id}: {e}. "
-                "Will negotiate protocol."
-            )
-        return None
-
     async def new_stream(
         self,
         peer_id: ID,
@@ -452,148 +396,19 @@ class BasicHost(IHost):
         :param protocol_ids: available protocol ids to use for stream
         :return: stream: new stream created
         """
-        semaphore_to_use: trio.Semaphore | None = None
-        semaphore_acquired = False
-
-        # Attempt to grab the negotiation semaphore before opening the stream so
-        # we don't create more QUIC streams than we can immediately negotiate.
-        existing_connection = self._get_first_connection(peer_id)
-        if existing_connection is not None:
-            existing_muxed_conn = getattr(existing_connection, "muxed_conn", None)
-            if existing_muxed_conn is not None:
-                semaphore_to_use = getattr(
-                    existing_muxed_conn, "_negotiation_semaphore", None
-                )
-        if semaphore_to_use is not None:
-            acquire_start = trio.current_time()
-            await semaphore_to_use.acquire()
-            semaphore_acquired = True
-            acquire_duration = (trio.current_time() - acquire_start) * 1000
-            if acquire_duration > 5 and logger.isEnabledFor(logging.DEBUG):
-                logger.debug(
-                    "Waited %.2fms to acquire negotiation slot for peer %s "
-                    "before opening stream",
-                    acquire_duration,
-                    peer_id,
-                )
-
         net_stream = await self._network.new_stream(peer_id)
 
-        protocol_choices = list(protocol_ids)
-        # Check if we already know the peer supports any of these protocols
-        # from the identify exchange. If so, request that protocol directly
-        # but still run the multiselect handshake to keep both sides in sync.
-        preferred = self._preferred_protocol(peer_id, protocol_ids)
-        if preferred is not None:
-            logger.debug(
-                f"Using cached protocol {preferred} for peer {peer_id}, "
-                "requesting it directly"
-            )
-            protocol_choices = [preferred]
-
+        # Perform protocol muxing to determine protocol to use
         try:
-            muxed_conn = getattr(net_stream, "muxed_conn", None)
-            stream_semaphore = (
-                getattr(muxed_conn, "_negotiation_semaphore", None)
-                if muxed_conn is not None
-                else None
-            )
-
-            if stream_semaphore is not None:
-                if semaphore_to_use is not stream_semaphore:
-                    if semaphore_acquired and semaphore_to_use is not None:
-                        semaphore_to_use.release()
-                    semaphore_to_use = stream_semaphore
-                    semaphore_acquired = False
-
-                if not semaphore_acquired and semaphore_to_use is not None:
-                    acquire_start = trio.current_time()
-                    await semaphore_to_use.acquire()
-                    semaphore_acquired = True
-                    acquire_duration = (trio.current_time() - acquire_start) * 1000
-                    if acquire_duration > 5 and logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Waited %.2fms to acquire negotiation slot for peer %s "
-                            "after stream creation",
-                            acquire_duration,
-                            peer_id,
-                        )
-
-            communicator = MultiselectCommunicator(net_stream)
             selected_protocol = await self.multiselect_client.select_one_of(
-                protocol_choices,
-                communicator,
+                list(protocol_ids),
+                MultiselectCommunicator(net_stream),
                 self.negotiate_timeout,
             )
         except MultiselectClientError as error:
-            # Enhanced error logging for debugging
-            error_msg = str(error)
-            connection_type = "unknown"
-            is_established = False
-            handshake_completed = False
-            registry_stats = None
-
-            # Get connection state if available
-            muxed_conn = getattr(net_stream, "muxed_conn", None)
-            if muxed_conn is not None:
-                connection_type = type(muxed_conn).__name__
-                if hasattr(muxed_conn, "is_established"):
-                    is_established = (
-                        muxed_conn.is_established
-                        if not callable(muxed_conn.is_established)
-                        else muxed_conn.is_established()
-                    )
-                if hasattr(muxed_conn, "_handshake_completed"):
-                    handshake_completed = muxed_conn._handshake_completed
-
-                # Get registry stats if QUIC connection
-                # Try to get stats from server listener (for server-side connections)
-                # or from client transport's listeners (if available)
-                if connection_type == "QUICConnection" and hasattr(
-                    muxed_conn, "_transport"
-                ):
-                    transport = getattr(muxed_conn, "_transport", None)
-                    if transport:
-                        # Try to get listener from transport
-                        listeners = getattr(transport, "_listeners", [])
-                        if listeners and len(listeners) > 0:
-                            listener = listeners[0]
-                            if listener and hasattr(listener, "_registry"):
-                                registry = getattr(listener, "_registry", None)
-                                if registry:
-                                    try:
-                                        registry_stats = registry.get_lock_stats()
-                                    except Exception:
-                                        registry_stats = None
-                        # Also try to get stats from connection's listener
-                        # if it's an inbound connection
-                        if registry_stats is None and hasattr(muxed_conn, "_listener"):
-                            listener = getattr(muxed_conn, "_listener", None)
-                            if listener and hasattr(listener, "_registry"):
-                                registry = getattr(listener, "_registry", None)
-                                if registry:
-                                    try:
-                                        registry_stats = registry.get_lock_stats()
-                                    except Exception:
-                                        registry_stats = None
-
-            # Log detailed error information
-            logger.error(
-                f"Failed to open stream to peer {peer_id}:\n"
-                f"  Error: {error_msg}\n"
-                f"  Protocols: {list(protocol_ids)}\n"
-                f"  Timeout: {self.negotiate_timeout}s\n"
-                f"  Connection: {connection_type}\n"
-                f"  Connection State: established={is_established}, "
-                f"handshake={handshake_completed}\n"
-                f"  Registry Stats: {registry_stats}"
-            )
-
+            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
             await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
-        finally:
-            if semaphore_acquired and semaphore_to_use is not None:
-                semaphore_to_use.release()
 
         net_stream.set_protocol(selected_protocol)
         return net_stream
@@ -634,13 +449,6 @@ class BasicHost(IHost):
         connection, connect will issue a dial, and block until a connection is
         opened, or an error is returned.
 
-        This method ensures the connection is fully established and ready for
-        streams before returning, including:
-        - QUIC handshake completion
-        - Muxer initialization
-        - Connection registration in swarm
-        - Stream handler readiness
-
         :param peer_info: peer_info of the peer we want to connect to
         :type peer_info: peer.peerinfo.PeerInfo
         """
@@ -648,85 +456,57 @@ class BasicHost(IHost):
 
         # there is already a connection to this peer
         if peer_info.peer_id in self._network.connections:
-            connections = self._network.connections[peer_info.peer_id]
-            if connections:
-                # Verify existing connection is ready
-                swarm_conn = connections[0]
-                if (
-                    hasattr(swarm_conn, "event_started")
-                    and not swarm_conn.event_started.is_set()
-                ):
-                    await swarm_conn.event_started.wait()
-                return
+            return
 
-        # Dial the peer - this will call add_conn which waits for event_started
-        connections = await self._network.dial_peer(peer_info.peer_id)
+        await self._network.dial_peer(peer_info.peer_id)
 
-        # Ensure connection is fully ready before returning
-        # dial_peer returns INetConn (SwarmConn) objects which have event_started
-        if connections:
-            swarm_conn = connections[0]
-            # Wait for connection to be fully started and ready for streams
-            # SwarmConn has event_started which is set after muxer and
-            # stream handlers are ready
-            if hasattr(swarm_conn, "event_started"):
-                await swarm_conn.event_started.wait()
-
-            # Kick off identify in the background so protocol caching can engage.
-            self._schedule_identify(peer_info.peer_id, reason="connect")
-
-    async def _run_identify(self, peer_id: ID) -> None:
-        """
-        Run identify protocol with a peer to discover supported protocols.
-
-        This method opens an identify stream, receives the peer's information,
-        and stores the supported protocols in the peerstore for later use.
-        This enables protocol caching to skip multiselect negotiation.
-
-        :param peer_id: ID of the peer to identify
-        """
-        try:
-            # Import here to avoid circular dependency
-            from libp2p.identity.identify.identify import (
-                ID as IDENTIFY_ID,
-            )
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
-                read_length_prefixed_protobuf,
-            )
-
-            # Open identify stream (this will use multiselect negotiation)
-            stream = await self.new_stream(peer_id, [IDENTIFY_ID])
-
-            # Read identify response (length-prefixed protobuf)
-            response = await read_length_prefixed_protobuf(
-                stream, use_varint_format=True
-            )
-            await stream.close()
-
-            # Parse the identify message
-            from libp2p.identity.identify.pb.identify_pb2 import Identify
-
-            identify_msg = Identify()
-            identify_msg.ParseFromString(response)
-
-            # Store protocols in peerstore
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-
-            logger.debug(
-                f"Identify completed for peer {peer_id}, "
-                f"protocols: {list(identify_msg.protocols)}"
-            )
-        except Exception as e:
-            # Don't fail the connection if identify fails
-            # Protocol caching just won't be available for this peer
-            logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
+        # TEST MEASURE: Also trigger identify directly from connect() as a fallback
+        # to the notifee system. This ensures identify runs even if the notifee
+        # callback has timing issues or doesn't fire reliably.
+        # TODO: Remove this if notifee system proves reliable, or keep as fallback
+        self._schedule_identify(peer_info.peer_id, reason="connect")
 
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
         await self._network.close()
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_peer_health_summary"):
+            return self._network.get_peer_health_summary(peer_id)
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_global_health_summary"):
+            return self._network.get_global_health_summary()
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "export_health_metrics"):
+            return self._network.export_health_metrics(format)
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_health_monitor_status"):
+            return await self._network.get_health_monitor_status()
+        return {"enabled": False}
 
     def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
         """
@@ -862,38 +642,10 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
-        # For QUIC connections, use connection-level semaphore to limit
-        # concurrent negotiations and prevent server-side overload
-        # This matches the client-side protection for symmetric behavior
-        muxed_conn = getattr(net_stream, "muxed_conn", None)
-        negotiation_semaphore = None
-        if muxed_conn is not None:
-            negotiation_semaphore = getattr(muxed_conn, "_negotiation_semaphore", None)
-
         try:
-            if negotiation_semaphore is not None:
-                # Use connection-level server semaphore to throttle
-                # server-side negotiations. This prevents server overload
-                # when many streams arrive simultaneously.
-                # Use separate server semaphore to avoid deadlocks
-                # with client negotiations.
-                muxed_conn = getattr(net_stream, "muxed_conn", None)
-                server_semaphore = None
-                if muxed_conn is not None:
-                    server_semaphore = getattr(
-                        muxed_conn, "_server_negotiation_semaphore", None
-                    )
-                # Fallback to shared semaphore if server semaphore not available
-                semaphore_to_use = server_semaphore or negotiation_semaphore
-                async with semaphore_to_use:
-                    protocol, handler = await self.multiselect.negotiate(
-                        MultiselectCommunicator(net_stream), self.negotiate_timeout
-                    )
-            else:
-                # For non-QUIC connections, negotiate directly (no semaphore needed)
-                protocol, handler = await self.multiselect.negotiate(
-                    MultiselectCommunicator(net_stream), self.negotiate_timeout
-                )
+            protocol, handler = await self.multiselect.negotiate(
+                MultiselectCommunicator(net_stream), self.negotiate_timeout
+            )
             if protocol is None:
                 await net_stream.reset()
                 raise StreamFailure(
