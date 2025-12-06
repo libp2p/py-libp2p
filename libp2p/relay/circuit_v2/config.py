@@ -132,6 +132,10 @@ class RelayConfig:
     def enable_client(self) -> bool:  # pragma: no cover – helper
         return bool(self.roles & RelayRole.CLIENT)
 
+    @property
+    def enable_dht_discovery(self) -> bool:  # pragma: no cover - helper
+        return False
+
     def __post_init__(self) -> None:
         """Initialize default values."""
         if self.limits is None:

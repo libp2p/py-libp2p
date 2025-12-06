@@ -1,0 +1,7 @@
+Enhanced QUIC Connection ID management with quinn-inspired improvements:
+- Added sequence number tracking for proper CID retirement ordering
+- Separated initial vs. established CID lookups for better packet routing
+- Improved fallback routing from O(n) to O(1) using reverse address mapping
+- Refactored Connection ID management into a dedicated ConnectionIDRegistry class
+
+These changes improve robustness, performance, and alignment with proven QUIC implementations.
