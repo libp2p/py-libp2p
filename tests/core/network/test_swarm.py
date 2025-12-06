@@ -390,7 +390,7 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                 for listener_addr in listener_addrs:
                     # Create a full multiaddr with peer ID for libp2p connection
                     peer_id = swarm1.get_peer_id()
-                    full_addr = listener_addr.encapsulate(f"/p2p/{peer_id}")
+                    full_addr = listener_addr.encapsulate(Multiaddr(f"/p2p/{peer_id}"))
 
                     # Test real libp2p connection
                     try:
