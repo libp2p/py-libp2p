@@ -11,6 +11,7 @@ from trio_asyncio import aio_as_trio
 
 from libp2p.abc import ISecureConn
 from libp2p.peer.id import ID
+from libp2p.security.noise.transport import PROTOCOL_ID as NOISE_PROTOCOL_ID
 from libp2p.security.security_multistream import SecurityMultistream
 from libp2p.transport.webrtc.async_bridge import get_webrtc_bridge
 from libp2p.transport.webrtc.private_to_public.util import (
@@ -614,6 +615,23 @@ async def connect(
             elif ice_state == "disconnected":
                 logger.warning(f"{role} ICE connection disconnected")
                 # Disconnected might recover, but log it
+            elif ice_state == "closed":
+                # ICE closed - this might happen after handshake completes
+                # Don't fail immediately if connection is already established
+                conn_state = peer_connection.connectionState
+                if conn_state == "connected":
+                    logger.info(
+                        f"{role} ICE closed but connection is connected - "
+                        "this is normal, connection is established. "
+                        "Setting connection_established event."
+                    )
+                    # Connection is actually working, treat as established
+                    connection_established.set()
+                else:
+                    logger.warning(
+                        f"{role} ICE closed before connection established - "
+                        f"connectionState: {conn_state}, this may indicate a problem"
+                    )
 
         # Set up connection state handlers on peer_connection (DirectPeerConnection)
         # This is the peer connection that's actually being used for offers/answers
@@ -621,11 +639,13 @@ async def connect(
         peer_connection.on("iceconnectionstatechange", on_ice_connection_state_change)
 
         # Check current state (might already be connected or connecting)
+        # Small delay to allow any pending state change events to fire
+        await trio.sleep(0.01)
         current_state = peer_connection.connectionState
         ice_state = peer_connection.iceConnectionState
-        logger.debug(
-            f"{role} initial peer connection state: {current_state}, "
-            f"ICE connection state: {ice_state}"
+        logger.info(
+            f"{role} initial peer connection state after handler setup: "
+            f"{current_state}, ICE connection state: {ice_state}"
         )
         if current_state == "connected":
             connection_established.set()
@@ -633,6 +653,12 @@ async def connect(
             connection_failed.set()
         elif ice_state in ("connected", "completed"):
             ice_connected.set()
+        elif ice_state == "closed" and current_state == "connected":
+            logger.debug(
+                f"{role} ICE is closed but connection is connected - "
+                "treating as established"
+            )
+            connection_established.set()
         elif current_state == "new" and ice_state == "new":
             # Both states are "new" - ICE processing hasn't started
             # This means ICE candidates might not have been added yet
@@ -645,45 +671,77 @@ async def connect(
             await trio.sleep(0.5)  # Brief wait for ICE to start processing
 
         # Wait for connection to be established (with timeout)
-        # Monitor both connection state and ICE connection state
+        # We monitor connection state for failures, but accept "connected" or
+        # "closed ICE + connected" as success
         if not connection_established.is_set() and not connection_failed.is_set():
-            logger.debug(
-                f"{role} waiting for peer connection to establish... "
-                f"(current: {peer_connection.connectionState}, "
-                f" ICE: {peer_connection.iceConnectionState})"
-            )
-            with trio.move_on_after(30):  # 30s timeout
-                # Wait for either connection established or failed
-                done_event = trio.Event()
+            # Re-check state right before waiting (handlers might have set events)
+            final_check_state = peer_connection.connectionState
+            final_check_ice = peer_connection.iceConnectionState
+            if final_check_state == "connected":
+                logger.info(f"{role} connectionState is 'connected' - proceeding")
+                connection_established.set()
+            elif final_check_ice == "closed" and final_check_state == "connected":
+                logger.info(
+                    f"{role} ICE 'closed' but connectionState 'connected' - proceeding"
+                )
+                connection_established.set()
 
-                async def wait_established() -> None:
-                    await connection_established.wait()
-                    done_event.set()
+            if not connection_established.is_set() and not connection_failed.is_set():
+                logger.info(
+                    f"{role} waiting for connectionState to become 'connected'... "
+                    f"(current: {final_check_state}, ICE: {final_check_ice})"
+                )
+                # Simplified wait: just poll for connectionState == "connected"
+                # This matches js-libp2p approach - they don't wait for ICE state
+                with trio.move_on_after(30):  # 30s timeout
+                    done_event = trio.Event()
 
-                async def wait_failed() -> None:
-                    await connection_failed.wait()
-                    done_event.set()
-
-                async def wait_ice_connected() -> None:
-                    await ice_connected.wait()
-                    logger.debug(f"{role} ICE connected, checking connection state...")
-                    # Check if connectionState already updated
-                    if peer_connection.connectionState == "connected":
-                        connection_established.set()
+                    async def wait_established() -> None:
+                        await connection_established.wait()
+                        logger.info(f"{role} connection_established event received")
                         done_event.set()
-                    else:
-                        # Give it a moment for connectionState to catch up
-                        await trio.sleep(1.0)
-                        if peer_connection.connectionState == "connected":
-                            connection_established.set()
-                        done_event.set()  # Signal that we've checked
 
-                async with trio.open_nursery() as nursery:
-                    nursery.start_soon(wait_established)
-                    nursery.start_soon(wait_failed)
-                    nursery.start_soon(wait_ice_connected)
-                    await done_event.wait()
-                    nursery.cancel_scope.cancel()
+                    async def wait_failed() -> None:
+                        await connection_failed.wait()
+                        logger.warning(f"{role} connection_failed event received")
+                        done_event.set()
+
+                    async def poll_connection_state() -> None:
+                        """Poll connectionState - accept 'connected' despite ICE"""
+                        check_interval = 0.05  # Check every 50ms
+                        while True:
+                            await trio.sleep(check_interval)
+                            if (
+                                connection_established.is_set()
+                                or connection_failed.is_set()
+                            ):
+                                return
+                            current_conn = peer_connection.connectionState
+                            current_ice = peer_connection.iceConnectionState
+
+                            # Accept connection if connectionState is "connected"
+                            if current_conn == "connected":
+                                logger.info(
+                                    f"{role} poll detected connectionState='connected' "
+                                    f"(ICE={current_ice}) - proceeding"
+                                )
+                                connection_established.set()
+                                done_event.set()
+                                return
+                            elif current_conn in ("failed", "disconnected", "closed"):
+                                logger.error(
+                                    f"{role} connection failed: {current_conn}"
+                                )
+                                connection_failed.set()
+                                done_event.set()
+                                return
+
+                    async with trio.open_nursery() as nursery:
+                        nursery.start_soon(wait_established)
+                        nursery.start_soon(wait_failed)
+                        nursery.start_soon(poll_connection_state)
+                        await done_event.wait()
+                        nursery.cancel_scope.cancel()
 
         if connection_failed.is_set():
             raise Exception(
@@ -693,11 +751,15 @@ async def connect(
             )
 
         if not connection_established.is_set():
+            # Final check: verify current state
+            current_conn_state = peer_connection.connectionState
+            current_ice_state = peer_connection.iceConnectionState
+
             # Check if ICE connected but connectionState didn't update
             if ice_connected.is_set():
                 logger.debug(
                     f"{role} ICE connected but connectionState is "
-                    f" {peer_connection.connectionState}, "
+                    f" {current_conn_state}, "
                     "waiting a bit longer..."
                 )
                 await trio.sleep(1.0)  # Give connectionState time to update
@@ -707,33 +769,52 @@ async def connect(
                     raise Exception(
                         f"ICE connected but peer connection did not establish "
                         f"(state: {peer_connection.connectionState}, "
-                        " ICE: {peer_connection.iceConnectionState})"
+                        f" ICE: {peer_connection.iceConnectionState})"
                     )
+            # Check if ICE is closed but connectionState is connected (this is valid)
+            elif current_ice_state == "closed" and current_conn_state == "connected":
+                logger.info(
+                    f"{role} ICE closed but connectionState is connected - "
+                    "connection is established, proceeding"
+                )
+                connection_established.set()
             else:
                 raise Exception(
                     f"Peer connection did not establish in time "
-                    f"(state: {peer_connection.connectionState}, "
-                    " ICE: {peer_connection.iceConnectionState})"
+                    f"(state: {current_conn_state}, "
+                    f" ICE: {current_ice_state})"
                 )
 
-        logger.debug(f"{role} peer connection established")
+        logger.info(
+            f"{role} peer connection established - "
+            "proceeding to data channel verification"
+        )
 
         # Validate ICE connection state before proceeding
-        # Ensure ICE connection is actually connected, not closed
+        # Note: ICE might be "closed" if it closed after connection was established
+        # This is normal behavior - check connectionState instead
         ice_state = peer_connection.iceConnectionState
-        if ice_state == "closed":
+        connection_state = peer_connection.connectionState
+
+        # If connection is connected, ICE closed is acceptable (normal after handshake)
+        if ice_state == "closed" and connection_state != "connected":
             raise Exception(
-                f"ICE connection is closed before data channel setup "
-                f"(connectionState: {peer_connection.connectionState}, "
+                f"ICE connection is closed before connection established "
+                f"(connectionState: {connection_state}, "
                 f"iceConnectionState: {ice_state})"
             )
-        if ice_state not in ("connected", "completed"):
+        if (
+            ice_state not in ("connected", "completed")
+            and connection_state != "connected"
+        ):
             logger.warning(
                 f"{role} ICE connection state is {ice_state}, not connected/completed. "
-                f"Proceeding with caution..."
+                f"Connection state: {connection_state}. Proceeding with caution..."
             )
 
         # Now wait for handshake channel to open
+        # CRITICAL: The handshake channel must be fully open and ready
+        # before we can start the Noise handshake
         if handshake_channel.readyState != "open":
             logger.debug(
                 "%s wait for handshake channel to open, starting status %s",
@@ -744,22 +825,37 @@ async def connect(
             open_event = trio.Event()
 
             def on_open() -> None:
+                logger.debug(f"{role} handshake channel opened event received")
                 open_event.set()
 
             handshake_channel.on("open", on_open)
             # Check if already open
             # (might have opened while we were waiting for conn)
             if handshake_channel.readyState == "open":
+                logger.debug(f"{role} handshake channel already open")
                 open_event.set()
             else:
+                logger.debug(f"{role} waiting for handshake channel to open...")
                 with trio.move_on_after(30):  # 30s timeout
                     await open_event.wait()
             if handshake_channel.readyState != "open":
                 raise Exception(
-                    f"Handshake data channel did not open in time"
-                    " (state: {handshake_channel.readyState}, "
-                    f"peer connection state: {rtc_pc.connectionState})"
+                    f"Handshake data channel did not open in time "
+                    f"(state: {handshake_channel.readyState}, "
+                    f"peer connection state: {rtc_pc.connectionState}, "
+                    f"ICE state: {peer_connection.iceConnectionState})"
                 )
+
+        # Additional verification: ensure channel is truly ready
+        # Give it a small delay to ensure all internal state is ready
+        await trio.sleep(0.1)
+
+        # Double-check channel state after delay
+        if handshake_channel.readyState != "open":
+            raise Exception(
+                f"Handshake channel closed after opening "
+                f"(state: {handshake_channel.readyState})"
+            )
 
         logger.debug("%s handshake channel opened", role)
 
@@ -785,18 +881,24 @@ async def connect(
                 )
 
             # Verify ICE connection is still good
+            # Note: ICE can be "closed" after connection is established - this is normal
             current_ice_state = peer_connection.iceConnectionState
-            if current_ice_state == "closed":
+            current_conn_state = peer_connection.connectionState
+            if current_ice_state == "closed" and current_conn_state != "connected":
                 raise Exception(
                     f"ICE connection closed during data channel verification "
-                    f"(state: {current_ice_state})"
+                    f"(ICE state: {current_ice_state}, "
+                    f" connection state: {current_conn_state})"
                 )
 
             logger.info(
-                "%s data channel verified (channel state: %s, ICE state: %s)",
+                "%s data channel verified successfully. "
+                "Channel state: %s, ICE state: %s, Connection state: %s. "
+                "Proceeding to Noise handshake...",
                 role,
                 handshake_channel.readyState,
                 current_ice_state,
+                current_conn_state,
             )
 
         except Exception as e:
@@ -895,9 +997,6 @@ async def connect(
                     "Remote certhash mismatch detected during WebRTC connection setup"
                 )
 
-        if remote_addr is not None and actual_certhash is not None:
-            remote_addr = canonicalize_certhash(remote_addr, actual_certhash)
-
         if remote_peer_id is None and remote_addr is not None:
             try:
                 peer_id_str = remote_addr.value_for_protocol("p2p")
@@ -910,14 +1009,44 @@ async def connect(
             raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
 
         # Verify data channel is open and ready before creating connection wrapper
+        # This is critical - the channel must be open for the handshake to work
         if handshake_channel.readyState != "open":
             raise Exception(
                 f"{role} handshake channel not open when creating WebRTCRawConnection "
-                f"(state: {handshake_channel.readyState})"
+                f"(state: {handshake_channel.readyState}, "
+                f"connectionState: {peer_connection.connectionState}, "
+                f"ICE state: {peer_connection.iceConnectionState})"
             )
+
+        # Now that the connection has been opened, add the remote's certhash to
+        # the multiaddr so we can complete the noise handshake (matches js-libp2p)
+        if role == "server" and remote_fingerprint is not None:
+            try:
+                client_certhash = fingerprint_to_certhash(remote_fingerprint)
+                if remote_addr is not None and client_certhash:
+                    remote_addr = canonicalize_certhash(remote_addr, client_certhash)
+                    logger.debug(
+                        f"{role} updated remote_addr with client certhash: "
+                        f"{client_certhash}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"{role} failed to add client certhash to remote_addr: {e}"
+                )
+        elif remote_addr is not None and actual_certhash is not None:
+            remote_addr = canonicalize_certhash(remote_addr, actual_certhash)
+
+        # Verify peer connection is still connected
+        if peer_connection.connectionState not in ("connected", "connecting"):
+            logger.warning(
+                f"{role} peer connection state is {peer_connection.connectionState} "
+                f"when creating WebRTCRawConnection - this may cause issues"
+            )
+
         logger.info(
-            f"{role} creating WebRTCRawConn with"
-            f" channel state: {handshake_channel.readyState}"
+            f"{role} creating WebRTCRawConn with "
+            f"channel state: {handshake_channel.readyState}, "
+            f"connection state: {peer_connection.connectionState}"
         )
 
         raw_connection = WebRTCRawConnection(
@@ -934,25 +1063,144 @@ async def connect(
         raw_connection.local_fingerprint = local_fingerprint
         secure_conn: "IRawConnection | ISecureConn" = raw_connection
 
+        # CRITICAL: Mark handshake as in progress IMMEDIATELY after creating connection
+        # This prevents the data channel's on_close handler from closing the connection
+        # before the handshake can start
+        raw_connection._handshake_in_progress = True
+        logger.debug(
+            f"{role} Marked handshake as in progress to prevent premature closure"
+        )
+
         noise_prologue: bytes | None = None
         if remote_addr is not None:
             noise_prologue = generate_noise_prologue(
                 local_fingerprint, remote_addr, role
             )
+            prologue_len = len(noise_prologue) if noise_prologue else 0
+            first_bytes = (
+                noise_prologue[:50].hex()
+                if noise_prologue and len(noise_prologue) >= 50
+                else (noise_prologue.hex() if noise_prologue else "None")
+            )
+            logger.debug(
+                f"{role} generated prologue: len={prologue_len}, "
+                f"first_50_bytes={first_bytes}"
+            )
+
+        sec_avail = "None" if security_multistream is None else "available"
+        data_state = (
+            raw_connection.data_channel.readyState
+            if hasattr(raw_connection, "data_channel")
+            else "N/A"
+        )
+        logger.info(
+            f"{role} security_multistream check: "
+            f"security_multistream is {sec_avail}, "
+            f"raw_connection type: {type(raw_connection)}, "
+            f"data_channel state: {data_state}"
+        )
 
         if security_multistream is not None:
-            transport = await security_multistream.select_transport(
-                raw_connection, role == "client"
+            # In WebRTC Direct, we skip multiselect negotiation and directly use Noise
+            # This matches js-libp2p behavior where Noise is used directly
+            data_state = (
+                raw_connection.data_channel.readyState
+                if hasattr(raw_connection, "data_channel")
+                else "N/A"
             )
+            logger.info(
+                f"{role} preparing Noise handshake: "
+                f"security_multistream available, "
+                f"noise_prologue generated: {noise_prologue is not None}, "
+                f"raw_connection type: {type(raw_connection)}, "
+                f"data_channel state: {data_state}"
+            )
+
+            if NOISE_PROTOCOL_ID not in security_multistream.transports:
+                available = list(security_multistream.transports.keys())
+                raise Exception(
+                    f"{role} Noise transport not found in security_multistream. "
+                    f"Available transports: {available}, "
+                    f"Expected: {NOISE_PROTOCOL_ID}"
+                )
+            transport = security_multistream.transports[NOISE_PROTOCOL_ID]
+            logger.debug(f"{role} got Noise transport: {type(transport)}")
+
             if hasattr(transport, "set_prologue"):
                 transport.set_prologue(noise_prologue)
-
-            if role == "client":
-                secure_conn = await transport.secure_outbound(
-                    raw_connection, remote_peer_id
+                logger.info(
+                    f"{role} set prologue on transport: "
+                    f"len={len(noise_prologue) if noise_prologue else 0}"
                 )
             else:
-                secure_conn = await transport.secure_inbound(raw_connection)
+                logger.warning(f"{role} transport does not have set_prologue method")
+
+            # Perform Noise handshake with proper error handling
+            try:
+                logger.info(
+                    f"{role} starting Noise handshake... "
+                    f"role={role}, "
+                    f"connection closed: {raw_connection._closed}, "
+                    f"data_channel state: {raw_connection.data_channel.readyState}, "
+                    f"peer_connection state: {peer_connection.connectionState}, "
+                    f"ICE state: {peer_connection.iceConnectionState}, "
+                    f"handshake_in_progress: {raw_connection._handshake_in_progress}"
+                )
+                # Verify connection is still open before starting handshake
+                if raw_connection._closed:
+                    raise Exception(
+                        f"{role} Connection already closed before handshake started"
+                    )
+                if raw_connection.data_channel.readyState != "open":
+                    raise Exception(
+                        f"{role} Data channel not open before handshake "
+                        f"(state: {raw_connection.data_channel.readyState})"
+                    )
+
+                # In WebRTC Direct, the server (listener) initiates the Noise handshake,
+                # so the client waits (secure_inbound) and the server starts
+                # (secure_outbound). This matches js-libp2p behavior.
+                if role == "client":
+                    logger.info(
+                        f"{role} calling secure_inbound "
+                        "(waiting for server to initiate)..."
+                    )
+                    secure_conn = await transport.secure_inbound(raw_connection)
+                    logger.info(f"{role} secure_inbound completed successfully")
+                else:
+                    logger.info(
+                        f"{role} calling secure_outbound (initiating handshake)... "
+                        f"remote_peer_id: {remote_peer_id}"
+                    )
+                    secure_conn = await transport.secure_outbound(
+                        raw_connection, remote_peer_id
+                    )
+                    logger.info(f"{role} secure_outbound completed successfully")
+
+                # Mark handshake as complete
+                raw_connection._handshake_in_progress = False
+                logger.info(f"{role} Noise handshake completed successfully")
+            except Exception as handshake_error:
+                # Mark handshake as no longer in progress
+                raw_connection._handshake_in_progress = False
+                logger.error(
+                    f"{role} Noise handshake failed: {handshake_error}", exc_info=True
+                )
+                # Check if connection is still usable
+                if raw_connection._closed:
+                    logger.error(
+                        f"{role} Connection closed during handshake - "
+                        "this may indicate a timing issue or connection error"
+                    )
+                # Check data channel state
+                logger.error(
+                    f"{role} Data channel state after handshake failure: "
+                    f"{raw_connection.data_channel.readyState}, "
+                    f"connection state: {peer_connection.connectionState}, "
+                    f"ICE state: {peer_connection.iceConnectionState}"
+                )
+                # Re-raise to let caller handle it
+                raise
 
         if hasattr(secure_conn, "remote_multiaddr"):
             setattr(secure_conn, "remote_multiaddr", remote_addr)
@@ -969,7 +1217,12 @@ async def connect(
         return secure_conn, answer_desc if role == "server" else None
 
     except Exception as e:
-        logger.error("%s noise handshake failed: %s", role, e)
+        logger.error("%s noise handshake failed: %s", role, e, exc_info=True)
+        # Provide more context about the failure
+        if hasattr(e, "__cause__") and e.__cause__:
+            logger.error(
+                "%s handshake failure cause: %s", role, e.__cause__, exc_info=True
+            )
         raise
     finally:
         if signal_service is not None and cleanup_handlers:

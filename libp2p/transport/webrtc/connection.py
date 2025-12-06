@@ -39,10 +39,11 @@ class WebRTCStream(INetStream):
         # Set muxed_conn as required by INetStream interface
         self.muxed_conn = cast(IMuxedConn, connection)
 
-        # Stream-specific channels
-        self.send_channel: MemorySendChannel[bytes]
-        self.receive_channel: MemoryReceiveChannel[bytes]
-        self.send_channel, self.receive_channel = trio.open_memory_channel(100)
+        channels: tuple[MemorySendChannel[bytes], MemoryReceiveChannel[bytes]] = (
+            trio.open_memory_channel(100)
+        )
+        self.send_channel: MemorySendChannel[bytes] = channels[0]
+        self.receive_channel: MemoryReceiveChannel[bytes] = channels[1]
 
         logger.debug(f"Created WebRTC stream {stream_id}")
 
@@ -151,10 +152,11 @@ class WebRTCRawConnection(IRawConnection):
         )  # Odd for initiator, even for responder
         self._stream_lock = trio.Lock()
 
-        # Message channels for raw data (when not using stream muxing)
-        self.send_channel: MemorySendChannel[bytes]
-        self.receive_channel: MemoryReceiveChannel[bytes]
-        self.send_channel, self.receive_channel = trio.open_memory_channel(1000)
+        channels: tuple[MemorySendChannel[bytes], MemoryReceiveChannel[bytes]] = (
+            trio.open_memory_channel(1000)
+        )
+        self.send_channel: MemorySendChannel[bytes] = channels[0]
+        self.receive_channel: MemoryReceiveChannel[bytes] = channels[1]
 
         # Read buffer for partial reads (required for read(n) to return exactly n bytes)
         self._read_buffer = b""
@@ -169,6 +171,9 @@ class WebRTCRawConnection(IRawConnection):
         self._message_dedup_lock = threading.Lock()
         # Keep only last 1000 message hashes to prevent memory growth
         self._max_dedup_cache = 1000
+
+        # Track if handshake is in progress to prevent premature closure
+        self._handshake_in_progress = False
 
         # Store trio token for async callback handling
         try:
@@ -250,7 +255,8 @@ class WebRTCRawConnection(IRawConnection):
                 logger.debug("send_channel closed, message dropped")
             except Exception as e:
                 logger.error(
-                    f"Failed to deliver raw message to send_channel: {e}", exc_info=True
+                    f"Failed to deliver raw message to send_channel: {e}",
+                    exc_info=True,
                 )
 
         def _deliver_stream_message(stream: "WebRTCStream", data: bytes) -> None:
@@ -357,12 +363,41 @@ class WebRTCRawConnection(IRawConnection):
         def on_close() -> None:
             """Handle channel close event"""
             logger.info(f"WebRTC channel closed to {self.peer_id}")
-            self._closed = True
-            # Close trio channels safely
-            try:
-                self._schedule_async(self._close_trio_channels)
-            except Exception as e:
-                logger.warning(f"Error closing trio channels from WebRTC callback: {e}")
+            # Don't immediately mark as closed - allow handshake to complete
+            # The connection might be closing during handshake, but we should
+            # let the handshake error handling deal with it
+            # Also, check if peer connection is still connected (ICE might be closed
+            # but connection is still working)
+            if not self._closed:
+                # Check if handshake is in progress - don't close during handshake
+                if self._handshake_in_progress:
+                    logger.warning(
+                        "Data channel closed during handshake - "
+                        "this may cause handshake to fail, but allowing it to complete"
+                    )
+                    return
+
+                # Check if peer connection is still connected
+                # ICE might be closed but connection is still working
+                try:
+                    if hasattr(self.peer_connection, "connectionState"):
+                        conn_state = self.peer_connection.connectionState
+                        if conn_state == "connected":
+                            logger.info(
+                                "Data channel closed but peer connection is still "
+                                "connected - this is normal, connection is still usable"
+                            )
+                            return
+                except Exception as e:
+                    logger.debug(f"Could not check peer connection state: {e}")
+
+                self._closed = True
+                try:
+                    self._schedule_async(self._close_trio_channels)
+                except Exception as e:
+                    logger.warning(
+                        f"Error closing trio channels from WebRTC callback: {e}"
+                    )
 
         def on_error(error: Any) -> None:
             """Handle channel error event"""
@@ -547,6 +582,32 @@ class WebRTCRawConnection(IRawConnection):
             logger.debug("Read called on closed connection")
             return b""
 
+        # WebRTC quirk: data channel can report "closed"
+        #  even when connection is "connected"
+        if (
+            hasattr(self.data_channel, "readyState")
+            and self.data_channel.readyState == "closed"
+        ):
+            conn_state = getattr(self.peer_connection, "connectionState", None)
+            if conn_state == "connected":
+                logger.debug(
+                    "Data channel reports closed but connection is connected - "
+                    "attempting read anyway (WebRTC quirk)"
+                )
+            elif self._handshake_in_progress:
+                logger.error(
+                    "Read called on closed data channel during handshake - "
+                    "handshake cannot complete. This indicates the data channel "
+                    "closed prematurely."
+                )
+                raise RuntimeError(
+                    "Data channel closed during handshake - "
+                    "cannot read handshake messages"
+                )
+            else:
+                # Handshake not in progress and connection not connected - return EOF
+                return b""
+
         async with self._read_lock:
             # If n is None, return all buffered data or wait
             if n is None:
@@ -595,7 +656,29 @@ class WebRTCRawConnection(IRawConnection):
         if self._closed:
             raise RuntimeError("Connection is closed")
 
-        # Check data channel state before writing
+        if self.data_channel.readyState == "closed":
+            conn_state = getattr(self.peer_connection, "connectionState", None)
+            if conn_state == "connected":
+                logger.debug(
+                    "Data channel reports closed but connection is connected - "
+                    "attempting write anyway (WebRTC quirk)"
+                )
+            elif self._handshake_in_progress:
+                logger.error(
+                    "Write called on closed data channel during handshake - "
+                    "handshake cannot complete. This indicates the data channel "
+                    "closed prematurely."
+                )
+                raise RuntimeError(
+                    "Data channel closed during handshake - "
+                    "cannot write handshake messages"
+                )
+            else:
+                # Handshake not in progress and connection not connected - raise error
+                raise RuntimeError(
+                    f"Data channel is closed and connection state is {conn_state}"
+                )
+
         if self.data_channel.readyState != "open":
             logger.warning(
                 f"Attempt write to data channel in: {self.data_channel.readyState}"
@@ -629,6 +712,14 @@ class WebRTCRawConnection(IRawConnection):
         try:
             if self._closed:
                 return
+
+            # If handshake is in progress, log a warning but allow closure
+            # (handshake error handling should deal with this)
+            if self._handshake_in_progress:
+                logger.warning(
+                    "Connection close requested during handshake - "
+                    "this may cause handshake to fail"
+                )
 
             self._closed = True
 

@@ -14,7 +14,7 @@ _fingerprint_regex = re.compile(
     r"^a=fingerprint:(?:\w+-[0-9]+)\s(?P<fingerprint>(?:[0-9A-Fa-f]{2}:)*[0-9A-Fa-f]{2})\r?$",
     re.MULTILINE,
 )
-log = logging.getLogger("libp2p.transport.webrtc")
+logger = logging.getLogger("libp2p.transport.webrtc.private_to_public.util")
 
 
 class SDP:
@@ -217,10 +217,26 @@ def fingerprint_to_multiaddr(fingerprint: str) -> Multiaddr:
         encoded = bytes.fromhex(hex_part)
     except ValueError as exc:  # pragma: no cover - defensive
         raise ValueError(f"Invalid fingerprint hex data: {hex_part}") from exc
-    # Fingerprint already represents the SHA-256 digest of the certificate.
-    # We just need to base64url encode the raw digest bytes.
-    b64 = base64.urlsafe_b64encode(encoded).decode("utf-8").rstrip("=")
-    certhash = f"uEi{b64}"
+    # Create full multihash bytes: code (0x12 for sha-256) + length + digest
+    # This matches js-libp2p: Digest.create(sha256.code, encoded).bytes
+    digest_len = len(encoded)
+    if digest_len == 32:
+        # SHA-256: code 0x12, length 32 (0x20)
+        multihash_bytes = bytes([0x12, 0x20]) + encoded
+    elif digest_len == 20:
+        # SHA-1: code 0x11, length 20 (0x14)
+        multihash_bytes = bytes([0x11, 0x14]) + encoded
+    elif digest_len == 64:
+        # SHA-512: code 0x13, length 64 (0x40)
+        multihash_bytes = bytes([0x13, 0x40]) + encoded
+    else:
+        raise ValueError(f"Unsupported digest length: {digest_len}")
+    # Base64url encode the full multihash bytes
+    # Note: "u" is the multibase prefix for base64url
+    # The base64url encoding naturally starts with "Ei" (encoding of [0x12, 0x20])
+    # So we should NOT add "Ei" as a prefix - just use "u" prefix
+    b64 = base64.urlsafe_b64encode(multihash_bytes).decode("utf-8").rstrip("=")
+    certhash = f"u{b64}"
     return Multiaddr(f"/certhash/{certhash}")
 
 
@@ -420,20 +436,33 @@ def certhash_decode(b: ByteString) -> str:
     Parameters
     ----------
     b : ByteString
-        The digest bytes to encode.
+        The digest bytes to encode (should be 32 bytes for SHA-256).
 
     Returns
     -------
     str
-        The certhash string (multibase base64url, prefix "uEi").
+        The certhash string (multibase base64url, prefix "u").
 
     """
     if not b:
         return ""
 
-    # Encode as base64url and add multibase prefix
-    b64_hash = base64.urlsafe_b64encode(b).decode().rstrip("=")
-    return f"uEi{b64_hash}"
+    # Create full multihash bytes: code + length + digest
+    digest_len = len(b)
+    if digest_len == 32:
+        multihash_bytes = bytes([0x12, 0x20]) + b
+    elif digest_len == 20:
+        multihash_bytes = bytes([0x11, 0x14]) + b
+    elif digest_len == 64:
+        multihash_bytes = bytes([0x13, 0x40]) + b
+    else:
+        raise ValueError(f"Unsupported digest length: {digest_len}")
+
+    # Base64url encode the full multihash bytes
+    # Note: "u" is the multibase prefix for base64url
+    # The base64url encoding naturally starts with "Ei" (encoding of [0x12, 0x20])
+    b64_hash = base64.urlsafe_b64encode(multihash_bytes).decode().rstrip("=")
+    return f"u{b64_hash}"
 
 
 def multiaddr_to_fingerprint(ma: Multiaddr) -> str:
@@ -581,6 +610,13 @@ def generate_noise_prologue(
     """
     Generate a noise prologue from the peer connection's certificate.
 
+    This matches the js-libp2p implementation:
+    - PREFIX = 'libp2p-webrtc-noise:'
+    - local = SHA256(local fingerprint bytes) as multihash digest
+    - remote = decoded certhash from multiaddr as multihash digest
+    - server: PREFIX + remote + local
+    - client: PREFIX + local + remote
+
     Parameters
     ----------
     local_fingerprint : str
@@ -600,16 +636,89 @@ def generate_noise_prologue(
     # bytes('libp2p-webrtc-noise:') +noise-server fingerprint +noise-client fingerprint
     PREFIX = b"libp2p-webrtc-noise:"
 
-    local_fp_string = local_fingerprint.strip().lower().replace(":", "")
-    local_fp_bytes = bytes.fromhex(local_fp_string)
-    local_digest = hashlib.sha256(local_fp_bytes).digest()
+    # Extract local fingerprint bytes (remove "sha-256 " prefix if present)
+    local_fp_string = local_fingerprint.strip().lower()
+    if " " in local_fp_string:
+        # Remove algorithm prefix (e.g. "sha-256 ")
+        _, hex_part = local_fp_string.split(" ", 1)
+    else:
+        hex_part = local_fp_string
+    # Remove colons and convert to bytes
+    hex_part = hex_part.replace(":", "").replace(" ", "")
+    local_fp_bytes = bytes.fromhex(hex_part)
 
+    # Create multihash digest: SHA256 of local fingerprint bytes
+    # js-libp2p returns local.bytes which is the FULL multihash
+    local_digest_raw = hashlib.sha256(local_fp_bytes).digest()
+    # Create full multihash bytes: code (0x12 for sha-256) + length (32) + digest
+    local_multihash = (
+        bytes([0x12, 0x20]) + local_digest_raw
+    )  # sha-256 code + 32-byte length + digest
+
+    # Extract remote certhash and decode to get FULL multihash bytes
+    # This matches js-libp2p: sdp.multibaseDecoder.decode(sdp.certhash(remoteAddr))
+    # The certhash is multibase-encoded: "u" prefix means base64url encoding
+    # The encoded content is the FULL multihash bytes (code + length + digest)
     cert = extract_certhash(remote_multi_addr)
-    _, remote_bytes = certhash_encode(cert)
+    # Decode multibase: "u" is the base64url prefix, rest is base64url-encoded multihash
+    # Note: "Ei" is NOT part of the prefix - it's the base64url encoding of [0x12, 0x20]
+    # So even if certhash starts with "uEi", we should only remove "u" prefix
+    if cert.startswith("u"):
+        base64_part = cert[1:]  # Remove "u" multibase prefix only
+    else:
+        base64_part = cert
+
+    # Decode base64url to get full multihash bytes (code + length + digest)
+    try:
+        s_bytes = base64_part.encode("ascii")
+        padding = 4 - (len(s_bytes) % 4)
+        if padding != 4:
+            s_bytes += b"=" * padding
+        remote_multihash = base64.urlsafe_b64decode(s_bytes)
+        # Verify it's a valid multihash (should start with code + length)
+        if len(remote_multihash) < 2:
+            raise Exception(
+                f"Decoded certhash too short: {len(remote_multihash)} bytes"
+            )
+        # Verify it's SHA-256 multihash (code 0x12, length should match digest)
+        if remote_multihash[0] != 0x12:
+            raise Exception(
+                f"Invalid multihash code: expected 0x12 (SHA-256), "
+                f"got {remote_multihash[0]:#x}"
+            )
+        expected_digest_len = remote_multihash[1]
+        actual_digest_len = len(remote_multihash[2:])
+        if actual_digest_len != expected_digest_len:
+            raise Exception(
+                f"Invalid multihash length: expected {expected_digest_len} "
+                f"bytes digest, got {actual_digest_len} bytes"
+            )
+        if expected_digest_len != 32:
+            raise Exception(
+                f"Unsupported digest length: expected 32 bytes (SHA-256), "
+                f"got {expected_digest_len} bytes"
+            )
+    except Exception as e:
+        raise Exception(f"Failed to decode certhash '{cert}': {e}") from e
 
     if role == "server":
         # server: PREFIX + remote + local
-        return PREFIX + remote_bytes + local_digest
+        prologue = PREFIX + remote_multihash + local_multihash
     else:
         # client: PREFIX + local + remote
-        return PREFIX + local_digest + remote_bytes
+        prologue = PREFIX + local_multihash + remote_multihash
+
+    logger.debug(
+        f"Generated noise prologue for {role}: "
+        f"local_multihash_len={len(local_multihash)}, "
+        f"remote_multihash_len={len(remote_multihash)}, "
+        f"prologue_len={len(prologue)}"
+    )
+    # Debug: log first few bytes to verify format
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"Prologue bytes (first 50): {prologue[:50].hex()} "
+            f"local_mh_header={local_multihash[:2].hex()} "
+            f"remote_mh_header={remote_multihash[:2].hex()}"
+        )
+    return prologue

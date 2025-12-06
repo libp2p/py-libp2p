@@ -121,7 +121,7 @@ class WebRTCDirectTransport(ITransport):
         protocols = {p.name for p in maddr.protocols()}
         return bool(protocols.intersection(self.supported_protocols))
 
-    async def dial(self, maddr: Multiaddr) -> IRawConnection:
+    async def dial(self, maddr: Multiaddr) -> IRawConnection | ISecureConn:
         """
         Dial a direct WebRTC connection to a peer.
         Uses UDP hole punching and SDP munging for NAT traversal.
@@ -396,7 +396,7 @@ class WebRTCDirectTransport(ITransport):
             logger.error(f"Failed to dial WebRTC-Direct connection to {maddr}: {e}")
             raise OpenConnectionError(f"WebRTC-Direct dial failed: {e}") from e
 
-    def create_listener(self, handler_function: THandler) -> IListener:
+    def create_listener(self, handler_function: THandler | None = None) -> IListener:
         """Create a WebRTC-Direct listener for incoming connections."""
         if self.cert_mgr is None:
             raise OpenConnectionError("Cert_mgr not present")

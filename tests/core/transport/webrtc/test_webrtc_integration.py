@@ -21,10 +21,11 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p import new_host
-from libp2p.abc import IHost
+from libp2p.abc import IHost, INetStream
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.exceptions import MultiError
+from libp2p.host.basic_host import BasicHost
 from libp2p.network.exceptions import SwarmException
 
 # Import WebRTC protocols to trigger registration
@@ -216,7 +217,9 @@ async def test_webrtc_direct_listen_on_localhost():
             await stream.write(data)
             await stream.close()
 
-        listener = webrtc_direct_transport.create_listener(echo_handler)
+        # Note: handler_function is not used by WebRTCDirectListener
+        # Stream handlers are set via host.set_stream_handler() instead
+        listener = webrtc_direct_transport.create_listener()
 
         # Listen on localhost
         listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
@@ -275,28 +278,13 @@ async def test_webrtc_direct_data_channel_read_write():
 
     transport_a = WebRTCDirectTransport()
     transport_a.set_host(host_a)
+    if isinstance(host_a, BasicHost):
+        host_a.transport_manager.register_transport("webrtc-direct", transport_a)
 
     transport_b = WebRTCDirectTransport()
     transport_b.set_host(host_b)
-
-    # Track received data on host B
-    received_data = b""
-    data_received_event = trio.Event()
-
-    async def data_handler(stream):
-        """Handler that receives data and echoes it back"""
-        nonlocal received_data, data_received_event
-        try:
-            received_data = await stream.read()
-            logger.info(
-                f"Host B received {len(received_data)} bytes: {received_data[:50]}"
-            )
-            await stream.write(received_data)
-            data_received_event.set()
-            await stream.close()
-        except Exception as e:
-            logger.error(f"Error in data handler: {e}")
-            raise
+    if isinstance(host_b, BasicHost):
+        host_b.transport_manager.register_transport("webrtc-direct", transport_b)
 
     connection = None
     stream = None
@@ -308,12 +296,11 @@ async def test_webrtc_direct_data_channel_read_write():
             host_b.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
         ):
             async with trio.open_nursery() as nursery:
-                # Start transports
                 await transport_a.start(nursery)
                 await transport_b.start(nursery)
 
                 # Register echo protocol handler on host B
-                async def echo_protocol_handler(stream):
+                async def echo_protocol_handler(stream: INetStream):
                     """Echo protocol handler for stream multiplexing"""
                     data = await stream.read()
                     await stream.write(data)
@@ -322,7 +309,8 @@ async def test_webrtc_direct_data_channel_read_write():
                 host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
 
                 # Create listener on host B
-                listener_b = transport_b.create_listener(data_handler)
+
+                listener_b = transport_b.create_listener()
                 listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
                 listen_success = await listener_b.listen(listen_maddr, nursery)
                 assert listen_success, "Host B failed to listen"
@@ -381,72 +369,64 @@ async def test_webrtc_direct_data_channel_read_write():
                                 f"  Stored TCP address {tcp_addr}for B in host A"
                             )
 
-                # Dial from host A to host B
-                # This should complete Noise handshake and return ISecureConn
+                # Store the full WebRTC address in peerstore for swarm to use
+                peerstore_a.add_addr(peer_b_id, webrtc_addr, 3600)
+                logger.debug(f"Stored full WebRTC address {webrtc_addr} for peer B")
+
                 logger.info(
-                    "Host A dialing host B (Noise handshake should complete)..."
+                    "Host A dialing host B via swarm "
+                    "(Noise handshake should complete)..."
                 )
+                network_a = host_a.get_network()
+                dial_error = None
                 with trio.move_on_after(TEST_TIMEOUT) as dial_scope:
-                    secure_connection = await transport_a.dial(webrtc_addr)
+                    try:
+                        connections = await network_a.dial_peer(peer_b_id)
+                    except Exception as e:
+                        dial_error = e
+                        logger.error(f"Dial failed with error: {e}", exc_info=True)
+                        raise
 
                 if dial_scope.cancelled_caught:
-                    pytest.fail("Timeout during dial - Noise handshake may have failed")
+                    error_msg = "Timeout during dial - Noise handshake may have failed"
+                    if dial_error:
+                        error_msg += f". Error: {dial_error}"
+                    pytest.fail(error_msg)
 
-                assert secure_connection is not None, (
-                    "Failed to establish WebRTC-Direct connection"
-                )
-                logger.info("✅ WebRTC-Direct connection established")
+                assert connections, "Failed to establish WebRTC-Direct connection"
+                logger.info("✅ WebRTC-Direct connection established via swarm")
 
-                # Verify connection is secured (ISecureConn after Noise handshake)
-                from libp2p.abc import INetConn
-
-                assert isinstance(secure_connection, INetConn), (
-                    "Connection should be secured after Noise handshake"
-                )
-                logger.info("✅ Connection is secured (Noise handshake completed)")
-
-                # Verify connection has underlying WebRTCRawConnection attributes
-                # The secure connection wraps the raw connection
-                if hasattr(secure_connection, "muxed_conn"):
-                    # Try to access underlying connection
-                    underlying = secure_connection.muxed_conn.accept_stream()
-                    if hasattr(underlying, "data_channel"):
-                        logger.debug("✅ Underlying connection has data_channel")
-                    if hasattr(underlying, "receive_channel"):
-                        logger.debug("✅ Underlying connection has receive_channel")
-
-                # Test data exchange through the swarm (after Noise handshake)
-                network_a = host_a.get_network()
+                # Verify connection is registered in swarm
                 connections_to_b = network_a.get_connections(peer_b_id)
                 assert connections_to_b, "No connections to peer B in host A's network"
                 logger.info("✅ Connection registered in swarm")
 
-                # Open a stream and test data exchange
-                logger.info("Testing data exchange over secure connection...")
-                stream = connections_to_b[0].get_streams()[0]
+                # Get the connection (should be INetConn after full upgrade)
+                connection_to_b = connections_to_b[0]
+                from libp2p.abc import INetConn
+
+                # Validate connection type
+                logger.info(f"Connection type: {type(connection_to_b)}")
+
+                # The connection should be INetConn (wraps muxed connection)
+                assert isinstance(connection_to_b, INetConn), (
+                    f"Connection should be INetConn, got {type(connection_to_b)}"
+                )
+                logger.info("✅ Connection is INetConn")
+
+                # Open a stream with protocol negotiation using host API
+                # This will negotiate the ECHO_PROTOCOL and route to the echo handler
+                logger.info("Opening stream with protocol negotiation...")
+                stream = await host_a.new_stream(peer_b_id, [ECHO_PROTOCOL])
                 assert stream is not None, "Failed to open stream"
+                logger.info("✅ Stream opened with protocol negotiation")
 
                 test_message = b"__webrtc_data_channel_test__"
                 logger.info(f"Testing write: sending {len(test_message)} bytes")
                 await stream.write(test_message)
                 logger.info("✅ Write successful")
 
-                # Wait for data to be received and echoed back
-                logger.info("Waiting for data to be received and echoed...")
-                with trio.move_on_after(TEST_TIMEOUT) as cancel_scope:
-                    await data_received_event.wait()
-                    await trio.sleep(0.2)
-
-                if cancel_scope.cancelled_caught:
-                    pytest.fail("Timeout waiting for data to be received by handler")
-
-                # Verify data was received by host B
-                assert received_data == test_message, (
-                    f"Data mismatch: sent {test_message}, received {received_data}"
-                )
-                logger.info("✅ Host B received data correctly")
-
-                # Read echoed data from stream
+                # Read echoed data from stream (echo handler will echo it back)
                 logger.info("Reading echoed data from stream...")
                 with trio.move_on_after(5.0) as read_scope:
                     echoed_data = await stream.read(len(test_message))
@@ -520,9 +500,13 @@ async def test_webrtc_direct_noise_handshake_completion():
 
     transport_a = WebRTCDirectTransport()
     transport_a.set_host(host_a)
+    if isinstance(host_a, BasicHost):
+        host_a.transport_manager.register_transport("webrtc-direct", transport_a)
 
     transport_b = WebRTCDirectTransport()
     transport_b.set_host(host_b)
+    if isinstance(host_b, BasicHost):
+        host_b.transport_manager.register_transport("webrtc-direct", transport_b)
 
     handshake_completed = trio.Event()
     secure_data_received = b""
@@ -551,7 +535,6 @@ async def test_webrtc_direct_noise_handshake_completion():
             host_b.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]),
         ):
             async with trio.open_nursery() as nursery:
-                # Start transports
                 await transport_a.start(nursery)
                 await transport_b.start(nursery)
 
@@ -564,8 +547,7 @@ async def test_webrtc_direct_noise_handshake_completion():
 
                 host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
 
-                # Create listener on host B with secure handler
-                listener_b = transport_b.create_listener(secure_handler)
+                listener_b = transport_b.create_listener()
                 listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
                 listen_success = await listener_b.listen(listen_maddr, nursery)
                 assert listen_success, "Host B failed to listen"
@@ -629,37 +611,43 @@ async def test_webrtc_direct_noise_handshake_completion():
                                 f"Stored TCP address {tcp_addr} for B in host A"
                             )
 
-                # Dial from host A to host B
-                # This should complete Noise handshake internally
+                # Store the full WebRTC address in peerstore for swarm to use
+                peerstore_a.add_addr(peer_b_id, webrtc_addr, 3600)
+                logger.debug(f"Stored full WebRTC address {webrtc_addr} for peer B")
+
                 logger.info(
-                    "Host A dialing host B (Noise handshake should complete)..."
+                    "Host A dialing host B via swarm "
+                    "(Noise handshake should complete)..."
                 )
+                network_a = host_a.get_network()
                 with trio.move_on_after(TEST_TIMEOUT) as dial_scope:
-                    raw_connection = await transport_a.dial(webrtc_addr)
+                    connections = await network_a.dial_peer(peer_b_id)
 
                 if dial_scope.cancelled_caught:
                     pytest.fail("Timeout during WebRTC-Direct dial")
 
-                assert raw_connection is not None, "Failed to establish connection"
-                logger.info("✅ Connection established (Noise handshake completed)")
-
-                from libp2p.abc import ISecureConn
-
-                assert isinstance(raw_connection, ISecureConn), (
-                    "Connection should be secured after Noise handshake"
+                assert connections, "Failed to establish connection"
+                logger.info(
+                    "✅ Connection established via swarm (Noise handshake completed)"
                 )
-                logger.info("✅ Connection is secured (ISecureConn)")
 
-                # Test that we can use the connection for data exchange
-                # The connection should have been upgraded through the swarm
-                # and registered, so we can open streams on it
-                network_a = host_a.get_network()
+                from libp2p.abc import INetConn
+
+                # Verify connection is registered
                 connections_to_b = network_a.get_connections(peer_b_id)
                 assert connections_to_b, "No connections to peer B in host A's network"
+                logger.info("✅ Connection registered in swarm")
 
-                # Open a stream and test data exchange
+                # Get the connection (should be INetConn after full upgrade)
+                connection_to_b = connections_to_b[0]
+                assert isinstance(connection_to_b, INetConn), (
+                    "Connection should be INetConn after full upgrade"
+                )
+                logger.info("✅ Connection is INetConn")
+
+                # Open a stream with protocol negotiation using host API
                 logger.info("Testing secure data exchange...")
-                stream = connections_to_b[0].get_streams()[0]
+                stream = await host_a.new_stream(peer_b_id, [ECHO_PROTOCOL])
                 assert stream is not None, "Failed to open stream on secure connection"
 
                 test_data = b"__noise_handshake_test__"
@@ -733,9 +721,13 @@ async def test_webrtc_direct_data_channel_message_handling():
 
     transport_a = WebRTCDirectTransport()
     transport_a.set_host(host_a)
+    if isinstance(host_a, BasicHost):
+        host_a.transport_manager.register_transport("webrtc-direct", transport_a)
 
     transport_b = WebRTCDirectTransport()
     transport_b.set_host(host_b)
+    if isinstance(host_b, BasicHost):
+        host_b.transport_manager.register_transport("webrtc-direct", transport_b)
 
     messages_received = []
 
@@ -776,7 +768,7 @@ async def test_webrtc_direct_data_channel_message_handling():
 
                 host_b.set_stream_handler(ECHO_PROTOCOL, echo_protocol_handler)
 
-                listener_b = transport_b.create_listener(message_handler)
+                listener_b = transport_b.create_listener()
                 listen_maddr = Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct")
                 await listener_b.listen(listen_maddr, nursery)
 
@@ -828,23 +820,36 @@ async def test_webrtc_direct_data_channel_message_handling():
                             peerstore_a.add_addr(peer_b_id, tcp_addr, 3600)
                             logger.debug(f"Stored TCP addr {tcp_addr} for B in host A")
 
-                # Dial - this completes Noise handshake
-                logger.info("Dialing (Noise handshake should complete)...")
-                secure_connection = await transport_a.dial(webrtc_addr)
-                assert secure_connection is not None, "Connection failed"
-                logger.info("✅ Connection established (Noise handshake completed)")
+                # Store the full WebRTC address in peerstore for swarm to use
+                peerstore_a.add_addr(peer_b_id, webrtc_addr, 3600)
+                logger.debug(f"Stored full WebRTC address {webrtc_addr} for peer B")
 
-                # Verify connection is secured
-                from libp2p.abc import ISecureConn
+                # Dial - this completes Noise handshake via swarm
+                logger.info("Dialing via swarm (Noise handshake should complete)...")
+                network_a = host_a.get_network()
+                with trio.move_on_after(TEST_TIMEOUT) as dial_scope:
+                    connections = await network_a.dial_peer(peer_b_id)
 
-                assert isinstance(secure_connection, ISecureConn), (
-                    "Connection should be secured"
+                if dial_scope.cancelled_caught:
+                    pytest.fail("Timeout during WebRTC-Direct dial")
+
+                assert connections, "Connection failed"
+                logger.info(
+                    "✅ Connection established via swarm (Noise handshake completed)"
                 )
 
-                # Get connection from swarm for stream operations
-                network_a = host_a.get_network()
+                # Verify connection is registered
                 connections_to_b = network_a.get_connections(peer_b_id)
                 assert connections_to_b, "No connections to peer B"
+                logger.info("✅ Connection registered in swarm")
+
+                # Get the connection
+                connection_to_b = connections_to_b[0]
+                from libp2p.abc import INetConn
+
+                assert isinstance(connection_to_b, INetConn), (
+                    "Connection should be INetConn"
+                )
 
                 # Test multiple messages through streams
                 test_messages = [
@@ -856,8 +861,8 @@ async def test_webrtc_direct_data_channel_message_handling():
                 for i, test_msg in enumerate(test_messages):
                     logger.info(f"Sending message {i + 1}: {len(test_msg)} bytes")
 
-                    # Open a new stream for each message
-                    stream = connections_to_b[0].get_streams()[0]
+                    # Open a new stream with protocol negotiation for each message
+                    stream = await host_a.new_stream(peer_b_id, [ECHO_PROTOCOL])
                     assert stream is not None, (
                         f"Failed to open stream for message {i + 1}"
                     )
@@ -865,7 +870,7 @@ async def test_webrtc_direct_data_channel_message_handling():
                     # Send message
                     await stream.write(test_msg)
 
-                    # Wait for message to be received (should not block indefinitely)
+                    # Wait for message to be received and echoed
                     logger.info(f"Waiting for message {i + 1} to be received...")
                     with trio.move_on_after(5.0) as read_scope:
                         received = await stream.read(len(test_msg))

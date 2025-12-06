@@ -145,6 +145,10 @@ class TransportManager:
         # Prefer exact matches by inspecting protocols in the multiaddr.
         protocols = {proto.name for proto in maddr.protocols()}
 
+        # Prefer WebRTC-Direct for addresses that explicitly request it.
+        if "webrtc-direct" in protocols and "webrtc-direct" in self._transports:
+            return self._transports["webrtc-direct"]
+
         # Prefer WebRTC for addresses that explicitly request it.
         if "webrtc" in protocols and "webrtc" in self._transports:
             return self._transports["webrtc"]

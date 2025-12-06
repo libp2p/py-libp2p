@@ -95,11 +95,13 @@ class WebRTCCertificate:
             assert self.cert is not None, "Certificate must be initialized"
             cert_der = self.cert.public_bytes(Encoding.DER)
             sha256_hash = hashlib.sha256(cert_der).digest()
-            # Multibase base32 encoding with 'u' prefix for base32pad-upper
-            # Convert to base64url first, then format as multibase
-            b64_hash = base64.urlsafe_b64encode(sha256_hash).decode().rstrip("=")
-            # Use "uEi" prefix for libp2p WebRTC certificate hash format
-            self._certhash = "uEi" + b64_hash
+            # Create full multihash bytes:
+            #  code (0x12 for sha-256) + length (32) + digest
+            multihash_bytes = bytes([0x12, 0x20]) + sha256_hash
+            # Base64url encode the full multihash bytes
+            # Note: "u" is the multibase prefix for base64url
+            b64_hash = base64.urlsafe_b64encode(multihash_bytes).decode().rstrip("=")
+            self._certhash = "u" + b64_hash
         return self._certhash
 
     def to_pem(self) -> tuple[bytes, bytes]:

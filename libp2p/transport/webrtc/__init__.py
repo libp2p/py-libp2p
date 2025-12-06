@@ -84,8 +84,11 @@ class CerthashCodec:
         if not b:
             return ""
         import base64
+        # b should be the full multihash bytes (code + length + digest)
+        # Base64url encode and add multibase prefix "u"
+        # Note: base64url encoding naturally starts with "Ei" (encoding of [0x12, 0x20])
         b64_hash = base64.urlsafe_b64encode(b).decode().rstrip('=')
-        return f"uEi{b64_hash}"
+        return f"u{b64_hash}"
 
 __all__ = [
     "WebRTCTransport",
