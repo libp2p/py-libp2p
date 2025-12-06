@@ -85,7 +85,7 @@ def test_extract_ip_from_multiaddr():
     assert extract_ip_from_multiaddr(addr4) == "2001:db8::1"
 
     # No IP address
-    addr5 = Multiaddr("/dns4/example.com/tcp/1234")
+    addr5 = Multiaddr("/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
     assert extract_ip_from_multiaddr(addr5) is None
 
     # Complex multiaddr (without p2p to avoid base58 issues)
@@ -126,8 +126,8 @@ def test_reachability_checker_is_addr_public():
     assert checker.is_addr_public(private_addr3) is False
 
     # No IP address
-    dns_addr = Multiaddr("/dns4/example.com/tcp/1234")
-    assert checker.is_addr_public(dns_addr) is False
+    p2p_addr = Multiaddr("/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+    assert checker.is_addr_public(p2p_addr) is False
 
 
 def test_reachability_checker_get_public_addrs():
@@ -140,7 +140,7 @@ def test_reachability_checker_get_public_addrs():
         Multiaddr("/ip4/192.168.1.1/tcp/1234"),  # Private
         Multiaddr("/ip4/1.1.1.1/udp/5678"),  # Public
         Multiaddr("/ip4/10.0.0.1/tcp/1234"),  # Private
-        Multiaddr("/dns4/example.com/tcp/1234"),  # DNS
+        Multiaddr("/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"),  # P2P
     ]
 
     public_addrs = checker.get_public_addrs(addrs)

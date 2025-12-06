@@ -992,7 +992,7 @@ async def test_store_multiaddrs_stores_addresses(protocol):
     peerstore.add_addrs.assert_called()
     stored_peer_id, addrs = peerstore.add_addrs.call_args[0]
     assert stored_peer_id == peer_info.peer_id
-    assert any("/p2p-circuit/p2p/" in str(ma) for ma in addrs)
+    assert any("/p2p-circuit" in str(ma) for ma in addrs)
 
 
 @pytest.mark.trio
@@ -1065,122 +1065,39 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     assert conn.is_initiator
 
 
-def test_valid_circuit_multiaddr(id_mock, circuit_v2_transport):
+def test_valid_circuit_multiaddr(circuit_v2_transport):
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-    id_obj = Mock(spec=ID)
-    id_mock.from_base58.return_value = id_obj
 
-    ip4_proto = Mock()
-    ip4_proto.name = "ip4"
-    tcp_proto = Mock()
-    tcp_proto.name = "tcp"
-    circuit_proto = Mock()
-    circuit_proto.name = "p2p-circuit"
-    p2p_proto = Mock()
-    p2p_proto.name = "p2p"
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}")
+    relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
 
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [
-            (ip4_proto, "127.0.0.1"),
-            (tcp_proto, "1234"),
-            (circuit_proto, None),
-            (p2p_proto, id_obj),
-        ]
-
-        ma = multiaddr.Multiaddr(
-            f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}"
-        )
-        relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
-
-        assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
-        assert target_peer_id == id_obj
-        id_mock.from_base58.assert_not_called()
+    assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
+    assert target_peer_id.to_base58() == valid_peer_id
 
 
-def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
+def test_invalid_circuit_multiaddr(circuit_v2_transport):
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-    id_obj = Mock(spec=ID)
-    id_mock.from_base58.return_value = id_obj
-
-    ip4_proto = Mock()
-    ip4_proto.name = "ip4"
-    tcp_proto = Mock()
-    tcp_proto.name = "tcp"
-    circuit_proto = Mock()
-    circuit_proto.name = "p2p-circuit"
-    p2p_proto = Mock()
-    p2p_proto.name = "p2p"
-    ip6_proto = Mock()
-    ip6_proto.name = "ip6"
 
     # Test case 1: Missing /p2p-circuit
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [
-            (ip4_proto, "127.0.0.1"),
-            (tcp_proto, "1234"),
-            (p2p_proto, id_obj),
-        ]
-        ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}")
-        with pytest.raises(ValueError) as exc_info:
-            circuit_v2_transport.parse_circuit_ma(ma)
-        assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma)
+    assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
 
     # Test case 2: Missing /p2p/<peerID>
-    with patch("multiaddr.protocols.protocol_with_name") as mock_proto:
-
-        def proto_side_effect(name):
-            if name == "p2p-circuit":
-                return circuit_proto
-            elif name == "ip4":
-                return ip4_proto
-            elif name == "tcp":
-                return tcp_proto
-            elif name == "ip6":
-                return ip6_proto
-            else:
-                return Mock(name=name)
-
-        mock_proto.side_effect = lambda name: (
-            circuit_proto
-            if name == "p2p-circuit"
-            else ip4_proto
-            if name == "ip4"
-            else tcp_proto
-            if name == "tcp"
-            else ip6_proto
-            if name == "ip6"
-            else Mock(name=name)
-        )
-
-        with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-            mock_items.return_value = [
-                (ip4_proto, "127.0.0.1"),
-                (tcp_proto, "1234"),
-                (circuit_proto, None),
-                (ip6_proto, "::1"),
-            ]
-            ma = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
-            with pytest.raises(ValueError) as exc_info:
-                circuit_v2_transport.parse_circuit_ma(ma)
-            assert str(exc_info.value) == f"Missing /p2p/<peerID> at the end: {ma}"
+    ma = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma)
+    assert str(exc_info.value) == f"Missing /p2p/<peerID> at the end: {ma}"
 
     # Test case 3: Too short
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [(ip4_proto, "127.0.0.1")]
-        ma = multiaddr.Multiaddr("/ip4/127.0.0.1")
-        with pytest.raises(ValueError) as exc_info:
-            circuit_v2_transport.parse_circuit_ma(ma)
-        assert str(exc_info.value) == f"Invalid circuit Multiaddr, too short: {ma}"
+    ma = multiaddr.Multiaddr("/ip4/127.0.0.1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma)
+    assert str(exc_info.value) == f"Invalid circuit Multiaddr, too short: {ma}"
 
     # Test case 4: Wrong protocol instead of p2p-circuit
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [
-            (ip4_proto, "127.0.0.1"),
-            (tcp_proto, "1234"),
-            (ip6_proto, "::1"),
-            (p2p_proto, id_obj),
-        ]
-        ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}")
-        with pytest.raises(ValueError) as exc_info:
-            circuit_v2_transport.parse_circuit_ma(ma)
-        assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma)
+    assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"

@@ -367,9 +367,7 @@ class CircuitV2Transport(ITransport):
             raise ValueError(f"Invalid peer ID in circuit Multiaddr: {val}") from e
 
         relay_parts = parts[:-2]
-        relay_ma_str = "/".join(
-            f"{p[0].name}/{p[1]}" for p in relay_parts if p[1] is not None
-        )
+        relay_ma_str = "".join(str(p) for p in relay_parts)
         relay_ma = (
             multiaddr.Multiaddr(relay_ma_str)
             if relay_ma_str
