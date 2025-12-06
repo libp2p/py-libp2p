@@ -893,6 +893,10 @@ class Swarm(Service, INetworkService):
         logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
+        # For QUIC connections, also verify connection is established
+        if isinstance(muxed_conn, QUICConnection):
+            if not muxed_conn.is_established:
+                await muxed_conn._connected_event.wait()
         logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()

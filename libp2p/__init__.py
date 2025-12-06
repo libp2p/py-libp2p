@@ -117,7 +117,7 @@ DEFAULT_MUXER = "YAMUX"
 # Multiplexer options
 MUXER_YAMUX = "YAMUX"
 MUXER_MPLEX = "MPLEX"
-DEFAULT_NEGOTIATE_TIMEOUT = 5
+DEFAULT_NEGOTIATE_TIMEOUT = 30  # seconds - increased for high-concurrency scenarios
 
 logger = logging.getLogger(__name__)
 
