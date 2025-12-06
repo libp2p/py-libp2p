@@ -30,7 +30,7 @@ dependencies = [
     "noiseprotocol>=0.3.0",
     "protobuf>=4.25.0,<7.0.0",
     "pycryptodome>=3.9.2",
-    "py-multihash @ git+https://github.com/sumanjeet0012/py-multihash.git@7562a97adef1a001dc3213ff18fb3486ee3f2e95",
+    "py-multihash @ git+https://github.com/sumanjeet0012/py-multihash.git@ef44daf898ff00afee5a9903fe846945df73e586",
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
