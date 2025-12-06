@@ -313,6 +313,12 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
+        Retrieve all multiaddresses this host is listening to, including the peer ID suffix.
+
+        .. note::
+            This method is deprecated and will be removed in a future release.
+            Please use :meth:`get_transport_addrs` instead if you need the raw transport addresses.
+
         :return: all the multiaddr addresses this host is listening to
         """
         # TODO: We don't need "/p2p/{peer_id}" postfix actually.
@@ -322,6 +328,19 @@ class BasicHost(IHost):
         for transport in self._network.listeners.values():
             for addr in transport.get_addrs():
                 addrs.append(addr.encapsulate(p2p_part))
+        return addrs
+
+    def get_transport_addrs(self) -> list[multiaddr.Multiaddr]:
+        """
+        Retrieve all transport multiaddresses this host is listening to.
+
+        This method returns the raw transport addresses without the ``/p2p/{peer_id}`` suffix.
+
+        :return: all the transport multiaddr addresses this host is listening to
+        """
+        addrs: list[multiaddr.Multiaddr] = []
+        for transport in self._network.listeners.values():
+            addrs.extend(transport.get_addrs())
         return addrs
 
     def get_connected_peers(self) -> list[ID]:
