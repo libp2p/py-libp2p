@@ -143,8 +143,11 @@ class TransportRegistry:
         self.register_transport("quic-v1", QUICTransport)
 
         # Register WebRTC transport for /webrtc protocol
-        WebRTCTransport = _get_webrtc_transport()
-        self.register_transport("webrtc", WebRTCTransport)
+        try:
+            WebRTCTransport = _get_webrtc_transport()
+            self.register_transport("webrtc", WebRTCTransport)
+        except (ImportError, KeyError, TypeError) as e:
+            logger.debug("WebRTC transport not available (optional dependency): %s", e)
 
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]

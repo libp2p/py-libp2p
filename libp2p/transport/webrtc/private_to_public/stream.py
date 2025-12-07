@@ -37,7 +37,7 @@ from ..exception import (
     WebRTCStreamStateError,
     WebRTCStreamTimeoutError,
 )
-from .pb.message_pb2 import Message
+from .pb.stream_message_pb2 import Message  # type: ignore[attr-defined]
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public.stream")
 

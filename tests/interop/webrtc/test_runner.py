@@ -10,9 +10,9 @@ from datetime import datetime
 import logging
 import sys
 
-import redis.asyncio as redis
+import redis.asyncio as redis  # type: ignore[import-untyped]
 import trio
-from trio_asyncio import aio_as_trio, open_loop
+from trio_asyncio import aio_as_trio, open_loop  # type: ignore[import-untyped]
 
 # Configure logging
 logging.basicConfig(
@@ -192,7 +192,7 @@ class WebRTCTestRunner:
             logger.error("✗ TEST FAILED with exception: %s", e, exc_info=True)
             return False
 
-    async def print_report(self):
+    async def print_report(self) -> bool:
         """Print test report"""
         logger.info("=" * 70)
         logger.info("WEBRTC INTEROP TEST REPORT")

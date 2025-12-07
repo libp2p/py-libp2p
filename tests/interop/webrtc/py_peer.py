@@ -4,13 +4,14 @@ import logging
 import sys
 
 from multiaddr import Multiaddr
-import redis.asyncio as redis
+import redis.asyncio as redis  # type: ignore[import-untyped]
 import trio
-from trio_asyncio import aio_as_trio, open_loop
+from trio_asyncio import aio_as_trio, open_loop  # type: ignore[import-untyped]
 
 from libp2p import new_host
 from libp2p.abc import IHost, INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID as PeerID
 
 logging.basicConfig(
@@ -18,7 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("py-peer")
 
-PING_PROTOCOL = "/ipfs/ping/1.0.0"
+PING_PROTOCOL = TProtocol("/ipfs/ping/1.0.0")
 COORDINATION_KEY_PREFIX = "interop:webrtc"
 
 

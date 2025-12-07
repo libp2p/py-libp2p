@@ -75,6 +75,7 @@ dev = [
     "tox>=4.0.0",
     "aiortc>=1.14.0",
     "trio-asyncio>=0.15.0",
+    "redis>=5.0.0",
     "twine",
     "wheel",
     "setuptools>=42",
@@ -302,4 +303,6 @@ project_excludes = [
     ".venv/**",
     "./tests/interop/nim_libp2p",
     "libp2p/transport/webrtc/**", # Optional WebRTC transport dependencies
+    "tests/interop/webrtc/**", # Optional WebRTC interop test dependencies
+    "tests/core/transport/webrtc/**", # Optional WebRTC test dependencies
 ]

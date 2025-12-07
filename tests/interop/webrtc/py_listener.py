@@ -14,15 +14,15 @@ import json
 import logging
 import sys
 
-from aiortc import (
+from aiortc import (  # type: ignore[import-untyped]
     RTCConfiguration,
     RTCIceServer,
     RTCPeerConnection,
     RTCSessionDescription,
 )
-import redis.asyncio as redis
+import redis.asyncio as redis  # type: ignore[import-untyped]
 import trio
-from trio_asyncio import aio_as_trio, open_loop
+from trio_asyncio import aio_as_trio, open_loop  # type: ignore[import-untyped]
 
 # Configure logging
 logging.basicConfig(
