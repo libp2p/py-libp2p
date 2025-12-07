@@ -10,8 +10,22 @@ import time
 from typing import cast
 
 import multiaddr
-from multiaddr.util import split
 import trio
+
+try:
+    from multiaddr.util import split
+except ImportError:
+    import binascii
+
+    from multiaddr import Multiaddr
+    from multiaddr.codec import bytes_split
+
+    def split(ma: Multiaddr) -> list[Multiaddr]:
+        addrs = []
+        bb = bytes_split(ma.to_bytes())
+        for addr in bb:
+            addrs.append(Multiaddr(binascii.hexlify(addr)))
+        return addrs
 
 from libp2p.abc import (
     IHost,

@@ -848,6 +848,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         self._stream_accept_event = trio.Event()
                     logger.debug(f"Accepted inbound stream {stream.stream_id}")
                     return stream
+                else:
+                    # Queue is empty, ensure event is cleared to avoid busy loop
+                    if self._stream_accept_event.is_set():
+                        self._stream_accept_event = trio.Event()
 
             if self._closed:
                 raise MuxedConnUnavailable("Connection closed while accepting stream")
@@ -987,7 +991,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
-                    logger.error(
+                    logger.debug(
                         f"Unexpected outbound stream {stream_id} in data event"
                     )
                     continue
@@ -1301,7 +1305,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
-                    logger.error(
+                    logger.debug(
                         f"Unexpected outbound stream {stream_id} in data event"
                     )
                     return
