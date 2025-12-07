@@ -493,11 +493,12 @@ class TestMeshMaintenance:
         )
 
         # Mock scorer
-        gossipsub.scorer = Mock()
-        gossipsub.scorer.params = Mock()
-        gossipsub.scorer.params.graylist_threshold = -5.0
+        scorer = Mock()
+        gossipsub.scorer = scorer
+        scorer.params = Mock()
+        scorer.params.graylist_threshold = -5.0
         # Add ip_by_peer attribute to avoid TypeError when checking IP diversity
-        gossipsub.scorer.ip_by_peer = {}
+        scorer.ip_by_peer = {}
         score_mock = Mock(
             side_effect=lambda peer, topics: {
                 "good_peer": 10.0,
@@ -505,7 +506,7 @@ class TestMeshMaintenance:
                 "mediocre_peer": 2.0,
             }.get(str(peer), 0.0)
         )
-        gossipsub.scorer.score = score_mock
+        scorer.score = score_mock
 
         topic = "test_topic"
         mesh_peers = [IDFactory() for _ in range(3)]
