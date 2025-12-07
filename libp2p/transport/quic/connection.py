@@ -843,6 +843,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
             async with self._stream_lock:
                 if self._stream_accept_queue:
                     stream = self._stream_accept_queue.pop(0)
+                    # If queue is now empty, clear the event
+                    if not self._stream_accept_queue:
+                        self._stream_accept_event = trio.Event()
                     logger.debug(f"Accepted inbound stream {stream.stream_id}")
                     return stream
 
