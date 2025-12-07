@@ -1424,10 +1424,9 @@ class GossipSub(IPubsubRouter, Service):
                 # Get the remote address from the connection
                 # Note: Accessing connection through muxed_conn may vary
                 muxed_conn = stream.muxed_conn
-                if hasattr(muxed_conn, "conn") and hasattr(
-                    muxed_conn.conn, "remote_addr"
-                ):
-                    remote_addr = muxed_conn.conn.remote_addr
+                conn = getattr(muxed_conn, "conn", None)
+                if conn is not None and hasattr(conn, "remote_addr"):
+                    remote_addr = getattr(conn, "remote_addr", None)
                     if remote_addr:
                         # Extract IP from multiaddr
                         ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
@@ -1677,10 +1676,11 @@ class GossipSub(IPubsubRouter, Service):
 
         # Count unique IPs in mesh
         unique_ips = set()
-        if self.scorer is not None:
+        scorer = self.scorer
+        if scorer is not None:
             for peer in mesh_peers:
-                if peer in self.scorer.ip_by_peer:
-                    unique_ips.add(self.scorer.ip_by_peer[peer])
+                if peer in scorer.ip_by_peer:
+                    unique_ips.add(scorer.ip_by_peer[peer])
 
         # If diversity is too low, try to improve it
         if len(unique_ips) < self.min_mesh_diversity_ips:
