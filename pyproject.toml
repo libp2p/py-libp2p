@@ -152,6 +152,7 @@ log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
 markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
+    "serial: mark test to run serially (not in parallel with pytest-xdist)",
 ]
 xfail_strict = true
 
