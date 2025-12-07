@@ -146,18 +146,31 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
         # For /tls/sni/example.com/ws: network + tcp + tls + sni + ws
 
         # Check if it's a simple /ws or /wss
-        if len(protocols) == 3:
-            return protocols[2].name in ["ws", "wss"]
+        # Note: It might have /p2p/ (or /ipfs/) at the end, which is valid for a
+        # full multiaddr but strictly speaking the "transport" part ends at /ws or /wss.
+        # The validation logic here seems too strict if it rejects addresses with
+        # /p2p suffix.
+
+        # If the last protocol is p2p/ipfs, we should ignore it for validation of
+        # the transport part
+        protocols_to_check = protocols
+        if protocols[-1].name in ["p2p", "ipfs"]:
+            protocols_to_check = protocols[:-1]
+
+        if len(protocols_to_check) == 3:
+            return protocols_to_check[2].name in ["ws", "wss"]
 
         # Check for /tls/ws or /tls/sni/.../ws patterns
         if tls_found:
             # Must end with /ws (not /wss when using /tls)
-            if protocols[-1].name != "ws":
+            # Again, ignore p2p suffix
+            last_proto = protocols_to_check[-1]
+            if last_proto.name != "ws":
                 return False
 
             # Check for valid TLS sequence
             tls_index = None
-            for i, protocol in enumerate(protocols[2:], start=2):
+            for i, protocol in enumerate(protocols_to_check[2:], start=2):
                 if protocol.name == "tls":
                     tls_index = i
                     break
@@ -166,7 +179,7 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
                 return False
 
             # After tls, we can have sni, then ws
-            remaining_protocols = protocols[tls_index + 1 :]
+            remaining_protocols = protocols_to_check[tls_index + 1 :]
             if len(remaining_protocols) == 1:
                 # /tls/ws
                 return remaining_protocols[0].name == "ws"
