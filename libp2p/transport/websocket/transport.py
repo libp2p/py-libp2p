@@ -654,6 +654,10 @@ class WebsocketTransport(ITransport):
             or proto_info.rest_multiaddr.value_for_protocol("ip6")
             or "localhost"
         )
+        # Ensure host is a string, not a tuple or other type
+        if isinstance(host, tuple):
+            host = host[0]
+
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
         ws_url = f"{protocol}://{host}:{port}/"
