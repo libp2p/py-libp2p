@@ -350,19 +350,18 @@ class TestValidationIntegration:
         pubsub.set_topic_validator("perf_topic", expensive_validator, True)
 
         # First validation should call validator
-        start_time = time.time()
         await pubsub.validate_msg(IDFactory(), msg)
-        first_duration = time.time() - start_time
         assert call_count["value"] == 1
 
-        # Second validation should use cache (much faster)
-        start_time = time.time()
+        # Second validation should use cache (validator not called again)
         await pubsub.validate_msg(IDFactory(), msg)
-        second_duration = time.time() - start_time
         assert call_count["value"] == 1  # Validator not called again
 
-        # Cached validation should be significantly faster
-        assert second_duration < first_duration / 2
+        # Verify result was cached
+        msg_id = pubsub._msg_id_constructor(msg)
+        cached_result = pubsub.validation_cache.get(msg_id)
+        assert cached_result is not None
+        assert cached_result.is_valid
 
     @pytest.mark.trio
     async def test_validation_with_multiple_topics_and_cache(self):
