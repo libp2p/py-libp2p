@@ -1,4 +1,5 @@
 import logging
+import sys
 from typing import Any
 
 from aiortc import (
@@ -9,6 +10,11 @@ from aiortc import (
 )
 import trio
 from trio_asyncio import aio_as_trio
+
+if sys.version_info >= (3, 11):
+    from builtins import ExceptionGroup
+else:
+    from exceptiongroup import ExceptionGroup
 
 from libp2p.abc import INetStream, IRawConnection
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -147,19 +153,24 @@ async def handle_incoming_stream(
                         await completion_event.wait()
                         # Cancel nursery tasks since we got what we needed
                         nursery.cancel_scope.cancel()
-                except* trio.Cancelled:
-                    # Cancellation is expected when we cancel the nursery
-                    # Check if we got what we wanted before cancellation
-                    if not data_channel_ready.is_set() and connection_failed.is_set():
-                        raise WebRTCError("WebRTC connection failed")
-                    # Otherwise, cancellation is fine if we got success
-                except* Exception as eg:
-                    # Handle ExceptionGroup from Trio nursery
+                except ExceptionGroup as eg:
+                    # Handle ExceptionGroup from Trio nursery (Python 3.10+ compatible)
                     # Extract meaningful exceptions (skip Cancelled)
                     errors = [
                         e for e in eg.exceptions if not isinstance(e, trio.Cancelled)
                     ]
-                    if errors:
+                    # Check if we only have Cancelled exceptions
+                    if not errors:
+                        # Only cancellations - expected when we cancel the nursery
+                        # Check if we got what we wanted before cancellation
+                        if (
+                            not data_channel_ready.is_set()
+                            and connection_failed.is_set()
+                        ):
+                            raise WebRTCError("WebRTC connection failed")
+                        # Otherwise, cancellation is fine if we got success
+                    else:
+                        # We have non-Cancelled exceptions
                         # Log all errors for debugging
                         for err in errors:
                             logger.error(f"Nursery task error: {err}", exc_info=err)
@@ -177,11 +188,12 @@ async def handle_incoming_stream(
                         raise WebRTCError(
                             f"Connection establishment error: {primary_error}"
                         ) from primary_error
-                    # If only cancellations, check our state
-                    if connection_failed.is_set():
+                except trio.Cancelled:
+                    # Direct cancellation (not in ExceptionGroup)
+                    # Check if we got what we wanted before cancellation
+                    if not data_channel_ready.is_set() and connection_failed.is_set():
                         raise WebRTCError("WebRTC connection failed")
-                    if not data_channel_ready.is_set():
-                        raise WebRTCError("Unexpected exception group from nursery")
+                    # Otherwise, cancellation is fine if we got success
 
             # Check results after waiting
             if connection_failed.is_set():

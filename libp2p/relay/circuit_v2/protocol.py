@@ -579,16 +579,16 @@ class CircuitV2Protocol(Service):
                         message="Reservation limit exceeded",
                     )
 
-                status_msg = HopMessage(
-                    type=HopMessage.STATUS,
-                    status=status,
-                    senderRecord=signed_envelope.marshal_envelope(),
-                )
-                status_msg.status.code = status.code
-                status_msg.status.message = status.message
+                    status_msg = HopMessage(
+                        type=HopMessage.STATUS,
+                        status=status,
+                        senderRecord=signed_envelope.marshal_envelope(),
+                    )
+                    status_msg.status.code = status.code
+                    status_msg.status.message = status.message
 
-                await stream.write(status_msg.SerializeToString())
-                return
+                    await stream.write(status_msg.SerializeToString())
+                    return
 
                 # Accept reservation
                 logger.debug("Accepting new reservation from peer %s", peer_id)

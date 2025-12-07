@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 import argparse
-import asyncio
 import logging
-import os
 import sys
-from typing import Optional
 
-import redis.asyncio as redis
 from multiaddr import Multiaddr
+import redis.asyncio as redis
+import trio
+from trio_asyncio import aio_as_trio, open_loop
 
 from libp2p import new_host
-from libp2p.abc import INetStream
+from libp2p.abc import IHost, INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.id import ID as PeerID
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s [py-peer] %(message)s'
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s [py-peer] %(message)s"
 )
 logger = logging.getLogger("py-peer")
 
@@ -28,15 +26,15 @@ class PyLibp2pPeer:
     def __init__(self, role: str, redis_client: redis.Redis, listen_port: int = 9090):
         self.role = role
         self.redis = redis_client
-        self.host = None
-        self.peer_id = None
+        self.host: IHost | None = None
+        self.peer_id: PeerID | None = None
         self.listen_port = listen_port
 
     async def setup_host(self) -> None:
         key_pair = create_new_key_pair()
         self.peer_id = PeerID.from_pubkey(key_pair.public_key)
 
-        self.host = await new_host(
+        self.host = new_host(
             key_pair=key_pair,
             listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
         )
@@ -55,22 +53,20 @@ class PyLibp2pPeer:
         addrs = self.host.get_addrs()
         if addrs:
             addr_with_peer = f"{addrs[0]}/p2p/{self.peer_id}"
-            await self.redis.set(
-                f"{COORDINATION_KEY_PREFIX}:listener:addr",
-                addr_with_peer,
-                ex=300
+            await aio_as_trio(
+                self.redis.set(
+                    f"{COORDINATION_KEY_PREFIX}:listener:addr", addr_with_peer, ex=300
+                )
             )
 
-        await self.redis.set(
-            f"{COORDINATION_KEY_PREFIX}:listener:ready",
-            "1",
-            ex=300
+        await aio_as_trio(
+            self.redis.set(f"{COORDINATION_KEY_PREFIX}:listener:ready", "1", ex=300)
         )
 
         try:
             while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
+                await trio.sleep(1)
+        except trio.Cancelled:
             pass
 
     async def ping_handler(self, stream: INetStream) -> None:
@@ -87,15 +83,17 @@ class PyLibp2pPeer:
 
         max_wait = 60
         for _ in range(max_wait):
-            ready = await self.redis.get(f"{COORDINATION_KEY_PREFIX}:listener:ready")
+            ready = await aio_as_trio(
+                self.redis.get(f"{COORDINATION_KEY_PREFIX}:listener:ready")
+            )
             if ready:
                 break
-            await asyncio.sleep(1)
+            await trio.sleep(1)
         else:
             raise TimeoutError("Listener not ready")
 
-        listener_addr_str = await self.redis.get(
-            f"{COORDINATION_KEY_PREFIX}:listener:addr"
+        listener_addr_str = await aio_as_trio(
+            self.redis.get(f"{COORDINATION_KEY_PREFIX}:listener:addr")
         )
         if not listener_addr_str:
             raise ValueError("Listener address missing")
@@ -105,34 +103,35 @@ class PyLibp2pPeer:
         listener_peer_id = None
         for proto in listener_addr.protocols():
             if proto.name == "p2p":
-                listener_peer_id = PeerID.from_base58(
-                    listener_addr.value_for_protocol(proto.code)
-                )
+                peer_id_str = listener_addr.value_for_protocol(proto.code)
+                if peer_id_str is None:
+                    continue
+                listener_peer_id = PeerID.from_base58(peer_id_str)
                 break
 
         if not listener_peer_id:
             raise ValueError("Invalid multiaddr: missing peer ID")
 
-        self.host.get_peerstore().add_addrs(
-            listener_peer_id,
-            [listener_addr],
-            10000
-        )
+        self.host.get_peerstore().add_addrs(listener_peer_id, [listener_addr], 10000)
 
         try:
             await self.host.connect(listener_peer_id)
-            await self.redis.set(
-                f"{COORDINATION_KEY_PREFIX}:connection:status",
-                "connected",
-                ex=300
+            await aio_as_trio(
+                self.redis.set(
+                    f"{COORDINATION_KEY_PREFIX}:connection:status",
+                    "connected",
+                    ex=300,
+                )
             )
             await self.test_ping(listener_peer_id)
 
         except Exception as e:
-            await self.redis.set(
-                f"{COORDINATION_KEY_PREFIX}:connection:status",
-                f"failed:{e}",
-                ex=300
+            await aio_as_trio(
+                self.redis.set(
+                    f"{COORDINATION_KEY_PREFIX}:connection:status",
+                    f"failed:{e}",
+                    ex=300,
+                )
             )
             raise
 
@@ -144,31 +143,34 @@ class PyLibp2pPeer:
             stream = await self.host.new_stream(peer_id, [PING_PROTOCOL])
 
             import secrets
+
             ping_payload = secrets.token_bytes(32)
             await stream.write(ping_payload)
 
             pong_payload = await stream.read(32)
 
             if ping_payload == pong_payload:
-                await self.redis.set(
-                    f"{COORDINATION_KEY_PREFIX}:ping:status",
-                    "passed",
-                    ex=300
+                await aio_as_trio(
+                    self.redis.set(
+                        f"{COORDINATION_KEY_PREFIX}:ping:status", "passed", ex=300
+                    )
                 )
             else:
-                await self.redis.set(
-                    f"{COORDINATION_KEY_PREFIX}:ping:status",
-                    "failed:mismatch",
-                    ex=300
+                await aio_as_trio(
+                    self.redis.set(
+                        f"{COORDINATION_KEY_PREFIX}:ping:status",
+                        "failed:mismatch",
+                        ex=300,
+                    )
                 )
 
             await stream.close()
 
         except Exception as e:
-            await self.redis.set(
-                f"{COORDINATION_KEY_PREFIX}:ping:status",
-                f"failed:{e}",
-                ex=300
+            await aio_as_trio(
+                self.redis.set(
+                    f"{COORDINATION_KEY_PREFIX}:ping:status", f"failed:{e}", ex=300
+                )
             )
             raise
 
@@ -193,23 +195,25 @@ async def main() -> None:
 
     redis_url = f"redis://{args.redis_host}:{args.redis_port}"
 
-    try:
-        redis_client = await redis.from_url(redis_url, decode_responses=False)
-        await redis_client.ping()
-    except Exception:
-        sys.exit(1)
+    async def run_with_redis() -> None:
+        async with open_loop():
+            try:
+                redis_client = await aio_as_trio(
+                    redis.from_url(redis_url, decode_responses=False)
+                )
+                await aio_as_trio(redis_client.ping())
+            except Exception:
+                sys.exit(1)
 
-    peer = PyLibp2pPeer(args.role, redis_client, listen_port=args.port)
+            peer = PyLibp2pPeer(args.role, redis_client, listen_port=args.port)
 
-    try:
-        await peer.run()
-    except KeyboardInterrupt:
-        pass
-    except Exception:
-        sys.exit(1)
-    finally:
-        await redis_client.close()
+            try:
+                await peer.run()
+            except KeyboardInterrupt:
+                pass
+            except Exception:
+                sys.exit(1)
+            finally:
+                await aio_as_trio(redis_client.close())
 
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    trio.run(run_with_redis)

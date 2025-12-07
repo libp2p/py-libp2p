@@ -170,8 +170,7 @@ python test_runner.py
 This will:
 
 1. Check that Redis is running
-2. Start listener peers for each implementation
-3. Start dialer peers to connect to listeners
-4. Verify connections and ping/pong exchanges
-5. Report results
-
+1. Start listener peers for each implementation
+1. Start dialer peers to connect to listeners
+1. Verify connections and ping/pong exchanges
+1. Report results
