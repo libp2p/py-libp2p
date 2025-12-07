@@ -186,6 +186,7 @@ class TestTransportFactory:
     def test_create_transport_for_multiaddr_dns(self):
         """Test creating transport for DNS multiaddr."""
         import pytest
+
         upgrader = TransportUpgrader({}, {})
 
         # DNS WebSocket multiaddr
