@@ -94,7 +94,13 @@ docs: check-docs
 	open docs/_build/html/index.html
 
 linux-docs: check-docs
-	xdg-open docs/_build/html/index.html
+	@if command -v xdg-open > /dev/null 2>&1; then \
+		xdg-open docs/_build/html/index.html; \
+	elif command -v open > /dev/null 2>&1; then \
+		open docs/_build/html/index.html; \
+	else \
+		echo "Could not find xdg-open or open command. Please open docs/_build/html/index.html manually."; \
+	fi
 
 # docs helpers
 

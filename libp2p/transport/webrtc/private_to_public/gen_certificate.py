@@ -219,24 +219,28 @@ class WebRTCCertificate:
         return renewal_time_ms if renewal_time_ms > 0 else 100
 
     def loadOrCreatePrivateKey(
-        self, forceRenew: bool = False
+        self, create_if_missing: bool
     ) -> ec.EllipticCurvePrivateKey:
         """
-        Load the existing private key if available, or generate a new one.
+        Load or create a private key for WebRTC certificate.
 
         Args:
-            forceRenew (bool): If True, always generate a new private key even if one
-                                already exists.
-                            If False, return the existing private key if present.
+            create_if_missing (bool): If True, create a new key if one doesn't exist.
 
         Returns:
-            ec.EllipticCurvePrivateKey:
-                The loaded or newly generated elliptic curve private key.
+            ec.EllipticCurvePrivateKey: The private key.
+
+        Raises:
+            Exception: If key cannot be loaded or created.
 
         """
-        # If private key is already present and not enforced to create new
-        if self.private_key is not None and not forceRenew:
+        # If private key is already present, return it
+        if self.private_key is not None:
             return self.private_key
+
+        # If key doesn't exist and creation is not allowed
+        if not create_if_missing:
+            raise Exception("No private key available and creation not permitted")
 
         # Create a new private key
         self.private_key = ec.generate_private_key(ec.SECP256R1())

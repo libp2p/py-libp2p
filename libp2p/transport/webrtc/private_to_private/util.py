@@ -21,8 +21,13 @@ def split_addr(ma: Multiaddr) -> tuple[Multiaddr, ID]:
     Remove /webrtc to get circuit address.
 
     Example:
+
         Input: /ip4/127.0.0.1/tcp/9000/ws/p2p/RELAY_ID/p2p-circuit/webrtc/p2p/TARGET_ID
+
         Output:
+
+        ::
+
             (
                 /ip4/127.0.0.1/tcp/9000/ws/p2p/RELAY_ID/p2p-circuit/p2p/TARGET_ID,
                 TARGET_ID,
