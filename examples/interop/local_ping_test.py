@@ -201,8 +201,7 @@ class PingTest:
             for addr in base_addrs:
                 try:
                     ip_value = self._get_ip_value(addr)
-                    tcp_port_val = addr.value_for_protocol("tcp")
-                    tcp_port = int(tcp_port_val) if tcp_port_val else port
+                    tcp_port = addr.value_for_protocol("tcp") or port
                     if ip_value:
                         quic_addr = self._build_quic_addr(ip_value, tcp_port)
                         # Preserve /p2p component if present
