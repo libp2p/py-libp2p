@@ -117,7 +117,7 @@ class QUICTransport(ITransport):
         self._background_nursery = nursery
         logger.debug("Transport background nursery set")
 
-    def set_swarm(self, swarm: Swarm) -> None:
+    def set_swarm(self, swarm: "Swarm") -> None:
         """Set the swarm for adding incoming connections."""
         self._swarm = swarm
 
@@ -451,7 +451,9 @@ class QUICTransport(ITransport):
 
         logger.debug("QUIC transport closed")
 
-    async def _cleanup_terminated_connection(self, connection: QUICConnection) -> None:
+    async def _cleanup_terminated_connection(
+        self, connection: "QUICConnection"
+    ) -> None:
         """Clean up a terminated connection from all listeners."""
         try:
             for listener in self._listeners:

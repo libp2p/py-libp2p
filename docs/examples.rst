@@ -11,7 +11,9 @@ Examples
    examples.echo
    examples.echo_quic
    examples.ping
+   examples.interop
    examples.pubsub
+   examples.bitswap
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
