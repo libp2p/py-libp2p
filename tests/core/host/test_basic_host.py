@@ -4,6 +4,7 @@ from unittest.mock import (
 )
 
 import pytest
+from multiaddr import Multiaddr
 
 from libp2p import (
     new_swarm,
@@ -60,8 +61,8 @@ async def test_swarm_stream_handler_no_protocol_selected(monkeypatch):
     # Ensure reset was called since negotiation failed
     net_stream.reset.assert_awaited()
 
+
 def test_get_addrs_and_transport_addrs():
-    from multiaddr import Multiaddr
     key_pair = create_new_key_pair()
     swarm = new_swarm(key_pair)
     host = BasicHost(swarm)
