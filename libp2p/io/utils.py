@@ -20,6 +20,7 @@ async def read_exactly(
     enhanced error messages that include transport context (if available).
 
     The error message includes:
+
     - The expected and actual number of bytes received
     - Transport type and connection duration (if reader provides conn_state())
     - Context about possible causes (peer closure, network issues,
@@ -38,7 +39,8 @@ async def read_exactly(
             The error message includes transport context if available via
             reader.conn_state().
 
-    NOTE: relying on exceptions to break out on erroneous conditions, like EOF
+    .. note::
+        Relies on exceptions to break out on erroneous conditions, like EOF.
 
     """
     buffer = bytearray()
