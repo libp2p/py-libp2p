@@ -28,14 +28,6 @@ libp2p.transport.webrtc.private\_to\_private.listener module
    :show-inheritance:
    :undoc-members:
 
-libp2p.transport.webrtc.private\_to\_private.relay\_fixtures module
--------------------------------------------------------------------
-
-.. automodule:: libp2p.transport.webrtc.private_to_private.relay_fixtures
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
 libp2p.transport.webrtc.private\_to\_private.signaling\_stream\_handler module
 ------------------------------------------------------------------------------
 
