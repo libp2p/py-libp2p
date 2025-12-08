@@ -88,4 +88,6 @@ def test_get_addrs_and_transport_addrs():
     peer_id_str = str(host.get_id())
     assert peer_id_str in addr_str
     # multiaddr might normalize /p2p/ to /ipfs/
-    assert addr_str.endswith(f"/p2p/{peer_id_str}") or addr_str.endswith(f"/ipfs/{peer_id_str}")
+    assert addr_str.endswith(f"/p2p/{peer_id_str}") or addr_str.endswith(
+        f"/ipfs/{peer_id_str}"
+    )
