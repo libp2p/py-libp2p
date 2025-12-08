@@ -32,7 +32,7 @@ from libp2p.transport.webrtc.private_to_public.transport import WebRTCDirectTran
 
 logger = logging.getLogger("libp2p.transport.webrtc.integration_tests")
 
-pytest_plugins = ("libp2p.transport.webrtc.private_to_private.relay_fixtures",)
+pytest_plugins = "tests.core.transport.webrtc.relay_fixtures"
 
 # Test configuration
 TEST_TIMEOUT = 30.0

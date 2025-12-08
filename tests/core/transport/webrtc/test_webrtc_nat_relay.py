@@ -31,15 +31,15 @@ from libp2p.tools.utils import connect
 
 # Import WebRTC protocols to trigger registration
 from libp2p.transport.webrtc import multiaddr_protocols  # noqa: F401
-from libp2p.transport.webrtc.private_to_private.relay_fixtures import (
+from libp2p.transport.webrtc.private_to_public.transport import WebRTCDirectTransport
+from tests.core.transport.webrtc.relay_fixtures import (
     store_relay_addrs,
 )
-from libp2p.transport.webrtc.private_to_public.transport import WebRTCDirectTransport
 from tests.utils.factories import HostFactory
 
 logger = logging.getLogger("libp2p.transport.webrtc.nat_relay_tests")
 
-pytest_plugins = ("libp2p.transport.webrtc.private_to_private.relay_fixtures",)
+pytest_plugins = "tests.core.transport.webrtc.relay_fixtures"
 
 # Test config
 TEST_TIMEOUT = 30.0
