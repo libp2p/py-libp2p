@@ -164,6 +164,78 @@ class P2PWebSocketConnection(ReadWriteCloser):
             # Note: keepalive will be started when connection is used
             pass
 
+    def _is_connection_closed_exception(self, e: Exception) -> bool:
+        """
+        Check if an exception indicates WebSocket connection closure.
+
+        Args:
+            e: The exception to check
+
+        Returns:
+            True if the exception indicates connection closure
+
+        """
+        error_str = str(e)
+        error_type = type(e).__name__
+        return (
+            "CloseReason" in error_str
+            or "ConnectionClosed" in error_type
+            or "closed" in error_str.lower()
+        )
+
+    def _extract_close_info(self, e: Exception) -> tuple[int | None, str]:
+        """
+        Extract close code and reason from a connection closure exception.
+
+        Args:
+            e: The exception that indicates connection closure
+
+        Returns:
+            Tuple of (close_code, close_reason)
+
+        """
+        # ConnectionClosed has a 'reason' attribute which is a CloseReason object
+        close_reason_obj = getattr(e, "reason", None)
+        if close_reason_obj is not None:
+            close_code = getattr(close_reason_obj, "code", None)
+            close_reason = (
+                getattr(close_reason_obj, "reason", None) or "Connection closed by peer"
+            )
+        else:
+            # Fallback if reason is not available
+            close_code = None
+            close_reason = "Connection closed by peer"
+        return close_code, close_reason
+
+    def _handle_connection_closed_exception(
+        self, e: Exception, operation: str = "read"
+    ) -> IOException:
+        """
+        Handle a connection closure exception by creating an appropriate IOException.
+
+        Args:
+            e: The exception that indicates connection closure
+            operation: The operation that was being performed (read/write)
+
+        Returns:
+            IOException with detailed information about the closure
+
+        """
+        self._closed = True
+        close_code, close_reason = self._extract_close_info(e)
+        logger.debug(
+            f"WebSocket connection closed during {operation}: "
+            f"code={close_code}, reason={close_reason}"
+        )
+        # Return IOException to be raised by caller
+        # This allows read_exactly() to immediately detect connection closure
+        # instead of returning empty bytes which would cause retries
+        return IOException(
+            f"WebSocket connection closed by peer during "
+            f"{operation} operation: code={close_code}, "
+            f"reason={close_reason}."
+        )
+
     async def _start_keepalive(self) -> None:
         """Start keepalive ping/pong."""
 
@@ -192,13 +264,21 @@ class P2PWebSocketConnection(ReadWriteCloser):
         This method blocks until data is available, similar to TCP streams.
         This is required for multistream negotiation which expects blocking reads.
 
+        When the WebSocket connection is closed by the peer, this method raises
+        ``IOException`` with detailed information including the close code and reason,
+        rather than returning empty bytes. This allows higher-level code (such as
+        ``read_exactly()``) to immediately detect connection closure and provide
+        better error messages.
+
         Args:
             n: Number of bytes to read (None for all available)
 
         Returns:
             bytes: Received data
 
-        :raises IOException: If connection is closed or read fails
+        :raises IOException: If connection is closed or read fails. When the connection
+            is closed by the peer, the exception includes the WebSocket close code and
+            reason for better debugging.
         :raises WebSocketConnectionError: If WebSocket connection error occurs
         :raises WebSocketMessageError: If message processing fails
 
@@ -228,19 +308,14 @@ class P2PWebSocketConnection(ReadWriteCloser):
                             )
                             self._read_buffer = message
                         except Exception as e:
-                            # Handle CloseReason from trio_websocket -
-                            # treat as connection closed
-                            error_str = str(e)
-                            if (
-                                "CloseReason" in error_str
-                                or "closed" in error_str.lower()
-                            ):
-                                self._closed = True
-                                logger.debug("WebSocket read: connection closed")
-                                return b""
+                            # Handle CloseReason/ConnectionClosed from trio_websocket
+                            if self._is_connection_closed_exception(e):
+                                raise self._handle_connection_closed_exception(
+                                    e, "read"
+                                )
                             # If connection is closed or error occurs, raise IOException
                             if self._closed:
-                                return b""
+                                raise IOException("Connection is closed")
                             logger.error(f"WebSocket read error: {e}")
                             raise IOException(f"Read failed: {str(e)}")
 
@@ -340,21 +415,17 @@ class P2PWebSocketConnection(ReadWriteCloser):
                         return result
                     except Exception as e:
                         # Handle CloseReason/ConnectionClosed from trio_websocket
-                        error_str = str(e)
-                        error_type = type(e).__name__
-                        if (
-                            "CloseReason" in error_str
-                            or "ConnectionClosed" in error_type
-                            or "closed" in error_str.lower()
-                        ):
-                            self._closed = True
-                            return b""
+                        if self._is_connection_closed_exception(e):
+                            raise self._handle_connection_closed_exception(e, "read")
                         logger.error(f"WebSocket read error: {e}")
                         raise IOException(f"Read failed: {str(e)}")
 
                 # Connection closed and no data
                 return b""
 
+            except IOException:
+                # Re-raise IOException as-is (already has proper context)
+                raise
             except Exception as e:
                 logger.error(f"WebSocket read failed: {e}")
                 raise IOException(f"Read failed: {str(e)}")
@@ -389,11 +460,8 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
             except Exception as e:
                 # Handle CloseReason from trio_websocket - connection was closed
-                error_str = str(e)
-                if "CloseReason" in error_str or "closed" in error_str.lower():
-                    self._closed = True
-                    logger.debug(f"WebSocket write failed (connection closed): {e}")
-                    raise IOException("Connection closed")
+                if self._is_connection_closed_exception(e):
+                    raise self._handle_connection_closed_exception(e, "write")
                 logger.error(f"WebSocket write failed: {e}")
                 self._closed = True
                 raise IOException(f"Write failed: {str(e)}")

@@ -647,9 +647,21 @@ class Yamux(IMuxedConn):
                 try:
                     header = await read_exactly(self.secured_conn, HEADER_SIZE)
                 except IncompleteReadError as e:
-                    logger.debug(
-                        "Connection closed (incomplete read) for peer "
-                        f"{self.peer_id}: {e}"
+                    # Get transport context for better debugging
+                    transport_type = "unknown"
+                    try:
+                        if hasattr(self.secured_conn, "conn_state"):
+                            conn_state_method = getattr(self.secured_conn, "conn_state")
+                            if callable(conn_state_method):
+                                state = conn_state_method()
+                                if isinstance(state, dict):
+                                    transport_type = state.get("transport", "unknown")
+                    except Exception:
+                        pass
+
+                    logger.error(
+                        f"Yamux connection closed during header read for peer "
+                        f"{self.peer_id}: {e}. Transport: {transport_type}."
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
