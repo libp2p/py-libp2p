@@ -25,12 +25,12 @@ dependencies = [
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "miniupnpc>=2.3",
-    "multiaddr>=0.0.11",
+    "multiaddr==0.0.11",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
     "protobuf>=4.25.0,<7.0.0",
     "pycryptodome>=3.9.2",
-    "pymultihash>=0.8.2",
+    "pymultihash==0.8.2",
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
@@ -61,6 +61,7 @@ identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
+floodsub-demo = "examples.pubsub.floodsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 
@@ -87,6 +88,7 @@ dev = [
     "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
+    "pytest-mock>=3.15.1",
 ]
 docs = [
     "sphinx>=6.0.0",
@@ -102,6 +104,7 @@ test = [
     "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
+    "pytest-mock>=3.15.1",
 ]
 
 [tool.setuptools]
@@ -142,7 +145,10 @@ warn_unused_ignores = false
 addopts = "-v --showlocals --durations 50 --maxfail 10"
 log_date_format = "%m-%d %H:%M:%S"
 log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
-markers = ["slow: mark test as slow"]
+markers = [
+    "slow: mark test as slow",
+    "flaky: mark test as flaky (may fail intermittently)",
+]
 xfail_strict = true
 
 [tool.towncrier]
