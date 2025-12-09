@@ -86,6 +86,7 @@ class TLSTransport(ISecureTransport):
 
         """
         # Validate trusted peer certificates for security vulnerabilities
+        print("\n\nCREATE SSL-CONTEXT: START")
         for cert_pem in self._trusted_peer_certs_pem:
             # Check for path traversal attempts and dangerous characters
             dangerous_patterns = ["..", "\x00", "&", "|", ";", "$"]
@@ -110,6 +111,8 @@ class TLSTransport(ISecureTransport):
         # - Set ALPN protocols: preferred muxers + "libp2p"
         # - Apply key log writer if provided in identity_config
         # - Disable SNI for client-side connections
+        print("CREATE SSL-CONTEXT: MID1")
+
         ctx = ssl.SSLContext(
             ssl.PROTOCOL_TLS_SERVER if server_side else ssl.PROTOCOL_TLS_CLIENT
         )
@@ -129,6 +132,8 @@ class TLSTransport(ISecureTransport):
 
         cert_path = cert_file.name
         key_path = key_file.name
+        
+        print("CREATE SSL-CONTEXT: MID2")
 
         try:
             cert_file.write(self._cert_pem)
@@ -153,6 +158,8 @@ class TLSTransport(ISecureTransport):
                     os.unlink(key_path)
             except (OSError, PermissionError):
                 pass  # Best effort cleanup
+            
+        print("CREATE SSL-CONTEXT: MID3")
 
         # If we have trusted peer certs, configure verification to accept those
         if server_side and self._trusted_peer_certs_pem:
@@ -182,6 +189,8 @@ class TLSTransport(ISecureTransport):
             # ALPN may be unavailable; proceed without early muxer negotiation
             pass
 
+        print("CREATE SSL-CONTEXT: MID4")
+        
         # key log file support if provided as path-like
         if self._identity_config and self._identity_config.key_log_writer:
             # Accept a file path or a file-like with name
@@ -196,6 +205,7 @@ class TLSTransport(ISecureTransport):
                     ctx.keylog_filename = keylog_path
                 except Exception:
                     pass
+        print("CREATE SSL-CONTEXT: END")
 
         return ctx
 
@@ -220,6 +230,7 @@ class TLSTransport(ISecureTransport):
 
         # Perform handshake
         await tls_reader_writer.handshake()
+        print("HANDSHAKE SUCCESSFULL")
 
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
@@ -229,7 +240,7 @@ class TLSTransport(ISecureTransport):
         # Extract remote public key from certificate
         remote_public_key = self._extract_public_key_from_cert(peer_cert)
         remote_peer_id = ID.from_pubkey(remote_public_key)
-
+        print("SECURE INBOUND: COMPLETE")
         # Return SecureSession like noise does
         return SecureSession(
             local_peer=self.local_peer,
@@ -262,6 +273,7 @@ class TLSTransport(ISecureTransport):
 
         # Perform handshake
         await tls_reader_writer.handshake()
+        print("HANDSHAKE SUCCESSFULL")
 
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
@@ -276,6 +288,8 @@ class TLSTransport(ISecureTransport):
             raise ValueError(
                 f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
             )
+        
+        print("SECURE OUTBOUND: COMPLETE")
 
         # Return SecureSession like noise does
         return SecureSession(

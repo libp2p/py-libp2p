@@ -419,7 +419,8 @@ class Swarm(Service, INetworkService):
             raise SwarmException(
                 f"failed to upgrade security for peer {peer_id}: {error}"
             ) from error
-
+        print("SECRURITY UPGRADE: COMPLETE")
+        
         logger.debug("upgraded security for peer %s", peer_id)
 
         try:
@@ -429,6 +430,7 @@ class Swarm(Service, INetworkService):
             await secured_conn.close()
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
 
+        print("MUX UPGRADE: COMPLETE")
         logger.debug("upgraded mux for peer %s", peer_id)
 
         # Pass endpoint IP to resource manager for outbound
@@ -468,6 +470,7 @@ class Swarm(Service, INetworkService):
 
         swarm_conn = await self.add_conn(muxed_conn)
         logger.debug("successfully dialed peer %s", peer_id)
+        print("\n\nDIALED PEER: SUCCESS")
         return swarm_conn
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:

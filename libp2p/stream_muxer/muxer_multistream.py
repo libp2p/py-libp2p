@@ -101,6 +101,7 @@ class MuxerMultistream:
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         communicator = MultiselectCommunicator(conn)
+        print("\nMUXER-MULTISELCT")
         protocol = await self.multistream_client.select_one_of(
             tuple(self.transports.keys()), communicator, self.negotiate_timeout
         )
