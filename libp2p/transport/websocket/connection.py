@@ -77,8 +77,12 @@ class P2PWebSocketConnection(ReadWriteCloser):
         1. Buffers incoming WebSocket messages
         2. Returns exactly the requested number of bytes when n is specified
         3. Accumulates multiple WebSocket messages if needed to satisfy the request
-        4. Returns empty bytes (not raises) when connection is closed and no data
-           available
+        4. Raises IOException when connection is closed by peer (instead of returning
+           empty bytes), allowing immediate detection of connection closure
+
+        :raises IOException: If the WebSocket connection is closed by the peer during
+            read operation. The exception includes the close code and reason for
+            better debugging.
         """
         if self._closed:
             raise IOException("Connection is closed")
@@ -98,9 +102,35 @@ class P2PWebSocketConnection(ReadWriteCloser):
                         except trio.TooSlowError:
                             # No message available within timeout
                             return b""
-                        except Exception:
-                            # Return empty bytes if no data available
-                            # (connection closed)
+                        except Exception as e:
+                            # Check if this is a WebSocket connection closure
+                            error_str = str(e)
+                            error_type = type(e).__name__
+                            if (
+                                "CloseReason" in error_str
+                                or "ConnectionClosed" in error_type
+                                or "closed" in error_str.lower()
+                            ):
+                                self._closed = True
+                                # Extract close code and reason if available
+                                close_code = getattr(e, "code", None)
+                                close_reason = (
+                                    getattr(e, "reason", None)
+                                    or "Connection closed by peer"
+                                )
+                                logger.debug(
+                                    f"WebSocket connection closed during read: "
+                                    f"code={close_code}, reason={close_reason}"
+                                )
+                                raise IOException(
+                                    f"WebSocket connection closed by peer during "
+                                    f"read operation: code={close_code}, "
+                                    f"reason={close_reason}. This may indicate "
+                                    f"the peer closed the connection, a network "
+                                    f"issue, or a protocol error during yamux "
+                                    f"stream operation."
+                                )
+                            # For other exceptions, return empty bytes (timeout, etc.)
                             return b""
 
                     result = self._read_buffer
@@ -123,7 +153,35 @@ class P2PWebSocketConnection(ReadWriteCloser):
                             self._read_buffer = message
                     except trio.TooSlowError:
                         return b""  # No data available
-                    except Exception:
+                    except Exception as e:
+                        # Check if this is a WebSocket connection closure
+                        error_str = str(e)
+                        error_type = type(e).__name__
+                        if (
+                            "CloseReason" in error_str
+                            or "ConnectionClosed" in error_type
+                            or "closed" in error_str.lower()
+                        ):
+                            self._closed = True
+                            # Extract close code and reason if available
+                            close_code = getattr(e, "code", None)
+                            close_reason = (
+                                getattr(e, "reason", None)
+                                or "Connection closed by peer"
+                            )
+                            logger.debug(
+                                f"WebSocket connection closed during read: "
+                                f"code={close_code}, reason={close_reason}"
+                            )
+                            raise IOException(
+                                f"WebSocket connection closed by peer during "
+                                f"read operation: code={close_code}, "
+                                f"reason={close_reason}. This may indicate "
+                                f"the peer closed the connection, a network "
+                                f"issue, or a protocol error during yamux "
+                                f"stream operation."
+                            )
+                        # For other exceptions, return empty bytes (timeout, etc.)
                         return b""
 
                 # Now return up to n bytes from the buffer (TCP-like semantics)
@@ -136,9 +194,12 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 self._bytes_read += len(result)
                 return result
 
+            except IOException:
+                # Re-raise IOException as-is (already has proper message)
+                raise
             except Exception as e:
                 logger.error(f"WebSocket read failed: {e}")
-                raise IOException from e
+                raise IOException(f"WebSocket read failed: {e}") from e
 
     async def close(self) -> None:
         """Close the WebSocket connection. This method is idempotent."""
