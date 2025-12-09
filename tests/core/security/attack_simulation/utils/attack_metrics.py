@@ -143,21 +143,21 @@ class AttackMetrics:
         attack_memory = base_memory * (1 + attack_intensity * 0.5)
         attack_cpu = base_cpu * (1 + attack_intensity * 2.0)
         attack_bandwidth = base_bandwidth * (1 + attack_intensity * 3.0)
-        # Attack-specific Metrics
-        if num_honest > 0:
-            self.dht_poisoning_rate = attack_intensity * (num_malicious / num_honest)
-        else:
-            self.dht_poisoning_rate = attack_intensity if num_malicious > 0 else 0.0
 
-        self.peer_table_flooding_rate = attack_intensity * num_malicious
-        self.routing_disruption_level = attack_impact
+        self.memory_usage = [base_memory, attack_memory, base_memory * 1.1]5
+        self.cpu_utilization = [base_cpu, attack_cpu, base_cpu * 1.2]
+        self.bandwidth_consumption = [
             base_bandwidth,
             attack_bandwidth,
             base_bandwidth * 1.3,
         ]
 
         # Attack-specific Metrics
-        self.dht_poisoning_rate = attack_intensity * (num_malicious / num_honest)
+        if num_honest > 0:
+            self.dht_poisoning_rate = attack_intensity * (num_malicious / num_honest)
+        else:
+            self.dht_poisoning_rate = attack_intensity if num_malicious > 0 else 0.0
+
         self.peer_table_flooding_rate = attack_intensity * num_malicious
         self.routing_disruption_level = attack_impact
 

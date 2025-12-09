@@ -1,8 +1,7 @@
 import pytest
 
-from tests.security.attack_simulation.utils.attack_metrics import AttackMetrics
-
 from .attack_analysis import AttackAnalysis
+from .attack_metrics import AttackMetrics
 
 
 @pytest.fixture
