@@ -27,16 +27,6 @@ Overview of TLS in Libp2p
 Installation Requirements
 -------------------------
 
-**Python requirements**
-
-- Python 3.8+
-
-**Install with TLS support**
-
-.. code-block:: bash
-
-   pip install "libp2p[tls]"
-
 **Additional dependencies**
 
 Ubuntu / Debian:

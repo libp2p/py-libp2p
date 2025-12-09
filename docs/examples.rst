@@ -20,3 +20,5 @@ Examples
    examples.rendezvous
    examples.random_walk
    examples.multiple_connections
+   tls-support
+   gossipsub-1.2
