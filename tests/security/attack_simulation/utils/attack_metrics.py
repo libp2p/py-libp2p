@@ -84,19 +84,28 @@ class AttackMetrics:
         """Calculate realistic metrics based on attack parameters"""
         num_honest = len(honest_peers)
         num_malicious = len(malicious_peers)
+        total_nodes = num_honest + num_malicious
 
         # Network Health Metrics
         base_success = 0.95  # Normal success rate
-        attack_impact = min(
-            attack_intensity * (num_malicious / (num_honest + num_malicious)), 0.9
-        )
+        if total_nodes > 0:
+            attack_impact = min(
+                attack_intensity * (num_malicious / total_nodes), 0.9
+            )
+        else:
+            attack_impact = 0.0
+
         during_attack = max(base_success - attack_impact, 0.1)
         after_attack = min(during_attack + 0.3, base_success)  # Partial recovery
 
         self.lookup_success_rate = [base_success, during_attack, after_attack]
 
         # Peer table contamination
-        contamination = min(attack_intensity * (num_malicious / num_honest), 1.0)
+        if num_honest > 0:
+            contamination = min(attack_intensity * (num_malicious / num_honest), 1.0)
+        else:
+            contamination = 1.0 if num_malicious > 0 else 0.0
+
         self.peer_table_contamination = [
             0.0,
             contamination,
@@ -134,10 +143,14 @@ class AttackMetrics:
         attack_memory = base_memory * (1 + attack_intensity * 0.5)
         attack_cpu = base_cpu * (1 + attack_intensity * 2.0)
         attack_bandwidth = base_bandwidth * (1 + attack_intensity * 3.0)
+        # Attack-specific Metrics
+        if num_honest > 0:
+            self.dht_poisoning_rate = attack_intensity * (num_malicious / num_honest)
+        else:
+            self.dht_poisoning_rate = attack_intensity if num_malicious > 0 else 0.0
 
-        self.memory_usage = [base_memory, attack_memory, base_memory * 1.1]
-        self.cpu_utilization = [base_cpu, attack_cpu, base_cpu * 1.2]
-        self.bandwidth_consumption = [
+        self.peer_table_flooding_rate = attack_intensity * num_malicious
+        self.routing_disruption_level = attack_impact
             base_bandwidth,
             attack_bandwidth,
             base_bandwidth * 1.3,
