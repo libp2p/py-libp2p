@@ -144,7 +144,7 @@ class AttackMetrics:
         attack_cpu = base_cpu * (1 + attack_intensity * 2.0)
         attack_bandwidth = base_bandwidth * (1 + attack_intensity * 3.0)
 
-        self.memory_usage = [base_memory, attack_memory, base_memory * 1.1]5
+        self.memory_usage = [base_memory, attack_memory, base_memory * 1.1]
         self.cpu_utilization = [base_cpu, attack_cpu, base_cpu * 1.2]
         self.bandwidth_consumption = [
             base_bandwidth,
