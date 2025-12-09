@@ -246,7 +246,8 @@ def new_swarm(
     if key_pair is None:
         # Use Ed25519 by default for better interoperability with Rust/Go libp2p
         # which often compile without RSA support
-        key_pair = generate_new_ed25519_identity()
+        # key_pair = generate_new_ed25519_identity()
+        key_pair = generate_new_rsa_identity()
 
     id_opt = generate_peer_id_from(key_pair)
 
@@ -301,6 +302,9 @@ def new_swarm(
     # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
     # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
+        TLS_PROTOCOL_ID: TLSTransport (
+            key_pair
+        ),
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
