@@ -661,7 +661,9 @@ class Yamux(IMuxedConn):
 
                     logger.error(
                         f"Yamux connection closed during header read for peer "
-                        f"{self.peer_id}: {e}. Transport: {transport_type}."
+                        f"{self.peer_id}: {e}. Transport: {transport_type}. "
+                        f"This may indicate a WebSocket message boundary issue, "
+                        f"peer disconnection, or network problem."
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -681,6 +683,18 @@ class Yamux(IMuxedConn):
                     logger.debug(
                         f"Unexpected header size {header_len} != {HEADER_SIZE} "
                         f"for peer {self.peer_id}"
+=======
+                            state = self.secured_conn.conn_state()  # type: ignore[attr-defined]
+                            if isinstance(state, dict):
+                                transport_type = state.get("transport", "unknown")
+                    except Exception:
+                        pass
+                    logger.error(
+                        f"Yamux connection closed during header read for peer "
+                        f"{self.peer_id}. Transport: {transport_type}. "
+                        f"This may indicate a WebSocket message boundary issue, "
+                        f"peer disconnection, or network problem."
+>>>>>>> 80f593cf (fix(websocket): Implement proactive closure detection for WebSocket transport)
                     )
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
@@ -944,8 +958,18 @@ class Yamux(IMuxedConn):
                         await self._cleanup_on_error()
                         break
                     else:
+                        # Get transport context for better debugging
+                        transport_type = "unknown"
+                        try:
+                            if hasattr(self.secured_conn, "conn_state"):
+                                state = self.secured_conn.conn_state()  # type: ignore[attr-defined]
+                                if isinstance(state, dict):
+                                    transport_type = state.get("transport", "unknown")
+                        except Exception:
+                            pass
                         logger.error(
                             f"Error in handle_incoming for peer {self.peer_id}: "
+                            f"Transport: {transport_type}. "
                             + f"{type(e).__name__}: {str(e)}"
                         )
                 else:

@@ -19,12 +19,10 @@ async def read_exactly(
     closes before n bytes are received, raises IncompleteReadError with
     enhanced error messages that include transport context (if available).
 
-    The error message includes:
-
-    - The expected and actual number of bytes received
-    - Transport type and connection duration (if reader provides conn_state())
-    - Context about possible causes (peer closure, network issues,
-      transport-specific problems)
+    The error message includes the expected and actual number of bytes
+    received, transport type and connection duration (if reader provides
+    conn_state()), and context about possible causes (peer closure, network
+    issues, transport-specific problems).
 
     Args:
         reader: The reader to read from
@@ -35,11 +33,11 @@ async def read_exactly(
         bytes: Exactly n bytes of data
 
     Raises:
-        IncompleteReadError: If the connection closes before n bytes are received.
-            The error message includes transport context if available via
-            reader.conn_state().
+        IncompleteReadError: If the connection closes before n bytes are
+            received. The error message includes transport context if
+            available via reader.conn_state().
 
-    .. note::
+    Note:
         Relies on exceptions to break out on erroneous conditions, like EOF.
 
     """
@@ -73,5 +71,8 @@ async def read_exactly(
 
     raise IncompleteReadError(
         f"Connection closed during read operation: expected {n} bytes but "
-        f"received {len(buffer)} bytes{context_info}"
+        f"received {len(buffer)} bytes{context_info}. "
+        f"This may indicate the peer closed the connection prematurely, "
+        f"a network issue, or a transport-specific problem "
+        f"(e.g., WebSocket message boundary handling)."
     )

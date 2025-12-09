@@ -464,7 +464,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
                     raise self._handle_connection_closed_exception(e, "write")
                 logger.error(f"WebSocket write failed: {e}")
                 self._closed = True
-                raise IOException(f"Write failed: {str(e)}")
+                raise IOException(f"Write failed: {str(e)}") from e
 
     async def close(self) -> None:
         """
