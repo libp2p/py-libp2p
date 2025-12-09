@@ -89,9 +89,7 @@ class AttackMetrics:
         # Network Health Metrics
         base_success = 0.95  # Normal success rate
         if total_nodes > 0:
-            attack_impact = min(
-                attack_intensity * (num_malicious / total_nodes), 0.9
-            )
+            attack_impact = min(attack_intensity * (num_malicious / total_nodes), 0.9)
         else:
             attack_impact = 0.0
 
