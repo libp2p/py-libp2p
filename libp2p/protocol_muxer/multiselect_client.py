@@ -36,15 +36,18 @@ class MultiselectClient(IMultiselectClient):
         try:
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
+            print("ERROR COMING")
             raise MultiselectClientError(f"handshake write failed: {error}") from error
 
         try:
             handshake_contents = await communicator.read()
 
         except MultiselectCommunicatorError as error:
+            print("ERROR COMING")
             raise MultiselectClientError(f"handshake read failed: {error}") from error
 
         if not is_valid_handshake(handshake_contents):
+            print("ERROR COMING")
             raise MultiselectClientError(
                 f"multiselect protocol ID mismatch: "
                 f"expected {MULTISELECT_PROTOCOL_ID}, "
@@ -68,12 +71,15 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
+        print(protocols)
         try:
             with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
+                print("HANDSHAKE DONE")
 
                 unsupported_errors: list[str] = []
                 for protocol in protocols:
+                    print(protocol)
                     try:
                         selected_protocol = await self.try_select(
                             communicator, protocol
