@@ -13,12 +13,21 @@ Basic WebSocket transport setup:
     from libp2p import new_host
     from libp2p.transport.websocket import WebsocketTransport, WebsocketConfig
     from libp2p.transport.upgrader import TransportUpgrader
+    from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
+    from libp2p.stream_muxer.yamux.yamux import Yamux
+    from libp2p.custom_types import TProtocol
+    from libp2p.crypto.rsa import create_new_key_pair
     from multiaddr import Multiaddr
+
+    # Generate a key pair
+    key_pair = create_new_key_pair()
 
     # Create upgrader with security and muxer
     upgrader = TransportUpgrader(
-        secure_transports_by_protocol={...},
-        muxer_transports_by_protocol={...}
+        secure_transports_by_protocol={
+            TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(key_pair)
+        },
+        muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux}
     )
 
     # Create WebSocket transport
@@ -26,6 +35,8 @@ Basic WebSocket transport setup:
     transport = WebsocketTransport(upgrader, config=config)
 
     # Create host with WebSocket transport
+    # Note: new_host handles transport creation internally if not overridden,
+    # but this shows how to set it up manually if needed.
     host = new_host(
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")]
     )

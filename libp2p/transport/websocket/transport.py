@@ -503,13 +503,15 @@ class WebsocketTransport(ITransport):
                 self._autotls_initialized = True
             except Exception as e:
                 logger.error(f"Failed to initialize AutoTLS: {e}")
-                # Only raise if we are in a context where we can handle it (e.g. dialing)
+                # Only raise if we are in a context where we can handle it
+                # (e.g. dialing)
                 # If called from background task, we just log error
                 if peer_id:
                     raise
         else:
             # Mark as initialized even if disabled so we don't check again
             self._autotls_initialized = True
+
     async def _get_ssl_context(
         self,
         peer_id: ID | None = None,
@@ -831,6 +833,10 @@ class WebsocketTransport(ITransport):
                 raise OpenConnectionError(f"Failed to upgrade connection: {str(e)}")
 
         except Exception as e:
+            if isinstance(e, OpenConnectionError):
+                raise
+            raise OpenConnectionError(f"Failed to dial {maddr}: {str(e)}") from e
+
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
         Create a WebSocket listener with the given handler.

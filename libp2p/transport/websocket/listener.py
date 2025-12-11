@@ -7,7 +7,7 @@ from typing import Any
 from multiaddr import Multiaddr
 import trio
 from trio_typing import TaskStatus
-from trio_websocket import WebSocketConnection
+from trio_websocket import WebSocketConnection, serve_websocket
 
 try:
     from websockets.legacy.server import WebSocketRequest  # type: ignore
@@ -71,6 +71,7 @@ class WebsocketListener(IListener):
         handler: Callable[[Any], Awaitable[None]],
         upgrader: TransportUpgrader,
         config: WebsocketListenerConfig | None = None,
+        peer_id: ID | None = None,
     ) -> None:
         """
         Initialize WebSocket listener.
@@ -79,11 +80,13 @@ class WebsocketListener(IListener):
             handler: Connection handler function
             upgrader: Transport upgrader for security and multiplexing
             config: Optional configuration
+            peer_id: Optional peer ID of the host
 
         """
         self._handler = handler
         self._upgrader = upgrader
         self._config = config or WebsocketListenerConfig()
+        self._peer_id = peer_id
 
         # Configuration attributes for test access
         self._handshake_timeout = self._config.handshake_timeout
@@ -200,7 +203,7 @@ class WebsocketListener(IListener):
             # Initialize AutoTLS if configured
             # This ensures certificates are ready before we start listening
             if self._config.autotls_config and self._config.autotls_config.enabled:
-                await self._initialize_autotls()
+                await self._initialize_autotls(self._peer_id)
 
             # Validate TLS configuration for WSS
             if self._is_wss and self._tls_config is None:
@@ -237,7 +240,6 @@ class WebsocketListener(IListener):
                 nonlocal server_info
                 try:
                     # Use trio_websocket's serve_websocket
-                    from trio_websocket import serve_websocket
 
                     # Create the server
                     await serve_websocket(
@@ -245,7 +247,9 @@ class WebsocketListener(IListener):
                         host=host,
                         port=port,
                         ssl_context=self._tls_config or (
-                            self._autotls_manager.get_ssl_context(None, "libp2p.local")
+                            self._autotls_manager.get_ssl_context(
+                                self._peer_id, "libp2p.local"
+                            )
                             if self._autotls_manager else None
                         ),
                         task_status=task_status,

@@ -399,8 +399,15 @@ class AutoTLSManager:
 
         self._renewal_tasks[key] = asyncio.create_task(renew_certificate())
 
-    def get_ssl_context(self, peer_id: ID, domain: str) -> ssl.SSLContext | None:
+    def get_ssl_context(self, peer_id: ID | None, domain: str) -> ssl.SSLContext | None:
         """Get SSL context for peer ID and domain."""
+        # If peer_id is None, try to find any valid certificate for the domain
+        if peer_id is None:
+            for (pid, d), cert in self._active_certificates.items():
+                if d == domain and not cert.is_expired:
+                    return cert.to_ssl_context()
+            return None
+
         key = (peer_id, domain)
         if key not in self._active_certificates:
             return None

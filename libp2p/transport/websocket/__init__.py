@@ -13,6 +13,7 @@ from .transport import (
     WithAutoTLS,
     combine_configs,
 )
+from .autotls import AutoTLSConfig
 from .connection import P2PWebSocketConnection
 from .listener import WebsocketListener, WebsocketListenerConfig
 
@@ -22,6 +23,7 @@ __all__ = [
     "P2PWebSocketConnection",
     "WebsocketListener",
     "WebsocketListenerConfig",
+    "AutoTLSConfig",
     "WithProxy",
     "WithProxyFromEnvironment",
     "WithTLSClientConfig",
