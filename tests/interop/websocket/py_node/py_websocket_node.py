@@ -19,7 +19,7 @@ try:
 except ImportError:
     LIBP2P_AVAILABLE = False
 
-from libp2p.transport.websocket.interop_tests.py_node.test_utils import TestResults
+from .test_utils import TestResults
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

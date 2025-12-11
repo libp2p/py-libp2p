@@ -1,15 +1,15 @@
-import pytest
-import trio
 from pathlib import Path
 import subprocess
-import sys
+
+import pytest
+import trio
 
 # Ensure we can import from the local directory structure
 # This might be needed if tests/ is not in python path, but usually pytest handles it.
 # We will use relative imports based on the package structure.
-
 from tests.interop.websocket.py_node.py_websocket_node import PyWebSocketNode
 from tests.interop.websocket.py_node.test_utils import TestResults
+
 
 @pytest.mark.trio
 async def test_py_client_js_server():
@@ -19,9 +19,11 @@ async def test_py_client_js_server():
 
     try:
         # Path to js_websocket_node.js relative to this test file
-        # tests/interop/test_websocket_py_to_js.py -> tests/interop/websocket/js_node/js_websocket_node.js
-        js_node_path = Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
-        
+        # tests/interop/websocket/js_node/js_websocket_node.js
+        js_node_path = (
+            Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
+        )
+
         if not js_node_path.exists():
             pytest.fail(f"JS Node script not found at {js_node_path}")
 
@@ -82,6 +84,6 @@ async def test_py_client_js_server():
                 js_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 js_process.kill()
-    
+
     # Verify results
     assert results.results["py_to_js_communication"]["success"] is True

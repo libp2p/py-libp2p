@@ -1,19 +1,22 @@
-import pytest
-import trio
 from pathlib import Path
 import subprocess
+
+import pytest
+import trio
+
 from tests.interop.websocket.py_node.py_websocket_node import PyWebSocketNode
-from tests.interop.websocket.py_node.test_utils import TestResults
+
 
 @pytest.mark.trio
 async def test_bidirectional_communication():
     """Test bidirectional communication between Python and JavaScript nodes"""
-    results = TestResults()
     js_process = None
 
     try:
-        js_node_path = Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
-        
+        js_node_path = (
+            Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
+        )
+
         if not js_node_path.exists():
             pytest.fail(f"JS Node script not found at {js_node_path}")
 
@@ -59,8 +62,9 @@ async def test_bidirectional_communication():
 
         await py_node.stop()
 
-        assert successful_exchanges == len(test_messages), \
+        assert successful_exchanges == len(test_messages), (
             f"Only {successful_exchanges}/{len(test_messages)} exchanges successful"
+        )
 
     finally:
         if js_process:
