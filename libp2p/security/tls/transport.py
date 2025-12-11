@@ -132,7 +132,7 @@ class TLSTransport(ISecureTransport):
 
         cert_path = cert_file.name
         key_path = key_file.name
-        
+
         print("CREATE SSL-CONTEXT: MID2")
 
         try:
@@ -158,7 +158,7 @@ class TLSTransport(ISecureTransport):
                     os.unlink(key_path)
             except (OSError, PermissionError):
                 pass  # Best effort cleanup
-            
+
         print("CREATE SSL-CONTEXT: MID3")
 
         # If we have trusted peer certs, configure verification to accept those
@@ -190,7 +190,7 @@ class TLSTransport(ISecureTransport):
             pass
 
         print("CREATE SSL-CONTEXT: MID4")
-        
+
         # key log file support if provided as path-like
         if self._identity_config and self._identity_config.key_log_writer:
             # Accept a file path or a file-like with name
@@ -288,7 +288,7 @@ class TLSTransport(ISecureTransport):
             raise ValueError(
                 f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
             )
-        
+
         print("SECURE OUTBOUND: COMPLETE")
 
         # Return SecureSession like noise does
