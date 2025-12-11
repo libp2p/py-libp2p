@@ -127,29 +127,29 @@ class KBucket:
         # Check if the old peer is responsive to ping request
         try:
             # Try to ping the oldest peer, not the new peer
-            response = await self._ping_peer(oldest_peer_id)
-            if response:
-                # If the old peer is still alive, we will not add the new peer
-                logger.debug(
-                    "Old peer %s is still alive, cannot add new peer %s",
-                    oldest_peer_id,
-                    peer_id,
-                )
-                return False
-        except Exception as e:
-            # If the old peer is unresponsive, we can replace it with the new peer
+            is_alive = await self._ping_peer(oldest_peer_id)
+        except Exception:
+            # If checking failed, assume peer is dead/unresponsive
+            is_alive = False
+
+        if is_alive:
+            # If the old peer is still alive, we will not add the new peer
             logger.debug(
-                "Old peer %s is unresponsive, replacing with new peer %s: %s",
+                "Old peer %s is still alive, cannot add new peer %s",
                 oldest_peer_id,
                 peer_id,
-                str(e),
             )
-            self.peers.popitem(last=False)  # Remove oldest peer
-            self.peers[peer_id] = (peer_info, current_time)
-            return True
+            return False
 
-        # If we got here, the oldest peer responded but we couldn't add the new peer
-        return False
+        # If the old peer is unresponsive, we can replace it with the new peer
+        logger.debug(
+            "Old peer %s is unresponsive, replacing with new peer %s",
+            oldest_peer_id,
+            peer_id,
+        )
+        self.peers.popitem(last=False)  # Remove oldest peer
+        self.peers[peer_id] = (peer_info, current_time)
+        return True
 
     def remove_peer(self, peer_id: ID) -> bool:
         """
@@ -485,23 +485,24 @@ class RoutingTable:
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
 
-            # Try to add to the bucket
-            success = await bucket.add_peer(peer_info)
-            if success:
-                logger.debug(f"Successfully added peer {peer_id} to routing table")
-                return True
+            # Check if we should update existing peer or add if there is space
+            if bucket.has_peer(peer_id) or bucket.size() < bucket.bucket_size:
+                success = await bucket.add_peer(peer_info)
+                if success:
+                    logger.debug(f"Successfully added/updated peer {peer_id}")
+                    return True
+                # Should not happen if size < bucket_size, but safe fallback
 
-            # If bucket is full and couldn't add peer, try splitting the bucket
-            # Only split if the bucket contains our Peer ID
+            # Bucket is full. Check if we should split
+            # (prioritize split over replacement)
             if self._should_split_bucket(bucket):
                 logger.debug(
                     f"Bucket is full, attempting to split bucket for peer {peer_id}"
                 )
                 split_success = self._split_bucket(bucket)
                 if split_success:
-                    # After splitting,
-                    # find the appropriate bucket for the peer and try to add it
-                    target_bucket = self.find_bucket(peer_info.peer_id)
+                    # After splitting, retry adding to the appropriate new bucket
+                    target_bucket = self.find_bucket(peer_id)
                     success = await target_bucket.add_peer(peer_info)
                     if success:
                         logger.debug(
@@ -515,12 +516,18 @@ class RoutingTable:
                         return False
                 else:
                     logger.debug(f"Failed to split bucket for peer {peer_id}")
-                    return False
-            else:
-                logger.debug(
-                    f"Bucket is full and cannot be split, peer {peer_id} not added"
-                )
-                return False
+                    # Fall through to replacement attempt below
+
+            # Cannot split (or split failed), try replacement (eviction)
+            success = await bucket.add_peer(peer_info)
+            if success:
+                logger.debug(f"Successfully added peer {peer_id} via replacement")
+                return True
+
+            logger.debug(
+                f"Bucket is full and cannot be split/replaced, peer {peer_id} not added"
+            )
+            return False
 
         except Exception as e:
             logger.debug(f"Error adding peer {peer_obj} to routing table: {e}")

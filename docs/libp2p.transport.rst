@@ -14,6 +14,11 @@ Subpackages
 
    libp2p.transport.quic
 
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.transport.webrtc
+
 Submodules
 ----------
 
