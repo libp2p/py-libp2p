@@ -420,7 +420,7 @@ class Swarm(Service, INetworkService):
                 f"failed to upgrade security for peer {peer_id}: {error}"
             ) from error
         print("SECRURITY UPGRADE: COMPLETE")
-        
+
         logger.debug("upgraded security for peer %s", peer_id)
 
         try:
