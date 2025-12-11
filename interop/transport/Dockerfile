@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config \
     libgmp-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the py-libp2p-${commitSha} folder so we can use it as a local dependency
