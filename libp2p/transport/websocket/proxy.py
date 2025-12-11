@@ -116,17 +116,6 @@ class SOCKSConnectionManager:
                     "SOCKS4 proxy support not available with trio_socks"
                 )
 
-            logger.info(
-                f"Connecting to {host}:{port} via SOCKS proxy "
-                f"{self.proxy_host}:{self.proxy_port}"
-            )
-
-            # Step 2: Since SOCKS implementation is not complete, raise error
-            raise NotImplementedError(
-                "SOCKS proxy connection not yet implemented. "
-                "This requires implementing trio_socks integration."
-            )
-
         except trio.TooSlowError as e:
             logger.error(f"SOCKS proxy connection timeout after {self.timeout}s")
             raise ConnectionError(
