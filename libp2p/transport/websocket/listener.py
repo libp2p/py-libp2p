@@ -124,7 +124,7 @@ class WebsocketListener(IListener):
             del self._connections[str(conn_id)]
             self._current_connections -= 1
 
-    async def _initialize_autotls(self, peer_id: ID) -> None:
+    async def _initialize_autotls(self, peer_id: ID | None = None) -> None:
         """Initialize AutoTLS if configured."""
         if self._autotls_initialized:
             return
@@ -197,13 +197,23 @@ class WebsocketListener(IListener):
             # Check if this is WSS
             self._is_wss = proto_info.is_wss
 
+            # Initialize AutoTLS if configured
+            # This ensures certificates are ready before we start listening
+            if self._config.autotls_config and self._config.autotls_config.enabled:
+                await self._initialize_autotls()
+
             # Validate TLS configuration for WSS
             if self._is_wss and self._tls_config is None:
-                raise ValueError(
-                    "WSS (secure WebSocket) requires TLS configuration but none "
-                    "was provided. Please provide tls_server_config when creating "
-                    "the WebSocket transport."
-                )
+                # If AutoTLS is enabled, we might have a context now
+                if self._autotls_manager:
+                    # AutoTLS will provide context per connection via SNI
+                    pass
+                else:
+                    raise ValueError(
+                        "WSS (secure WebSocket) requires TLS configuration but none "
+                        "was provided. Please provide tls_server_config when creating "
+                        "the WebSocket transport."
+                    )
 
             # Check connection limits
             if self._current_connections >= self._config.max_connections:
@@ -234,7 +244,10 @@ class WebsocketListener(IListener):
                         handler=self._handle_websocket_connection,
                         host=host,
                         port=port,
-                        ssl_context=self._tls_config,
+                        ssl_context=self._tls_config or (
+                            self._autotls_manager.get_ssl_context(None, "libp2p.local")
+                            if self._autotls_manager else None
+                        ),
                         task_status=task_status,
                     )
                 except Exception as e:

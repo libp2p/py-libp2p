@@ -454,14 +454,31 @@ class WebsocketTransport(ITransport):
         self._tls_client_config = self._config.tls_client_config
         self._tls_server_config = self._config.tls_server_config
 
+        # Peer ID of the host (set by Swarm)
+        self._peer_id: ID | None = None
+
+    def set_peer_id(self, peer_id: ID) -> None:
+        """Set the peer ID of the host."""
+        self._peer_id = peer_id
+        logger.debug(f"WebSocket transport peer ID set to {peer_id}")
+
     def set_background_nursery(self, nursery: trio.Nursery) -> None:
         """Set the nursery to use for background tasks (called by Swarm)."""
         self._background_nursery = nursery
         logger.debug("WebSocket transport background nursery set")
 
-        # AutoTLS support (initialized lazily)
-        self._autotls_manager = None
-        self._autotls_initialized = False
+        # Initialize AutoTLS state if not already done
+        if not hasattr(self, "_autotls_initialized"):
+            self._autotls_manager = None
+            self._autotls_initialized = False
+
+        # Start AutoTLS initialization if enabled and not initialized
+        if (
+            self._config.autotls_config
+            and self._config.autotls_config.enabled
+            and not self._autotls_initialized
+        ):
+            nursery.start_soon(self._initialize_autotls, self._peer_id)
 
     async def can_dial(self, maddr: Multiaddr) -> bool:
         """Check if we can dial the given multiaddr."""
@@ -471,7 +488,7 @@ class WebsocketTransport(ITransport):
         except (ValueError, KeyError):
             return False
 
-    async def _initialize_autotls(self, peer_id: ID) -> None:
+    async def _initialize_autotls(self, peer_id: ID | None = None) -> None:
         """Initialize AutoTLS if configured."""
         if self._autotls_initialized:
             return
@@ -481,12 +498,18 @@ class WebsocketTransport(ITransport):
                 self._autotls_manager = await initialize_autotls(
                     self._config.autotls_config
                 )
-                logger.info(f"AutoTLS initialized for peer {peer_id}")
+                pid_str = str(peer_id) if peer_id else "unknown"
+                logger.info(f"AutoTLS initialized for peer {pid_str}")
                 self._autotls_initialized = True
             except Exception as e:
                 logger.error(f"Failed to initialize AutoTLS: {e}")
-                raise
-
+                # Only raise if we are in a context where we can handle it (e.g. dialing)
+                # If called from background task, we just log error
+                if peer_id:
+                    raise
+        else:
+            # Mark as initialized even if disabled so we don't check again
+            self._autotls_initialized = True
     async def _get_ssl_context(
         self,
         peer_id: ID | None = None,
@@ -494,6 +517,9 @@ class WebsocketTransport(ITransport):
         is_server: bool = True,
     ) -> ssl.SSLContext | None:
         """Get SSL context for connection."""
+        # Ensure AutoTLS is initialized
+        await self._initialize_autotls(peer_id)
+
         # Check AutoTLS first
         if self._autotls_manager and peer_id:
             domain = sni_name or (
@@ -805,9 +831,6 @@ class WebsocketTransport(ITransport):
                 raise OpenConnectionError(f"Failed to upgrade connection: {str(e)}")
 
         except Exception as e:
-            logger.error(f"Failed to dial {maddr}: {str(e)}")
-            raise OpenConnectionError(f"Failed to dial {maddr}: {str(e)}")
-
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """
         Create a WebSocket listener with the given handler.
@@ -824,6 +847,17 @@ class WebsocketTransport(ITransport):
         logger.debug("WebsocketTransport.create_listener called")
         from .listener import WebsocketListenerConfig
 
+        # Ensure AutoTLS is initialized if configured
+        # We can't await here because create_listener is synchronous in the interface,
+        # so we schedule it on the background nursery.
+        if (
+            self._background_nursery
+            and not self._autotls_initialized
+            and self._config.autotls_config
+            and self._config.autotls_config.enabled
+        ):
+            self._background_nursery.start_soon(self._initialize_autotls)
+
         return WebsocketListener(
             handler,
             self._upgrader,
@@ -839,6 +873,7 @@ class WebsocketTransport(ITransport):
                 autotls_config=self._config.autotls_config,
                 advanced_tls_config=self._config.tls_config,
             ),
+            peer_id=self._peer_id,
         )
 
     async def get_connections(self) -> dict[str, P2PWebSocketConnection]:
