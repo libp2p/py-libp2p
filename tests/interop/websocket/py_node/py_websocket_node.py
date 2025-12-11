@@ -40,7 +40,7 @@ class PyWebSocketNode:
             key_pair = create_new_key_pair()
             network = new_swarm(
                 key_pair=key_pair,
-                listen_addrs=[],
+                listen_addrs=None,
             )
             self.host = BasicHost(network=network)
             from libp2p.custom_types import TProtocol

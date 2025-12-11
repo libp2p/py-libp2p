@@ -7,7 +7,7 @@
   "scripts": {
     "test:server": "node js_websocket_node.js server 8002 false 30000",
     "test:client": "node js_websocket_node.js client /ip4/127.0.0.1/tcp/8001 'Hello'",
-    "test:js-to-py": "node ../tests/test_js_to_py.js"
+    "test:js-to-py": "node test_js_to_py.js"
   },
   "dependencies": {},
   "devDependencies": {},

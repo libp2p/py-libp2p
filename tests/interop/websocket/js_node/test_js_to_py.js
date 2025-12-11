@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { TestResults } from '../js_node/test_utils.js'
+import { TestResults } from './test_utils.js'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 

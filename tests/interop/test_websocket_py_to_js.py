@@ -1,30 +1,38 @@
-import json
+import pytest
+import trio
 from pathlib import Path
 import subprocess
-from typing import Any
+import sys
 
-import trio
+# Ensure we can import from the local directory structure
+# This might be needed if tests/ is not in python path, but usually pytest handles it.
+# We will use relative imports based on the package structure.
 
-from libp2p.transport.websocket.interop_tests.py_node.py_websocket_node import (
-    PyWebSocketNode,
-)
-from libp2p.transport.websocket.interop_tests.py_node.test_utils import TestResults
+from tests.interop.websocket.py_node.py_websocket_node import PyWebSocketNode
+from tests.interop.websocket.py_node.test_utils import TestResults
 
-
-async def test_py_client_js_server() -> dict[str, Any]:
+@pytest.mark.trio
+async def test_py_client_js_server():
     """Test Python client connecting to JavaScript server"""
     results = TestResults()
     js_process = None
 
     try:
-        js_node_path = Path(__file__).parent.parent / "js_node" / "js_websocket_node.js"
+        # Path to js_websocket_node.js relative to this test file
+        # tests/interop/test_websocket_py_to_js.py -> tests/interop/websocket/js_node/js_websocket_node.js
+        js_node_path = Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
+        
+        if not js_node_path.exists():
+            pytest.fail(f"JS Node script not found at {js_node_path}")
+
+        print("Starting JavaScript server...")
         js_process = subprocess.Popen(
             ["node", str(js_node_path), "server", "8002", "false", "15000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
-        print("Starting JavaScript server...")
+        # Give JS server time to start
         await trio.sleep(3)
 
         print("Setting up Python client...")
@@ -45,8 +53,6 @@ async def test_py_client_js_server() -> dict[str, Any]:
                     True,
                     {"sent": test_message, "received": response},
                 )
-                print("Python to JS test completed successfully")
-                print(f"Received: {response}")
             else:
                 results.add_result(
                     "py_to_js_communication",
@@ -57,7 +63,7 @@ async def test_py_client_js_server() -> dict[str, Any]:
                         "error": "Response does not contain original message",
                     },
                 )
-                print("Python to JS test failed: unexpected response")
+                pytest.fail(f"Unexpected response: {response}")
 
         except Exception as e:
             results.add_result(
@@ -65,13 +71,9 @@ async def test_py_client_js_server() -> dict[str, Any]:
                 False,
                 {"error": f"Connection error: {str(e)}"},
             )
-            print(f"Python to JS test failed: {e}")
+            raise e
 
         await node.stop()
-
-    except Exception as e:
-        results.add_error(f"Test error: {e}")
-        print(f"Test error: {e}")
 
     finally:
         if js_process:
@@ -80,11 +82,6 @@ async def test_py_client_js_server() -> dict[str, Any]:
                 js_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 js_process.kill()
-
-    return results.to_dict()
-
-
-if __name__ == "__main__":
-    print("=== Python Client to JavaScript Server Test ===")
-    results = trio.run(test_py_client_js_server)
-    print("\nTest Results:", json.dumps(results, indent=2))
+    
+    # Verify results
+    assert results.results["py_to_js_communication"]["success"] is True
