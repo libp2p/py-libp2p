@@ -246,8 +246,7 @@ def new_swarm(
     if key_pair is None:
         # Use Ed25519 by default for better interoperability with Rust/Go libp2p
         # which often compile without RSA support
-        # key_pair = generate_new_ed25519_identity()
-        key_pair = generate_new_rsa_identity()
+        key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
 
