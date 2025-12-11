@@ -246,11 +246,13 @@ class WebsocketListener(IListener):
                         handler=self._handle_websocket_connection,
                         host=host,
                         port=port,
-                        ssl_context=self._tls_config or (
+                        ssl_context=self._tls_config
+                        or (
                             self._autotls_manager.get_ssl_context(
                                 self._peer_id, "libp2p.local"
                             )
-                            if self._autotls_manager else None
+                            if self._autotls_manager
+                            else None
                         ),
                         task_status=task_status,
                     )
