@@ -1,7 +1,5 @@
 from typing import Any, cast
 
-import multiaddr
-
 from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.rsa import RSAPublicKey
@@ -133,8 +131,8 @@ class Envelope:
             )
         return False
 
-    def _env_addrs_set(self) -> set[multiaddr.Multiaddr]:
-        return {b for b in self.record().addrs}
+    def _env_addrs_set(self) -> set[str]:
+        return {str(b) for b in self.record().addrs}
 
 
 def pub_key_to_protobuf(pub_key: PublicKey) -> cryto_pb.PublicKey:

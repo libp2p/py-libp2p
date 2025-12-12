@@ -1026,6 +1026,8 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
 
     peerstore = Mock()
     mock_host.get_peerstore.return_value = peerstore
+    # Configure get_local_record to return None to trigger new record creation
+    peerstore.get_local_record.return_value = None
 
     relay_stream = AsyncMock()
     mock_host.new_stream = AsyncMock(return_value=relay_stream)

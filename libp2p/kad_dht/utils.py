@@ -2,10 +2,10 @@
 Utility functions for Kademlia DHT implementation.
 """
 
+import hashlib
 import logging
 
 import base58
-import multihash
 
 from libp2p.abc import IHost
 from libp2p.peer.envelope import consume_envelope
@@ -101,7 +101,7 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     bytes: The resulting key.
 
     """
-    return multihash.digest(binary_data, "sha2-256").digest
+    return hashlib.sha256(binary_data).digest()
 
 
 def xor_distance(key1: bytes, key2: bytes) -> int:
@@ -157,7 +157,7 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
 
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
-        peer_hash = multihash.digest(peer_id.to_bytes(), "sha2-256").digest
+        peer_hash = hashlib.sha256(peer_id.to_bytes()).digest()
         return xor_distance(target_key, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
