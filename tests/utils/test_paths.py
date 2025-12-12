@@ -135,7 +135,7 @@ class TestPathUtilities:
 
         # Test absolute path (platform-agnostic)
         if os.name == "nt":  # Windows
-            absolute_path = "C:\\absolute\\path"
+            absolute_path = str(Path("C:/absolute/path"))
         else:  # Unix-like
             absolute_path = "/absolute/path"
         result = resolve_relative_path(base_path, absolute_path)
@@ -226,7 +226,7 @@ class TestCrossPlatformCompatibility:
             pytest.skip("This test only runs on Windows systems")
 
         monkeypatch.setattr("os.name", "nt")
-        monkeypatch.setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
+        monkeypatch.setenv("APPDATA", str(Path("C:/Users/Test/AppData/Roaming")))
         config_dir = get_config_dir()
         assert "AppData" in str(config_dir)
         assert "py-libp2p" in str(config_dir)
@@ -261,12 +261,12 @@ class TestBackwardCompatibility:
         # Test join_paths vs os.path.join
         parts = ["a", "b", "c"]
         new_result = join_paths(*parts)
-        old_result = Path(os.path.join(*parts))
+        old_result = Path(*parts)  # Equivalent to os.path.join for these parts
         assert new_result == old_result
 
-        # Test get_script_dir vs os.path.dirname(os.path.abspath(__file__))
+        # Test get_script_dir vs Path(__file__).parent.absolute()
         new_script_dir = get_script_dir(__file__)
-        old_script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        old_script_dir = Path(__file__).parent.absolute()
         assert new_script_dir == old_script_dir
 
     def test_existing_functionality_preserved(self):
