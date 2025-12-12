@@ -143,9 +143,7 @@ class TestIsCircuitRelayAddress:
         from unittest.mock import Mock
 
         mock_addr = Mock()
-        circuit_str = (
-            "/ip4/192.168.1.1/tcp/4001/p2p/QmRelay/p2p-circuit/p2p/QmTarget"
-        )
+        circuit_str = "/ip4/192.168.1.1/tcp/4001/p2p/QmRelay/p2p-circuit/p2p/QmTarget"
         mock_addr.__str__ = Mock(return_value=circuit_str)
         assert is_circuit_relay_address(mock_addr) is True
 

@@ -391,7 +391,9 @@ class TestDialQueueAddressResolution:
 
         # List of multiaddrs
         maddrs = [
-            Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC"),
+            Multiaddr(
+                "/ip4/127.0.0.1/tcp/1234/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC"
+            ),
             Multiaddr("/ip4/192.168.1.1/tcp/5678"),
         ]
 

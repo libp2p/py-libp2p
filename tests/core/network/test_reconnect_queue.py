@@ -297,19 +297,19 @@ class TestExponentialBackoff:
         peer_id = ID(b"QmTest")
 
         job = ReconnectJob(peer_id=peer_id, attempt=0)
-        delay = queue.retry_interval * (queue.backoff_factor ** job.attempt)
+        delay = queue.retry_interval * (queue.backoff_factor**job.attempt)
         assert delay == 1.0
 
         job.attempt = 1
-        delay = queue.retry_interval * (queue.backoff_factor ** job.attempt)
+        delay = queue.retry_interval * (queue.backoff_factor**job.attempt)
         assert delay == 2.0
 
         job.attempt = 2
-        delay = queue.retry_interval * (queue.backoff_factor ** job.attempt)
+        delay = queue.retry_interval * (queue.backoff_factor**job.attempt)
         assert delay == 4.0
 
         job.attempt = 3
-        delay = queue.retry_interval * (queue.backoff_factor ** job.attempt)
+        delay = queue.retry_interval * (queue.backoff_factor**job.attempt)
         assert delay == 8.0
 
     def test_backoff_with_custom_factor(self):
@@ -327,7 +327,7 @@ class TestExponentialBackoff:
         job = ReconnectJob(peer_id=peer_id, attempt=2)
 
         # 0.5 * 3^2 = 4.5
-        delay = queue.retry_interval * (queue.backoff_factor ** job.attempt)
+        delay = queue.retry_interval * (queue.backoff_factor**job.attempt)
         assert delay == 4.5
 
 
