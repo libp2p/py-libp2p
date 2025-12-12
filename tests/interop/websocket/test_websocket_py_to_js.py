@@ -21,7 +21,7 @@ async def test_py_client_js_server():
         # Path to js_websocket_node.js relative to this test file
         # tests/interop/websocket/js_node/js_websocket_node.js
         js_node_path = (
-            Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
+            Path(__file__).parent / "js_node" / "js_websocket_node.js"
         )
 
         if not js_node_path.exists():

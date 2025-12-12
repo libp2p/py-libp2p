@@ -14,7 +14,7 @@ async def test_bidirectional_communication():
 
     try:
         js_node_path = (
-            Path(__file__).parent / "websocket" / "js_node" / "js_websocket_node.js"
+            Path(__file__).parent / "js_node" / "js_websocket_node.js"
         )
 
         if not js_node_path.exists():
