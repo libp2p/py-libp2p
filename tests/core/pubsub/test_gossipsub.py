@@ -460,6 +460,8 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         router_obj = pubsubs_gsub[0].router
         assert isinstance(router_obj, GossipSub)
         router = router_obj
+        # Disable adaptive gossip for this test to maintain expected behavior
+        router.adaptive_gossip_enabled = False
         monkeypatch.setattr(router, "peer_protocol", peer_protocol)
 
         topic_mesh_peer_count = 14
@@ -498,15 +500,19 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         monkeypatch.setattr(router.mcache, "window", window)
 
         peers_to_gossip = router.gossip_heartbeat()
-        # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up
-        # to `GossipSubDegree` peers (exclude mesh peers).
-        if topic_mesh_peer_count - initial_peer_count < router.degree:
-            # The same goes for fanout so it's two times the number of peers to gossip.
-            assert len(peers_to_gossip) == 2 * (
-                topic_mesh_peer_count - initial_peer_count
-            )
-        elif topic_mesh_peer_count - initial_peer_count >= router.degree:
-            assert len(peers_to_gossip) == 2 * (router.degree)
+        # According to Gossipsub spec, we gossip to
+        # max(Dlazy=6, GossipFactor * total_peers)
+        # where GossipFactor=0.25. For each topic (mesh and fanout), we calculate:
+        # gossip_count = max(6, int((topic_peer_count - current_peers) * 0.25))
+        # Total peers to gossip = 2 * gossip_count
+        # (one for mesh topic, one for fanout topic)
+        total_gossip_peers_per_topic = topic_mesh_peer_count - initial_peer_count
+        # Dlazy=6, GossipFactor=0.25
+        expected_gossip_count_per_topic = max(
+            6, int(total_gossip_peers_per_topic * 0.25)
+        )
+        expected_total = 2 * expected_gossip_count_per_topic
+        assert len(peers_to_gossip) == expected_total
 
         for peer in peers_to_gossip:
             if peer in peer_topics[topic_mesh]:
