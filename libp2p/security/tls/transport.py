@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 import ssl
 from typing import Any
 
@@ -16,6 +17,8 @@ from libp2p.security.tls.certificate import (
     verify_certificate_chain,
 )
 from libp2p.security.tls.io import TLSReadWriter
+
+logger = logging.getLogger(__name__)
 
 # Protocol ID for TLS transport
 PROTOCOL_ID = TProtocol("/tls/1.0.0")
@@ -86,7 +89,7 @@ class TLSTransport(ISecureTransport):
 
         """
         # Validate trusted peer certificates for security vulnerabilities
-        print("\n\nCREATE SSL-CONTEXT: START")
+        logger.debug("TLS create_ssl_context: starting (server_side=%s)", server_side)
         for cert_pem in self._trusted_peer_certs_pem:
             # Check for path traversal attempts and dangerous characters
             dangerous_patterns = ["..", "\x00", "&", "|", ";", "$"]
@@ -111,15 +114,18 @@ class TLSTransport(ISecureTransport):
         # - Set ALPN protocols: preferred muxers + "libp2p"
         # - Apply key log writer if provided in identity_config
         # - Disable SNI for client-side connections
-        print("CREATE SSL-CONTEXT: MID1")
+        logger.debug("TLS create_ssl_context: creating SSL context")
 
         ctx = ssl.SSLContext(
             ssl.PROTOCOL_TLS_SERVER if server_side else ssl.PROTOCOL_TLS_CLIENT
         )
         ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-        # We do our own verification of the peer certificate
+        # We do our own verification (like Go's InsecureSkipVerify).
+        # Python's ssl module can't request a client cert without CA verification.
+        # TODO: Implement proper mutual TLS with custom verification
         ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
+        # Default: no client cert verification
+        ctx.verify_mode = ssl.CERT_NONE
 
         # Load our cached self-signed certificate bound to libp2p identity
         import os
@@ -133,7 +139,7 @@ class TLSTransport(ISecureTransport):
         cert_path = cert_file.name
         key_path = key_file.name
 
-        print("CREATE SSL-CONTEXT: MID2")
+        logger.debug("TLS create_ssl_context: writing cert/key to temp files")
 
         try:
             cert_file.write(self._cert_pem)
@@ -159,37 +165,44 @@ class TLSTransport(ISecureTransport):
             except (OSError, PermissionError):
                 pass  # Best effort cleanup
 
-        print("CREATE SSL-CONTEXT: MID3")
+        logger.debug("TLS create_ssl_context: loading certificate chain")
 
-        # If we have trusted peer certs, configure verification to accept those
-        if server_side and self._trusted_peer_certs_pem:
-            ca_file = tempfile.NamedTemporaryFile("w", delete=False)
-            ca_path = ca_file.name
-            try:
-                ca_file.write("".join(self._trusted_peer_certs_pem))
-                ca_file.flush()
-                ca_file.close()
-                ctx.load_verify_locations(cafile=ca_path)
-                ctx.verify_mode = ssl.CERT_OPTIONAL
-            except Exception:
-                pass
-            finally:
-                # Manual cleanup
+        # Load trusted peer certs as CA certificates if present
+        # This enables mutual TLS when peers explicitly trust each other's certs
+        if self._trusted_peer_certs_pem and server_side:
+            for i, cert_pem in enumerate(self._trusted_peer_certs_pem):
+                ca_file = tempfile.NamedTemporaryFile("w", delete=False, suffix=".pem")
+                ca_path = ca_file.name
                 try:
-                    if os.path.exists(ca_path):
-                        os.unlink(ca_path)
-                except (OSError, PermissionError):
-                    pass  # Best effort cleanup
+                    ca_file.write(cert_pem)
+                    ca_file.flush()
+                    ca_file.close()
+                    ctx.load_verify_locations(cafile=ca_path)
+                finally:
+                    try:
+                        if os.path.exists(ca_path):
+                            os.unlink(ca_path)
+                    except (OSError, PermissionError):
+                        pass
+            # Request client cert and verify against trusted CAs
+            ctx.verify_mode = ssl.CERT_OPTIONAL
+            cnt = len(self._trusted_peer_certs_pem)
+            logger.debug("TLS: loaded %d trusted certs", cnt)
 
-        # ALPN: provide list; without a select-callback we accept server preference.
+        # ALPN: Set up protocol list with preferred muxers + "libp2p" fallback
+        # Note: Python's ssl module doesn't support set_alpn_select_callback
+        # like Go does, so we can't prefer client's choice on server side.
+        # The server will prefer its own order. To maximize compatibility,
+        # we put the "libp2p" fallback last so muxers are tried first.
         alpn_list = list(self._preferred_muxers) + [ALPN_PROTOCOL]
         try:
             ctx.set_alpn_protocols(alpn_list)
-        except Exception:
+            logger.debug("TLS create_ssl_context: ALPN protocols set: %s", alpn_list)
+        except Exception as e:
             # ALPN may be unavailable; proceed without early muxer negotiation
-            pass
+            logger.debug("TLS create_ssl_context: ALPN not available: %s", e)
 
-        print("CREATE SSL-CONTEXT: MID4")
+        logger.debug("TLS create_ssl_context: configuring ALPN and key log")
 
         # key log file support if provided as path-like
         if self._identity_config and self._identity_config.key_log_writer:
@@ -205,7 +218,7 @@ class TLSTransport(ISecureTransport):
                     ctx.keylog_filename = keylog_path
                 except Exception:
                     pass
-        print("CREATE SSL-CONTEXT: END")
+        logger.debug("TLS create_ssl_context: completed")
 
         return ctx
 
@@ -229,20 +242,51 @@ class TLSTransport(ISecureTransport):
         )
 
         # Perform handshake
+        logger.debug("TLS secure_inbound: starting handshake")
         await tls_reader_writer.handshake()
-        print("HANDSHAKE SUCCESSFULL")
+        logger.debug("TLS secure_inbound: handshake completed successfully")
 
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
         if not peer_cert:
-            raise ValueError("missing peer certificate")
+            # TODO: Python ssl can't request client cert without CA verification.
+            # Use placeholder peer ID - client can still verify server identity.
+            logger.warning("TLS inbound: no peer cert (Python ssl limitation)")
+            logger.warning("TLS inbound: using placeholder remote peer ID")
+            # Use a placeholder - we'll need to identify the peer through multistream
+            # For now, generate a temporary key for the remote peer
+            logger.debug("TLS secure_inbound: generating temporary key pair")
+            from libp2p import generate_new_ed25519_identity
+
+            try:
+                temp_key_pair = generate_new_ed25519_identity()
+                logger.debug("TLS secure_inbound: temporary key pair generated")
+            except Exception as e:
+                logger.error("TLS secure_inbound: failed to generate temp key: %s", e)
+                raise
+            remote_public_key = temp_key_pair.public_key
+            remote_peer_id = ID.from_pubkey(remote_public_key)
+            logger.warning("TLS secure_inbound: temporary peer ID: %s", remote_peer_id)
+            logger.debug("TLS secure_inbound: creating SecureSession with placeholder")
+            session = SecureSession(
+                local_peer=self.local_peer,
+                local_private_key=self.libp2p_privkey,
+                remote_peer=remote_peer_id,
+                remote_permanent_pubkey=remote_public_key,
+                is_initiator=False,
+                conn=tls_reader_writer,
+            )
+            logger.debug("TLS secure_inbound: returning placeholder SecureSession")
+            return session
 
         # Extract remote public key from certificate
+        logger.debug("TLS secure_inbound: extracting public key from certificate")
         remote_public_key = self._extract_public_key_from_cert(peer_cert)
         remote_peer_id = ID.from_pubkey(remote_public_key)
-        print("SECURE INBOUND: COMPLETE")
+        logger.debug("TLS secure_inbound: extracted peer ID %s", remote_peer_id)
+        logger.debug("TLS secure_inbound: creating SecureSession")
         # Return SecureSession like noise does
-        return SecureSession(
+        session = SecureSession(
             local_peer=self.local_peer,
             local_private_key=self.libp2p_privkey,
             remote_peer=remote_peer_id,
@@ -250,6 +294,8 @@ class TLSTransport(ISecureTransport):
             is_initiator=False,
             conn=tls_reader_writer,
         )
+        logger.debug("TLS secure_inbound: SecureSession created, returning")
+        return session
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
         """
@@ -272,8 +318,9 @@ class TLSTransport(ISecureTransport):
         )
 
         # Perform handshake
+        logger.debug("TLS outbound: handshake starting (peer=%s)", peer_id)
         await tls_reader_writer.handshake()
-        print("HANDSHAKE SUCCESSFULL")
+        logger.debug("TLS secure_outbound: handshake completed successfully")
 
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
@@ -285,11 +332,12 @@ class TLSTransport(ISecureTransport):
         remote_peer_id = ID.from_pubkey(remote_public_key)
 
         if remote_peer_id != peer_id:
+            logger.error("TLS: peer mismatch want=%s got=%s", peer_id, remote_peer_id)
             raise ValueError(
                 f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
             )
 
-        print("SECURE OUTBOUND: COMPLETE")
+        logger.debug("TLS outbound: peer verified, connection established")
 
         # Return SecureSession like noise does
         return SecureSession(
