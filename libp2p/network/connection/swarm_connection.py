@@ -1,3 +1,4 @@
+import inspect
 import logging
 import time
 from typing import (
@@ -108,7 +109,6 @@ class SwarmConn(INetConn):
         if self._resource_scope is not None:
             try:
                 # Release the resource scope
-                import inspect
 
                 if hasattr(self._resource_scope, "close"):
                     close_method = getattr(self._resource_scope, "close")
