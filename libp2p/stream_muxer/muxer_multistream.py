@@ -1,6 +1,7 @@
 from collections import (
     OrderedDict,
 )
+import logging
 
 import trio
 
@@ -34,6 +35,8 @@ from libp2p.stream_muxer.yamux.yamux import (
     PROTOCOL_ID,
     Yamux,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MuxerMultistream:
@@ -101,10 +104,29 @@ class MuxerMultistream:
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         communicator = MultiselectCommunicator(conn)
-        print("\nMUXER-MULTISELCT")
-        protocol = await self.multistream_client.select_one_of(
-            tuple(self.transports.keys()), communicator, self.negotiate_timeout
+        logger.debug(
+            "MuxerMultistream: muxer negotiation peer=%s initiator=%s",
+            peer_id,
+            conn.is_initiator,
         )
+
+        # Use appropriate multiselect based on role:
+        # - Initiator (client/dialer) uses multiselect_client to select a protocol
+        # - Non-initiator (server/listener) uses multiselect to negotiate with client
+        if conn.is_initiator:
+            protocol = await self.multistream_client.select_one_of(
+                tuple(self.transports.keys()), communicator, self.negotiate_timeout
+            )
+        else:
+            negotiated_protocol, _ = await self.multiselect.negotiate(
+                communicator, self.negotiate_timeout
+            )
+            if negotiated_protocol is None:
+                raise MultiselectError(
+                    "Fail to negotiate a stream muxer protocol: no protocol selected"
+                )
+            protocol = negotiated_protocol
+        logger.debug("MuxerMultistream new_conn: negotiated protocol %s", protocol)
         transport_class = self.transports[protocol]
         if protocol == PROTOCOL_ID:
             async with trio.open_nursery():
