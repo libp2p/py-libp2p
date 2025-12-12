@@ -368,7 +368,8 @@ class TestDialQueueAddressResolution:
         await queue.start()
 
         # Multiaddr with embedded peer ID
-        maddr = Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p/QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC")
+        peer_id_str = "QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC"
+        maddr = Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{peer_id_str}")
 
         # We can't complete the dial without a proper swarm, but we can test
         # that the multiaddr is processed correctly

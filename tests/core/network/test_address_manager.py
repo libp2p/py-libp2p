@@ -129,7 +129,8 @@ class TestIsCircuitRelayAddress:
         from unittest.mock import Mock
 
         mock_addr = Mock()
-        mock_addr.__str__ = Mock(return_value="/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/QmTest")
+        circuit_str = "/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/QmTest"
+        mock_addr.__str__ = Mock(return_value=circuit_str)
         assert is_circuit_relay_address(mock_addr) is True
 
     def test_non_circuit_relay(self):
@@ -142,7 +143,10 @@ class TestIsCircuitRelayAddress:
         from unittest.mock import Mock
 
         mock_addr = Mock()
-        mock_addr.__str__ = Mock(return_value="/ip4/192.168.1.1/tcp/4001/p2p/QmRelay/p2p-circuit/p2p/QmTarget")
+        circuit_str = (
+            "/ip4/192.168.1.1/tcp/4001/p2p/QmRelay/p2p-circuit/p2p/QmTarget"
+        )
+        mock_addr.__str__ = Mock(return_value=circuit_str)
         assert is_circuit_relay_address(mock_addr) is True
 
 
@@ -225,7 +229,8 @@ class TestDefaultAddressSorter:
 
         # Create a mock circuit address
         circuit_addr = Mock()
-        circuit_addr.__str__ = Mock(return_value="/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/QmTest")
+        circuit_str = "/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/QmTest"
+        circuit_addr.__str__ = Mock(return_value=circuit_str)
         circuit_addr.protocols = Mock(return_value=[])
 
         # Create a regular address
