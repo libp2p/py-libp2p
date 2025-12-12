@@ -677,9 +677,13 @@ class WebsocketTransport(ITransport):
     ) -> P2PWebSocketConnection:
         """Create a direct WebSocket connection."""
         # Extract host and port from the rest_multiaddr
+        # Support IP addresses and DNS-based multiaddrs
         host = (
             proto_info.rest_multiaddr.value_for_protocol("ip4")
             or proto_info.rest_multiaddr.value_for_protocol("ip6")
+            or proto_info.rest_multiaddr.value_for_protocol("dns")
+            or proto_info.rest_multiaddr.value_for_protocol("dns4")
+            or proto_info.rest_multiaddr.value_for_protocol("dns6")
             or "localhost"
         )
         # Ensure host is a string, not a tuple or other type
