@@ -616,7 +616,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
             return False
 
         # Store the new record
-        new_addrs = list({addr.to_bytes(): addr for addr in record.addrs}.values())
+        new_addrs = set(record.addrs)
         record_state = PeerRecordState(envelope, record.seq)
         await self._save_peer_record(peer_id, record_state)
 

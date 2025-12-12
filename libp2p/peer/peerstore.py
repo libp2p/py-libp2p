@@ -74,7 +74,7 @@ def env_to_send_in_RPC(host: IHost) -> tuple[bytes, bool]:
         one was reused (False).
 
     """
-    listen_addrs_set = {addr.to_bytes() for addr in host.get_addrs()}
+    listen_addrs_set = {addr for addr in host.get_addrs()}
     local_env = host.get_peerstore().get_local_record()
 
     if local_env is None:
@@ -341,7 +341,7 @@ class PeerStore(IPeerStore):
         if existing and existing.seq > record.seq:
             return False  # reject older record
 
-        new_addrs = list({addr.to_bytes(): addr for addr in record.addrs}.values())
+        new_addrs = set(record.addrs)
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
         self.peer_data_map[peer_id].clear_addrs()

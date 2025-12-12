@@ -13,9 +13,7 @@ async def test_bidirectional_communication():
     js_process = None
 
     try:
-        js_node_path = (
-            Path(__file__).parent / "js_node" / "js_websocket_node.js"
-        )
+        js_node_path = Path(__file__).parent / "js_node" / "js_websocket_node.js"
 
         if not js_node_path.exists():
             pytest.fail(f"JS Node script not found at {js_node_path}")
