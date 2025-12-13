@@ -61,13 +61,9 @@ class RelayServer:
 
         # Instantiate CircuitV2Protocol
         try:
-            self.relay_protocol = CircuitV2Protocol(
-                self.host, limits, allow_hop=True
-            )
+            self.relay_protocol = CircuitV2Protocol(self.host, limits, allow_hop=True)
         except Exception:
-            logger.exception(
-                "Failed to create CircuitV2Protocol with provided limits."
-            )
+            logger.exception("Failed to create CircuitV2Protocol with provided limits.")
             # If it fails, re-raise so caller can exit/see the error
             raise
 
