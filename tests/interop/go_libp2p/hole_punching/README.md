@@ -27,8 +27,8 @@ dos2unix test_local.sh
 ## What the Tests Validate
 
 1. **Relay connectivity**: Go relay server accepts connections from both peers
-2. **Circuit relay**: Python client connects to Go server through the relay
-3. **Stream handling**: Test stream opened and messages exchanged between peers
+1. **Circuit relay**: Python client connects to Go server through the relay
+1. **Stream handling**: Test stream opened and messages exchanged between peers
 
 ## Test Components
 
