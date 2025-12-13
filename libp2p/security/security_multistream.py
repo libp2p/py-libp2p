@@ -4,6 +4,7 @@ from abc import (
 from collections import (
     OrderedDict,
 )
+import logging
 
 from libp2p.abc import (
     IRawConnection,
@@ -29,6 +30,8 @@ from libp2p.protocol_muxer.multiselect_client import (
 from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
+
+logger = logging.getLogger(__name__)
 
 """
 Represents a secured connection object, which includes a connection and details about
@@ -81,8 +84,11 @@ class SecurityMultistream(ABC):
 
         :return: secure connection object (that implements secure_conn_interface)
         """
+        logger.debug("SecurityMultistream.secure_inbound: selecting transport")
         transport = await self.select_transport(conn, False)
+        logger.debug("SecurityMultistream: transport selected, securing")
         secure_conn = await transport.secure_inbound(conn)
+        logger.debug("SecurityMultistream: secure connection established")
         return secure_conn
 
     async def secure_outbound(self, conn: IRawConnection, peer_id: ID) -> ISecureConn:
