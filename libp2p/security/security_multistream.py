@@ -81,7 +81,9 @@ class SecurityMultistream(ABC):
 
         :return: secure connection object (that implements secure_conn_interface)
         """
+        print("SECURE-INBOUND")
         transport = await self.select_transport(conn, False)
+        print("TRANSPORT SELECTED")
         secure_conn = await transport.secure_inbound(conn)
         return secure_conn
 
@@ -116,7 +118,9 @@ class SecurityMultistream(ABC):
             )
         else:
             # Select protocol if non-initiator
+            print("\nNOT THE INITIATOR, SO NEGOTIATING..")
             protocol, _ = await self.multiselect.negotiate(communicator)
+            print("PROTOCOL: ", protocol)
         if protocol is None:
             raise MultiselectError(
                 "Failed to negotiate a security protocol: no protocol selected"

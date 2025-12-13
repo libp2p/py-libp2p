@@ -85,6 +85,12 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport
+)
+
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
@@ -293,6 +299,7 @@ def new_swarm(
 
     # Default security transports (using Noise as primary)
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
+        # TLS_PROTOCOL_ID: TLSTransport(key_pair),
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
