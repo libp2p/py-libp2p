@@ -15,6 +15,7 @@ dependencies = [
     "libp2p @ file:///app/py-libp2p", # local libp2p dependency is a snapshot based on ${commitSha} in Makefile
     "redis>=4.0.0",
     "typing-extensions>=4.0.0",
+    "cryptography>=41.0.0",  # Required for TLS/WSS support
 ]
 
 [tool.setuptools.packages.find]
