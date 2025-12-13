@@ -6,53 +6,15 @@ matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/index.ts
 """
+
 import ipaddress
 import logging
-from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 
-if TYPE_CHECKING:
-    pass
+from libp2p.network.address_manager import extract_ip_from_multiaddr
 
 logger = logging.getLogger("libp2p.network.connection_gate")
-
-
-def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
-    """
-    Extract the IP address from a multiaddr.
-
-    Parameters
-    ----------
-    addr : Multiaddr
-        Multiaddr to extract from
-
-    Returns
-    -------
-    str | None
-        IP address or None if not found
-
-    """
-    # Convert to string representation
-    addr_str = str(addr)
-
-    # Look for IPv4 address
-    ipv4_start = addr_str.find("/ip4/")
-    if ipv4_start != -1:
-        # Extract the IPv4 address
-        ipv4_end = addr_str.find("/", ipv4_start + 5)
-        if ipv4_end != -1:
-            return addr_str[ipv4_start + 5 : ipv4_end]
-
-    # Look for IPv6 address
-    ipv6_start = addr_str.find("/ip6/")
-    if ipv6_start != -1:
-        # Extract the IPv6 address
-        ipv6_end = addr_str.find("/", ipv6_start + 5)
-        if ipv6_end != -1:
-            return addr_str[ipv6_start + 5 : ipv6_end]
-
-    return None
 
 
 class ConnectionGate:
@@ -185,8 +147,7 @@ class ConnectionGate:
         # Check if IP is private and private addresses are not allowed
         if not self.allow_private_addresses and ip.is_private:
             logger.debug(
-                f"Private IP address {ip_str} denied "
-                "(private addresses not allowed)"
+                f"Private IP address {ip_str} denied (private addresses not allowed)"
             )
             return False
 
@@ -299,8 +260,11 @@ class ConnectionGate:
                 ip = ipaddress.ip_address(entry)
                 network = ipaddress.ip_network(f"{ip}/{ip.max_prefixlen}", strict=False)
 
-            self.deny_list = [n for n in self.deny_list if n != network]
-            logger.debug(f"Removed {entry} from deny list")
+            try:
+                self.deny_list.remove(network)
+                logger.debug(f"Removed {entry} from deny list")
+            except ValueError:
+                # Not present, so nothing to remove
+                pass
         except ValueError as e:
             logger.warning(f"Invalid deny list entry '{entry}': {e}")
-

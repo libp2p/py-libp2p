@@ -15,6 +15,7 @@ from aioquic.quic.connection import (
 )
 from aioquic.quic.logger import QuicLogger
 import multiaddr
+from multiaddr.protocols import P_P2P
 import trio
 
 from libp2p.abc import (
@@ -117,7 +118,7 @@ class QUICTransport(ITransport):
         self._background_nursery = nursery
         logger.debug("Transport background nursery set")
 
-    def set_swarm(self, swarm: Swarm) -> None:
+    def set_swarm(self, swarm: "Swarm") -> None:
         """Set the swarm for adding incoming connections."""
         self._swarm = swarm
 
@@ -252,9 +253,10 @@ class QUICTransport(ITransport):
         try:
             # Extract connection details from multiaddr
             host, port = quic_multiaddr_to_endpoint(maddr)
-            remote_peer_id = maddr.get_peer_id()
-            if remote_peer_id is not None:
-                remote_peer_id = ID.from_base58(remote_peer_id)
+            remote_peer_id_str = maddr.value_for_protocol(P_P2P)
+            remote_peer_id = None
+            if remote_peer_id_str is not None:
+                remote_peer_id = ID.from_base58(remote_peer_id_str)
 
             if remote_peer_id is None:
                 logger.error("Unable to derive peer id from multiaddr")
@@ -451,7 +453,9 @@ class QUICTransport(ITransport):
 
         logger.debug("QUIC transport closed")
 
-    async def _cleanup_terminated_connection(self, connection: QUICConnection) -> None:
+    async def _cleanup_terminated_connection(
+        self, connection: "QUICConnection"
+    ) -> None:
         """Clean up a terminated connection from all listeners."""
         try:
             for listener in self._listeners:

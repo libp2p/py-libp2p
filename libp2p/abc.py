@@ -341,6 +341,15 @@ class INetConn(Closer):
     muxed_conn: IMuxedConn
     event_started: trio.Event
 
+    @property
+    @abstractmethod
+    def is_closed(self) -> bool:
+        """
+        Check if the connection is fully closed.
+
+        :return: True if the connection is closed, otherwise False.
+        """
+
     @abstractmethod
     async def new_stream(self) -> INetStream:
         """
@@ -1523,6 +1532,58 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    async def upgrade_outbound_raw_conn(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Secure and upgrade a raw outbound connection to a multiplexed network connection
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The raw connection to upgrade.
+        peer_id : ID
+            The peer to which this connection is established.
+
+        Returns
+        -------
+        INetConn
+            The upgraded, secure, and multiplexed network connection.
+
+        Raises
+        ------
+        SwarmException
+            If upgrading security or multiplexing the connection fails.
+
+        """
+
+    @abstractmethod
+    async def upgrade_inbound_raw_conn(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Secure and upgrade a raw inbound connection to a multiplexed network connection
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The incoming raw connection to upgrade.
+        maddr : Multiaddr
+            The multiaddress on which the connection was received.
+
+        Returns
+        -------
+        IMuxedConn
+            The upgraded, secure, and multiplexed network connection.
+
+        Raises
+        ------
+        SwarmException
+            If upgrading security or multiplexing the connection fails.
+
+        """
+
+    @abstractmethod
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
         """
         Set the stream handler for incoming streams.
@@ -1793,7 +1854,10 @@ class IHost(ABC):
 
     @abstractmethod
     def run(
-        self, listen_addrs: Sequence[Multiaddr]
+        self,
+        listen_addrs: Sequence[Multiaddr],
+        *,
+        task_status: Any = trio.TASK_STATUS_IGNORED,
     ) -> AbstractAsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
@@ -1802,6 +1866,8 @@ class IHost(ABC):
         ----------
         listen_addrs : Sequence[Multiaddr]
             A sequence of multiaddresses on which the host should listen.
+        task_status : Any
+            Task status for trio nursery compatibility (ignored).
 
         """
 
@@ -1878,6 +1944,61 @@ class IHost(ABC):
     async def close(self) -> None:
         """
         Close the host and all underlying connections and services.
+
+        """
+
+    @abstractmethod
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Upgrade a raw outbound connection to a fully secure and
+        multiplexed network connection for the specified peer.
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The raw (unencrypted/unmultiplexed) connection to upgrade.
+        peer_id : ID
+            The ID of the peer this connection is being established to.
+
+        Returns
+        -------
+        INetConn
+            The upgraded and authenticated network connection
+            with security and multiplexing.
+
+        Raises
+        ------
+        SwarmException
+            If the upgrade process (security handshake or multiplexer negotiation) fails
+
+        """
+
+    @abstractmethod
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Upgrade a raw inbound connection to a fully secure and
+        multiplexed network connection for the given multiaddress.
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The inbound raw connection to upgrade.
+        maddr : Multiaddr
+            The multiaddress this connection arrived on.
+
+        Returns
+        -------
+        IMuxedConn
+            The upgraded and authenticated inbound muxed connection.
+
+        Raises
+        ------
+        SwarmException
+            If the upgrade process (security handshake or multiplexer negotiation) fails
 
         """
 

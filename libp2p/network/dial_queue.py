@@ -5,6 +5,7 @@ This module provides a priority-based dial queue matching JavaScript libp2p beha
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/dial-queue.ts
 """
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import heapq
@@ -13,9 +14,11 @@ import time
 from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 
 from libp2p.abc import INetConn
+from libp2p.network.address_manager import AddressManager
 from libp2p.network.config import (
     DEFAULT_DIAL_PRIORITY,
     MAX_DIAL_QUEUE_LENGTH,
@@ -73,6 +76,8 @@ class DialQueue:
         max_parallel_dials: int = MAX_PARALLEL_DIALS,
         max_dial_queue_length: int = MAX_DIAL_QUEUE_LENGTH,
         dial_timeout: float = 10.0,
+        address_manager: AddressManager | None = None,
+        dns_resolver: DNSResolver | None = None,
     ):
         """
         Initialize dial queue.
@@ -87,12 +92,20 @@ class DialQueue:
             Maximum queue size before rejecting new dials
         dial_timeout : float
             Default timeout for dial operations (seconds)
+        address_manager : AddressManager | None
+            Address manager for sorting and filtering addresses
+        dns_resolver : DNSResolver | None
+            DNS resolver for resolving DNS addresses
 
         """
         self.swarm = swarm
         self.max_parallel_dials = max_parallel_dials
         self.max_dial_queue_length = max_dial_queue_length
         self.dial_timeout = dial_timeout
+
+        # Address management
+        self.address_manager = address_manager or AddressManager()
+        self.dns_resolver = dns_resolver or DNSResolver()
 
         # Priority queue (min-heap) - lower values = higher priority
         self._queue: list[DialJob] = []
@@ -128,9 +141,7 @@ class DialQueue:
                 if job.send_channel:
                     try:
                         # Send cancellation - raise Cancelled exception
-                        await job.send_channel.send(
-                            RuntimeError("Queue shutdown")
-                        )
+                        await job.send_channel.send(RuntimeError("Queue shutdown"))
                     except Exception:
                         pass
 
@@ -234,7 +245,9 @@ class DialQueue:
 
             # Create new job with channel for result
             self._job_counter += 1
-            send_channel, receive_channel = trio.open_memory_channel[INetConn | BaseException](1)
+            send_channel, receive_channel = trio.open_memory_channel[
+                INetConn | BaseException
+            ](1)
 
             job = DialJob(
                 priority=priority,
@@ -247,7 +260,10 @@ class DialQueue:
             )
 
             heapq.heappush(self._queue, job)
-            logger.debug(f"Added dial job {job.job_id} for peer {peer_id} with priority {priority}")
+            logger.debug(
+                f"Added dial job {job.job_id} for peer {peer_id} "
+                f"with priority {priority}"
+            )
 
         # Start processing
         await self._process_queue()
@@ -288,17 +304,18 @@ class DialQueue:
 
             # Start jobs from queue
             async with self._queue_lock:
-                while (
-                    self._queue
-                    and len(self._running_jobs) < self.max_parallel_dials
-                ):
+                while self._queue and len(self._running_jobs) < self.max_parallel_dials:
                     job = heapq.heappop(self._queue)
                     self._running_jobs.add(job)
                     job.running = True
 
-                    # Start job in background (manager should be available when queue is started)
+                    # Start job in background
+                    # (manager should be available when queue is started)
                     try:
-                        if hasattr(self.swarm, "manager") and self.swarm.manager is not None:
+                        if (
+                            hasattr(self.swarm, "manager")
+                            and self.swarm.manager is not None
+                        ):
                             self.swarm.manager.run_task(self._run_job, job)
                         else:
                             # Manager not available yet - spawn using trio directly
@@ -325,9 +342,7 @@ class DialQueue:
             if job.send_channel:
                 try:
                     # Send cancellation error
-                    await job.send_channel.send(
-                        RuntimeError("Dial job cancelled")
-                    )
+                    await job.send_channel.send(RuntimeError("Dial job cancelled"))
                 except Exception:
                     pass
         except Exception as e:
@@ -364,29 +379,65 @@ class DialQueue:
         if self._shutdown_event.is_set():
             raise RuntimeError("Dial queue shutdown")
 
-        # Call swarm's internal dial methods directly (bypassing queue to avoid recursion)
+        # Call swarm's internal dial methods directly
+        # (bypassing queue to avoid recursion)
         # First try dialing by peer ID using internal method
         if peer_id:
             try:
-                # Use internal _dial_with_retry method directly
                 # Get addresses from peer store
                 try:
                     addrs = self.swarm.peerstore.addrs(peer_id)
                 except Exception:
                     addrs = []
 
-                if addrs:
-                    # Try first address with internal dial method
-                    connection = await self.swarm._dial_with_retry(addrs[0], peer_id)
-                    return connection
+                # Resolve DNS addresses if any
+                resolved_addrs: list[Multiaddr] = []
+                for addr in addrs:
+                    try:
+                        resolved = await self.dns_resolver.resolve(addr)
+                        resolved_addrs.extend(resolved)
+                    except Exception as e:
+                        logger.debug(f"DNS resolution failed for {addr}: {e}")
+                        resolved_addrs.append(addr)
+
+                # Prepare addresses (filter, sort, limit)
+                max_addrs = self.swarm.connection_config.max_peer_addrs_to_dial
+                prepared_addrs = self.address_manager.prepare_addresses(
+                    resolved_addrs, peer_id=peer_id, max_addresses=max_addrs
+                )
+
+                if prepared_addrs:
+                    # Try addresses in sorted order
+                    for addr in prepared_addrs:
+                        try:
+                            connection = await self.swarm._dial_with_retry(
+                                addr, peer_id
+                            )
+                            return connection
+                        except Exception as e:
+                            logger.debug(f"Dial failed for {addr}: {e}, trying next")
+                            continue
             except Exception as e:
                 logger.debug(f"Direct dial failed for {peer_id}: {e}")
 
-        # Fall back to dialing addresses directly using internal method
+        # Fall back to dialing provided multiaddrs directly
         if not peer_id:
             raise RuntimeError("Failed to dial peer - no peer_id provided")
 
-        for multiaddr in multiaddrs:
+        # Resolve and prepare provided multiaddrs
+        resolved_multiaddrs: list[Multiaddr] = []
+        for addr in multiaddrs:
+            try:
+                resolved = await self.dns_resolver.resolve(addr)
+                resolved_multiaddrs.extend(resolved)
+            except Exception:
+                resolved_multiaddrs.append(addr)
+
+        prepared_addrs = self.address_manager.prepare_addresses(
+            resolved_multiaddrs, peer_id=peer_id
+        )
+
+        for multiaddr in prepared_addrs:
             try:
                 connection = await self.swarm._dial_with_retry(multiaddr, peer_id)
                 return connection
@@ -403,4 +454,3 @@ class DialQueue:
     def get_running_count(self) -> int:
         """Get number of running dial jobs."""
         return len(self._running_jobs)
-

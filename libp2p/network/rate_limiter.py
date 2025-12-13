@@ -6,36 +6,15 @@ abuse and resource exhaustion, matching JavaScript libp2p behavior.
 
 Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/utils/src/rate-limiter.ts
 """
+
 from collections import defaultdict
 import logging
 import time
 from typing import Any
 
+from libp2p.network.exceptions import RateLimitError
+
 logger = logging.getLogger("libp2p.network.rate_limiter")
-
-
-class RateLimitError(Exception):
-    """Raised when rate limit is exceeded."""
-
-    def __init__(
-        self, message: str, consumed_points: int, remaining_points: int = 0
-    ) -> None:
-        """
-        Initialize rate limit error.
-
-        Parameters
-        ----------
-        message : str
-            Error message
-        consumed_points : int
-            Number of points consumed
-        remaining_points : int
-            Number of points remaining
-
-        """
-        super().__init__(message)
-        self.consumed_points = consumed_points
-        self.remaining_points = remaining_points
 
 
 class RateLimiter:
@@ -112,9 +91,7 @@ class RateLimiter:
         # Clean up old entries (outside duration window)
         window_start = now - self.duration
         records = self._storage[key]
-        records[:] = [
-            (ts, pts) for ts, pts in records if ts > window_start
-        ]
+        records[:] = [(ts, pts) for ts, pts in records if ts > window_start]
 
         # Calculate current consumption
         consumed_points = sum(pts for _, pts in records)
@@ -229,4 +206,3 @@ class ConnectionRateLimiter:
 
         """
         self._limiter.reset(host)
-

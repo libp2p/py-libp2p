@@ -649,8 +649,8 @@ class TestScoreGates:
 
                 # Apply decay multiple times
                 for _ in range(
-                    6
-                ):  # Increase to 6 heartbeats to ensure score drops below threshold
+                    7
+                ):  # Use 7 heartbeats so 2.0 * 0.8**7 < 0.5 on all platforms
                     gsub0.scorer.on_heartbeat()
 
                 # Score should have decayed below threshold

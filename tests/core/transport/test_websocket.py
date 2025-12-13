@@ -1,16 +1,16 @@
-# Import exceptiongroup for Python 3.11+
-import builtins
 from collections.abc import Sequence
 import logging
 from typing import Any
 
 import pytest
 
-if hasattr(builtins, "ExceptionGroup"):
-    ExceptionGroup = builtins.ExceptionGroup
-else:
-    # Fallback for older Python versions
-    ExceptionGroup = Exception
+try:
+    from builtins import ExceptionGroup  # type: ignore[attr-defined]
+except ImportError:
+    try:
+        from exceptiongroup import ExceptionGroup  # type: ignore[assignment]
+    except ImportError:  # pragma: no cover - fallback if dependency missing
+        ExceptionGroup = Exception  # type: ignore[assignment]
 from multiaddr import Multiaddr
 import trio
 
@@ -833,9 +833,10 @@ async def test_wss_host_pair_data_exchange():
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.now(datetime.UTC))
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
             .not_valid_after(
-                datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(days=1)
             )
             .add_extension(
                 x509.SubjectAlternativeName(
@@ -1571,17 +1572,18 @@ async def test_websocket_listener_addr_format():
 @pytest.mark.trio
 async def test_sni_resolution_limitation():
     """
-    Test SNI resolution limitation - Python multiaddr library doesn't support
-    SNI protocol.
+    Test SNI resolution - WSS addresses with DNS names are expanded to include
+    explicit TLS/SNI components.
     """
     upgrader = create_upgrader()
     transport = WebsocketTransport(upgrader)
 
-    # Test that WSS addresses are returned unchanged (SNI resolution not supported)
+    # Test that WSS addresses with DNS names are resolved to include SNI
     wss_maddr = Multiaddr("/dns/example.com/tcp/1234/wss")
     resolved = transport.resolve(wss_maddr)
     assert len(resolved) == 1
-    assert resolved[0] == wss_maddr
+    # WSS with DNS name should be expanded to include explicit TLS/SNI
+    assert resolved[0] == Multiaddr("/dns/example.com/tcp/1234/tls/sni/example.com/ws")
 
     # Test that non-WSS addresses are returned unchanged
     ws_maddr = Multiaddr("/dns/example.com/tcp/1234/ws")
@@ -1589,7 +1591,7 @@ async def test_sni_resolution_limitation():
     assert len(resolved) == 1
     assert resolved[0] == ws_maddr
 
-    # Test that IP addresses are returned unchanged
+    # Test that IP addresses (no DNS name) are returned unchanged
     ip_maddr = Multiaddr("/ip4/127.0.0.1/tcp/1234/wss")
     resolved = transport.resolve(ip_maddr)
     assert len(resolved) == 1

@@ -1,1 +1,0 @@
-Fix type checker error with miniupnpc import by adding type ignore comment.

@@ -43,8 +43,11 @@ class HopMessage(google.protobuf.message.Message):
     RESERVATION_FIELD_NUMBER: builtins.int
     LIMIT_FIELD_NUMBER: builtins.int
     STATUS_FIELD_NUMBER: builtins.int
+    SENDERRECORD_FIELD_NUMBER: builtins.int
     type: global___HopMessage.Type.ValueType
     peer: builtins.bytes
+    senderRecord: builtins.bytes
+    """Envelope(PeerRecord)"""
     @property
     def reservation(self) -> global___Reservation: ...
     @property
@@ -59,9 +62,11 @@ class HopMessage(google.protobuf.message.Message):
         reservation: global___Reservation | None = ...,
         limit: global___Limit | None = ...,
         status: global___Status | None = ...,
+        senderRecord: builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["limit", b"limit", "reservation", b"reservation", "status", b"status"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["limit", b"limit", "peer", b"peer", "reservation", b"reservation", "status", b"status", "type", b"type"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "limit", b"limit", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "limit", b"limit", "peer", b"peer", "reservation", b"reservation", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]) -> None: ...
+    def WhichOneof(self, oneof_group: typing.Literal["_senderRecord", b"_senderRecord"]) -> typing.Literal["senderRecord"] | None: ...
 
 global___HopMessage = HopMessage
 
@@ -85,8 +90,11 @@ class StopMessage(google.protobuf.message.Message):
     TYPE_FIELD_NUMBER: builtins.int
     PEER_FIELD_NUMBER: builtins.int
     STATUS_FIELD_NUMBER: builtins.int
+    SENDERRECORD_FIELD_NUMBER: builtins.int
     type: global___StopMessage.Type.ValueType
     peer: builtins.bytes
+    senderRecord: builtins.bytes
+    """Envelope(PeerRecord) encoded"""
     @property
     def status(self) -> global___Status: ...
     def __init__(
@@ -95,9 +103,11 @@ class StopMessage(google.protobuf.message.Message):
         type: global___StopMessage.Type.ValueType = ...,
         peer: builtins.bytes = ...,
         status: global___Status | None = ...,
+        senderRecord: builtins.bytes | None = ...,
     ) -> None: ...
-    def HasField(self, field_name: typing.Literal["status", b"status"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing.Literal["peer", b"peer", "status", b"status", "type", b"type"]) -> None: ...
+    def HasField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "senderRecord", b"senderRecord", "status", b"status"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["_senderRecord", b"_senderRecord", "peer", b"peer", "senderRecord", b"senderRecord", "status", b"status", "type", b"type"]) -> None: ...
+    def WhichOneof(self, oneof_group: typing.Literal["_senderRecord", b"_senderRecord"]) -> typing.Literal["senderRecord"] | None: ...
 
 global___StopMessage = StopMessage
 
