@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """Python hole punching server for interop tests."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
 import time
+from typing import TYPE_CHECKING, Any, cast
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p import new_host
-from libp2p.peer.peerinfo import PeerInfo
+from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+
+if TYPE_CHECKING:
+    from libp2p.abc import IHost, INetStream
 
 # DCUtR may not be present; import defensively
 try:
@@ -26,28 +33,43 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
+
 class HolePunchServer:
-    def __init__(self, port=0):
+    """Hole punch server for interop testing."""
+
+    host: IHost | None
+    dcutr_protocol: Any
+    connections: list[Any]
+
+    def __init__(self, port: int = 0) -> None:
         self.port = port
         self.host = None
         self.dcutr_protocol = None
         self.connections = []
 
-    async def start(self, relay_addr=None, duration=120):
+    async def start(self, relay_addr: str | None = None, duration: int = 120) -> None:
         """Start the hole punch server."""
         try:
             # Create py-libp2p host (new_host is synchronous)
-            listen_addrs = []
+            listen_addrs: list[Multiaddr] = []
             if self.port > 0:
-                listen_addrs = [f"/ip4/0.0.0.0/tcp/{self.port}"]
+                listen_addrs = [Multiaddr(f"/ip4/0.0.0.0/tcp/{self.port}")]
 
-            self.host = new_host(listen_addrs=listen_addrs)  # REMOVE await
+            self.host = new_host(listen_addrs=listen_addrs)
 
             if DCUtRProtocol is None or background_trio_service is None:
-                logger.warning("DCUtRProtocol or background_trio_service not available; server will accept relayed streams but cannot do DCUtR hole-punching.")
+                logger.warning(
+                    "DCUtRProtocol or background_trio_service not available; "
+                    "server will accept relayed streams but cannot do DCUtR "
+                    "hole-punching."
+                )
                 # set up ping handler and run
-                self.host.set_stream_handler("/test/ping/1.0.0", self._handle_ping_stream)
-                logger.info(f"Python hole punch server running on: {self.host.get_addrs()}")
+                self.host.set_stream_handler(
+                    cast(TProtocol, "/test/ping/1.0.0"), self._handle_ping_stream
+                )
+                logger.info(
+                    f"Python hole punch server running on: {self.host.get_addrs()}"
+                )
                 logger.info(f"Python hole punch server peer ID: {self.host.get_id()}")
                 if relay_addr:
                     await self._connect_to_relay(relay_addr)
@@ -62,7 +84,9 @@ class HolePunchServer:
             async with background_trio_service(self.dcutr_protocol):
                 await self.dcutr_protocol.event_started.wait()
 
-                logger.info(f"Python hole punch server running on: {self.host.get_addrs()}")
+                logger.info(
+                    f"Python hole punch server running on: {self.host.get_addrs()}"
+                )
                 logger.info(f"Python hole punch server peer ID: {self.host.get_id()}")
 
                 # Connect to relay if provided
@@ -70,7 +94,9 @@ class HolePunchServer:
                     await self._connect_to_relay(relay_addr)
 
                 # Set up test stream handler
-                self.host.set_stream_handler("/test/ping/1.0.0", self._handle_ping_stream)
+                self.host.set_stream_handler(
+                    cast(TProtocol, "/test/ping/1.0.0"), self._handle_ping_stream
+                )
 
                 # Run for specified duration
                 logger.info(f"Running server for {duration} seconds...")
@@ -81,8 +107,12 @@ class HolePunchServer:
         except Exception:
             logger.exception("Unhandled exception in HolePunchServer.start")
 
-    async def _connect_to_relay(self, relay_addr):
+    async def _connect_to_relay(self, relay_addr: str) -> None:
         """Connect to the relay server."""
+        if self.host is None:
+            logger.error("Host is not initialized")
+            return
+
         try:
             relay_multiaddr = Multiaddr(relay_addr)
             relay_str = str(relay_multiaddr)
@@ -98,14 +128,23 @@ class HolePunchServer:
                     await self.host.connect(relay_peer_info)
                     logger.info(f"Connected to relay: {relay_peer_id}")
                 except Exception:
-                    logger.exception("Failed to parse or connect to relay peer ID from multiaddr")
+                    logger.exception(
+                        "Failed to parse or connect to relay peer ID from multiaddr"
+                    )
             else:
-                logger.warning("Relay multiaddr does not contain '/p2p/<id>' segment; skipping connect.")
+                logger.warning(
+                    "Relay multiaddr does not contain '/p2p/<id>' segment; "
+                    "skipping connect."
+                )
         except Exception:
             logger.exception("Failed in _connect_to_relay")
 
-    async def _handle_ping_stream(self, stream):
+    async def _handle_ping_stream(self, stream: INetStream) -> None:
         """Handle incoming ping streams."""
+        if self.host is None:
+            logger.error("Host is not initialized")
+            return
+
         try:
             # stream.muxed_conn may or may not have peer_id attribute
             peer_id = getattr(getattr(stream, "muxed_conn", None), "peer_id", None)
@@ -114,7 +153,7 @@ class HolePunchServer:
             response = {
                 "status": "pong",
                 "timestamp": int(time.time()),
-                "peer_id": str(self.host.get_id())
+                "peer_id": str(self.host.get_id()),
             }
 
             data = json.dumps(response).encode("utf-8")
@@ -128,9 +167,9 @@ class HolePunchServer:
             except Exception:
                 pass
 
-    def get_info(self):
+    def get_info(self) -> dict[str, object] | None:
         """Get server information."""
-        if not self.host:
+        if self.host is None:
             return None
 
         try:
@@ -138,26 +177,33 @@ class HolePunchServer:
                 "peer_id": str(self.host.get_id()),
                 "addresses": [str(addr) for addr in self.host.get_addrs()],
                 "status": "active",
-                "connections": len(self.host.get_network().connections)
+                "connections": len(self.host.get_network().connections),
             }
         except Exception:
             logger.exception("Error while building get_info()")
             return None
 
-async def main():
+
+async def main() -> None:
     """Main function for the hole punching server."""
     parser = argparse.ArgumentParser(description="Python Hole Punch Server")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on")
     parser.add_argument("--relay", help="Relay multiaddr to connect to")
-    parser.add_argument("--duration", type=int, default=120, help="Server duration in seconds")
-    parser.add_argument("--print-id-only", action="store_true", help="Print only peer ID and exit")
-    parser.add_argument("--print-info", action="store_true", help="Print server info as JSON and exit")
+    parser.add_argument(
+        "--duration", type=int, default=120, help="Server duration in seconds"
+    )
+    parser.add_argument(
+        "--print-id-only", action="store_true", help="Print only peer ID and exit"
+    )
+    parser.add_argument(
+        "--print-info", action="store_true", help="Print server info as JSON and exit"
+    )
     args = parser.parse_args()
 
     # Setup logging
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
     server = HolePunchServer(port=args.port)
@@ -165,10 +211,10 @@ async def main():
     if args.print_id_only or args.print_info:
         # Start server briefly to get info
         try:
-            listen_addrs = []
+            listen_addrs: list[Multiaddr] = []
             if args.port > 0:
-                listen_addrs = [f"/ip4/0.0.0.0/tcp/{args.port}"]
-            server.host = new_host(listen_addrs=listen_addrs)  # REMOVE await
+                listen_addrs = [Multiaddr(f"/ip4/0.0.0.0/tcp/{args.port}")]
+            server.host = new_host(listen_addrs=listen_addrs)
 
             if args.print_id_only:
                 print(str(server.host.get_id()), end="")
@@ -187,6 +233,7 @@ async def main():
             await server.start(relay_addr=args.relay, duration=args.duration)
         except Exception:
             logger.exception("Error running hole punch server")
+
 
 if __name__ == "__main__":
     trio.run(main)

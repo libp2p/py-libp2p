@@ -58,14 +58,14 @@ func main() {
         for i, addr := range h.Addrs() {
             addrs[i] = addr.String()
         }
-        
+
         info := ServerInfo{
             PeerID:      h.ID().String(),
             Addresses:   addrs,
             Status:      "active",
             Connections: len(h.Network().Conns()),
         }
-        
+
         jsonData, err := json.Marshal(info)
         if err != nil {
             log.Fatal(err)
@@ -106,7 +106,7 @@ func main() {
     // Log connection events
     h.Network().Notify(&network.NotifyBundle{
         ConnectedF: func(n network.Network, conn network.Conn) {
-            log.Printf("New connection from peer: %s via %s", 
+            log.Printf("New connection from peer: %s via %s",
                 conn.RemotePeer(), conn.RemoteMultiaddr())
         },
         DisconnectedF: func(n network.Network, conn network.Conn) {
@@ -132,14 +132,14 @@ func main() {
 func handlePingStream(s network.Stream) {
     defer s.Close()
     log.Printf("Received ping stream from: %s", s.Conn().RemotePeer())
-    
+
     // Echo back a simple response
     response := map[string]interface{}{
         "status":    "pong",
         "timestamp": time.Now().Unix(),
         "peer_id":   s.Conn().LocalPeer().String(),
     }
-    
+
     data, _ := json.Marshal(response)
     s.Write(data)
 }

@@ -51,7 +51,7 @@ func main() {
 	// Log connection events
 	h.Network().Notify(&network.NotifyBundle{
 		ConnectedF: func(n network.Network, conn network.Conn) {
-			log.Printf("Connected to peer: %s via %s", 
+			log.Printf("Connected to peer: %s via %s",
 				conn.RemotePeer(), conn.RemoteMultiaddr())
 		},
 		DisconnectedF: func(n network.Network, conn network.Conn) {
@@ -93,21 +93,21 @@ func main() {
 			log.Printf("Failed to connect through relay: %v", err)
 		} else {
 			log.Printf("Connected to target through relay!")
-			
+
 			// Check connection status
 			conns := h.Network().ConnsToPeer(targetID)
 			for _, conn := range conns {
-				log.Printf("Connection to %s: %s", 
+				log.Printf("Connection to %s: %s",
 					targetID, conn.RemoteMultiaddr())
 			}
-			
+
 			// Try to open a test stream
 			stream, err := h.NewStream(ctx, targetID, "/test/ping/1.0.0")
 			if err != nil {
 				log.Printf("Failed to open test stream: %v", err)
 			} else {
 				log.Printf("Successfully opened test stream to target")
-				
+
 				// Read response
 				buffer := make([]byte, 1024)
 				n, err := stream.Read(buffer)
@@ -126,7 +126,7 @@ func main() {
 		for i, addr := range h.Addrs() {
 			addrs[i] = addr.String()
 		}
-		
+
 		directConn := false
 		if *targetPeerID != "" {
 			targetID, err := peer.Decode(*targetPeerID)
@@ -141,7 +141,7 @@ func main() {
 				}
 			}
 		}
-		
+
 		info := ClientInfo{
 			PeerID:           h.ID().String(),
 			Addresses:        addrs,
@@ -149,7 +149,7 @@ func main() {
 			ConnectionCount:  len(h.Network().Conns()),
 			DirectConnection: directConn,
 		}
-		
+
 		jsonData, err := json.Marshal(info)
 		if err != nil {
 			log.Fatal(err)

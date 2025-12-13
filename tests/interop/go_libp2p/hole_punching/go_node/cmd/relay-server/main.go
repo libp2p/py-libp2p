@@ -52,12 +52,12 @@ func main() {
 		for i, addr := range h.Addrs() {
 			addrs[i] = addr.String()
 		}
-		
+
 		info := RelayInfo{
 			PeerID:    h.ID().String(),
 			Addresses: addrs,
 		}
-		
+
 		jsonData, err := json.Marshal(info)
 		if err != nil {
 			log.Fatal(err)
@@ -92,14 +92,14 @@ func main() {
 
 func handleMonitorStream(s network.Stream) {
 	defer s.Close()
-	
+
 	// Send basic status info
 	status := map[string]interface{}{
 		"status":      "active",
 		"timestamp":   time.Now().Unix(),
 		"connections": len(s.Conn().RemoteMultiaddr().String()),
 	}
-	
+
 	data, _ := json.Marshal(status)
 	s.Write(data)
 }

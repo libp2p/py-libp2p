@@ -98,6 +98,16 @@ fi
 
 echo -e "${BLUE}Starting Python hole punch client...${NC}"
 cd "$SCRIPT_DIR/py_node"
+
+# Get the project root directory (4 levels up from py_node)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+# Activate the virtual environment if it exists
+if [ -f "$PROJECT_ROOT/venv/bin/activate" ]; then
+    source "$PROJECT_ROOT/venv/bin/activate"
+    echo -e "${GREEN}Activated venv at $PROJECT_ROOT/venv${NC}"
+fi
+
 python hole_punch_client.py \
     --relay="$RELAY_ADDR" \
     --target="$GO_SERVER_ID" \
