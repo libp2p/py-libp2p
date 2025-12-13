@@ -21,6 +21,7 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
@@ -34,13 +35,17 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.pubkey import PublicKeyValidator
+from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
     Service,
 )
 
 from .common import (
     ALPHA,
+    BUCKET_SIZE,
     PROTOCOL_ID,
+    PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
 )
 from .pb.kademlia_pb2 import (
@@ -92,7 +97,17 @@ class KadDHT(Service):
 
     """
 
-    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
+    def __init__(
+        self,
+        host: IHost,
+        mode: DHTMode,
+        enable_random_walk: bool = False,
+        validator: NamespacedValidator | None = None,
+        validator_changed: bool = False,
+        protocol_prefix: TProtocol = PROTOCOL_PREFIX,
+        enable_providers: bool = True,
+        enable_values: bool = True,
+    ):
         """
         Initialize a new Kademlia DHT node.
 
@@ -114,6 +129,18 @@ class KadDHT(Service):
 
         # Initialize the routing table
         self.routing_table = RoutingTable(self.local_peer_id, self.host)
+
+        self.protocol_prefix = protocol_prefix
+        self.enable_providers = enable_providers
+        self.enable_values = enable_values
+        self.validator = validator
+
+        if validator is None:
+            self.validator = NamespacedValidator({"pk": PublicKeyValidator()})
+
+        # If true implies that the validator has been changed and that
+        # Defaults should not be used
+        self.validator_changed = validator_changed
 
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)
@@ -207,6 +234,84 @@ class KadDHT(Service):
             logger.info("RT Refresh Manager stopped")
         else:
             logger.info("RT Refresh Manager was not running (Random Walk disabled)")
+
+    def apply_fallbacks(self) -> None:
+        """
+        Apply fallback validators if not explicitely changed by the user
+
+        This sets default validators like 'pk' and 'ipns' if they are missing and
+        the default validator set hasn't been overridden.
+        """
+        if not self.validator_changed:
+            if not isinstance(self.validator, NamespacedValidator):
+                raise ValueError(
+                    "Default validator was changed without marking it True"
+                )
+
+            if "pk" not in self.validator._validators:
+                self.validator._validators["pk"] = PublicKeyValidator()
+
+            # TODO: Do the same thing for ipns, but need to implement first.
+
+    def validate_config(self) -> None:
+        """
+        Validate the DHT config.
+        """
+        if self.protocol_prefix != PROTOCOL_PREFIX:
+            return  # Skip validation for non-standart prefixes
+
+        for bucket in self.routing_table.buckets:
+            if bucket.bucket_size != BUCKET_SIZE:
+                raise ValueError(
+                    f"{PROTOCOL_PREFIX} prefix must use bucket size {BUCKET_SIZE}"
+                )
+
+        if not self.enable_providers:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have providers enabled")
+
+        if not self.enable_values:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have values enabled")
+
+        if not isinstance(self.validator, NamespacedValidator):
+            raise ValueError(
+                f"{PROTOCOL_PREFIX} prefix must use a namespace type validator"
+            )
+
+        vmap = self.validator._validators
+
+        # TODO: Need to add ipns also in the check
+        if set(vmap.keys()) != {"pk"}:
+            raise ValueError(f"{PROTOCOL_PREFIX} must have 'pk' and 'ipns' validators")
+
+        pk_validator = vmap.get("pk")
+        if not isinstance(pk_validator, PublicKeyValidator):
+            raise TypeError("'pk' namesapce must use PublicKeyValidator")
+
+        # TODO: ipns checks
+
+    def set_validator(self, val: NamespacedValidator) -> None:
+        """
+        Set a custom validator for the DHT config.
+
+        This marks the validator as explicitly changed, so the default
+        validators (pk and ipns) will not be automatically applied later.
+        """
+        self.validator = val
+        self.validator_changed = True
+        return
+
+    def set_namespace_validator(self, ns: str, val: Validator) -> None:
+        """
+        Adds a validator under a specofic namespace to the current DHT config.
+
+        Raises an error if the current validator is not a NamespacedValidator
+        """
+        if not isinstance(self.validator, NamespacedValidator):
+            raise TypeError(
+                "Can only add namespaced validators to a NamespacedValidator"
+            )
+
+        self.validator._validators["ns"] = val
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -511,8 +616,8 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
-                    value = self.value_store.get(key)
-                    if value:
+                    value_record = self.value_store.get(key)
+                    if value_record:
                         logger.debug(f"Found value for key {key.hex()}")
 
                         # Create response using protobuf
@@ -521,9 +626,7 @@ class KadDHT(Service):
 
                         # Create record
                         response.key = key
-                        response.record.key = key
-                        response.record.value = value
-                        response.record.timeReceived = str(time.time())
+                        response.record.CopyFrom(value_record)
 
                         # Create sender_signed_peer_record
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -660,26 +763,45 @@ class KadDHT(Service):
 
     # Value storage and retrieval methods
 
-    async def put_value(self, key: bytes, value: bytes) -> None:
+    async def put_value(self, key: str, value: bytes) -> None:
         """
         Store a value in the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for storage)
+            value: Binary value to store
+
         """
-        logger.debug(f"Storing value for key {key.hex()}")
+        logger.debug(f"Storing value for key {key}")
+
+        # Validate if key starts with "/" (namespaced keys like /pk/...)
+        if self.validator is not None and key.startswith("/"):
+            self.validator.validate(key, value)
+
+            key_bytes = key.encode("utf-8")
+            old_value_record = self.value_store.get(key_bytes)
+            if old_value_record is not None and old_value_record.value != value:
+                index = self.validator.select(key, [value, old_value_record.value])
+                if index != 0:
+                    raise ValueError(
+                        "Refusing to replace newer value with the older one"
+                    )
+
+        # Convert string key to bytes for storage
+        key_bytes = key.encode("utf-8")
 
         # 1. Store locally first
-        self.value_store.put(key, value)
+        self.value_store.put(key_bytes, value)
         try:
             decoded_value = value.decode("utf-8")
         except UnicodeDecodeError:
             decoded_value = value.hex()
-        logger.debug(
-            f"Stored value locally for key {key.hex()} with value {decoded_value}"
-        )
+        logger.debug(f"Stored value locally for key {key} with value {decoded_value}")
 
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
@@ -694,7 +816,7 @@ class KadDHT(Service):
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self.value_store._store_at_peer(
-                            peer, key, value
+                            peer, key_bytes, value
                         )
                         batch_results[idx] = success
                         if success:
@@ -712,19 +834,32 @@ class KadDHT(Service):
 
         logger.info(f"Successfully stored value at {stored_count} peers")
 
-    async def get_value(self, key: bytes) -> bytes | None:
-        logger.debug(f"Getting value for key: {key.hex()}")
+    async def get_value(self, key: str) -> bytes | None:
+        """
+        Retrieve a value from the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for lookup)
+
+        Returns:
+            The value if found, None otherwise
+
+        """
+        logger.debug(f"Getting value for key: {key}")
+
+        # Convert string key to bytes for lookup
+        key_bytes = key.encode("utf-8")
 
         # 1. Check local store first
-        value = self.value_store.get(key)
-        if value:
+        value_record = self.value_store.get(key_bytes)
+        if value_record:
             logger.debug("Found value locally")
-            return value
+            return value_record.value
 
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Searching {len(closest_peers)} peers for value")
@@ -738,7 +873,7 @@ class KadDHT(Service):
                 nonlocal found_value
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        value = await self.value_store._get_from_peer(peer, key)
+                        value = await self.value_store._get_from_peer(peer, key_bytes)
                         if value is not None and found_value is None:
                             found_value = value
                             logger.debug(f"Found value at peer {peer}")
@@ -750,12 +885,12 @@ class KadDHT(Service):
                     nursery.start_soon(query_one, peer)
 
             if found_value is not None:
-                self.value_store.put(key, found_value)
+                self.value_store.put(key_bytes, found_value)
                 logger.info("Successfully retrieved value from network")
                 return found_value
 
         # 4. Not found
-        logger.warning(f"Value not found for key {key.hex()}")
+        logger.warning(f"Value not found for key {key}")
         return None
 
     # Add these methods in the Utility methods section
@@ -776,17 +911,19 @@ class KadDHT(Service):
         """
         return await self.routing_table.add_peer(peer_id)
 
-    async def provide(self, key: bytes) -> bool:
+    async def provide(self, key: str) -> bool:
         """
         Reference to provider_store.provide for convenience.
         """
-        return await self.provider_store.provide(key)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.provide(key_bytes)
 
-    async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
+    async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
         """
-        return await self.provider_store.find_providers(key, count)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.find_providers(key_bytes, count)
 
     def get_routing_table_size(self) -> int:
         """

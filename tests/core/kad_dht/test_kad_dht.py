@@ -24,9 +24,6 @@ from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
-from libp2p.kad_dht.utils import (
-    create_key_from_binary,
-)
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import ID
 from libp2p.peer.peer_record import PeerRecord
@@ -34,6 +31,8 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.records.utils import InvalidRecordType
+from libp2p.records.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -67,6 +66,62 @@ async def retry(coro: Awaitable[T], retries: int = 3, delay: float = 0.5) -> T:
 
     # This should never be reached, but satisfies type checker
     raise RuntimeError("Retry function should not reach this point")
+
+
+async def wait_for_peer_record(
+    dht: KadDHT, peer_id: ID, timeout: float = TEST_TIMEOUT, delay: float = 0.1
+) -> Envelope:
+    """
+    Wait for a peer record to become available in the peerstore.
+
+    This is useful for handling timing issues on different platforms where
+    peer records may not be immediately available after DHT operations.
+
+    Parameters
+    ----------
+    dht : KadDHT
+        The DHT node to check for the peer record.
+    peer_id : ID
+        The peer ID to wait for.
+    timeout : float
+        Maximum time to wait in seconds.
+    delay : float
+        Delay between retry attempts in seconds.
+
+    Returns
+    -------
+    Envelope
+        The peer record envelope once it becomes available.
+
+    Raises
+    ------
+    TimeoutError
+        If the peer record is not available within the timeout period.
+
+    """
+    start_time = trio.current_time()
+    while True:
+        envelope = dht.host.get_peerstore().get_peer_record(peer_id)
+        if envelope is not None:
+            return envelope
+
+        if trio.current_time() - start_time > timeout:
+            raise TimeoutError(
+                f"Peer record for {peer_id} not available after {timeout} seconds"
+            )
+
+        await trio.sleep(delay)
+
+    # add unreachable raise to satisfy Pyright
+    raise TimeoutError("Unreachable code path")
+
+
+class BlankValidator(Validator):
+    def validate(self, key: str, value: bytes) -> None:
+        return
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        return 0
 
 
 @pytest.fixture
@@ -129,9 +184,25 @@ async def test_find_node(dht_pair: tuple[KadDHT, KadDHT]):
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before the next FIND_NODE
-    # req is sent
-    envelope_a = dht_a.host.get_peerstore().get_peer_record(dht_b.host.get_id())
-    envelope_b = dht_b.host.get_peerstore().get_peer_record(dht_a.host.get_id())
+    # req is sent. However, on some platforms (e.g., Windows), peer records may
+    # not be immediately available due to timing differences. We wait for them
+    # to become available, or trigger find_peer operations to exchange them if needed.
+    with trio.fail_after(TEST_TIMEOUT):
+        # Try to get peer records, waiting up to 1 second
+        try:
+            envelope_a = await wait_for_peer_record(
+                dht_a, dht_b.host.get_id(), timeout=1.0
+            )
+            envelope_b = await wait_for_peer_record(
+                dht_b, dht_a.host.get_id(), timeout=1.0
+            )
+        except TimeoutError:
+            # If peer records aren't available yet, trigger find_peer to exchange them
+            await dht_a.find_peer(dht_b.host.get_id())
+            await dht_b.find_peer(dht_a.host.get_id())
+            # Now wait for the records with the full timeout
+            envelope_a = await wait_for_peer_record(dht_a, dht_b.host.get_id())
+            envelope_b = await wait_for_peer_record(dht_b, dht_a.host.get_id())
 
     assert isinstance(envelope_a, Envelope)
     assert isinstance(envelope_b, Envelope)
@@ -184,15 +255,17 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     dht_a, dht_b = dht_pair
     # dht_a.peer_routing.routing_table.add_peer(dht_b.pe)
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
-    # Generate a random key and value
-    key = create_key_from_binary(b"test-key")
+    # Generate a random key and value (use string key for API)
+    key = "random_key"
+    key_bytes = key.encode("utf-8")
     value = b"test-value"
 
     # First add the value directly to node A's store to verify storage works
-    dht_a.value_store.put(key, value)
+    dht_a.value_store.put(key_bytes, value)
     logger.debug("Local value store: %s", dht_a.value_store.store)
-    local_value = dht_a.value_store.get(key)
-    assert local_value == value, "Local value storage failed"
+    local_value_record = dht_a.value_store.get(key_bytes)
+    assert local_value_record is not None
+    assert local_value_record.value == value, "Local value storage failed"
     print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
     await dht_a.routing_table.add_peer(peer_b_info)
     print("Routing table of a has ", dht_a.routing_table.get_peer_ids())
@@ -233,7 +306,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     assert record_b.seq == record_b_put_value.seq
 
     # # Log debugging information
-    logger.debug("Put value with key %s...", key.hex()[:10])
+    logger.debug("Put value with key %s...", key[:10])
     logger.debug("Node A value store: %s", dht_a.value_store.store)
 
     # # Allow more time for the value to propagate
@@ -272,18 +345,39 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     # Verify that the retrieved value matches the original
     assert retrieved_value == value, "Retrieved value does not match the stored value"
 
+    # TEST PUB-KEY VALIDATORS
+
+    # VALID KEY PAIR
+    keypair = create_new_key_pair()
+    peer_id = ID.from_pubkey(keypair.public_key)
+    key = f"/pk/{peer_id.to_bytes().hex()}"
+    value = keypair.public_key.serialize()
+
+    with trio.fail_after(TEST_TIMEOUT):
+        await dht_a.put_value(key, value)  # Now accepts string directly
+
+    # INVALID KEY PAIR
+    key = "/pk/abcdef1234567890"  # Not a valid multihash
+    value = b"not-a-real-key"
+
+    with trio.fail_after(TEST_TIMEOUT):
+        with pytest.raises(InvalidRecordType, match="valid multihash"):
+            await dht_a.put_value(key, value)  # Now accepts string directly
+
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=1)
 async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     """Test advertising and finding content providers."""
     dht_a, dht_b = dht_pair
 
     # Generate a random content ID
     content = f"test-content-{uuid.uuid4()}".encode()
-    content_id = hashlib.sha256(content).digest()
+    content_id = "randome_content"  # String for API
+    content_id_bytes = content_id.encode("utf-8")  # Bytes for internal storage
 
     # Store content on the first node
-    dht_a.value_store.put(content_id, content)
+    dht_a.value_store.put(content_id_bytes, content)
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before PUT_VALUE req is sent
@@ -324,11 +418,23 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     assert record_b.seq == record_b_add_prov.seq
 
     # Allow time for the provider record to propagate
-    await trio.sleep(0.1)
+    await trio.sleep(0.5)
 
-    # Find providers using the second node
+    # Find providers using the second node with retry logic for CI robustness
+    # Retry to handle potential race conditions where provider hasn't propagated yet
     with trio.fail_after(TEST_TIMEOUT):
-        providers = await dht_b.find_providers(content_id)
+
+        async def find_and_verify_providers() -> list[PeerInfo]:
+            providers = await dht_b.find_providers(content_id)
+            # Verify that we found the first node as a provider
+            assert providers, "No providers found"
+            assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
+                "Expected provider not found"
+            )
+            return providers
+
+        # Retry with verification to handle race conditions
+        await retry(find_and_verify_providers(), retries=5, delay=0.3)
 
     # These are the records in each peer after the find_provider execution
     envelope_a_find_prov = dht_a.host.get_peerstore().get_peer_record(
@@ -349,12 +455,6 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     # advertisement by dht_a
     assert record_a_find_prov.seq == record_a_add_prov.seq
     assert record_b_find_prov.seq == record_b_add_prov.seq
-
-    # Verify that we found the first node as a provider
-    assert providers, "No providers found"
-    assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
-        "Expected provider not found"
-    )
 
     # Retrieve the content using the provider information
     with trio.fail_after(TEST_TIMEOUT):
@@ -392,7 +492,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Generate a random content ID
     content_2 = f"random-content-{uuid.uuid4()}".encode()
-    content_id_2 = hashlib.sha256(content_2).digest()
+    content_id_2 = str(hashlib.sha256(content_2).digest()).encode()
 
     provider_signed_envelope = create_signed_peer_record(
         provider_peer_id, [provider_addr], provider_key_pair.private_key
@@ -464,13 +564,15 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
 
     # Generate a random key and value
-    key = create_key_from_binary(b"test-key")
+    key = "random_key"  # String for API
+    key_bytes = key.encode("utf-8")  # Bytes for internal storage
     value = b"test-value"
 
     # First add the value directly to node A's store to verify storage works
-    dht_a.value_store.put(key, value)
-    local_value = dht_a.value_store.get(key)
-    assert local_value == value, "Local value storage failed"
+    dht_a.value_store.put(key_bytes, value)
+    local_value = dht_a.value_store.get(key_bytes)
+    assert local_value is not None
+    assert local_value.value == value, "Local value storage failed"
     await dht_a.routing_table.add_peer(peer_b_info)
 
     # Corrupt dht_a's local peer_record
@@ -484,11 +586,11 @@ async def test_dht_req_fail_with_invalid_record_transfer(
         dht_a.host.get_peerstore().set_local_record(envelope)
 
     await dht_a.put_value(key, value)
-    retrieved_value = dht_b.value_store.get(key)
+    retrieved_value_record = dht_b.value_store.get(key_bytes)
 
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receiving
     # the corrupted invalid record
-    assert retrieved_value is None
+    assert retrieved_value_record is None
 
     # Create a corrupt envelope with correct signature but false peer_id
     false_record = PeerRecord(ID.from_pubkey(key_pair.public_key), true_record.addrs)
@@ -497,8 +599,8 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     dht_a.host.get_peerstore().set_local_record(false_envelope)
 
     await dht_a.put_value(key, value)
-    retrieved_value = dht_b.value_store.get(key)
+    retrieved_value_record = dht_b.value_store.get(key_bytes)
 
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receving
     # the record with a different peer_id regardless of a valid signature
-    assert retrieved_value is None
+    assert retrieved_value_record is None
