@@ -16,6 +16,7 @@ import logging
 from cryptography.hazmat.primitives import (
     serialization,
 )
+from cryptography.hazmat.primitives.asymmetric import x25519
 from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
 from noise.connection import (
     Keypair as NoiseKeypairEnum,
@@ -141,9 +142,17 @@ class BasePattern(IPattern):
     ) -> NoiseHandshakePayload:
         # Sign the X25519 public key (not the Ed25519 public key)
         # The Noise protocol uses X25519 keys for the DH exchange
-        signature = make_handshake_payload_sig(
-            self.libp2p_privkey, self.noise_static_key.get_public_key()
+        priv_bytes = self.noise_static_key.to_bytes()
+        x25519_key = x25519.X25519PrivateKey.from_private_bytes(priv_bytes)
+        x25519_pub_bytes = x25519_key.public_key().public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
         )
+        noise_static_pubkey = Ed25519PublicKey.from_bytes(x25519_pub_bytes)
+        logger.debug(
+            f"make_handshake_payload: derived X25519 pubkey: {x25519_pub_bytes.hex()}"
+        )
+        signature = make_handshake_payload_sig(self.libp2p_privkey, noise_static_pubkey)
 
         # Handle early data through extensions (prioritize extensions early data)
         if extensions is not None:
@@ -249,6 +258,10 @@ class PatternXX(BasePattern):
                 "remote static public key, but it is not present in the handshake_state"
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
+        logger.debug(
+            f"handshake_inbound: received remote pubkey: "
+            f"{remote_pubkey.to_bytes().hex()}"
+        )
 
         if not verify_handshake_payload_sig(peer_handshake_payload, remote_pubkey):
             raise InvalidSignature
@@ -302,6 +315,10 @@ class PatternXX(BasePattern):
                 "remote static public key, but it is not present in the handshake_state"
             )
         remote_pubkey = self._get_pubkey_from_noise_keypair(handshake_state.rs)
+        logger.debug(
+            f"handshake_outbound: received remote pubkey: "
+            f"{remote_pubkey.to_bytes().hex()}"
+        )
 
         logger.debug(
             f"Noise XX handshake_outbound: verifying signature for peer {remote_peer}"
