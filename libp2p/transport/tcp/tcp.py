@@ -64,8 +64,10 @@ class TCPListener(IListener):
             remote_host: str = ""
             remote_port: int = 0
             try:
+                print("\nGOT A STREAM")
                 tcp_stream = TrioTCPStream(stream)
                 remote_tuple = tcp_stream.get_remote_address()
+                print("REOMTE_ADDR: ", remote_tuple)
 
                 if remote_tuple is not None:
                     remote_host, remote_port = remote_tuple

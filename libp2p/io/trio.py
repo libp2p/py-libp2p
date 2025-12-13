@@ -65,6 +65,7 @@ class TrioTCPStream(ReadWriteCloser):
 
         """
         # Return cached value if available
+        print("GET-REMOTE-ADDR: ", self.stream.socket)
         if self._cached_remote_address is not None:
             return self._cached_remote_address
 
