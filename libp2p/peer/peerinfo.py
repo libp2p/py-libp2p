@@ -3,13 +3,12 @@ from collections.abc import (
 )
 from typing import (
     Any,
+    cast,
 )
 
 import multiaddr
-from multiaddr import (
-    protocols,
-)
 from multiaddr.protocols import (
+    P_P2P,
     Protocol,
 )
 
@@ -38,31 +37,39 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
         raise InvalidAddrError("`addr` should not be `None`")
 
-    addr_protocols = list(addr.protocols())
-    if not addr_protocols:
-        raise InvalidAddrError("Address has no protocols")
+    protocols = addr.protocols()
+    if not protocols:
+        raise InvalidAddrError(f"`addr`={addr} should at least have a protocol `P_P2P`")
 
-    last_protocol: Protocol = addr_protocols[-1]
-    # multiaddr.protocols.P_P2P is 421
-    if last_protocol.code != protocols.P_P2P:
+    last_protocol = cast(Protocol, protocols[-1])
+
+    if last_protocol is None:
+        raise InvalidAddrError("The last protocol is None")
+
+    last_protocol_code = last_protocol.code
+    if last_protocol_code != P_P2P:
         raise InvalidAddrError(
-            f"The last protocol should be `P_P2P` (421) "
-            f"instead of `{last_protocol.code}`"
+            f"The last protocol should be `P_P2P` instead of `{last_protocol_code}`"
         )
 
     # make sure the /p2p value parses as a peer.ID
-    peer_id_str = addr.value_for_protocol(protocols.P_P2P)
+    peer_id_str = addr.value_for_protocol(P_P2P)
     if peer_id_str is None:
         raise InvalidAddrError("Missing value for /p2p protocol in multiaddr")
 
     peer_id: ID = ID.from_base58(peer_id_str)
 
     # we might have received just an / p2p part, which means there's no addr.
-    # Decapsulate the p2p part to get the address
+    # Construct the p2p part to decapsulate it
     p2p_part = multiaddr.Multiaddr(f"/p2p/{peer_id_str}")
-    addr_without_p2p = addr.decapsulate(p2p_part)
+    transport_addr = addr.decapsulate(p2p_part)
 
-    return PeerInfo(peer_id, [addr_without_p2p])
+    if not transport_addr.protocols():
+        # If transport_addr is empty, it means the input was just the p2p part.
+        # In this case we return the original address as the address list.
+        return PeerInfo(peer_id, [addr])
+
+    return PeerInfo(peer_id, [transport_addr])
 
 
 def peer_info_to_bytes(peer_info: PeerInfo) -> bytes:

@@ -305,8 +305,8 @@ async def identify_push_demo(host_a, host_b):
     assert all(protocol in peerstore_protocols for protocol in host_a_protocols)
 
     # Check that the addresses were updated
-    host_a_addrs = set(host_a.get_addrs())
-    peerstore_addrs = set(peerstore.addrs(peer_id))
+    host_a_addrs = {str(addr) for addr in host_a.get_addrs()}
+    peerstore_addrs = {str(addr) for addr in peerstore.addrs(peer_id)}
 
     # Log addresses after push
     logger.debug("Host A addresses: %s", host_a_addrs)

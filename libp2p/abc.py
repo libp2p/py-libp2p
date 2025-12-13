@@ -341,6 +341,15 @@ class INetConn(Closer):
     muxed_conn: IMuxedConn
     event_started: trio.Event
 
+    @property
+    @abstractmethod
+    def is_closed(self) -> bool:
+        """
+        Check if the connection is fully closed.
+
+        :return: True if the connection is closed, otherwise False.
+        """
+
     @abstractmethod
     async def new_stream(self) -> INetStream:
         """

@@ -695,8 +695,8 @@ async def test_wss_host_pair_data_exchange():
     )
 
     assert wss_transport is not None
-    assert wss_transport._config.tls_client_config is not None
-    assert wss_transport._config.tls_server_config is not None
+    assert wss_transport.tls_client_config is not None
+    assert wss_transport.tls_server_config is not None
 
     # Test multiaddr parsing works correctly
     assert parsed.is_wss

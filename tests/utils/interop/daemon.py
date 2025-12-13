@@ -7,10 +7,15 @@ from contextlib import (
 
 from multiaddr import (
     Multiaddr,
-    exceptions,
-    protocols,
 )
-from p2pclient import (
+from multiaddr.exceptions import (
+    ProtocolLookupError,
+)
+from multiaddr.protocols import (
+    P_IP4,
+    P_TCP,
+)
+from p2pclient import (  # type: ignore[import-error]
     Client,
 )
 import trio
@@ -135,10 +140,10 @@ async def make_p2pd(
         listen_maddr: Multiaddr | None = None
         for maddr in maddrs:
             try:
-                ip = maddr.value_for_protocol(protocols.P_IP4)
+                ip = maddr.value_for_protocol(P_IP4)
                 # NOTE: Check if this `maddr` uses `tcp`.
-                maddr.value_for_protocol(protocols.P_TCP)
-            except exceptions.ProtocolLookupError:
+                maddr.value_for_protocol(P_TCP)
+            except ProtocolLookupError:
                 continue
             if ip == LOCALHOST_IP:
                 listen_maddr = maddr

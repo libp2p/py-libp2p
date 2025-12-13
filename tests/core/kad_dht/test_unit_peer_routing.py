@@ -350,17 +350,21 @@ class TestPeerRouting:
 
         response_bytes = response_msg.SerializeToString()
 
-        # Mock stream reading
+        # Mock stream reading - varint is read byte-by-byte, then response in chunks
         varint_length = varint.encode(len(response_bytes))
-        mock_stream.read.side_effect = [varint_length, response_bytes]
+        # Return varint bytes one at a time, then the full response
+        read_calls = [bytes([b]) for b in varint_length] + [response_bytes]
+        mock_stream.read.side_effect = read_calls
 
         # Mock peerstore
         mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
         mock_host.get_peerstore().add_addrs = Mock()
-
-        result = await peer_routing._query_peer_for_closest(
-            sample_peer_info.peer_id, target_key
-        )
+        # Mock env_to_send_in_RPC to return valid envelope bytes
+        with patch("libp2p.kad_dht.peer_routing.env_to_send_in_RPC") as mock_env:
+            mock_env.return_value = (b"", False)
+            result = await peer_routing._query_peer_for_closest(
+                sample_peer_info.peer_id, target_key
+            )
 
         assert len(result) == 1
         assert result[0] == response_peer_id
@@ -427,6 +431,10 @@ class TestPeerRouting:
         """Test handling incoming FIND_NODE requests."""
         # Create mock stream
         mock_stream = AsyncMock()
+        # Mock muxed_conn.peer_id
+        mock_muxed_conn = Mock()
+        mock_muxed_conn.peer_id = create_valid_peer_id("remote_peer")
+        mock_stream.muxed_conn = mock_muxed_conn
 
         # Create FIND_NODE request
         request_msg = Message()
@@ -451,12 +459,19 @@ class TestPeerRouting:
             mock_host.get_peerstore().addrs.return_value = [
                 Multiaddr("/ip4/127.0.0.1/tcp/8004")
             ]
+            mock_host.get_peerstore().get_peer_record.return_value = None
+            # Mock env_to_send_in_RPC and maybe_consume_signed_record
+            with patch("libp2p.kad_dht.peer_routing.env_to_send_in_RPC") as mock_env:
+                mock_env.return_value = (b"", False)
+                with patch(
+                    "libp2p.kad_dht.peer_routing.maybe_consume_signed_record"
+                ) as mock_consume:
+                    mock_consume.return_value = True
+                    await peer_routing._handle_kad_stream(mock_stream)
 
-            await peer_routing._handle_kad_stream(mock_stream)
-
-            # Should write response
-            mock_stream.write.assert_called()
-            mock_stream.close.assert_called_once()
+                    # Should write response
+                    mock_stream.write.assert_called()
+                    mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
     async def test_handle_kad_stream_invalid_message(self, peer_routing):
