@@ -145,29 +145,11 @@ class CircuitV2Transport(ITransport):
         found_circuit = False
         relay_maddr_end_index = None
 
-        # Reconstruct items from protocols and string splitting
-        parts = str(maddr).split("/")
-        # parts[0] is empty
-        parts = parts[1:]
-        iter_parts = iter(parts)
-
-        # Collect items manually
-        items = []
-        for proto in maddr.protocols():
-            # Consume protocol name
-            _ = next(iter_parts)
-
-            if proto.size == 0:
-                val = None
-            else:
-                val = next(iter_parts)
-            items.append((proto, val))
-
-        for idx, (proto, value) in enumerate(items):
+        for idx, (proto, value) in enumerate(maddr.items()):
             if proto.name == "p2p-circuit":
                 found_circuit = True
                 relay_maddr_end_index = idx
-            elif proto.name in ("p2p", "ipfs"):
+            elif proto.name == "p2p":
                 if not found_circuit and relay_id_str is None:
                     relay_id_str = value
                 elif found_circuit and dest_id_str is None:

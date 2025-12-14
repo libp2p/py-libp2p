@@ -57,37 +57,27 @@ class TestQUICTransport:
         import multiaddr
 
         # Valid QUIC addresses
-        # Build list conditionally since py-multiaddr may not support quic-v1
-        valid_addrs = []
-
-        # Add draft-29 addresses (should work)
-        valid_addrs.extend(
-            [
-                multiaddr.Multiaddr(
-                    f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-                ),
-                multiaddr.Multiaddr(
-                    f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-                ),
-                multiaddr.Multiaddr(
-                    f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
-                ),
-            ]
-        )
-
-        # Add quic-v1 addresses if supported by py-multiaddr
-        # TODO: Update Multiaddr package to accept quic-v1
-        quic_v1_addrs = [
-            f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}",
-            f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_V1}",
-            f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}",
+        valid_addrs = [
+            # TODO: Update Multiaddr package to accept quic-v1
+            multiaddr.Multiaddr(
+                f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+            ),
+            multiaddr.Multiaddr(
+                f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+            ),
+            multiaddr.Multiaddr(
+                f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_DRAFT29}"
+            ),
+            multiaddr.Multiaddr(
+                f"/ip4/127.0.0.1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
+            ),
+            multiaddr.Multiaddr(
+                f"/ip4/192.168.1.1/udp/8080/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
+            ),
+            multiaddr.Multiaddr(
+                f"/ip6/::1/udp/4001/{QUICTransportConfig.PROTOCOL_QUIC_V1}"
+            ),
         ]
-        for addr_str in quic_v1_addrs:
-            try:
-                valid_addrs.append(multiaddr.Multiaddr(addr_str))
-            except ValueError:
-                # quic-v1 protocol not supported by py-multiaddr, skip
-                pass
 
         for addr in valid_addrs:
             assert transport.can_dial(addr)

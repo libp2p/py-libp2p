@@ -584,143 +584,20 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
             for host, _ in dummy_peers:
                 await wait_until_listening(host)
 
-            # Configure host_a with increased connection limits to support 499 peers
-            # The default max_connections is 300, but we need 499
-            network = host_a.get_network()
-            if hasattr(network, "connection_config"):
-                # Increase connection limits
-                # pyrefly: ignore
-                network.connection_config.max_connections = 600  # Well above 499
-                # pyrefly: ignore
-                network.connection_config.max_parallel_dials = (
-                    200  # Increase parallel dials
-                )
-                # pyrefly: ignore
-                network.connection_config.dial_timeout = 30.0  # Increase dial timeout
-                # pyrefly: ignore
-                network.connection_config.max_dial_queue_length = 1000  # Increase queue
-                logger.info(
-                    f"Configured host_a connection limits: "
-                    # pyrefly: ignore
-                    f"max_connections={network.connection_config.max_connections}"
-                )
-
-            # Connect host_a → dummy peers in batches to avoid overwhelming the system
-            # Use a semaphore to limit concurrent connections (but higher than before)
-            connection_semaphore = trio.Semaphore(50)  # Increased from 10 to 50
-            expected_peer_ids = {host.get_id() for host, _ in dummy_peers}
-
-            async def connect_to_peer(host, _):
-                async with connection_semaphore:
-                    max_retries = 5  # Increased from 3 to 5
-                    for attempt in range(max_retries):
-                        try:
-                            # Get the address with /p2p/... part included
-                            addr = host.get_addrs()[0]
-                            await host_a.connect(info_from_p2p_addr(addr))
-                            # Connection successful, break out of retry loop
-                            break
-                        except Exception as e:
-                            if attempt < max_retries - 1:
-                                # Exponential backoff with longer delays
-                                wait_time = 0.5 * (2**attempt)  # 0.5s, 1s, 2s, 4s, 8s
-                                await trio.sleep(wait_time)
-                            else:
-                                logger.warning(
-                                    f"Failed to connect to peer {host.get_id()} "
-                                    f"after {max_retries} attempts: {e}"
-                                )
-
-            # Start all connections in parallel with concurrency limit
-            # using existing nursery
-            for host, listen_addr in dummy_peers:
-                nursery.start_soon(connect_to_peer, host, listen_addr)
-
-            # Give connections time to start
-            # (with 499 peers and 50 concurrent, this takes less time)
-            # Estimate: 499 peers / 50 concurrent = ~10 batches
-            await trio.sleep(5.0)  # Increased from 2.0 to 5.0
-
-            # Wait for all connections to be fully established with retries
-            max_connection_wait = (
-                180.0  # Increased from 60.0 to 180.0 seconds (3 minutes)
-            )
-            connection_check_interval = 0.5  # Check every 500ms (increased from 200ms)
-            connection_elapsed = 0.0
-
-            while connection_elapsed < max_connection_wait:
-                connected_peers = set(host_a.get_connected_peers())
-                if expected_peer_ids.issubset(connected_peers):
-                    break
-
-                missing = expected_peer_ids - connected_peers
-                logger.debug(
-                    f"Waiting for connections: {len(missing)} peers not yet connected"
-                )
-                await trio.sleep(connection_check_interval)
-                connection_elapsed += connection_check_interval
-
-            # Verify ALL connections are established before pushing
-            # With increased limits and timeouts, we expect 100% connection success
-            connected_peers = set(host_a.get_connected_peers())
-            if not expected_peer_ids.issubset(connected_peers):
-                missing = expected_peer_ids - connected_peers
-                raise AssertionError(
-                    f"Failed to connect to {len(missing)} out of "
-                    f"{len(expected_peer_ids)} peers. "
-                    f"Missing peers: {list(missing)[:10]}"
-                    f"{'...' if len(missing) > 10 else ''}"
-                )
-
-            logger.info(
-                f"Successfully connected to all {len(expected_peer_ids)} peers (100%)"
-            )
+            # Now connect host_a → dummy peers
+            for host, _ in dummy_peers:
+                await host_a.connect(info_from_p2p_addr(host.get_addrs()[0]))
 
             await push_identify_to_peers(
                 host_a,
             )
 
-            # Wait for all peerstores to be updated with host_a's peer_id
-            # With 499 peers and CONCURRENCY_LIMIT=10, this may take some time
+            await trio.sleep(0.5)
+
             peer_id_a = host_a.get_id()
-            max_wait_time = 120.0  # Increased from 30.0 to 120.0 seconds (2 minutes)
-            check_interval = 0.2  # Check every 200ms (increased from 100ms)
-            elapsed = 0.0
-
-            while elapsed < max_wait_time:
-                all_updated = True
-                for host, _ in dummy_peers:
-                    host_id = host.get_id()
-                    # Only check peers that are actually connected
-                    if host_id in connected_peers:
-                        dummy_peerstore = host.get_peerstore()
-                        if peer_id_a not in dummy_peerstore.peer_ids():
-                            all_updated = False
-                            break
-
-                if all_updated:
-                    break
-
-                await trio.sleep(check_interval)
-                elapsed += check_interval
-
-            # Final assertion - verify all peerstores have been updated
-            # Only check peers that are actually connected
-            failed_peers = []
             for host, _ in dummy_peers:
-                host_id = host.get_id()
-                # Only verify if the peer is connected
-                if host_id in connected_peers:
-                    dummy_peerstore = host.get_peerstore()
-                    if peer_id_a not in dummy_peerstore.peer_ids():
-                        failed_peers.append(host_id)
-
-            if failed_peers:
-                raise AssertionError(
-                    f"{len(failed_peers)} connected peer(s) did not receive "
-                    f"identify push from {peer_id_a}: "
-                    f"{failed_peers[:10]}{'...' if len(failed_peers) > 10 else ''}"
-                )
+                dummy_peerstore = host.get_peerstore()
+                assert peer_id_a in dummy_peerstore.peer_ids()
 
             nursery.cancel_scope.cancel()
 

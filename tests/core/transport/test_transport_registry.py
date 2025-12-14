@@ -188,11 +188,7 @@ class TestTransportFactory:
         upgrader = TransportUpgrader({}, {})
 
         # DNS WebSocket multiaddr
-        try:
-            maddr = Multiaddr("/dns4/example.com/tcp/443/ws")
-        except ValueError:
-            # DNS addresses not supported by py-multiaddr, skip this test
-            return
+        maddr = Multiaddr("/dns4/example.com/tcp/443/ws")
         transport = create_transport_for_multiaddr(maddr, upgrader)
 
         assert transport is not None
