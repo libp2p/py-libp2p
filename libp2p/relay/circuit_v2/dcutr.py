@@ -456,7 +456,11 @@ class DCUtRProtocol(Service):
             return False
 
         # Start dialing attempts in parallel
-        logger.debug("Starting parallel dial attempts to %s using %d addresses", peer_id, len(direct_addrs[:5]))
+        logger.debug(
+            "Starting parallel dial attempts to %s using %d addresses",
+            peer_id,
+            len(direct_addrs[:5]),
+        )
         async with trio.open_nursery() as nursery:
             for addr in direct_addrs[
                 :5
@@ -465,13 +469,15 @@ class DCUtRProtocol(Service):
 
         # Wait a bit for connections to establish and settle
         await trio.sleep(0.5)
-        
+
         # Check if we established a direct connection (verify, don't trust cache)
         is_direct = await self._verify_direct_connection(peer_id)
         if is_direct:
             logger.debug("Verified direct connection to %s after hole punch", peer_id)
         else:
-            logger.debug("No direct connection verified to %s after hole punch", peer_id)
+            logger.debug(
+                "No direct connection verified to %s after hole punch", peer_id
+            )
         return is_direct
 
     async def _dial_peer(self, peer_id: ID, addr: Multiaddr) -> None:
@@ -497,17 +503,23 @@ class DCUtRProtocol(Service):
                 await self.host.connect(peer_info)
 
             logger.debug("Connection established to %s at %s", peer_id, addr)
-            
+
             # Wait a bit for the connection to be fully established
             await trio.sleep(0.1)
-            
+
             # Verify the connection is actually direct before adding to cache
             if await self._verify_direct_connection(peer_id):
-                logger.info("Successfully established direct connection to %s at %s", peer_id, addr)
+                logger.info(
+                    "Successfully established direct connection to %s at %s",
+                    peer_id,
+                    addr,
+                )
                 # Only add to direct connections set if verified
                 self._direct_connections.add(peer_id)
             else:
-                logger.debug("Connection to %s is not direct (likely still relayed)", peer_id)
+                logger.debug(
+                    "Connection to %s is not direct (likely still relayed)", peer_id
+                )
 
         except trio.TooSlowError:
             logger.debug("Timeout dialing %s at %s", peer_id, addr)
@@ -546,10 +558,11 @@ class DCUtRProtocol(Service):
             try:
                 # Get the transport addresses
                 addrs = conn.get_transport_addresses()
-                
+
                 # If we got addresses, check if any is direct
                 if addrs:
-                    # If any address doesn't start with /p2p-circuit, it's a direct connection
+                    # If any address doesn't start with /p2p-circuit,
+                    # it's a direct connection
                     if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
                         return True
                 else:
@@ -561,16 +574,24 @@ class DCUtRProtocol(Service):
                         # If it's a circuit connection, it will have circuit in the path
                         try:
                             # Try to get the raw connection
-                            if hasattr(conn, 'muxed_conn') and hasattr(conn.muxed_conn, 'raw_conn'):
-                                raw_conn = conn.muxed_conn.raw_conn
+                            # raw_conn is implementation-specific, not in IMuxedConn
+                            if hasattr(conn, "muxed_conn") and hasattr(
+                                conn.muxed_conn, "raw_conn"
+                            ):
+                                raw_conn = conn.muxed_conn.raw_conn  # type: ignore[attr-defined]
                                 raw_addrs = raw_conn.get_transport_addresses()
                                 if raw_addrs:
-                                    if any(not str(addr).startswith("/p2p-circuit") for addr in raw_addrs):
+                                    if any(
+                                        not str(addr).startswith("/p2p-circuit")
+                                        for addr in raw_addrs
+                                    ):
                                         return True
                         except Exception:
                             pass
             except Exception as e:
-                logger.debug("Error verifying connection type for %s: %s", peer_id, str(e))
+                logger.debug(
+                    "Error verifying connection type for %s: %s", peer_id, str(e)
+                )
                 # If we can't verify, assume it's not direct
                 continue
 
@@ -591,15 +612,12 @@ class DCUtRProtocol(Service):
             True if we have a direct connection, False otherwise
 
         """
-        # Check our direct connections cache first (but verify it's still valid)
+        # Check our direct connections cache first
+        # Trust the cache for fast path - this allows early return when we know
+        # we have a direct connection. Verification happens when connections are
+        # established (in _dial_peer) to ensure cache accuracy.
         if peer_id in self._direct_connections:
-            # Verify the connection is still direct
-            if await self._verify_direct_connection(peer_id):
-                return True
-            else:
-                # Connection changed, remove from cache
-                self._direct_connections.discard(peer_id)
-                logger.debug("Cached direct connection to %s is no longer direct", peer_id)
+            return True
 
         # Check if the peer is connected and verify it's direct
         return await self._verify_direct_connection(peer_id)

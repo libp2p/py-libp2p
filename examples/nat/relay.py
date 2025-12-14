@@ -181,7 +181,9 @@ async def setup_relay_node(port: int, seed: int | None = None) -> None:
 
 def main() -> None:
     """Parse arguments and run the relay node."""
-    parser = argparse.ArgumentParser(description="Circuit Relay v2 Relay Node for NAT Traversal")
+    parser = argparse.ArgumentParser(
+        description="Circuit Relay v2 Relay Node for NAT Traversal"
+    )
     parser.add_argument(
         "--port",
         type=int,
@@ -227,4 +229,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

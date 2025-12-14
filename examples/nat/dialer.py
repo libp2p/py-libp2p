@@ -16,6 +16,7 @@ import argparse
 import logging
 import os
 import sys
+from typing import cast
 
 import multiaddr
 import trio
@@ -24,16 +25,13 @@ from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.host.autonat import AutoNATService, AutoNATStatus
-from libp2p.host.autonat.autonat import AUTONAT_PROTOCOL_ID
-from libp2p.network.stream.net_stream import INetStream
+from libp2p.host.basic_host import BasicHost
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
-from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.protocol import (
-    PROTOCOL_ID,
-    STOP_PROTOCOL_ID,
     CircuitV2Protocol,
 )
 from libp2p.relay.circuit_v2.resources import RelayLimits
@@ -93,15 +91,22 @@ def is_connection_direct(host, peer_id: ID) -> bool:
         for conn in connections:
             try:
                 addrs = conn.get_transport_addresses()
-                if addrs and any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                if addrs and any(
+                    not str(addr).startswith("/p2p-circuit") for addr in addrs
+                ):
                     return True
             except Exception:
                 # If we can't get addresses, try checking the raw connection
                 try:
-                    if hasattr(conn, 'muxed_conn') and hasattr(conn.muxed_conn, 'raw_conn'):
+                    if hasattr(conn, "muxed_conn") and hasattr(
+                        conn.muxed_conn, "raw_conn"
+                    ):
                         raw_conn = conn.muxed_conn.raw_conn
                         raw_addrs = raw_conn.get_transport_addresses()
-                        if raw_addrs and any(not str(addr).startswith("/p2p-circuit") for addr in raw_addrs):
+                        if raw_addrs and any(
+                            not str(addr).startswith("/p2p-circuit")
+                            for addr in raw_addrs
+                        ):
                             return True
                 except Exception:
                     pass
@@ -156,7 +161,8 @@ async def setup_dialer_node(
     )
 
     # Initialize AutoNAT service
-    autonat_service = AutoNATService(host)
+    # new_host() returns IHost but always returns BasicHost or RoutedHost
+    autonat_service = AutoNATService(cast(BasicHost, host))
     logger.info("[DIALER] AutoNAT service initialized")
 
     # Initialize DCUtR protocol
@@ -225,7 +231,9 @@ async def setup_dialer_node(
                                     )
                                 ],
                             )
-                            logger.info(f"Using constructed address: {relay_info.addrs[0]}")
+                            logger.info(
+                                f"Using constructed address: {relay_info.addrs[0]}"
+                            )
 
                         logger.debug(
                             "[DIALER] attempting host.connect to relay %s",
@@ -247,27 +255,31 @@ async def setup_dialer_node(
 
                         # Step 1: Connect to listener through relay
                         logger.info(
-                            f"Step 1: Connecting to listener {listener_peer_id} through relay"
+                            f"Step 1: Connecting to listener {listener_peer_id} "
+                            f"through relay"
                         )
 
                         # Create a proper circuit address
-                        # The format should be: /ip4/.../tcp/.../p2p/RELAY_PEER_ID/p2p-circuit/p2p/DEST_PEER_ID
-                        # First, get a proper relay address (replace 0.0.0.0 with 127.0.0.1 for localhost)
+                        # Format: /ip4/.../tcp/.../p2p/RELAY_PEER_ID/
+                        #         p2p-circuit/p2p/DEST_PEER_ID
+                        # First, get a proper relay address
+                        # (replace 0.0.0.0 with 127.0.0.1 for localhost)
                         relay_addr_str = str(relay_info.addrs[0])
                         if "0.0.0.0" in relay_addr_str:
-                            relay_addr_str = relay_addr_str.replace("0.0.0.0", "127.0.0.1")
-                        
+                            relay_addr_str = relay_addr_str.replace(
+                                "0.0.0.0", "127.0.0.1"
+                            )
+
                         # Ensure the relay peer ID is in the address before p2p-circuit
                         relay_peer_id_str = str(relay_info.peer_id)
                         if f"/p2p/{relay_peer_id_str}" not in relay_addr_str:
                             # Add the relay peer ID if not present
                             relay_addr_str = f"{relay_addr_str}/p2p/{relay_peer_id_str}"
-                        
+
                         # Construct the circuit address
                         circuit_addr = multiaddr.Multiaddr(
                             f"{relay_addr_str}/p2p-circuit/p2p/{listener_peer_id}"
                         )
-                        listener_peer_info = PeerInfo(listener_peer_id, [circuit_addr])
                         logger.info(f"Using circuit address: {circuit_addr}")
 
                         # Dial through the relay
@@ -294,24 +306,29 @@ async def setup_dialer_node(
 
                             # Step 2: Attempt DCUtR hole punching
                             logger.info(
-                                "Step 2: Attempting DCUtR hole punching for direct connection..."
+                                "Step 2: Attempting DCUtR hole punching "
+                                "for direct connection..."
                             )
-                            
+
                             # Wait for DCUtR protocol to be ready
                             await dcutr_protocol.event_started.wait()
-                            
+
                             # Attempt hole punch
-                            hole_punch_success = await dcutr_protocol.initiate_hole_punch(
-                                listener_peer_id
+                            hole_punch_success = (
+                                await dcutr_protocol.initiate_hole_punch(
+                                    listener_peer_id
+                                )
                             )
 
                             if hole_punch_success:
                                 logger.info(
-                                    "✓ Successfully established direct connection via DCUtR!"
+                                    "✓ Successfully established direct "
+                                    "connection via DCUtR!"
                                 )
                             else:
                                 logger.info(
-                                    "⚠ Hole punching failed or not possible, continuing with relay connection"
+                                    "⚠ Hole punching failed or not possible, "
+                                    "continuing with relay connection"
                                 )
 
                             # Wait a bit more
@@ -319,7 +336,9 @@ async def setup_dialer_node(
 
                             # Check final connection type using DCUtR's verification
                             # This is more reliable than our simple check
-                            is_direct = await dcutr_protocol._verify_direct_connection(listener_peer_id)
+                            is_direct = await dcutr_protocol._verify_direct_connection(
+                                listener_peer_id
+                            )
                             if not is_direct:
                                 # Fallback to our check
                                 is_direct = is_connection_direct(host, listener_peer_id)
@@ -327,13 +346,14 @@ async def setup_dialer_node(
                             logger.info(
                                 f"Final connection type to listener: {connection_type}"
                             )
-                            
+
                             # Also check what the stream actually uses
                             # We'll verify this when we open the stream
 
                             # Step 3: Open a stream and send a message
                             logger.info(
-                                "Step 3: Opening stream to listener and sending message..."
+                                "Step 3: Opening stream to listener "
+                                "and sending message..."
                             )
                             logger.debug(
                                 "[DIALER] opening app stream to %s with %s",
@@ -347,31 +367,46 @@ async def setup_dialer_node(
                                 # Verify the actual stream connection type
                                 actual_connection_type = "RELAYED"  # Default
                                 try:
-                                    conn = stream.muxed_conn.raw_conn
+                                    # raw_conn is implementation-specific,
+                                    # not in IMuxedConn interface
+                                    conn = (
+                                        stream.muxed_conn.raw_conn  # type: ignore[attr-defined]
+                                    )
                                     addrs = conn.get_transport_addresses()
                                     if addrs:
                                         # Check if any address indicates circuit
-                                        if any("/p2p-circuit" in str(addr) for addr in addrs):
+                                        if any(
+                                            "/p2p-circuit" in str(addr)
+                                            for addr in addrs
+                                        ):
                                             actual_connection_type = "RELAYED"
-                                        elif any("127.0.0.1" in str(addr) and "8000" in str(addr) for addr in addrs):
-                                            # If it's connecting to relay port, it's likely relayed
+                                        elif any(
+                                            "127.0.0.1" in str(addr)
+                                            and "8000" in str(addr)
+                                            for addr in addrs
+                                        ):
+                                            # If connecting to relay port,
+                                            # it's likely relayed
                                             actual_connection_type = "RELAYED"
                                         else:
                                             actual_connection_type = "DIRECT"
                                 except Exception:
                                     pass
-                                
+
                                 logger.info(
                                     f"✓ Opened stream to listener with protocol "
-                                    f"{EXAMPLE_PROTOCOL_ID} (detected: {actual_connection_type}, "
+                                    f"{EXAMPLE_PROTOCOL_ID} "
+                                    f"(detected: {actual_connection_type}, "
                                     f"reported: {connection_type})"
                                 )
-                                
+
                                 # Update connection type based on actual stream
                                 if actual_connection_type != connection_type:
                                     logger.warning(
-                                        f"Connection type mismatch: reported {connection_type} "
-                                        f"but stream indicates {actual_connection_type}"
+                                        f"Connection type mismatch: "
+                                        f"reported {connection_type} "
+                                        f"but stream indicates "
+                                        f"{actual_connection_type}"
                                     )
                                     connection_type = actual_connection_type
 
@@ -385,14 +420,15 @@ async def setup_dialer_node(
 
                                 # Wait for response
                                 logger.debug(
-                                    "[DIALER] waiting to read up to %d bytes on app stream",
+                                    "[DIALER] waiting to read up to %d bytes "
+                                    "on app stream",
                                     MAX_READ_LEN,
                                 )
                                 response = await stream.read(MAX_READ_LEN)
-                                logger.info(
-                                    f"✓ Received response: "
-                                    f"{response.decode() if response else 'No response'}"
+                                response_str = (
+                                    response.decode() if response else "No response"
                                 )
+                                logger.info(f"✓ Received response: {response_str}")
 
                                 # Close the stream
                                 await stream.close()
@@ -438,7 +474,10 @@ def main() -> None:
         "--relay-addr",
         type=str,
         required=True,
-        help="Multiaddress or peer ID of relay node (e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)",
+        help=(
+            "Multiaddress or peer ID of relay node "
+            "(e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)"
+        ),
     )
     parser.add_argument(
         "--listener-id",
@@ -485,4 +524,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

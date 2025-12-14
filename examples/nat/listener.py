@@ -1,4 +1,4 @@
-"""
+r"""
 NAT Traversal Listener Node Example.
 
 This module implements a NAT'd peer that:
@@ -8,13 +8,15 @@ This module implements a NAT'd peer that:
 - Accepts incoming connections via relay and supports direct upgrades
 
 Usage:
-    python listener.py --port 8001 --relay-addr /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID
+    python listener.py --port 8001 \\
+        --relay-addr /ip4/127.0.0.1/tcp/8000/p2p/RELAY_PEER_ID
 """
 
 import argparse
 import logging
 import os
 import sys
+from typing import cast
 
 import multiaddr
 import trio
@@ -24,12 +26,13 @@ from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.host.autonat import AutoNATService, AutoNATStatus
 from libp2p.host.autonat.autonat import AUTONAT_PROTOCOL_ID
-from libp2p.network.stream.net_stream import INetStream
+from libp2p.host.basic_host import BasicHost
+from libp2p.network.stream.net_stream import INetStream, NetStream
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo, info_from_p2p_addr
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
-from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.dcutr import DCUtRProtocol
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
 from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
@@ -59,11 +62,12 @@ async def handle_example_protocol(stream: INetStream) -> None:
         remote_addr = stream.get_remote_address()
     except Exception:
         remote_addr = None
-    
+
     # Check if connection is direct or relayed
     is_direct = False
     try:
-        conn = stream.muxed_conn.raw_conn
+        # raw_conn is implementation-specific, not in IMuxedConn interface
+        conn = stream.muxed_conn.raw_conn  # type: ignore[attr-defined]
         addrs = conn.get_transport_addresses()
         if addrs:
             is_direct = any(not str(addr).startswith("/p2p-circuit") for addr in addrs)
@@ -81,7 +85,7 @@ async def handle_example_protocol(stream: INetStream) -> None:
         logger.debug("Could not determine connection type: %s", str(e))
         # Default to relayed if we can't determine
         is_direct = False
-    
+
     connection_type = "DIRECT" if is_direct else "RELAYED"
     logger.info(
         "[APP] Received connection from %s via %s connection | remote_addr=%s",
@@ -101,7 +105,10 @@ async def handle_example_protocol(stream: INetStream) -> None:
 
         # Send a response
         local_peer_id = stream.muxed_conn.peer_id
-        response = f"Hello! This is listener {local_peer_id} (via {connection_type})".encode()
+        response_msg = (
+            f"Hello! This is listener {local_peer_id} (via {connection_type})"
+        )
+        response = response_msg.encode()
         logger.debug("[APP] writing %d bytes to stream", len(response))
         await stream.write(response)
         logger.info("Sent response to %s", remote_peer_id)
@@ -141,7 +148,9 @@ def get_autonat_status_string(status: int) -> str:
         return "UNKNOWN"
 
 
-async def log_autonat_status(autonat_service: AutoNATService, interval: float = 5.0) -> None:
+async def log_autonat_status(
+    autonat_service: AutoNATService, interval: float = 5.0
+) -> None:
     """Periodically log AutoNAT status."""
     while True:
         await trio.sleep(interval)
@@ -183,7 +192,8 @@ async def setup_listener_node(
     )
 
     # Initialize AutoNAT service
-    autonat_service = AutoNATService(host)
+    # new_host() returns IHost but always returns BasicHost or RoutedHost
+    autonat_service = AutoNATService(cast(BasicHost, host))
     logger.info("[LISTENER] AutoNAT service initialized")
 
     # Initialize DCUtR protocol
@@ -207,7 +217,12 @@ async def setup_listener_node(
         host.set_stream_handler(EXAMPLE_PROTOCOL_ID, handle_example_protocol)
         host.set_stream_handler(PROTOCOL_ID, protocol._handle_hop_stream)
         host.set_stream_handler(STOP_PROTOCOL_ID, protocol._handle_stop_stream)
-        host.set_stream_handler(AUTONAT_PROTOCOL_ID, autonat_service.handle_stream)
+        # Wrap bound method to match expected function signature
+        # Streams are always NetStream instances in practice
+        host.set_stream_handler(
+            AUTONAT_PROTOCOL_ID,
+            lambda stream: autonat_service.handle_stream(cast(NetStream, stream)),
+        )
         logger.debug("[LISTENER] protocol handlers registered")
 
         # Start the relay protocol service
@@ -270,14 +285,14 @@ async def setup_listener_node(
                             )
                             await host.connect(relay_info)
                             logger.info(f"Connected to relay {relay_info.peer_id}")
-                            
+
                             # Wait a bit for relay discovery to complete
                             await trio.sleep(2)
-                            
+
                             # Update AutoNAT status periodically
                             async with trio.open_nursery() as nursery:
                                 nursery.start_soon(log_autonat_status, autonat_service)
-                                
+
                                 print("\n" + "=" * 60)
                                 print("Listener node is running!")
                                 print("=" * 60)
@@ -286,14 +301,20 @@ async def setup_listener_node(
                                 print(f"Connected to relay: {relay_info.peer_id}")
                                 print("\nThis node is configured to:")
                                 print("  - Accept connections via relay")
-                                print("  - Support DCUtR hole punching for direct connections")
+                                print(
+                                    "  - Support DCUtR hole punching "
+                                    "for direct connections"
+                                )
                                 print("  - Report AutoNAT reachability status")
                                 print("\nPress Ctrl+C to exit\n")
 
                                 # Keep the node running
                                 await trio.sleep_forever()
                         except Exception as e:
-                            logger.exception("[LISTENER] Failed to connect to relay: %s", e)
+                            logger.exception(
+                                "[LISTENER] Failed to connect to relay: %s",
+                                e,
+                            )
                             return
                     else:
                         logger.error("Relay address is required")
@@ -313,7 +334,10 @@ def main() -> None:
         "--relay-addr",
         type=str,
         required=True,
-        help="Multiaddress or peer ID of relay node (e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)",
+        help=(
+            "Multiaddress or peer ID of relay node "
+            "(e.g., /ip4/127.0.0.1/tcp/8000/p2p/PEER_ID)"
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -354,4 +378,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
