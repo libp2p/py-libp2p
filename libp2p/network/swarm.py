@@ -49,6 +49,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
+from libp2p.rcmgr import Direction
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
 from libp2p.tools.async_service import (
@@ -219,9 +220,15 @@ class Swarm(Service, INetworkService):
             self.listener_nursery = nursery
             self.event_listener_nursery_created.set()
 
+            # Set background nursery BEFORE setting the event
+            # This ensures transports have the nursery when they check
             if isinstance(self.transport, QUICTransport):
                 self.transport.set_background_nursery(nursery)
                 self.transport.set_swarm(self)
+            elif hasattr(self.transport, "set_background_nursery"):
+                # WebSocket transport also needs background nursery
+                # for connection management
+                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
 
             # Start connection management components
             try:
@@ -792,8 +799,6 @@ class Swarm(Service, INetworkService):
 
         # Check resource manager for stream limits
         if self._resource_manager is not None:
-            from libp2p.rcmgr import Direction
-
             if not self._resource_manager.acquire_stream(
                 str(peer_id), Direction.OUTBOUND
             ):

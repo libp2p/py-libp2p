@@ -61,6 +61,16 @@ class DialJob:
         # FIFO within same priority
         return self.added_at < other.added_at
 
+    def __hash__(self) -> int:
+        """Make DialJob hashable using job_id."""
+        return hash(self.job_id)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare DialJob instances by job_id."""
+        if not isinstance(other, DialJob):
+            return NotImplemented
+        return self.job_id == other.job_id
+
 
 class DialQueue:
     """

@@ -226,7 +226,7 @@ class ReconnectQueue:
                     self._running_reconnects.discard(peer_id)
                 async with self._jobs_lock:
                     self._reconnect_jobs.pop(peer_id, None)
-                return
+            return
 
         # Attempt reconnection
         if not self._started:
@@ -234,7 +234,9 @@ class ReconnectQueue:
                 self._running_reconnects.discard(peer_id)
             return
 
-        cancel_scope = trio.CancelScope()
+        # Create cancel scope for this reconnection attempt
+        # Note: cancelled_caught is a read-only property, not a constructor parameter
+        cancel_scope = trio.CancelScope()  # type: ignore[call-arg]
         job.cancel_scope = cancel_scope
 
         try:
