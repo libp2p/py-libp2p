@@ -50,6 +50,7 @@ from .common import (
 )
 from .pb.kademlia_pb2 import (
     Message,
+    Record,
 )
 from .peer_routing import (
     PeerRouting,
@@ -714,6 +715,13 @@ class KadDHT(Service):
                                 "Missing key or value in PUT_VALUE message"
                             )
 
+                        # Always validate the key-value pair before storing
+                        # Reject keys without registered namespace validators
+                        key_str = key.decode("utf-8")
+                        if self.validator is None:
+                            raise ValueError("Validator is required for DHT operations")
+                        self.validator.validate(key_str, value)
+
                         self.value_store.put(key, value)
                         logger.debug(f"Stored value {value.hex()} for key {key.hex()}")
                         success = True
@@ -771,24 +779,28 @@ class KadDHT(Service):
             key: String key (will be converted to bytes for storage)
             value: Binary value to store
 
+        Raises:
+            InvalidRecordType: If no validator is registered for the key's namespace
+            ValueError: If trying to replace a newer value with an older one
+
         """
         logger.debug(f"Storing value for key {key}")
 
-        # Validate if key starts with "/" (namespaced keys like /pk/...)
-        if self.validator is not None and key.startswith("/"):
-            self.validator.validate(key, value)
+        # Always validate the key-value pair using the namespaced validator
+        # This will raise InvalidRecordType if:
+        # - The key is not namespaced (doesn't start with / or has no second /)
+        # - No validator is registered for the key's namespace
+        # Following Go libp2p behavior where only namespaced keys are allowed
+        if self.validator is None:
+            raise ValueError("Validator is required for DHT operations")
+        self.validator.validate(key, value)
 
-            key_bytes = key.encode("utf-8")
-            old_value_record = self.value_store.get(key_bytes)
-            if old_value_record is not None and old_value_record.value != value:
-                index = self.validator.select(key, [value, old_value_record.value])
-                if index != 0:
-                    raise ValueError(
-                        "Refusing to replace newer value with the older one"
-                    )
-
-        # Convert string key to bytes for storage
         key_bytes = key.encode("utf-8")
+        old_value_record = self.value_store.get(key_bytes)
+        if old_value_record is not None and old_value_record.value != value:
+            index = self.validator.select(key, [value, old_value_record.value])
+            if index != 0:
+                raise ValueError("Refusing to replace newer value with the older one")
 
         # 1. Store locally first
         self.value_store.put(key_bytes, value)
@@ -834,12 +846,14 @@ class KadDHT(Service):
 
         logger.info(f"Successfully stored value at {stored_count} peers")
 
-    async def get_value(self, key: str) -> bytes | None:
+    async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
         """
         Retrieve a value from the DHT.
 
         Args:
             key: String key (will be converted to bytes for lookup)
+            quorum: Minimum number of peer responses required for confidence
+                   (0 means no quorum requirement)
 
         Returns:
             The value if found, None otherwise
@@ -864,19 +878,38 @@ class KadDHT(Service):
         ]
         logger.debug(f"Searching {len(closest_peers)} peers for value")
 
+        # Collect valid records from peers: mapping peer -> Record
+        valid_records: list[tuple[ID, Record]] = []
+
         # 3. Query ALPHA peers at a time in parallel
+        # Use list to track mutable state (pyrefly requirement)
+        total_responses_list: list[int] = [0]
         for i in range(0, len(closest_peers), ALPHA):
             batch = closest_peers[i : i + ALPHA]
-            found_value = None
 
             async def query_one(peer: ID) -> None:
-                nonlocal found_value
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        value = await self.value_store._get_from_peer(peer, key_bytes)
-                        if value is not None and found_value is None:
-                            found_value = value
-                            logger.debug(f"Found value at peer {peer}")
+                        # Fetch the record directly to get timeReceived
+                        rec = await self.value_store._get_from_peer(
+                            peer, key_bytes, return_record=True
+                        )
+                        if rec is not None:
+                            total_responses_list[0] += 1
+                            # Validate the record's value
+                            try:
+                                if self.validator is None:
+                                    raise ValueError("Validator is required")
+                                if not isinstance(rec, Record):
+                                    raise TypeError("Expected Record type")
+                                self.validator.validate(key, rec.value)
+                                valid_records.append((peer, rec))
+                                logger.debug(f"Found valid record at peer {peer}")
+                            except Exception as e:
+                                logger.debug(
+                                    f"Received invalid record from {peer}, "
+                                    f"discarding: {e}"
+                                )
                 except Exception as e:
                     logger.debug(f"Error querying peer {peer}: {e}")
 
@@ -884,12 +917,70 @@ class KadDHT(Service):
                 for peer in batch:
                     nursery.start_soon(query_one, peer)
 
-            if found_value is not None:
-                self.value_store.put(key_bytes, found_value)
-                logger.info("Successfully retrieved value from network")
-                return found_value
+            # If quorum is set and we have enough distinct responses, we can stop early
+            if quorum and total_responses_list[0] >= quorum:
+                logger.debug(f"Quorum reached ({total_responses_list[0]} responses)")
+                break
 
-        # 4. Not found
+        # 4. Select the best record if any valid records were found
+        if valid_records:
+            # Prefer selecting by timeReceived if available
+            best_idx = None
+            best_ts = -1.0
+            for idx, (_peer, rec) in enumerate(valid_records):
+                try:
+                    ts = float(rec.timeReceived) if rec.timeReceived else 0.0
+                except Exception:
+                    ts = 0.0
+                if ts > best_ts:
+                    best_ts = ts
+                    best_idx = idx
+
+            if best_idx is None:
+                # Fallback to validator.select using raw values
+                if self.validator is None:
+                    raise ValueError("Validator is required for record selection")
+                values = [rec.value for _p, rec in valid_records]
+                sel = self.validator.select(key, values)
+                best_idx = sel
+
+            best_peer, best_rec = valid_records[best_idx]
+            best_value = best_rec.value
+
+            # Propagate the best (newest) record to peers that returned older values
+            outdated_peers: list[ID] = []
+            for peer, rec in valid_records:
+                try:
+                    # If rec.timeReceived is missing or older than best,
+                    # mark as outdated
+                    rec_ts = float(rec.timeReceived) if rec.timeReceived else 0.0
+                except Exception:
+                    rec_ts = 0.0
+                if rec_ts < best_ts:
+                    outdated_peers.append(peer)
+
+            if outdated_peers:
+
+                async def propagate(peer: ID) -> None:
+                    try:
+                        with trio.move_on_after(QUERY_TIMEOUT):
+                            await self.value_store._store_at_peer(
+                                peer, key_bytes, best_value
+                            )
+                            logger.debug(f"Propagated updated record to peer {peer}")
+                    except Exception as e:
+                        logger.debug(f"Failed to propagate to peer {peer}: {e}")
+
+                async with trio.open_nursery() as nursery:
+                    for p in outdated_peers:
+                        nursery.start_soon(propagate, p)
+
+            # Store the best value locally
+            self.value_store.put(key_bytes, best_value)
+            logger.info("Successfully retrieved value from network")
+            return best_value
+
+        # 5. Not found
         logger.warning(f"Value not found for key {key}")
         return None
 
@@ -948,6 +1039,36 @@ class KadDHT(Service):
 
         """
         return self.value_store.size()
+
+    def register_validator(self, namespace: str, validator: Validator) -> None:
+        """
+        Register a custom validator for a specific namespace.
+
+        This allows storing and retrieving values with custom namespaced keys
+        (e.g., /myapp/key). The validator will be used to validate values
+        before storing and after retrieval.
+
+        Args:
+            namespace: The namespace string (e.g., "myapp" for keys like /myapp/key)
+            validator: A Validator instance with validate() and select() methods
+
+        Example:
+            class MyValidator(Validator):
+                def validate(self, key: str, value: bytes) -> None:
+                    # Custom validation logic
+                    pass
+
+                def select(self, key: str, values: list[bytes]) -> int:
+                    return 0  # Return index of best value
+
+            dht.register_validator("myapp", MyValidator())
+            await dht.put_value("/myapp/my-key", b"my-value")
+
+        """
+        if self.validator is None:
+            self.validator = NamespacedValidator({namespace: validator})
+        else:
+            self.validator._validators[namespace] = validator
 
     def is_random_walk_enabled(self) -> bool:
         """
