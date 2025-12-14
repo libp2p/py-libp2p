@@ -11,6 +11,7 @@ from contextlib import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 import weakref
 
@@ -331,12 +332,16 @@ class BasicHost(IHost):
         return list(self._network.connections.keys())
 
     def run(
-        self, listen_addrs: Sequence[multiaddr.Multiaddr]
+        self,
+        listen_addrs: Sequence[multiaddr.Multiaddr],
+        *,
+        task_status: Any = trio.TASK_STATUS_IGNORED,
     ) -> AbstractAsyncContextManager[None]:
         """
         Run the host instance and listen to ``listen_addrs``.
 
         :param listen_addrs: a sequence of multiaddrs that we want to listen to
+        :param task_status: task status for trio nursery compatibility (ignored)
         """
 
         @asynccontextmanager
@@ -353,7 +358,7 @@ class BasicHost(IHost):
                     if await upnp_manager.discover():
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.add_port_mapping(port, "TCP")
+                                await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
@@ -368,7 +373,7 @@ class BasicHost(IHost):
                         logger.debug("Removing UPnP port mappings")
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(port, "TCP")
+                                await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
                         self.bootstrap.stop()
 

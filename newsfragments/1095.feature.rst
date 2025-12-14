@@ -1,0 +1,1 @@
+Adds custom validator support and quorum-based value retrieval to the Kademlia DHT.

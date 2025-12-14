@@ -847,13 +847,13 @@ class KadDHT(Service):
         logger.info(f"Successfully stored value at {stored_count} peers")
 
     async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
-        """
+        r"""
         Retrieve a value from the DHT.
 
         Args:
             key: String key (will be converted to bytes for lookup)
             quorum: Minimum number of peer responses required for confidence
-                   (0 means no quorum requirement)
+            (0 means no quorum requirement)
 
         Returns:
             The value if found, None otherwise
