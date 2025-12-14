@@ -37,7 +37,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
-    "zeroconf (>=0.147.0,<0.148.0)"
+    "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -56,7 +56,7 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
-echo-quic-demo="examples.echo.echo_quic:main"
+echo-quic-demo = "examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
@@ -74,6 +74,9 @@ dev = [
     "mypy>=1.15.0",
     "pre-commit>=3.4.0",
     "tox>=4.0.0",
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
+    "redis>=5.0.0",
     "twine",
     "wheel",
     "setuptools>=42",
@@ -96,6 +99,8 @@ docs = [
     "sphinx_rtd_theme>=1.0.0",
     "towncrier>=24,<25",
     "tomli; python_version < '3.11'",
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
 ]
 test = [
     "factory-boy>=2.12.0,<3.0.0",
@@ -107,6 +112,7 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
 ]
+webrtc = ["aiortc>=1.14.0", "trio-asyncio>=0.15.0", "redis>=5.0.0"]
 
 [tool.setuptools]
 include-package-data = true
@@ -149,6 +155,7 @@ log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
 markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
+    "serial: mark test to run serially (not in parallel with pytest-xdist)",
 ]
 xfail_strict = true
 
@@ -299,4 +306,7 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "libp2p/transport/webrtc/**", # Optional WebRTC transport dependencies
+    "tests/interop/webrtc/**", # Optional WebRTC interop test dependencies
+    "tests/core/transport/webrtc/**", # Optional WebRTC test dependencies
 ]

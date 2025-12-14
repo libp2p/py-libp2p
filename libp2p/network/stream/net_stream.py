@@ -3,9 +3,7 @@ from enum import (
     auto,
 )
 import logging
-from typing import (
-    TYPE_CHECKING,
-)
+from typing import TYPE_CHECKING, Any, cast
 
 import trio
 
@@ -352,6 +350,22 @@ class NetStream(INetStream):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying muxed stream."""
         return self.muxed_stream.get_remote_address()
+
+    def is_closed(self) -> bool:
+        if hasattr(self.muxed_stream, "is_closed"):
+            try:
+                muxed_stream_any = cast(Any, self.muxed_stream)
+                return bool(muxed_stream_any.is_closed())
+            except Exception:
+                pass
+        return self._state in (
+            StreamState.CLOSE_BOTH,
+            StreamState.RESET,
+            StreamState.ERROR,
+        )
+
+    def is_open(self) -> bool:
+        return not self.is_closed()
 
     async def is_operational(self) -> bool:
         """
