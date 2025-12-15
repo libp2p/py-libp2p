@@ -176,7 +176,7 @@ async def test_listener_fallback_routing_by_address():
     assert connection_found is mock_connection
 
     # Register the new CID using the registry
-    await listener._registry.register_new_connection_id_for_existing_connection(
+    await listener._registry.register_new_connection_id_for_existing_conn(
         unknown_cid, mock_connection, addr
     )
 
