@@ -180,8 +180,8 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
                 return False
 
         # If we have more than 3 protocols but no TLS, check for valid continuations
-        # Allow additional protocols after the WebSocket protocol (like /p2p)
-        valid_continuations = ["p2p"]
+        # Allow additional protocols after the WebSocket protocol (like /p2p or /ipfs)
+        valid_continuations = ["p2p", "ipfs"]
 
         # Find the WebSocket protocol index
         ws_index = None
@@ -194,9 +194,11 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
             # Check protocols after the WebSocket protocol
             for i in range(ws_index + 1, len(protocols)):
                 if protocols[i].name not in valid_continuations:
+                    print(f"DEBUG: Invalid continuation protocol: {protocols[i].name}")
                     return False
 
         return True
 
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: Validation exception: {e}")
         return False

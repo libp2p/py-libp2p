@@ -25,12 +25,13 @@ def create_transport(protocol: str, upgrader: TransportUpgrader | None = None, *
     if protocol in ["ws", "wss"]:
         if upgrader is None:
             raise ValueError(f"WebSocket transport requires an upgrader")
-        return WebsocketTransport(
-            upgrader,
+        from libp2p.transport.websocket.transport import WebsocketConfig, WebsocketTransport
+        config = WebsocketConfig(
             tls_client_config=kwargs.get("tls_client_config"),
             tls_server_config=kwargs.get("tls_server_config"),
             handshake_timeout=kwargs.get("handshake_timeout", 15.0)
         )
+        return WebsocketTransport(upgrader, config)
     elif protocol == "tcp":
         return TCP()
     else:
