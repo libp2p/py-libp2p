@@ -78,6 +78,32 @@ class DHTMode(Enum):
     SERVER = "SERVER"
 
 
+# Timestamp validation constants
+MAX_TIMESTAMP_AGE = 24 * 60 * 60  # 24 hours in seconds
+MAX_TIMESTAMP_FUTURE = 5 * 60  # 5 minutes in the future in seconds
+
+
+def is_valid_timestamp(ts: float) -> bool:
+    """
+    Validate if a timestamp is within acceptable bounds.
+
+    Args:
+        ts: The timestamp to validate (Unix timestamp in seconds)
+
+    Returns:
+        bool: True if timestamp is valid (not too old and not too far in future)
+
+    """
+    current_time = time.time()
+    # Check if timestamp is not in the future by more than MAX_TIMESTAMP_FUTURE
+    if ts > current_time + MAX_TIMESTAMP_FUTURE:
+        return False
+    # Check if timestamp is not too far in the past
+    if current_time - ts > MAX_TIMESTAMP_AGE:
+        return False
+    return True
+
+
 class KadDHT(Service):
     """
     Kademlia DHT implementation for libp2p.
@@ -847,16 +873,20 @@ class KadDHT(Service):
         logger.info(f"Successfully stored value at {stored_count} peers")
 
     async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
-        r"""
+        """
         Retrieve a value from the DHT.
 
         Args:
             key: String key (will be converted to bytes for lookup)
-            quorum: Minimum number of peer responses required for confidence
-            (0 means no quorum requirement)
+            quorum: Minimum number of valid peer responses required for confidence.
+            If quorum > 0 and not met, the function still returns the best value
+            found (if any) but logs a warning. Set to 0 to disable quorum checking.
 
         Returns:
-            The value if found, None otherwise
+            The value if found (best value even if quorum not met), None otherwise.
+            Note: When quorum is not met, a warning is logged but the best available
+            value is still returned. This allows graceful degradation when the network
+            has insufficient peers.
 
         """
         logger.debug(f"Getting value for key: {key}")
@@ -917,49 +947,50 @@ class KadDHT(Service):
                 for peer in batch:
                     nursery.start_soon(query_one, peer)
 
-            # If quorum is set and we have enough distinct responses, we can stop early
-            if quorum and total_responses_list[0] >= quorum:
-                logger.debug(f"Quorum reached ({total_responses_list[0]} responses)")
+            # If quorum is set and we have enough valid records, we can stop early
+            # Note: quorum counts valid records, not all responses.
+            if quorum and len(valid_records) >= quorum:
+                logger.debug(f"Quorum reached ({len(valid_records)} valid records)")
                 break
 
         # 4. Select the best record if any valid records were found
         if valid_records:
-            # Prefer selecting by timeReceived if available
-            best_idx = None
-            best_ts = -1.0
-            for idx, (_peer, rec) in enumerate(valid_records):
-                try:
-                    ts = float(rec.timeReceived) if rec.timeReceived else 0.0
-                except Exception:
-                    ts = 0.0
-                if ts > best_ts:
-                    best_ts = ts
-                    best_idx = idx
+            # Check if quorum was met
+            if quorum > 0 and len(valid_records) < quorum:
+                logger.warning(
+                    f"Quorum not met: found {len(valid_records)} valid records, "
+                    f"required {quorum}. Returning best value found."
+                )
 
-            if best_idx is None:
-                # Fallback to validator.select using raw values
-                if self.validator is None:
-                    raise ValueError("Validator is required for record selection")
-                values = [rec.value for _p, rec in valid_records]
-                sel = self.validator.select(key, values)
-                best_idx = sel
+            # Select the best record using the validator
+            # Note: Following Go libp2p's approach, we use validator.select() to choose
+            # the best value, not timestamps. The timeReceived field is for local
+            # bookkeeping only, not for distributed consensus on the "best" record.
+            if self.validator is None:
+                raise ValueError("Validator is required for record selection")
+
+            values = [rec.value for _p, rec in valid_records]
+            best_idx = self.validator.select(key, values)
+            logger.debug(
+                f"Selected best value at index {best_idx}using validator.select()"
+            )
 
             best_peer, best_rec = valid_records[best_idx]
             best_value = best_rec.value
 
-            # Propagate the best (newest) record to peers that returned older values
+            # Propagate the best record to peers that have different values
+            # This ensures network consistency, following Go libp2p's approach
             outdated_peers: list[ID] = []
             for peer, rec in valid_records:
-                try:
-                    # If rec.timeReceived is missing or older than best,
-                    # mark as outdated
-                    rec_ts = float(rec.timeReceived) if rec.timeReceived else 0.0
-                except Exception:
-                    rec_ts = 0.0
-                if rec_ts < best_ts:
+                # Propagate if the peer has a different value than the best
+                if rec.value != best_value:
                     outdated_peers.append(peer)
 
             if outdated_peers:
+                logger.debug(
+                    f"Propagating best value to {len(outdated_peers)}"
+                    "peers with outdated values"
+                )
 
                 async def propagate(peer: ID) -> None:
                     try:
@@ -1068,7 +1099,7 @@ class KadDHT(Service):
         if self.validator is None:
             self.validator = NamespacedValidator({namespace: validator})
         else:
-            self.validator._validators[namespace] = validator
+            self.validator.add_validator(namespace, validator)
 
     def is_random_walk_enabled(self) -> bool:
         """

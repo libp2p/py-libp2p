@@ -243,7 +243,8 @@ async def run_node(
                 value = b"Hello from py-libp2p!"
 
                 # Example 2: Content Provider Advertisement
-                # Provider keys don't require validation (different code path)
+                # Provider keys use a different storage mechanism (provider store)
+                # that doesn't go through the value validation path
                 content_id = "my-content-identifier"
 
                 if dht_mode == DHTMode.SERVER:

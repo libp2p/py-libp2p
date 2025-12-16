@@ -82,9 +82,14 @@ class ValueStore:
         """
         Store a value at a specific peer.
 
-        params: peer_id: The ID of the peer to store the value at
-        params: key: The key to store
-        params: value: The value to store
+        Parameters
+        ----------
+        peer_id : ID
+            The ID of the peer to store the value at
+        key : bytes
+            The key to store
+        value : bytes
+            The value to store
 
         Returns
         -------
@@ -186,7 +191,10 @@ class ValueStore:
         """
         Retrieve a value from the DHT.
 
-        params: key: The key to look up
+        Parameters
+        ----------
+        key : bytes
+            The key to look up
 
         Returns
         -------
@@ -221,10 +229,15 @@ class ValueStore:
         """
         Retrieve a value from a specific peer.
 
-        params: peer_id: The ID of the peer to retrieve the value from
-        params: key: The key to retrieve
-        params: return_record: If True, return the full Record (for quorum),
-        else return just the value
+        Parameters
+        ----------
+        peer_id : ID
+            The ID of the peer to retrieve the value from
+        key : bytes
+            The key to retrieve
+        return_record : bool
+            If True, return the full Record (for quorum),
+            else return just the value
 
         Returns
         -------
@@ -334,8 +347,10 @@ class ValueStore:
         """
         Remove a value from the DHT.
 
-
-        params: key: The key to remove
+        Parameters
+        ----------
+        key : bytes
+            The key to remove
 
         Returns
         -------
@@ -353,7 +368,10 @@ class ValueStore:
         """
         Check if a key exists in the store and hasn't expired.
 
-        params: key: The key to check
+        Parameters
+        ----------
+        key : bytes
+            The key to check
 
         Returns
         -------
