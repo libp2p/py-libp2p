@@ -8,6 +8,7 @@ import logging
 import time
 from typing import (
     Any,
+    cast,
 )
 
 from multiaddr import (
@@ -271,9 +272,11 @@ class ProviderStore:
                     break
 
             response_length = varint.decode_bytes(length_bytes)
+            if response_length is None:
+                return False
             # Read response data
             response_bytes = b""
-            remaining = response_length
+            remaining = cast(int, response_length)
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
@@ -418,9 +421,11 @@ class ProviderStore:
                         break
 
                 response_length = varint.decode_bytes(length_bytes)
+                if response_length is None:
+                    return []
                 # Read response data
                 response_bytes = b""
-                remaining = response_length
+                remaining = cast(int, response_length)
                 while remaining > 0:
                     chunk = await stream.read(remaining)
                     if not chunk:

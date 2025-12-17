@@ -14,9 +14,7 @@ import logging
 import os
 import time
 
-from libp2p.abc import (
-    IHost,
-)
+from libp2p.abc import IHost, IPeerStore
 from libp2p.peer.id import (
     ID,
 )
@@ -91,7 +89,7 @@ class Reservation:
         self.limits = limits
         self.host = host
         self.created_at = time.time()
-        self.expires_at = self.created_at + limits.duration
+        self.expires_at = int(self.created_at + limits.duration)
         self.data_used = 0
         self.active_connections = 0
         self.voucher = self._generate_voucher()
@@ -258,7 +256,9 @@ class RelayResourceManager:
     - Managing connection quotas
     """
 
-    def __init__(self, limits: RelayLimits, host: IHost | None = None):
+    def __init__(
+        self, limits: RelayLimits, peer_store: IPeerStore, host: IHost | None = None
+    ):
         """
         Initialize the resource manager.
 
@@ -266,13 +266,16 @@ class RelayResourceManager:
         ----------
         limits : RelayLimits
             The resource limits to enforce
+        peer_store : IPeerStore
+            Peer store for retrieving public keys and peer metadata
         host : IHost | None
-            The host instance for accessing cryptographic keys and peerstore
+            The host instance for accessing cryptographic keys
 
         """
         self.limits = limits
         self.host = host
         self._reservations: dict[ID, Reservation] = {}
+        self.peer_store = peer_store
 
     def can_accept_reservation(self, peer_id: ID) -> bool:
         """
@@ -336,114 +339,27 @@ class RelayResourceManager:
             True if the reservation is valid
 
         """
-        # First check if we have a reservation for this peer
+        # Fetch the reservation
         reservation = self._reservations.get(peer_id)
-        if reservation is None:
-            logger.debug("No reservation found for peer %s", peer_id)
+
+        # Reject if reservation is missing, expired, or mismatched
+        if (
+            reservation is None
+            or reservation.is_expired()
+            or reservation.voucher != proto_res.voucher
+            or reservation.expires_at != proto_res.expire
+        ):
             return False
 
-        # Check if the reservation has expired
-        if reservation.is_expired():
-            logger.debug("Reservation for peer %s has expired", peer_id)
-            return False
-
-        # Check if the expiration time matches (accounting for integer
-        # truncation in protobuf)
-        if abs(int(reservation.expires_at) - proto_res.expire) > 1:
-            logger.debug(
-                "Expiration time mismatch: expected %s, got %s",
-                int(reservation.expires_at),
-                proto_res.expire,
-            )
-            return False
-
-        # Check if the voucher matches - this must always happen
-        if proto_res.voucher != reservation.voucher:
-            logger.debug(
-                "Voucher mismatch for peer %s: expected %s, got %s",
-                peer_id,
-                reservation.voucher.hex(),
-                proto_res.voucher.hex(),
-            )
-            return False
-
-        # Signature verification is required for security
-        if not proto_res.signature:
-            logger.debug(
-                "No signature provided, rejecting reservation for peer %s", peer_id
-            )
-            return False
-
-        if self.host is None:
-            logger.warning(
-                "No host available for signature verification, rejecting "
-                "reservation for peer %s",
-                peer_id,
-            )
-            return False
-
-        # Verify the signature using the relay's public key (not the client's)
-        data_to_sign = self._get_data_to_sign(proto_res.voucher, proto_res.expire)
-        return self._verify_signature_with_relay_key(data_to_sign, proto_res.signature)
-
-    def _verify_signature_with_relay_key(self, data: bytes, signature: bytes) -> bool:
-        """
-        Verify a signature using the relay's public key.
-
-        Parameters
-        ----------
-        data : bytes
-            The data that was signed
-        signature : bytes
-            The signature to verify
-
-        Returns
-        -------
-        bool
-            True if the signature is valid
-
-        """
-        if self.host is None:
-            logger.warning("No host available for verification")
-            return False
-
+        # verify signature
         try:
-            # Get the relay's public key (not the client's)
-            relay_public_key = self.host.get_public_key()
-
-            if relay_public_key is None:
-                logger.warning("Relay public key not available")
+            public_key = self.peer_store.pubkey(peer_id)
+            if public_key is None:
                 return False
 
-            # Verify the signature against the relay's public key
-            is_valid = relay_public_key.verify(data, signature)
-            logger.debug("Signature verification result: %s", is_valid)
-            return is_valid
-
-        except Exception as e:
-            logger.error("Error in relay signature verification: %s", str(e))
+            return public_key.verify(proto_res.voucher, proto_res.signature)
+        except Exception:
             return False
-
-    def _get_data_to_sign(self, voucher: bytes, expire: int) -> bytes:
-        """
-        Get the data that should be signed for a reservation.
-
-        Parameters
-        ----------
-        voucher : bytes
-            The voucher token
-        expire : int
-            The expiration timestamp
-
-        Returns
-        -------
-        bytes
-            The data to sign
-
-        """
-        expiration_bytes = int(expire).to_bytes(8, byteorder="big")
-        data = RELAY_VOUCHER_DOMAIN_SEP + voucher + expiration_bytes
-        return data
 
     def can_accept_connection(self, peer_id: ID) -> bool:
         """
@@ -521,10 +437,33 @@ class RelayResourceManager:
             remaining = max(0, int(existing.expires_at - time.time()))
             return remaining
 
-        # Create a new reservation if we can accept it
-        if self.can_accept_reservation(peer_id):
+        # Create new reservation
+        self.create_reservation(peer_id)
+        return self.limits.duration
+
+    def has_reservation(self, peer_id: ID) -> bool:
+        """
+        Check if a reservation already exists for a peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check for
+
+        Returns
+        -------
+        bool
+            True if reservation exists, False otherwise
+
+        """
+        existing = self._reservations.get(peer_id)
+        if existing and not existing.is_expired():
+            return True
+        return False
+
+    def refresh_reservation(self, peer_id: ID) -> int:
+        if self.has_reservation(peer_id):
             self.create_reservation(peer_id)
             return self.limits.duration
 
-        # We can't accept a new reservation
         return 0

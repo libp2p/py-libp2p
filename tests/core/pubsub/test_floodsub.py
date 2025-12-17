@@ -88,3 +88,81 @@ async def test_gossipsub_run_with_floodsub_tests(test_case_obj, security_protoco
             security_protocol=security_protocol,
         ),
     )
+
+
+@pytest.mark.trio
+async def test_floodsub_peer_churn_subscription_resync():
+    async with PubsubFactory.create_batch_with_floodsub(2) as (A, B):
+        topic = "x"
+        data = b"msg"
+
+        sub_b = await B.subscribe(topic)
+        await trio.sleep(0.1)
+
+        # Connect
+        await connect(A.host, B.host)
+        await trio.sleep(0.2)
+
+        # Disconnect
+        await B.host.disconnect(A.host.get_id())
+        await trio.sleep(0.1)
+
+        # Reconnect
+        await connect(A.host, B.host)
+        await trio.sleep(0.2)
+
+        # After reconnect, A must know B is subscribed
+        await A.publish(topic, data)
+        msg_b = await sub_b.get()
+
+        assert msg_b.data == data
+
+
+@pytest.mark.trio
+async def test_floodsub_dedup_loop_topology():
+    async with PubsubFactory.create_batch_with_floodsub(3) as (A, B, C):
+        topic = "z"
+        data = b"dup"
+
+        sub_a = await A.subscribe(topic)
+        sub_b = await B.subscribe(topic)
+
+        # form a loop: A-B-C-A
+        await connect(A.host, B.host)
+        await connect(B.host, C.host)
+        await connect(C.host, A.host)
+        await trio.sleep(0.4)
+
+        # publish twice
+        await C.publish(topic, data)
+        await C.publish(topic, data)
+        await trio.sleep(0.2)
+
+        # A and B should get EXACTLY one message
+        msg_a = await sub_a.get()
+        msg_b = await sub_b.get()
+
+        assert msg_a.data == data
+        assert msg_b.data == data
+
+
+@pytest.mark.trio
+async def test_subscription_sync_on_late_joiner():
+    async with PubsubFactory.create_batch_with_floodsub(3) as (A, B, C):
+        topic = "sync"
+        data = b"m"
+
+        # B and C subscribe before connecting
+        sub_c = await C.subscribe(topic)
+        await B.subscribe(topic)
+        await trio.sleep(0.1)
+
+        # Connect them AFTER subscription
+        await connect(A.host, B.host)
+        await connect(A.host, C.host)
+        await trio.sleep(0.3)
+
+        await A.publish(topic, data)
+        msg_c = await sub_c.get()
+
+        assert msg_c.data == data

@@ -1,18 +1,20 @@
 """Tests for the Circuit Relay v2 protocol."""
 
 import logging
+import os
 import time
 from typing import Any
 
 import pytest
 import trio
 
-from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamError,
     StreamReset,
 )
+from libp2p.peer import peerstore
 from libp2p.peer.envelope import (
     Envelope,
     unmarshal_envelope,
@@ -24,6 +26,7 @@ from libp2p.peer.peerstore import (
     env_to_send_in_RPC,
 )
 from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
+from libp2p.relay.circuit_v2.pb.circuit_pb2 import Reservation as PbReservation
 from libp2p.relay.circuit_v2.protocol import (
     DEFAULT_RELAY_LIMITS,
     PROTOCOL_ID,
@@ -55,6 +58,58 @@ CONNECT_TIMEOUT = 15  # seconds (increased)
 STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
 SLEEP_TIME = 1.0  # seconds (increased)
+
+
+@pytest.fixture
+def key_pair():
+    return create_new_key_pair()
+
+
+@pytest.fixture
+def peer_store():
+    return peerstore.PeerStore()
+
+
+@pytest.fixture
+def peer_id(key_pair, peer_store):
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store.add_key_pair(peer_id, key_pair)
+    return peer_id
+
+
+@pytest.fixture
+def limits():
+    return RelayLimits(
+        duration=3600, data=1_000_000, max_circuit_conns=10, max_reservations=100
+    )
+
+
+@pytest.fixture
+def manager(limits, peer_store):
+    return RelayResourceManager(limits, peer_store)
+
+
+@pytest.fixture
+def reservation(manager, peer_id):
+    return manager.create_reservation(peer_id)
+
+
+def test_circuit_v2_verify_reservation(manager, peer_id, reservation, key_pair):
+    # Valid protobuf reservation
+    proto_res = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=reservation.voucher,
+        signature=key_pair.private_key.sign(reservation.voucher),
+    )
+    assert manager.verify_reservation(peer_id, proto_res) is True
+
+    # Invalid protobuf reservation
+    invalid_proto = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=os.urandom(32),
+        signature=key_pair.private_key.sign(os.urandom(32)),
+    )
+    assert manager.verify_reservation(peer_id, invalid_proto) is False
 
 
 async def assert_stream_response(
@@ -337,7 +392,9 @@ async def test_circuit_v2_voucher_verification_complete():
         # Create resource manager with the relay host
         # Note: No need to add client's public key since we now use relay's key
         # for signing/verification
-        resource_manager = RelayResourceManager(limits, relay_host)
+        resource_manager = RelayResourceManager(
+            limits, relay_host.get_peerstore(), relay_host
+        )
         client_peer_id = client_host.get_id()
 
         logger.info("Creating reservation for peer %s", client_peer_id)
@@ -423,7 +480,7 @@ async def test_circuit_v2_voucher_verification_complete():
 
         # Test with expired reservation
         expired_reservation = resource_manager._reservations[client_peer_id]
-        expired_reservation.expires_at = time.time() - 1
+        expired_reservation.expires_at = int(time.time()) - 1
 
         is_valid_expired = resource_manager.verify_reservation(
             client_peer_id, pb_reservation
@@ -432,7 +489,9 @@ async def test_circuit_v2_voucher_verification_complete():
         logger.info("Expired reservation correctly rejected")
 
         # Test resource manager without host (should fail)
-        resource_manager_no_host = RelayResourceManager(limits, None)
+        resource_manager_no_host = RelayResourceManager(
+            limits, client_host.get_peerstore(), None
+        )
         temp_peer_id = client_host.get_id()
         temp_ttl = resource_manager_no_host.reserve(temp_peer_id)
         assert temp_ttl > 0, "Should create reservation even without host"
@@ -903,7 +962,7 @@ async def test_circuit_v2_data_transfer_limit_enforcement():
             max_reservations=2,
         )
 
-        resource_manager = RelayResourceManager(limits, host)
+        resource_manager = RelayResourceManager(limits, host.get_peerstore(), host)
 
         # Create a reservation
         peer_id = host.get_id()

@@ -203,7 +203,7 @@ class InternalManagerAPI(ManagerAPI):
     functionality as it is only designed to be used internally.
     """
 
-    @trio_typing.takes_callable_and_args
+    @trio_typing.takes_callable_and_args  # type: ignore
     @abstractmethod
     def run_task(
         self,
@@ -221,7 +221,7 @@ class InternalManagerAPI(ManagerAPI):
         """
         ...
 
-    @trio_typing.takes_callable_and_args
+    @trio_typing.takes_callable_and_args  # type: ignore
     @abstractmethod
     def run_daemon_task(
         self, async_fn: AsyncFn, *args: Any, name: str | None = None
