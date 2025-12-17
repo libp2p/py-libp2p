@@ -547,7 +547,11 @@ class CircuitV2Protocol(Service):
         try:
             # Create raw connection
             raw_conn = RawConnection(stream=stream, initiator=False)
-            ma = multiaddr.Multiaddr(remote_peer_id)
+            # Create a multiaddr from the peer ID
+            # The peer ID is passed as bytes, so we need to convert it to an ID
+            # object first
+            peer_id_obj = ID(remote_peer_id)
+            ma = multiaddr.Multiaddr(f"/p2p/{peer_id_obj.to_string()}")
             await self.host.upgrade_inbound_connection(raw_conn, ma)
 
         except Exception as e:

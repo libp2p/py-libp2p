@@ -353,11 +353,24 @@ class RelayResourceManager:
 
         # verify signature
         try:
-            public_key = self.peer_store.pubkey(peer_id)
+            # The reservation is signed by the relay, so we verify with our public key
+            if self.host:
+                public_key = self.host.get_public_key()
+            else:
+                # If we don't have the host instance, we can't verify the signature
+                # as we don't have access to the relay's public key
+                return False
+
             if public_key is None:
                 return False
 
-            return public_key.verify(proto_res.voucher, proto_res.signature)
+            # Reconstruct the data that was signed
+            expiration_bytes = int(proto_res.expire).to_bytes(8, byteorder="big")
+            data_to_verify = (
+                RELAY_VOUCHER_DOMAIN_SEP + proto_res.voucher + expiration_bytes
+            )
+
+            return public_key.verify(data_to_verify, proto_res.signature)
         except Exception:
             return False
 

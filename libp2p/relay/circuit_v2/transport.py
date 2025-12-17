@@ -36,6 +36,9 @@ from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
 )
+from libp2p.tools.constants import (
+    MAX_READ_LEN,
+)
 
 from .config import (
     ClientConfig,
@@ -439,7 +442,7 @@ class CircuitV2Transport(ITransport):
             )
             await relay_stream.write(hop_msg.SerializeToString())
 
-            resp_bytes = await relay_stream.read()
+            resp_bytes = await relay_stream.read(MAX_READ_LEN)
             resp = HopMessage()
             resp.ParseFromString(resp_bytes)
 
