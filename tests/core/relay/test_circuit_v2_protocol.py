@@ -34,6 +34,7 @@ from libp2p.relay.circuit_v2.protocol import (
     CircuitV2Protocol,
 )
 from libp2p.relay.circuit_v2.resources import (
+    RELAY_VOUCHER_DOMAIN_SEP,
     RelayLimits,
     RelayResourceManager,
 )
@@ -85,8 +86,13 @@ def limits():
 
 
 @pytest.fixture
-def manager(limits, peer_store):
-    return RelayResourceManager(limits, peer_store)
+def manager(limits, peer_store, key_pair):
+    # Create a mock host with get_public_key method for testing
+    from unittest.mock import MagicMock
+
+    mock_host = MagicMock()
+    mock_host.get_public_key.return_value = key_pair.public_key
+    return RelayResourceManager(limits, peer_store, mock_host)
 
 
 @pytest.fixture
@@ -96,18 +102,23 @@ def reservation(manager, peer_id):
 
 def test_circuit_v2_verify_reservation(manager, peer_id, reservation, key_pair):
     # Valid protobuf reservation
+    # Sign the correct data: domain_sep + voucher + expiration
+    expiration_bytes = int(reservation.expires_at).to_bytes(8, byteorder="big")
+    data_to_sign = RELAY_VOUCHER_DOMAIN_SEP + reservation.voucher + expiration_bytes
     proto_res = PbReservation(
         expire=int(reservation.expires_at),
         voucher=reservation.voucher,
-        signature=key_pair.private_key.sign(reservation.voucher),
+        signature=key_pair.private_key.sign(data_to_sign),
     )
     assert manager.verify_reservation(peer_id, proto_res) is True
 
-    # Invalid protobuf reservation
+    # Invalid protobuf reservation - wrong voucher
+    invalid_voucher = os.urandom(32)
+    invalid_data = RELAY_VOUCHER_DOMAIN_SEP + invalid_voucher + expiration_bytes
     invalid_proto = PbReservation(
         expire=int(reservation.expires_at),
-        voucher=os.urandom(32),
-        signature=key_pair.private_key.sign(os.urandom(32)),
+        voucher=invalid_voucher,
+        signature=key_pair.private_key.sign(invalid_data),
     )
     assert manager.verify_reservation(peer_id, invalid_proto) is False
 
