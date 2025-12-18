@@ -1,6 +1,6 @@
 import random
 
-import base58
+from multicodec import b58decode, b58encode
 import multihash
 
 from libp2p.crypto.rsa import (
@@ -27,7 +27,7 @@ def test_pretty():
         random_id_string += random.choice(ALPHABETS)
     peer_id = ID(random_id_string.encode())
     actual = peer_id.pretty()
-    expected = base58.b58encode(random_id_string).decode()
+    expected = b58encode(random_id_string).decode()
 
     assert actual == expected
 
@@ -36,7 +36,7 @@ def test_str_less_than_10():
     random_id_string = ""
     for _ in range(5):
         random_id_string += random.choice(ALPHABETS)
-    peer_id = base58.b58encode(random_id_string).decode()
+    peer_id = b58encode(random_id_string).decode()
     expected = peer_id
     actual = ID(random_id_string.encode()).__str__()
 
@@ -47,7 +47,7 @@ def test_str_more_than_10():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.choice(ALPHABETS)
-    peer_id = base58.b58encode(random_id_string).decode()
+    peer_id = b58encode(random_id_string).decode()
     expected = peer_id
     actual = ID(random_id_string.encode()).__str__()
 
@@ -60,7 +60,7 @@ def test_eq_true():
         random_id_string += random.choice(ALPHABETS)
     peer_id = ID(random_id_string.encode())
 
-    assert peer_id == base58.b58encode(random_id_string).decode()
+    assert peer_id == b58encode(random_id_string).decode()
     assert peer_id == random_id_string.encode()
     assert peer_id == ID(random_id_string.encode())
 
@@ -76,7 +76,7 @@ def test_id_to_base58():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.choice(ALPHABETS)
-    expected = base58.b58encode(random_id_string).decode()
+    expected = b58encode(random_id_string).decode()
     actual = ID(random_id_string.encode()).to_base58()
 
     assert actual == expected
@@ -86,7 +86,7 @@ def test_id_from_base58():
     random_id_string = ""
     for _ in range(10):
         random_id_string += random.choice(ALPHABETS)
-    expected = ID(base58.b58decode(random_id_string))
+    expected = ID(b58decode(random_id_string))
     actual = ID.from_base58(random_id_string)
 
     assert actual == expected

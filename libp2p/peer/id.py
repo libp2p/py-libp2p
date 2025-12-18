@@ -1,7 +1,7 @@
 import functools
 import hashlib
 
-import base58
+from multicodec import b58decode, b58encode
 import multihash
 
 from libp2p.crypto.keys import (
@@ -49,7 +49,7 @@ class ID:
 
     @functools.cached_property
     def base58(self) -> str:
-        return base58.b58encode(self._bytes).decode()
+        return b58encode(self._bytes).decode()
 
     def to_bytes(self) -> bytes:
         return self._bytes
@@ -77,7 +77,7 @@ class ID:
 
     @classmethod
     def from_base58(cls, b58_encoded_peer_id_str: str) -> "ID":
-        peer_id_bytes = base58.b58decode(b58_encoded_peer_id_str)
+        peer_id_bytes = b58decode(b58_encoded_peer_id_str)
         pid = ID(peer_id_bytes)
         return pid
 

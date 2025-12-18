@@ -16,7 +16,7 @@ from typing import (
     cast,
 )
 
-import base58
+from multicodec import b58encode
 import trio
 
 from libp2p.abc import (
@@ -816,7 +816,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                b58encode(msg.from_id).decode(),
                 msg.seqno.hex(),
             )
             return
@@ -834,10 +834,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if b58encode(msg.from_id).decode() == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,

@@ -4,7 +4,7 @@ Utility functions for Kademlia DHT implementation.
 
 import logging
 
-import base58
+from multicodec import b58encode
 import multihash
 
 from libp2p.abc import IHost
@@ -139,7 +139,7 @@ def bytes_to_base58(data: bytes) -> str:
         str: Base58 encoded string
 
     """
-    return base58.b58encode(data).decode("utf-8")
+    return b58encode(data).decode("utf-8")
 
 
 def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]:

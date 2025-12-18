@@ -1,8 +1,8 @@
 import argparse
 import logging
 
-import base58
 import multiaddr
+from multicodec import b58encode
 import trio
 
 from libp2p import (
@@ -52,7 +52,7 @@ async def receive_loop(subscription, termination_event):
     while not termination_event.is_set():
         try:
             message = await subscription.get()
-            logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
+            logger.info(f"From peer: {b58encode(message.from_id).decode()}")
             print(f"Received message: {message.data.decode('utf-8')}")
         except Exception:
             logger.exception("Error in receive loop")

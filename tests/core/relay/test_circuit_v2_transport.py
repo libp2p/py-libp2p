@@ -6,9 +6,9 @@ import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from base58 import b58encode
 import multiaddr
 from multiaddr import Multiaddr
+from multicodec import b58encode
 import trio
 
 from libp2p.abc import IHost
