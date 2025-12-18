@@ -11,6 +11,7 @@ Examples
    examples.echo
    examples.echo_quic
    examples.ping
+   examples.interop
    examples.pubsub
    examples.bitswap
    examples.circuit_relay
@@ -19,3 +20,4 @@ Examples
    examples.rendezvous
    examples.random_walk
    examples.multiple_connections
+   examples.websocket

@@ -763,46 +763,45 @@ class KadDHT(Service):
 
     # Value storage and retrieval methods
 
-    async def put_value(self, key: bytes, value: bytes) -> None:
+    async def put_value(self, key: str, value: bytes) -> None:
         """
         Store a value in the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for storage)
+            value: Binary value to store
+
         """
-        logger.debug(f"Storing value for key {key.hex()}")
+        logger.debug(f"Storing value for key {key}")
 
-        if key.decode("utf-8").startswith("/"):
-            if self.validator is not None:
-                # Dont allow local users to put bad values
-                self.validator.validate(key.decode("utf-8"), value)
+        # Validate if key starts with "/" (namespaced keys like /pk/...)
+        if self.validator is not None and key.startswith("/"):
+            self.validator.validate(key, value)
 
-                old_value_record = self.value_store.get(key)
-                if old_value_record is not None and old_value_record.value != value:
-                    # Select which value is better
-                    try:
-                        index = self.validator.select(
-                            key.decode("utf-8"), [value, old_value_record.value]
-                        )
-                        if index != 0:
-                            raise ValueError(
-                                "Refusing to replace newer value with the older one"
-                            )
-                    except Exception as e:
-                        logger.debug(f"Validation error for key {key.hex()}: {e}")
-                        raise
+            key_bytes = key.encode("utf-8")
+            old_value_record = self.value_store.get(key_bytes)
+            if old_value_record is not None and old_value_record.value != value:
+                index = self.validator.select(key, [value, old_value_record.value])
+                if index != 0:
+                    raise ValueError(
+                        "Refusing to replace newer value with the older one"
+                    )
+
+        # Convert string key to bytes for storage
+        key_bytes = key.encode("utf-8")
 
         # 1. Store locally first
-        self.value_store.put(key, value)
+        self.value_store.put(key_bytes, value)
         try:
             decoded_value = value.decode("utf-8")
         except UnicodeDecodeError:
             decoded_value = value.hex()
-        logger.debug(
-            f"Stored value locally for key {key.hex()} with value {decoded_value}"
-        )
+        logger.debug(f"Stored value locally for key {key} with value {decoded_value}")
 
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
@@ -817,7 +816,7 @@ class KadDHT(Service):
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self.value_store._store_at_peer(
-                            peer, key, value
+                            peer, key_bytes, value
                         )
                         batch_results[idx] = success
                         if success:
@@ -835,11 +834,24 @@ class KadDHT(Service):
 
         logger.info(f"Successfully stored value at {stored_count} peers")
 
-    async def get_value(self, key: bytes) -> bytes | None:
-        logger.debug(f"Getting value for key: {key.hex()}")
+    async def get_value(self, key: str) -> bytes | None:
+        """
+        Retrieve a value from the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for lookup)
+
+        Returns:
+            The value if found, None otherwise
+
+        """
+        logger.debug(f"Getting value for key: {key}")
+
+        # Convert string key to bytes for lookup
+        key_bytes = key.encode("utf-8")
 
         # 1. Check local store first
-        value_record = self.value_store.get(key)
+        value_record = self.value_store.get(key_bytes)
         if value_record:
             logger.debug("Found value locally")
             return value_record.value
@@ -847,7 +859,7 @@ class KadDHT(Service):
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Searching {len(closest_peers)} peers for value")
@@ -861,7 +873,7 @@ class KadDHT(Service):
                 nonlocal found_value
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        value = await self.value_store._get_from_peer(peer, key)
+                        value = await self.value_store._get_from_peer(peer, key_bytes)
                         if value is not None and found_value is None:
                             found_value = value
                             logger.debug(f"Found value at peer {peer}")
@@ -873,12 +885,12 @@ class KadDHT(Service):
                     nursery.start_soon(query_one, peer)
 
             if found_value is not None:
-                self.value_store.put(key, found_value)
+                self.value_store.put(key_bytes, found_value)
                 logger.info("Successfully retrieved value from network")
                 return found_value
 
         # 4. Not found
-        logger.warning(f"Value not found for key {key.hex()}")
+        logger.warning(f"Value not found for key {key}")
         return None
 
     # Add these methods in the Utility methods section
@@ -899,17 +911,19 @@ class KadDHT(Service):
         """
         return await self.routing_table.add_peer(peer_id)
 
-    async def provide(self, key: bytes) -> bool:
+    async def provide(self, key: str) -> bool:
         """
         Reference to provider_store.provide for convenience.
         """
-        return await self.provider_store.provide(key)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.provide(key_bytes)
 
-    async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
+    async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
         """
-        return await self.provider_store.find_providers(key, count)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.find_providers(key_bytes, count)
 
     def get_routing_table_size(self) -> int:
         """

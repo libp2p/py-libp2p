@@ -481,6 +481,17 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("added new peer %s", peer_id)
 
+    async def _handle_new_peer_safe(self, peer_id: ID) -> None:
+        """
+        Safely handle new peer with exception handling.
+        This wrapper ensures that any exceptions during peer negotiation
+        don't crash the entire pubsub service.
+        """
+        try:
+            await self._handle_new_peer(peer_id)
+        except Exception as error:
+            logger.info(f"Protocol negotiation failed for peer {peer_id}: {error}")
+
     def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
             return
@@ -503,8 +514,8 @@ class Pubsub(Service, IPubsub):
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
-                # Add Peer
-                self.manager.run_task(self._handle_new_peer, peer_id)
+                # Add Peer - wrap in exception handler to prevent service crash
+                self.manager.run_task(self._handle_new_peer_safe, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
         """

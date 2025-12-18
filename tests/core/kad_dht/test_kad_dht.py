@@ -255,14 +255,15 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     dht_a, dht_b = dht_pair
     # dht_a.peer_routing.routing_table.add_peer(dht_b.pe)
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
-    # Generate a random key and value
-    key = b"rendom_key"
+    # Generate a random key and value (use string key for API)
+    key = "random_key"
+    key_bytes = key.encode("utf-8")
     value = b"test-value"
 
     # First add the value directly to node A's store to verify storage works
-    dht_a.value_store.put(key, value)
+    dht_a.value_store.put(key_bytes, value)
     logger.debug("Local value store: %s", dht_a.value_store.store)
-    local_value_record = dht_a.value_store.get(key)
+    local_value_record = dht_a.value_store.get(key_bytes)
     assert local_value_record is not None
     assert local_value_record.value == value, "Local value storage failed"
     print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
@@ -305,7 +306,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     assert record_b.seq == record_b_put_value.seq
 
     # # Log debugging information
-    logger.debug("Put value with key %s...", key.hex()[:10])
+    logger.debug("Put value with key %s...", key[:10])
     logger.debug("Node A value store: %s", dht_a.value_store.store)
 
     # # Allow more time for the value to propagate
@@ -353,7 +354,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     value = keypair.public_key.serialize()
 
     with trio.fail_after(TEST_TIMEOUT):
-        await dht_a.put_value(key.encode(), value)
+        await dht_a.put_value(key, value)  # Now accepts string directly
 
     # INVALID KEY PAIR
     key = "/pk/abcdef1234567890"  # Not a valid multihash
@@ -361,7 +362,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
 
     with trio.fail_after(TEST_TIMEOUT):
         with pytest.raises(InvalidRecordType, match="valid multihash"):
-            await dht_a.put_value(key.encode(), value)
+            await dht_a.put_value(key, value)  # Now accepts string directly
 
 
 @pytest.mark.trio
@@ -372,10 +373,11 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Generate a random content ID
     content = f"test-content-{uuid.uuid4()}".encode()
-    content_id = b"randome_content"
+    content_id = "randome_content"  # String for API
+    content_id_bytes = content_id.encode("utf-8")  # Bytes for internal storage
 
     # Store content on the first node
-    dht_a.value_store.put(content_id, content)
+    dht_a.value_store.put(content_id_bytes, content)
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before PUT_VALUE req is sent
@@ -562,12 +564,13 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
 
     # Generate a random key and value
-    key = b"rendom_key"
+    key = "random_key"  # String for API
+    key_bytes = key.encode("utf-8")  # Bytes for internal storage
     value = b"test-value"
 
     # First add the value directly to node A's store to verify storage works
-    dht_a.value_store.put(key, value)
-    local_value = dht_a.value_store.get(key)
+    dht_a.value_store.put(key_bytes, value)
+    local_value = dht_a.value_store.get(key_bytes)
     assert local_value is not None
     assert local_value.value == value, "Local value storage failed"
     await dht_a.routing_table.add_peer(peer_b_info)
@@ -583,7 +586,7 @@ async def test_dht_req_fail_with_invalid_record_transfer(
         dht_a.host.get_peerstore().set_local_record(envelope)
 
     await dht_a.put_value(key, value)
-    retrieved_value_record = dht_b.value_store.get(key)
+    retrieved_value_record = dht_b.value_store.get(key_bytes)
 
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receiving
     # the corrupted invalid record
@@ -596,7 +599,7 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     dht_a.host.get_peerstore().set_local_record(false_envelope)
 
     await dht_a.put_value(key, value)
-    retrieved_value_record = dht_b.value_store.get(key)
+    retrieved_value_record = dht_b.value_store.get(key_bytes)
 
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receving
     # the record with a different peer_id regardless of a valid signature
