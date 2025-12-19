@@ -31,8 +31,9 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.utils import InvalidRecordType
-from libp2p.records.validator import Validator
+from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -135,9 +136,18 @@ async def dht_pair(security_protocol):
         peer_b_info = PeerInfo(host_b.get_id(), host_b.get_addrs())
         peer_a_info = PeerInfo(host_a.get_id(), host_a.get_addrs())
 
+        # Create a validator with 'test' namespace for testing
+        # and 'pk' namespace for public key validation
+        test_validator = NamespacedValidator(
+            {
+                "pk": PublicKeyValidator(),
+                "test": BlankValidator(),
+            }
+        )
+
         # Create DHT nodes from the hosts with bootstrap peers as multiaddr strings
-        dht_a: KadDHT = KadDHT(host_a, mode=DHTMode.SERVER)
-        dht_b: KadDHT = KadDHT(host_b, mode=DHTMode.SERVER)
+        dht_a: KadDHT = KadDHT(host_a, mode=DHTMode.SERVER, validator=test_validator)
+        dht_b: KadDHT = KadDHT(host_b, mode=DHTMode.SERVER, validator=test_validator)
         await dht_a.peer_routing.routing_table.add_peer(peer_b_info)
         await dht_b.peer_routing.routing_table.add_peer(peer_a_info)
 
@@ -255,8 +265,8 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     dht_a, dht_b = dht_pair
     # dht_a.peer_routing.routing_table.add_peer(dht_b.pe)
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
-    # Generate a random key and value (use string key for API)
-    key = "random_key"
+    # Generate a random key and value (use namespaced key for API)
+    key = "/test/random_key"
     key_bytes = key.encode("utf-8")
     value = b"test-value"
 
@@ -373,7 +383,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Generate a random content ID
     content = f"test-content-{uuid.uuid4()}".encode()
-    content_id = "randome_content"  # String for API
+    content_id = "/test/random_content"  # Namespaced key for API
     content_id_bytes = content_id.encode("utf-8")  # Bytes for internal storage
 
     # Store content on the first node
@@ -563,8 +573,8 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     dht_a, dht_b = dht_pair
     peer_b_info = PeerInfo(dht_b.host.get_id(), dht_b.host.get_addrs())
 
-    # Generate a random key and value
-    key = "random_key"  # String for API
+    # Generate a random key and value (use namespaced key)
+    key = "/test/random_key"  # Namespaced key for API
     key_bytes = key.encode("utf-8")  # Bytes for internal storage
     value = b"test-value"
 
@@ -604,3 +614,45 @@ async def test_dht_req_fail_with_invalid_record_transfer(
     # This proves that DHT_B rejected DHT_A PUT_RECORD req upon receving
     # the record with a different peer_id regardless of a valid signature
     assert retrieved_value_record is None
+
+
+@pytest.mark.trio
+async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
+    """Test that custom validators can be registered and used."""
+    dht_a, dht_b = dht_pair
+
+    # Create a custom validator that only accepts values starting with "valid:"
+    class CustomValidator(Validator):
+        def validate(self, key: str, value: bytes) -> None:
+            if not value.startswith(b"valid:"):
+                raise ValueError("Value must start with 'valid:'")
+
+        def select(self, key: str, values: list[bytes]) -> int:
+            return 0
+
+    # Register the custom validator for "custom" namespace
+    dht_a.register_validator("custom", CustomValidator())
+    dht_b.register_validator("custom", CustomValidator())
+
+    # Test 1: Valid value should be stored successfully
+    key = "/custom/my-key"
+    valid_value = b"valid:test-data"
+
+    with trio.fail_after(TEST_TIMEOUT):
+        await dht_a.put_value(key, valid_value)
+
+    # Value should be stored locally
+    key_bytes = key.encode("utf-8")
+    stored = dht_a.value_store.get(key_bytes)
+    assert stored is not None
+    assert stored.value == valid_value
+
+    # Test 2: Invalid value should raise an error
+    invalid_value = b"invalid-data"
+    with pytest.raises(ValueError, match="Value must start with 'valid:'"):
+        await dht_a.put_value(key, invalid_value)
+
+    # Test 3: Key with unregistered namespace should raise InvalidRecordType
+    unregistered_key = "/unknown/some-key"
+    with pytest.raises(InvalidRecordType):
+        await dht_a.put_value(unregistered_key, b"some-value")

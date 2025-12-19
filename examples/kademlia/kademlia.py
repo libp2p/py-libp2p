@@ -4,6 +4,7 @@
 A basic example of using the Kademlia DHT implementation, with all setup logic inlined.
 This example demonstrates both value storage/retrieval and content server
 advertisement/discovery.
+It also shows how to use custom validators for namespaced keys.
 """
 
 import argparse
@@ -31,6 +32,7 @@ from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
+from libp2p.records.validator import Validator
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -38,6 +40,46 @@ from libp2p.tools.utils import (
     info_from_p2p_addr,
 )
 from libp2p.utils.paths import get_script_dir, join_paths
+
+
+# Custom validator for the "example" namespace
+class ExampleValidator(Validator):
+    """
+    A simple validator for the 'example' namespace.
+
+    This validator accepts any value and always selects the first value
+    when comparing multiple values.
+    """
+
+    def validate(self, key: str, value: bytes) -> None:
+        """
+        Validate a key-value pair.
+
+        In a real application, you might check:
+        - Value format/schema
+        - Signatures
+        - Size limits
+        - etc.
+        """
+        # For this example, we accept any value
+        # You can add custom validation logic here
+        if not value:
+            raise ValueError("Value cannot be empty")
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        """
+        Select the best value from a list of values.
+
+        Returns the index of the selected value.
+        In this example, we simply return the first value (index 0).
+
+        In a real application, you might:
+        - Compare timestamps
+        - Check version numbers
+        - Verify signatures and pick the most recent valid one
+        """
+        return 0
+
 
 # Configure logging
 logging.basicConfig(
@@ -175,6 +217,12 @@ async def run_node(
 
             await connect_to_bootstrap_nodes(host, bootstrap_nodes)
             dht = KadDHT(host, dht_mode)
+
+            # Register a custom validator for the "example" namespace
+            # This allows us to store values with keys like "/example/my-key"
+            dht.register_validator("example", ExampleValidator())
+            logger.info("Registered custom 'example' namespace validator")
+
             # take all peer ids from the host and add them to the dht
             for peer_id in host.get_peerstore().peer_ids():
                 await dht.routing_table.add_peer(peer_id)
@@ -188,12 +236,15 @@ async def run_node(
             async with background_trio_service(dht):
                 logger.info(f"DHT service started in {dht_mode.value} mode")
 
-                # Example 1: Simple Key-Value Storage
-                # Just use a string key directly - DHT API accepts strings!
-                key = "my-example-key"
+                # Example 1: Simple Key-Value Storage with namespaced key
+                # Keys MUST be namespaced (e.g., /namespace/key) for validation
+                # The namespace must have a registered validator
+                key = "/example/my-example-key"
                 value = b"Hello from py-libp2p!"
 
                 # Example 2: Content Provider Advertisement
+                # Provider keys use a different storage mechanism (provider store)
+                # that doesn't go through the value validation path
                 content_id = "my-content-identifier"
 
                 if dht_mode == DHTMode.SERVER:
