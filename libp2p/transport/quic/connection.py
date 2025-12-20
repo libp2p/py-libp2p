@@ -36,6 +36,7 @@ from .exceptions import (
 from .stream import QUICStream, StreamDirection
 
 if TYPE_CHECKING:
+    from .listener import QUICListener
     from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
@@ -73,6 +74,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         security_manager: Optional["QUICTLSConfigManager"] = None,
         resource_scope: Any | None = None,
         listener_socket: trio.socket.SocketType | None = None,
+        listener: "QUICListener | None" = None,
+        listener_connection_id: bytes | None = None,
     ):
         """
         Initialize QUIC connection with security integration.
@@ -88,6 +91,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
             security_manager: Security manager for TLS/certificate handling
             resource_scope: Resource manager scope for tracking
             listener_socket: Socket of listener to transmit data
+            listener: Owning listener for server-side connections (enables O(1)
+                Connection ID registration).
+            listener_connection_id: Listener's primary Connection ID for this
+                connection (used as the base CID when registering new CIDs).
 
         """
         self._quic = quic_connection
@@ -95,11 +102,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._remote_peer_id = remote_peer_id
         self._local_peer_id = local_peer_id
         self.peer_id = remote_peer_id or local_peer_id
-        self._is_initiator = is_initiator
+        # Derive initiator/client role from aioquic configuration when available.
+        # Only trust `is_client` when it's a real bool
+        #  (mocks may return truthy objects).
+        is_client = getattr(
+            getattr(quic_connection, "configuration", None), "is_client", None
+        )
+        self._is_initiator = is_client if isinstance(is_client, bool) else is_initiator
         self._maddr = maddr
         self._transport = transport
         self._security_manager = security_manager
         self._resource_scope = resource_scope
+        # Owning listener context (server-side). Used to register newly-issued
+        # Connection IDs in O(1) for correct packet routing.
+        self._listener: "QUICListener | None" = listener
+        self._listener_connection_id: bytes | None = listener_connection_id
 
         # Trio networking - socket may be provided by listener
         self._socket = listener_socket if listener_socket else None
@@ -187,6 +204,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
         self.STREAM_OPEN_TIMEOUT = self._transport._config.STREAM_OPEN_TIMEOUT
 
+        # Performance monitoring thresholds
+        self.SLOW_NOTIFICATION_THRESHOLD_SECONDS = 0.01  # 10ms
+
         # Performance and monitoring
         self._connection_start_time = time.time()
         self._stats = {
@@ -208,6 +228,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             f"(initiator: {self._is_initiator}, addr: {self._remote_addr}, "
             f"security: {self._security_manager is not None})"
         )
+
+    def set_listener_context(
+        self, listener: "QUICListener | None", listener_connection_id: bytes | None
+    ) -> None:
+        """
+        Set owning listener context for O(1) Connection ID registration.
+
+        For server-side connections, the listener is responsible for packet routing.
+        """
+        self._listener = listener
+        self._listener_connection_id = listener_connection_id
 
     # Resource manager integration
     def set_resource_scope(self, scope: Any) -> None:
@@ -846,11 +877,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(f"Accepted inbound stream {stream.stream_id}")
                     return stream
 
+                # If the event is already set but the queue is empty, reset it to avoid
+                # a busy loop that can starve the QUIC event loop under load.
+                if self._stream_accept_event.is_set():
+                    self._stream_accept_event = trio.Event()
+                    continue
+
+                accept_event = self._stream_accept_event
+
             if self._closed:
                 raise MuxedConnUnavailable("Connection closed while accepting stream")
 
             # Wait for new streams indefinitely
-            await self._stream_accept_event.wait()
+            await accept_event.wait()
 
         raise QUICConnectionError("Error occurred while waiting to accept stream")
 
@@ -984,8 +1023,37 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
+                    # Common benign case: we closed and removed a locally-initiated
+                    # stream wrapper, then received a late FIN-only event.
+                    fin_only = True
+                    for e in stream_events:
+                        data = getattr(e, "data", b"")
+                        end_stream = getattr(e, "end_stream", False)
+                        if data or not end_stream:
+                            fin_only = False
+                            break
+                    if fin_only:
+                        logger.debug(
+                            "Ignoring late FIN on closed outbound stream %s "
+                            "(is_initiator=%s, quic.is_client=%s)",
+                            stream_id,
+                            self._is_initiator,
+                            getattr(
+                                getattr(self._quic, "configuration", None),
+                                "is_client",
+                                None,
+                            ),
+                        )
+                        continue
+                    is_client = getattr(
+                        getattr(self._quic, "configuration", None), "is_client", None
+                    )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        f"Unexpected outbound stream {stream_id} in data event"
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     continue
 
@@ -1147,6 +1215,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         notification_start = time.time()
         try:
+            if self._listener and self._listener_connection_id:
+                await self._listener._registry.add_connection_id(
+                    new_connection_id, self._listener_connection_id, sequence
+                )
+                notification_duration = time.time() - notification_start
+                if notification_duration > self.SLOW_NOTIFICATION_THRESHOLD_SECONDS:
+                    logger.debug(
+                        f"Slow Connection ID notification: "
+                        f"{notification_duration * 1000:.2f}ms "
+                        f"for Connection ID {new_connection_id.hex()[:8]}"
+                    )
+                return
+
             if not self._transport:
                 return
 
@@ -1298,8 +1379,28 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
+                    if not event.data and event.end_stream:
+                        logger.debug(
+                            "Ignoring late FIN on closed outbound stream %s "
+                            "(is_initiator=%s, quic.is_client=%s)",
+                            stream_id,
+                            self._is_initiator,
+                            getattr(
+                                getattr(self._quic, "configuration", None),
+                                "is_client",
+                                None,
+                            ),
+                        )
+                        return
+                    is_client = getattr(
+                        getattr(self._quic, "configuration", None), "is_client", None
+                    )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        f"Unexpected outbound stream {stream_id} in data event"
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     return
 
