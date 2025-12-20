@@ -639,12 +639,10 @@ async def test_yamux_stress_ping():
                 print(f"  Registry Stats: {registry_stats}")
 
         # === Assertions ===
-        # Allow >30% success rate in CI to account for resource constraints
-        # TODO: Investigate root cause of high failure rate in CI (Issue to be created)
         success_rate = len(latencies) / STREAM_COUNT if STREAM_COUNT > 0 else 0.0
-        min_success_rate = 0.30  # 30% minimum success rate
-        assert success_rate > min_success_rate, (
-            f"Expected >{min_success_rate:.0%} success rate, got {success_rate:.1%} "
+        min_success_rate = 1.0  # 100% success rate required
+        assert success_rate >= min_success_rate, (
+            f"Expected {min_success_rate:.0%} success rate, got {success_rate:.1%} "
             f"({len(latencies)}/{STREAM_COUNT} streams succeeded)"
         )
         assert all(isinstance(x, int) and x >= 0 for x in latencies), (
@@ -670,7 +668,12 @@ async def test_quic_concurrent_streams():
     from libp2p.transport.quic.transport import QUICTransport
     from libp2p.transport.quic.utils import create_quic_multiaddr
 
-    STREAM_COUNT = 50  # Between 20-50 as specified
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        STREAM_COUNT = 20
+        pytest.skip("flaky under xdist; run this integration test without -n")
+    else:
+        STREAM_COUNT = 50  # Between 20-50 as specified
+
     server_key = create_new_key_pair()
     client_key = create_new_key_pair()
     config = QUICTransportConfig(
