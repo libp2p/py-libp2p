@@ -204,6 +204,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
         self.STREAM_OPEN_TIMEOUT = self._transport._config.STREAM_OPEN_TIMEOUT
 
+        # Performance monitoring thresholds
+        self.SLOW_NOTIFICATION_THRESHOLD_SECONDS = 0.01  # 10ms
+
         # Performance and monitoring
         self._connection_start_time = time.time()
         self._stats = {
@@ -1045,16 +1048,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        "Unexpected outbound stream %s in data event "
-                        "(parity=%s, is_initiator=%s, quic.is_client=%s, "
-                        "streams=%s, cached=%s)",
-                        stream_id,
-                        "even" if stream_id % 2 == 0 else "odd",
-                        self._is_initiator,
-                        is_client,
-                        len(self._streams),
-                        stream_id in self._stream_cache,
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     continue
 
@@ -1221,7 +1220,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     new_connection_id, self._listener_connection_id, sequence
                 )
                 notification_duration = time.time() - notification_start
-                if notification_duration > 0.01:  # Log slow notifications (>10ms)
+                if notification_duration > self.SLOW_NOTIFICATION_THRESHOLD_SECONDS:
                     logger.debug(
                         f"Slow Connection ID notification: "
                         f"{notification_duration * 1000:.2f}ms "
@@ -1396,16 +1395,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     is_client = getattr(
                         getattr(self._quic, "configuration", None), "is_client", None
                     )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        "Unexpected outbound stream %s in data event "
-                        "(parity=%s, is_initiator=%s, quic.is_client=%s, "
-                        "streams=%s, cached=%s)",
-                        stream_id,
-                        "even" if stream_id % 2 == 0 else "odd",
-                        self._is_initiator,
-                        is_client,
-                        len(self._streams),
-                        stream_id in self._stream_cache,
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     return
 

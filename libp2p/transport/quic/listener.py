@@ -946,6 +946,23 @@ class QUICListener(IListener):
         except Exception as e:
             logger.debug(f"Error processing events: {e}")
 
+    async def _cleanup_promotion_lock(self, quic_key: int) -> None:
+        """
+        Clean up promotion lock and related tracking for a quic_key (idempotent).
+
+        This method safely removes all promotion-related state for a connection,
+        preventing memory leaks from stale locks and tracking dictionaries.
+
+        Args:
+            quic_key: The identity (id()) of the aioquic QuicConnection
+
+        """
+        async with self._promotion_lock:
+            self._promotion_locks.pop(quic_key, None)
+            self._conn_by_quic_id.pop(quic_key, None)
+            self._pending_cid_by_quic_id.pop(quic_key, None)
+            self._handler_invoked_quic_ids.discard(quic_key)
+
     async def _promote_pending_connection(
         self,
         quic_conn: QuicConnection,
@@ -961,11 +978,16 @@ class QUICListener(IListener):
         )
 
         # Acquire per-connection promotion lock (keyed by aioquic connection id).
-        async with self._promotion_lock:
-            per_cid_lock = self._promotion_locks.get(quic_key)
-            if per_cid_lock is None:
-                per_cid_lock = trio.Lock()
-                self._promotion_locks[quic_key] = per_cid_lock
+        try:
+            async with self._promotion_lock:
+                per_cid_lock = self._promotion_locks.get(quic_key)
+                if per_cid_lock is None:
+                    per_cid_lock = trio.Lock()
+                    self._promotion_locks[quic_key] = per_cid_lock
+        except Exception:
+            # If lock creation fails, cleanup and re-raise
+            await self._cleanup_promotion_lock(quic_key)
+            raise
 
         async with per_cid_lock:
             try:
@@ -1080,9 +1102,8 @@ class QUICListener(IListener):
                 )
                 await self._remove_connection(destination_connection_id)
             finally:
-                # Best-effort cleanup of the per-CID lock.
-                async with self._promotion_lock:
-                    self._promotion_locks.pop(quic_key, None)
+                # Best-effort cleanup of the per-CID lock and related tracking.
+                await self._cleanup_promotion_lock(quic_key)
 
     async def _remove_connection(self, destination_connection_id: bytes) -> None:
         """Remove connection by connection ID."""
@@ -1093,6 +1114,13 @@ class QUICListener(IListener):
             )
             if connection_obj:
                 await connection_obj.close()
+                # Clean up promotion lock if connection has a quic connection
+                if (
+                    hasattr(connection_obj, "_quic")
+                    and connection_obj._quic is not None
+                ):
+                    quic_key = id(connection_obj._quic)
+                    await self._cleanup_promotion_lock(quic_key)
 
             # Remove from registry (cleans up all mappings)
             await self._registry.remove_connection_id(destination_connection_id)
@@ -1285,6 +1313,13 @@ class QUICListener(IListener):
             for cid in pending_cids:
                 await self._remove_pending_connection(cid)
 
+            # Clean up all remaining promotion locks and tracking
+            async with self._promotion_lock:
+                self._promotion_locks.clear()
+                self._conn_by_quic_id.clear()
+                self._pending_cid_by_quic_id.clear()
+                self._handler_invoked_quic_ids.clear()
+
             # Close socket
             if self._socket:
                 self._socket.close()
@@ -1302,6 +1337,11 @@ class QUICListener(IListener):
     ) -> None:
         """Remove a connection by object reference."""
         try:
+            # Clean up promotion lock if connection has a quic connection
+            if hasattr(connection_obj, "_quic") and connection_obj._quic is not None:
+                quic_key = id(connection_obj._quic)
+                await self._cleanup_promotion_lock(quic_key)
+
             # Find the connection ID for this object
             connection_ids = await self._registry.get_all_cids_for_connection(
                 connection_obj
