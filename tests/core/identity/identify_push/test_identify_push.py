@@ -27,9 +27,6 @@ from libp2p.identity.identify_push.identify_push import (
     push_identify_to_peer,
     push_identify_to_peers,
 )
-from libp2p.network.swarm import (
-    Swarm,
-)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -564,34 +561,14 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
     security_protocol,
 ):
     dummy_peers = []
-    # Number of dummy peers to create
-    # (must be less than 500 due to Trio's async task limit)
-    num_dummy_peers = 499
 
     async with host_pair_factory(security_protocol=security_protocol) as (host_a, _):
-        # Configure host_a to allow enough connections for all dummy peers
-        # The default max_connections is 300, but we need at least
-        # num_dummy_peers + 1
-        swarm_a = host_a.get_network()
-        if isinstance(swarm_a, Swarm):
-            # Add buffer to connection limit
-            swarm_a.connection_config.max_connections = num_dummy_peers + 10
-            swarm_a.connection_config.max_parallel_dials = min(
-                200, num_dummy_peers + 10
-            )
-            swarm_a.connection_config.max_dial_queue_length = num_dummy_peers + 10
-
-        # Create dummy peers with higher connection limits for incoming connections
+        # Create dummy peers
         # Breaking with more than 500 peers
         # Trio have a async tasks limit of 1000
-        for _ in range(num_dummy_peers):
+        for _ in range(499):
             key_pair = create_new_key_pair()
             dummy_host = new_host(key_pair=key_pair)
-            # Configure dummy host's swarm to allow more incoming connections
-            dummy_swarm = dummy_host.get_network()
-            if isinstance(dummy_swarm, Swarm):
-                dummy_swarm.connection_config.max_connections = num_dummy_peers + 10
-                dummy_swarm.connection_config.max_incoming_pending_connections = 100
             dummy_host.set_stream_handler(
                 ID_PUSH, identify_push_handler_for(dummy_host)
             )
@@ -615,8 +592,7 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
                 host_a,
             )
 
-            # Wait longer for identify push to complete across all connections
-            await trio.sleep(1.0)
+            await trio.sleep(0.5)
 
             peer_id_a = host_a.get_id()
             for host, _ in dummy_peers:

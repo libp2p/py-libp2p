@@ -1,7 +1,6 @@
 import logging
 
 from multiaddr import Multiaddr
-from multiaddr.protocols import P_P2P
 from multiaddr.resolvers import DNSResolver
 import trio
 
@@ -105,7 +104,7 @@ class BootstrapDiscovery:
                     logger.warning(f"DNS resolution returned None for: {addr_str}")
                     return
 
-                peer_id_str = multiaddr.value_for_protocol(P_P2P)
+                peer_id_str = multiaddr.get_peer_id()
                 if peer_id_str is None:
                     logger.warning(f"Missing peer ID in DNS address: {addr_str}")
                     return
