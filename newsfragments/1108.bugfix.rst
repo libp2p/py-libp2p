@@ -1,0 +1,1 @@
+Fixed mplex stream reset handling to allow reading buffered data before raising reset exception. This improves compatibility with rust-libp2p ping protocol where reset messages may arrive concurrently with data.

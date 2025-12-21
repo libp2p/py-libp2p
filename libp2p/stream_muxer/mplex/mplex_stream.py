@@ -143,10 +143,10 @@ class MplexStream(IMuxedStream):
                     "the number of bytes to read `n` must be non-negative or "
                     f"`None` to indicate read until EOF, got n={n}"
                 )
-            if self.event_reset.is_set():
-                raise MplexStreamReset
             if n is None:
                 return await self._read_until_eof()
+            # Try to read buffered data first, even if reset is set
+            # This allows reading data that arrived before the reset
             if len(self._buf) == 0:
                 data: bytes
                 # Peek whether there is data available. If yes, we just read until
@@ -155,6 +155,10 @@ class MplexStream(IMuxedStream):
                     data = self.incoming_data_channel.receive_nowait()
                     self._buf.extend(data)
                 except trio.EndOfChannel:
+                    # If reset is set, raise reset only if no data was buffered
+                    # This allows reading data that arrived before the reset
+                    if self.event_reset.is_set() and len(self._buf) == 0:
+                        raise MplexStreamReset
                     raise MplexStreamEOF
                 except trio.WouldBlock:
                     # We know `receive` will be blocked here. Wait for data here with
@@ -163,7 +167,9 @@ class MplexStream(IMuxedStream):
                         data = await self.incoming_data_channel.receive()
                         self._buf.extend(data)
                     except trio.EndOfChannel:
-                        if self.event_reset.is_set():
+                        # If reset is set, raise reset only if no data was buffered
+                        # This allows reading data that arrived before the reset
+                        if self.event_reset.is_set() and len(self._buf) == 0:
                             raise MplexStreamReset
                         if self.event_remote_closed.is_set():
                             raise MplexStreamEOF
@@ -176,10 +182,19 @@ class MplexStream(IMuxedStream):
                             "`incoming_data_channel` is closed but stream is not reset."
                             "This should never happen."
                         ) from error
+            # Try to read any remaining data from channel (non-blocking)
             self._buf.extend(self._read_return_when_blocked())
-            payload = self._buf[:n]
-            self._buf = self._buf[len(payload) :]
-            return bytes(payload)
+            # If we have data in buffer, return it even if reset is set
+            # This allows reading data that arrived before the reset
+            if len(self._buf) > 0:
+                payload = self._buf[:n]
+                self._buf = self._buf[len(payload) :]
+                return bytes(payload)
+            # Only raise reset if no data is available
+            if self.event_reset.is_set():
+                raise MplexStreamReset
+            # Should not reach here, but return empty bytes as fallback
+            return b""
 
     async def write(self, data: bytes) -> None:
         """
