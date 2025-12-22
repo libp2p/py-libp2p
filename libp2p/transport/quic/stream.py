@@ -363,6 +363,19 @@ class QUICStream(IMuxedStream):
             logger.debug(f"Stream {self.stream_id} write side closed")
 
         except Exception as e:
+            msg = str(e).lower()
+            # These usually happen during shutdown races / late FIN handling.
+            if "after fin" in msg or "unknown peer-initiated stream" in msg:
+                self._write_closed = True
+                async with self._state_lock:
+                    if self._read_closed:
+                        self._state = StreamState.CLOSED
+                    else:
+                        self._state = StreamState.WRITE_CLOSED
+                logger.debug(
+                    f"Ignoring close_write error on stream {self.stream_id}: {e}"
+                )
+                return
             logger.error(f"Error closing write side of stream {self.stream_id}: {e}")
 
     async def close_read(self) -> None:
@@ -412,7 +425,11 @@ class QUICStream(IMuxedStream):
             await self._connection._transmit()
 
         except Exception as e:
-            logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
+            msg = str(e).lower()
+            if "unknown peer-initiated stream" in msg:
+                logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
+            else:
+                logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
         finally:
             # Always cleanup resources
             await self._cleanup_resources()

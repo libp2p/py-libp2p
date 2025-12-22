@@ -3,6 +3,134 @@ Release Notes
 
 .. towncrier release notes start
 
+py-libp2p v0.5.0 (2025-12-21)
+-----------------------------
+
+Bugfixes
+~~~~~~~~
+
+- Fixed pubsub service crashes when protocol negotiation fails by adding proper exception handling. (`#910 <https://github.com/libp2p/py-libp2p/issues/910>`__)
+- Fixed Yamux.accept_stream() hanging indefinitely when connection is closed. (`#930 <https://github.com/libp2p/py-libp2p/issues/930>`__)
+- Handle FLAG_FIN & FLAG_RST in TYPE_WINDOW_UPDATE frames (`#931 <https://github.com/libp2p/py-libp2p/issues/931>`__)
+- Added peer ID validation in identify_push protocol to prevent forged peer records.
+
+  This security enhancement ensures that the peer ID in signed peer records matches
+  the sender's peer ID, preventing peer ID spoofing attacks. This addresses
+  CVE-2023-40583 equivalent vulnerability. (`#958 <https://github.com/libp2p/py-libp2p/issues/958>`__)
+- Fixed resource scope cleanup in SwarmConn close method to properly release connection resources when connections are closed. (`#1020 <https://github.com/libp2p/py-libp2p/issues/1020>`__)
+- Fixed interoperability with rust-libp2p by switching default key generation to Ed25519 and enhancing Yamux to handle data with SYN/ACK frames. (`#1034 <https://github.com/libp2p/py-libp2p/issues/1034>`__)
+- Fixed Mplex connection cleanup to properly handle connection closure callbacks, resolving interop test failures with chromium-rust-v0.53. (`#1037 <https://github.com/libp2p/py-libp2p/issues/1037>`__)
+- Fixed QUIC interop issue where Go-to-Python ping would fail after identify stream closes. The listener now properly tracks new Connection IDs issued after connection establishment, enabling correct packet routing for subsequent streams. (`#1044 <https://github.com/libp2p/py-libp2p/issues/1044>`__)
+- Kademlia DHT API now accepts string keys instead of bytes (``put_value(key: str, ...)``). Fixes UnicodeDecodeError with binary multihash keys. (`#1059 <https://github.com/libp2p/py-libp2p/issues/1059>`__)
+- Fixed BasicHost.run() to accept task_status keyword argument for compatibility with modern pytest-trio (>=0.8.0) and trio (>=0.26.0). (`#1071 <https://github.com/libp2p/py-libp2p/issues/1071>`__)
+- Fixed QUIC stream direction misclassification that caused server-side errors when handling client-initiated streams. (`#1081 <https://github.com/libp2p/py-libp2p/issues/1081>`__)
+
+
+Features
+~~~~~~~~
+
+- Noise protocol now uses spec-compliant X25519 keys for DH exchange while maintaining Ed25519 keys for libp2p identity signatures. This fixes signature verification failures and ensures compatibility with other libp2p implementations. Updated ``tests/utils/factories.py`` to use separate X25519 keys for Noise static keys and ``libp2p/security/noise/patterns.py`` to properly handle key separation during handshake.
+
+  Full Specification Compliance Achieved:
+  Stream Muxers: Added stream_muxers field to NoiseExtensions (spec requirement)
+  Legacy Cleanup: Removed non-spec data field from NoiseHandshakePayload
+  Protobuf Schema: Updated to match official libp2p/specs/noise
+  WebTransport Support: Certificate hash exchange fully implemented
+
+  Beyond Specification - Advanced Features:
+  Early Data (0-RTT): Full implementation with handlers and callbacks
+  Advanced Rekeying: Configurable policies and statistics
+  Static Key Caching: Performance optimizations
+  Comprehensive Management: Full handler system for early data (`#591 <https://github.com/libp2p/py-libp2p/issues/591>`__)
+- Added fallback mechanism in Kademlia DHT to use connected peers and peerstore when routing table has insufficient peers. (`#905 <https://github.com/libp2p/py-libp2p/issues/905>`__)
+- Enhanced WebSocket transport with advanced features including SOCKS proxy support,
+  AutoTLS for browser integration, connection management, and comprehensive configuration
+  options. The implementation adds production-ready features like connection pooling,
+  statistics tracking, and advanced TLS configuration for improved reliability and
+  monitoring capabilities. (`#938 <https://github.com/libp2p/py-libp2p/issues/938>`__)
+- Added persistent peer storage system with datastore-agnostic backend support.
+
+  The new PersistentPeerStore implementation provides persistent storage for peer data
+  (addresses, keys, metadata, protocols, latency metrics) across application restarts.
+  This addresses the limitation of the in-memory peerstore that loses all peer information
+  when the process restarts.
+
+  Key features:
+  - Datastore-agnostic interface supporting multiple backends (SQLite, LevelDB, RocksDB, Memory)
+  - Full compatibility with existing IPeerStore interface
+  - Automatic persistence of all PeerData fields including last_identified, ttl, and latmap
+  - Factory functions for easy creation with different backends
+  - Comprehensive test suite and usage examples
+
+  The implementation follows the same architectural pattern as go-libp2p's pstoreds package,
+  providing a robust foundation for long-running libp2p applications that need to maintain
+  peer information across restarts. (`#946 <https://github.com/libp2p/py-libp2p/issues/946>`__)
+- Enhances the `libp2p`` stack with improved peer connection, relay routing, and discovery for resilient networking.
+
+  **Voucher and Signature Verification**
+  - Implements voucher and signature verification in ``resources.py``
+  - Validates incoming relay vouchers and signatures to ensure proper authorization
+  - Prevents misuse of relay resources through secure validation
+
+  **Relay Selection Logic**
+  - Implements initial relay selection logic in ``transport.py``
+  - Uses basic selection strategies (first-available or round-robin) for relay dialing
+  - Introduces sophisticated relay selection with scoring, latency-based metrics, and retry strategies
+
+  **DHT-based Peer Discovery**
+  - Implements DHT-based peer discovery using the libp2p DHT
+  - Enables dynamic location and connection to peers across the network
+
+  **Relay Reservation and Maintenance**
+  - Implements reservation storage and refresh mechanism
+  - Tracks active relay reservations and refreshes them before expiry
+  - Supports long-lived relayed connections
+
+  **Relay Multiaddr Handling**
+  - Adds ``/p2p-circuit/...`` addresses to peerstore for reconnects and discovery
+  - Implements proper parsing and handling of relayed multiaddrs
+  - Ensures correct validation and usage of ``/p2p-circuit/p2p/...`` paths during dialing
+
+  **CircuitV2Listener Implementation**
+  - Implements ``run()`` method in ``CircuitV2Listener``
+  - Finalizes listener logic to support incoming relayed connections
+
+  **Testing and Quality**
+  - Adds dedicated tests for voucher and signature verification
+  - Includes tests for initial and advanced relay selection logic
+  - Covers DHT-based peer discovery functionality
+  - Tests reservation storage and refresh mechanisms
+  - Validates relay multiaddr handling and parsing
+  - Tests ``CircuitV2Listener`` functionality
+  - Maintains 100% test coverage across all new features
+  - Resolves all linting issues and adheres to code quality standards
+  - Ensures no regressions in existing functionality (`#996 <https://github.com/libp2p/py-libp2p/issues/996>`__)
+- Introduced ``get_transport_addrs()`` method to ``BasicHost`` for retrieving raw transport addresses without the peer ID suffix.
+  Refactored ``get_addrs()`` to utilize this new method, maintaining backward compatibility. (`#1073 <https://github.com/libp2p/py-libp2p/issues/1073>`__)
+- Adds custom validator support and quorum-based value retrieval to the Kademlia DHT. (`#1095 <https://github.com/libp2p/py-libp2p/issues/1095>`__)
+
+
+Internal Changes - for py-libp2p Contributors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Enhanced QUIC Connection ID management with quinn-inspired improvements:
+  - Added sequence number tracking for proper CID retirement ordering
+  - Separated initial vs. established CID lookups for better packet routing
+  - Improved fallback routing from O(n) to O(1) using reverse address mapping
+  - Refactored Connection ID management into a dedicated ConnectionIDRegistry class
+
+  These changes improve robustness, performance, and alignment with proven QUIC implementations. (`#1044 <https://github.com/libp2p/py-libp2p/issues/1044>`__)
+- Refactored QUIC Connection ID management into a dedicated ConnectionIDRegistry class, improving code organization and maintainability of the QUIC listener. (`#1046 <https://github.com/libp2p/py-libp2p/issues/1046>`__)
+- Upgraded py-libp2p transport ping test to the latest standard. (`#1086 <https://github.com/libp2p/py-libp2p/issues/1086>`__)
+- Updated py-multihash dependency from git repository to PyPI version 3.0.0. (`#1102 <https://github.com/libp2p/py-libp2p/issues/1102>`__)
+
+
+Miscellaneous Changes
+~~~~~~~~~~~~~~~~~~~~~
+
+- `#926 <https://github.com/libp2p/py-libp2p/issues/926>`__, `#1039 <https://github.com/libp2p/py-libp2p/issues/1039>`__
+
+
 py-libp2p v0.4.0 (2025-11-05)
 -----------------------------
 
