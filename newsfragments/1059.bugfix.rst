@@ -1,1 +1,0 @@
-Kademlia DHT API now accepts string keys instead of bytes (``put_value(key: str, ...)``). Fixes UnicodeDecodeError with binary multihash keys.
