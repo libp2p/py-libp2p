@@ -51,15 +51,31 @@ Listener node:
 .. code-block:: python
 
    import trio
+   import multiaddr
    from libp2p import new_host
-   from libp2p.security.tls.transport import TLSTransport
+   from libp2p.crypto.keys import create_new_key_pair
+   from libp2p.security.tls.transport import TLSTransport, PROTOCOL_ID
 
    async def main():
-       host = new_host(security_transports=[TLSTransport()])
-       await host.listen("/ip4/0.0.0.0/tcp/8000")
-       print("TLS-enabled listener at:", host.get_addrs())
-
-       await trio.sleep_forever()
+       # Create a key pair for the host
+       key_pair = create_new_key_pair()
+       
+       # Create TLS transport with the key pair
+       tls_transport = TLSTransport(key_pair)
+       
+       # Create security options mapping
+       sec_opt = {PROTOCOL_ID: tls_transport}
+       
+       # Create host with TLS security option
+       host = new_host(key_pair=key_pair, sec_opt=sec_opt)
+       
+       # Create Multiaddr object for listening
+       listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/8000")
+       
+       # Run the host and listen
+       async with host.run(listen_addrs=[listen_addr]):
+           print("TLS-enabled listener at:", host.get_addrs())
+           await trio.sleep_forever()
 
    if __name__ == "__main__":
        trio.run(main())
@@ -69,18 +85,35 @@ Dialer node:
 .. code-block:: python
 
    import trio
+   import multiaddr
    from libp2p import new_host
-   from libp2p.security.tls.transport import TLSTransport
+   from libp2p.crypto.keys import create_new_key_pair
+   from libp2p.security.tls.transport import TLSTransport, PROTOCOL_ID
    from libp2p.peer.peerinfo import info_from_p2p_addr
 
    async def main():
-       host = new_host(security_transports=[TLSTransport()])
-
+       # Create a key pair for the host
+       key_pair = create_new_key_pair()
+       
+       # Create TLS transport with the key pair
+       tls_transport = TLSTransport(key_pair)
+       
+       # Create security options mapping
+       sec_opt = {PROTOCOL_ID: tls_transport}
+       
+       # Create host with TLS security option
+       host = new_host(key_pair=key_pair, sec_opt=sec_opt)
+       
+       # Parse the listener address (replace with actual listener address)
        addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
-       peer_info = info_from_p2p_addr(addr)
-
-       await host.connect(peer_info)
-       print("Connected securely to", peer_info.peer_id)
+       maddr = multiaddr.Multiaddr(addr)
+       peer_info = info_from_p2p_addr(maddr)
+       
+       # Run the host and connect
+       async with host.run():
+           await host.connect(peer_info)
+           print("Connected securely to", peer_info.peer_id)
+           await trio.sleep(1)
 
    if __name__ == "__main__":
        trio.run(main())
@@ -88,6 +121,17 @@ Dialer node:
 **Defaults if no configuration is provided**
 
 - Generates a self-signed certificate automatically.
+
+**Note for testing with self-signed certificates**
+
+When testing with self-signed certificates, peers need to trust each other's certificates.
+You can do this by calling ``trust_peer_cert_pem()`` on the TLS transport before creating the host:
+
+.. code-block:: python
+
+   # For testing: trust peer certificates
+   listener_tls.trust_peer_cert_pem(dialer_tls.get_certificate_pem())
+   dialer_tls.trust_peer_cert_pem(listener_tls.get_certificate_pem())
 
 Certificate Management
 ----------------------
