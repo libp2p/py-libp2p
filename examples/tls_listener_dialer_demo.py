@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TLS Listener and Dialer Demo
+TLS Listener and Dialer Demo with "ping-pong" test.
 
 Usage:
     python examples/tls_listener_dialer_demo.py listener [port]
@@ -9,11 +9,33 @@ Usage:
 """
 
 import sys
-import trio
+
 import multiaddr
-from libp2p import new_host, generate_new_rsa_identity
-from libp2p.security.tls.transport import TLSTransport, PROTOCOL_ID
+import trio
+
+from libp2p import generate_new_rsa_identity, new_host
+from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.security.tls.transport import PROTOCOL_ID, TLSTransport
+
+PING_PROTOCOL = "/tls/ping/1.0.0"
+
+
+async def handle_ping(stream):
+    try:
+        while True:
+            data = await stream.read(4)
+            if not data:
+                break
+            await stream.write(b"pong")
+            await stream.close()
+            break
+    except Exception as e:
+        print(f"Ping handler error: {e}")
+        try:
+            await stream.close()
+        except Exception:
+            pass
 
 
 async def run_listener(port: int = 8000):
@@ -23,14 +45,24 @@ async def run_listener(port: int = 8000):
     host = new_host(key_pair=key_pair, sec_opt=sec_opt)
     listen_addr = multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
 
-    async with host.run(listen_addrs=[listen_addr]):
+    # Safe context manager handling
+    # since new_host.run may not support __aenter__ natively in dev
+    host_run_ctx = host.run(listen_addrs=[listen_addr])
+
+    try:
+        await host_run_ctx.__aenter__()
+        host.set_stream_handler(TProtocol(PING_PROTOCOL), handle_ping)
         addrs = host.get_addrs()
         print(f"Listener running at: {addrs[0]}")
         print(f"Peer ID: {host.get_id()}")
+        print(f'Waiting for ping requests on protocol: "{PING_PROTOCOL}"')
         try:
             await trio.sleep_forever()
         except KeyboardInterrupt:
-            await host.close()
+            pass
+    finally:
+        await host_run_ctx.__aexit__(None, None, None)
+        await host.close()
 
 
 async def run_dialer(listener_address: str):
@@ -46,15 +78,32 @@ async def run_dialer(listener_address: str):
         print(f"Error parsing address: {e}")
         return
 
-    async with host.run(listen_addrs=[]):
+    host_run_ctx = host.run(listen_addrs=[])
+    try:
+        await host_run_ctx.__aenter__()
+        await host.connect(peer_info)
+        print(f"Connected to {peer_info.peer_id}")
+
+        # Perform a ping-pong activity
         try:
-            await host.connect(peer_info)
-            print(f"Connected to {peer_info.peer_id}")
-            await trio.sleep(5)
-            await host.close()
+            stream = await host.new_stream(
+                peer_info.peer_id, [TProtocol(PING_PROTOCOL)]
+            )
+            print("Sending: ping")
+            await stream.write(b"ping")
+            data = await stream.read(4)
+            print(f"Got reply: {data!r}")
+            await stream.close()
         except Exception as e:
-            print(f"Connection failed: {e}")
-            await host.close()
+            print(f"Ping-pong failed: {e}")
+
+        await trio.sleep(2)
+        await host.close()
+    except Exception as e:
+        print(f"Connection failed: {e}")
+    finally:
+        await host_run_ctx.__aexit__(None, None, None)
+        await host.close()
 
 
 async def run_full_test():
@@ -75,23 +124,43 @@ async def run_full_test():
 
     listen_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/8000")
 
+    l_run_ctx = listener_host.run(listen_addrs=[listen_addr])
+    d_run_ctx = dialer_host.run(listen_addrs=[])
+
     async with trio.open_nursery() as nursery:
-        async with listener_host.run(listen_addrs=[listen_addr]):
-            listener_addrs = listener_host.get_addrs()
-            print(f"Listener: {listener_addrs[0]}")
+        await l_run_ctx.__aenter__()
+        listener_host.set_stream_handler(TProtocol(PING_PROTOCOL), handle_ping)
+        listener_addrs = listener_host.get_addrs()
+        print(f"Listener: {listener_addrs[0]}")
 
-            await trio.sleep(1)
+        await trio.sleep(1)
 
-            async with dialer_host.run(listen_addrs=[]):
-                peer_info = info_from_p2p_addr(listener_addrs[0])
-                await dialer_host.connect(peer_info)
-                print(f"Dialer connected to {peer_info.peer_id}")
+        await d_run_ctx.__aenter__()
+        try:
+            peer_info = info_from_p2p_addr(listener_addrs[0])
+            await dialer_host.connect(peer_info)
+            print(f"Dialer connected to {peer_info.peer_id}")
 
-                await trio.sleep(2)
+            # Ping-pong activity
+            try:
+                stream = await dialer_host.new_stream(
+                    peer_info.peer_id, [TProtocol(PING_PROTOCOL)]
+                )
+                print("Dialer sending: ping")
+                await stream.write(b"ping")
+                data = await stream.read(4)
+                print(f"Dialer got reply: {data!r}")
+                await stream.close()
+            except Exception as e:
+                print(f"Ping-pong failed: {e}")
 
-                await dialer_host.close()
-                await listener_host.close()
-                nursery.cancel_scope.cancel()
+            await trio.sleep(4)
+        finally:
+            await d_run_ctx.__aexit__(None, None, None)
+            await dialer_host.close()
+            await l_run_ctx.__aexit__(None, None, None)
+            await listener_host.close()
+            nursery.cancel_scope.cancel()
 
 
 def main():
@@ -101,7 +170,6 @@ def main():
             trio.run(run_listener, port)
         elif sys.argv[1] == "dialer":
             if len(sys.argv) < 3:
-                print("Usage: python examples/tls_listener_dialer_demo.py dialer <listener_address>")
                 sys.exit(1)
             trio.run(run_dialer, sys.argv[2])
         else:
@@ -113,4 +181,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

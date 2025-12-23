@@ -59,19 +59,19 @@ Listener node:
    async def main():
        # Create a key pair for the host
        key_pair = create_new_key_pair()
-       
+
        # Create TLS transport with the key pair
        tls_transport = TLSTransport(key_pair)
-       
+
        # Create security options mapping
        sec_opt = {PROTOCOL_ID: tls_transport}
-       
+
        # Create host with TLS security option
        host = new_host(key_pair=key_pair, sec_opt=sec_opt)
-       
+
        # Create Multiaddr object for listening
        listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/8000")
-       
+
        # Run the host and listen
        async with host.run(listen_addrs=[listen_addr]):
            print("TLS-enabled listener at:", host.get_addrs())
@@ -94,21 +94,21 @@ Dialer node:
    async def main():
        # Create a key pair for the host
        key_pair = create_new_key_pair()
-       
+
        # Create TLS transport with the key pair
        tls_transport = TLSTransport(key_pair)
-       
+
        # Create security options mapping
        sec_opt = {PROTOCOL_ID: tls_transport}
-       
+
        # Create host with TLS security option
        host = new_host(key_pair=key_pair, sec_opt=sec_opt)
-       
+
        # Parse the listener address (replace with actual listener address)
        addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
        maddr = multiaddr.Multiaddr(addr)
        peer_info = info_from_p2p_addr(maddr)
-       
+
        # Run the host and connect
        async with host.run():
            await host.connect(peer_info)
