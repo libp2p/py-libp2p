@@ -1,1 +1,0 @@
-Updated py-multihash dependency from git repository to PyPI version 3.0.0.

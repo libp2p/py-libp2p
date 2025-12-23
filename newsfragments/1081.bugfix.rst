@@ -1,1 +1,0 @@
-Fixed QUIC stream direction misclassification that caused server-side errors when handling client-initiated streams.
