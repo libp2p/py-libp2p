@@ -60,6 +60,10 @@ def configure_logging():
             "libp2p.transport",
             "libp2p.network",
             "libp2p.protocol_muxer",
+            "libp2p.stream_muxer",
+            "libp2p.stream_muxer.mplex",
+            "libp2p.stream_muxer.mplex.mplex",
+            "libp2p.stream_muxer.mplex.mplex_stream",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
