@@ -4,6 +4,7 @@ Transport registry for dynamic transport selection based on multiaddr protocols.
 
 from collections.abc import Callable
 import logging
+import sys
 from typing import Any
 
 from multiaddr import Multiaddr
@@ -229,6 +230,7 @@ def create_transport_for_multiaddr(
                    (e.g., private_key for QUIC)
     :return: Transport instance or None if no suitable transport found
     """
+    print(f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: called with maddr={maddr}, upgrader={type(upgrader).__name__}", file=sys.stderr)
     logger.debug(
         f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: calle with "
         f"maddr={maddr}, upgrader={type(upgrader).__name__}"
@@ -236,6 +238,7 @@ def create_transport_for_multiaddr(
     try:
         # Get all protocols in the multiaddr
         protocols = [proto.name for proto in maddr.protocols()]
+        print(f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: protocols={protocols}", file=sys.stderr)
         logger.debug(
             f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr:protocols={protocols}"
         )
@@ -272,6 +275,7 @@ def create_transport_for_multiaddr(
                     return transport
                 else:
                     transport = registry.create_transport("ws", upgrader, **kwargs)
+                    print(f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: created ws transport={transport}", file=sys.stderr)
                     logger.debug(
                         f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: "
                         f"created ws transport={transport}"
