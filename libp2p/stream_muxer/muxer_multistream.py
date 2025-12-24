@@ -122,18 +122,18 @@ class MuxerMultistream:
                 async def on_close() -> None:
                     pass
 
-                muxer: IMuxedConn = Yamux(
+                yamux_muxer = Yamux(
                     conn, peer_id, is_initiator=conn.is_initiator, on_close=on_close
                 )
                 logger.debug(
                     f"[MUXER_MULTISTREAM] new_conn: created Yamux muxer, "
                     f"peer_id={peer_id}"
                 )
-                return muxer
-        result: IMuxedConn = transport_class(conn, peer_id)
+                return yamux_muxer
+        muxer: IMuxedConn = transport_class(conn, peer_id)
         transport_name = getattr(transport_class, "__name__", str(transport_class))
         logger.debug(
             f"[MUXER_MULTISTREAM] new_conn: created {transport_name} muxer, "
             f"peer_id={peer_id}"
         )
-        return result
+        return muxer
