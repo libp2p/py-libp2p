@@ -107,6 +107,9 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
 ]
+interop = [
+    "requests>=2.25.0",
+]
 
 [tool.setuptools]
 include-package-data = true
