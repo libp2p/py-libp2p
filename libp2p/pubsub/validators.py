@@ -28,10 +28,40 @@ def signature_validator(msg: rpc_pb2.Message) -> bool:
         logger.debug("Reject because no signature attached for msg: %s", msg)
         return False
 
-    # Validate if message sender matches message signer,
-    # i.e., check if `msg.key` matches `msg.from_id`
-    msg_pubkey = deserialize_public_key(msg.key)
-    if ID.from_pubkey(msg_pubkey) != msg.from_id:
+    # Get the public key - either from msg.key or extracted from peer ID
+    # For Ed25519 and other small keys, the key is embedded in the peer ID
+    # For RSA keys (which are too large), the key is sent in msg.key
+    msg_pubkey = None
+    sender_id = ID(msg.from_id)
+
+    # First, try to extract public key from the peer ID (from_id)
+    try:
+        msg_pubkey = sender_id.extract_public_key()
+        if msg_pubkey:
+            logger.debug(
+                "Extracted public key from peer ID, type: %s", msg_pubkey.get_type()
+            )
+    except Exception as e:
+        logger.debug("Could not extract key from peer ID: %s", e)
+
+    # If we couldn't extract from peer ID, use msg.key
+    if msg_pubkey is None:
+        if not msg.key or len(msg.key) == 0:
+            logger.debug(
+                "Reject because no key attached and cannot extract from peer "
+                "ID for msg: %s",
+                msg,
+            )
+            return False
+        logger.debug(
+            "Using msg.key for signature verification, length: %d", len(msg.key)
+        )
+        try:
+            msg_pubkey = deserialize_public_key(msg.key)
+        except Exception as e:
+            logger.debug("Failed to deserialize public key: %s", e)
+            raise
+    if ID.from_pubkey(msg_pubkey) != sender_id:
         logger.debug(
             "Reject because signing key does not match sender ID for msg: %s", msg
         )
