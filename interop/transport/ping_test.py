@@ -66,6 +66,7 @@ def configure_logging():
             "libp2p.transport.registry",
             "libp2p.transport.upgrader",
             "libp2p.network",
+            "libp2p.network.swarm",
             "libp2p.protocol_muxer",
             "libp2p.protocol_muxer.multiselect_client",
             "libp2p.stream_muxer",
