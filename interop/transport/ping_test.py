@@ -53,6 +53,11 @@ def configure_logging():
     debug_enabled = os.getenv("debug", "false").upper() in ["DEBUG", "1", "TRUE", "YES"]
 
     if debug_enabled:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            stream=sys.stderr,
+        )
         logger_names = [
             "",
             "libp2p.ping_test",
