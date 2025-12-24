@@ -91,6 +91,11 @@ class Mplex(IMuxedConn):
         :param peer_id: peer_id of peer the connection is to
         :param on_close: optional callback to be called when the connection closes
         """
+        logger.debug(
+            f"[MPLEX] __init__: creating Mplex instance, "
+            f"peer_id={peer_id}, "
+            f"is_initiator={getattr(secured_conn, 'is_initiator', 'unknown')}"
+        )
         self.secured_conn = secured_conn
 
         self.next_channel_id = 0
@@ -110,6 +115,10 @@ class Mplex(IMuxedConn):
         self.on_close = on_close
 
     async def start(self) -> None:
+        logger.debug(
+            f"[MPLEX] start: called for peer_id={self.peer_id}, "
+            f"is_initiator={getattr(self, 'is_initiator', 'unknown')}"
+        )
         await self.handle_incoming()
 
     @property
