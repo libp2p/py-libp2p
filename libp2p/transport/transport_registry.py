@@ -38,6 +38,8 @@ def _get_websocket_transport() -> Any:
 
 
 logger = logging.getLogger("libp2p.transport.registry")
+# Enable debug logging for transport registry troubleshooting
+logger.setLevel(logging.DEBUG)
 
 
 def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
