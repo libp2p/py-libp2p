@@ -55,6 +55,8 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 MPLEX_MESSAGE_CHANNEL_SIZE = 8
 
 logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
+# Enable debug logging for mplex troubleshooting
+logger.setLevel(logging.DEBUG)
 
 
 class Mplex(IMuxedConn):
@@ -146,6 +148,10 @@ class Mplex(IMuxedConn):
         return next_id
 
     async def _initialize_stream(self, stream_id: StreamID, name: str) -> MplexStream:
+        logger.debug(
+            f"[MPLEX] _initialize_stream: creating stream "
+            f"stream_id={stream_id}, name={name}, peer_id={self.peer_id}"
+        )
         send_channel, receive_channel = trio.open_memory_channel[bytes](
             MPLEX_MESSAGE_CHANNEL_SIZE
         )
@@ -153,6 +159,11 @@ class Mplex(IMuxedConn):
         async with self.streams_lock:
             self.streams[stream_id] = stream
             self.streams_msg_channels[stream_id] = send_channel
+        logger.debug(
+            f"[MPLEX] _initialize_stream: stream created and registered "
+            f"stream_id={stream_id}, total_streams={len(self.streams)}, "
+            f"peer_id={self.peer_id}"
+        )
         return stream
 
     async def open_stream(self) -> IMuxedStream:
@@ -165,17 +176,46 @@ class Mplex(IMuxedConn):
         stream_id = StreamID(channel_id=channel_id, is_initiator=True)
         # Default stream name is the `channel_id`
         name = str(channel_id)
+        logger.debug(
+            f"[MPLEX] open_stream: creating stream with "
+            f"channel_id={channel_id}, stream_id={stream_id}, name={name}, "
+            f"peer_id={self.peer_id}"
+        )
         stream = await self._initialize_stream(stream_id, name)
+        logger.debug(
+            f"[MPLEX] open_stream: initialized stream, "
+            f"sending NewStream message, peer_id={self.peer_id}"
+        )
         await self.send_message(HeaderTags.NewStream, name.encode(), stream_id)
+        logger.debug(
+            f"[MPLEX] open_stream: NewStream message sent, "
+            f"returning stream, peer_id={self.peer_id}"
+        )
         return stream
 
     async def accept_stream(self) -> IMuxedStream:
         """
         Accept a muxed stream opened by the other end.
         """
+        logger.debug(
+            f"[MPLEX] accept_stream: waiting for new stream, peer_id={self.peer_id}"
+        )
         try:
-            return await self.new_stream_receive_channel.receive()
+            stream = await self.new_stream_receive_channel.receive()
+            # stream is always MplexStream from our channel
+            stream_id_str = getattr(stream, "stream_id", "unknown")
+            name_str = getattr(stream, "name", "unknown")
+            logger.debug(
+                f"[MPLEX] accept_stream: received new stream "
+                f"stream_id={stream_id_str}, name={name_str}, "
+                f"peer_id={self.peer_id}"
+            )
+            return stream
         except trio.EndOfChannel:
+            logger.debug(
+                f"[MPLEX] accept_stream: channel closed, "
+                f"raising MplexUnavailable, peer_id={self.peer_id}"
+            )
             raise MplexUnavailable
 
     async def send_message(
@@ -195,9 +235,16 @@ class Mplex(IMuxedConn):
             data = b""
 
         _bytes = header + encode_varint_prefixed(data)
+        logger.debug(
+            f"[MPLEX] send_message: flag={flag.name}, stream_id={stream_id}, "
+            f"data_len={len(data)}, peer_id={self.peer_id}"
+        )
 
-        # type ignored TODO figure out return for this and write_to_stream
-        return await self.write_to_stream(_bytes)  # type: ignore
+        await self.write_to_stream(_bytes)
+        logger.debug(
+            f"[MPLEX] send_message: message sent successfully, peer_id={self.peer_id}"
+        )
+        return len(_bytes)
 
     async def write_to_stream(self, _bytes: bytes) -> None:
         """
@@ -218,15 +265,37 @@ class Mplex(IMuxedConn):
         Read a message off of the secured connection and add it to the
         corresponding message buffer.
         """
+        logger.debug(
+            f"[MPLEX] handle_incoming: starting message handling loop, "
+            f"peer_id={self.peer_id}"
+        )
         self.event_started.set()
+        message_count = 0
         while True:
             try:
+                message_count += 1
+                logger.debug(
+                    f"[MPLEX] handle_incoming: waiting for message "
+                    f"#{message_count}, peer_id={self.peer_id}"
+                )
                 await self._handle_incoming_message()
+                logger.debug(
+                    f"[MPLEX] handle_incoming: message #{message_count} "
+                    f"handled successfully, peer_id={self.peer_id}"
+                )
             except MplexUnavailable as e:
-                logger.debug("mplex unavailable while waiting for incoming: %s", e)
+                logger.debug(
+                    f"[MPLEX] handle_incoming: mplex unavailable while "
+                    f"waiting for incoming: {e}, peer_id={self.peer_id}, "
+                    f"total_messages={message_count}"
+                )
                 break
         # If we enter here, it means this connection is shutting down.
         # We should clean things up.
+        logger.debug(
+            f"[MPLEX] handle_incoming: exiting loop, cleaning up, "
+            f"peer_id={self.peer_id}, total_messages={message_count}"
+        )
         await self._cleanup()
 
     async def read_message(self) -> tuple[int, int, bytes]:
@@ -235,16 +304,33 @@ class Mplex(IMuxedConn):
 
         :return: stream_id, flag, message contents
         """
+        logger.debug(f"[MPLEX] read_message: reading header, peer_id={self.peer_id}")
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
+            logger.debug(
+                f"[MPLEX] read_message: header read successfully "
+                f"header={header}, peer_id={self.peer_id}"
+            )
         except (ParseError, RawConnError, IncompleteReadError) as error:
+            logger.error(
+                f"[MPLEX] read_message: failed to read header "
+                f"error={error}, peer_id={self.peer_id}"
+            )
             raise MplexUnavailable(
                 "failed to read the header correctly from the underlying connection: "
                 f"{error}"
             )
         try:
             message = await read_varint_prefixed_bytes(self.secured_conn)
+            logger.debug(
+                f"[MPLEX] read_message: message body read successfully "
+                f"message_len={len(message)}, peer_id={self.peer_id}"
+            )
         except (ParseError, RawConnError, IncompleteReadError) as error:
+            logger.error(
+                f"[MPLEX] read_message: failed to read message body "
+                f"error={error}, peer_id={self.peer_id}"
+            )
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
                 f"connection: {error}"
@@ -261,62 +347,136 @@ class Mplex(IMuxedConn):
 
         :raise MplexUnavailable: `Mplex` encounters fatal error or is shutting down.
         """
+        logger.debug(
+            f"[MPLEX] _handle_incoming_message: reading message, peer_id={self.peer_id}"
+        )
         channel_id, flag, message = await self.read_message()
         stream_id = StreamID(channel_id=channel_id, is_initiator=bool(flag & 1))
+        try:
+            flag_name = HeaderTags(flag).name
+        except ValueError:
+            flag_name = f"UNKNOWN({flag})"
+        logger.debug(
+            f"[MPLEX] _handle_incoming_message: received message "
+            f"flag={flag_name}, channel_id={channel_id}, "
+            f"stream_id={stream_id}, message_len={len(message)}, "
+            f"peer_id={self.peer_id}"
+        )
 
         if flag == HeaderTags.NewStream.value:
+            logger.debug(
+                f"[MPLEX] _handle_incoming_message: handling NewStream, "
+                f"peer_id={self.peer_id}"
+            )
             await self._handle_new_stream(stream_id, message)
         elif flag in (
             HeaderTags.MessageInitiator.value,
             HeaderTags.MessageReceiver.value,
         ):
+            logger.debug(
+                f"[MPLEX] _handle_incoming_message: handling Message, "
+                f"peer_id={self.peer_id}"
+            )
             await self._handle_message(stream_id, message)
         elif flag in (HeaderTags.CloseInitiator.value, HeaderTags.CloseReceiver.value):
+            logger.debug(
+                f"[MPLEX] _handle_incoming_message: handling Close, "
+                f"peer_id={self.peer_id}"
+            )
             await self._handle_close(stream_id)
         elif flag in (HeaderTags.ResetInitiator.value, HeaderTags.ResetReceiver.value):
+            logger.debug(
+                f"[MPLEX] _handle_incoming_message: handling Reset, "
+                f"peer_id={self.peer_id}"
+            )
             await self._handle_reset(stream_id)
         else:
             # Receives messages with an unknown flag
-            # TODO: logging
+            logger.warning(
+                f"[MPLEX] _handle_incoming_message: unknown flag={flag}, "
+                f"resetting stream stream_id={stream_id}, peer_id={self.peer_id}"
+            )
             async with self.streams_lock:
                 if stream_id in self.streams:
                     stream = self.streams[stream_id]
                     await stream.reset()
 
     async def _handle_new_stream(self, stream_id: StreamID, message: bytes) -> None:
+        logger.debug(
+            f"[MPLEX] _handle_new_stream: received NewStream "
+            f"stream_id={stream_id}, name={message.decode()}, "
+            f"peer_id={self.peer_id}"
+        )
         async with self.streams_lock:
             if stream_id in self.streams:
                 # `NewStream` for the same id is received twice...
+                logger.error(
+                    f"[MPLEX] _handle_new_stream: duplicate stream_id={stream_id}, "
+                    f"peer_id={self.peer_id}"
+                )
                 raise MplexUnavailable(
                     f"received NewStream message for existing stream: {stream_id}"
                 )
         mplex_stream = await self._initialize_stream(stream_id, message.decode())
+        logger.debug(
+            f"[MPLEX] _handle_new_stream: initialized stream, "
+            f"sending to accept_stream channel, peer_id={self.peer_id}"
+        )
         try:
             await self.new_stream_send_channel.send(mplex_stream)
+            logger.debug(
+                f"[MPLEX] _handle_new_stream: stream sent to accept_stream "
+                f"channel successfully, peer_id={self.peer_id}"
+            )
         except trio.ClosedResourceError:
+            logger.error(
+                f"[MPLEX] _handle_new_stream: channel closed, "
+                f"raising MplexUnavailable, peer_id={self.peer_id}"
+            )
             raise MplexUnavailable
 
     async def _handle_message(self, stream_id: StreamID, message: bytes) -> None:
+        logger.debug(
+            f"[MPLEX] _handle_message: received message "
+            f"stream_id={stream_id}, message_len={len(message)}, "
+            f"peer_id={self.peer_id}"
+        )
         async with self.streams_lock:
             if stream_id not in self.streams:
                 # We receive a message of the stream `stream_id` which is not accepted
                 #   before. It is abnormal. Possibly disconnect?
-                # TODO: Warn and emit logs about this.
+                logger.warning(
+                    f"[MPLEX] _handle_message: stream_id={stream_id} not found "
+                    f"in streams dict, ignoring message, peer_id={self.peer_id}"
+                )
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
         async with stream.close_lock:
             if stream.event_remote_closed.is_set():
-                # TODO: Warn "Received data from remote after stream was closed by them. (len = %d)"  # noqa: E501
+                logger.warning(
+                    f"[MPLEX] _handle_message: received data after stream "
+                    f"closed stream_id={stream_id}, message_len={len(message)}, "
+                    f"peer_id={self.peer_id}"
+                )
                 return
         try:
             send_channel.send_nowait(message)
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
+            logger.debug(
+                f"[MPLEX] _handle_message: message sent to stream channel "
+                f"successfully stream_id={stream_id}, peer_id={self.peer_id}"
+            )
+        except (trio.BrokenResourceError, trio.ClosedResourceError) as e:
+            logger.error(
+                f"[MPLEX] _handle_message: channel error "
+                f"stream_id={stream_id}, error={e}, peer_id={self.peer_id}"
+            )
             raise MplexUnavailable
         except trio.WouldBlock:
             # `send_channel` is full, reset this stream.
             logger.warning(
-                "message channel of stream %s is full: stream is reset", stream_id
+                f"[MPLEX] _handle_message: message channel of stream "
+                f"{stream_id} is full: stream is reset, peer_id={self.peer_id}"
             )
             await stream.reset()
 
@@ -344,15 +504,27 @@ class Mplex(IMuxedConn):
                 self.streams.pop(stream_id, None)
 
     async def _handle_reset(self, stream_id: StreamID) -> None:
+        logger.debug(
+            f"[MPLEX] _handle_reset: received reset "
+            f"stream_id={stream_id}, peer_id={self.peer_id}"
+        )
         async with self.streams_lock:
             if stream_id not in self.streams:
                 # This is *ok*. We forget the stream on reset.
+                logger.debug(
+                    f"[MPLEX] _handle_reset: stream not found (already removed) "
+                    f"stream_id={stream_id}, peer_id={self.peer_id}"
+                )
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
         # Close send_channel to signal no more data will be sent.
         # This will cause EndOfChannel on the receive side after all buffered
         # data is read.
+        logger.debug(
+            f"[MPLEX] _handle_reset: closing send channel "
+            f"stream_id={stream_id}, peer_id={self.peer_id}"
+        )
         await send_channel.aclose()
         async with stream.close_lock:
             if not stream.event_remote_closed.is_set():
@@ -364,6 +536,10 @@ class Mplex(IMuxedConn):
         async with self.streams_lock:
             self.streams.pop(stream_id, None)
             self.streams_msg_channels.pop(stream_id, None)
+        logger.debug(
+            f"[MPLEX] _handle_reset: reset completed "
+            f"stream_id={stream_id}, peer_id={self.peer_id}"
+        )
 
     async def _cleanup(self) -> None:
         if not self.event_shutting_down.is_set():
