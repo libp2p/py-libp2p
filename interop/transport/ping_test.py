@@ -63,6 +63,7 @@ def configure_logging():
             "libp2p.ping_test",
             "libp2p",
             "libp2p.transport",
+            "libp2p.transport.registry",
             "libp2p.transport.upgrader",
             "libp2p.network",
             "libp2p.protocol_muxer",
