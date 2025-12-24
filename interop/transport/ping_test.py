@@ -69,6 +69,7 @@ def configure_logging():
             "libp2p.stream_muxer.mplex",
             "libp2p.stream_muxer.mplex.mplex",
             "libp2p.stream_muxer.mplex.mplex_stream",
+            "libp2p.stream_muxer.muxer_multistream",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)

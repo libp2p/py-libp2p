@@ -896,7 +896,15 @@ class Swarm(Service, INetworkService):
         logger.debug(
             f"Swarm::add_conn | muxed_conn type: {muxed_type}, peer_id: {muxed_peer_id}"
         )
+        logger.debug(
+            f"[SWARM] add_conn: calling muxed_conn.start() for "
+            f"type={muxed_type.__name__}, peer_id={muxed_peer_id}"
+        )
         self.manager.run_task(muxed_conn.start)
+        logger.debug(
+            f"[SWARM] add_conn: muxed_conn.start() task scheduled for "
+            f"peer_id={muxed_peer_id}"
+        )
         logger.debug(
             f"Swarm::add_conn | waiting for event_started for peer {muxed_conn.peer_id}"
         )
