@@ -1818,6 +1818,19 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_transport_addrs(self) -> list[Multiaddr]:
+        """
+        Retrieve the raw multiaddr addresses this host is listening to,
+        without the /p2p/{peer_id} suffix.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of raw multiaddresses.
+
+        """
+
+    @abstractmethod
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host
