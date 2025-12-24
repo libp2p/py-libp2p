@@ -267,7 +267,7 @@ def new_swarm(
 
         addr = listen_addrs[0]
         logger.debug(f"new_swarm: Creating transport for address: {addr}")
-        print(f"[DEBUG] new_swarm: About to call create_transport_for_multiaddr with addr={addr}", file=sys.stderr)
+        logger.debug(f"new_swarm: About to call create_transport_for_multiaddr with addr={addr}")
         transport_maybe = create_transport_for_multiaddr(
             addr,
             temp_upgrader,

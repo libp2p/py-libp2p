@@ -441,9 +441,8 @@ class Swarm(Service, INetworkService):
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
         except Exception as error:
             logger.error(
-                f"[SWARM] upgrade_outbound_raw_conn: unexpected error during "
-                f"muxer upgrade, peer_id={peer_id}, error={error}, "
-                f"error_type={type(error).__name__}"
+                f"[SWARM] upgrade_outbound_raw_conn: unexpected error during muxer upgrade, "
+                f"peer_id={peer_id}, error={error}, error_type={type(error).__name__}"
             )
             await secured_conn.close()
             raise
@@ -746,9 +745,8 @@ class Swarm(Service, INetworkService):
             raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
         except Exception as error:
             logger.error(
-                f"[SWARM] upgrade_inbound_raw_conn: unexpected error during "
-                f"muxer upgrade, peer_id={peer_id}, error={error}, "
-                f"error_type={type(error).__name__}"
+                f"[SWARM] upgrade_inbound_raw_conn: unexpected error during muxer upgrade, "
+                f"peer_id={peer_id}, error={error}, error_type={type(error).__name__}"
             )
             await secured_conn.close()
             raise

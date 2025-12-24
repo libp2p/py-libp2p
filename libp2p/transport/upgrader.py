@@ -81,6 +81,10 @@ class TransportUpgrader:
             f"peer_id={peer_id}, is_initiator={conn.is_initiator}"
         )
         try:
+            logger.debug(
+                f"[UPGRADER] upgrade_connection: about to call muxer_multistream.new_conn, "
+                f"peer_id={peer_id}"
+            )
             muxed_conn = await self.muxer_multistream.new_conn(conn, peer_id)
             logger.debug(
                 f"[UPGRADER] upgrade_connection: muxer created successfully, "

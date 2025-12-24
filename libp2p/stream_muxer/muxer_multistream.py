@@ -101,13 +101,17 @@ class MuxerMultistream:
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         import logging
-
         logger = logging.getLogger("libp2p.stream_muxer.muxer_multistream")
         logger.debug(
             f"[MUXER_MULTISTREAM] new_conn: starting negotiation, "
-            f"peer_id={peer_id}, is_initiator={conn.is_initiator}"
+            f"peer_id={peer_id}, is_initiator={conn.is_initiator}, "
+            f"available_protocols={list(self.transports.keys())}"
         )
         communicator = MultiselectCommunicator(conn)
+        logger.debug(
+            f"[MUXER_MULTISTREAM] new_conn: about to call select_one_of, "
+            f"peer_id={peer_id}"
+        )
         protocol = await self.multistream_client.select_one_of(
             tuple(self.transports.keys()), communicator, self.negotiate_timeout
         )
@@ -122,18 +126,17 @@ class MuxerMultistream:
                 async def on_close() -> None:
                     pass
 
-                yamux_muxer = Yamux(
+                muxer = Yamux(
                     conn, peer_id, is_initiator=conn.is_initiator, on_close=on_close
                 )
                 logger.debug(
                     f"[MUXER_MULTISTREAM] new_conn: created Yamux muxer, "
                     f"peer_id={peer_id}"
                 )
-                return yamux_muxer
-        muxer: IMuxedConn = transport_class(conn, peer_id)
-        transport_name = getattr(transport_class, "__name__", str(transport_class))
+                return muxer
+        muxer = transport_class(conn, peer_id)
         logger.debug(
-            f"[MUXER_MULTISTREAM] new_conn: created {transport_name} muxer, "
+            f"[MUXER_MULTISTREAM] new_conn: created {transport_class.__name__} muxer, "
             f"peer_id={peer_id}"
         )
         return muxer
