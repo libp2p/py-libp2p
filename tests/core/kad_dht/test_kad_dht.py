@@ -11,6 +11,7 @@ from collections.abc import Awaitable
 import hashlib
 import logging
 import os
+import random
 from typing import TypeVar
 from unittest.mock import patch
 import uuid
@@ -543,7 +544,8 @@ async def test_reissue_when_listen_addrs_change(dht_pair: tuple[KadDHT, KadDHT])
     seq0 = env0.record().seq
 
     # Simulate B's listen addrs changing (different port)
-    new_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+    # Pick a port unlikely to be used, or increment existing port
+    new_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{random.randint(20000, 40000)}")
 
     # Patch just for the duration we force B to respond:
     with patch.object(dht_b.host, "get_addrs", return_value=[new_addr]):

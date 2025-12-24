@@ -1212,7 +1212,10 @@ async def test_blacklist_tears_down_existing_connection():
         # 1) Connect peer1 to peer0
         await connect(pubsub0.host, pubsub1.host)
         # Give handle_peer_queue some time to run
-        await trio.sleep(0.1)
+        for _ in range(50):
+            if pubsub1.my_id in pubsub0.peers:
+                break
+            await trio.sleep(0.1)
 
         # After connect, pubsub0.peers should contain pubsub1.my_id
         assert pubsub1.my_id in pubsub0.peers
@@ -1229,7 +1232,10 @@ async def test_blacklist_tears_down_existing_connection():
         pubsub0.add_to_blacklist(pubsub1.my_id)
 
         # Allow the asynchronous teardown task (_teardown_if_connected) to run
-        await trio.sleep(0.1)
+        for _ in range(50):
+            if pubsub1.my_id not in pubsub0.peers:
+                break
+            await trio.sleep(0.1)
 
         # 4a) pubsub0.peers should no longer contain peer1
         assert pubsub1.my_id not in pubsub0.peers
