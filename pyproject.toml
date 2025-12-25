@@ -18,6 +18,7 @@ maintainers = [
     { name = "Luca (acul71)" },
 ]
 dependencies = [
+    "anyio>=1.2.2,<2.0.0",
     "aioquic>=1.2.0",
     "base58>=1.0.3",
     "coincurve==21.0.0",
