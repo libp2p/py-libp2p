@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+import logging
 from types import (
     TracebackType,
 )
@@ -28,6 +29,10 @@ from .exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
 )
+
+logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex_stream")
+# Enable debug logging for mplex troubleshooting
+logger.setLevel(logging.DEBUG)
 
 if TYPE_CHECKING:
     from libp2p.stream_muxer.mplex.mplex import (
@@ -137,33 +142,87 @@ class MplexStream(IMuxedStream):
         :param n: number of bytes to read
         :return: bytes actually read
         """
+        peer_id = getattr(self.muxed_conn, "peer_id", "unknown")
+        logger.debug(
+            f"[MPLEX_STREAM] _do_read: starting read "
+            f"stream_id={self.stream_id}, n={n}, peer_id={peer_id}"
+        )
         async with self.rw_lock.read_lock():
+            logger.debug(
+                f"[MPLEX_STREAM] _do_read: acquired read lock "
+                f"stream_id={self.stream_id}, peer_id={peer_id}"
+            )
             if n is not None and n < 0:
                 raise ValueError(
                     "the number of bytes to read `n` must be non-negative or "
                     f"`None` to indicate read until EOF, got n={n}"
                 )
-            if self.event_reset.is_set():
-                raise MplexStreamReset
             if n is None:
+                logger.debug(
+                    f"[MPLEX_STREAM] _do_read: reading until EOF "
+                    f"stream_id={self.stream_id}, peer_id={peer_id}"
+                )
                 return await self._read_until_eof()
+            # Try to read buffered data first, even if reset is set
+            # This allows reading data that arrived before the reset
+            logger.debug(
+                f"[MPLEX_STREAM] _do_read: checking buffer "
+                f"stream_id={self.stream_id}, buf_len={len(self._buf)}, "
+                f"peer_id={peer_id}"
+            )
             if len(self._buf) == 0:
                 data: bytes
                 # Peek whether there is data available. If yes, we just read until
                 # there is no data, then return.
                 try:
                     data = self.incoming_data_channel.receive_nowait()
+                    logger.debug(
+                        f"[MPLEX_STREAM] _do_read: received data non-blocking "
+                        f"stream_id={self.stream_id}, data_len={len(data)}, "
+                        f"peer_id={peer_id}"
+                    )
                     self._buf.extend(data)
                 except trio.EndOfChannel:
+                    logger.debug(
+                        f"[MPLEX_STREAM] _do_read: EndOfChannel "
+                        f"stream_id={self.stream_id}, "
+                        f"reset={self.event_reset.is_set()}, "
+                        f"buf_len={len(self._buf)}, peer_id={peer_id}"
+                    )
+                    # If reset is set, raise reset only if no data was buffered
+                    # This allows reading data that arrived before the reset
+                    if self.event_reset.is_set() and len(self._buf) == 0:
+                        logger.debug(
+                            f"[MPLEX_STREAM] _do_read: raising MplexStreamReset "
+                            f"stream_id={self.stream_id}, peer_id={peer_id}"
+                        )
+                        raise MplexStreamReset
                     raise MplexStreamEOF
                 except trio.WouldBlock:
+                    logger.debug(
+                        f"[MPLEX_STREAM] _do_read: WouldBlock, waiting for data "
+                        f"stream_id={self.stream_id}, peer_id={peer_id}"
+                    )
                     # We know `receive` will be blocked here. Wait for data here with
                     # `receive` and catch all kinds of errors here.
                     try:
                         data = await self.incoming_data_channel.receive()
+                        logger.debug(
+                            f"[MPLEX_STREAM] _do_read: received data blocking "
+                            f"stream_id={self.stream_id}, data_len={len(data)}, "
+                            f"peer_id={peer_id}"
+                        )
                         self._buf.extend(data)
                     except trio.EndOfChannel:
-                        if self.event_reset.is_set():
+                        logger.debug(
+                            f"[MPLEX_STREAM] _do_read: EndOfChannel during "
+                            f"blocking receive stream_id={self.stream_id}, "
+                            f"reset={self.event_reset.is_set()}, "
+                            f"buf_len={len(self._buf)}, peer_id={peer_id}"
+                        )
+                        # If reset is set, raise reset only if no data was buffered
+                        # This allows reading data that arrived before the reset
+                        if self.event_reset.is_set() and len(self._buf) == 0:
                             raise MplexStreamReset
                         if self.event_remote_closed.is_set():
                             raise MplexStreamEOF
@@ -176,10 +235,39 @@ class MplexStream(IMuxedStream):
                             "`incoming_data_channel` is closed but stream is not reset."
                             "This should never happen."
                         ) from error
-            self._buf.extend(self._read_return_when_blocked())
-            payload = self._buf[:n]
-            self._buf = self._buf[len(payload) :]
-            return bytes(payload)
+            # Try to read any remaining data from channel (non-blocking)
+            additional_data = self._read_return_when_blocked()
+            if len(additional_data) > 0:
+                logger.debug(
+                    f"[MPLEX_STREAM] _do_read: read additional data "
+                    f"stream_id={self.stream_id}, "
+                    f"additional_len={len(additional_data)}, peer_id={peer_id}"
+                )
+            self._buf.extend(additional_data)
+            # If we have data in buffer, return it even if reset is set
+            # This allows reading data that arrived before the reset
+            if len(self._buf) > 0:
+                payload = self._buf[:n]
+                self._buf = self._buf[len(payload) :]
+                logger.debug(
+                    f"[MPLEX_STREAM] _do_read: returning data "
+                    f"stream_id={self.stream_id}, payload_len={len(payload)}, "
+                    f"remaining_buf_len={len(self._buf)}, peer_id={peer_id}"
+                )
+                return bytes(payload)
+            # Only raise reset if no data is available
+            if self.event_reset.is_set():
+                logger.debug(
+                    f"[MPLEX_STREAM] _do_read: raising MplexStreamReset (no data) "
+                    f"stream_id={self.stream_id}, peer_id={peer_id}"
+                )
+                raise MplexStreamReset
+            # Should not reach here, but return empty bytes as fallback
+            logger.warning(
+                f"[MPLEX_STREAM] _do_read: returning empty bytes (unexpected) "
+                f"stream_id={self.stream_id}, peer_id={peer_id}"
+            )
+            return b""
 
     async def write(self, data: bytes) -> None:
         """
@@ -204,11 +292,32 @@ class MplexStream(IMuxedStream):
 
         :param data: bytes to write
         """
+        peer_id = getattr(self.muxed_conn, "peer_id", "unknown")
+        logger.debug(
+            f"[MPLEX_STREAM] _do_write: starting write "
+            f"stream_id={self.stream_id}, data_len={len(data)}, peer_id={peer_id}"
+        )
         async with self.rw_lock.write_lock():
+            logger.debug(
+                f"[MPLEX_STREAM] _do_write: acquired write lock "
+                f"stream_id={self.stream_id}, peer_id={peer_id}"
+            )
             if self.event_local_closed.is_set():
+                logger.error(
+                    f"[MPLEX_STREAM] _do_write: stream closed "
+                    f"stream_id={self.stream_id}, peer_id={peer_id}"
+                )
                 raise MplexStreamClosed(f"cannot write to closed stream: data={data!r}")
             flag = self._get_header_flag("message")
+            logger.debug(
+                f"[MPLEX_STREAM] _do_write: sending message "
+                f"stream_id={self.stream_id}, flag={flag.name}, peer_id={peer_id}"
+            )
             await self.muxed_conn.send_message(flag, data, self.stream_id)
+            logger.debug(
+                f"[MPLEX_STREAM] _do_write: write completed "
+                f"stream_id={self.stream_id}, peer_id={peer_id}"
+            )
 
     async def close(self) -> None:
         """
