@@ -63,8 +63,8 @@ async def test_anyio_service_external_api_raises_when_cancelled():
         with pytest.raises(ExceptionGroup):
             async with anyio.create_task_group() as tg:
                 # an event to ensure that we are indeed within the body of the
-                is_within_fn = anyio.Event()
-                trigger_return = anyio.Event()
+                is_within_fn = anyio.create_event()
+                trigger_return = anyio.create_event()
 
                 await tg.spawn(service.get_7, trigger_return, is_within_fn)
 
@@ -99,7 +99,7 @@ async def test_anyio_service_external_api_raises_when_finished():
 
 @pytest.mark.anyio
 async def test_trio_external_api_call_that_schedules_task():
-    done = anyio.Event()
+    done = anyio.create_event()
 
     class MyService(Service):
         async def run(self):

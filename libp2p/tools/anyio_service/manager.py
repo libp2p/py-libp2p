@@ -15,6 +15,9 @@ import anyio
 from anyio import TaskInfo
 from anyio.abc import TaskGroup
 
+if TYPE_CHECKING:
+    from anyio.abc import Event, Lock
+
 from .api import InternalManagerAPI
 from .exceptions import DaemonTaskExit, LifecycleError
 from .stats import Stats, TaskStats
@@ -75,14 +78,14 @@ class AnyIOManager(InternalManagerAPI):
         self._verbose = is_verbose_logging_enabled()
 
         # Lifecycle events (created lazily to avoid async context requirement)
-        self._started: anyio.Event | None = None
-        self._finished: anyio.Event | None = None
+        self._started: Event | None = None
+        self._finished: Event | None = None
 
         # Cancellation flag (sync, since cancel() must be non-async per API)
         self._cancel_requested: bool = False
 
         # Lifecycle lock (created lazily to avoid async context requirement)
-        self._run_lock: anyio.Lock | None = None
+        self._run_lock: Lock | None = None
 
         # Stats tracking
         self._total_task_count = 0

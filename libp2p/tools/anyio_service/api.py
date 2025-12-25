@@ -208,7 +208,7 @@ _ChannelPayload = tuple[Optional[Any], Optional[BaseException]]
 async def _wait_finished(
     service: ServiceAPI,
     api_func: Callable[..., Any],
-    queue: anyio.Queue,
+    queue: Any,  # anyio.Queue
 ) -> None:
     """Helper for external_api: wait for service to finish."""
     manager = service.get_manager()
@@ -242,7 +242,7 @@ async def _wait_api_fn(
     api_fn: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    queue: anyio.Queue,
+    queue: Any,  # anyio.Queue
 ) -> None:
     """Helper for external_api: execute the API function."""
     try:
@@ -281,7 +281,7 @@ def external_api(func: TFunc) -> TFunc:
             )
 
         # Create a queue for communication
-        result_queue: anyio.Queue = anyio.create_queue(1)
+        result_queue = anyio.create_queue(1)  # type: ignore[attr-defined]
 
         # Race the API call against service finishing
         async with anyio.create_task_group() as tg:

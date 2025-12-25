@@ -12,6 +12,9 @@ import uuid
 import anyio
 from anyio import TaskInfo
 
+if TYPE_CHECKING:
+    from anyio.abc import CancelScope, Event
+
 from .exceptions import DaemonTaskExit, LifecycleError, TooManyChildrenException
 
 if TYPE_CHECKING:
@@ -209,10 +212,10 @@ class FunctionTask(BaseTaskWithChildren):
         self._count_in_stats = count_in_stats  # Whether to include in user-facing stats
 
         # Event to track when task is done (created lazily in async context)
-        self._done: anyio.Event | None = None
+        self._done: Event | None = None
 
         # Cancel scope for ordered cancellation (created lazily in async context)
-        self._cancel_scope: anyio.CancelScope | None = None
+        self._cancel_scope: CancelScope | None = None
 
     # Stats tracking API
     @property
