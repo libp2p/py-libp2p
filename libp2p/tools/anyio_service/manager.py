@@ -151,9 +151,9 @@ class AnyIOManager(InternalManagerAPI):
     async def _ensure_initialized(self) -> None:
         """Ensure lifecycle primitives are initialized (called from async context)."""
         if self._started is None:
-            self._started = anyio.create_event()
-            self._finished = anyio.create_event()
-            self._run_lock = anyio.create_lock()
+            self._started = anyio.Event()
+            self._finished = anyio.Event()
+            self._run_lock = anyio.Lock()
 
     async def wait_started(self) -> None:
         await self._ensure_initialized()
@@ -229,8 +229,8 @@ class AnyIOManager(InternalManagerAPI):
                     self._system_nursery = system_nursery
 
                     # System tasks
-                    await system_nursery.spawn(self._handle_cancelled)  # type: ignore[arg-type]
-                    await system_nursery.spawn(self._task_spawner)  # type: ignore[arg-type]
+                    system_nursery.start_soon(self._handle_cancelled)  # type: ignore[arg-type]
+                    system_nursery.start_soon(self._task_spawner)  # type: ignore[arg-type]
 
                     try:
                         async with anyio.create_task_group() as task_nursery:
@@ -238,7 +238,7 @@ class AnyIOManager(InternalManagerAPI):
 
                             # Mark as started
                             if self._started is not None:
-                                await self._started.set()
+                                self._started.set()
 
                             # Run the main service (internal task, not counted in stats)
                             self.run_task(
@@ -256,12 +256,12 @@ class AnyIOManager(InternalManagerAPI):
                     finally:
                         # Cancel system task group to clean up
                         if system_nursery.cancel_scope is not None:
-                            await system_nursery.cancel_scope.cancel()
+                            system_nursery.cancel_scope.cancel()
 
         finally:
             # Mark as finished
             if self._finished is not None:
-                await self._finished.set()
+                self._finished.set()
             self.logger.debug("%s: finished", self._service)
 
         # HIGH COMPLEXITY: Raise collected errors
@@ -305,7 +305,7 @@ class AnyIOManager(InternalManagerAPI):
             self._task_nursery is not None
             and self._task_nursery.cancel_scope is not None
         ):
-            await self._task_nursery.cancel_scope.cancel()
+            self._task_nursery.cancel_scope.cancel()
 
     # ========================================================================
     # HIGH COMPLEXITY: Parent Task Finding
@@ -363,7 +363,7 @@ class AnyIOManager(InternalManagerAPI):
                     while self._task_queue and self._task_nursery is not None:
                         task, name = self._task_queue.pop(0)
                         try:
-                            await self._task_nursery.spawn(  # type: ignore[unused-coroutine]
+                            self._task_nursery.start_soon(
                                 self._run_and_manage_task, task, name=name
                             )
                         except RuntimeError:
@@ -459,7 +459,7 @@ class AnyIOManager(InternalManagerAPI):
 
         HIGH COMPLEXITY:
         - Creates FunctionTask with full lifecycle
-        - Finds parent using await anyio.get_current_task()
+        - Finds parent using anyio.get_current_task()
         - Adds to task hierarchy
         - Schedules for execution
         """
@@ -499,7 +499,7 @@ class AnyIOManager(InternalManagerAPI):
 
         HIGH COMPLEXITY:
         - Creates ChildServiceTask with full lifecycle
-        - Finds parent using await anyio.get_current_task()
+        - Finds parent using anyio.get_current_task()
         - Adds to task hierarchy
         - Returns child manager for external control
         """

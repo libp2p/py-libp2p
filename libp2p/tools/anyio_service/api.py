@@ -9,6 +9,7 @@ import sys
 from typing import Any, Optional, TypeVar, cast
 
 import anyio
+from anyio.streams.memory import MemoryObjectSendStream
 
 from .exceptions import LifecycleError
 from .stats import Stats
@@ -208,13 +209,13 @@ _ChannelPayload = tuple[Optional[Any], Optional[BaseException]]
 async def _wait_finished(
     service: ServiceAPI,
     api_func: Callable[..., Any],
-    queue: Any,  # anyio.Queue
+    send_stream: MemoryObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: wait for service to finish."""
     manager = service.get_manager()
 
     if manager.is_finished:
-        await queue.put(
+        await send_stream.send(
             (
                 None,
                 LifecycleError(
@@ -226,7 +227,7 @@ async def _wait_finished(
         return
 
     await manager.wait_finished()
-    await queue.put(
+    await send_stream.send(
         (
             None,
             LifecycleError(
@@ -242,7 +243,7 @@ async def _wait_api_fn(
     api_fn: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    queue: Any,  # anyio.Queue
+    send_stream: MemoryObjectSendStream[_ChannelPayload],
 ) -> None:
     """Helper for external_api: execute the API function."""
     try:
@@ -253,9 +254,9 @@ async def _wait_api_fn(
             raise Exception(
                 "This should be unreachable but acts as a type guard for mypy"
             )
-        await queue.put((None, exc_value.with_traceback(exc_tb)))
+        await send_stream.send((None, exc_value.with_traceback(exc_tb)))
     else:
-        await queue.put((result, None))
+        await send_stream.send((result, None))
 
 
 def external_api(func: TFunc) -> TFunc:
@@ -280,22 +281,24 @@ def external_api(func: TFunc) -> TFunc:
                 f"Cannot access external API {func}. Service {self} is not running."
             )
 
-        # Create a queue for communication
-        result_queue = anyio.create_queue(1)  # type: ignore[attr-defined]
+        # Create a memory object stream for communication
+        send_stream, receive_stream = anyio.create_memory_object_stream[
+            _ChannelPayload
+        ](1)
 
         # Race the API call against service finishing
         async with anyio.create_task_group() as tg:
-            await tg.spawn(
-                _wait_api_fn,  # type: ignore
+            tg.start_soon(
+                _wait_api_fn,
                 self,
                 func,
                 args,
                 kwargs,
-                result_queue,
+                send_stream,
             )
-            await tg.spawn(_wait_finished, self, func, result_queue)
-            result, err = await result_queue.get()  # type: ignore[no-untyped-call]
-            tg.cancel_scope.cancel()  # type: ignore[unused-coroutine]
+            tg.start_soon(_wait_finished, self, func, send_stream)
+            result, err = await receive_stream.receive()
+            tg.cancel_scope.cancel()
 
         if err is None:
             return result

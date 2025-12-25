@@ -254,13 +254,14 @@ class FunctionTask(BaseTaskWithChildren):
         """
         # Initialize primitives (must be done in async context for AnyIO)
         if self._done is None:
-            self._done = anyio.create_event()
+            self._done = anyio.Event()
 
-        self.anyio_task = await anyio.get_current_task()
+        self.anyio_task = anyio.get_current_task()
 
         try:
-            async with anyio.open_cancel_scope() as cancel_scope:
+            with anyio.CancelScope() as cancel_scope:
                 self._cancel_scope = cancel_scope
+                await self._async_fn(*self._async_fn_args)
 
                 if self.daemon:
                     raise DaemonTaskExit(f"Daemon task {self} exited")
@@ -271,7 +272,7 @@ class FunctionTask(BaseTaskWithChildren):
 
         finally:
             if self._done is not None:
-                await self._done.set()
+                self._done.set()
             if self.parent is not None:
                 self.parent.discard_child(self)
 
@@ -287,7 +288,7 @@ class FunctionTask(BaseTaskWithChildren):
 
         # Then cancel self
         if self._cancel_scope is not None:
-            await self._cancel_scope.cancel()
+            self._cancel_scope.cancel()
         await self.wait_done()
 
     @property

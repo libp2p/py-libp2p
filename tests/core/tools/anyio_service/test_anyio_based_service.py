@@ -11,6 +11,7 @@ else:
 
 import pytest
 import anyio
+from anyio import CancelScope, Event
 
 from libp2p.tools.anyio_service import (
     AnyIOManager,
@@ -41,9 +42,9 @@ async def do_service_lifecycle_check(
         assert manager.is_cancelled is False
         assert manager.is_finished is False
 
-        await tg.spawn(manager_run_fn)
+        tg.start_soon(manager_run_fn)
 
-        async with anyio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await manager.wait_started()
 
         assert manager.is_started is True
@@ -54,7 +55,7 @@ async def do_service_lifecycle_check(
         # trigger the service to exit
         trigger_exit_condition_fn()
 
-        async with anyio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await manager.wait_finished()
 
         if should_be_cancelled:
@@ -88,7 +89,7 @@ def test_service_manager_initial_state():
 
 @pytest.mark.anyio
 async def test_anyio_service_lifecycle_run_and_clean_exit():
-    trigger_exit = anyio.create_event()
+    trigger_exit = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -109,7 +110,7 @@ async def test_anyio_service_lifecycle_run_and_clean_exit():
 async def test_anyio_service_lifecycle_run_and_external_cancellation():
     @as_service
     async def ServiceTest(manager):
-        await anyio.create_event().wait()
+        await Event().wait()
 
     service = ServiceTest()
     manager = AnyIOManager(service)
@@ -124,7 +125,7 @@ async def test_anyio_service_lifecycle_run_and_external_cancellation():
 
 @pytest.mark.anyio
 async def test_anyio_service_lifecycle_run_and_exception():
-    trigger_error = anyio.create_event()
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -148,7 +149,7 @@ async def test_anyio_service_lifecycle_run_and_exception():
 
 @pytest.mark.anyio
 async def test_anyio_service_lifecycle_run_and_task_exception():
-    trigger_error = anyio.create_event()
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -175,7 +176,7 @@ async def test_anyio_service_lifecycle_run_and_task_exception():
 
 @pytest.mark.anyio
 async def test_sub_service_cancelled_when_parent_stops():
-    ready_cancel = anyio.create_event()
+    ready_cancel = Event()
 
     # This test runs a service that runs a sub-service that sleeps forever. When the
     # parent exits, the sub-service should be cancelled as well.
@@ -209,7 +210,7 @@ async def test_sub_service_cancelled_when_parent_stops():
 
 @pytest.mark.anyio
 async def test_anyio_service_lifecycle_run_and_daemon_task_exit():
-    trigger_error = anyio.create_event()
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -239,11 +240,11 @@ async def test_exceptiongroup_in_run():
     # This test should cause AnyIOManager.run() to explicitly raise an ExceptionGroup
     # containing two exceptions -- one raised inside its run() method and another
     # raised by the daemon task exiting early.
-    trigger_error = anyio.create_event()
+    trigger_error = Event()
 
     class ServiceTest(Service):
         async def run(self):
-            ready = anyio.create_event()
+            ready = Event()
             self.manager.run_task(self.error_fn, ready)
             await ready.wait()
             trigger_error.set()
@@ -303,7 +304,7 @@ async def test_anyio_service_manager_stop():
 
 @pytest.mark.anyio
 async def test_anyio_service_manager_run_task():
-    task_event = anyio.create_event()
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -314,13 +315,13 @@ async def test_anyio_service_manager_run_task():
         await manager.wait_finished()
 
     async with background_anyio_service(RunTaskService()):
-        async with anyio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await task_event.wait()
 
 
 @pytest.mark.anyio
 async def test_anyio_service_manager_run_task_waits_for_task_completion():
-    task_event = anyio.create_event()
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -334,14 +335,14 @@ async def test_anyio_service_manager_run_task_waits_for_task_completion():
         # completion unless explicitely cancelled.
 
     async with background_anyio_service(RunTaskService()):
-        async with anyio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await task_event.wait()
 
 
 @pytest.mark.anyio
 async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishes():
-    task_event = anyio.create_event()
-    service_finished = anyio.create_event()
+    task_event = Event()
+    service_finished = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -356,23 +357,23 @@ async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishe
         service_finished.set()
 
     async with background_anyio_service(RunTaskService()) as manager:
-        async with anyio.fail_after(0.01):
+        with anyio.fail_after(0.01):
             await service_finished.wait()
 
         # show that the service hangs waiting for the task to complete.
-        async with anyio.move_on_after(0.01) as cancel_scope:
+        with anyio.move_on_after(0.01) as cancel_scope:
             await manager.wait_finished()
         assert cancel_scope.cancel_called is True
 
         # trigger cancellation and see that the service actually stops
         manager.cancel()
-        async with anyio.fail_after(0.01):
+        with anyio.fail_after(0.01):
             await manager.wait_finished()
 
 
 @pytest.mark.anyio
 async def test_anyio_service_manager_run_task_reraises_exceptions():
-    task_event = anyio.create_event()
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -381,19 +382,19 @@ async def test_anyio_service_manager_run_task_reraises_exceptions():
             raise Exception("task exception in run_task")
 
         manager.run_task(task_fn)
-        async with anyio.fail_after(1):
-            await anyio.create_event().wait()
+        with anyio.fail_after(1):
+            await Event().wait()
 
     with pytest.raises(ExceptionGroup):
         async with background_anyio_service(RunTaskService()):
             task_event.set()
-            async with anyio.fail_after(1):
-                await anyio.create_event().wait()
+            with anyio.fail_after(1):
+                await Event().wait()
 
 
 @pytest.mark.anyio
 async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
-    task_event = anyio.create_event()
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -401,14 +402,14 @@ async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
             await task_event.wait()
 
         manager.run_daemon_task(daemon_task_fn, name="daemon_task_fn")
-        async with anyio.fail_after(1):
-            await anyio.create_event().wait()
+        with anyio.fail_after(1):
+            await Event().wait()
 
     with pytest.raises(ExceptionGroup):
         async with background_anyio_service(RunTaskService()):
             task_event.set()
-            async with anyio.fail_after(1):
-                await anyio.create_event().wait()
+            with anyio.fail_after(1):
+                await Event().wait()
 
 
 @pytest.mark.anyio
@@ -430,7 +431,7 @@ async def test_anyio_service_manager_propogates_and_records_exceptions():
 
 @pytest.mark.anyio
 async def test_anyio_service_lifecycle_run_and_clean_exit_with_child_service():
-    trigger_exit = anyio.create_event()
+    trigger_exit = Event()
 
     @as_service
     async def ChildServiceTest(manager):
@@ -454,7 +455,7 @@ async def test_anyio_service_lifecycle_run_and_clean_exit_with_child_service():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_daemon_child_service():
-    ready = anyio.create_event()
+    ready = Event()
 
     @as_service
     async def ChildServiceTest(manager):
@@ -474,8 +475,8 @@ async def test_anyio_service_with_daemon_child_service():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_daemon_child_task():
-    ready = anyio.create_event()
-    started = anyio.create_event()
+    ready = Event()
+    started = Event()
 
     async def _task():
         started.set()
@@ -495,7 +496,7 @@ async def test_anyio_service_with_daemon_child_task():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_async_generator():
-    is_within_agen = anyio.create_event()
+    is_within_agen = Event()
 
     async def do_agen():
         while True:
@@ -542,7 +543,7 @@ async def test_anyio_service_disallows_task_scheduling_after_cancel():
 
 @pytest.mark.anyio
 async def test_anyio_service_cancellation_with_running_daemon_task():
-    in_daemon = anyio.create_event()
+    in_daemon = Event()
 
     class ServiceTest(Service):
         async def run(self):
@@ -561,7 +562,7 @@ async def test_anyio_service_cancellation_with_running_daemon_task():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_try_finally_cleanup():
-    ready_cancel = anyio.create_event()
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -583,7 +584,7 @@ async def test_anyio_service_with_try_finally_cleanup():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
-    ready_cancel = anyio.create_event()
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -606,7 +607,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
-    ready_cancel = anyio.create_event()
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -616,7 +617,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                async with anyio.open_cancel_scope():
+                with CancelScope():
                     await anyio.sleep(0)
                 self.cleanup_up = True
 

@@ -20,13 +20,13 @@ async def checkpoint():
 
 @pytest.mark.anyio
 async def test_anyio_manager_stats():
-    ready = anyio.create_event()
+    ready = anyio.Event()
 
     class StatsTest(Service):
         async def run(self):
             # 2 that run forever
-            self.manager.run_task(lambda: anyio.create_event().wait())
-            self.manager.run_task(lambda: anyio.create_event().wait())
+            self.manager.run_task(lambda: anyio.Event().wait())
+            self.manager.run_task(lambda: anyio.Event().wait())
 
             # 2 that complete
             self.manager.run_task(checkpoint)
@@ -37,7 +37,7 @@ async def test_anyio_manager_stats():
 
         async def run_with_children(self, num_children):
             for _ in range(num_children):
-                self.manager.run_task(lambda: anyio.create_event().wait())
+                self.manager.run_task(lambda: anyio.Event().wait())
             ready.set()
 
         def run_external_root(self):
@@ -46,13 +46,13 @@ async def test_anyio_manager_stats():
     service = StatsTest()
     async with anyio.create_task_group() as tg:
         manager = AnyIOManager(service)
-        await tg.spawn(manager.run)
+        tg.start_soon(manager.run)  # type: ignore[arg-type]
         await manager.wait_started()
 
         try:
             service.run_external_root()
             assert len(manager._root_tasks) == 2
-            async with anyio.fail_after(1):
+            with anyio.fail_after(1):
                 await ready.wait()
 
             # we need to yield to the event loop a few times to allow the various
@@ -78,17 +78,17 @@ async def test_anyio_manager_stats():
 
 @pytest.mark.anyio
 async def test_anyio_manager_stats_does_not_count_main_run_method():
-    ready = anyio.create_event()
+    ready = anyio.Event()
 
     class StatsTest(Service):
         async def run(self):
-            self.manager.run_task(lambda: anyio.create_event().wait())
+            self.manager.run_task(lambda: anyio.Event().wait())
             ready.set()
 
     service = StatsTest()
     async with anyio.create_task_group() as tg:
         manager = AnyIOManager(service)
-        await tg.spawn(manager.run)  # type: ignore[arg-type]
+        tg.start_soon(manager.run)  # type: ignore[arg-type]
         await manager.wait_started()
 
         try:
