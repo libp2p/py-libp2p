@@ -322,18 +322,25 @@ class BasicHost(IHost):
         """
         return self.multiselect
 
-    def get_addrs(self) -> list[multiaddr.Multiaddr]:
+    def get_transport_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        :return: all the multiaddr addresses this host is listening to
+        Return the raw multiaddr addresses this host is listening to,
+        without the /p2p/{peer_id} suffix.
         """
-        # TODO: We don't need "/p2p/{peer_id}" postfix actually.
-        p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-
         addrs: list[multiaddr.Multiaddr] = []
         for transport in self._network.listeners.values():
-            for addr in transport.get_addrs():
-                addrs.append(addr.encapsulate(p2p_part))
+            addrs.extend(transport.get_addrs())
         return addrs
+
+    def get_addrs(self) -> list[multiaddr.Multiaddr]:
+        """
+        Return all the multiaddr addresses this host is listening to.
+
+        Note: This method appends the /p2p/{peer_id} suffix to the addresses.
+        Use get_transport_addrs() for raw transport addresses.
+        """
+        p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
+        return [addr.encapsulate(p2p_part) for addr in self.get_transport_addrs()]
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -368,7 +375,7 @@ class BasicHost(IHost):
                     if await upnp_manager.discover():
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.add_port_mapping(port, "TCP")
+                                await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
@@ -383,7 +390,7 @@ class BasicHost(IHost):
                         logger.debug("Removing UPnP port mappings")
                         for addr in self.get_addrs():
                             if port := addr.value_for_protocol("tcp"):
-                                await upnp_manager.remove_port_mapping(port, "TCP")
+                                await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
                         self.bootstrap.stop()
 

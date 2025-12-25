@@ -181,7 +181,6 @@ class WebRTCAsyncBridge:
             # data_channel.send is a synchronous function, no need to await
             # await aio_as_trio(data_channel.send)(data)
             data_channel.send(data)
-
             logger.debug(f"Successfully sent {len(data)} bytes")
         except Exception as e:
             logger.error(f"Failed to send data: {e}")

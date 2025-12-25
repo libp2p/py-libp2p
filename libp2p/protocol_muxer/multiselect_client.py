@@ -11,6 +11,9 @@ from .exceptions import (
     ProtocolNotSupportedError,
 )
 
+logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
+logger.setLevel(logging.DEBUG)
+
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased for high-concurrency scenarios
