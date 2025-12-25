@@ -28,5 +28,3 @@ else
     echo "  wasm-pack build --target web"
     exit 1
 fi
-
-

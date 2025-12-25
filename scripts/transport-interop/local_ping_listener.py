@@ -4,12 +4,9 @@ Local Python ping listener for transport-interop tests.
 This version writes the listener address to a file instead of Redis.
 """
 
-import json
 import logging
-import os
-import sys
-import time
 from pathlib import Path
+import sys
 
 import multiaddr
 import trio
@@ -84,7 +81,9 @@ class LocalPingListener:
                     if "p2p" in protocols:
                         p2p_value = addr.value_for_protocol("p2p")
                         if p2p_value:
-                            addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+                            addr = addr.decapsulate(
+                                multiaddr.Multiaddr(f"/p2p/{p2p_value}")
+                            )
                     ws_addr = addr.encapsulate(multiaddr.Multiaddr("/ws"))
                     if p2p_value:
                         ws_addr = ws_addr.encapsulate(
@@ -92,7 +91,10 @@ class LocalPingListener:
                         )
                     ws_addrs.append(ws_addr)
             except Exception as e:
-                print(f"Error converting address {addr} to WebSocket: {e}", file=sys.stderr)
+                print(
+                    f"Error converting address {addr} to WebSocket: {e}",
+                    file=sys.stderr,
+                )
         if ws_addrs:
             return ws_addrs
         return [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
@@ -144,7 +146,9 @@ class LocalPingListener:
         self.address_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.address_file, "w") as f:
             f.write(address)
-        print(f"Wrote listener address to {self.address_file}: {address}", file=sys.stderr)
+        print(
+            f"Wrote listener address to {self.address_file}: {address}", file=sys.stderr
+        )
 
     async def run(self) -> None:
         """Run the listener."""
@@ -193,13 +197,19 @@ class LocalPingListener:
 
                 while elapsed < timeout:
                     if self.ping_received:
-                        print("Ping received and responded, listener exiting", file=sys.stderr)
+                        print(
+                            "Ping received and responded, listener exiting",
+                            file=sys.stderr,
+                        )
                         return
                     await trio.sleep(check_interval)
                     elapsed += check_interval
 
                 if not self.ping_received:
-                    print(f"Timeout: No ping received within {timeout} seconds", file=sys.stderr)
+                    print(
+                        f"Timeout: No ping received within {timeout} seconds",
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
 
         except Exception as e:
@@ -216,7 +226,9 @@ async def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Local Python ping listener")
-    parser.add_argument("--port", type=int, default=0, help="Port number (0 = auto-select)")
+    parser.add_argument(
+        "--port", type=int, default=0, help="Port number (0 = auto-select)"
+    )
     parser.add_argument(
         "--address-file",
         type=str,
@@ -248,5 +260,3 @@ async def main():
 
 if __name__ == "__main__":
     trio.run(main)
-
-

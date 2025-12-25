@@ -65,5 +65,3 @@ echo "Test complete. Check /tmp/rust_dialer_test.log for full output."
 if [ -n "$COORD_PID" ]; then
     kill $COORD_PID 2>/dev/null || true
 fi
-
-

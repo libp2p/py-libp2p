@@ -7,21 +7,25 @@ The Rust dialer **IS working**! Here's what we've verified:
 ### ✅ What's Working
 
 1. **Rust dialer starts successfully**
+
    - Compiles without errors
    - Loads configuration from environment variables
    - Creates WASM server on port 8081
 
-2. **Chromedriver integration**
+1. **Chromedriver integration**
+
    - Starts chromedriver on random available port (no conflicts)
    - Connects to chromedriver successfully
    - Opens headless Chrome browser
 
-3. **WASM server**
+1. **WASM server**
+
    - Serves HTML page with WASM test
    - Serves WASM files (`interop_tests.js`, `interop_tests_bg.wasm`)
    - Files load successfully (HTTP 200 responses)
 
-4. **Browser navigation**
+1. **Browser navigation**
+
    - Browser navigates to WASM test page
    - WASM files are loaded by browser
    - Page executes JavaScript
@@ -31,6 +35,7 @@ The Rust dialer **IS working**! Here's what we've verified:
 The WASM code loads but **doesn't complete the ping test**. The test times out after 30 seconds.
 
 This suggests:
+
 - The WASM code may be encountering an error when trying to connect
 - There may be a network/connectivity issue between browser and Python listener
 - The listener address format might not be compatible
@@ -45,6 +50,7 @@ cd /home/luca/Informatica/Learning/PNL_Launchpad_Curriculum/Libp2p/py-libp2p/scr
 ```
 
 This will show detailed debug output showing:
+
 - Rust dialer startup
 - Chromedriver startup
 - Browser connection
@@ -98,13 +104,13 @@ The Rust dialer now includes extensive debug output prefixed with `[wasm_ping]`:
 ## Next Steps
 
 Since the Rust dialer is working, the issue is likely:
+
 1. **WASM code error** - Check browser console for JavaScript errors
-2. **Network connectivity** - Browser can't reach Python listener
-3. **Address format** - Listener address format incompatible with WASM
+1. **Network connectivity** - Browser can't reach Python listener
+1. **Address format** - Listener address format incompatible with WASM
 
 To debug further:
+
 - Check browser console logs (if possible)
 - Verify Python listener is accessible from browser
 - Check if WASM code is calling the coordinator correctly
-
-

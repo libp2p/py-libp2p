@@ -5,6 +5,7 @@ This is a local, standalone version of the Rust `wasm_ping` binary that can comp
 ## Overview
 
 This local Rust project:
+
 - Compiles independently with fixed dependencies
 - Uses the WASM package from the main rust-libp2p project (via symlink)
 - Provides the same functionality as the main project's `wasm_ping` binary
@@ -23,12 +24,14 @@ cargo build --bin wasm_ping
 ## Requirements
 
 1. The WASM package must be built in the main rust-libp2p project:
+
    ```bash
    cd $HOME/PNL_Launchpad_Curriculum/Libp2p/rust-libp2p/interop-tests
    wasm-pack build --target web
    ```
 
-2. If the main project has compilation issues, you may need to:
+1. If the main project has compilation issues, you may need to:
+
    - Fix dependency issues in the main project, OR
    - Use a pre-built WASM package from another source
 
@@ -55,5 +58,3 @@ export redis_addr=127.0.0.1:8080
 cd /home/luca/Informatica/Learning/PNL_Launchpad_Curriculum/Libp2p/py-libp2p/scripts/transport-interop/rust-local
 cargo run --bin wasm_ping
 ```
-
-

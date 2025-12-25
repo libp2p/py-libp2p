@@ -224,4 +224,3 @@ tail -50 /tmp/rust_dialer.log
 echo -e "${YELLOW}Coordinator logs:${NC}"
 tail -50 /tmp/coordinator.log
 exit 1
-

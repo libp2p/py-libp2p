@@ -6,9 +6,8 @@ Replaces Redis for coordination between Python listener and Rust wasm dialer.
 
 import json
 import logging
-import sys
 from pathlib import Path
-from typing import Optional
+import sys
 
 from aiohttp import web
 
@@ -16,11 +15,13 @@ logger = logging.getLogger("coordinator")
 
 
 class CoordinatorServer:
-    def __init__(self, address_file: str = "/tmp/libp2p_listener_addr.txt", port: int = 8080):
+    def __init__(
+        self, address_file: str = "/tmp/libp2p_listener_addr.txt", port: int = 8080
+    ):
         self.address_file = Path(address_file)
         self.port = port
-        self.listener_address: Optional[str] = None
-        self.test_result: Optional[dict] = None
+        self.listener_address: str | None = None
+        self.test_result: dict | None = None
 
     async def blpop_handler(self, request: web.Request) -> web.Response:
         """Handle Redis BLPOP proxy request."""
@@ -38,14 +39,20 @@ class CoordinatorServer:
                         return web.json_response([key, self.listener_address])
                     if self.address_file.exists():
                         try:
-                            self.listener_address = self.address_file.read_text().strip()
-                            logger.info(f"Read listener address from file: {self.listener_address}")
+                            self.listener_address = (
+                                self.address_file.read_text().strip()
+                            )
+                            logger.info(
+                                f"Read listener address from file: {self.listener_address}"
+                            )
                             return web.json_response([key, self.listener_address])
                         except Exception as e:
                             logger.warning(f"Error reading address file: {e}")
                     await asyncio.sleep(1)
 
-                return web.Response(status=500, text="Timeout waiting for listener address")
+                return web.Response(
+                    status=500, text="Timeout waiting for listener address"
+                )
             else:
                 return web.Response(status=400, text=f"Unknown key: {key}")
 
@@ -120,7 +127,9 @@ def main():
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Coordination server for local interop tests")
+    parser = argparse.ArgumentParser(
+        description="Coordination server for local interop tests"
+    )
     parser.add_argument(
         "--address-file",
         type=str,
@@ -144,4 +153,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
