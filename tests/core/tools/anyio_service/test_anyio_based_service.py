@@ -41,9 +41,9 @@ async def do_service_lifecycle_check(
         assert manager.is_cancelled is False
         assert manager.is_finished is False
 
-        tg.start_soon(manager_run_fn)
+        await tg.spawn(manager_run_fn)
 
-        with anyio.fail_after(0.1):
+        async with anyio.fail_after(0.1):
             await manager.wait_started()
 
         assert manager.is_started is True
@@ -54,7 +54,7 @@ async def do_service_lifecycle_check(
         # trigger the service to exit
         trigger_exit_condition_fn()
 
-        with anyio.fail_after(0.1):
+        async with anyio.fail_after(0.1):
             await manager.wait_finished()
 
         if should_be_cancelled:
@@ -109,7 +109,7 @@ async def test_anyio_service_lifecycle_run_and_clean_exit():
 async def test_anyio_service_lifecycle_run_and_external_cancellation():
     @as_service
     async def ServiceTest(manager):
-        await anyio.sleep_forever()
+        await anyio.Event().wait()
 
     service = ServiceTest()
     manager = AnyIOManager(service)
@@ -314,7 +314,7 @@ async def test_anyio_service_manager_run_task():
         await manager.wait_finished()
 
     async with background_anyio_service(RunTaskService()):
-        with anyio.fail_after(0.1):
+        async with anyio.fail_after(0.1):
             await task_event.wait()
 
 
@@ -334,7 +334,7 @@ async def test_anyio_service_manager_run_task_waits_for_task_completion():
         # completion unless explicitely cancelled.
 
     async with background_anyio_service(RunTaskService()):
-        with anyio.fail_after(0.1):
+        async with anyio.fail_after(0.1):
             await task_event.wait()
 
 
@@ -356,17 +356,17 @@ async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishe
         service_finished.set()
 
     async with background_anyio_service(RunTaskService()) as manager:
-        with anyio.fail_after(0.01):
+        async with anyio.fail_after(0.01):
             await service_finished.wait()
 
         # show that the service hangs waiting for the task to complete.
-        with anyio.move_on_after(0.01) as cancel_scope:
+        async with anyio.move_on_after(0.01) as cancel_scope:
             await manager.wait_finished()
-        assert cancel_scope.cancelled_caught is True
+        assert cancel_scope.cancel_called is True
 
         # trigger cancellation and see that the service actually stops
         manager.cancel()
-        with anyio.fail_after(0.01):
+        async with anyio.fail_after(0.01):
             await manager.wait_finished()
 
 
@@ -381,14 +381,14 @@ async def test_anyio_service_manager_run_task_reraises_exceptions():
             raise Exception("task exception in run_task")
 
         manager.run_task(task_fn)
-        with anyio.fail_after(1):
-            await anyio.sleep_forever()
+        async with anyio.fail_after(1):
+            await anyio.Event().wait()
 
     with pytest.raises(ExceptionGroup):
         async with background_anyio_service(RunTaskService()):
             task_event.set()
-            with anyio.fail_after(1):
-                await anyio.sleep_forever()
+            async with anyio.fail_after(1):
+                await anyio.Event().wait()
 
 
 @pytest.mark.anyio
@@ -401,14 +401,14 @@ async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
             await task_event.wait()
 
         manager.run_daemon_task(daemon_task_fn, name="daemon_task_fn")
-        with anyio.fail_after(1):
-            await anyio.sleep_forever()
+        async with anyio.fail_after(1):
+            await anyio.Event().wait()
 
     with pytest.raises(ExceptionGroup):
         async with background_anyio_service(RunTaskService()):
             task_event.set()
-            with anyio.fail_after(1):
-                await anyio.sleep_forever()
+            async with anyio.fail_after(1):
+                await anyio.Event().wait()
 
 
 @pytest.mark.anyio
@@ -616,7 +616,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                with anyio.CancelScope(shield=True):  # type: ignore[call-arg]
+                async with anyio.CancelScope():
                     await anyio.sleep(0)
                 self.cleanup_up = True
 

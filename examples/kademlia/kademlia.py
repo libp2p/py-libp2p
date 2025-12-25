@@ -32,9 +32,7 @@ from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
-from libp2p.kad_dht.utils import (
-    create_key_from_binary,
-)
+from libp2p.records.validator import Validator
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )

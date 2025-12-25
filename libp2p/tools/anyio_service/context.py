@@ -61,7 +61,7 @@ async def background_anyio_service(service: ServiceAPI) -> AsyncIterator[Manager
         manager = AnyIOManager(service)
         service._manager = manager
 
-        tg.start_soon(manager.run)  # type: ignore[arg-type]
+        await tg.spawn(manager.run)  # type: ignore[arg-type]
         await manager.wait_started()
 
         try:
