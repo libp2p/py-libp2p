@@ -34,11 +34,11 @@ def test_split_key_good_multi():
 
 
 def test_make_put_record():
-    key = "some_key"
+    key = b"some_key"
     value = b"some_value"
 
     record = make_put_record(key, value)
-    assert record.key == key.encode()
+    assert record.key == key
     assert record.value == value
 
 
