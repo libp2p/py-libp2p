@@ -65,5 +65,6 @@ Module contents
 
 .. automodule:: libp2p.tools.anyio_service
    :members:
+   :exclude-members: TrioManager
    :undoc-members:
    :show-inheritance:
