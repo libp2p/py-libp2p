@@ -1972,10 +1972,10 @@ class GossipSub(IPubsubRouter, Service):
 
                 if peer_id in scorer.ip_by_peer:
                     peer_ip = scorer.ip_by_peer[peer_id]
-                if peer_ip not in current_ips:
-                    # This peer would add IP diversity
-                    selected.append(peer_id)
-                    current_ips.add(peer_ip)
+                    if peer_ip not in current_ips:
+                        # This peer would add IP diversity
+                        selected.append(peer_id)
+                        current_ips.add(peer_ip)
 
         return selected
 
