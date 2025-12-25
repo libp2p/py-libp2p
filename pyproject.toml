@@ -19,7 +19,6 @@ maintainers = [
 ]
 dependencies = [
     "aioquic>=1.2.0",
-    "anyio>=1.2.0",
     "base58>=1.0.3",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
@@ -81,7 +80,7 @@ dev = [
     "sphinx>=6.0.0",
     "sphinx_rtd_theme>=1.0.0",
     "towncrier>=24,<25",
-    "p2pclient @ git+https://github.com/sumanjeet0012/py-libp2p-daemon-bindings.git@6d4e5e0c2b3a12fb377183187cf0cf4094229e9e",
+    "p2pclient==0.2.0",
     "pytest>=7.0.0",
     "pytest-xdist>=2.4.0",
     "pytest-trio>=0.5.2",
@@ -100,7 +99,7 @@ docs = [
 ]
 test = [
     "factory-boy>=2.12.0,<3.0.0",
-    "p2pclient @ git+https://github.com/sumanjeet0012/py-libp2p-daemon-bindings.git@6d4e5e0c2b3a12fb377183187cf0cf4094229e9e",
+    "p2pclient==0.2.0",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.4.0",
