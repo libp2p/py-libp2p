@@ -1,0 +1,13 @@
+- Added a lightweight peer reputation tracker for Kademlia lookups so network
+  searches prefer reliable peers without external dependencies.
+- Introduced an optional adaptive GossipSub tuner that tweaks mesh degree,
+  heartbeat interval, and PX peers based on live heartbeat metrics.
+- Extended the chat demo with an optional AI assistant that can summarize
+  conversations or auto-reply using transformers (when installed) or
+  heuristic fallbacks.
+- Added predictive heuristics for relay/AutoNAT: a new reachability predictor
+  now guides DCUtR hole-punch attempts and the AutoNAT service surfaces a
+  confidence-backed status classification.
+- Introduced a pubsub anomaly detector that tracks per-peer publish/control
+  rates, automatically blacklisting statistical outliers to mitigate spam.
+
