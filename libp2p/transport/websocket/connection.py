@@ -195,16 +195,20 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         """
         # ConnectionClosed has a 'reason' attribute which is a CloseReason object
+        # But some exceptions (like mocks in tests) may have code/reason directly
         close_reason_obj = getattr(e, "reason", None)
-        if close_reason_obj is not None:
+
+        # Check if reason is a CloseReason object (has 'code' attribute)
+        if close_reason_obj is not None and hasattr(close_reason_obj, "code"):
             close_code = getattr(close_reason_obj, "code", None)
             close_reason = (
                 getattr(close_reason_obj, "reason", None) or "Connection closed by peer"
             )
         else:
-            # Fallback if reason is not available
-            close_code = None
-            close_reason = "Connection closed by peer"
+            # Fallback: check if code and reason are directly on the exception
+            # (for mock exceptions in tests or other exception types)
+            close_code = getattr(e, "code", None)
+            close_reason = getattr(e, "reason", None) or "Connection closed by peer"
         return close_code, close_reason
 
     def _handle_connection_closed_exception(
