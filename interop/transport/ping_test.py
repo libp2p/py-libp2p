@@ -901,8 +901,46 @@ class PingTest:
                 print(f"Outputting results: {result}", file=sys.stderr)
                 print(json.dumps(result))
 
-                await stream.close()
-                print("Stream closed successfully", file=sys.stderr)
+                # Try to close the stream gracefully
+                # If the connection is already closed by the peer, that's okay
+                # This can happen when the listener closes the connection immediately
+                # after receiving the ping response (e.g., with Nim implementation)
+                try:
+                    await stream.close()
+                    print("Stream closed successfully", file=sys.stderr)
+                except Exception as e:
+                    # Check if the error is due to connection already being closed
+                    error_str = str(e)
+                    error_type = type(e).__name__
+
+                    # List of error messages/types that indicate connection closed
+                    connection_closed_indicators = [
+                        "connection closed",
+                        "Connection closed",
+                        "MplexUnavailable",
+                        "Failed to send close message",
+                        "WebSocket connection closed",
+                        "connection closed by peer",
+                        "ConnectionClosed",
+                    ]
+
+                    if any(
+                        keyword.lower() in error_str.lower() or keyword in error_type
+                        for keyword in connection_closed_indicators
+                    ):
+                        print(
+                            f"Stream close skipped: connection already closed by peer "
+                            f"({error_type}: {error_str[:100]})",
+                            file=sys.stderr,
+                        )
+                    else:
+                        # Re-raise if it's a different error we don't expect
+                        print(
+                            f"Unexpected error during stream close: "
+                            f"{error_type}: {error_str}",
+                            file=sys.stderr,
+                        )
+                        raise
 
         except Exception as e:
             print(f"Dialer error: {e}", file=sys.stderr)
