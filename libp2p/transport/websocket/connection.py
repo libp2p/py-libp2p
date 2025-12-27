@@ -288,8 +288,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
         """
         if self._closed:
-            # Return empty bytes to signal EOF (like TCP does)
-            return b""
+            # Raise IOException immediately when connection is closed
+            # This allows read_exactly() to immediately detect connection closure
+            # instead of retrying up to 100 times thinking it's "no data yet"
+            raise IOException("Connection is closed")
 
         async with self._read_lock:
             try:
@@ -431,6 +433,9 @@ class P2PWebSocketConnection(ReadWriteCloser):
                 # Re-raise IOException as-is (already has proper context)
                 raise
             except Exception as e:
+                # Handle connection closure missed by inner handlers
+                if self._is_connection_closed_exception(e):
+                    raise self._handle_connection_closed_exception(e, "read")
                 logger.error(f"WebSocket read failed: {e}")
                 raise IOException(f"Read failed: {str(e)}")
 
