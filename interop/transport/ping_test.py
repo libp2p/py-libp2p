@@ -596,30 +596,28 @@ class PingTest:
             print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
 
             wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
-            check_interval = 0.5
-            elapsed = 0
 
-            while elapsed < wait_timeout:
-                if self.ping_received:
-                    print(
-                        "Ping received and responded, waiting for connection to close.",
-                        file=sys.stderr,
-                    )
-                    # Wait a short time to allow dialer to finish closing the connection
-                    # This is especially important for implementations like JVM
-                    # that close connections more slowly
-                    await trio.sleep(3.0)
-                    print("Listener exiting", file=sys.stderr)
-                    return
-                await trio.sleep(check_interval)
-                elapsed += check_interval
+            # Wait for the full timeout period, matching Go implementation behavior
+            # This ensures the dialer has enough time to complete cleanup and exit
+            # before the listener exits. The dialer will exit first (after completing
+            # the ping), causing Docker Compose to stop all containers, and the
+            # listener will receive SIGTERM (exit code 143) which is treated as success.
+            # This approach is more reliable than exiting early after receiving ping,
+            # as it avoids race conditions with slower implementations like JVM.
+            print(
+                f"Listener ready, waiting up to {wait_timeout} seconds for ping...",
+                file=sys.stderr,
+            )
+            await trio.sleep(wait_timeout)
 
             if not self.ping_received:
                 print(
                     f"Timeout: No ping received within {wait_timeout} seconds",
                     file=sys.stderr,
                 )
-            sys.exit(1)
+                sys.exit(1)
+            else:
+                print("Ping received and responded, listener exiting", file=sys.stderr)
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
