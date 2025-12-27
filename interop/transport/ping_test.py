@@ -608,7 +608,7 @@ class PingTest:
                     # Wait a short time to allow dialer to finish closing the connection
                     # This is especially important for implementations like JVM
                     # that close connections more slowly
-                    await trio.sleep(1.0)
+                    await trio.sleep(3.0)
                     print("Listener exiting", file=sys.stderr)
                     return
                 await trio.sleep(check_interval)
