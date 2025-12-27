@@ -602,8 +602,14 @@ class PingTest:
             while elapsed < wait_timeout:
                 if self.ping_received:
                     print(
-                        "Ping received and responded, listener exiting", file=sys.stderr
+                        "Ping received and responded, waiting for connection to close.",
+                        file=sys.stderr,
                     )
+                    # Wait a short time to allow dialer to finish closing the connection
+                    # This is especially important for implementations like JVM
+                    # that close connections more slowly
+                    await trio.sleep(1.0)
+                    print("Listener exiting", file=sys.stderr)
                     return
                 await trio.sleep(check_interval)
                 elapsed += check_interval
