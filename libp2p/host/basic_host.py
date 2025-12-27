@@ -237,7 +237,7 @@ class BasicHost(IHost):
         self.get_peerstore().set_local_record(envelope)
 
         # Install transport manager and expose it on the underlying network.
-        self.transport_manager = TransportManager(self, self._network)
+        self.transport_manager = TransportManager(self, self._network)  # type: ignore[attr-defined]
         setattr(self._network, "transport_manager", self.transport_manager)
         base_transport = getattr(self._network, "transport", None)
         if isinstance(base_transport, ITransport):

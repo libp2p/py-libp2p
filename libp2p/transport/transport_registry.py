@@ -43,6 +43,14 @@ def _get_webrtc_transport() -> Any:
     return WebRTCTransport
 
 
+def _get_webrtc_direct_transport() -> Any:
+    from libp2p.transport.webrtc.private_to_public.transport import (
+        WebRTCDirectTransport,
+    )
+
+    return WebRTCDirectTransport
+
+
 logger = logging.getLogger("libp2p.transport.registry")
 
 
@@ -149,6 +157,15 @@ class TransportRegistry:
         except (ImportError, KeyError, TypeError) as e:
             logger.debug("WebRTC transport not available (optional dependency): %s", e)
 
+        # Register WebRTC-Direct transport for /webrtc-direct protocol
+        try:
+            WebRTCDirectTransport = _get_webrtc_direct_transport()
+            self.register_transport("webrtc-direct", WebRTCDirectTransport)
+        except (ImportError, KeyError, TypeError) as e:
+            logger.debug(
+                "WebRTC-Direct transport not available (optional dependency): %s", e
+            )
+
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
     ) -> None:
@@ -247,6 +264,10 @@ class TransportRegistry:
                             transport_class,
                         )
                 return transport_ctor()
+            elif protocol == "webrtc-direct":
+                # WebRTC-Direct transport doesn't require config
+                transport_ctor = cast(Any, transport_class)
+                return transport_ctor()
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()
@@ -316,10 +337,17 @@ def create_transport_for_multiaddr(
                     return registry.create_transport("wss", upgrader, **kwargs)
                 else:
                     return registry.create_transport("ws", upgrader, **kwargs)
+        elif "webrtc-direct" in protocols:
+            # For WebRTC-Direct, we need a valid structure like:
+            # /ip4/127.0.0.1/udp/0/webrtc-direct/certhash/.../p2p/PEER_ID
+            # Check if the multiaddr has proper WebRTC-Direct structure
+            if _is_valid_webrtc_multiaddr(maddr):
+                registry = get_transport_registry()
+                # WebRTC-Direct transport doesn't require upgrader
+                return registry.create_transport("webrtc-direct", upgrader, **kwargs)
         elif "webrtc" in protocols:
             # For WebRTC, we need a valid structure like:
             # /ip4/127.0.0.1/tcp/8080/ws/p2p/RELAY_ID/p2p-circuit/webrtc/p2p/TARGET_ID
-            # or /ip4/127.0.0.1/udp/0/webrtc-direct/certhash/.../p2p/PEER_ID
             # Check if the multiaddr has proper WebRTC structure
             if _is_valid_webrtc_multiaddr(maddr):
                 registry = get_transport_registry()
