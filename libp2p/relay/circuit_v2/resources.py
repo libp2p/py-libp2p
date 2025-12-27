@@ -10,16 +10,22 @@ from dataclasses import (
 )
 from enum import Enum, auto
 import hashlib
+import logging
 import os
 import time
 
-from libp2p.abc import IPeerStore
+from libp2p.abc import IHost, IPeerStore
 from libp2p.peer.id import (
     ID,
 )
 
 # Import the protobuf definitions
 from .pb.circuit_pb2 import Reservation as PbReservation
+
+logger = logging.getLogger("libp2p.relay.circuit_v2.resources")
+
+# Prefix for data to be signed, helps prevent signature reuse attacks
+RELAY_VOUCHER_DOMAIN_SEP = b"libp2p-relay-voucher:"
 
 RANDOM_BYTES_LENGTH = 16  # 128 bits of randomness
 TIMESTAMP_MULTIPLIER = 1000000  # To convert seconds to microseconds
@@ -44,10 +50,28 @@ class RelayLimits:
     max_reservations: int  # Maximum number of active reservations
 
 
+@dataclass
+class ReservationVoucher:
+    """
+    Represents a voucher for a relay reservation.
+
+    This is compatible with the Go implementation's ReservationVoucher.
+    """
+
+    # The relay peer ID
+    relay: ID
+    # The client peer ID
+    peer: ID
+    # Expiration time as Unix timestamp
+    expiration: int
+    # Optional list of addresses the client can use
+    addrs: list[bytes] | None = None
+
+
 class Reservation:
     """Represents a relay reservation."""
 
-    def __init__(self, peer_id: ID, limits: RelayLimits):
+    def __init__(self, peer_id: ID, limits: RelayLimits, host: IHost | None = None):
         """
         Initialize a new reservation.
 
@@ -57,15 +81,20 @@ class Reservation:
             The peer ID this reservation is for
         limits : RelayLimits
             The resource limits for this reservation
+        host : IHost | None
+            The host instance for accessing cryptographic keys
 
         """
         self.peer_id = peer_id
         self.limits = limits
+        self.host = host
         self.created_at = time.time()
         self.expires_at = int(self.created_at + limits.duration)
         self.data_used = 0
         self.active_connections = 0
         self.voucher = self._generate_voucher()
+        self.voucher_obj: ReservationVoucher | None = None
+        self.addrs: list[bytes] = []  # List of addresses for this reservation
 
     def _generate_voucher(self) -> bytes:
         """
@@ -112,20 +141,109 @@ class Reservation:
         return (
             not self.is_expired()
             and self.active_connections < self.limits.max_circuit_conns
-            and self.data_used < self.limits.data
         )
 
+    def track_data_transfer(self, bytes_transferred: int) -> bool:
+        """
+        Track data transferred for this reservation.
+
+        Parameters
+        ----------
+        bytes_transferred : int
+            Number of bytes transferred
+
+        Returns
+        -------
+        bool
+            True if the data limit has not been exceeded, False otherwise
+
+        """
+        # Check if this transfer would exceed the limit
+        if self.data_used + bytes_transferred > self.limits.data:
+            logger.debug(
+                "Data transfer would exceed limit: %d + %d > %d",
+                self.data_used,
+                bytes_transferred,
+                self.limits.data,
+            )
+            return False
+
+        # Track the data transfer
+        self.data_used += bytes_transferred
+        return True
+
     def to_proto(self) -> PbReservation:
-        """Convert the reservation to its protobuf representation."""
-        # TODO: For production use, implement proper signature generation
-        # The signature should be created by signing the voucher with the
-        # peer's private key. The current implementation with an empty signature
-        # is intended for development and testing only.
+        """
+        Convert the reservation to its protobuf representation.
+
+        Returns
+        -------
+        PbReservation
+            The protobuf representation of this reservation
+
+        """
+        signature = b""
+
+        # Sign the voucher if we have a host with a private key
+        if self.host is not None:
+            try:
+                # Get the host's private key for signing
+                private_key = self.host.get_private_key()
+
+                # Get the data to sign
+                data_to_sign = self.get_data_to_sign()
+
+                # Sign the data
+                signature = private_key.sign(data_to_sign)
+
+                logger.debug(
+                    "Successfully signed reservation voucher for peer %s, "
+                    "signature length: %d bytes, data length: %d bytes",
+                    self.peer_id,
+                    len(signature),
+                    len(data_to_sign),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to sign reservation voucher for peer %s: %s. "
+                    "Using empty signature.",
+                    self.peer_id,
+                    str(e),
+                )
+                signature = b""
+        else:
+            logger.debug(
+                "No host provided for reservation %s, using empty signature",
+                self.peer_id,
+            )
+
         return PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
-            signature=b"",
+            signature=signature,
         )
+
+    def get_data_to_sign(self) -> bytes:
+        """
+        Get the data that should be signed for this reservation.
+
+        Returns
+        -------
+        bytes
+            The data to sign, which includes the domain separator, voucher,
+            and expiration
+
+        """
+        expiration_bytes = int(self.expires_at).to_bytes(8, byteorder="big")
+        data = RELAY_VOUCHER_DOMAIN_SEP + self.voucher + expiration_bytes
+        logger.debug(
+            "Data to sign: domain_sep=%s, voucher=%s, expire=%d, total_length=%d",
+            RELAY_VOUCHER_DOMAIN_SEP.hex()[:10] + "...",
+            self.voucher.hex()[:10] + "...",
+            int(self.expires_at),
+            len(data),
+        )
+        return data
 
 
 class RelayResourceManager:
@@ -138,7 +256,9 @@ class RelayResourceManager:
     - Managing connection quotas
     """
 
-    def __init__(self, limits: RelayLimits, peer_store: IPeerStore):
+    def __init__(
+        self, limits: RelayLimits, peer_store: IPeerStore, host: IHost | None = None
+    ):
         """
         Initialize the resource manager.
 
@@ -148,9 +268,12 @@ class RelayResourceManager:
             The resource limits to enforce
         peer_store : IPeerStore
             Peer store for retrieving public keys and peer metadata
+        host : IHost | None
+            The host instance for accessing cryptographic keys
 
         """
         self.limits = limits
+        self.host = host
         self._reservations: dict[ID, Reservation] = {}
         self.peer_store = peer_store
 
@@ -195,7 +318,7 @@ class RelayResourceManager:
             The newly created reservation
 
         """
-        reservation = Reservation(peer_id, self.limits)
+        reservation = Reservation(peer_id, self.limits, self.host)
         self._reservations[peer_id] = reservation
         return reservation
 
@@ -230,11 +353,24 @@ class RelayResourceManager:
 
         # verify signature
         try:
-            public_key = self.peer_store.pubkey(peer_id)
+            # The reservation is signed by the relay, so we verify with our public key
+            if self.host:
+                public_key = self.host.get_public_key()
+            else:
+                # If we don't have the host instance, we can't verify the signature
+                # as we don't have access to the relay's public key
+                return False
+
             if public_key is None:
                 return False
 
-            return public_key.verify(proto_res.voucher, proto_res.signature)
+            # Reconstruct the data that was signed
+            expiration_bytes = int(proto_res.expire).to_bytes(8, byteorder="big")
+            data_to_verify = (
+                RELAY_VOUCHER_DOMAIN_SEP + proto_res.voucher + expiration_bytes
+            )
+
+            return public_key.verify(data_to_verify, proto_res.signature)
         except Exception:
             return False
 
@@ -255,6 +391,31 @@ class RelayResourceManager:
         """
         reservation = self._reservations.get(peer_id)
         return reservation is not None and reservation.can_accept_connection()
+
+    def track_data_transfer(self, peer_id: ID, bytes_transferred: int) -> bool:
+        """
+        Track data transferred for a peer's reservation.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID
+        bytes_transferred : int
+            Number of bytes transferred
+
+        Returns
+        -------
+        bool
+            True if the data limit has not been exceeded, False otherwise
+
+        """
+        reservation = self._reservations.get(peer_id)
+        if reservation is None:
+            logger.debug("No reservation found for peer %s", peer_id)
+            return False
+
+        # Delegate to the reservation's track_data_transfer method
+        return reservation.track_data_transfer(bytes_transferred)
 
     def _clean_expired(self) -> None:
         """Remove expired reservations."""

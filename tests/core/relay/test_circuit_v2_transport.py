@@ -370,6 +370,38 @@ async def test_circuit_v2_transport_message_routing_through_relay():
 
         await trio.sleep(SLEEP_TIME)
 
+        # Step 1.5: Destination makes a reservation with the relay
+        # This is required for the relay to accept connections to the destination
+        with trio.fail_after(CONNECT_TIMEOUT):
+            logger.debug("Creating reservation for destination on relay")
+            relay_stream = await target_host.new_stream(
+                relay_host.get_id(), [PROTOCOL_ID]
+            )
+
+            # Send RESERVE message
+            from libp2p.peer.peerstore import env_to_send_in_RPC
+            from libp2p.relay.circuit_v2.pb.circuit_pb2 import HopMessage
+
+            envelope_bytes, _ = env_to_send_in_RPC(target_host)
+            reserve_msg = HopMessage(
+                type=HopMessage.RESERVE,
+                peer=target_host.get_id().to_bytes(),
+                senderRecord=envelope_bytes,
+            )
+            await relay_stream.write(reserve_msg.SerializeToString())
+
+            # Read reservation response
+            resp_bytes = await relay_stream.read(1024)
+            resp = HopMessage()
+            resp.ParseFromString(resp_bytes)
+
+            assert resp.type == HopMessage.STATUS, "Expected STATUS response"
+            assert resp.status.code == 0, f"Reservation failed: {resp.status.message}"
+            logger.debug("Reservation created successfully")
+            await relay_stream.close()
+
+        await trio.sleep(SLEEP_TIME)
+
         # Step 2: Source connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(client_host, relay_host)

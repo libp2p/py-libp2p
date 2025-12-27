@@ -4,6 +4,7 @@ Rendezvous client implementation.
 
 import logging
 import random
+from typing import cast
 
 import trio
 import varint
@@ -218,6 +219,12 @@ class RendezvousClient:
                     f"Connection timeout after {DEFAULT_TIMEOUT}s",
                 )
 
+            if stream is None:
+                raise RendezvousError(
+                    Message.ResponseStatus.E_INTERNAL_ERROR,
+                    "Failed to establish stream",
+                )
+
             # Serialize and send message with varint length prefix
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
@@ -242,10 +249,15 @@ class RendezvousClient:
                         break
 
                 response_length = varint.decode_bytes(length_bytes)
+                if response_length is None:
+                    raise RendezvousError(
+                        Message.ResponseStatus.E_INTERNAL_ERROR,
+                        "Failed to decode response length",
+                    )
 
                 # Read response data
                 response_bytes = b""
-                remaining = response_length
+                remaining = cast(int, response_length)
                 while remaining > 0:
                     chunk = await stream.read(remaining)
                     if not chunk:

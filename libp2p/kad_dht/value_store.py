@@ -6,6 +6,7 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 
 import logging
 import time
+from typing import cast
 
 import varint
 
@@ -148,10 +149,13 @@ class ValueStore:
                     break
             logger.debug(f"Received varint length bytes: {length_bytes.hex()}")
             response_length = varint.decode_bytes(length_bytes)
+            if response_length is None:
+                logger.debug(f"Failed to decode varint from peer {peer_id}")
+                return False
             logger.debug("Response length: %d bytes", response_length)
             # Read response data
             response_bytes = b""
-            remaining = response_length
+            remaining = cast(int, response_length)
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
@@ -282,9 +286,12 @@ class ValueStore:
                 if b[0] & 0x80 == 0:
                     break
             response_length = varint.decode_bytes(length_bytes)
+            if response_length is None:
+                logger.warning(f"Failed to decode varint from peer {peer_id}")
+                return None
             # Read response data
             response_bytes = b""
-            remaining = response_length
+            remaining = cast(int, response_length)
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:

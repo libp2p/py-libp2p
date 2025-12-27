@@ -4,6 +4,7 @@ Rendezvous service implementation for hosting a rendezvous point.
 
 import logging
 import time
+from typing import cast
 
 import varint
 
@@ -96,10 +97,12 @@ class RendezvousService:
                         break
 
                 message_length = varint.decode_bytes(length_bytes)
+                if message_length is None:
+                    return  # Invalid varint
 
                 # Read message data
                 message_bytes = b""
-                remaining = message_length
+                remaining = cast(int, message_length)
                 while remaining > 0:
                     chunk = await stream.read(remaining)
                     if not chunk:

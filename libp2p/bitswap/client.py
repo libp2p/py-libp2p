@@ -6,7 +6,7 @@ Supports v1.0.0, v1.1.0, and v1.2.0 protocols.
 from collections.abc import Sequence
 import hashlib
 import logging
-from typing import Any
+from typing import Any, cast
 
 import trio
 import varint
@@ -802,6 +802,9 @@ class BitswapClient:
 
             # Decode length
             length = varint.decode_bytes(length_bytes)
+            if length is None:
+                logger.error("Failed to decode varint length")
+                return None
 
             if length > MAX_MESSAGE_SIZE:
                 raise MessageTooLargeError(
@@ -810,7 +813,7 @@ class BitswapClient:
 
             # Read message data
             msg_data = b""
-            remaining = length
+            remaining = cast(int, length)
 
             while remaining > 0:
                 chunk = await stream.read(remaining)
