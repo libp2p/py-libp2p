@@ -594,7 +594,7 @@ class CircuitV2Protocol(Service):
                 raise ValueError(f"Failed to create reservation for peer {peer_id}")
 
             # Create the protobuf reservation with voucher and signature
-            pb_reservation = reservation_obj.to_proto()
+            reservation_obj.to_proto()
 
             # Get the peer's addresses from the peerstore if available
             addrs: list[bytes] = []
@@ -732,7 +732,6 @@ class CircuitV2Protocol(Service):
                 logger.debug("Connected to destination peer %s", peer_id)
 
                 # Send STOP CONNECT message
-                src_peer_id = cast(INetStreamWithExtras, stream).get_remote_peer_id()
                 stop_msg = StopMessage(
                     type=StopMessage.CONNECT,
                     peer=source_addr.to_bytes(),
@@ -871,11 +870,8 @@ class CircuitV2Protocol(Service):
                 total_bytes += bytes_transferred
 
                 # Track data and check limits
-                if (
-                    reservation
-                    and not self.resource_manager.track_data_transfer(
-                        peer_id, bytes_transferred
-                    )
+                if reservation and not self.resource_manager.track_data_transfer(
+                    peer_id, bytes_transferred
                 ):
                     logger.warning(
                         "Data transfer limit exceeded for peer %s: "
