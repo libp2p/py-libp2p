@@ -312,6 +312,8 @@ class CircuitV2Transport(ITransport):
 
         # Try stored addresses first (optimization from origin/main)
         for ma in circuit_addrs:
+            # Start timing for this specific connection attempt
+            attempt_start_time = trio.current_time()
             try:
                 logger.debug(
                     "Trying stored circuit multiaddr %s for peer %s",
@@ -323,7 +325,7 @@ class CircuitV2Transport(ITransport):
                     logger.debug("Connected via stored circuit addr %s", ma)
                     # Record successful connection attempt
                     relay_peer_id = self._extract_relay_id_from_ma(ma)
-                    latency_ms = (trio.current_time() - connection_start_time) * 1000
+                    latency_ms = (trio.current_time() - attempt_start_time) * 1000
                     self.performance_tracker.record_connection_attempt(
                         relay_id=relay_peer_id,
                         latency_ms=latency_ms,
@@ -341,7 +343,7 @@ class CircuitV2Transport(ITransport):
                 # Record failure in performance tracker
                 try:
                     relay_peer_id = self._extract_relay_id_from_ma(ma)
-                    latency_ms = (trio.current_time() - connection_start_time) * 1000
+                    latency_ms = (trio.current_time() - attempt_start_time) * 1000
                     self.performance_tracker.record_connection_attempt(
                         relay_id=relay_peer_id,
                         latency_ms=latency_ms,
@@ -418,13 +420,6 @@ class CircuitV2Transport(ITransport):
             status_msg = getattr(resp.status, "message", "Unknown error")
 
             if status_code != StatusCode.OK:
-                # Record failed connection attempt
-                latency_ms = (trio.current_time() - connection_start_time) * 1000
-                self.performance_tracker.record_connection_attempt(
-                    relay_id=relay_peer_id,
-                    latency_ms=latency_ms,
-                    success=False,
-                )
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
             # Record successful connection attempt
