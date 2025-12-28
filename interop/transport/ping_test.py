@@ -596,24 +596,28 @@ class PingTest:
             print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
 
             wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
-            check_interval = 0.5
-            elapsed = 0
 
-            while elapsed < wait_timeout:
-                if self.ping_received:
-                    print(
-                        "Ping received and responded, listener exiting", file=sys.stderr
-                    )
-                    return
-                await trio.sleep(check_interval)
-                elapsed += check_interval
+            # Wait for the full timeout period, matching Go implementation behavior
+            # This ensures the dialer has enough time to complete cleanup and exit
+            # before the listener exits. The dialer will exit first (after completing
+            # the ping), causing Docker Compose to stop all containers, and the
+            # listener will receive SIGTERM (exit code 143) which is treated as success.
+            # This approach is more reliable than exiting early after receiving ping,
+            # as it avoids race conditions with slower implementations like JVM.
+            print(
+                f"Listener ready, waiting up to {wait_timeout} seconds for ping...",
+                file=sys.stderr,
+            )
+            await trio.sleep(wait_timeout)
 
             if not self.ping_received:
                 print(
                     f"Timeout: No ping received within {wait_timeout} seconds",
                     file=sys.stderr,
                 )
-            sys.exit(1)
+                sys.exit(1)
+            else:
+                print("Ping received and responded, listener exiting", file=sys.stderr)
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
@@ -895,8 +899,46 @@ class PingTest:
                 print(f"Outputting results: {result}", file=sys.stderr)
                 print(json.dumps(result))
 
-                await stream.close()
-                print("Stream closed successfully", file=sys.stderr)
+                # Try to close the stream gracefully
+                # If the connection is already closed by the peer, that's okay
+                # This can happen when the listener closes the connection immediately
+                # after receiving the ping response (e.g., with Nim implementation)
+                try:
+                    await stream.close()
+                    print("Stream closed successfully", file=sys.stderr)
+                except Exception as e:
+                    # Check if the error is due to connection already being closed
+                    error_str = str(e)
+                    error_type = type(e).__name__
+
+                    # List of error messages/types that indicate connection closed
+                    connection_closed_indicators = [
+                        "connection closed",
+                        "Connection closed",
+                        "MplexUnavailable",
+                        "Failed to send close message",
+                        "WebSocket connection closed",
+                        "connection closed by peer",
+                        "ConnectionClosed",
+                    ]
+
+                    if any(
+                        keyword.lower() in error_str.lower() or keyword in error_type
+                        for keyword in connection_closed_indicators
+                    ):
+                        print(
+                            f"Stream close skipped: connection already closed by peer "
+                            f"({error_type}: {error_str[:100]})",
+                            file=sys.stderr,
+                        )
+                    else:
+                        # Re-raise if it's a different error we don't expect
+                        print(
+                            f"Unexpected error during stream close: "
+                            f"{error_type}: {error_str}",
+                            file=sys.stderr,
+                        )
+                        raise
 
         except Exception as e:
             print(f"Dialer error: {e}", file=sys.stderr)
