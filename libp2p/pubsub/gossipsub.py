@@ -650,6 +650,19 @@ class GossipSub(IPubsubRouter, Service):
         while True:
             # Maintain mesh and keep track of which peers to send GRAFT or PRUNE to
             peers_to_graft, peers_to_prune = self.mesh_heartbeat()
+
+            # Ensure mesh diversity for Eclipse attack protection
+            # and collect additional peers to graft
+            if self.eclipse_protection_enabled:
+                for topic in self.mesh:
+                    diversity_peers = self._ensure_mesh_diversity(topic)
+                    # Add diversity peers to the graft list
+                    for peer in diversity_peers:
+                        if peer not in peers_to_graft:
+                            peers_to_graft[peer] = []
+                        if topic not in peers_to_graft[peer]:
+                            peers_to_graft[peer].append(topic)
+
             # Maintain fanout
             self.fanout_heartbeat()
             # Get the peers to send IHAVE to
@@ -673,11 +686,6 @@ class GossipSub(IPubsubRouter, Service):
 
             # Security maintenance (v2.0 feature)
             self._periodic_security_cleanup()
-
-            # Ensure mesh diversity for Eclipse attack protection
-            if self.eclipse_protection_enabled:
-                for topic in self.mesh:
-                    self._ensure_mesh_diversity(topic)
 
             # Perform ongoing mesh quality maintenance (v2.0 feature)
             for topic in self.mesh:
@@ -1658,21 +1666,22 @@ class GossipSub(IPubsubRouter, Service):
 
         return True
 
-    def _ensure_mesh_diversity(self, topic: str) -> None:
+    def _ensure_mesh_diversity(self, topic: str) -> list[ID]:
         """
         Ensure mesh has sufficient IP diversity to prevent Eclipse attacks.
 
         :param topic: The topic to check
+        :return: List of peers that should be grafted for IP diversity
         """
         if not self.eclipse_protection_enabled or topic not in self.mesh:
-            return
+            return []
 
         if self.scorer is None:
-            return
+            return []
 
         mesh_peers = self.mesh[topic]
         if len(mesh_peers) < self.min_mesh_diversity_ips:
-            return
+            return []
 
         # Count unique IPs in mesh
         unique_ips = set()
@@ -1689,25 +1698,28 @@ class GossipSub(IPubsubRouter, Service):
                 topic,
                 len(unique_ips),
             )
-            self._improve_mesh_diversity(topic, unique_ips)
+            return self._improve_mesh_diversity(topic, unique_ips)
 
-    def _improve_mesh_diversity(self, topic: str, current_ips: set[str]) -> None:
+        return []
+
+    def _improve_mesh_diversity(self, topic: str, current_ips: set[str]) -> list[ID]:
         """
         Attempt to improve mesh diversity by grafting peers from different IPs.
 
         :param topic: The topic to improve
         :param current_ips: Set of IPs currently in mesh
+        :return: List of peers that should be grafted for IP diversity
         """
         if self.pubsub is None or self.scorer is None:
-            return
+            return []
 
         if topic not in self.pubsub.peer_topics:
-            return
+            return []
 
         # Find candidates from different IPs
         candidates = []
         if self.scorer is None:
-            return
+            return []
 
         scorer = self.scorer  # Type narrowing
         for peer in self.pubsub.peer_topics[topic]:
@@ -1723,7 +1735,7 @@ class GossipSub(IPubsubRouter, Service):
                 candidates.append(peer)
 
         if not candidates:
-            return
+            return []
 
         # Select best candidates based on score
         candidates_with_scores = [
@@ -1731,7 +1743,8 @@ class GossipSub(IPubsubRouter, Service):
         ]
         candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
 
-        # Graft up to 2 diverse peers
+        # Select up to 2 diverse peers to graft
+        peers_to_graft = []
         grafted = 0
         for peer, score in candidates_with_scores:
             if grafted >= 2:
@@ -1739,11 +1752,16 @@ class GossipSub(IPubsubRouter, Service):
 
             if score > scorer.params.graylist_threshold:
                 self.mesh[topic].add(peer)
-                # Note: In real implementation, we'd send GRAFT message
+                peers_to_graft.append(peer)
+                # Notify scorer about the new mesh peer
+                if self.scorer is not None:
+                    self.scorer.on_join_mesh(peer, topic)
                 logger.debug(
                     "Grafted peer %s for IP diversity in topic %s", peer, topic
                 )
                 grafted += 1
+
+        return peers_to_graft
 
     def _cleanup_security_state(self, peer_id: ID) -> None:
         """
