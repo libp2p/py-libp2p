@@ -17,6 +17,8 @@ Examples
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
+   examples.nat
    examples.rendezvous
    examples.random_walk
    examples.multiple_connections
+   examples.websocket

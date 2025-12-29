@@ -17,6 +17,7 @@ import time
 from libp2p.abc import (
     IHost,
 )
+from libp2p.abc import IPeerStore
 from libp2p.peer.id import (
     ID,
 )
@@ -91,7 +92,7 @@ class Reservation:
         self.limits = limits
         self.host = host
         self.created_at = time.time()
-        self.expires_at = self.created_at + limits.duration
+        self.expires_at = int(self.created_at + limits.duration)
         self.data_used = 0
         self.active_connections = 0
         self.voucher = self._generate_voucher()
@@ -258,7 +259,7 @@ class RelayResourceManager:
     - Managing connection quotas
     """
 
-    def __init__(self, limits: RelayLimits, host: IHost | None = None):
+    def __init__(self, limits: RelayLimits, peer_store: IPeerStore):
         """
         Initialize the resource manager.
 
@@ -266,13 +267,14 @@ class RelayResourceManager:
         ----------
         limits : RelayLimits
             The resource limits to enforce
-        host : IHost | None
-            The host instance for accessing cryptographic keys and peerstore
+        peer_store : IPeerStore
+            Peer store for retrieving public keys and peer metadata
 
         """
         self.limits = limits
         self.host = host
         self._reservations: dict[ID, Reservation] = {}
+        self.peer_store = peer_store
 
     def can_accept_reservation(self, peer_id: ID) -> bool:
         """
@@ -521,10 +523,33 @@ class RelayResourceManager:
             remaining = max(0, int(existing.expires_at - time.time()))
             return remaining
 
-        # Create a new reservation if we can accept it
-        if self.can_accept_reservation(peer_id):
+        # Create new reservation
+        self.create_reservation(peer_id)
+        return self.limits.duration
+
+    def has_reservation(self, peer_id: ID) -> bool:
+        """
+        Check if a reservation already exists for a peer
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to check for
+
+        Returns
+        -------
+        bool
+            True if reservation exists, False otherwise
+
+        """
+        existing = self._reservations.get(peer_id)
+        if existing and not existing.is_expired():
+            return True
+        return False
+
+    def refresh_reservation(self, peer_id: ID) -> int:
+        if self.has_reservation(peer_id):
             self.create_reservation(peer_id)
             return self.limits.duration
 
-        # We can't accept a new reservation
         return 0

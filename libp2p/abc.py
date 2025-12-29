@@ -1820,6 +1820,19 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_transport_addrs(self) -> list[Multiaddr]:
+        """
+        Retrieve the raw multiaddr addresses this host is listening to,
+        without the /p2p/{peer_id} suffix.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of raw multiaddresses.
+
+        """
+
+    @abstractmethod
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host
@@ -1845,7 +1858,10 @@ class IHost(ABC):
 
     @abstractmethod
     def run(
-        self, listen_addrs: Sequence[Multiaddr]
+        self,
+        listen_addrs: Sequence[Multiaddr],
+        *,
+        task_status: Any = trio.TASK_STATUS_IGNORED,
     ) -> AbstractAsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
@@ -1854,6 +1870,8 @@ class IHost(ABC):
         ----------
         listen_addrs : Sequence[Multiaddr]
             A sequence of multiaddresses on which the host should listen.
+        task_status : Any
+            Task status for trio nursery compatibility (ignored).
 
         """
 
