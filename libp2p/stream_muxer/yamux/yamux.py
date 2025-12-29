@@ -647,22 +647,39 @@ class Yamux(IMuxedConn):
                 try:
                     header = await read_exactly(self.secured_conn, HEADER_SIZE)
                 except IncompleteReadError as e:
-                    # Get transport context for better debugging
-                    transport_type = "unknown"
-                    try:
-                        if hasattr(self.secured_conn, "conn_state"):
-                            conn_state_method = getattr(self.secured_conn, "conn_state")
-                            if callable(conn_state_method):
-                                state = conn_state_method()
-                                if isinstance(state, dict):
-                                    transport_type = state.get("transport", "unknown")
-                    except Exception:
-                        pass
+                    # Check if this is a clean connection closure (0 bytes received)
+                    # This happens when the peer closes the connection gracefully
+                    # after completing their operations (e.g., after ping/pong)
+                    error_msg = str(e)
+                    is_clean_close = "received 0 bytes" in error_msg
 
-                    logger.error(
-                        f"Yamux connection closed during header read for peer "
-                        f"{self.peer_id}: {e}. Transport: {transport_type}."
-                    )
+                    if is_clean_close:
+                        # Clean connection closure - this is normal when peer
+                        # disconnects after completing protocol exchange
+                        logger.info(
+                            f"Yamux connection closed cleanly by peer {self.peer_id}"
+                        )
+                    else:
+                        # Unexpected partial read - log as warning
+                        transport_type = "unknown"
+                        try:
+                            if hasattr(self.secured_conn, "conn_state"):
+                                conn_state_method = getattr(
+                                    self.secured_conn, "conn_state"
+                                )
+                                if callable(conn_state_method):
+                                    state = conn_state_method()
+                                    if isinstance(state, dict):
+                                        transport_type = state.get(
+                                            "transport", "unknown"
+                                        )
+                        except Exception:
+                            pass
+                        logger.warning(
+                            f"Yamux connection closed unexpectedly for peer "
+                            f"{self.peer_id}: {e}. Transport: {transport_type}."
+                        )
+
                     self.event_shutting_down.set()
                     await self._cleanup_on_error()
                     break
@@ -927,26 +944,27 @@ class Yamux(IMuxedConn):
                                 self.stream_events[stream_id].set()
             except Exception as e:
                 # Special handling for expected IncompleteReadError on stream close
-                # This occurs when the connection closes while reading the header
-                # (12 bytes)
+                # This occurs when the connection closes while reading
                 if isinstance(e, IncompleteReadError):
-                    details = getattr(e, "args", [{}])[0]
-                    if (
-                        isinstance(details, dict)
-                        and details.get("requested_count") == HEADER_SIZE
-                        and details.get("received_count") == 0
-                    ):
+                    error_msg = str(e)
+                    # Check if this is a clean connection closure (0 bytes received)
+                    # The error message format is:
+                    # "Connection closed during read operation: expected X bytes
+                    #  but received 0 bytes..."
+                    is_clean_close = "received 0 bytes" in error_msg
+
+                    if is_clean_close:
                         logger.info(
-                            f"Stream closed cleanly for peer {self.peer_id}"
-                            + f" (IncompleteReadError: {details})"
+                            f"Connection closed cleanly for peer {self.peer_id}"
                         )
                         self.event_shutting_down.set()
                         await self._cleanup_on_error()
                         break
                     else:
-                        logger.error(
-                            f"Error in handle_incoming for peer {self.peer_id}: "
-                            + f"{type(e).__name__}: {str(e)}"
+                        # Partial read - log as warning, not error
+                        logger.warning(
+                            f"Incomplete read in handle_incoming for peer "
+                            f"{self.peer_id}: {error_msg}"
                         )
                 else:
                     # Handle RawConnError with more nuance
