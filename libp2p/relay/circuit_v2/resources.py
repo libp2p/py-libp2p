@@ -17,7 +17,6 @@ import time
 from libp2p.abc import (
     IHost,
 )
-from libp2p.abc import IPeerStore
 from libp2p.peer.id import (
     ID,
 )
@@ -259,7 +258,7 @@ class RelayResourceManager:
     - Managing connection quotas
     """
 
-    def __init__(self, limits: RelayLimits, peer_store: IPeerStore):
+    def __init__(self, limits: RelayLimits, host: IHost | None = None):
         """
         Initialize the resource manager.
 
@@ -267,14 +266,14 @@ class RelayResourceManager:
         ----------
         limits : RelayLimits
             The resource limits to enforce
-        peer_store : IPeerStore
-            Peer store for retrieving public keys and peer metadata
+        host : IHost | None
+            The host instance for accessing cryptographic keys and peer store
 
         """
         self.limits = limits
         self.host = host
         self._reservations: dict[ID, Reservation] = {}
-        self.peer_store = peer_store
+        self.peer_store = host.get_peerstore() if host else None
 
     def can_accept_reservation(self, peer_id: ID) -> bool:
         """

@@ -85,8 +85,8 @@ def limits():
 
 
 @pytest.fixture
-def manager(limits, peer_store):
-    return RelayResourceManager(limits, peer_store)
+def manager(limits):
+    return RelayResourceManager(limits, None)
 
 
 @pytest.fixture
@@ -478,7 +478,7 @@ async def test_circuit_v2_voucher_verification_complete():
 
         # Test with expired reservation
         expired_reservation = resource_manager._reservations[client_peer_id]
-        expired_reservation.expires_at = time.time() - 1
+        expired_reservation.expires_at = int(time.time() - 1)
 
         is_valid_expired = resource_manager.verify_reservation(
             client_peer_id, pb_reservation
