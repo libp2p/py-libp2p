@@ -94,13 +94,24 @@ def reservation(manager, peer_id):
     return manager.create_reservation(peer_id)
 
 
-def test_circuit_v2_verify_reservation(manager, peer_id, reservation, key_pair):
-    # Valid protobuf reservation
-    proto_res = PbReservation(
-        expire=int(reservation.expires_at),
-        voucher=reservation.voucher,
-        signature=key_pair.private_key.sign(reservation.voucher),
-    )
+def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
+    # Create a mock host with the key pair
+    from unittest.mock import Mock
+
+    mock_host = Mock()
+    mock_host.get_private_key.return_value = key_pair.private_key
+    mock_host.get_public_key.return_value = key_pair.public_key
+
+    # Create manager with the mock host
+    manager = RelayResourceManager(limits, mock_host)
+
+    # Create a reservation
+    reservation = manager.create_reservation(peer_id)
+
+    # Get the proper signed protobuf reservation from the reservation object
+    proto_res = reservation.to_proto()
+
+    # This should pass since it's properly signed
     assert manager.verify_reservation(peer_id, proto_res) is True
 
     # Invalid protobuf reservation
