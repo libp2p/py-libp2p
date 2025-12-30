@@ -650,10 +650,7 @@ class Yamux(IMuxedConn):
                     # Check if this is a clean connection closure (0 bytes received)
                     # This happens when the peer closes the connection gracefully
                     # after completing their operations (e.g., after ping/pong)
-                    error_msg = str(e)
-                    is_clean_close = "received 0 bytes" in error_msg
-
-                    if is_clean_close:
+                    if e.is_clean_close:
                         # Clean connection closure - this is normal when peer
                         # disconnects after completing protocol exchange
                         logger.info(
@@ -946,16 +943,9 @@ class Yamux(IMuxedConn):
                 # Special handling for expected IncompleteReadError on stream close
                 # This occurs when the connection closes while reading
                 if isinstance(e, IncompleteReadError):
-                    error_msg = str(e)
-                    # Check if this is a clean connection closure (0 bytes received)
-                    # The error message format is:
-                    # "Connection closed during read operation: expected X bytes
-                    #  but received 0 bytes..."
-                    is_clean_close = "received 0 bytes" in error_msg
-
-                    if is_clean_close:
+                    if e.is_clean_close:
                         logger.info(
-                            f"Connection closed cleanly for peer {self.peer_id}"
+                            f"Yamux connection closed cleanly for peer {self.peer_id}"
                         )
                         self.event_shutting_down.set()
                         await self._cleanup_on_error()
@@ -964,7 +954,7 @@ class Yamux(IMuxedConn):
                         # Partial read - log as warning, not error
                         logger.warning(
                             f"Incomplete read in handle_incoming for peer "
-                            f"{self.peer_id}: {error_msg}"
+                            f"{self.peer_id}: {e}"
                         )
                 else:
                     # Handle RawConnError with more nuance
