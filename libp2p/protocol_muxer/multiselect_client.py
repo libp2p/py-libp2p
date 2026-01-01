@@ -72,8 +72,14 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
         try:
+            logger.debug(
+                f"[MULTISELECT_CLIENT] select_one_of: starting negotiation, "
+                f"protocols={[str(p) for p in protocols]}, timeout={negotiate_timeout}"
+            )
             with trio.fail_after(negotiate_timeout):
+                logger.debug("[MULTISELECT_CLIENT] select_one_of: starting handshake")
                 await self.handshake(communicator)
+                logger.debug("[MULTISELECT_CLIENT] select_one_of: handshake completed")
 
                 protocol_list = [str(p) for p in protocols]
                 logger.debug(f"Attempting to negotiate one of: {protocol_list}")
@@ -81,24 +87,50 @@ class MultiselectClient(IMultiselectClient):
                 unsupported_errors: list[str] = []
                 for protocol in protocols:
                     try:
+                        logger.debug(
+                            f"[MULTISELECT_CLIENT] select_one_of: "
+                            f"trying protocol={protocol}"
+                        )
                         selected_protocol = await self.try_select(
                             communicator, protocol
                         )
+                        logger.debug(
+                            f"[MULTISELECT_CLIENT] select_one_of: "
+                            f"protocol selected={selected_protocol}"
+                        )
                         return selected_protocol
                     except ProtocolNotSupportedError as error:
+                        logger.debug(
+                            f"[MULTISELECT_CLIENT] select_one_of: "
+                            f"protocol={protocol} not supported: {error}"
+                        )
                         unsupported_errors.append(str(error))
                         continue
 
+                logger.error(
+                    f"[MULTISELECT_CLIENT] select_one_of: no protocol supported, "
+                    f"errors={unsupported_errors}"
+                )
                 raise MultiselectClientError(
                     _build_protocols_not_supported_message(
                         protocols, negotiate_timeout, unsupported_errors
                     )
                 )
         except trio.TooSlowError:
+            logger.error(
+                f"[MULTISELECT_CLIENT] select_one_of: timeout after "
+                f"{negotiate_timeout}s, protocols={list(protocols)}"
+            )
             raise MultiselectClientError(
                 f"response timed out after {negotiate_timeout}s, "
                 f"protocols tried: {list(protocols)}"
             )
+        except Exception as e:
+            logger.error(
+                f"[MULTISELECT_CLIENT] select_one_of: unexpected error: {e}, "
+                f"type={type(e).__name__}"
+            )
+            raise
 
     async def query_multistream_command(
         self,
