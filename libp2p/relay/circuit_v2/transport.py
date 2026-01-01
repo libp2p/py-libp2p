@@ -7,7 +7,7 @@ allowing peers to establish connections through relay nodes.
 
 import logging
 import time
-from typing import cast
+from typing import Any, cast
 
 import multiaddr
 import trio
@@ -17,6 +17,7 @@ from libp2p.abc import (
     IListener,
     INetConn,
     INetStream,
+    IRawConnection,
     ITransport,
 )
 from libp2p.custom_types import (
@@ -48,6 +49,9 @@ from .pb.circuit_pb2 import (
     HopMessage,
     StopMessage,
 )
+from .performance_tracker import (
+    RelayPerformanceTracker,
+)
 from .protocol import (
     PROTOCOL_ID,
     STREAM_READ_TIMEOUT,
@@ -65,6 +69,63 @@ logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
 TOP_N = 3
 RESERVATION_REFRESH_INTERVAL = 10  # seconds
 RESERVATION_REFRESH_MARGIN = 30  # seconds
+
+
+class TrackedRawConnection(IRawConnection):
+    """
+    Wrapper around RawConnection that tracks circuit closure.
+
+    Automatically calls record_circuit_closed() when the connection is closed.
+    This ensures that active circuit counts are properly decremented when
+    connections are closed, preventing unbounded growth of circuit counts.
+    """
+
+    _wrapped: RawConnection
+    _relay_id: ID
+    _tracker: RelayPerformanceTracker
+    _closed: bool = False
+
+    def __init__(
+        self,
+        wrapped: RawConnection,
+        relay_id: ID,
+        tracker: RelayPerformanceTracker,
+    ) -> None:
+        """
+        Initialize the tracked connection wrapper.
+
+        Args:
+            wrapped: The RawConnection to wrap
+            relay_id: The relay peer ID for tracking
+            tracker: The performance tracker to notify on closure
+
+        """
+        self._wrapped = wrapped
+        self._relay_id = relay_id
+        self._tracker = tracker
+
+    async def close(self) -> None:
+        """Close the connection and record circuit closure."""
+        if not self._closed:
+            self._closed = True
+            await self._wrapped.close()
+            self._tracker.record_circuit_closed(self._relay_id)
+
+    async def write(self, data: bytes) -> None:
+        """Write data to the wrapped connection."""
+        return await self._wrapped.write(data)
+
+    async def read(self, n: int | None = None) -> bytes:
+        """Read data from the wrapped connection."""
+        return await self._wrapped.read(n)
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        """Get remote address from the wrapped connection."""
+        return self._wrapped.get_remote_address()
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to wrapped connection."""
+        return getattr(self._wrapped, name)
 
 
 class CircuitV2Transport(ITransport):
@@ -106,6 +167,16 @@ class CircuitV2Transport(ITransport):
             stream_timeout=config.timeouts.discovery_stream_timeout,
             peer_protocol_timeout=config.timeouts.peer_protocol_timeout,
         )
+        # Performance tracking (from HEAD)
+        self.relay_counter = 0  # for round robin load balancing
+        # A lock to protect ``relay_counter`` from concurrent access since
+        # ``_select_relay`` may be invoked from multiple tasks concurrently.
+        self._relay_counter_lock = trio.Lock()
+
+        # Performance tracker for intelligent relay selection
+        self.performance_tracker = RelayPerformanceTracker()
+
+        # Stored addresses and DHT (from origin/main)
         self._last_relay_index = -1
         self._relay_list: list[ID] = []
         self._relay_metrics: dict[ID, dict[str, float | int]] = {}
@@ -192,7 +263,7 @@ class CircuitV2Transport(ITransport):
         dest_info: PeerInfo,
         *,
         relay_info: PeerInfo | None = None,
-    ) -> RawConnection:
+    ) -> IRawConnection:
         """
         Dial a destination peer using a relay.
 
@@ -214,6 +285,9 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established.
 
         """
+        # Track connection start time for latency measurement
+        connection_start_time = trio.current_time()
+
         # Prefer stored /p2p-circuit addrs from peerstore
         # Try first to read addresses from peerstore
         peer_store = self.host.get_peerstore()
@@ -236,7 +310,10 @@ class CircuitV2Transport(ITransport):
             except ValueError:
                 continue
 
+        # Try stored addresses first (optimization from origin/main)
         for ma in circuit_addrs:
+            # Start timing for this specific connection attempt
+            attempt_start_time = trio.current_time()
             try:
                 logger.debug(
                     "Trying stored circuit multiaddr %s for peer %s",
@@ -246,19 +323,47 @@ class CircuitV2Transport(ITransport):
                 conn = await self._dial_via_circuit_addr(ma, dest_info)
                 if conn:
                     logger.debug("Connected via stored circuit addr %s", ma)
+                    # Record successful connection attempt
+                    relay_peer_id = self._extract_relay_id_from_ma(ma)
+                    latency_ms = (trio.current_time() - attempt_start_time) * 1000
+                    self.performance_tracker.record_connection_attempt(
+                        relay_id=relay_peer_id,
+                        latency_ms=latency_ms,
+                        success=True,
+                    )
+                    # Record circuit opened
+                    self.performance_tracker.record_circuit_opened(relay_peer_id)
+                    # Store multiaddrs for future use
+                    self._store_multiaddrs(dest_info, relay_peer_id)
+                    # conn is already a TrackedRawConnection from _dial_via_circuit_addr
                     return conn
                 logger.debug("Dial via %s returned None", ma)
             except Exception as e:
                 logger.debug("Stored circuit addr failed (%s): %s", ma, e)
+                # Record failure in performance tracker
+                try:
+                    relay_peer_id = self._extract_relay_id_from_ma(ma)
+                    latency_ms = (trio.current_time() - attempt_start_time) * 1000
+                    self.performance_tracker.record_connection_attempt(
+                        relay_id=relay_peer_id,
+                        latency_ms=latency_ms,
+                        success=False,
+                    )
+                except Exception:
+                    pass  # Ignore errors in tracking
 
         # If no specific relay is provided, try to find one
         if relay_info is None:
-            relay_peer_id = await self._select_relay(dest_info)
-            if not relay_peer_id:
+            selected_relay = await self._select_relay(dest_info)
+            if not selected_relay:
                 raise ConnectionError("No suitable relay found")
+            relay_peer_id = selected_relay
             relay_info = self.host.get_peerstore().peer_info(relay_peer_id)
+        else:
+            relay_peer_id = relay_info.peer_id
+
         await self.host.connect(relay_info)
-        relay_peer_id = relay_info.peer_id
+
         # Get a stream to the relay
         try:
             logger.debug(
@@ -317,11 +422,36 @@ class CircuitV2Transport(ITransport):
             if status_code != StatusCode.OK:
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            # Create raw connection from stream
+            # Record successful connection attempt
+            latency_ms = (trio.current_time() - connection_start_time) * 1000
+            self.performance_tracker.record_connection_attempt(
+                relay_id=relay_peer_id,
+                latency_ms=latency_ms,
+                success=True,
+            )
+
+            # Record circuit opened
+            self.performance_tracker.record_circuit_opened(relay_peer_id)
+
+            # Store multiaddrs for future use
             self._store_multiaddrs(dest_info, relay_peer_id)
-            return RawConnection(stream=relay_stream, initiator=True)
+
+            # Create raw connection from stream and wrap it to track closure
+            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            return TrackedRawConnection(
+                wrapped=raw_conn,
+                relay_id=relay_peer_id,
+                tracker=self.performance_tracker,
+            )
 
         except Exception as e:
+            # Record failed connection attempt
+            latency_ms = (trio.current_time() - connection_start_time) * 1000
+            self.performance_tracker.record_connection_attempt(
+                relay_id=relay_peer_id,
+                latency_ms=latency_ms,
+                success=False,
+            )
             await relay_stream.close()
             raise ConnectionError(f"Failed to establish relay connection: {str(e)}")
 
@@ -406,7 +536,7 @@ class CircuitV2Transport(ITransport):
 
     async def _dial_via_circuit_addr(
         self, circuit_ma: multiaddr.Multiaddr, peer_info: PeerInfo
-    ) -> RawConnection:
+    ) -> IRawConnection:
         """
         Dial using a stored /p2p-circuit multiaddr.
 
@@ -450,7 +580,13 @@ class CircuitV2Transport(ITransport):
                 await relay_stream.close()
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            return RawConnection(stream=relay_stream, initiator=True)
+            # Wrap in TrackedRawConnection for tracking
+            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            return TrackedRawConnection(
+                wrapped=raw_conn,
+                relay_id=relay_peer_id,
+                tracker=self.performance_tracker,
+            )
 
         except Exception:
             await relay_stream.close()
@@ -461,9 +597,19 @@ class CircuitV2Transport(ITransport):
         Select an appropriate relay for the given peer.
 
         Selection priority:
-        1. Stored relays in _relay_list.
-        2. Relays discovered dynamically via DHT.
-        3. Measure, score, and pick top N relays round-robin.
+        1. Performance-tracked relays from discovery (with reservations prioritized)
+        2. DHT-discovered relays (if enabled and no discovery relays available)
+        3. Round-robin among equal-scored relays
+
+        Uses performance tracking to select the best relay based on:
+        - Connection latency (lower is better)
+        - Active circuit count (fewer is better)
+        - Success rate (higher is better)
+
+        Parameters
+        ----------
+        peer_info : PeerInfo
+            The peer to connect to
 
         Returns
         -------
@@ -475,91 +621,86 @@ class CircuitV2Transport(ITransport):
             logger.warning("Auto-relay disabled, skipping relay selection")
             return None
 
-        for attempt in range(self.client_config.max_auto_relay_attempts):
-            # --- Step 1: Use stored relays if available ---
-            if not self._relay_list:
-                # Fetch relays from discovery
-                relays = self.discovery.get_relays() or []
-                seen = {r.to_string() for r in self._relay_list}
-                for r in relays:
-                    if r.to_string() not in seen:
-                        self._relay_list.append(r)
-                        seen.add(r.to_string())
+        attempts = 0
+        while attempts < self.client_config.max_auto_relay_attempts:
+            # Step 1: Get relays from discovery
+            relays = self.discovery.get_relays() or []
 
-                # --- Step 2: Fall back to DHT if still empty ---
-                if not self._relay_list and self.dht:
-                    discovered = await self.discover_peers(
-                        peer_info.peer_id.to_bytes(), max_results=TOP_N
-                    )
-                    for p in discovered:
-                        if p.peer_id.to_string() not in {
-                            r.to_string() for r in self._relay_list
-                        }:
-                            self._relay_list.append(p.peer_id)
+            # Step 2: If no relays from discovery, try DHT (from origin/main)
+            if not relays and self.dht:
+                discovered = await self.discover_peers(
+                    peer_info.peer_id.to_bytes(), max_results=TOP_N
+                )
+                for p in discovered:
+                    if p.peer_id.to_string() not in {r.to_string() for r in relays}:
+                        relays.append(p.peer_id)
 
-            if not self._relay_list:
-                backoff = min(2**attempt, 10)
+            if not relays:
+                backoff = min(2**attempts, 10)
                 await trio.sleep(backoff)
+                attempts += 1
                 continue
 
-            # --- Step 3: Measure relays concurrently ---
-            scored_relays: list[tuple[ID, float]] = []
-            async with trio.open_nursery() as nursery:
-                for relay_id in list(self._relay_list):
-                    nursery.start_soon(self._measure_relay, relay_id, scored_relays)
+            # Step 3: Prioritize relays with active reservations (from HEAD)
+            relays_with_reservations = []
+            other_relays = []
 
-            if not scored_relays:
-                backoff = min(2**attempt, 10)
-                await trio.sleep(backoff)
-                continue
+            for relay_id in relays:
+                relay_info = self.discovery.get_relay_info(relay_id)
+                if relay_info and relay_info.has_reservation:
+                    relays_with_reservations.append(relay_id)
+                else:
+                    other_relays.append(relay_id)
 
-            # --- Step 4: Filter by minimum score ---
-            filtered = [
-                (rid, score)
-                for rid, score in scored_relays
-                if score >= self.client_config.min_relay_score
-            ]
-            if not filtered:
-                backoff = min(2**attempt, 10)
-                await trio.sleep(backoff)
-                continue
-
-            # --- Step 5: Sort top relays ---
-            filtered.sort(key=lambda x: (x[1], x[0].to_string()), reverse=True)
-            top_relays = [rid for rid, _ in filtered[:TOP_N]]
-            if not top_relays:
-                backoff = min(2**attempt, 10)
-                await trio.sleep(backoff)
-                continue
-
-            # --- Step 6: Round-robin selection ---
-            if self._last_relay_index == -1:
-                self._last_relay_index = 0
-            else:
-                self._last_relay_index = (self._last_relay_index + 1) % len(top_relays)
-            chosen = top_relays[self._last_relay_index]
-
-            # Ensure metrics exist
-            if chosen not in self._relay_metrics:
-                self._relay_metrics[chosen] = {
-                    "latency": 0,
-                    "failures": 0,
-                    "last_seen": 0,
-                }
-
-            logger.debug(
-                "Selected relay %s from top %d candidates (lat=%.3fs)",
-                chosen,
-                len(top_relays),
-                self._relay_metrics[chosen].get("latency", 0),
+            # Step 4: Use performance tracker to select best relay (from HEAD)
+            candidate_list = (
+                relays_with_reservations if relays_with_reservations else other_relays
             )
-            return chosen
+
+            if candidate_list:
+                selected_relay = self.performance_tracker.select_best_relay(
+                    available_relays=candidate_list,
+                    require_reservation=False,  # Already filtered
+                    relay_info_getter=self.discovery.get_relay_info,
+                )
+
+                if selected_relay:
+                    # Step 5: Round-robin for equal scores (from HEAD)
+                    best_score = self.performance_tracker.get_relay_score(
+                        selected_relay
+                    )
+                    equal_score_relays = [
+                        r
+                        for r in candidate_list
+                        if self.performance_tracker.get_relay_score(r) == best_score
+                        and best_score != float("inf")
+                    ]
+
+                    if len(equal_score_relays) > 1:
+                        async with self._relay_counter_lock:
+                            index = self.relay_counter % len(equal_score_relays)
+                            selected_relay = equal_score_relays[index]
+                            self.relay_counter += 1
+
+                    return selected_relay
+
+            backoff = min(2**attempts, 10)
+            await trio.sleep(backoff)
+            attempts += 1
 
         logger.warning(
             "No suitable relay found after %d attempts",
             self.client_config.max_auto_relay_attempts,
         )
         return None
+
+    def _extract_relay_id_from_ma(self, ma: multiaddr.Multiaddr) -> ID:
+        """Extract relay peer ID from a circuit multiaddr."""
+        relay_ma, _ = self.parse_circuit_ma(ma)
+        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        if not relay_peer_id_str:
+            raise ValueError("Relay multiaddr missing peer id")
+        return ID.from_base58(relay_peer_id_str)
 
     async def discover_peers(self, key: bytes, max_results: int = 5) -> list[PeerInfo]:
         if not self.dht:
