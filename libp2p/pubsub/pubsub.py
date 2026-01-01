@@ -454,6 +454,11 @@ class Pubsub(Service, IPubsub):
         await self.event_handle_dead_peer_queue_started.wait()
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
+        # Check if we already have a pubsub stream with this peer to avoid duplicates
+        if peer_id in self.peers:
+            logger.debug("Peer %s already has pubsub stream, skipping", peer_id)
+            return
+
         if self.is_peer_blacklisted(peer_id):
             logger.debug("Rejecting blacklisted peer %s", peer_id)
             return
@@ -521,11 +526,28 @@ class Pubsub(Service, IPubsub):
         """
         Continuously read from dead peer channel and close the stream
         between that peer and remove peer info from pubsub and pubsub router.
+        Only removes the peer if there are no remaining active connections.
         """
         async with self.dead_peer_receive_channel:
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
-                # Remove Peer
+                # Check if peer still has active connections before removing
+                # This prevents premature removal when multiple connections exist
+                network = self.host.get_network()
+                remaining_connections = network.get_connections(peer_id)
+                if remaining_connections:
+                    # Filter out closed connections
+                    active_connections = [
+                        c for c in remaining_connections if not c.muxed_conn.is_closed
+                    ]
+                    if active_connections:
+                        logger.debug(
+                            "Peer %s still has %d active connections, not removing",
+                            peer_id,
+                            len(active_connections),
+                        )
+                        continue
+                # Remove Peer - no more active connections
                 self._handle_dead_peer(peer_id)
 
     def handle_subscription(
