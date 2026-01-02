@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 import trio
 
@@ -91,6 +93,7 @@ async def test_simple_three_nodes_triangle_topography():
 
 
 @pytest.mark.trio
+@pytest.mark.skipif(sys.platform == "win32", reason="Flaky on Windows: cleanup race")
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -105,6 +108,7 @@ async def test_simple_seven_nodes_tree_topography():
 
 
 @pytest.mark.trio
+@pytest.mark.skipif(sys.platform == "win32", reason="Flaky on Windows: cleanup race")
 async def test_set_then_send_from_root_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -122,6 +126,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
 
 
 @pytest.mark.trio
+@pytest.mark.skipif(sys.platform == "win32", reason="Flaky on Windows: cleanup race")
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}

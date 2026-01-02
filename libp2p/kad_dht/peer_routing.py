@@ -6,6 +6,7 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
+from typing import cast
 
 import trio
 import varint
@@ -328,10 +329,13 @@ class PeerRouting(IPeerRouting):
                 if b[0] & 0x80 == 0:
                     break
             response_length = varint.decode_bytes(length_bytes)
+            if response_length is None:
+                logger.debug(f"Failed to decode varint from peer {peer}")
+                return []
 
             # Read response data
             response_bytes = b""
-            remaining = response_length
+            remaining = cast(int, response_length)
             while remaining > 0:
                 chunk = await stream.read(remaining)
                 if not chunk:
