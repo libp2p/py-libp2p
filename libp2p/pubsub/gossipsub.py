@@ -921,7 +921,7 @@ class GossipSub(IPubsubRouter, Service):
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
-            if self.peer_protocol[peer_id]
+            if self.peer_protocol.get(peer_id)
             in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12, PROTOCOL_ID_V20)
         }
         if backoff_check:
