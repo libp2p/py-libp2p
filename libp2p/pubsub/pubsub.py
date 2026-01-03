@@ -59,7 +59,6 @@ from libp2p.peer.peerdata import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.pubsub.utils import maybe_consume_signed_record
-from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.tools.async_service import (
     Service,
 )
@@ -934,7 +933,7 @@ class Pubsub(Service, IPubsub):
             # Single write operation (like Go's s.Write(buf))
             await stream.write(bytes(buf))
             return True
-        except (StreamClosed, StreamReset, MuxedStreamError):
+        except (StreamClosed, StreamReset):
             peer_id = stream.muxed_conn.peer_id
             logger.debug("Fail to write message to %s: stream closed", peer_id)
             self._handle_dead_peer(peer_id)
