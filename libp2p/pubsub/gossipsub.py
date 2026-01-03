@@ -107,6 +107,12 @@ class GossipSub(IPubsubRouter, Service):
         int  # Maximum number of message IDs to track per peer in IDONTWANT lists
     )
 
+    # Retry mechanism: store pending control messages (GRAFT/PRUNE) for piggybacking
+    # Following go-libp2p-pubsub pattern for control message retries
+    pending_control: dict[ID, rpc_pb2.ControlMessage]
+    # Store pending gossip (IHAVE) messages for piggybacking
+    pending_gossip: dict[ID, list[rpc_pb2.ControlIHave]]
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -172,6 +178,9 @@ class GossipSub(IPubsubRouter, Service):
         # Gossipsub v1.2 features
         self.dont_send_message_ids = dict()
         self.max_idontwant_messages = max_idontwant_messages
+
+        self.pending_control: dict[ID, rpc_pb2.ControlMessage] = {}
+        self.pending_gossip: dict[ID, list[rpc_pb2.ControlIHave]] = {}
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -260,6 +269,10 @@ class GossipSub(IPubsubRouter, Service):
         # Clean up IDONTWANT tracking for this peer
         self.dont_send_message_ids.pop(peer_id, None)
 
+        # Clean up pending messages for this peer
+        self.pending_control.pop(peer_id, None)
+        self.pending_gossip.pop(peer_id, None)
+
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
@@ -294,7 +307,12 @@ class GossipSub(IPubsubRouter, Service):
                 await self.handle_idontwant(idontwant, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
-        """Invoked to forward a new message that has been validated."""
+        """
+        Invoked to forward a new message that has been validated.
+        
+        This method follows the go-libp2p-pubsub sendRPC pattern, piggybacking
+        any pending control or gossip messages onto the publish RPC.
+        """
         self.mcache.put(pubsub_msg)
 
         # Get message ID for IDONTWANT
@@ -310,12 +328,6 @@ class GossipSub(IPubsubRouter, Service):
             origin=ID(pubsub_msg.from_id),
             msg_id=msg_id,
         )
-        rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
-
-        # Add the senderRecord of the peer in the RPC msg
-        if isinstance(self.pubsub, Pubsub):
-            envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
-            rpc_msg.senderRecord = envelope_bytes
 
         logger.debug("publishing message %s", pubsub_msg)
 
@@ -334,8 +346,35 @@ class GossipSub(IPubsubRouter, Service):
                 continue
             stream = self.pubsub.peers[peer_id]
 
-            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await self.pubsub.write_msg(stream, rpc_msg)
+            # Create RPC message for each peer (may be modified with piggybacked msgs)
+            rpc_msg = rpc_pb2.RPC(publish=[pubsub_msg])
+
+            # Add the senderRecord of the peer in the RPC msg
+            if isinstance(self.pubsub, Pubsub):
+                envelope_bytes, _ = env_to_send_in_RPC(self.pubsub.host)
+                rpc_msg.senderRecord = envelope_bytes
+
+            # Piggyback pending control message retries (GRAFT/PRUNE only)
+            if peer_id in self.pending_control:
+                pending_ctl = self.pending_control.pop(peer_id)
+                self.piggyback_control(peer_id, rpc_msg, pending_ctl)
+
+            # Piggyback pending gossip (IHAVE)
+            if peer_id in self.pending_gossip:
+                pending_gossip = self.pending_gossip.pop(peer_id)
+                self.piggyback_gossip(peer_id, rpc_msg, pending_gossip)
+
+            try:
+                await self.pubsub.write_msg(stream, rpc_msg)
+            except Exception as e:
+                logger.debug(
+                    "Failed to publish message to peer %s: %s. Saving control for retry.",
+                    peer_id,
+                    e,
+                )
+                # Store control messages for retry (if any were piggybacked)
+                if rpc_msg.HasField("control"):
+                    self.push_control(peer_id, rpc_msg.control)
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
@@ -580,6 +619,10 @@ class GossipSub(IPubsubRouter, Service):
             await self._emit_control_msgs(
                 peers_to_graft, peers_to_prune, peers_to_gossip
             )
+
+            # Flush any remaining pending control and gossip messages
+            # that weren't piggybacked onto the heartbeat messages.
+            await self.flush_pending_messages()
 
             self.mcache.shift()
 
@@ -990,7 +1033,8 @@ class GossipSub(IPubsubRouter, Service):
     ) -> None:
         """
         Forwards all request messages that are present in mcache to the
-        requesting peer.
+        requesting peer, with piggybacking of pending messages.
+        
         """
         msg_ids: list[tuple[bytes, bytes]] = [
             safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
@@ -1021,6 +1065,16 @@ class GossipSub(IPubsubRouter, Service):
 
         packet.publish.extend(msgs_to_forward)
 
+        # Piggyback pending control message retries (GRAFT/PRUNE only)
+        if sender_peer_id in self.pending_control:
+            pending_ctl = self.pending_control.pop(sender_peer_id)
+            self.piggyback_control(sender_peer_id, packet, pending_ctl)
+
+        # Piggyback pending gossip (IHAVE)
+        if sender_peer_id in self.pending_gossip:
+            pending_gossip = self.pending_gossip.pop(sender_peer_id)
+            self.piggyback_gossip(sender_peer_id, packet, pending_gossip)
+
         if self.pubsub is None:
             raise NoPubsubAttached
 
@@ -1030,11 +1084,24 @@ class GossipSub(IPubsubRouter, Service):
                 "Fail to responed to iwant request from %s: peer record not exist",
                 sender_peer_id,
             )
+            # Store control messages for retry if any were piggybacked
+            if packet.HasField("control"):
+                self.push_control(sender_peer_id, packet.control)
             return
         peer_stream = self.pubsub.peers[sender_peer_id]
 
         # 4) And write the packet to the stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        try:
+            await self.pubsub.write_msg(peer_stream, packet)
+        except Exception as e:
+            logger.debug(
+                "Failed to respond to IWANT from peer %s: %s. Saving control for retry.",
+                sender_peer_id,
+                e,
+            )
+            # Store control messages for retry if any were piggybacked
+            if packet.HasField("control"):
+                self.push_control(sender_peer_id, packet.control)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -1125,6 +1192,191 @@ class GossipSub(IPubsubRouter, Service):
             control_msg.idontwant.extend(idontwant_msgs)
         return control_msg
 
+
+    def push_control(self, peer_id: ID, ctl: rpc_pb2.ControlMessage) -> None:
+        """
+        Store control messages (GRAFT/PRUNE only) for retry.
+        
+        When an RPC fails to send, we save GRAFT and PRUNE messages to be
+        piggybacked onto future RPCs to the same peer. IHAVE/IWANT/IDONTWANT
+        are NOT retried as they are time-sensitive gossip messages.
+        
+        This follows the go-libp2p-pubsub pushControl pattern.
+        
+        :param peer_id: The peer the control message was destined for
+        :param ctl: The control message that failed to send
+        """
+        # Only retry GRAFT and PRUNE messages
+        # IHAVE/IWANT/IDONTWANT are not retried as gossip is time-sensitive
+        has_graft = len(ctl.graft) > 0
+        has_prune = len(ctl.prune) > 0
+        
+        if not has_graft and not has_prune:
+            return
+        
+        if peer_id not in self.pending_control:
+            # Create new pending control message with only GRAFT/PRUNE
+            pending = rpc_pb2.ControlMessage()
+            if has_graft:
+                pending.graft.extend(ctl.graft)
+            if has_prune:
+                pending.prune.extend(ctl.prune)
+            self.pending_control[peer_id] = pending
+        else:
+            # Merge with existing pending control message
+            if has_graft:
+                self.pending_control[peer_id].graft.extend(ctl.graft)
+            if has_prune:
+                self.pending_control[peer_id].prune.extend(ctl.prune)
+        
+        logger.debug(
+            "Stored control messages for retry to peer %s (GRAFT: %d, PRUNE: %d)",
+            peer_id,
+            len(ctl.graft) if has_graft else 0,
+            len(ctl.prune) if has_prune else 0,
+        )
+
+    def piggyback_control(
+        self, peer_id: ID, rpc_msg: rpc_pb2.RPC, ctl: rpc_pb2.ControlMessage
+    ) -> None:
+        """
+        Piggyback pending control messages onto an outgoing RPC.
+        
+        This checks if the control messages are still relevant (i.e., GRAFT only
+        if peer is in mesh, PRUNE only if peer is not in mesh) before adding.
+        
+        This follows the go-libp2p-pubsub piggybackControl pattern.
+        
+        :param peer_id: The peer to send the RPC to
+        :param rpc_msg: The RPC message to piggyback onto
+        :param ctl: The pending control message to piggyback
+        """
+        tograft: list[rpc_pb2.ControlGraft] = []
+        toprune: list[rpc_pb2.ControlPrune] = []
+        
+        # Filter GRAFT messages - only include if peer is still in mesh for topic
+        for graft in ctl.graft:
+            topic = graft.topicID
+            peers = self.mesh.get(topic)
+            if peers is not None and peer_id in peers:
+                tograft.append(graft)
+        
+        # Filter PRUNE messages - only include if peer is NOT in mesh for topic
+        for prune in ctl.prune:
+            topic = prune.topicID
+            peers = self.mesh.get(topic)
+            if peers is None or peer_id not in peers:
+                toprune.append(prune)
+        
+        if not tograft and not toprune:
+            return
+        
+        # Ensure control message exists on RPC
+        if not rpc_msg.HasField("control"):
+            rpc_msg.control.CopyFrom(rpc_pb2.ControlMessage())
+        
+        # Append piggybacked messages
+        if tograft:
+            rpc_msg.control.graft.extend(tograft)
+        if toprune:
+            rpc_msg.control.prune.extend(toprune)
+        
+        logger.debug(
+            "Piggybacked control messages to peer %s (GRAFT: %d, PRUNE: %d)",
+            peer_id,
+            len(tograft),
+            len(toprune),
+        )
+
+    def piggyback_gossip(
+        self, peer_id: ID, rpc_msg: rpc_pb2.RPC, ihave_msgs: list[rpc_pb2.ControlIHave]
+    ) -> None:
+        """
+        Piggyback pending gossip (IHAVE) messages onto an outgoing RPC.
+        
+        This follows the go-libp2p-pubsub piggybackGossip pattern.
+        
+        :param peer_id: The peer to send the RPC to
+        :param rpc_msg: The RPC message to piggyback onto
+        :param ihave_msgs: The IHAVE messages to piggyback
+        """
+        if not ihave_msgs:
+            return
+        
+        # Ensure control message exists on RPC
+        if not rpc_msg.HasField("control"):
+            rpc_msg.control.CopyFrom(rpc_pb2.ControlMessage())
+        
+        rpc_msg.control.ihave.extend(ihave_msgs)
+        
+        logger.debug(
+            "Piggybacked %d IHAVE messages to peer %s",
+            len(ihave_msgs),
+            peer_id,
+        )
+
+    def enqueue_gossip(self, peer_id: ID, ihave: rpc_pb2.ControlIHave) -> None:
+        """
+        Enqueue an IHAVE message for later piggybacking.
+        
+        This follows the go-libp2p-pubsub enqueueGossip pattern.
+        
+        :param peer_id: The peer to send the gossip to
+        :param ihave: The IHAVE message to enqueue
+        """
+        if peer_id not in self.pending_gossip:
+            self.pending_gossip[peer_id] = []
+        self.pending_gossip[peer_id].append(ihave)
+
+    async def flush_pending_messages(self) -> None:
+        """
+        Send any remaining pending control and gossip messages.
+        
+        This is called at the end of heartbeat to ensure any pending
+        messages that weren't piggybacked get sent.
+        
+        This follows the go-libp2p-pubsub flush pattern.
+        """
+        if self.pubsub is None:
+            return
+        
+        # Send gossip first, which will also piggyback pending control
+        for peer_id, ihave_msgs in list(self.pending_gossip.items()):
+            del self.pending_gossip[peer_id]
+            
+            if peer_id not in self.pubsub.peers:
+                continue
+            
+            # Create RPC with IHAVE messages
+            control_msg = rpc_pb2.ControlMessage()
+            control_msg.ihave.extend(ihave_msgs)
+            
+            # Piggyback any pending control messages
+            if peer_id in self.pending_control:
+                pending_ctl = self.pending_control.pop(peer_id)
+                if pending_ctl.graft:
+                    control_msg.graft.extend(pending_ctl.graft)
+                if pending_ctl.prune:
+                    control_msg.prune.extend(pending_ctl.prune)
+            
+            await self.emit_control_message(control_msg, peer_id)
+        
+        # Send remaining control messages that weren't merged with gossip
+        for peer_id, ctl in list(self.pending_control.items()):
+            del self.pending_control[peer_id]
+            
+            if peer_id not in self.pubsub.peers:
+                continue
+            
+            # Only send if there are GRAFT or PRUNE messages
+            if ctl.graft or ctl.prune:
+                control_msg = rpc_pb2.ControlMessage()
+                if ctl.graft:
+                    control_msg.graft.extend(ctl.graft)
+                if ctl.prune:
+                    control_msg.prune.extend(ctl.prune)
+                await self.emit_control_message(control_msg, peer_id)
+
     async def emit_ihave(self, topic: str, msg_ids: Any, to_peer: ID) -> None:
         """Emit ihave message, sent to to_peer, for topic and msg_ids."""
         ihave_msg: rpc_pb2.ControlIHave = rpc_pb2.ControlIHave()
@@ -1207,8 +1459,21 @@ class GossipSub(IPubsubRouter, Service):
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
+        """
+        Emit a control message to a peer, with piggybacking of pending messages.
+        
+        This method follows the go-libp2p-pubsub sendRPC pattern:
+        1. Check for pending control messages and piggyback them
+        2. Check for pending gossip messages and piggyback them
+        3. Send the combined message
+        4. On failure, save GRAFT/PRUNE for retry via push_control
+        
+        :param control_msg: The control message to send
+        :param to_peer: The peer to send the message to
+        """
         if self.pubsub is None:
             raise NoPubsubAttached
+        
         # Add control message to packet
         packet: rpc_pb2.RPC = rpc_pb2.RPC()
 
@@ -1219,16 +1484,39 @@ class GossipSub(IPubsubRouter, Service):
 
         packet.control.CopyFrom(control_msg)
 
+        # Piggyback pending control message retries (GRAFT/PRUNE only)
+        if to_peer in self.pending_control:
+            pending_ctl = self.pending_control.pop(to_peer)
+            self.piggyback_control(to_peer, packet, pending_ctl)
+
+        # Piggyback pending gossip (IHAVE)
+        if to_peer in self.pending_gossip:
+            pending_gossip = self.pending_gossip.pop(to_peer)
+            self.piggyback_gossip(to_peer, packet, pending_gossip)
+
         # Get stream for peer from pubsub
         if to_peer not in self.pubsub.peers:
             logger.debug(
                 "Fail to emit control message to %s: peer record not exist", to_peer
             )
+            # Store control messages for retry
+            if packet.HasField("control"):
+                self.push_control(to_peer, packet.control)
             return
         peer_stream = self.pubsub.peers[to_peer]
 
         # Write rpc to stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        try:
+            await self.pubsub.write_msg(peer_stream, packet)
+        except Exception as e:
+            logger.debug(
+                "Failed to send control message to peer %s: %s. Saving for retry.",
+                to_peer,
+                e,
+            )
+            # Store control messages for retry
+            if packet.HasField("control"):
+                self.push_control(to_peer, packet.control)
 
     async def _emit_idontwant_for_message(
         self, msg_id: bytes, topic_ids: Iterable[str]
