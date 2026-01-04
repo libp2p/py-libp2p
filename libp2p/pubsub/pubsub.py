@@ -909,7 +909,8 @@ class Pubsub(Service, IPubsub):
 
         :param stream: stream to write the message to
         :param rpc_msg: RPC message to write
-        :return: True if successful, False if stream was closed
+        :return: True if successful, False if stream was closed (StreamClosed)
+            or reset (StreamReset)
         """
         try:
             # Calculate message size first
