@@ -51,7 +51,7 @@ from libp2p.stream_muxer.exceptions import (
 from libp2p.stream_muxer.rw_lock import ReadWriteLock
 
 # Configure logger for this module
-logger = logging.getLogger("libp2p.stream_muxer.yamux")
+logger = logging.getLogger(__name__)
 
 PROTOCOL_ID = "/yamux/1.0.0"
 TYPE_DATA = 0x0

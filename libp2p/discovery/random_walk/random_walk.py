@@ -14,7 +14,7 @@ from libp2p.discovery.random_walk.exceptions import RandomWalkError
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
-logger = logging.getLogger("libp2p.discovery.random_walk")
+logger = logging.getLogger(__name__)
 
 
 class RandomWalk:
