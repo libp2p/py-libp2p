@@ -81,7 +81,7 @@ dev = [
 docs = [
     "sphinx>=6.0.0",
     "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=24,<25",
+    "towncrier>=25,<26",
     "tomli; python_version < '3.11'",
 ]
 test = [
