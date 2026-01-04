@@ -935,6 +935,6 @@ class Pubsub(Service, IPubsub):
             return True
         except (StreamClosed, StreamReset):
             peer_id = stream.muxed_conn.peer_id
-            logger.debug("Fail to write message to %s: stream closed", peer_id)
+            logger.debug("Fail to write message to %s: stream closed or reset", peer_id)
             self._handle_dead_peer(peer_id)
             return False

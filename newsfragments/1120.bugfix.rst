@@ -1,0 +1,15 @@
+Added StreamReset to the possible exceptions in Pubsub.write_msg to safely catch the exception so it doesn't shut down the pubsub service.
+
+Testing:
+
+Test added to ``tests/core/pubsub/test_pubsub_write_msg_exceptions.py::test_write_msg_stream_reset``
+
+This test sets up two hosts with pubsub, creates a stream between them, and then resets the stream before attempting to publish a message.
+The test verifies that the write_msg method handles the StreamReset exception gracefully without crashing. This can be tested
+to fail by removing StreamReset.
+
+
+Logging:
+
+Updated debug log from ``logger.debug("Fail to write message to %s: stream closed", peer_id)`` to
+``logger.debug("Fail to write message to %s: stream closed or reset", peer_id)``
