@@ -49,6 +49,7 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamError,
+    StreamReset,
 )
 from libp2p.peer.id import (
     ID,
@@ -908,7 +909,8 @@ class Pubsub(Service, IPubsub):
 
         :param stream: stream to write the message to
         :param rpc_msg: RPC message to write
-        :return: True if successful, False if stream was closed
+        :return: True if successful, False if stream was closed (StreamClosed)
+            or reset (StreamReset)
         """
         try:
             # Calculate message size first
@@ -932,8 +934,8 @@ class Pubsub(Service, IPubsub):
             # Single write operation (like Go's s.Write(buf))
             await stream.write(bytes(buf))
             return True
-        except StreamClosed:
+        except (StreamClosed, StreamReset):
             peer_id = stream.muxed_conn.peer_id
-            logger.debug("Fail to write message to %s: stream closed", peer_id)
+            logger.debug("Fail to write message to %s: stream closed or reset", peer_id)
             self._handle_dead_peer(peer_id)
             return False
