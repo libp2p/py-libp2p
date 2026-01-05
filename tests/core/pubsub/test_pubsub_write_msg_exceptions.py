@@ -11,8 +11,6 @@ from libp2p.pubsub.pubsub import Pubsub
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.tools.async_service import background_trio_service
 
-DATA = b"data_123"
-TCP_DATA_PROTOCOL = TProtocol("/test/tcp-data-exchange/1.0.0")
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 
 
@@ -51,7 +49,7 @@ async def create_tcp_host_pair():
 
 @pytest.mark.trio
 async def test_write_msg_stream_reset():
-    """Test basic TCP connection establishment."""
+    """Test that Pubsub.write_msg handles StreamReset exceptions gracefully."""
     host_a, host_b = await create_tcp_host_pair()
 
     async with (
