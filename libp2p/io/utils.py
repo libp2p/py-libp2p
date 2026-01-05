@@ -73,5 +73,7 @@ async def read_exactly(
 
     raise IncompleteReadError(
         f"Connection closed during read operation: expected {n} bytes but "
-        f"received {len(buffer)} bytes{context_info}"
+        f"received {len(buffer)} bytes{context_info}",
+        expected_bytes=n,
+        received_bytes=len(buffer),
     )
