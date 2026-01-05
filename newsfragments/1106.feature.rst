@@ -1,0 +1,1 @@
+Improved RSA key compatibility with other libp2p implementations, added public key extraction from peer IDs for Ed25519/Secp256k1 keys, and enhanced pubsub connection management to prevent premature peer removal and service crashes.
