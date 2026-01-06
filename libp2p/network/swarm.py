@@ -140,10 +140,6 @@ class Swarm(Service, INetworkService):
         self._round_robin_index = {}
         self._resource_manager = None
 
-    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
-        """Attach a ResourceManager to wire connection/stream scopes."""
-        self._resource_manager = resource_manager
-
         # Initialize health monitoring conditionally
         if (
             isinstance(self.connection_config, ConnectionConfig)
@@ -158,6 +154,10 @@ class Swarm(Service, INetworkService):
             self._health_metrics_collector = {}
             self._health_monitor = None
             logger.debug("Health monitoring disabled")
+
+    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
+        """Attach a ResourceManager to wire connection/stream scopes."""
+        self._resource_manager = resource_manager
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
