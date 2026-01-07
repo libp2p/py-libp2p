@@ -27,6 +27,10 @@ from .resources import (
     RelayResourceManager,
     Reservation,
 )
+from .performance_tracker import (
+    RelayPerformanceTracker,
+    RelayStats,
+)
 from .transport import (
     CircuitV2Transport,
 )
@@ -39,8 +43,10 @@ __all__ = [
     "RelayResourceManager",
     "CircuitV2Transport",
     "RelayDiscovery",
-     "DCUtRProtocol",
+    "DCUtRProtocol",
     "DCUTR_PROTOCOL_ID",
     "ReachabilityChecker",
     "is_private_ip",
+    "RelayPerformanceTracker",
+    "RelayStats",
 ]
