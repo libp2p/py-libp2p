@@ -1,6 +1,3 @@
-// Write output immediately to help debug
-console.log("[DEBUG] Starting JS peer script");
-
 import redis from "redis";
 
 console.log("[DEBUG] Redis imported successfully");
@@ -84,10 +81,30 @@ class WebRTCPeer {
         "interop:webrtc:js:listener:ready"
       );
       if (ready) {
-        const multiaddr = await this.redisClient.get(
+        const multiaddrStr = await this.redisClient.get(
           "interop:webrtc:js:listener:multiaddr"
         );
-        logger.info(`✓ Found JS listener: ${multiaddr}`);
+        logger.info(`✓ Found JS listener: ${multiaddrStr}`);
+
+        try {
+          const { createLibp2p } = await import('libp2p');
+          const { multiaddr } = await import('multiaddr');
+          // Minimal libp2p node config, adjust as needed
+          const node = await createLibp2p({
+            addresses: { listen: [] },
+            transports: [],
+          });
+          await node.start();
+          logger.info('Libp2p node started');
+          try {
+            const conn = await node.dial(multiaddr(multiaddrStr));
+            logger.info('Dialed to listener:', multiaddrStr);
+          } catch (err) {
+            logger.error('Dial failed:', err);
+          }
+        } catch (err) {
+          logger.error('Libp2p dial logic error:', err);
+        }
 
         // Signal connection
         await this.redisClient.set("interop:webrtc:dialer:connected", "1");

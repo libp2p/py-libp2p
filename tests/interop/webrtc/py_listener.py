@@ -268,6 +268,10 @@ class WebRTCListener:
 
 async def main() -> None:
     """Main entry point"""
+    from libp2p import new_host
+    # Create a py-libp2p host (minimal config, adjust as needed)
+    host = new_host()
+    logger.info(f"py-libp2p host created: {host}")
     listener = WebRTCListener()
     await listener.run()
 
