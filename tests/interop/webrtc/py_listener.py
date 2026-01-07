@@ -13,6 +13,7 @@ Creates a WebRTC listener that:
 import json
 import logging
 import sys
+from libp2p import new_host
 
 from aiortc import (  # type: ignore[import-untyped]
     RTCConfiguration,
@@ -268,8 +269,6 @@ class WebRTCListener:
 
 async def main() -> None:
     """Main entry point"""
-    from libp2p import new_host
-    # Create a py-libp2p host (minimal config, adjust as needed)
     host = new_host()
     logger.info(f"py-libp2p host created: {host}")
     listener = WebRTCListener()
