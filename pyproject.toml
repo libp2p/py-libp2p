@@ -81,7 +81,7 @@ dev = [
     "setuptools>=42",
     "sphinx>=6.0.0",
     "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=24,<25",
+    "towncrier >=25, <26",
     "p2pclient @ git+https://github.com/sumanjeet0012/py-libp2p-daemon-bindings.git@f89c35a1c715d05c4e54cd05cd5a38b8f3bdcf22",
     "pytest>=7.0.0",
     "pytest-xdist>=2.4.0",
