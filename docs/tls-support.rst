@@ -50,73 +50,67 @@ Listener node:
 
 .. code-block:: python
 
-   import trio
-   import multiaddr
-   from libp2p import new_host
-   from libp2p.crypto.keys import create_new_key_pair
-   from libp2p.security.tls.transport import TLSTransport, PROTOCOL_ID
+  import trio
+  import multiaddr
+  from libp2p import new_host
+  from libp2p.crypto.secp256k1 import create_new_key_pair
+  from libp2p.security.tls.transport import PROTOCOL_ID, TLSTransport
 
-   async def main():
-       # Create a key pair for the host
-       key_pair = create_new_key_pair()
+  async def main():
+    key_pair = create_new_key_pair(secret=None)
+    tls_transport = TLSTransport(libp2p_keypair=key_pair)
+    sec_opt = {PROTOCOL_ID: tls_transport}
+    host = new_host(key_pair=key_pair, sec_opt=sec_opt)
+    listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/8000")
+    async with host.run(listen_addrs=[listen_addr]):
+        while not host.get_addrs():
+            await trio.sleep(0.1)
+        addrs = host.get_addrs()
+        peer_id = host.get_id()
+        print("TLS-enabled listener at:", addrs[0] if addrs else "No addresses")
+        print("Peer ID:", peer_id)
+        print("\nUse this address with the dialer:")
+        print(f"  /ip4/127.0.0.1/tcp/8000/p2p/{peer_id}")
+        await trio.sleep_forever()
 
-       # Create TLS transport with the key pair
-       tls_transport = TLSTransport(key_pair)
-
-       # Create security options mapping
-       sec_opt = {PROTOCOL_ID: tls_transport}
-
-       # Create host with TLS security option
-       host = new_host(key_pair=key_pair, sec_opt=sec_opt)
-
-       # Create Multiaddr object for listening
-       listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/8000")
-
-       # Run the host and listen
-       async with host.run(listen_addrs=[listen_addr]):
-           print("TLS-enabled listener at:", host.get_addrs())
-           await trio.sleep_forever()
-
-   if __name__ == "__main__":
-       trio.run(main())
+  if __name__ == "__main__":
+    trio.run(main)
 
 Dialer node:
 
 .. code-block:: python
 
-   import trio
-   import multiaddr
-   from libp2p import new_host
-   from libp2p.crypto.keys import create_new_key_pair
-   from libp2p.security.tls.transport import TLSTransport, PROTOCOL_ID
-   from libp2p.peer.peerinfo import info_from_p2p_addr
+  import trio
+  import multiaddr
+  from libp2p import new_host
+  from libp2p.crypto.secp256k1 import create_new_key_pair
+  from libp2p.security.tls.transport import PROTOCOL_ID, TLSTransport
+  from libp2p.peer.peerinfo import info_from_p2p_addr
 
-   async def main():
-       # Create a key pair for the host
-       key_pair = create_new_key_pair()
+  async def main():
+      key_pair = create_new_key_pair(secret=None)
+      tls_transport = TLSTransport(libp2p_keypair=key_pair)
+      sec_opt = {PROTOCOL_ID: tls_transport}
+      host = new_host(key_pair=key_pair, sec_opt=sec_opt)
 
-       # Create TLS transport with the key pair
-       tls_transport = TLSTransport(key_pair)
+      addr = "/ip4/127.0.0.1/tcp/8000/p2p/16Uiu2HAm3hATVnBDT13acn2utRJXsFa2LRRGrZwDsosJ1mFZsM2Q"
+      maddr = multiaddr.Multiaddr(addr)
+      peer_info = info_from_p2p_addr(maddr)
 
-       # Create security options mapping
-       sec_opt = {PROTOCOL_ID: tls_transport}
+      async with host.run(listen_addrs=[]):
+          await trio.sleep(0.5)
+          host.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 120)
+          
+          try:
+              await host.connect(peer_info)
+              print("Connected securely to", peer_info.peer_id)
+              await trio.sleep(1)
+          except Exception as e:
+              print(f"Connection failed: {e}")
+              raise
 
-       # Create host with TLS security option
-       host = new_host(key_pair=key_pair, sec_opt=sec_opt)
-
-       # Parse the listener address (replace with actual listener address)
-       addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
-       maddr = multiaddr.Multiaddr(addr)
-       peer_info = info_from_p2p_addr(maddr)
-
-       # Run the host and connect
-       async with host.run():
-           await host.connect(peer_info)
-           print("Connected securely to", peer_info.peer_id)
-           await trio.sleep(1)
-
-   if __name__ == "__main__":
-       trio.run(main())
+  if __name__ == "__main__":
+      trio.run(main)
 
 **Defaults if no configuration is provided**
 
