@@ -100,7 +100,7 @@ Dialer node:
       async with host.run(listen_addrs=[]):
           await trio.sleep(0.5)
           host.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 120)
-          
+
           try:
               await host.connect(peer_info)
               print("Connected securely to", peer_info.peer_id)
