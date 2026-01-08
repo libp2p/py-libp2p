@@ -1,4 +1,4 @@
-py-libp2p>=0.1.0
+py-libp2p>=0.5.0
 multiaddr>=0.0.9
 base58>=2.1.1
 
