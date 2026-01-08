@@ -51,7 +51,32 @@ Install the development dependencies using a virtual environment:
     . venv/bin/activate
     ./scripts/setup_dev.sh
 
-**Option 2: Manual setup with pip:**
+**Option 2: Using uv (recommended, same as CI):**
+
+First, install ``uv`` if you haven't already:
+
+.. code:: sh
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Or using pip:
+
+.. code:: sh
+
+    pip install uv
+
+Then set up the development environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    uv venv venv
+    source venv/bin/activate
+    uv pip install --upgrade pip
+    uv pip install --group dev -e .
+    pre-commit install
+
+**Option 3: Manual setup with pip:**
 
 .. code:: sh
 
@@ -63,8 +88,7 @@ Install the development dependencies using a virtual environment:
     pre-commit install
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first. Alternatively, you can use ``uv``
-(which is used in CI) by running: ``uv pip install --group dev -e .``
+If you have an older pip version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -109,7 +133,44 @@ Install the development dependencies using a virtual environment:
     . venv/bin/activate
     ./scripts/setup_dev.sh
 
-**Option 2: Manual setup with pip:**
+**Option 2: Using uv (recommended, same as CI):**
+
+First, install ``uv`` if you haven't already:
+
+.. code:: sh
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Or using Homebrew:
+
+.. code:: sh
+
+    brew install uv
+
+Or using pip:
+
+.. code:: sh
+
+    pip install uv
+
+Then set up the development environment:
+
+.. code:: sh
+
+    cd py-libp2p
+    uv venv venv
+    source venv/bin/activate
+    uv pip install --upgrade pip
+    uv pip install --group dev -e .
+    pre-commit install
+
+On macOS, help the build command find and link against the ``gmp`` library:
+
+.. code:: sh
+
+    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" uv pip install --group dev -e .
+
+**Option 3: Manual setup with pip:**
 
 .. code:: sh
 
@@ -128,8 +189,7 @@ On macOS, help the build command find and link against the ``gmp`` library:
     CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" pip install --group dev -e .
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-If you have an older pip version, upgrade it first. Alternatively, you can use ``uv``
-(which is used in CI) by running: ``uv pip install --group dev -e .``
+If you have an older pip version, upgrade it first.
 
 An alternative using ``virtualenv``:
 
@@ -205,7 +265,30 @@ Setup Steps
         .\venv\Scripts\activate
 
 3. **Install Dependencies**
-   - Install the project and dev dependencies:
+
+   **Option A: Using uv (recommended, same as CI):**
+
+   First, install ``uv`` if you haven't already:
+
+   .. code:: powershell
+
+        # Using pip
+        pip install uv
+
+        # Or using winget
+        winget install --id=astral-sh.uv
+
+   Then set up the development environment:
+
+   .. code:: powershell
+
+        uv venv venv
+        .\venv\Scripts\activate
+        uv pip install --upgrade pip
+        uv pip install --group dev -e .
+        pre-commit install
+
+   **Option B: Using pip:**
 
    .. code:: powershell
 
@@ -214,8 +297,7 @@ Setup Steps
         pre-commit install
 
    **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
-   If you have an older pip version, upgrade it first. Alternatively, you can use ``uv``
-   (which is used in CI) by running: ``uv pip install --group dev -e .``
+   If you have an older pip version, upgrade it first.
 
 4. **Verify Setup**
    - Run the tests to ensure everything works:
