@@ -409,11 +409,12 @@ class CircuitV2Transport(ITransport):
             # Get destination peer SPR from the relay's response and validate it
             if resp.HasField("senderRecord"):
                 if not maybe_consume_signed_record(resp, self.host, dest_info.peer_id):
-                    logger.error(
-                        "Received an invalid senderRecord, dropping the stream"
+                    logger.warning(
+                        "Received an invalid senderRecord from relay, "
+                        "but continuing connection"
                     )
-                    await relay_stream.close()
-                    raise ConnectionError("Invalid senderRecord")
+                    # Don't fail the connection - the senderRecord is optional
+                    # and the relay might not have the destination's signed peer record
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)
@@ -833,11 +834,11 @@ class CircuitV2Transport(ITransport):
 
             if resp.HasField("senderRecord"):
                 if not maybe_consume_signed_record(resp, self.host, relay_peer_id):
-                    logger.error(
-                        "Received an invalid senderRecord, dropping the stream"
+                    logger.warning(
+                        "Received an invalid senderRecord from relay, "
+                        "but continuing reservation"
                     )
-                    await stream.close()
-                    return False
+                    # Don't fail the reservation - the senderRecord is optional
 
             # Access status attributes directly
             status_code = getattr(resp.status, "code", StatusCode.OK)

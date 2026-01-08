@@ -193,7 +193,8 @@ async def test_handle_prune():
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
         # Wait for heartbeat to allow mesh to connect
-        await trio.sleep(1)
+        # With heartbeat_interval=3, we need to wait longer for mesh establishment
+        await trio.sleep(3.5)
 
         # Check that they are each other's mesh peer
         assert id_alice in gossipsubs[index_bob].mesh[topic]
