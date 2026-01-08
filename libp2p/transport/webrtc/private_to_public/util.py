@@ -561,6 +561,27 @@ def generate_ice_credentials(
     return ufrag, ice_pwd
 
 
+def is_localhost_address(ip: str) -> bool:
+    """
+    Check if an IP address is a localhost/loopback address.
+
+    Parameters
+    ----------
+    ip : str
+        The IP address to check.
+
+    Returns
+    -------
+    bool
+        True if the address is localhost/loopback, False otherwise.
+
+    """
+    if not ip:
+        return False
+    ip_lower = ip.lower().strip()
+    return ip_lower in ("127.0.0.1", "::1", "localhost", "0.0.0.0", "::")
+
+
 def extract_from_multiaddr(ma: Multiaddr) -> tuple[str, int, int | None]:
     """
     Convert a Multiaddr to a tuple with host, port, and IP family.

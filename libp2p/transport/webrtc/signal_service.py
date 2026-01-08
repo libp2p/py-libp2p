@@ -223,6 +223,7 @@ class SignalService(INotifee):
             if peer_id_str in self.active_streams:
                 stream = self.active_streams[peer_id_str]
             else:
+                # Create new signaling stream
                 stream = await self.host.new_stream(peer_id, [self.signal_protocol])
                 self.active_streams[peer_id_str] = stream
 
@@ -432,7 +433,9 @@ class SignalService(INotifee):
 
         except Exception as e:
             logger.error(f"SDP negotiation failed with {peer_id}: {e}")
-            await self.send_connection_state(peer_id, "failed", str(e))
+            # Don't send connection_state in error handler to avoid recursion
+            # Let the caller handle it
+            # await self.send_connection_state(peer_id, "failed", str(e))
             raise
         finally:
             # Restore previous handlers

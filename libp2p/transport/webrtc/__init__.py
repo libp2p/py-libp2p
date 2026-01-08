@@ -6,6 +6,7 @@ implementations.
 """
 
 from . import aioice_patch  # noqa: F401  ensures loopback patch is applied early
+from . import aiortc_patch  # noqa: F401  ensures aiortc patches are applied early
 from .private_to_private.transport import WebRTCTransport
 from .private_to_public.transport import WebRTCDirectTransport
 from .constants import (

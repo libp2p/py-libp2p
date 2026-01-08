@@ -19,6 +19,7 @@ from libp2p.relay.circuit_v2.nat import ReachabilityChecker
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..constants import (
+    DEFAULT_DIAL_TIMEOUT,
     DEFAULT_ICE_SERVERS,
     WebRTCError,
 )
@@ -36,6 +37,7 @@ from .util import (
     extract_certhash,
     fingerprint_to_certhash,
     generate_ice_credentials,
+    is_localhost_address,
 )
 
 if TYPE_CHECKING:
@@ -232,40 +234,81 @@ class WebRTCDirectTransport(ITransport):
                 base_addr = Multiaddr(f"/{ip_proto}/{ip}/udp/{port}")
                 peerstore.add_addr(peer_id, base_addr, 3600)
                 logger.debug(f"Stored peer address {base_addr} for {peer_id}")
+                # For localhost, ensure TCP addresses are available for signaling
+                # Signal service needs TCP connection,
+                # This prevents recursion when signal_service tries to create a stream
+                if is_localhost_address(ip):
+                    try:
+                        network = self.host.get_network()
+                        existing_connections = (
+                            network.get_connections(peer_id)
+                            if hasattr(network, "get_connections")
+                            else []
+                        )
+                        try:
+                            existing_addrs = peerstore.addrs(peer_id)
+                        except Exception:
+                            existing_addrs = []
+                        tcp_addrs = [
+                            a
+                            for a in existing_addrs
+                            if "/tcp/" in str(a) and "/webrtc" not in str(a)
+                        ]
+                        if not existing_connections and not tcp_addrs:
+                            logger.debug(
+                                f"No TCP addr for {peer_id} on localhost - "
+                                "signal_service will handle this"
+                            )
+                    except Exception as tcp_exc:
+                        logger.debug(
+                            f"Error checking TCP addresses for localhost: {tcp_exc}"
+                        )
             except Exception as e:
                 logger.debug(f"Failed to store peer address in peerstore: {e}")
                 # Continue anyway - might already be stored
 
-            # NAT detection: Check peer and self-reachability
-            is_peer_reachable = False
-            is_self_reachable = False
+            # Check if this is a localhost connection -
+            # skip NAT checks and UDP hole punching
+            is_localhost = is_localhost_address(ip)
             public_addrs_self: list[Multiaddr] = []
+            if is_localhost:
+                logger.debug(
+                    f"Localhost connection detected ({ip}), "
+                    "skipping NAT checks and UDP hole punching"
+                )
+                is_peer_reachable = True
+                is_self_reachable = True
+                needs_hole_punching = False
+            else:
+                # NAT detection: Check peer and self-reachability
+                is_peer_reachable = False
+                is_self_reachable = False
 
-            if self._reachability_checker:
-                try:
-                    # Check peer reachability
-                    is_peer_reachable = (
-                        await self._reachability_checker.check_peer_reachability(
-                            peer_id
+                if self._reachability_checker:
+                    try:
+                        # Check peer reachability
+                        is_peer_reachable = (
+                            await self._reachability_checker.check_peer_reachability(
+                                peer_id
+                            )
                         )
-                    )
-                    logger.debug(f"Peer {peer_id} reachable: {is_peer_reachable}")
+                        logger.debug(f"Peer {peer_id} reachable: {is_peer_reachable}")
 
-                    # Check self-reachability
-                    (
-                        is_self_reachable,
-                        public_addrs_self,
-                    ) = await self._reachability_checker.check_self_reachability()
-                    logger.debug(
-                        f"Self reachable: {is_self_reachable}, "
-                        f"public addresses: {len(public_addrs_self)}"
-                    )
-                except Exception as nat_exc:
-                    logger.debug(f"NAT detection check failed: {nat_exc}")
-                    # Continue with conservative approach (assume NAT)
+                        # Check self-reachability
+                        (
+                            is_self_reachable,
+                            public_addrs_self,
+                        ) = await self._reachability_checker.check_self_reachability()
+                        logger.debug(
+                            f"Self reachable: {is_self_reachable}, "
+                            f"public addresses: {len(public_addrs_self)}"
+                        )
+                    except Exception as nat_exc:
+                        logger.debug(f"NAT detection check failed: {nat_exc}")
+                        # Continue with conservative approach (assume NAT)
 
-            # Determine if UDP hole punching is needed
-            needs_hole_punching = not (is_peer_reachable and is_self_reachable)
+                # Determine if UDP hole punching is needed
+                needs_hole_punching = not (is_peer_reachable and is_self_reachable)
 
             punch_metadata = {
                 "ufrag": ufrag,
@@ -300,9 +343,13 @@ class WebRTCDirectTransport(ITransport):
             else:
                 logger.debug("Both peers appear reachable, skipping UDP hole punching")
 
-            # Configure ICE servers based on NAT status
+            # Configure ICE servers based on NAT status and localhost detection
             ice_servers_dict: list[dict[str, str]] = []
-            if not is_self_reachable:
+            if is_localhost:
+                # Localhost - no ICE servers needed
+                ice_servers_dict = []
+                logger.debug("Localhost connection - no ICE servers needed")
+            elif not is_self_reachable:
                 # Behind NAT - use STUN/TURN servers
                 ice_servers_dict = DEFAULT_ICE_SERVERS
                 logger.debug("Configured ICE servers for NAT traversal")
@@ -351,18 +398,58 @@ class WebRTCDirectTransport(ITransport):
                             {"ufrag": handler_ufrag},
                         )
 
-                    secure_conn, _ = await connect(
-                        role="client",
-                        ufrag=ufrag,
-                        ice_pwd=ice_pwd,
-                        peer_connection=direct_peer_connection,
-                        remote_addr=maddr,
-                        remote_peer_id=peer_id,
-                        signal_service=self.signal_service,
-                        certhash=certhash,
-                        offer_handler=handle_offer,
-                        security_multistream=swarm.upgrader.security_multistream,
-                    )
+                    connection_timeout = DEFAULT_DIAL_TIMEOUT
+                    secure_conn = None
+                    connection_error = None
+
+                    with trio.move_on_after(connection_timeout) as timeout_scope:
+                        try:
+                            secure_conn, _ = await connect(
+                                role="client",
+                                ufrag=ufrag,
+                                ice_pwd=ice_pwd,
+                                peer_connection=direct_peer_connection,
+                                remote_addr=maddr,
+                                remote_peer_id=peer_id,
+                                signal_service=self.signal_service,
+                                certhash=certhash,
+                                offer_handler=handle_offer,
+                                security_multistream=swarm.upgrader.security_multistream,
+                            )
+                        except Exception as connect_exc:
+                            connection_error = connect_exc
+                            if not timeout_scope.cancelled_caught:
+                                raise
+
+                    # Check if connection timed out
+                    if timeout_scope.cancelled_caught or secure_conn is None:
+                        # Close peer connection on timeout
+                        try:
+                            await aio_as_trio(direct_peer_connection.close())
+                        except Exception:
+                            pass
+                        # Trigger fallback if both peers behind NAT
+                        if (
+                            not is_localhost
+                            and not is_self_reachable
+                            and not is_peer_reachable
+                            and self._reachability_checker
+                        ):
+                            logger.info(
+                                f"Direct conn timed out after {connection_timeout}s "
+                                "for NAT peers, attempting Circuit Relay v2 fallback"
+                            )
+                            try:
+                                return await self._dial_via_relay_fallback(
+                                    maddr, peer_id
+                                )
+                            except Exception as relay_exc:
+                                logger.warning(f"Relay fallback failed: {relay_exc}")
+                        # Raise timeout error
+                        raise OpenConnectionError(
+                            f"WebRTC-Direct conn timed out after {connection_timeout}s"
+                        ) from connection_error
+
                     if secure_conn is None:
                         raise OpenConnectionError("WebRTC-Direct connection failed")
                     remote_fp = getattr(secure_conn, "remote_fingerprint", None)
@@ -434,7 +521,8 @@ class WebRTCDirectTransport(ITransport):
                     # Fallback to Circuit Relay v2 if both peers behind NAT
                     #  and UDP hole punching failed
                     if (
-                        not is_self_reachable
+                        not is_localhost
+                        and not is_self_reachable
                         and not is_peer_reachable
                         and not hole_punch_success
                         and self._reachability_checker
@@ -607,30 +695,103 @@ class WebRTCDirectTransport(ITransport):
         # Import here to avoid circular dependency
         from ..private_to_private.transport import WebRTCTransport
 
-        # Create a temporary private-to-private transport instance
         if self.host is None:
             raise WebRTCError("Host must be set for Circuit Relay v2 fallback")
 
-        relay_transport = WebRTCTransport({})
-        relay_transport.set_host(self.host)
+        # Try to reuse existing WebRTCTransport from TransportManager if available
+        relay_transport: WebRTCTransport | None = None
+
+        # Get the existing transport manager from the network (not create a new one!)
+        # The transport_manager is stored on the network as an attribute
+        transport_manager = getattr(self.host.get_network(), "transport_manager", None)
+        if transport_manager:
+            # get_transport returns the instance (ITransport), not a class
+            existing_webrtc_transport = transport_manager.get_transport("webrtc")
+            if existing_webrtc_transport is not None:
+                # Check if it's a WebRTCTransport instance
+                if isinstance(existing_webrtc_transport, WebRTCTransport):
+                    relay_transport = existing_webrtc_transport
+                    logger.debug(
+                        "Reusing existing WebRTC instance from TransportManager"
+                    )
+                    # Check if transport is started, if not start it
+                    if not relay_transport._started:
+                        logger.debug("Starting existing WebRTCTransport instance")
+                        await relay_transport.start()
+
+        # If no existing instance found, create a new one
+        if relay_transport is None:
+            logger.debug("Creating new WebRTCTransport instance for fallback")
+            relay_transport = WebRTCTransport({})
+            relay_transport.set_host(self.host)
 
         try:
-            # Start the relay transport
-            await relay_transport.start()
+            # Start the relay transport if not already started
+            if not relay_transport._started:
+                await relay_transport.start()
 
             # Try to find a relay address for the peer
             peerstore = self.host.get_peerstore() if self.host else None
+            relay_addrs_found = False
+
             if peerstore:
-                # Look for existing relay addresses
+                # Look for existing relay addresses in peerstore
                 relay_addrs = peerstore.addrs(peer_id)
                 for relay_addr in relay_addrs:
                     if "/p2p-circuit" in str(relay_addr):
-                        # Found a relay address, use it
-                        relay_maddr = relay_addr.encapsulate(
-                            Multiaddr(f"/webrtc/p2p/{peer_id.to_base58()}")
-                        )
+                        # Found a relay address, construct WebRTC multiaddr
+                        relay_maddr_str = str(relay_addr)
+                        # Ensure it ends with /webrtc/p2p/{peer_id}
+                        if not relay_maddr_str.endswith(
+                            f"/webrtc/p2p/{peer_id.to_base58()}"
+                        ):
+                            # Construct proper WebRTC multiaddr via relay
+                            relay_maddr = Multiaddr(
+                                f"{relay_maddr_str}/webrtc/p2p/{peer_id.to_base58()}"
+                            )
+                        else:
+                            relay_maddr = Multiaddr(relay_maddr_str)
                         logger.debug(f"Using existing relay address: {relay_maddr}")
+                        relay_addrs_found = True
                         return await relay_transport.dial(relay_maddr)
+
+            # If no relay address in peerstore, use RelayDiscovery
+            if not relay_addrs_found and relay_transport._relay_discovery:
+                logger.debug("No relay addresses in peerstore, using RelayDiscovery")
+                discovered_relays = relay_transport._relay_discovery.get_relays()
+                if discovered_relays:
+                    # Try to discover relays if none found
+                    if not discovered_relays:
+                        logger.debug(
+                            "No relays discovered yet, triggering discovery..."
+                        )
+                        await relay_transport._relay_discovery.discover_relays()
+                        await trio.sleep(1.0)  # Give discovery time to complete
+                        discovered_relays = (
+                            relay_transport._relay_discovery.get_relays()
+                        )
+
+                    # Try each discovered relay
+                    for relay_peer_id in discovered_relays:
+                        relay_addrs = (
+                            peerstore.addrs(relay_peer_id) if peerstore else []
+                        )
+                        if relay_addrs:
+                            # Use first relay address
+                            relay_base_addr = relay_addrs[0]
+                            # Construct WebRTC multiaddr via relay
+                            relay_maddr = Multiaddr(
+                                f"{relay_base_addr}/p2p-circuit/webrtc/p2p/{peer_id.to_base58()}"
+                            )
+                            logger.debug(f"Using discovered relay: {relay_maddr}")
+                            try:
+                                return await relay_transport.dial(relay_maddr)
+                            except Exception as dial_exc:
+                                logger.debug(
+                                    f"Failed to dial via relay "
+                                    f"{relay_peer_id}: {dial_exc}"
+                                )
+                                continue  # Try next relay
 
             # If no relay address found, we can't proceed with fallback
             raise OpenConnectionError(
@@ -638,10 +799,27 @@ class WebRTCDirectTransport(ITransport):
             )
 
         finally:
-            try:
-                await relay_transport.stop()
-            except Exception:
-                pass
+            # Only stop if we created a new instance (not if we reused existing one)
+            # Check if this transport is registered in transport_manager
+            transport_manager = getattr(
+                self.host.get_network(), "transport_manager", None
+            )
+            is_registered = (
+                transport_manager is not None
+                and transport_manager.get_transport("webrtc") is relay_transport
+            )
+
+            if not is_registered:
+                # We created a new instance, so clean it up
+                try:
+                    await relay_transport.stop()
+                except Exception:
+                    pass
+            else:
+                logger.debug(
+                    "Skipping stop() for registered WebRTCTransport instance "
+                    "(will be managed by transport lifecycle)"
+                )
 
     async def _cert_renewal_task(
         self,

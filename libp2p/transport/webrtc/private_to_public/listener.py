@@ -22,6 +22,7 @@ from .connect import connect
 from .direct_rtc_connection import DirectPeerConnection
 from .gen_certificate import WebRTCCertificate
 from .util import (
+    SDP,
     canonicalize_certhash,
     extract_from_multiaddr,
     fingerprint_to_certhash,
@@ -475,16 +476,130 @@ class WebRTCDirectListener(IListener):
         if session.remote_peer_id is None:
             session.remote_peer_id = sender_id
 
+        # Extract certhash from offer SDP fingerprint
+        if session.certhash is None and session.offer.sdp:
+            try:
+                fingerprint = SDP.get_fingerprint_from_sdp(session.offer.sdp)
+                if fingerprint:
+                    session.certhash = fingerprint_to_certhash(fingerprint)
+                    logger.debug(
+                        "Extracted certhash %s from offer SDP", session.certhash
+                    )
+            except Exception as e:
+                logger.debug("Failed to extract certhash from offer SDP: %s", e)
+
+        # Create peer connection if it doesn't exist (for signaling-first flows)
+        if session.peer_connection is None:
+            logger.info(
+                "Creating peer connection for session %s (signaling-first)", ufrag
+            )
+            if session.ice_pwd is None:
+                _, session.ice_pwd = generate_ice_credentials()
+            session.peer_connection = (
+                await DirectPeerConnection.create_dialer_rtc_peer_connection(
+                    role="server",
+                    ufrag=ufrag,
+                    ice_pwd=session.ice_pwd,
+                    rtc_configuration=self.rtc_configuration,
+                    certificate=self.cert,
+                )
+            )
+            if (
+                self.signal_service is not None
+                and session.peer_connection is not None
+                and not session.ice_listener_registered
+            ):
+
+                def _queue_local_candidate(
+                    candidate: RTCIceCandidate | None,
+                ) -> None:
+                    if self.signal_service is None or session.remote_peer_id is None:
+                        return
+                    if candidate is None:
+                        self.signal_service.enqueue_local_candidate(
+                            session.remote_peer_id,
+                            None,
+                            extra={"ufrag": session.ufrag},
+                        )
+                        return
+                    candidate_any = cast(Any, candidate)
+                    if hasattr(candidate_any, "to_sdp"):
+                        candidate_sdp = candidate_any.to_sdp()
+                    else:
+                        candidate_sdp = getattr(candidate_any, "candidate", None)
+                    self.signal_service.enqueue_local_candidate(
+                        session.remote_peer_id,
+                        {
+                            "candidate": candidate_sdp,
+                            "sdpMid": candidate_any.sdpMid,
+                            "sdpMLineIndex": candidate_any.sdpMLineIndex,
+                        },
+                        extra={"ufrag": session.ufrag},
+                    )
+
+                session.peer_connection.on("icecandidate", _queue_local_candidate)
+                session.ice_listener_registered = True
+
+        # Extract host/port from SDP candidates if not already set
+        if session.remote_host is None or session.remote_port is None:
+            if session.offer.sdp:
+                try:
+                    # Look for candidate lines in SDP
+                    candidate_lines = [
+                        line
+                        for line in session.offer.sdp.splitlines()
+                        if line.startswith("a=candidate:")
+                    ]
+                    for cand_line in candidate_lines:
+                        # Parse candidate: foundation component-id
+                        # transport priority IP port typ type
+                        parts = cand_line.split()
+                        if len(parts) >= 6:
+                            # Extract IP and port from candidate
+                            cand_ip = parts[4]
+                            cand_port = int(parts[5])
+                            # Prefer host candidates for localhost
+                            if "typ host" in cand_line:
+                                session.remote_host = cand_ip
+                                session.remote_port = cand_port
+                                logger.debug(
+                                    "Extracted host/port from offer SDP: %s:%s",
+                                    session.remote_host,
+                                    session.remote_port,
+                                )
+                                break
+                except Exception as e:
+                    logger.debug("Failed to extract host/port from offer SDP: %s", e)
+
+        # For localhost, use default if still not set
+        if session.remote_host is None or session.remote_port is None:
+            # Use localhost defaults for signaling-first flows
+            session.remote_host = "127.0.0.1"
+            session.remote_port = 0  # Will be determined during conn
+            logger.debug("Using localhost defaults for signaling-first flow")
+
+        # Construct client_multiaddr if we have the required info
         if (
-            session.peer_connection is not None
+            session.remote_peer_id is not None
+            and session.certhash is not None
             and session.remote_host is not None
-            and session.remote_port is not None
         ):
             ip_proto = "ip6" if ":" in session.remote_host else "ip4"
+            # Use port 0 if not set - it will be updated when connection is established
+            port = session.remote_port if session.remote_port is not None else 0
             session.client_multiaddr = Multiaddr(
-                f"/{ip_proto}/{session.remote_host}/udp/{session.remote_port}"
+                f"/{ip_proto}/{session.remote_host}/udp/{port}"
                 f"/webrtc-direct/certhash/{session.certhash}/p2p/{session.remote_peer_id}"
             )
+            logger.debug("Constructed client_multiaddr: %s", session.client_multiaddr)
+
+        # Finalize session if we have all required components
+        if (
+            session.peer_connection is not None
+            and session.offer is not None
+            and session.client_multiaddr is not None
+            and session.remote_peer_id is not None
+        ):
             await self._finalize_session(session)
 
     async def _handle_signal_ice(

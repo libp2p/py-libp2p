@@ -25,15 +25,17 @@ PROTOCOL_WEBRTC_DIRECT = "webrtc-direct"
 PROTOCOL_CERTHASH = "certhash"
 
 # Data channel configuration
-MAX_BUFFERED_AMOUNT = 2 * 1024 * 1024  # 2MB
-BUFFERED_AMOUNT_LOW_TIMEOUT = 30 * 1000  # 30 seconds
+MAX_BUFFERED_AMOUNT = (
+    256 * 1024
+)  # 256KB (reduced from 2MB to prevent backpressure deadlocks)
+BUFFERED_AMOUNT_LOW_TIMEOUT = 30.0  # 30 seconds (float for trio.move_on_after)
 MAX_MESSAGE_SIZE = 16 * 1024  # 16KB (compatible with go-libp2p and rust-libp2p)
 
-# Stream handling timeouts
-FIN_ACK_TIMEOUT = 5000  # 5 seconds
-OPEN_TIMEOUT = 5000  # 5 seconds
-DATA_CHANNEL_DRAIN_TIMEOUT = 30000  # 30 seconds
-DEFAULT_READ_TIMEOUT = 30000  # 30 seconds
+# Stream handling timeouts (all in seconds as floats for trio.move_on_after)
+FIN_ACK_TIMEOUT = 5.0  # 5 seconds
+OPEN_TIMEOUT = 5.0  # 5 seconds
+DATA_CHANNEL_DRAIN_TIMEOUT = 30.0  # 30 seconds
+DEFAULT_READ_TIMEOUT = 30.0  # 30 seconds
 # WebRTC-Direct specific constants
 UFRAG_PREFIX = "libp2p+webrtc+v1/"
 UFRAG_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
@@ -106,10 +108,10 @@ TRANSPORT_TYPE_WEBRTC = "webrtc"
 TRANSPORT_TYPE_WEBRTC_DIRECT = "webrtc-direct"
 
 # Default timeouts and retries
-DEFAULT_DIAL_TIMEOUT = 30.0  # seconds
-DEFAULT_LISTEN_TIMEOUT = 30.0  # seconds
-DEFAULT_HANDSHAKE_TIMEOUT = 10.0  # seconds
-DEFAULT_ICE_GATHERING_TIMEOUT = 5.0  # seconds
+DEFAULT_DIAL_TIMEOUT = 60.0  # seconds
+DEFAULT_LISTEN_TIMEOUT = 60.0  # seconds
+DEFAULT_HANDSHAKE_TIMEOUT = 40.0  # seconds
+DEFAULT_ICE_GATHERING_TIMEOUT = 10.0  # seconds
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 1.0  # seconds
 

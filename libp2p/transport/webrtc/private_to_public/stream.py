@@ -292,6 +292,12 @@ class WebRTCStream(IMuxedStream):
                 )
                 with trio.move_on_after(BUFFERED_AMOUNT_LOW_TIMEOUT) as scope:
                     while self._channel.bufferedAmount > MAX_BUFFERED_AMOUNT:
+                        logger.debug(
+                            f"Stream {self.stream_id} waiting for buffer: "
+                            f"bufferedAmount={self._channel.bufferedAmount}, "
+                            f"max={MAX_BUFFERED_AMOUNT}, "
+                            f"channel_state={self._channel.readyState}"
+                        )
                         await bufferedamountlow_event.wait()
                         bufferedamountlow_event = trio.Event()
                 if scope.cancelled_caught:
@@ -302,11 +308,48 @@ class WebRTCStream(IMuxedStream):
             finally:
                 bufferedamountlow_event = trio.Event()
 
+        # Check channel state before sending
+        channel_state = self._channel.readyState
+        buffered_before = getattr(self._channel, "bufferedAmount", -1)
+
+        logger.debug(
+            f"Sending message on stream {self.stream_id}, "
+            f'channel state "{channel_state}", buffered={buffered_before}'
+        )
+
+        # Don't send if channel is closed
+        if channel_state == "closed":
+            conn_state = getattr(
+                getattr(self._channel, "peerConnection", None),
+                "connectionState",
+                None,
+            )
+            if conn_state != "connected":
+                raise RuntimeError(
+                    f"Cannot send on closed channel (stream {self.stream_id}), "
+                    f"connection state: {conn_state}"
+                )
+            else:
+                logger.debug(
+                    f"Channel reports closed but connection is connected - "
+                    f"attempting send anyway (WebRTC quirk, stream {self.stream_id})"
+                )
+
         try:
-            logger.debug(f'Sending message, channel state "{self._channel.readyState}"')
             self._channel.send(data)
+            logger.debug(
+                f"Successfully sent message on stream {self.stream_id} "
+                f"({len(data)} bytes)"
+            )
         except Exception as err:
-            logger.error(f"Error while sending message: {err}")
+            channel_state_after = getattr(self._channel, "readyState", "unknown")
+            logger.error(
+                f"Error while sending message on stream {self.stream_id}: {err} - "
+                f"channel_state_before={channel_state}, "
+                f"channel_state_after={channel_state_after}, "
+                f"buffered_before={buffered_before}",
+                exc_info=True,
+            )
             raise
 
     async def _send_flag(self, flag: "Message.Flag.ValueType") -> bool:

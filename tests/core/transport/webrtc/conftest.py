@@ -12,7 +12,17 @@ Or in CI, add a separate step:
     pytest -n 1 --timeout=2400 tests/core/transport/webrtc
 """
 
+from collections.abc import AsyncIterator
+
 import pytest
+import trio
+
+from libp2p.abc import IHost
+from libp2p.tools.utils import connect
+from tests.core.transport.webrtc.relay_fixtures import (
+    store_relay_addrs,
+)
+from tests.utils.factories import HostFactory
 
 
 def pytest_collection_modifyitems(config, items):
@@ -27,3 +37,47 @@ def pytest_collection_modifyitems(config, items):
         # Only mark items from this directory (webrtc tests)
         if "webrtc" in str(item.fspath):
             item.add_marker(pytest.mark.serial)
+
+
+@pytest.fixture
+async def nat_peer_a(relay_host: IHost) -> AsyncIterator[IHost]:
+    """Create a NAT peer A that connects to the relay."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+
+        # Connect to relay
+        relay_id = relay_host.get_id()
+        relay_addrs = list(relay_host.get_addrs())
+
+        if relay_addrs:
+            store_relay_addrs(relay_id, relay_addrs, host.get_peerstore())
+
+            try:
+                await connect(host, relay_host)
+                await trio.sleep(0.1)
+            except Exception:
+                pass
+
+        yield host
+
+
+@pytest.fixture
+async def nat_peer_b(relay_host: IHost) -> AsyncIterator[IHost]:
+    """Create a NAT peer B that connects to the relay."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        host = hosts[0]
+
+        # Connect to relay
+        relay_id = relay_host.get_id()
+        relay_addrs = list(relay_host.get_addrs())
+
+        if relay_addrs:
+            store_relay_addrs(relay_id, relay_addrs, host.get_peerstore())
+
+            try:
+                await connect(host, relay_host)
+                await trio.sleep(0.1)
+            except Exception:
+                pass
+
+        yield host

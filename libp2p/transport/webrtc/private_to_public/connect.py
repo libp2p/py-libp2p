@@ -1,5 +1,7 @@
 from collections.abc import Awaitable, Callable
 import logging
+import time as time_module
+import traceback
 from typing import TYPE_CHECKING, Any, cast
 
 from aioice.candidate import Candidate
@@ -25,7 +27,27 @@ from libp2p.transport.webrtc.private_to_public.util import (
 )
 
 from ..connection import WebRTCRawConnection
+from ..constants import DEFAULT_DIAL_TIMEOUT
 from .direct_rtc_connection import DirectPeerConnection
+
+# Import aiortc patch to prevent premature closure during handshake
+try:
+    from libp2p.transport.webrtc.aiortc_patch import (
+        register_handshake,
+        unregister_handshake,
+    )
+
+    # Type ignore for conditional variants - both have compatible signatures
+    register_handshake = register_handshake  # type: ignore[assignment]
+    unregister_handshake = unregister_handshake  # type: ignore[assignment]
+except ImportError:
+    # Patch not available, define no-op functions
+    def register_handshake(peer_connection: Any) -> None:  # type: ignore[misc]
+        pass
+
+    def unregister_handshake(peer_connection: Any) -> None:  # type: ignore[misc]
+        pass
+
 
 if TYPE_CHECKING:
     from libp2p.abc import IRawConnection
@@ -144,15 +166,139 @@ async def connect(
     # CRITICAL: Create data channel BEFORE createOffer() on peer_conn
     # This is required for ICE gathering to start
     # - RTCPeerConnection needs a media component to gather candidates.
-    #  js-libp2p does this: createDataChannel() -> createOffer()
     bridge = get_webrtc_bridge()
     cleanup_handlers: list[
         tuple[str, Callable[[dict[str, Any], str], Awaitable[None]]]
     ] = []
 
+    # Create handshake data channel with comprehensive lifecycle logging
+    # CRITICAL: Use empty string label and negotiated=True, id=0 as per
+    # libp2p WebRTC spec
+    # Both client and server MUST create the negotiated channel (id=0)
+    # BEFORE setRemoteDescription
+    # NOTE: Register handshake IMMEDIATELY after creating channel to
+    # prevent premature closure
     handshake_channel: RTCDataChannel = peer_connection.createDataChannel(
         "", negotiated=True, id=0
     )
+
+    # CRITICAL: Create message buffer IMMEDIATELY after channel creation
+    # Messages can arrive BEFORE channel.open fires
+    # This buffer captures ALL messages, preventing loss during connection setup
+    message_buffer_send, message_buffer_recv = trio.open_memory_channel(1000)
+
+    # CRITICAL: Attach permanent dumb handler IMMEDIATELY - before channel opens
+    # This handler does ONE thing: buffer bytes. No logic, no decoding, no state.
+    # It exists before open, before connection object, before handshake.
+    def _early_message_handler(message: Any) -> None:
+        """Permanent dumb handler that buffers all messages immediately."""
+        try:
+            if hasattr(message, "data"):
+                data = message.data
+                if isinstance(data, bytes):
+                    pass
+                elif hasattr(data, "tobytes"):
+                    data = data.tobytes()
+                else:
+                    data = bytes(data) if data else b""
+            elif isinstance(message, bytes):
+                data = message
+            else:
+                try:
+                    data = bytes(message)
+                except (TypeError, ValueError):
+                    data = str(message).encode()
+
+            if data:
+                # Buffer immediately - this is thread-safe (send_nowait is atomic)
+                try:
+                    message_buffer_send.send_nowait(data)
+                    channel_state = getattr(handshake_channel, "readyState", "unknown")
+                    logger.debug(
+                        f"{role} early handler buffered {len(data)} bytes "
+                        f"(channel state: {channel_state})"
+                    )
+                except trio.WouldBlock:
+                    logger.warning(
+                        f"{role} message buffer full, dropping {len(data)} bytes "
+                        "(this should be rare)"
+                    )
+                except trio.ClosedResourceError:
+                    logger.debug(f"{role} message buffer closed, message dropped")
+        except Exception as e:
+            logger.error(f"{role} error in early message handler: {e}", exc_info=True)
+
+    # Attach handler IMMEDIATELY - this is permanent and never unregistered
+    handshake_channel.on("message", _early_message_handler)
+    logger.info(
+        f"{role} attached permanent early message handler "
+        f"(channel state: {getattr(handshake_channel, 'readyState', 'unknown')})"
+    )
+
+    # CRITICAL: Register handshake IMMEDIATELY after creating channel
+    # This prevents aiortc from closing the peer connection before handshake can start
+    # We'll unregister when handshake completes or fails
+    register_handshake(peer_connection)
+    logger.debug(
+        f"{role} Registered handshake immediately after channel creation "
+        f"(peer_conn={id(peer_connection)})"
+    )
+
+    def log_channel_event(event_name: str, **kwargs: Any) -> None:
+        """Log data channel lifecycle events with full context"""
+        timestamp = time_module.time() * 1000
+        stack_trace = "".join(traceback.format_stack()[-5:-1])  # Last 4 frames
+        logger.info(
+            f"{role} DC {event_name} at {timestamp:.2f}ms - "
+            f"channel_id={getattr(handshake_channel, 'id', 'unknown')}, "
+            f"readyState={getattr(handshake_channel, 'readyState', 'unknown')}, "
+            f"bufferedAmount={getattr(handshake_channel, 'bufferedAmount', -1)}, "
+            f"kwargs={kwargs}"
+        )
+        logger.debug(f"{role} DC {event_name} stack trace:\n{stack_trace}")
+
+    def on_channel_open() -> None:
+        log_channel_event("open")
+        conn_state = getattr(peer_connection, "connectionState", None)
+        ice_state = getattr(peer_connection, "iceConnectionState", None)
+        logger.info(
+            f"{role} Handshake channel opened - "
+            f"connectionState={conn_state}, ICE={ice_state}"
+        )
+
+    def on_channel_close() -> None:
+        import traceback
+
+        close_stack = "".join(traceback.format_stack()[-10:-1])  # Last 9 frames
+        log_channel_event(
+            "close",
+            connection_state=getattr(peer_connection, "connectionState", None),
+            ice_state=getattr(peer_connection, "iceConnectionState", None),
+            sctp_state=getattr(
+                getattr(peer_connection, "sctp", None),
+                "transport.state",
+                None,
+            )
+            if hasattr(peer_connection, "sctp")
+            else None,
+        )
+        logger.error(
+            f"{role} Handshake channel CLOSED - "
+            f"readyState={getattr(handshake_channel, 'readyState', 'unknown')}, "
+            f"connectionState={getattr(peer_connection, 'connectionState', 'unknown')}, "  # noqa: E501
+            f"ICE={getattr(peer_connection, 'iceConnectionState', 'unknown')}, "
+            f"bufferedAmount={getattr(handshake_channel, 'bufferedAmount', -1)}\n"
+            f"Close event stack trace:\n{close_stack}"
+        )
+
+    def on_channel_error(error: Any) -> None:
+        log_channel_event("error", error=str(error), error_type=type(error).__name__)
+        logger.error(f"{role} Handshake channel ERROR: {error}")
+
+    # Register lifecycle event handlers
+    handshake_channel.on("open", on_channel_open)
+    handshake_channel.on("close", on_channel_close)
+    handshake_channel.on("error", on_channel_error)
 
     # Get the underlying peer connection for ICE candidate handling
     rtc_pc = peer_connection.peer_connection
@@ -391,6 +537,23 @@ async def connect(
                 raise Exception(
                     "Server role requires incoming SDP offer via signaling service"
                 )
+            # CRITICAL: For server role, the negotiated data channel (id=0)
+            # must be created BEFORE setRemoteDescription. The channel is
+            # already created at line 154 above, before role-specific code.
+            # This ensures both peers have the negotiated channel before any
+            # SDP operations.
+            # Verify handshake channel exists before proceeding
+            if handshake_channel is None:
+                raise Exception(
+                    "Server: handshake channel must be created before "
+                    "setRemoteDescription"
+                )
+            logger.debug(
+                f"server handshake channel ready before setRemoteDescription: "
+                f"id={getattr(handshake_channel, 'id', 'unknown')}, "
+                f"state={handshake_channel.readyState}"
+            )
+
             # Set remote description - aiortc automatically processes candidates in SDP
             offer_candidates_in_sdp = [
                 line
@@ -692,8 +855,8 @@ async def connect(
                     f"(current: {final_check_state}, ICE: {final_check_ice})"
                 )
                 # Simplified wait: just poll for connectionState == "connected"
-                # This matches js-libp2p approach - they don't wait for ICE state
-                with trio.move_on_after(30):  # 30s timeout
+                connection_timeout = DEFAULT_DIAL_TIMEOUT
+                with trio.move_on_after(connection_timeout):
                     done_event = trio.Event()
 
                     async def wait_established() -> None:
@@ -846,74 +1009,67 @@ async def connect(
                     f"ICE state: {peer_connection.iceConnectionState})"
                 )
 
-        # Additional verification: ensure channel is truly ready
-        # Give it a small delay to ensure all internal state is ready
-        await trio.sleep(0.1)
-
-        # Double-check channel state after delay
+        # Verify channel is open
         if handshake_channel.readyState != "open":
             raise Exception(
-                f"Handshake channel closed after opening "
-                f"(state: {handshake_channel.readyState})"
+                f"Handshake channel not open (state: {handshake_channel.readyState})"
             )
 
         logger.debug("%s handshake channel opened", role)
 
-        # Verifying data channel can actually send data
-        # This prevents false positives where channel appears open but data doesn't flow
-        logger.debug("%s verifying data channel can send data...", role)
-        try:
-            # Verify channel state is still open
-            if handshake_channel.readyState != "open":
-                raise Exception(
-                    f"Data channel not open for verification "
-                    f"(state: {handshake_channel.readyState})"
-                )
-
-            # Check channel properties to ensure it's operational
-            # bufferedAmount should be accessible (indicates channel is ready)
+        # CRITICAL: Extract remote_peer_id IMMEDIATELY after channel opens
+        # This is needed to create WebRTCRawConnection early
+        # so handlers are registered before any handshake data exchange begins
+        if remote_peer_id is None and remote_addr is not None:
             try:
-                buffered = handshake_channel.bufferedAmount
-                logger.debug("%s data channel bufferedAmount: %d bytes", role, buffered)
-            except Exception as e:
-                logger.warning(
-                    "%s could not check data channel bufferedAmount: %s", role, e
-                )
+                peer_id_str = remote_addr.value_for_protocol("p2p")
+                if peer_id_str:
+                    remote_peer_id = ID.from_base58(peer_id_str)
+            except Exception:
+                remote_peer_id = None
 
-            # Verify ICE connection is still good
-            # Note: ICE can be "closed" after connection is established - this is normal
-            current_ice_state = peer_connection.iceConnectionState
-            current_conn_state = peer_connection.connectionState
-            if current_ice_state == "closed" and current_conn_state != "connected":
-                raise Exception(
-                    f"ICE connection closed during data channel verification "
-                    f"(ICE state: {current_ice_state}, "
-                    f" connection state: {current_conn_state})"
-                )
+        if remote_peer_id is None:
+            raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
 
-            logger.info(
-                "%s data channel verified successfully. "
-                "Channel state: %s, ICE state: %s, Connection state: %s. "
-                "Proceeding to Noise handshake...",
-                role,
-                handshake_channel.readyState,
-                current_ice_state,
-                current_conn_state,
-            )
-
-        except Exception as e:
-            logger.error(
-                "%s data channel verification failed: %s", role, e, exc_info=True
-            )
-            raise Exception(
-                f"Data channel verification failed: {e}. "
-                f"Channel state: {handshake_channel.readyState}, "
-                f"ICE state: {peer_connection.iceConnectionState}, "
-                f"Connection state: {peer_connection.connectionState}"
-            ) from e
-
+        # CRITICAL: Create WebRTCRawConnection IMMEDIATELY after channel opens
+        # This registers message handlers early,
+        # createStream (which sets up handlers) happens immediately after channel opens
         rtc_pc = peer_connection.peer_connection
 
+        logger.info(
+            f"{role} creating WebRTCRawConn IMMEDIATELY after channel opens "
+            f"(channel state: {handshake_channel.readyState}, "
+            f"connection state: {peer_connection.connectionState})"
+        )
+
+        raw_connection = WebRTCRawConnection(
+            remote_peer_id,
+            rtc_pc,
+            handshake_channel,
+            is_initiator=(role == "client"),
+            incoming_message_buffer=message_buffer_recv,
+        )
+
+        logger.info(f"{role} WebRTCRawConnection created successfully")
+
+        # Mark handshake as in progress IMMEDIATELY after creating connection
+        # This prevents the data channel's on_close handler from closing the connection
+        # before the handshake can start
+        raw_connection._handshake_in_progress = True
+        # Create handshake failure event for early abort
+        raw_connection._handshake_failure_event = trio.Event()
+
+        # Register handshake with aiortc patch to prevent premature peer
+        # connection closure
+        register_handshake(peer_connection)
+
+        logger.debug(
+            f"{role} Marked handshake as in progress to prevent premature closure"
+        )
+
+        # Extract fingerprints and certhash (this can happen after
+        # WebRTCRawConnection is created) since it doesn't depend on the
+        # connection object
         remote_fingerprint: str | None = None
         if role == "server":
             if remote_addr is not None:
@@ -997,29 +1153,8 @@ async def connect(
                     "Remote certhash mismatch detected during WebRTC connection setup"
                 )
 
-        if remote_peer_id is None and remote_addr is not None:
-            try:
-                peer_id_str = remote_addr.value_for_protocol("p2p")
-                if peer_id_str:
-                    remote_peer_id = ID.from_base58(peer_id_str)
-            except Exception:
-                remote_peer_id = None
-
-        if remote_peer_id is None:
-            raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
-
-        # Verify data channel is open and ready before creating connection wrapper
-        # This is critical - the channel must be open for the handshake to work
-        if handshake_channel.readyState != "open":
-            raise Exception(
-                f"{role} handshake channel not open when creating WebRTCRawConnection "
-                f"(state: {handshake_channel.readyState}, "
-                f"connectionState: {peer_connection.connectionState}, "
-                f"ICE state: {peer_connection.iceConnectionState})"
-            )
-
         # Now that the connection has been opened, add the remote's certhash to
-        # the multiaddr so we can complete the noise handshake (matches js-libp2p)
+        # the multiaddr so we can complete the noise handshake
         if role == "server" and remote_fingerprint is not None:
             try:
                 client_certhash = fingerprint_to_certhash(remote_fingerprint)
@@ -1036,40 +1171,11 @@ async def connect(
         elif remote_addr is not None and actual_certhash is not None:
             remote_addr = canonicalize_certhash(remote_addr, actual_certhash)
 
-        # Verify peer connection is still connected
-        if peer_connection.connectionState not in ("connected", "connecting"):
-            logger.warning(
-                f"{role} peer connection state is {peer_connection.connectionState} "
-                f"when creating WebRTCRawConnection - this may cause issues"
-            )
-
-        logger.info(
-            f"{role} creating WebRTCRawConn with "
-            f"channel state: {handshake_channel.readyState}, "
-            f"connection state: {peer_connection.connectionState}"
-        )
-
-        raw_connection = WebRTCRawConnection(
-            remote_peer_id,
-            rtc_pc,
-            handshake_channel,
-            is_initiator=(role == "client"),
-        )
-
-        logger.info(f"{role} WebRTCRawConnection created successfully")
-
+        # Set connection properties after fingerprint extraction
         raw_connection.remote_multiaddr = remote_addr
         raw_connection.remote_fingerprint = remote_fingerprint
         raw_connection.local_fingerprint = local_fingerprint
         secure_conn: "IRawConnection | ISecureConn" = raw_connection
-
-        # CRITICAL: Mark handshake as in progress IMMEDIATELY after creating connection
-        # This prevents the data channel's on_close handler from closing the connection
-        # before the handshake can start
-        raw_connection._handshake_in_progress = True
-        logger.debug(
-            f"{role} Marked handshake as in progress to prevent premature closure"
-        )
 
         noise_prologue: bytes | None = None
         if remote_addr is not None:
@@ -1102,7 +1208,6 @@ async def connect(
 
         if security_multistream is not None:
             # In WebRTC Direct, we skip multiselect negotiation and directly use Noise
-            # This matches js-libp2p behavior where Noise is used directly
             data_state = (
                 raw_connection.data_channel.readyState
                 if hasattr(raw_connection, "data_channel")
@@ -1137,6 +1242,22 @@ async def connect(
 
             # Perform Noise handshake with proper error handling
             try:
+                # Get diagnostic states before handshake
+                sctp_state = "N/A"
+                try:
+                    if hasattr(peer_connection, "sctp") and peer_connection.sctp:
+                        if hasattr(peer_connection.sctp, "transport"):
+                            sctp_state = getattr(
+                                peer_connection.sctp.transport, "state", "N/A"
+                            )
+                        else:
+                            sctp_state = "sctp exists but no transport attr"
+                except Exception:
+                    pass
+                buffered_amount = getattr(
+                    raw_connection.data_channel, "bufferedAmount", -1
+                )
+
                 logger.info(
                     f"{role} starting Noise handshake... "
                     f"role={role}, "
@@ -1144,8 +1265,12 @@ async def connect(
                     f"data_channel state: {raw_connection.data_channel.readyState}, "
                     f"peer_connection state: {peer_connection.connectionState}, "
                     f"ICE state: {peer_connection.iceConnectionState}, "
+                    f"ICE gathering state: {peer_connection.iceGatheringState}, "
+                    f"SCTP state: {sctp_state}, "
+                    f"channel bufferedAmount: {buffered_amount}, "
                     f"handshake_in_progress: {raw_connection._handshake_in_progress}"
                 )
+
                 # Verify connection is still open before starting handshake
                 if raw_connection._closed:
                     raise Exception(
@@ -1159,30 +1284,54 @@ async def connect(
 
                 # In WebRTC Direct, the server (listener) initiates the Noise handshake,
                 # so the client waits (secure_inbound) and the server starts
-                # (secure_outbound). This matches js-libp2p behavior.
-                if role == "client":
-                    logger.info(
-                        f"{role} calling secure_inbound "
-                        "(waiting for server to initiate)..."
-                    )
-                    secure_conn = await transport.secure_inbound(raw_connection)
-                    logger.info(f"{role} secure_inbound completed successfully")
-                else:
-                    logger.info(
-                        f"{role} calling secure_outbound (initiating handshake)... "
-                        f"remote_peer_id: {remote_peer_id}"
-                    )
-                    secure_conn = await transport.secure_outbound(
-                        raw_connection, remote_peer_id
-                    )
-                    logger.info(f"{role} secure_outbound completed successfully")
+                # (secure_outbound).
+                # Watch for handshake failure in parallel and abort early if
+                # channel closes
+                async def watch_handshake_failure() -> None:
+                    if raw_connection._handshake_failure_event:
+                        await raw_connection._handshake_failure_event.wait()
+                        raise Exception(
+                            f"{role} Handshake aborted: data channel closed "
+                            "during handshake"
+                        )
+
+                async def perform_handshake() -> ISecureConn:
+                    if role == "client":
+                        logger.info(
+                            f"{role} calling secure_inbound "
+                            "(waiting for server to initiate)..."
+                        )
+                        secure_conn = await transport.secure_inbound(raw_connection)
+                        logger.info(f"{role} secure_inbound completed successfully")
+                        return secure_conn
+                    else:
+                        logger.info(
+                            f"{role} calling secure_outbound (initiating handshake)... "
+                            f"remote_peer_id: {remote_peer_id}"
+                        )
+                        secure_conn = await transport.secure_outbound(
+                            raw_connection, remote_peer_id
+                        )
+                        logger.info(f"{role} secure_outbound completed successfully")
+                        return secure_conn
+
+                # Run handshake and failure watcher concurrently - abort early
+                # if channel closes
+                async with trio.open_nursery() as handshake_nursery:
+                    handshake_nursery.start_soon(watch_handshake_failure)
+                    secure_conn = await perform_handshake()
+                    handshake_nursery.cancel_scope.cancel()
 
                 # Mark handshake as complete
                 raw_connection._handshake_in_progress = False
+                raw_connection._handshake_failure_event = None
+                unregister_handshake(peer_connection)
                 logger.info(f"{role} Noise handshake completed successfully")
             except Exception as handshake_error:
                 # Mark handshake as no longer in progress
                 raw_connection._handshake_in_progress = False
+                raw_connection._handshake_failure_event = None
+                unregister_handshake(peer_connection)
                 logger.error(
                     f"{role} Noise handshake failed: {handshake_error}", exc_info=True
                 )
@@ -1225,6 +1374,14 @@ async def connect(
             )
         raise
     finally:
+        # Close message buffer send side (receive side closed by WebRTCRawConnection)
+        # This signals the buffer consumer to stop
+        try:
+            await message_buffer_send.aclose()
+            logger.debug(f"{role} closed message buffer send side")
+        except Exception as e:
+            logger.debug(f"{role} error closing message buffer: {e}")
+
         if signal_service is not None and cleanup_handlers:
             for msg_type, handler in cleanup_handlers:
                 signal_service.remove_handler(msg_type, handler)

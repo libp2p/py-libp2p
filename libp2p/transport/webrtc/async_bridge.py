@@ -156,8 +156,29 @@ class WebRTCAsyncBridge:
     async def close_data_channel(self, data_channel: RTCDataChannel) -> None:
         """Close data channel with proper async bridging"""
         try:
-            await aio_as_trio(data_channel.close)
-            logger.debug("Successfully closed data channel")
+            # Check if channel is already closed
+            if (
+                hasattr(data_channel, "readyState")
+                and data_channel.readyState == "closed"
+            ):
+                logger.debug("Data channel already closed, skipping close()")
+                return
+
+            # Call close() - RTCDataChannel.close() always returns None
+            # but may be a coroutine that needs to be awaited
+            try:
+                # RTCDataChannel.close() is typed to return None, but in practice
+                # it may return a coroutine. We check if the result is awaitable.
+                close_result: Any = data_channel.close()  # type: ignore[func-returns-value]
+                # Check if result is awaitable (coroutine)
+                if close_result is not None and hasattr(close_result, "__await__"):
+                    await aio_as_trio(close_result)
+                    logger.debug("Successfully closed data channel")
+                else:
+                    logger.debug("Data channel closed synchronously")
+            except TypeError:
+                logger.debug("Data channel close() raised TypeError (non-critical)")
+                return
         except RuntimeError as e:
             # Handle closed event loop gracefully
             if "closed" in str(e).lower() or "no running event loop" in str(e).lower():
@@ -167,23 +188,88 @@ class WebRTCAsyncBridge:
                 return
             raise
         except Exception as e:
-            # Only log as error if it's not a closed loop issue
             error_str = str(e).lower()
+            if "nonetype" in error_str and "await" in error_str:
+                logger.debug(f"Data channel close() returned None (non-critical): {e}")
+                return
+            # Only log as error if it's not a closed loop issue
             if "closed" not in error_str and "no running event loop" not in error_str:
                 logger.error(f"Failed to close data channel: {e}")
             else:
                 logger.debug(f"Event loop issue during cleanup (non-critical): {e}")
             raise
 
-    async def send_data(self, data_channel: RTCDataChannel, data: bytes) -> None:
+    async def send_data(
+        self, data_channel: RTCDataChannel, data: bytes, peer_connection: Any = None
+    ) -> None:
         """Send data through channel with proper async bridging"""
+        ready_state = getattr(data_channel, "readyState", None)
+        # Allow sending if channel is closed but connection is still connected
+        # This handles the case where aiortc marks channel as closed
+        #  but connection is working
+        if ready_state != "open":
+            conn_state = None
+            if peer_connection and hasattr(peer_connection, "connectionState"):
+                conn_state = getattr(peer_connection, "connectionState", None)
+            if ready_state == "closed" and conn_state == "connected":
+                logger.debug(
+                    f"Channel state is '{ready_state}' "
+                    f" but connection is '{conn_state}' - "
+                    f"attempting send anyway (WebRTC quirk)"
+                )
+            else:
+                logger.debug(
+                    f"Cannot send data: data channel state is '{ready_state}' "
+                    f"(expected 'open'), connection state: {conn_state}"
+                )
+                raise RuntimeError(
+                    f"Data channel not ready for sending "
+                    f" (state: {ready_state}, connection: {conn_state})"
+                )
+
         try:
-            # data_channel.send is a synchronous function, no need to await
-            # await aio_as_trio(data_channel.send)(data)
+            # data_channel.send is a sync function
+            # CRITICAL: Wrap in try/except to prevent any exceptions from propagating
+            # and potentially causing the channel to close
             data_channel.send(data)
             logger.debug(f"Successfully sent {len(data)} bytes")
         except Exception as e:
-            logger.error(f"Failed to send data: {e}")
+            # Log full exception details with stack trace for debugging
+            import traceback
+
+            error_trace = traceback.format_exc()
+            error_msg = str(e).lower()
+
+            # Check channel state after error
+            channel_state_after = getattr(data_channel, "readyState", "unknown")
+            buffered_after = getattr(data_channel, "bufferedAmount", -1)
+
+            # Check if error is related to channel state (expected)
+            if "not open" in error_msg or "closed" in error_msg or "state" in error_msg:
+                logger.debug(
+                    f"Failed to send data (channel state issue): {e} - "
+                    f"channel_state_before={ready_state}, "
+                    f"channel_state_after={channel_state_after}, "
+                    f"buffered_before={getattr(data_channel, 'bufferedAmount', -1)}, "
+                    f"buffered_after={buffered_after}"
+                )
+            else:
+                logger.error(
+                    f"Failed to send data: {e} - "
+                    f"channel_state_before={ready_state}, "
+                    f"channel_state_after={channel_state_after}, "
+                    f"buffered_after={buffered_after}\n"
+                    f"Traceback:\n{error_trace}"
+                )
+
+            # CRITICAL: Don't let send errors close the channel
+            # The channel might still be usable even if one send fails
+            # Only raise if channel is actually closed
+            if channel_state_after == "closed":
+                logger.error(
+                    "Data channel closed after send error - this may indicate "
+                    "a serious issue with the connection"
+                )
             raise
 
 

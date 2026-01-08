@@ -14,11 +14,14 @@ from multiaddr import Multiaddr
 import trio
 
 if sys.version_info >= (3, 11):
-    from builtins import ExceptionGroup
+    pass
 else:
-    from exceptiongroup import ExceptionGroup
+    pass
+
+from trio_asyncio import aio_as_trio
 
 from libp2p.abc import IHost, INetStream, IRawConnection
+from libp2p.utils.varint import encode_uvarint, read_length_prefixed_protobuf
 
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
@@ -123,68 +126,99 @@ async def initiate_connection(
             "Established signaling stream through circuit relay to %s", target_peer_id
         )
 
-        # Create RTCPeerConnection and data channel using safe operations
+        # Create RTCPeerConnection and "init" data channel
+        #: "init" channel is created to ensure ICE information is shared in SDP offer
+        # This channel will be closed after connection is established
         (
             peer_connection,
-            data_channel,
+            init_channel,
         ) = await TrioSafeWebRTCOperations.create_peer_conn_with_data_channel(
-            rtc_config, "libp2p-webrtc"
+            rtc_config, "init"
         )
 
-        logger.info("Created RTCPeerConnection and data channel")
+        logger.info("Created RTCPeerConnection and 'init' data channel")
 
-        # Setup data channel ready event
-        data_channel_ready = trio.Event()
+        # Setup init channel ready event
+        init_channel_ready = trio.Event()
+        init_channel_closed = trio.Event()
 
-        def on_data_channel_open() -> None:
-            logger.info("Data channel opened")
-            data_channel_ready.set()
+        def on_init_channel_open() -> None:
+            logger.info("Init data channel opened")
+            init_channel_ready.set()
 
-        def on_data_channel_error(error: Any) -> None:
-            logger.error(f"Data channel error: {error}")
+        def on_init_channel_close() -> None:
+            logger.info("Init data channel closed")
+            init_channel_closed.set()
 
-        # Register data channel event handlers
-        data_channel.on("open", on_data_channel_open)
-        data_channel.on("error", on_data_channel_error)
+        def on_init_channel_error(error: Any) -> None:
+            logger.error(f"Init data channel error: {error}")
 
-        # Create and send SDP offer with async bridge
-        bridge = TrioSafeWebRTCOperations._get_bridge()
-        async with bridge:
-            offer = await bridge.create_offer(peer_connection)
-            await bridge.set_local_description(peer_connection, offer)
+        init_channel.on("open", on_init_channel_open)
+        init_channel.on("close", on_init_channel_close)
+        init_channel.on("error", on_init_channel_error)
 
-        # Wait for ICE gathering to complete
-        with trio.move_on_after(timeout):
+        # Create and send SDP offer
+        # Note: We're already in an open_loop() context from transport.dial(),
+        # so we use aio_as_trio directly instead of creating another bridge context
+        offer = await aio_as_trio(peer_connection.createOffer())
+        await aio_as_trio(peer_connection.setLocalDescription(offer))
+
+        # Wait for ICE gathering to complete (with separate timeout)
+        # Use a shorter timeout for ICE gathering so we have time for ans
+        # Use 1/3 of total timeout or 10s, whichever is smaller
+        ice_gathering_timeout = min(timeout / 3, 10.0)
+        ice_gathering_complete = False
+        with trio.move_on_after(ice_gathering_timeout):
             while peer_connection.iceGatheringState != "complete":
                 await trio.sleep(0.05)
+            ice_gathering_complete = True
 
-        logger.debug("Sending  SDP_offer to peer as initiator")
-        # Send offer with all ICE candidates
+        if not ice_gathering_complete:
+            logger.warning(
+                f"ICE gathering did not complete within {ice_gathering_timeout}s, "
+                "proceeding with available candidates"
+            )
+
+        logger.debug("Sending SDP offer to peer as initiator")
+        # Send offer
         offer_msg = Message()
         offer_msg.type = Message.SDP_OFFER
         offer_msg.data = offer.sdp
         await _send_signaling_message(signaling_stream, offer_msg)
         logger.debug("Sent SDP offer to %s", target_peer_id)
 
-        # (Note: aiortc does not emit ice candidate event, per candidate
-        # but sends it along SDP.
-        # To maintain interop, we extract and resend in given format)
-        logger.debug("Sending ICE candidates to %s", target_peer_id)
-        await _send_ice_candidates(signaling_stream, peer_connection)
-
-        # Wait for answer
+        # Wait for answer BEFORE sending ICE candidates
         logger.debug("Awaiting SDP answer from %s", target_peer_id)
-        answer_msg = await _receive_signaling_message(signaling_stream, timeout)
+        # Use remaining timeout for answer
+        # (subtract time used for ICE gathering)
+        answer_timeout = timeout - ice_gathering_timeout
+        if answer_timeout < 5.0:
+            answer_timeout = 5.0  # Min 5 sec for ans
+        # Wrap with timeout at this level
+        with trio.move_on_after(answer_timeout) as answer_scope:
+            answer_msg = await _receive_signaling_message(
+                signaling_stream, answer_timeout
+            )
+
+        if answer_scope.cancelled_caught:
+            raise WebRTCError(
+                f"Timeout waiting for SDP answer (timeout={answer_timeout}s)"
+            )
         if answer_msg.type != Message.SDP_ANSWER:
             raise SDPHandshakeError(f"Expected answer, got: {answer_msg.type}")
 
-        # Set remote description
+        # Set remote description first (matches js-libp2p order)
         answer = RTCSessionDescription(sdp=answer_msg.data, type="answer")
-        bridge = TrioSafeWebRTCOperations._get_bridge()
-        async with bridge:
-            await bridge.set_remote_description(peer_connection, answer)
+        await aio_as_trio(peer_connection.setRemoteDescription(answer))
 
         logger.info("Set remote description from answer")
+
+        # (Note: aiortc does not emit ice candidate event, per candidate
+        # but sends it along SDP.
+        # To maintain interop, we extract and resend in given format)
+        # Send ICE candidates after setting remote description
+        logger.debug("Sending ICE candidates to %s", target_peer_id)
+        await _send_ice_candidates(signaling_stream, peer_connection)
 
         # Handle incoming ICE candidates
         logger.debug("Handling incoming ICE candidates from %s", target_peer_id)
@@ -192,7 +226,6 @@ async def initiate_connection(
             signaling_stream, peer_connection, timeout
         )
 
-        # Wait for data channel to be ready
         connection_failed = trio.Event()
 
         def on_connection_state_change() -> None:
@@ -206,109 +239,343 @@ async def initiate_connection(
         if peer_connection is not None:
             peer_connection.on("connectionstatechange", on_connection_state_change)
 
-        # Wait for either success or failure
-        # Use a single event to track completion and a flag for success/failure
-        completion_event = trio.Event()
-        success_result = False
+        # Verify connection is established
+        # CRITICAL: We need BOTH connectionState AND ICE to be ready for SCTP to work
+        connection_established = trio.Event()
+        ice_connected = trio.Event()
 
-        async def wait_for_success() -> None:
-            nonlocal success_result
+        def on_connection_state_change() -> None:
+            if peer_connection is not None:
+                state = peer_connection.connectionState
+                logger.debug(f"Connection state: {state}")
+                if state == "connected":
+                    connection_established.set()
+                elif state == "failed":
+                    connection_failed.set()
+
+        def on_ice_connection_state_change() -> None:
+            if peer_connection is not None:
+                ice_state = peer_connection.iceConnectionState
+                logger.debug(f"ICE connection state: {ice_state}")
+                if ice_state in ("connected", "completed"):
+                    ice_connected.set()
+                elif ice_state == "failed":
+                    connection_failed.set()
+
+        # Register both connection and ICE state handlers
+        peer_connection.on("connectionstatechange", on_connection_state_change)
+        peer_connection.on("iceconnectionstatechange", on_ice_connection_state_change)
+
+        # Check current states
+        current_conn_state = peer_connection.connectionState
+        current_ice_state = peer_connection.iceConnectionState
+
+        logger.debug(
+            f"Initial states: connectionState={current_conn_state}, "
+            f"iceConnectionState={current_ice_state}"
+        )
+
+        if current_conn_state == "connected":
+            connection_established.set()
+        elif current_conn_state == "failed":
+            connection_failed.set()
+
+        if current_ice_state in ("connected", "completed"):
+            ice_connected.set()
+        elif current_ice_state == "failed":
+            connection_failed.set()
+
+        # Wait for BOTH connection and ICE to be ready
+        # This is critical for SCTP to establish properly
+        if not connection_established.is_set() or not ice_connected.is_set():
+            logger.debug("Waiting for connection and ICE to be ready...")
+            with trio.move_on_after(30.0) as conn_scope:
+                # Wait for connection state
+                if not connection_established.is_set():
+                    await connection_established.wait()
+                # Wait for ICE state
+                if not ice_connected.is_set():
+                    await ice_connected.wait()
+            if conn_scope.cancelled_caught:
+                final_conn_state = peer_connection.connectionState
+                final_ice_state = peer_connection.iceConnectionState
+                logger.warning(
+                    f"Connection/ICE not ready within timeout: "
+                    f"connectionState={final_conn_state}, "
+                    f"iceConnectionState={final_ice_state}"
+                )
+                # If connection is connected but ICE isn't, we might still proceed
+                if final_conn_state != "connected":
+                    raise WebRTCError(
+                        f"Connection not established (state: {final_conn_state}, "
+                        f"ICE: {final_ice_state})"
+                    )
+                elif final_ice_state not in ("connected", "completed", "closed"):
+                    logger.warning(
+                        f"ICE not fully ready (state: {final_ice_state}), "
+                        "but connection is connected - proceeding with caution"
+                    )
+
+        if connection_failed.is_set():
+            raise WebRTCError("WebRTC connection failed")
+
+        logger.info(
+            f"WebRTC connection established successfully "
+            f"(connectionState={peer_connection.connectionState}, "
+            f"iceConnectionState={peer_connection.iceConnectionState})"
+        )
+
+        # CRITICAL: Wait for SCTP to be ready before expecting init channel to open
+        # SCTP needs time to initialize after connection is established
+        logger.debug("Checking SCTP state and waiting for it to be ready...")
+        sctp_ready = False
+        for attempt in range(100):  # Wait up to 10 seconds (100 * 0.1s)
             try:
-                await data_channel_ready.wait()
-                success_result = True
-                completion_event.set()
+                if hasattr(peer_connection, "sctp") and peer_connection.sctp:
+                    if hasattr(peer_connection.sctp, "transport"):
+                        sctp_state = getattr(
+                            peer_connection.sctp.transport, "state", "N/A"
+                        )
+                        logger.debug(f"SCTP state check {attempt}: {sctp_state}")
+                        if sctp_state == "connected":
+                            sctp_ready = True
+                            logger.info(f"✅ SCTP is ready (state: {sctp_state})")
+                            break
+                        elif sctp_state == "closed":
+                            logger.warning(
+                                "SCTP is closed - connection may have failed"
+                            )
+                            break
             except Exception as e:
-                logger.debug(f"Error in wait_for_success: {e}")
-                completion_event.set()
+                logger.debug(f"Error checking SCTP state: {e}")
+            await trio.sleep(0.1)
 
-        async def wait_for_failure() -> None:
-            try:
-                await connection_failed.wait()
-                completion_event.set()
-            except Exception as e:
-                logger.debug(f"Error in wait_for_failure: {e}")
-                completion_event.set()
+        if not sctp_ready:
+            logger.warning(
+                "SCTP not in 'connected' state after waiting, "
+                "but proceeding - init channel might still open"
+            )
+        else:
+            # Give SCTP a brief moment to stabilize after reaching "connected" state
+            await trio.sleep(0.2)
 
+        # CRITICAL: Wait for init channel to open BEFORE creating new channel
+        # The init channel must be open for SCTP to properly negotiate new channels
+        # This ensures SCTP association is fully established
+        logger.debug(
+            "Waiting for 'init' channel to open before creating new channel..."
+        )
+        if init_channel.readyState != "open":
+            init_state = init_channel.readyState
+            logger.debug(f"Init channel state: {init_state}, waiting for it to open...")
+            # Wait longer for init channel - it's critical for SCTP establishment
+            with trio.move_on_after(30.0) as init_open_scope:
+                await init_channel_ready.wait()
+            if init_open_scope.cancelled_caught:
+                # If init channel doesn't open, SCTP might not be ready
+                # But we'll try creating the new channel anyway - it might work
+                init_state = init_channel.readyState
+                logger.warning(
+                    f"⚠️  Init channel did not open within 30s timeout "
+                    f"(state: {init_state}). "
+                    "SCTP may not be fully established, but proceeding to "
+                    "create new channel anyway."
+                )
+            else:
+                logger.info("✅ Init channel opened successfully - SCTP is ready")
+        else:
+            logger.info("✅ Init channel already open - SCTP is ready")
+
+        # CRITICAL: Create new data channel BEFORE closing init channel
+        # The init channel must remain open for SCTP to properly negotiate
+        # the new channel
+        # Per spec step 9: Messages on RTCDataChannels use the message
+        # framing mechanism.
+        # We create a new channel with an empty label (per spec requirement).
+        # IMPORTANT: Create it while init channel is still open to ensure
+        # SCTP can negotiate it
+        logger.debug(
+            "Creating new data channel for communication (init channel is open)"
+        )
         try:
-            with trio.move_on_after(timeout) as cancel_scope:
+            # Create incoming message buffer early to prevent message loss
+            message_buffer_send, message_buffer_recv = trio.open_memory_channel(1000)
+
+            def _early_message_handler(message: Any) -> None:
+                """
+                Early handler that buffers all messages immediately to
+                prevent loss.
+                """
                 try:
-                    async with trio.open_nursery() as nursery:
-                        nursery.start_soon(wait_for_success)
-                        nursery.start_soon(wait_for_failure)
-                        await completion_event.wait()
-                        # Cancel nursery tasks since we got what we needed
-                        # This is safe - tasks will handle cancellation gracefully
-                        nursery.cancel_scope.cancel()
-                except ExceptionGroup as eg:
-                    # Handle ExceptionGroup from Trio nursery (Python 3.10+ compatible)
-                    # Extract meaningful exceptions (skip Cancelled)
-                    errors = [
-                        e for e in eg.exceptions if not isinstance(e, trio.Cancelled)
-                    ]
-                    # Check if we only have Cancelled exceptions
-                    if not errors:
-                        # Only cancellations - expected when we cancel the nursery
-                        # Check if we got what we wanted before cancellation
-                        if (
-                            not data_channel_ready.is_set()
-                            and connection_failed.is_set()
-                        ):
-                            raise WebRTCError("WebRTC connection failed")
-                        # Otherwise, cancellation is fine if we got success
+                    # Extract data from message (same logic as in WebRTCRawConnection)
+                    if hasattr(message, "data"):
+                        data = message.data
+                        if isinstance(data, bytes):
+                            pass
+                        elif hasattr(data, "tobytes"):
+                            data = data.tobytes()
+                        else:
+                            data = bytes(data) if data else b""
+                    elif isinstance(message, bytes):
+                        data = message
                     else:
-                        # We have non-Cancelled exceptions
-                        # Log all errors for debugging
-                        for err in errors:
-                            logger.error(f"Nursery task error: {err}", exc_info=err)
-                        # Use the first error as the primary cause
-                        primary_error = errors[0]
-                        # Check if it's a connection failure
-                        if connection_failed.is_set():
-                            raise WebRTCError(
-                                "WebRTC connection failed"
-                            ) from primary_error
-                        # Re-raise if it's already a WebRTCError
-                        if isinstance(primary_error, WebRTCError):
-                            raise primary_error
-                        # Otherwise, wrap it
+                        try:
+                            data = bytes(message)
+                        except (TypeError, ValueError):
+                            data = str(message).encode()
+
+                    if data:
+                        try:
+                            message_buffer_send.send_nowait(data)
+                            logger.debug(
+                                f"Initiator early handler buffered {len(data)} bytes"
+                            )
+                        except trio.WouldBlock:
+                            logger.warning("Message buffer full, dropping message")
+                        except trio.ClosedResourceError:
+                            logger.debug("Message buffer closed")
+                except Exception as e:
+                    logger.debug(f"Error in early message handler: {e}")
+
+            # Create new data channel with empty label (per spec)
+            # This will trigger a 'datachannel' event on the answerer side
+            logger.info(
+                "🚀 Creating new data channel - this should trigger "
+                "datachannel event on answerer"
+            )
+            new_data_channel = peer_connection.createDataChannel("")
+            channel_id = getattr(new_data_channel, "id", "N/A")
+            channel_state = new_data_channel.readyState
+            logger.info(
+                f"✅ Created new data channel for communication "
+                f"(label='{new_data_channel.label}', id={channel_id}, "
+                f"initial state={channel_state})"
+            )
+
+            # Attach early handler immediately after creating channel
+            new_data_channel.on("message", _early_message_handler)
+            logger.debug("Attached early message handler to new data channel")
+
+            # Give time for the datachannel event to propagate to answerer via SCTP
+            # The event should fire when SCTP sends the channel creation message
+            logger.debug("Waiting for datachannel event to propagate to answerer...")
+            await trio.sleep(
+                0.5
+            )  # Increased from 0.1s to allow SCTP message to be sent
+
+            # Wait for new channel to open
+            new_channel_ready = trio.Event()
+
+            def on_new_channel_open() -> None:
+                logger.info("New data channel opened")
+                new_channel_ready.set()
+
+            new_data_channel.on("open", on_new_channel_open)
+
+            # Check if already open
+            if new_data_channel.readyState == "open":
+                new_channel_ready.set()
+                logger.info("New data channel already open")
+            else:
+                current_channel_state = new_data_channel.readyState
+                logger.debug(
+                    f"Waiting for new data channel to open "
+                    f"(current state: {current_channel_state})..."
+                )
+                # Give more time for channel to open (SCTP needs time after
+                # init channel close)
+                with trio.move_on_after(15.0) as new_open_scope:
+                    await new_channel_ready.wait()
+                if new_open_scope.cancelled_caught:
+                    # Check connection and SCTP state
+                    conn_state = peer_connection.connectionState
+                    ice_state = peer_connection.iceConnectionState
+                    current_sctp_state = "N/A"
+                    try:
+                        if hasattr(peer_connection, "sctp") and peer_connection.sctp:
+                            if hasattr(peer_connection.sctp, "transport"):
+                                current_sctp_state = getattr(
+                                    peer_connection.sctp.transport, "state", "N/A"
+                                )
+                    except Exception:
+                        pass
+                    logger.warning(
+                        f"New data channel did not open within timeout "
+                        f"(state: {new_data_channel.readyState}, "
+                        f"conn_state: {conn_state}, ice_state: {ice_state}, "
+                        f"sctp_state: {current_sctp_state})"
+                    )
+                    # If SCTP is closed, we can't proceed
+                    if current_sctp_state == "closed":
                         raise WebRTCError(
-                            f"Connection establishment error: {primary_error}"
-                        ) from primary_error
-                except trio.Cancelled:
-                    # Direct cancellation (not in ExceptionGroup)
-                    # Check if we got what we wanted before cancellation
-                    if not data_channel_ready.is_set() and connection_failed.is_set():
-                        raise WebRTCError("WebRTC connection failed")
-                    # Otherwise, cancellation is fine if we got success
-
-            # Check results after waiting
-            if connection_failed.is_set():
-                raise WebRTCError("WebRTC connection failed")
-
-            if cancel_scope.cancelled_caught:
-                if not data_channel_ready.is_set():
-                    raise WebRTCError("Data channel connection timeout")
-
-            if not data_channel_ready.is_set():
-                raise WebRTCError("Data channel failed to open")
-
+                            f"SCTP transport closed while waiting for new "
+                            f"data channel to open "
+                            f"(conn_state: {conn_state}, "
+                            f"ice_state: {ice_state})"
+                        )
+                    # If connection is still good, proceed anyway -
+                    # channel might open later
+                    if conn_state == "connected" and ice_state in (
+                        "connected",
+                        "completed",
+                    ):
+                        logger.info(
+                            "Connection is stable, proceeding despite channel "
+                            "not being open yet"
+                        )
+                    else:
+                        raise WebRTCError(
+                            f"New data channel failed to open and connection "
+                            f"is not stable "
+                            f"(conn_state: {conn_state}, "
+                            f"ice_state: {ice_state})"
+                        )
         except WebRTCError:
-            # Re-raise WebRTCErrors as-is
             raise
         except Exception as e:
-            # Handle any other exceptions
-            # Check if it's a connection failure
-            if connection_failed.is_set():
-                raise WebRTCError("WebRTC connection failed") from e
-            # Otherwise, wrap it
-            raise WebRTCError(f"Connection establishment error: {e}") from e
+            logger.error(f"Failed to create new data channel: {e}")
+            raise WebRTCError(
+                f"Failed to create communication data channel: {e}"
+            ) from e
 
-        # Create connection wrapper
+        # Early handler and buffer are already created and attached above
+
+        # Now that new channel is created and opened, close init channel per spec step 8
+        logger.debug(
+            "Closing 'init' channel per spec step 8 (after new channel is ready)"
+        )
+        try:
+            # Check if channel is already closed
+            if init_channel.readyState == "closed":
+                logger.debug("Init channel already closed")
+                init_channel_closed.set()
+            else:
+                bridge = TrioSafeWebRTCOperations._get_bridge()
+                await bridge.close_data_channel(init_channel)
+                with trio.move_on_after(5.0) as close_scope:
+                    await init_channel_closed.wait()
+                if close_scope.cancelled_caught:
+                    logger.debug(
+                        "Init channel close event not received, proceeding anyway"
+                    )
+            logger.info("Init channel closed successfully")
+        except Exception as e:
+            logger.warning(f"Error closing init channel: {e}")
+
+        # Close signaling stream per spec step 8
+        logger.debug("Closing signaling stream per spec step 8")
+        try:
+            await signaling_stream.close()
+        except Exception as e:
+            logger.warning(f"Error closing signaling stream: {e}")
+
+        # Create connection wrapper with the new data channel and message buffer
         connection = WebRTCRawConnection(
             peer_id=target_peer_id,
             peer_connection=peer_connection,
-            data_channel=data_channel,
+            data_channel=new_data_channel,
             is_initiator=True,
+            incoming_message_buffer=message_buffer_recv,
         )
 
         logger.info(f"Successfully established WebRTC connection to {target_peer_id}")
@@ -317,30 +584,17 @@ async def initiate_connection(
     except Exception as e:
         logger.error(f"Failed to initiate WebRTC connection: {e}")
 
-        # Cleanup on failure - handle closed event loops gracefully
-        # Note: This cleanup happens while still in the open_loop()
-        #  context from transport.dial()
         if peer_connection:
             try:
-                bridge = TrioSafeWebRTCOperations._get_bridge()
-                try:
-                    async with bridge:
-                        await bridge.close_peer_connection(peer_connection)
-                except (RuntimeError, Exception) as cleanup_error:
-                    # Check if it's a closed loop issue
-                    error_str = str(cleanup_error).lower()
-                    if "closed" in error_str or "no running event loop" in error_str:
-                        logger.debug("Event loop closed during cleanup (non-critical)")
-                    else:
-                        logger.warning(
-                            f"Error cleaning up peer connection: {cleanup_error}"
-                        )
-            except Exception as cleanup_error:
-                # Final fallback - log but don't fail
+                await aio_as_trio(peer_connection.close())
+            except (RuntimeError, Exception) as cleanup_error:
+                # Check if it's a closed loop issue
                 error_str = str(cleanup_error).lower()
-                if "closed" not in error_str:
+                if "closed" in error_str or "no running event loop" in error_str:
+                    logger.debug("Event loop closed during cleanup (non-critical)")
+                else:
                     logger.warning(
-                        f"Unexpected err during conn cleanup: {cleanup_error}"
+                        f"Error cleaning up peer connection: {cleanup_error}"
                     )
 
         if signaling_stream:
@@ -355,50 +609,83 @@ async def initiate_connection(
 
 
 async def _send_signaling_message(stream: INetStream, message: Message) -> None:
-    """Send a signaling message over the stream"""
+    """Send a signaling message over the stream with varint length prefix."""
     try:
-        # message_length = len(message_data).to_bytes(4, byteorder="big")
-        await stream.write(message.SerializeToString())
-        logger.debug(f"Sent signaling message: {message.type}")
+        #: Messages are sent prefixed with the message length in bytes,
+        # encoded as an unsigned variable length integer
+        message_bytes = message.SerializeToString()
+        varint_prefix = encode_uvarint(len(message_bytes))
+        await stream.write(varint_prefix + message_bytes)
+        logger.debug(
+            f"Sent signaling message: {message.type} ({len(message_bytes)} bytes)"
+        )
     except Exception as e:
         logger.error(f"Failed to send signaling message: {e}")
         raise
 
 
 async def _receive_signaling_message(stream: INetStream, timeout: float) -> Message:
-    """Receive a signaling message from the stream"""
-    try:
-        with trio.move_on_after(timeout):
-            # Read message data
-            message_data = await stream.read()
-            deserealized_msg = Message()
-            deserealized_msg.ParseFromString(message_data)
-            logger.debug(f"Received signaling message: {deserealized_msg.type}")
-            return deserealized_msg
+    """
+    Receive a varint-prefixed signaling message from the stream.
 
+    NOTE: This function does NOT use cancel scopes to avoid nested scope issues.
+    The caller should manage timeouts at a higher level.
+    """
+    try:
+        # Read varint-prefixed protobuf message
+        # Use read_length_prefixed_protobuf which handles the varint decoding
+        message_data = await read_length_prefixed_protobuf(
+            stream, use_varint_format=True, max_length=1024 * 1024
+        )
+
+        # Parse protobuf message
+        deserialized_msg = Message()
+        deserialized_msg.ParseFromString(message_data)
+        msg_type = deserialized_msg.type
+        msg_len = len(message_data)
+        logger.debug(f"Received signaling message: {msg_type} ({msg_len} bytes)")
+        return deserialized_msg
+
+    except WebRTCError:
+        # Re-raise WebRTCErrors as-is
+        raise
     except Exception as e:
         logger.error(f"Failed to receive signaling message: {e}")
-        raise
+        raise WebRTCError(f"Failed to receive signaling message: {e}") from e
 
 
 async def _send_ice_candidates(
     stream: INetStream, peer_connection: RTCPeerConnection
 ) -> None:
-    # Get SDP offer from localDescription to extract ICE Candidate
+    """Extract and send ICE candidates from local description SDP."""
+    # Get SDP from localDescription to extract ICE Candidate
     sdp = peer_connection.localDescription.sdp
     sdp_lines = sdp.splitlines()
 
+    # Find media lines (m=) to determine sdpMLineIndex for candidates
+    mline_index = 0
     msg = Message()
     msg.type = Message.ICE_CANDIDATE
+
     # Extract ICE_Candidate and send each separately
     for line in sdp_lines:
-        if line.startswith("a=candidate:"):
+        if line.startswith("m="):
+            # New media line - increment index
+            mline_index += 1
+        elif line.startswith("a=candidate:"):
             cand_str = line[len("a=") :]
-            candidate_init = {"candidate": cand_str, "sdpMLineIndex": 0}
+            # Use the current m-line index
+            # (0-indexed in WebRTC, but we track 1-indexed)
+            # WebRTC uses 0-indexed, so subtract 1
+            candidate_init = {
+                "candidate": cand_str,
+                "sdpMLineIndex": max(0, mline_index - 1),
+            }
             data = json.dumps(candidate_init)
             msg.data = data
             await _send_signaling_message(stream, msg)
             logger.debug("Sent ICE candidate init: %s", candidate_init)
+
     # Mark end-of-candidates
     msg = Message(type=Message.ICE_CANDIDATE, data=json.dumps(None))
     await _send_signaling_message(stream, msg)
@@ -408,61 +695,115 @@ async def _send_ice_candidates(
 async def _handle_incoming_ice_candidates(
     stream: INetStream, peer_connection: RTCPeerConnection, timeout: float
 ) -> None:
-    """Handle incoming ICE candidates from the signaling stream"""
+    """
+    Handle incoming ICE candidates from the signaling stream.
+
+    NOTE: This function avoids nested cancel scopes to prevent Trio corruption.
+    """
     logger.debug("Handling incoming ICE candidates")
 
-    while True:
-        try:
-            with trio.move_on_after(timeout) as cancel_scope:
-                message = await _receive_signaling_message(stream, timeout)
+    start_time = trio.current_time()
 
-            if cancel_scope.cancelled_caught:
-                logger.warning("ICE candidate receive timeout")
+    while True:
+        elapsed = trio.current_time() - start_time
+        if elapsed >= timeout:
+            logger.warning("ICE candidate receive timeout")
+            break
+
+        try:
+            # Use remaining timeout, but read in chunks to allow connection checks
+            remaining_timeout = timeout - elapsed
+            if remaining_timeout <= 0:
                 break
+            read_timeout = min(remaining_timeout, 1.0)  # Read in 1s chunks
+
+            # Wrap the read with a timeout using move_on_after at this level only
+            # (not nested since we're managing timeout with time-based checks)
+            with trio.move_on_after(read_timeout) as read_scope:
+                message = await _receive_signaling_message(stream, read_timeout)
+
+            if read_scope.cancelled_caught:
+                # Timeout on this read - check overall timeout
+                elapsed = trio.current_time() - start_time
+                if elapsed >= timeout:
+                    logger.warning(
+                        "Overall timeout reached during ICE candidate reading"
+                    )
+                    break
+                # Otherwise, continue to next iteration
+                continue
 
             # stream ended or we became connected
             if not message:
-                logger.error("Null message recieved")
+                logger.error("Null message received")
                 break
 
             if message.type != Message.ICE_CANDIDATE:
                 logger.error("ICE candidate message expected. Exiting...")
                 raise WebRTCError("ICE candidate message expected.")
-                break
 
             # Candidate init cannot be null
             if message.data == "":
                 logger.debug("candidate received is empty")
                 continue
 
-            logger.debug("Recieved new ICE Candidate")
+            logger.debug("Received new ICE Candidate")
             try:
                 candidate_init = json.loads(message.data)
             except json.JSONDecodeError:
                 logger.error("Invalid ICE candidate JSON: %s", message.data)
                 break
 
-            bridge = TrioSafeWebRTCOperations._get_bridge()
-
             # None means ICE gathering is fully complete
             if candidate_init is None:
                 logger.debug("Received ICE candidate null → end-of-ice signal")
-                async with bridge:
-                    await bridge.add_ice_candidate(peer_connection, None)
+                try:
+                    await aio_as_trio(peer_connection.addIceCandidate(None))
+                except Exception as e:
+                    logger.warning(f"Failed to add end-of-ICE candidate: {e}")
                 return
 
             # CandidateInit is expected to be a dict
             if isinstance(candidate_init, dict) and "candidate" in candidate_init:
+                # Ensure sdpMLineIndex is present
+                if "sdpMLineIndex" not in candidate_init:
+                    candidate_init["sdpMLineIndex"] = 0
+
                 candidate = candidate_from_aioice(
                     Candidate.from_sdp(candidate_init["candidate"])
                 )
-                async with bridge:
-                    await bridge.add_ice_candidate(peer_connection, candidate)
-                logger.debug("Added ICE candidate: %r", candidate_init)
+                # Set sdpMLineIndex and sdpMid
+                mline_index = candidate_init.get("sdpMLineIndex", 0)
+                if hasattr(candidate, "sdpMLineIndex"):
+                    candidate.sdpMLineIndex = mline_index
+                if not hasattr(candidate, "sdpMid") or candidate.sdpMid is None:
+                    candidate.sdpMid = str(mline_index)
 
+                try:
+                    await aio_as_trio(peer_connection.addIceCandidate(candidate))
+                    logger.debug("Added ICE candidate: %r", candidate_init)
+                except Exception as e:
+                    logger.warning(f"Failed to add ICE candidate: {e}")
+                    continue
+            else:
+                logger.warning(f"Invalid candidate format: {candidate_init}")
+
+        except WebRTCError:
+            # Check timeout before raising
+            elapsed = trio.current_time() - start_time
+            if elapsed >= timeout:
+                logger.warning("Timeout during ICE candidate handling")
+                break
+            raise
         except Exception as e:
+            # Check timeout before continuing
+            elapsed = trio.current_time() - start_time
+            if elapsed >= timeout:
+                logger.warning("Timeout during ICE candidate handling")
+                break
             logger.warning(f"Error handling ICE candidate: {e}")
-            break
+            # Continue trying to read
+            continue
 
 
 async def _wait_for_event(event: trio.Event) -> None:
