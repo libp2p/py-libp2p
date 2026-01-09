@@ -21,6 +21,9 @@ from libp2p.abc import (
     IHost,
     INetStream,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -530,8 +533,8 @@ class CircuitV2Protocol(Service):
         ----------
         stream : INetStream
             The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
+        remote_peer_id : bytes
+            The remote peer's ID bytes
 
         Raises
         ------
@@ -541,8 +544,14 @@ class CircuitV2Protocol(Service):
         """
         try:
             # Create raw connection
-            raw_conn = RawConnection(stream=stream, initiator=False)
-            ma = multiaddr.Multiaddr(remote_peer_id)
+            peer_id = ID(remote_peer_id)
+            ma = multiaddr.Multiaddr(f"/p2p/{peer_id.to_base58()}")
+            raw_conn = RawConnection(
+                stream=stream,
+                initiator=False,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[ma],
+            )
             await self.host.upgrade_inbound_connection(raw_conn, ma)
 
         except Exception as e:

@@ -20,6 +20,9 @@ from libp2p.abc import (
     INetConn,
     INetStream,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -530,11 +533,8 @@ class DCUtRProtocol(Service):
 
         # Check if any connection is direct (not relayed)
         for conn in connections:
-            # Get the transport addresses
-            addrs = conn.get_transport_addresses()
-
-            # If any address doesn't start with /p2p-circuit, it's a direct connection
-            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+            # Use the new connection type method
+            if conn.get_connection_type() == ConnectionType.DIRECT:
                 # Cache this result
                 self._direct_connections.add(peer_id)
                 return True

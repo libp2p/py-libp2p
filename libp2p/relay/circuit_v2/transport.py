@@ -19,6 +19,9 @@ from libp2p.abc import (
     INetStream,
     ITransport,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     THandler,
 )
@@ -450,7 +453,12 @@ class CircuitV2Transport(ITransport):
                 await relay_stream.close()
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            return RawConnection(stream=relay_stream, initiator=True)
+            return RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
 
         except Exception:
             await relay_stream.close()
