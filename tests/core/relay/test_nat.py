@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from multiaddr import Multiaddr
 
+from libp2p.abc import ConnectionType
 from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.nat import (
     ReachabilityChecker,
@@ -161,6 +162,7 @@ async def test_check_peer_reachability_connected_direct():
     mock_conn.get_transport_addresses.return_value = [
         Multiaddr("/ip4/192.168.1.1/tcp/1234")  # Direct connection
     ]
+    mock_conn.get_connection_type.return_value = ConnectionType.DIRECT
 
     mock_network.connections = {peer_id: mock_conn}
 
@@ -282,11 +284,13 @@ async def test_check_peer_reachability_multiple_connections():
     mock_conn1.get_transport_addresses.return_value = [
         Multiaddr("/p2p-circuit/ip4/192.168.1.1/tcp/1234")  # Relay
     ]
+    mock_conn1.get_connection_type.return_value = ConnectionType.RELAYED
 
     mock_conn2 = MagicMock()
     mock_conn2.get_transport_addresses.return_value = [
         Multiaddr("/ip4/192.168.1.1/tcp/1234")  # Direct
     ]
+    mock_conn2.get_connection_type.return_value = ConnectionType.DIRECT
 
     mock_network.connections = {peer_id: [mock_conn1, mock_conn2]}
 
