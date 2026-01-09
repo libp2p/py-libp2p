@@ -783,3 +783,45 @@ async def test_yamux_syn_with_large_data(yamux_pair):
     assert received == test_data
     assert len(received) == 1024
     logging.debug("test_yamux_syn_with_large_data complete")
+
+
+@pytest.mark.trio
+async def test_incomplete_read_error_clean_close_detection():
+    """
+    Test that IncompleteReadError correctly identifies clean connection closures.
+
+    This verifies the fix for issue #1084 where yamux listener incorrectly
+    logged clean peer disconnections as errors. Clean closures (0 bytes received)
+    should be detected via the is_clean_close property.
+    """
+    from libp2p.io.exceptions import IncompleteReadError
+
+    # Test clean closure (0 bytes received)
+    clean_error = IncompleteReadError(
+        "Connection closed during read operation: expected 2 bytes but "
+        "received 0 bytes",
+        expected_bytes=2,
+        received_bytes=0,
+    )
+    assert clean_error.is_clean_close, "Should detect clean closure (0 bytes)"
+    assert clean_error.expected_bytes == 2
+    assert clean_error.received_bytes == 0
+
+    # Test partial read (not clean closure)
+    partial_error = IncompleteReadError(
+        "Connection closed during read operation: expected 12 bytes but "
+        "received 5 bytes",
+        expected_bytes=12,
+        received_bytes=5,
+    )
+    assert not partial_error.is_clean_close, "Partial read should not be clean closure"
+    assert partial_error.expected_bytes == 12
+    assert partial_error.received_bytes == 5
+
+    # Test default values (backward compatibility)
+    legacy_error = IncompleteReadError("Some error message")
+    assert legacy_error.is_clean_close, "Default 0 bytes should be clean closure"
+    assert legacy_error.expected_bytes == 0
+    assert legacy_error.received_bytes == 0
+
+    logging.debug("test_incomplete_read_error_clean_close_detection complete")

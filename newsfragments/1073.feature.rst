@@ -1,2 +1,0 @@
-Introduced ``get_transport_addrs()`` method to ``BasicHost`` for retrieving raw transport addresses without the peer ID suffix.
-Refactored ``get_addrs()`` to utilize this new method, maintaining backward compatibility.
