@@ -7,18 +7,19 @@ This directory contains interoperability tests for py-libp2p and nim-libp2p usin
 - `nim_echo_server.nim`: Nim implementation of an echo server using nim-libp2p.
 - `test_echo_interop.py`: Python pytest tests that connect to the nim echo server.
 - `conftest.py`: Pytest fixtures for managing the nim echo server lifecycle.
-- `scripts/setup_nim_echo.sh`: Shell script to install dependencies and build the nim server.
-- `logs/`: Directory for server logs.
+- `scripts`: Shell script to install dependencies and build the nim server.
 - `README.md`: Contains details about running the tests.
 
 ## Prerequisites
 
 ### Python
 - Python 3.8+ 
-Install Python dependencies:
+
+- Install required dependencies:
 ```bash
-pip install libp2p trio pytest pytest-trio pytest-timeout multiaddr cryptography
+pip install -e .
 ```
+
 
 ### Nim
 - Nim 1.6+ (recommended: latest stable version)
@@ -71,17 +72,23 @@ This script will:
 Run all interop tests using pytest:
 
 ```bash
-pytest test_echo_interop.py -v
+pytest -v -s
 ```
 
 Or run specific tests:
 
 ```bash
 # Basic echo test
-pytest test_echo_interop.py::test_basic_echo_interop -v
+pytest -v -s test_echo_interop.py::test_basic_echo_interop
 
 # Large message echo test
-pytest test_echo_interop.py::test_large_message_echo -v
+pytest -v -s test_echo_interop.py::test_large_message_echo
+```
+
+To see logger output in terminal (shows `logger.info()` messages):
+
+```bash
+pytest -v -s --log-cli-level=INFO
 ```
 
 ### 4. Run tests directly (alternative)
