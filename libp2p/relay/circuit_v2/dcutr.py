@@ -20,9 +20,6 @@ from libp2p.abc import (
     INetConn,
     INetStream,
 )
-from libp2p.connection_types import (
-    ConnectionType,
-)
 from libp2p.custom_types import (
     TProtocol,
 )

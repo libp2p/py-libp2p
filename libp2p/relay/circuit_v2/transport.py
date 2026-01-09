@@ -126,6 +126,23 @@ class TrackedRawConnection(IRawConnection):
         """Get remote address from the wrapped connection."""
         return self._wrapped.get_remote_address()
 
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        For relayed connections, this should include /p2p-circuit in the path.
+        Delegates to wrapped connection but ensures relay context is preserved.
+        """
+        return self._wrapped.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection.
+
+        This is always RELAYED since TrackedRawConnection wraps relay connections.
+        """
+        return ConnectionType.RELAYED
+
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped connection."""
         return getattr(self._wrapped, name)
