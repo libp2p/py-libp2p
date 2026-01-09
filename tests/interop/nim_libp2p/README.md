@@ -22,7 +22,7 @@ pip install -e .
 
 
 ### Nim
-- Nim 1.6+ (recommended: latest stable version)
+- Nim 2.0+ (required by nim-libp2p)
 - Nimble (Nim package manager)
 
 Install Nim (if not already installed):
