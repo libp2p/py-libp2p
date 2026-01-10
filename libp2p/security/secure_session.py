@@ -76,28 +76,42 @@ class SecureSession(BaseSession):
         if n == 0:
             return b""
 
-        data_from_buffer = self._drain(n)
-        if len(data_from_buffer) > 0:
-            return data_from_buffer
+        try:
+            data_from_buffer = self._drain(n)
+            if len(data_from_buffer) > 0:
+                return data_from_buffer
 
-        msg = await self.conn.read_msg()
+            requested = n if n is not None else "all"
+            msg1 = "[SecureSession] Reading message from connection"
+            msg2 = f"(requested: {requested})"
+            message = f"{msg1} {msg2}"
+            print(message)
+            msg = await self.conn.read_msg()
+            print(f"[SecureSession] Read message: length={len(msg)} bytes")
 
-        # If underlying connection returned empty bytes, treat as closed
-        # and raise to signal that reads after close are invalid.
-        if msg == b"":
-            raise Exception("Connection closed")
+            if n is None:
+                return msg
 
-        if n is None:
-            return msg
+            if n < len(msg):
+                self._fill(msg)
+                return self._drain(n)
+            else:
+                return msg
 
-        if n < len(msg):
-            self._fill(msg)
-            return self._drain(n)
-        else:
-            return msg
+        except Exception as e:
+            print(f"[SecureSession] Error reading data: {e}")
+            # Re-raise to maintain proper error handling flow
+            raise
 
     async def write(self, data: bytes) -> None:
-        await self.conn.write_msg(data)
+        try:
+            print(f"[SecureSession] Writing message: length={len(data)} bytes")
+            await self.conn.write_msg(data)
+            print("[SecureSession] Write completed successfully")
+        except Exception as e:
+            print(f"[SecureSession] Error writing data: {e}")
+            # Re-raise to maintain proper error handling flow
+            raise
 
     async def close(self) -> None:
         await self.conn.close()
