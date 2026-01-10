@@ -38,6 +38,8 @@ def _get_websocket_transport() -> Any:
 
 
 logger = logging.getLogger("libp2p.transport.registry")
+# Enable debug logging for transport registry troubleshooting
+logger.setLevel(logging.DEBUG)
 
 
 def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
@@ -227,9 +229,16 @@ def create_transport_for_multiaddr(
                    (e.g., private_key for QUIC)
     :return: Transport instance or None if no suitable transport found
     """
+    logger.debug(
+        f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: called with "
+        f"maddr={maddr}, upgrader={type(upgrader).__name__}"
+    )
     try:
         # Get all protocols in the multiaddr
         protocols = [proto.name for proto in maddr.protocols()]
+        logger.debug(
+            f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: protocols={protocols}"
+        )
 
         # Check for supported transport protocols in order of preference
         # We need to validate that the multiaddr structure is valid for our transports
@@ -255,9 +264,19 @@ def create_transport_for_multiaddr(
                 # Determine if this is a secure WebSocket connection
                 registry = get_transport_registry()
                 if "wss" in protocols or "tls" in protocols:
-                    return registry.create_transport("wss", upgrader, **kwargs)
+                    transport = registry.create_transport("wss", upgrader, **kwargs)
+                    logger.debug(
+                        f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: "
+                        f"created wss transport={transport}"
+                    )
+                    return transport
                 else:
-                    return registry.create_transport("ws", upgrader, **kwargs)
+                    transport = registry.create_transport("ws", upgrader, **kwargs)
+                    logger.debug(
+                        f"[TRANSPORT_REGISTRY] create_transport_for_multiaddr: "
+                        f"created ws transport={transport}"
+                    )
+                    return transport
         elif "tcp" in protocols:
             # For TCP, we need a valid structure like /ip4/127.0.0.1/tcp/8080
             # Check if the multiaddr has proper TCP structure

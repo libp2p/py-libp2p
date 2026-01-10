@@ -422,12 +422,30 @@ class Swarm(Service, INetworkService):
 
         logger.debug("upgraded security for peer %s", peer_id)
 
+        logger.debug(
+            f"[SWARM] upgrade_outbound_raw_conn: about to call upgrade_connection, "
+            f"peer_id={peer_id}"
+        )
         try:
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            logger.debug(
+                f"[SWARM] upgrade_outbound_raw_conn: upgrade_connection succeeded, "
+                f"peer_id={peer_id}, muxed_conn_type={type(muxed_conn).__name__}"
+            )
         except MuxerUpgradeFailure as error:
-            logger.debug("failed to upgrade mux for peer %s", peer_id)
+            logger.error(
+                f"[SWARM] upgrade_outbound_raw_conn: MuxerUpgradeFailure, "
+                f"peer_id={peer_id}, error={error}"
+            )
             await secured_conn.close()
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+        except Exception as error:
+            logger.error(
+                f"[SWARM] upgrade_outbound_raw_conn: unexpected error during muxer upgrade, "
+                f"peer_id={peer_id}, error={error}, error_type={type(error).__name__}"
+            )
+            await secured_conn.close()
+            raise
 
         logger.debug("upgraded mux for peer %s", peer_id)
 
@@ -708,12 +726,30 @@ class Swarm(Service, INetworkService):
             ) from error
         peer_id = secured_conn.get_remote_peer()
 
+        logger.debug(
+            f"[SWARM] upgrade_inbound_raw_conn: about to call upgrade_connection, "
+            f"peer_id={peer_id}"
+        )
         try:
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            logger.debug(
+                f"[SWARM] upgrade_inbound_raw_conn: upgrade_connection succeeded, "
+                f"peer_id={peer_id}, muxed_conn_type={type(muxed_conn).__name__}"
+            )
         except MuxerUpgradeFailure as error:
-            logger.error("fail to upgrade mux for peer %s", peer_id)
+            logger.error(
+                f"[SWARM] upgrade_inbound_raw_conn: MuxerUpgradeFailure, "
+                f"peer_id={peer_id}, error={error}"
+            )
             await secured_conn.close()
             raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
+        except Exception as error:
+            logger.error(
+                f"[SWARM] upgrade_inbound_raw_conn: unexpected error during muxer upgrade, "
+                f"peer_id={peer_id}, error={error}, error_type={type(error).__name__}"
+            )
+            await secured_conn.close()
+            raise
         logger.debug("upgraded mux for peer %s", peer_id)
         # Optional pre-upgrade admission using ResourceManager
         pre_scope = None
@@ -896,7 +932,15 @@ class Swarm(Service, INetworkService):
         logger.debug(
             f"Swarm::add_conn | muxed_conn type: {muxed_type}, peer_id: {muxed_peer_id}"
         )
+        logger.debug(
+            f"[SWARM] add_conn: calling muxed_conn.start() for "
+            f"type={muxed_type.__name__}, peer_id={muxed_peer_id}"
+        )
         self.manager.run_task(muxed_conn.start)
+        logger.debug(
+            f"[SWARM] add_conn: muxed_conn.start() task scheduled for "
+            f"peer_id={muxed_peer_id}"
+        )
         logger.debug(
             f"Swarm::add_conn | waiting for event_started for peer {muxed_conn.peer_id}"
         )

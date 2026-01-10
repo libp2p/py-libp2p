@@ -53,13 +53,27 @@ def configure_logging():
     debug_enabled = os.getenv("debug", "false").upper() in ["DEBUG", "1", "TRUE", "YES"]
 
     if debug_enabled:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            stream=sys.stderr,
+        )
         logger_names = [
             "",
             "libp2p.ping_test",
             "libp2p",
             "libp2p.transport",
+            "libp2p.transport.registry",
+            "libp2p.transport.upgrader",
             "libp2p.network",
+            "libp2p.network.swarm",
             "libp2p.protocol_muxer",
+            "libp2p.protocol_muxer.multiselect_client",
+            "libp2p.stream_muxer",
+            "libp2p.stream_muxer.mplex",
+            "libp2p.stream_muxer.mplex.mplex",
+            "libp2p.stream_muxer.mplex.mplex_stream",
+            "libp2p.stream_muxer.muxer_multistream",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
