@@ -20,8 +20,19 @@ from libp2p import (
     new_host,
 )
 from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
+from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
     TProtocol,
+)
+# TLS imports disabled - testing Noise-only to verify broker fallback
+# from libp2p.security.tls.transport import (
+#     PROTOCOL_ID as TLS_PROTOCOL_ID,
+#     create_tls_transport,
+# )
+from libp2p.security.noise.transport import (
+    PROTOCOL_ID as NOISE_PROTOCOL_ID,
+    Transport as NoiseTransport,
 )
 from libp2p.identity.identify.identify import (
     ID as IDENTIFY_PROTOCOL_ID,
@@ -38,9 +49,9 @@ from libp2p.peer.peerinfo import (
 )
 
 # Configure minimal logging
-logging.basicConfig(level=logging.WARNING)
-logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger("libp2p").setLevel(logging.WARNING)
+#logging.basicConfig(level=logging.WARNING)
+#logging.getLogger("multiaddr").setLevel(logging.WARNING)
+#logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -108,7 +119,10 @@ async def handle_ping(stream: INetStream) -> None:
                 await stream.write(payload)
                 print(f"responded with pong to {peer_id}")
 
-        except Exception:
+        except Exception as e:
+            print(f"[PING HANDLER] Error: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             await stream.reset()
             break
 
@@ -178,14 +192,19 @@ def pubkey_from_protobuf_bytes(b: bytes) -> PublicKey:
         raise ValueError("Unsupported key type yet")
 
 
-def get_nonce():
+async def get_nonce():
     new_nonce_url = DIRECTORY["newNonce"]
-    nonce_resp = requests.head(new_nonce_url, timeout=10)
+    # Run blocking requests in thread pool to avoid blocking event loop
+    nonce_resp = await trio.to_thread.run_sync(
+        lambda: requests.head(new_nonce_url, timeout=10)
+    )
     # some servers return nonce in HEAD, some in GET; try HEAD but fallback to GET
     if "Replay-Nonce" in nonce_resp.headers:
         nonce = nonce_resp.headers["Replay-Nonce"]
     else:
-        nonce_resp_get = requests.get(new_nonce_url, timeout=10)
+        nonce_resp_get = await trio.to_thread.run_sync(
+            lambda: requests.get(new_nonce_url, timeout=10)
+        )
         nonce = nonce_resp_get.headers.get("Replay-Nonce")
     if not nonce:
         raise RuntimeError("Failed to obtain ACME nonce from newNonce endpoint")
@@ -333,14 +352,66 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     if transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
 
+    # Create keypair for the host
+    key_pair = create_new_key_pair()
+    
+    # Create Noise transport only (testing broker fallback mechanism)
+    # Go example proves broker CAN fallback to Noise, so we test with Noise-only
+    noise_key_pair = create_new_x25519_key_pair()
+    noise_transport = NoiseTransport(key_pair, noise_privkey=noise_key_pair.private_key)
+    
+    # Configure security options with ONLY Noise (no TLS)
+    # Broker should try TLS first, get "na", then fallback to Noise
+    security_options = {
+        NOISE_PROTOCOL_ID: noise_transport,
+    }
+    
     if psk == 1:
-        host = new_host(listen_addrs=listen_addrs, psk=PSK)
+        host = new_host(
+            key_pair=key_pair,
+            listen_addrs=listen_addrs,
+            psk=PSK,
+            sec_opt=security_options
+        )
     else:
-        host = new_host(listen_addrs=listen_addrs)
+        host = new_host(
+            key_pair=key_pair,
+            listen_addrs=listen_addrs,
+            sec_opt=security_options
+        )
 
     # Set up identify handler with specified format
     # Set use_varint_format = False, if want to checkout the Signed-PeerRecord
-    identify_handler = identify_handler_for(host, use_varint_format=False)
+    base_identify_handler = identify_handler_for(host, use_varint_format=False)
+    
+    # Wrap identify handler with better logging
+    async def logged_identify_handler(stream: INetStream) -> None:
+        """Wrapper around identify handler with enhanced logging"""
+        peer_id = stream.muxed_conn.peer_id
+        print(f"\n[IDENTIFY] Incoming identify request from peer: {peer_id}")
+        try:
+            # Try to get remote address for logging
+            try:
+                remote_addr = stream.get_remote_address()
+                if remote_addr:
+                    print(f"[IDENTIFY] Remote address: {remote_addr}")
+                else:
+                    print(f"[IDENTIFY] Remote address: None (could not determine)")
+            except Exception as e:
+                print(f"[IDENTIFY] Error getting remote address: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # Call the base handler
+            await base_identify_handler(stream)
+            print(f"[IDENTIFY] Successfully handled identify request from {peer_id}")
+        except Exception as e:
+            print(f"[IDENTIFY] Error in identify handler: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    
+    identify_handler = logged_identify_handler
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         # Start the peer-store cleanup task
@@ -357,10 +428,14 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             for addr in all_addrs:
                 print(f"{addr}")
 
-            print(
-                f"\nRun this from the same folder in another console:\n\n"
-                f"autotls-demo -d {host.get_addrs()[0]} -psk {psk} -t {transport}\n"
-            )
+            all_addrs = host.get_addrs()
+            if all_addrs:
+                print(
+                    f"\nRun this from the same folder in another console:\n\n"
+                    f"autotls-demo -d {all_addrs[0]} -psk {psk} -t {transport}\n"
+                )
+            else:
+                print("\nWarning: No listening addresses available")
             print("Waiting for incoming connection...")
 
             peer_id = host.get_id()
@@ -376,7 +451,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
             print("\nBase36 PeerID:", b36_peer_id)
 
-            def acme_new_account(priv_key=None):
+            async def acme_new_account(priv_key=None):
                 if priv_key is None:
                     print("\nGENERATING RSA-KEY (2048)...")
                     priv_key = generate_rsa_key(2048)
@@ -385,15 +460,17 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
                 print("STARTING ACME ACCOUTN CREATION SEQUENCE...")
 
-                # Fetch directory
-                r = requests.get(ACME_DIRECTORY_URL, timeout=10)
+                # Fetch directory - run in thread pool to avoid blocking event loop
+                r = await trio.to_thread.run_sync(
+                    lambda: requests.get(ACME_DIRECTORY_URL, timeout=10)
+                )
                 r.raise_for_status()
 
                 global DIRECTORY
                 DIRECTORY = r.json()
 
                 # Create JWS
-                nonce = get_nonce()
+                nonce = await get_nonce()
                 new_account_url = DIRECTORY["newAccount"]
                 jwk = jwk_from_rsa_private_key(priv_key)
 
@@ -407,10 +484,12 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 payload = {"termsOfServiceAgreed": True}
                 jws = create_jws(protected, payload, priv_key)
 
-                # POST to newAccount || Fetch the account URL
+                # POST to newAccount || Fetch the account URL - run in thread pool
                 headers = {"Content-Type": "application/jose+json"}
-                resp = requests.post(
-                    DIRECTORY["newAccount"], json=jws, headers=headers, timeout=10
+                resp = await trio.to_thread.run_sync(
+                    lambda: requests.post(
+                        DIRECTORY["newAccount"], json=jws, headers=headers, timeout=10
+                    )
                 )
 
                 if not (200 <= resp.status_code < 300):
@@ -422,9 +501,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print("\nACCOUNT-URL:", account_url)
                 return account_url, priv_key
 
-            def acme_new_order_for_peerid(b36peerid, priv_key, kid):
+            async def acme_new_order_for_peerid(b36peerid, priv_key, kid):
                 new_order_url = DIRECTORY["newOrder"]
-                nonce = get_nonce()
+                nonce = await get_nonce()
                 domain = f"*.{b36peerid}.libp2p.direct"
 
                 protected = {
@@ -437,11 +516,14 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 payload = {"identifiers": [{"type": "dns", "value": domain}]}
 
                 jws = create_jws(protected, payload, priv_key)
-                resp = requests.post(
-                    new_order_url,
-                    json=jws,
-                    headers={"Content-Type": "application/jose+json"},
-                    timeout=10,
+                # Run in thread pool to avoid blocking event loop
+                resp = await trio.to_thread.run_sync(
+                    lambda: requests.post(
+                        new_order_url,
+                        json=jws,
+                        headers={"Content-Type": "application/jose+json"},
+                        timeout=10,
+                    )
                 )
 
                 order_url = resp.headers["Location"]
@@ -455,11 +537,11 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 resp.raise_for_status()
                 return order_url, auth_url, finalize_url
 
-            def acme_get_dns01_challenge(auth_url, priv_key, kid, jwk_thumbprint):
+            async def acme_get_dns01_challenge(auth_url, priv_key, kid, jwk_thumbprint):
                 print("\nGETTING THE DNS-01 CHALLENGE FROM ACME...")
 
                 # POST-as-GET with empty payload
-                nonce = get_nonce()
+                nonce = await get_nonce()
                 protected = {
                     "alg": "RS256",
                     "kid": kid,
@@ -468,11 +550,14 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 }
                 jws = create_jws(protected, None, priv_key)
 
-                resp = requests.post(
-                    auth_url,
-                    json=jws,
-                    headers={"Content-Type": "application/jose+json"},
-                    timeout=10,
+                # Run in thread pool to avoid blocking event loop
+                resp = await trio.to_thread.run_sync(
+                    lambda: requests.post(
+                        auth_url,
+                        json=jws,
+                        headers={"Content-Type": "application/jose+json"},
+                        timeout=10,
+                    )
                 )
 
                 auth = resp.json()
@@ -528,7 +613,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print("\nBROKER RESPONSE:", r, r.status_code, r.headers)
                 return r
 
-            def http_peer_id_auth(private_key: PrivateKey, key_auth, addrs):
+            async def http_peer_id_auth(private_key: PrivateKey, key_auth, addrs):
                 print("\nINITIATION PEER-ID AUTHENTICATION WITH AUTO-TLS BROKER...")
 
                 url = "https://registration.libp2p.direct/v1/_acme-challenge"
@@ -538,7 +623,10 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 hs = ClientInitiatedHandshake(private_key, hostname)
 
                 header = {"Authorization": hs.get_challenge_header()}
-                resp = requests.options(url, headers=header)
+                # Run in thread pool to avoid blocking event loop
+                resp = await trio.to_thread.run_sync(
+                    lambda: requests.options(url, headers=header)
+                )
 
                 www = resp.headers.get("Www-Authenticate")
                 if not www:
@@ -551,10 +639,22 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                     "User-Agent": "py-libp2p/example/autotls",
                     "Authorization": "libp2p-PeerID " + hs.verify_server(www),
                 }
-                # resp = requests.post(url, headers=header)
-                resp = requests.post(url, headers=header, data=json.dumps(body))
-                print("\n", resp.request.headers)
-                print("\n", resp.request.body)
+                # Run in thread pool to avoid blocking event loop
+                resp = await trio.to_thread.run_sync(
+                    lambda: requests.post(url, headers=header, data=json.dumps(body))
+                )
+                print("\n[HTTP REQUEST]")
+                print("Request headers:", resp.request.headers)
+                print("Request body:", resp.request.body)
+                print("\n[HTTP RESPONSE]")
+                print(f"Status code: {resp.status_code}")
+                print(f"Response headers: {dict(resp.headers)}")
+                print(f"Response body: {resp.text}")
+                
+                # Check for errors from broker
+                if resp.status_code != 200:
+                    print(f"\n[ERROR] Broker returned status {resp.status_code}: {resp.text}")
+                    raise RuntimeError(f"Broker returned error: {resp.status_code} - {resp.text}")
 
                 # Extract BEARER-TOKEN
                 auth_info = resp.headers.get("Authentication-Info")
@@ -568,20 +668,56 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 return hs.server_id, bearer
 
             try:
-                account_url, priv_key = acme_new_account(None)
-                order_url, auth_url, finalize_url = acme_new_order_for_peerid(
+                account_url, priv_key = await acme_new_account(None)
+                order_url, auth_url, finalize_url = await acme_new_order_for_peerid(
                     b36_peer_id, priv_key, account_url
                 )
 
                 jwk = jwk_from_rsa_private_key(priv_key)
                 jwk_thumprint = compute_jwk_thumbprint(jwk)
 
-                dns01, key_auth, chall_url = acme_get_dns01_challenge(
+                dns01, key_auth, chall_url = await acme_get_dns01_challenge(
                     auth_url, priv_key, account_url, jwk_thumprint
                 )
-                public_addrs = [f"/ip4/13.126.88.127/tcp/{port}/p2p/{host.get_id()}"]
+                
+                # Get the actual public IP address from host's listening addresses
+                # Filter out localhost (127.0.0.1) to get the public IP
+                all_addrs = host.get_addrs()
+                public_addr = None
+                for addr in all_addrs:
+                    addr_str = str(addr)
+                    # Look for the public IP (not 127.0.0.1)
+                    if "/ip4/127.0.0.1" not in addr_str and "/ip4/" in addr_str:
+                        public_addr = addr_str
+                        break
+                
+                # Fallback: if no public address found, use the first non-localhost address
+                if public_addr is None and all_addrs:
+                    for addr in all_addrs:
+                        addr_str = str(addr)
+                        if "/ip4/127.0.0.1" not in addr_str:
+                            public_addr = addr_str
+                            break
+                
+                # If still no address, construct from known public IP
+                if public_addr is None:
+                    # Extract public IP from listening addresses
+                    for addr in all_addrs:
+                        try:
+                            ip = addr.value_for_protocol("ip4")
+                            if ip and ip != "127.0.0.1":
+                                public_addr = f"/ip4/{ip}/tcp/{port}/p2p/{host.get_id()}"
+                                break
+                        except Exception:
+                            continue
+                
+                if public_addr is None:
+                    raise RuntimeError("Could not determine public IP address for broker")
+                
+                print(f"\n[DEBUG] Using public address for broker: {public_addr}")
+                public_addrs = [public_addr]
 
-                server_id, bearer = http_peer_id_auth(
+                server_id, bearer = await http_peer_id_auth(
                     host.get_private_key(), key_auth, public_addrs
                 )
 
@@ -590,7 +726,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 # )
 
             except Exception as e:
-                print("Error:", e)
+                print(f"Error: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
 
         else:
             maddr = multiaddr.Multiaddr(destination)
