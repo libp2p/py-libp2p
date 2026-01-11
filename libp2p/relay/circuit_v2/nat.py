@@ -19,6 +19,11 @@ from libp2p.peer.id import (
     ID,
 )
 
+from .predictor import (
+    RelayDecision,
+    RelayDecisionPredictor,
+)
+
 logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
 
 # Timeout for reachability checks
@@ -176,6 +181,7 @@ class ReachabilityChecker:
         self.host = host
         self._peer_reachability: dict[ID, bool] = {}
         self._known_public_peers: set[ID] = set()
+        self._predictor = RelayDecisionPredictor()
 
     def is_addr_public(self, addr: Multiaddr) -> bool:
         """
@@ -216,6 +222,39 @@ class ReachabilityChecker:
 
         """
         return [addr for addr in addrs if self.is_addr_public(addr)]
+
+    def record_connection_result(
+        self,
+        peer_id: ID,
+        *,
+        success: bool,
+        via_relay: bool,
+        latency: float | None = None,
+    ) -> None:
+        """
+        Feed connection outcomes back into the predictor.
+        """
+        self._predictor.record_observation(
+            peer_id, success=success, via_relay=via_relay, latency=latency
+        )
+        if success and not via_relay:
+            self._peer_reachability[peer_id] = True
+        elif not success:
+            self._peer_reachability.pop(peer_id, None)
+
+    def predict_relay_strategy(
+        self, peer_id: ID, addrs: list[Multiaddr] | None = None
+    ) -> RelayDecision:
+        """
+        Return the current relay vs. direct recommendation for a peer.
+        """
+        target_addrs = addrs
+        if target_addrs is None:
+            try:
+                target_addrs = self.host.get_peerstore().addrs(peer_id)
+            except Exception:
+                target_addrs = []
+        return self._predictor.predict(peer_id, addrs=target_addrs or [])
 
     async def check_peer_reachability(self, peer_id: ID) -> bool:
         """

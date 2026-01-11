@@ -59,6 +59,15 @@ from libp2p.peer.peerdata import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.pubsub.utils import maybe_consume_signed_record
+try:
+    from libp2p.tools.anomaly_detector import (
+        AnomalyReport,
+        PeerAnomalyDetector,
+    )
+except ImportError:
+    # Fallback if anomaly detector is not available
+    AnomalyReport = None  # type: ignore
+    PeerAnomalyDetector = None  # type: ignore
 from libp2p.tools.async_service import (
     Service,
 )
@@ -222,6 +231,10 @@ class Pubsub(Service, IPubsub):
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
+        if PeerAnomalyDetector is not None:
+            self._anomaly_detector = PeerAnomalyDetector()
+        else:
+            self._anomaly_detector = None
 
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
@@ -279,6 +292,7 @@ class Pubsub(Service, IPubsub):
                     continue
 
                 if rpc_incoming.publish:
+                    self._record_peer_activity(peer_id, "publish_msgs", len(rpc_incoming.publish))
                     # deal with RPC.publish
                     for msg in rpc_incoming.publish:
                         if not self._is_subscribed_to_msg(msg):
@@ -291,6 +305,7 @@ class Pubsub(Service, IPubsub):
                             self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
+                    self._record_peer_activity(peer_id, "subscription_msgs", len(rpc_incoming.subscriptions))
                     # deal with RPC.subscriptions
                     # We don't need to relay the subscription to our
                     # peers because a given node only needs its peers
@@ -314,6 +329,7 @@ class Pubsub(Service, IPubsub):
                         rpc_incoming.control,
                         peer_id,
                     )
+                    self._record_peer_activity(peer_id, "control_msgs", 1.0)
                     await self.router.handle_rpc(rpc_incoming, peer_id)
         except StreamEOF:
             logger.debug(
@@ -368,6 +384,30 @@ class Pubsub(Service, IPubsub):
         self.blacklisted_peers.add(peer_id)
         logger.debug("Added peer %s to blacklist", peer_id)
         self.manager.run_task(self._teardown_if_connected, peer_id)
+
+    def _record_peer_activity(self, peer_id: ID, metric: str, amount: float) -> None:
+        """
+        Feed activity metrics into the anomaly detector, blacklisting peers
+        that significantly exceed expected behaviour.
+        """
+        if self._anomaly_detector is None:
+            return
+        try:
+            report = self._anomaly_detector.record(peer_id, metric, float(amount))
+        except Exception as exc:
+            logger.debug("Anomaly detector error for peer %s: %s", peer_id, exc)
+            return
+
+        if report:
+            logger.warning(
+                "Peer %s flagged for %s anomaly (rate=%.2f, mean=%.2f, z=%.2f)",
+                peer_id,
+                metric,
+                report.rate,
+                report.mean,
+                report.z_score,
+            )
+            self.add_to_blacklist(peer_id)
 
     async def _teardown_if_connected(self, peer_id: ID) -> None:
         """Close their stream and remove them if connected"""

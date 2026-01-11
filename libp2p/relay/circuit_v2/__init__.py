@@ -14,6 +14,10 @@ from .nat import (
     ReachabilityChecker,
     is_private_ip,
 )
+from .predictor import (
+    RelayDecision,
+    RelayDecisionPredictor,
+)
 
 from .discovery import (
     RelayDiscovery,
@@ -46,6 +50,8 @@ __all__ = [
     "DCUtRProtocol",
     "DCUTR_PROTOCOL_ID",
     "ReachabilityChecker",
+    "RelayDecision",
+    "RelayDecisionPredictor",
     "is_private_ip",
     "RelayPerformanceTracker",
     "RelayStats",

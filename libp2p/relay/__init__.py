@@ -11,13 +11,15 @@ from libp2p.relay.circuit_v2 import (
     PROTOCOL_ID,
     CircuitV2Protocol,
     CircuitV2Transport,
+    DCUTR_PROTOCOL_ID,
+    DCUtRProtocol,
+    ReachabilityChecker,
+    RelayDecision,
+    RelayDecisionPredictor,
     RelayDiscovery,
     RelayLimits,
     RelayResourceManager,
     Reservation,
-     DCUTR_PROTOCOL_ID,
-    DCUtRProtocol,
-    ReachabilityChecker,
     is_private_ip,
 )
 
@@ -32,6 +34,7 @@ __all__ = [
     "DCUtRProtocol",
     "DCUTR_PROTOCOL_ID",
     "ReachabilityChecker",
-    "is_private_ip"
-
+    "RelayDecision",
+    "RelayDecisionPredictor",
+    "is_private_ip",
 ]
