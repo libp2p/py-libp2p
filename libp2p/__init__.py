@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import ssl
 
 from libp2p.transport.quic.utils import is_quic_multiaddr
@@ -34,6 +35,7 @@ from libp2p.crypto.keys import (
     KeyPair,
 )
 from libp2p.crypto.ed25519 import (
+    Ed25519PrivateKey,
     create_new_key_pair as create_new_ed25519_key_pair,
 )
 from libp2p.crypto.rsa import (
@@ -139,6 +141,28 @@ def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
         raise ValueError(f"Unknown muxer: {muxer_name}. Use 'YAMUX' or 'MPLEX'.")
     DEFAULT_MUXER = muxer_upper
 
+def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
+    pvt_key = key_pair.private_key
+
+    match type:
+        case "ed25519":
+            assert isinstance(pvt_key, Ed25519PrivateKey)
+            key_path = Path("ed25519.key")
+            key_path.write_bytes(pvt_key.to_bytes())
+            print(pvt_key.to_bytes())
+
+def load_keypair(type: str = "ed25519") -> KeyPair | None:
+    key_path = Path(f"{type}.key")
+    if not key_path.exists():
+        return None
+
+    data = key_path.read_bytes()
+    match type:
+        case "ed25519":
+            pvt_key = Ed25519PrivateKey.from_bytes(data)
+            print(data)
+            pub_key = pvt_key.get_public_key()
+            return KeyPair(pvt_key, pub_key)
 
 def get_default_muxer() -> str:
     """

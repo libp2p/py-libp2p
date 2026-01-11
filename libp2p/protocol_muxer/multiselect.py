@@ -104,7 +104,7 @@ class Multiselect(IMultiselectMuxer):
                         try:
                             await communicator.write(PROTOCOL_NOT_FOUND_MSG)
                             print("PROTOCOL NOT IN HANDLERS: ", command)
-                            
+
                         except MultiselectCommunicatorError as error:
                             print("ERROR IN NEGOTIATE WRITE")
                             raise MultiselectError() from error

@@ -172,6 +172,7 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,

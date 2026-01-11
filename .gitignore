@@ -138,6 +138,8 @@ fabric.properties
 
 # Django stuff:
 *.log
+*.pem
+*.key
 local_settings.py
 db.sqlite3
 
