@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import socket
 
 from multiaddr import Multiaddr
@@ -23,11 +24,53 @@ def _safe_get_network_addrs(ip_version: int) -> list[str]:
         return []
 
 
-def find_free_port() -> int:
-    """Find a free port on localhost."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+def find_free_port(ip_version: int = 4) -> int:
+    """
+    Find a free port on localhost.
+
+    :param ip_version: IP version (4 for IPv4, 6 for IPv6)
+    :return: Available port number
+    """
+    family = socket.AF_INET6 if ip_version == 6 else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
         s.bind(("", 0))  # Bind to a free port provided by the OS
         return s.getsockname()[1]
+
+
+def _validate_ipv4_address(address: str) -> str:
+    """
+    Validate that's a given address is a valid IPv4 address.
+
+    Args:
+        address: The IP address string to validate
+
+    Returns:
+        The validated IPv4 address, or "127.0.0.1" if invalid
+
+    """
+    try:
+        ipaddress.IPv4Address(address)
+        return address
+    except (ipaddress.AddressValueError, ValueError):
+        return "127.0.0.1"
+
+
+def _validate_ipv6_address(address: str) -> str:
+    """
+    Validate that's a given address is a valid IPv6 address.
+
+    Args:
+        address: The IP address string to validate
+
+    Returns:
+        The validated IPv6 address, or "::1" if invalid
+
+    """
+    try:
+        ipaddress.IPv6Address(address)
+        return address
+    except (ipaddress.AddressValueError, ValueError):
+        return "::1"
 
 
 def _safe_expand(addr: Multiaddr, port: int | None = None) -> list[Multiaddr]:
