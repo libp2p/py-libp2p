@@ -28,13 +28,13 @@ source .venv/bin/activate
 pip install -e .
 
 # Run tests
-pytest tests/security/attack_simulation/ -v
+pytest tests/core/security/attack_simulation/ -v
 ```
 
 ## Structure
 
 ```
-tests/security/attack_simulation/
+tests/core/security/attack_simulation/
 ├── eclipse_attack/        # Eclipse attack simulation
 │   └── bootnode_poisoning.py  # Bootnode poisoning attack
 ├── sybil_attack/          # Sybil attack simulation
@@ -71,7 +71,7 @@ The framework includes an **extended threat model** inspired by Polkadot/Smoldot
 Simulates complete bootnode compromise leading to network isolation.
 
 ```bash
-pytest tests/security/attack_simulation/eclipse_attack/test_bootnode_poisoning.py -v
+pytest tests/core/security/attack_simulation/eclipse_attack/test_bootnode_poisoning.py -v
 ```
 
 **Key Metrics**: Isolation rate, recovery success, fallback peer effectiveness
@@ -81,7 +81,7 @@ pytest tests/security/attack_simulation/eclipse_attack/test_bootnode_poisoning.p
 Tests resilience against stale chain replay for nodes offline beyond validator unstaking period.
 
 ```bash
-pytest tests/security/attack_simulation/fork_attack/test_long_range_fork.py -v
+pytest tests/core/security/attack_simulation/fork_attack/test_long_range_fork.py -v
 ```
 
 **Key Metrics**: Fork detection rate, false acceptance rate, resync success
@@ -91,7 +91,7 @@ pytest tests/security/attack_simulation/fork_attack/test_long_range_fork.py -v
 Evaluates light client vulnerability to authentic-but-invalid blocks.
 
 ```bash
-pytest tests/security/attack_simulation/data_attack/test_invalid_block.py -v
+pytest tests/core/security/attack_simulation/data_attack/test_invalid_block.py -v
 ```
 
 **Key Metrics**: Light client acceptance rate, post-finality detection, vulnerability gap
@@ -101,7 +101,7 @@ pytest tests/security/attack_simulation/data_attack/test_invalid_block.py -v
 Measures memory exhaustion when finality halts while block production continues.
 
 ```bash
-pytest tests/security/attack_simulation/finality_attack/test_stall_simulation.py -v
+pytest tests/core/security/attack_simulation/finality_attack/test_stall_simulation.py -v
 ```
 
 **Key Metrics**: Memory exhaustion rate, timeout detection, recovery time
@@ -111,7 +111,7 @@ pytest tests/security/attack_simulation/finality_attack/test_stall_simulation.py
 Comprehensive mitigation documentation available at:
 
 ```
-tests/security/attack_simulation/docs/mitigations.md
+tests/core/security/attack_simulation/docs/mitigations.md
 ```
 
 Covers:
@@ -135,16 +135,16 @@ Extended threat model configurations in `config/attack_configs.py`:
 
 ```bash
 # Run all attack simulations
-pytest tests/security/attack_simulation/ -v
+pytest tests/core/security/attack_simulation/ -v
 
 # Run extended threat model tests only
-pytest tests/security/attack_simulation/eclipse_attack/test_bootnode_poisoning.py \
-      tests/security/attack_simulation/fork_attack/ \
-      tests/security/attack_simulation/data_attack/ \
-      tests/security/attack_simulation/finality_attack/ -v
+pytest tests/core/security/attack_simulation/eclipse_attack/test_bootnode_poisoning.py \
+      tests/core/security/attack_simulation/fork_attack/ \
+      tests/core/security/attack_simulation/data_attack/ \
+      tests/core/security/attack_simulation/finality_attack/ -v
 
 # Generate comprehensive report
-pytest tests/security/attack_simulation/ -v --html=report.html --self-contained-html
+pytest tests/core/security/attack_simulation/ -v --html=report.html --self-contained-html
 ```
 
 ## Performance Benchmarks
