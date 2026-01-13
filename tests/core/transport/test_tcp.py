@@ -44,7 +44,7 @@ def _ipv6_available() -> bool:
         client.close()
         server.close()
         return True
-    except (OSError, socket.timeout):
+    except (OSError, TimeoutError):
         return False
 
 
