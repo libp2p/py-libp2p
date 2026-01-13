@@ -308,6 +308,9 @@ def test_new_swarm_defaults_to_ed25519():
 async def test_swarm_listen_multiple_addresses(security_protocol):
     """Test that swarm can listen on multiple addresses simultaneously."""
     from libp2p.utils.address_validation import get_available_interfaces
+    from libp2p.utils.multiaddr_utils import (
+        extract_ip_from_multiaddr,
+    )
 
     # Get multiple addresses to listen on
     listen_addrs = get_available_interfaces(0)  # Let OS choose ports
@@ -319,11 +322,11 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
         success = await swarm.listen(*listen_addrs)
         assert success, "Should successfully listen on at least one address"
 
-        # Check that we have listeners for the addresses
+        # Check that we have listeners for addresses
         actual_listeners = list(swarm.listeners.keys())
         assert len(actual_listeners) > 0, "Should have at least one listener"
 
-        # Verify that all successful listeners are in the listeners dict
+        # Verify that all successful listeners are in listeners dict
         successful_count = 0
         for addr in listen_addrs:
             addr_str = str(addr)
@@ -336,15 +339,16 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
                     f"Listener for {addr} should have addresses"
                 )
 
-                # Check that the listener address matches the expected address
+                # Check that listener address matches the expected address
                 # (port might be different if we used port 0)
-                expected_ip = addr.value_for_protocol("ip4")
+                expected_ip = extract_ip_from_multiaddr(addr)
                 expected_protocol = addr.value_for_protocol("tcp")
                 if expected_ip and expected_protocol:
                     found_matching = False
                     for listener_addr in listener_addrs:
+                        listener_ip = extract_ip_from_multiaddr(listener_addr)
                         if (
-                            listener_addr.value_for_protocol("ip4") == expected_ip
+                            listener_ip == expected_ip
                             and listener_addr.value_for_protocol("tcp") is not None
                         ):
                             found_matching = True
