@@ -26,13 +26,25 @@ from libp2p.transport.tcp.tcp import (
 
 
 def _ipv6_available() -> bool:
-    """Check if IPv6 is available on this system."""
+    """Check if IPv6 is available on this system by testing actual connectivity."""
     try:
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        sock.bind(("::1", 0))
-        sock.close()
+        # Create a listener socket
+        server = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("::1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+
+        # Try to connect to it
+        client = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        client.settimeout(1.0)  # 1 second timeout
+        client.connect(("::1", port))
+
+        # Clean up
+        client.close()
+        server.close()
         return True
-    except OSError:
+    except (OSError, socket.timeout):
         return False
 
 
