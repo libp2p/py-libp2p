@@ -13,7 +13,6 @@ Creates a WebRTC listener that:
 import json
 import logging
 import sys
-from libp2p import new_host
 
 from aiortc import (  # type: ignore[import-untyped]
     RTCConfiguration,
@@ -24,6 +23,8 @@ from aiortc import (  # type: ignore[import-untyped]
 import redis.asyncio as redis  # type: ignore[import-untyped]
 import trio
 from trio_asyncio import aio_as_trio, open_loop  # type: ignore[import-untyped]
+
+from libp2p import new_host
 
 # Configure logging
 logging.basicConfig(

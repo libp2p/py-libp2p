@@ -779,21 +779,232 @@ class WebRTCTransport(ITransport):
             )
 
         swarm = cast("Swarm", network)
+
+        # CRITICAL: Verify DTLS and SCTP states before security upgrade
+        # This prevents "ConnectionError: Cannot send encrypted data, not connected"
+        peer_connection = getattr(connection, "peer_connection", None)
+        data_channel = getattr(connection, "data_channel", None)
+
+        if peer_connection is not None:
+            from ..aiortc_patch import (
+                get_dtls_state,
+                get_sctp_state,
+                is_dtls_connected,
+                is_sctp_connected,
+            )
+
+            # CRITICAL: Check DTLS state before security upgrade
+            # DTLS might have closed between connection return and security upgrade
+            dtls_state = get_dtls_state(peer_connection)
+            dtls_connected = is_dtls_connected(peer_connection)
+
+            # If DTLS is closed, check if connection states suggest
+            #  it should be connected
+            # This handles the case where DTLS closes due to transient issues
+            if not dtls_connected and dtls_state == "closed":
+                conn_state = getattr(peer_connection, "connectionState", "unknown")
+                ice_state = getattr(peer_connection, "iceConnectionState", "unknown")
+                sctp_state_check = get_sctp_state(peer_connection)
+
+                # If connection and ICE are still connected,
+                #  DTLS might have closed transiently
+                if conn_state == "connected" and ice_state == "completed":
+                    logger.warning(
+                        f"DTLS closed but connection/ICE still connected: "
+                        f"dtls={dtls_state}, sctp={sctp_state_check}, "
+                        f"waiting briefly to see if DTLS recovers..."
+                    )
+                    # Wait up to 2 seconds for DTLS to recover
+                    max_recovery_wait = 2.0
+                    start_recovery = trio.current_time()
+                    while trio.current_time() - start_recovery < max_recovery_wait:
+                        await trio.sleep(0.2)
+                        dtls_state = get_dtls_state(peer_connection)
+                        dtls_connected = is_dtls_connected(peer_connection)
+                        if dtls_connected:
+                            logger.info("DTLS recovered after brief wait")
+                            break
+                        # Check if connection states changed
+                        new_conn_state = getattr(
+                            peer_connection, "connectionState", "unknown"
+                        )
+                        new_ice_state = getattr(
+                            peer_connection, "iceConnectionState", "unknown"
+                        )
+                        if (
+                            new_conn_state != "connected"
+                            or new_ice_state != "completed"
+                        ):
+                            logger.error(
+                                f"Conn/ICE-states changed during DTLS recovery wait: "
+                                f"conn={new_conn_state}, ice={new_ice_state}"
+                            )
+                            break
+
+            if not dtls_connected:
+                # Final check - DTLS is not connected
+                final_dtls_state = get_dtls_state(peer_connection)
+                final_sctp_state = get_sctp_state(peer_connection)
+                conn_state = getattr(peer_connection, "connectionState", "unknown")
+                ice_state = getattr(peer_connection, "iceConnectionState", "unknown")
+
+                logger.error(
+                    f"DTLS not connected before security upgrade: "
+                    f"dtls_state={final_dtls_state}, sctp_state={final_sctp_state}, "
+                    f"connectionState={conn_state}, iceConnectionState={ice_state}"
+                )
+
+                # Provide more context about why DTLS might be closed
+                if final_dtls_state == "closed":
+                    if final_sctp_state == "closed":
+                        error_msg = (
+                            f"Both DTLS and SCTP are closed before security upgrade. "
+                            f"This suggests SCTP closed first, causing DTLS to close. "
+                            f"Connection states: conn={conn_state}, ice={ice_state}"
+                        )
+                    else:
+                        error_msg = (
+                            f"DTLS is closed but SCTP is {final_sctp_state}. "
+                            f"This may indicate DTLS closed independently. "
+                            f"Connection states: conn={conn_state}, ice={ice_state}"
+                        )
+                else:
+                    error_msg = (
+                        f"DTLS transport not connected (state: {final_dtls_state}) - "
+                        f"cannot proceed with security upgrade"
+                    )
+
+                await connection.close()
+                raise WebRTCError(error_msg)
+
+            # Check SCTP state - with retry if it was recently connected
+            sctp_state = get_sctp_state(peer_connection)
+            sctp_connected = is_sctp_connected(peer_connection)
+
+            # If SCTP is not connected, wait briefly and retry (might be transient)
+            if not sctp_connected:
+                logger.warning(
+                    f"SCTP not connected on first check: state={sctp_state}, "
+                    f"waiting briefly and retrying..."
+                )
+                await trio.sleep(0.5)  # Brief wait for SCTP to stabilize
+                sctp_state = get_sctp_state(peer_connection)
+                sctp_connected = is_sctp_connected(peer_connection)
+
+            if not sctp_connected:
+                # Check if SCTP is closed (terminal state)
+                if sctp_state == "closed":
+                    final_dtls_state_for_sctp = get_dtls_state(peer_connection)
+                    logger.error(
+                        f"SCTP closed before security upgrade: "
+                        f" state={sctp_state}, "
+                        f"connectionState= "
+                        f"{getattr(peer_connection, 'connectionState', 'unknown')}, "
+                        f"iceConnectionState= "
+                        f"{getattr(peer_connection, 'iceConnectionState', 'unknown')}, "
+                        f"dtls_state={final_dtls_state_for_sctp}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"SCTP transport closed (state: {sctp_state}) - "
+                        "cannot proceed with security upgrade. "
+                        "SCTP closure may have caused DTLS to close."
+                    )
+                else:
+                    logger.error(
+                        f"SCTP not connected before security upgrade: "
+                        f" state={sctp_state}, "
+                        f"connectionState= "
+                        f"{getattr(peer_connection, 'connectionState', 'unknown')}, "
+                        f"iceConnectionState= "
+                        f"{getattr(peer_connection, 'iceConnectionState', 'unknown')}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"SCTP transport not connected (state: {sctp_state}) - "
+                        "cannot proceed with security upgrade"
+                    )
+
+            logger.debug(
+                f"DTLS and SCTP verified before security upgrade: "
+                f"DTLS={dtls_state}, SCTP={sctp_state}"
+            )
+
+        # Verify data channel is open
+        if data_channel is not None:
+            channel_state = getattr(data_channel, "readyState", "unknown")
+            if channel_state != "open":
+                logger.error(
+                    f"Data channel not open before security upgrade: "
+                    f" state={channel_state}"
+                )
+                await connection.close()
+                raise WebRTCError(
+                    f"Data channel not open (state: {channel_state}) - "
+                    "cannot proceed with security upgrade"
+                )
+            logger.debug("Data channel verified open before security upgrade")
+
         try:
+            # Monitor data channel during security upgrade
+            # Check channel state before and after upgrade
+            channel_state_before = (
+                getattr(data_channel, "readyState", "unknown")
+                if data_channel is not None
+                else "N/A"
+            )
+
             secured_conn = await swarm.upgrader.upgrade_security(
                 connection, False, remote_peer_id
             )
+
+            # Verify data channel is still open after security upgrade
+            if data_channel is not None:
+                channel_state_after = getattr(data_channel, "readyState", "unknown")
+                if channel_state_after != "open":
+                    logger.error(
+                        f"Data channel closed during security upgrade: "
+                        f"before={channel_state_before}, after={channel_state_after}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"Data channel closed during security upgrade "
+                        f"(state: {channel_state_after})"
+                    )
+                logger.debug(
+                    f"Data channel remained open during security upgrade: "
+                    f"state={channel_state_after}"
+                )
+
             muxed_conn = await swarm.upgrader.upgrade_connection(
                 secured_conn, remote_peer_id
             )
             await swarm.add_conn(muxed_conn)
             logger.info("Registered incoming WebRTC connection from %s", remote_peer_id)
+
+            # CRITICAL: Unregister handshake AFTER successful security upgrade
+            # The handshake is now complete, so DTLS/SCTP can close normally if needed
+            if peer_connection is not None:
+                from ..aiortc_patch import unregister_handshake
+
+                unregister_handshake(peer_connection)
+                logger.debug(
+                    f"Unregistered handshake for peer connection {id(peer_connection)} "
+                    f"after successful security upgrade"
+                )
         except Exception as exc:
             logger.error(
                 "Failed to upgrade incoming WebRTC connection from %s: %s",
                 remote_peer_id,
                 exc,
             )
+
+            # Unregister handshake on failure
+            if peer_connection is not None:
+                from ..aiortc_patch import unregister_handshake
+
+                unregister_handshake(peer_connection)
+
             try:
                 await connection.close()
             except Exception:

@@ -11,7 +11,7 @@ This script demonstrates:
 
 Usage:
     python examples/webrtc/test_webrtc_pvt_to_pvt_example.py
-    pytest -n 1 tests/core/transport/webrtc/test_webrtc_circuit_relay.py
+    pytest -n 1 --tb=short tests/core/transport/webrtc -v
 
 """
 

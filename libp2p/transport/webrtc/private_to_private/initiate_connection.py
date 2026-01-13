@@ -23,6 +23,13 @@ from trio_asyncio import aio_as_trio
 from libp2p.abc import IHost, INetStream, IRawConnection
 from libp2p.utils.varint import encode_uvarint, read_length_prefixed_protobuf
 
+from ..aiortc_patch import (
+    get_dtls_state,
+    get_sctp_state,
+    is_dtls_connected,
+    is_sctp_connected,
+    register_handshake,
+)
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
 from ..constants import (
@@ -64,7 +71,7 @@ async def initiate_connection(
 
     try:
         # Establish connection to target peer through circuit relay
-        # Following js-libp2p pattern: dial circuit address, then open signaling stream
+        # dial circuit address, then open signaling stream
 
         network = host.get_network()
         existing_connections = []
@@ -127,16 +134,21 @@ async def initiate_connection(
         )
 
         # Create RTCPeerConnection and "init" data channel
-        #: "init" channel is created to ensure ICE information is shared in SDP offer
+        # CRITICAL: Use negotiated=True with fixed id=0 for init channel
+        # This ensures both sides create the same channel and it opens reliably
+        # The init channel is used to ensure ICE information is shared in SDP offer
         # This channel will be closed after connection is established
-        (
-            peer_connection,
-            init_channel,
-        ) = await TrioSafeWebRTCOperations.create_peer_conn_with_data_channel(
-            rtc_config, "init"
+        # Note: We're already in an open_loop() context from transport.dial(),
+        # so we can create the peer connection directly
+        bridge = TrioSafeWebRTCOperations._get_bridge()
+        peer_connection = await bridge.create_peer_connection(rtc_config)
+        # Create negotiated init channel with fixed ID 0
+        # Both initiator and answerer must create this with same parameters
+        init_channel = peer_connection.createDataChannel("init", negotiated=True, id=0)
+        logger.info(
+            f"Created RTCPeerConnection and negotiated 'init' data channel "
+            f"(id=0, state={init_channel.readyState})"
         )
-
-        logger.info("Created RTCPeerConnection and 'init' data channel")
 
         # Setup init channel ready event
         init_channel_ready = trio.Event()
@@ -325,78 +337,166 @@ async def initiate_connection(
             f"iceConnectionState={peer_connection.iceConnectionState})"
         )
 
-        # CRITICAL: Wait for SCTP to be ready before expecting init channel to open
-        # SCTP needs time to initialize after connection is established
-        logger.debug("Checking SCTP state and waiting for it to be ready...")
-        sctp_ready = False
-        for attempt in range(100):  # Wait up to 10 seconds (100 * 0.1s)
-            try:
-                if hasattr(peer_connection, "sctp") and peer_connection.sctp:
-                    if hasattr(peer_connection.sctp, "transport"):
-                        sctp_state = getattr(
-                            peer_connection.sctp.transport, "state", "N/A"
-                        )
-                        logger.debug(f"SCTP state check {attempt}: {sctp_state}")
-                        if sctp_state == "connected":
-                            sctp_ready = True
-                            logger.info(f"✅ SCTP is ready (state: {sctp_state})")
-                            break
-                        elif sctp_state == "closed":
-                            logger.warning(
-                                "SCTP is closed - connection may have failed"
-                            )
-                            break
-            except Exception as e:
-                logger.debug(f"Error checking SCTP state: {e}")
-            await trio.sleep(0.1)
+        # CRITICAL: Give SCTP time to initialize after connection is established
+        # SCTP needs a moment to set up before data channels can open
+        logger.debug("Waiting briefly for SCTP to initialize after connection...")
+        await trio.sleep(0.5)
 
-        if not sctp_ready:
-            logger.warning(
-                "SCTP not in 'connected' state after waiting, "
-                "but proceeding - init channel might still open"
-            )
-        else:
-            # Give SCTP a brief moment to stabilize after reaching "connected" state
-            await trio.sleep(0.2)
-
-        # CRITICAL: Wait for init channel to open BEFORE creating new channel
-        # The init channel must be open for SCTP to properly negotiate new channels
-        # This ensures SCTP association is fully established
+        # CRITICAL: Wait for init channel to open before proceeding
+        # This ensures SCTP is fully established and ready for new channels
+        # The init channel must open for SCTP to be ready for new channels
         logger.debug(
-            "Waiting for 'init' channel to open before creating new channel..."
+            "Waiting for 'init' channel to open (required for SCTP establishment)..."
         )
-        if init_channel.readyState != "open":
+
+        # Check current state first -
+        # channel might have opened during conn establishment
+        current_init_state = init_channel.readyState
+        logger.debug(f"Init channel state after connection: {current_init_state}")
+
+        if current_init_state == "open":
+            logger.info("✅ Init channel already open - SCTP is ready")
+            init_channel_ready.set()
+        else:
             init_state = init_channel.readyState
             logger.debug(f"Init channel state: {init_state}, waiting for it to open...")
-            # Wait longer for init channel - it's critical for SCTP establishment
-            with trio.move_on_after(30.0) as init_open_scope:
-                await init_channel_ready.wait()
-            if init_open_scope.cancelled_caught:
-                # If init channel doesn't open, SCTP might not be ready
-                # But we'll try creating the new channel anyway - it might work
-                init_state = init_channel.readyState
-                logger.warning(
-                    f"⚠️  Init channel did not open within 30s timeout "
-                    f"(state: {init_state}). "
-                    "SCTP may not be fully established, but proceeding to "
-                    "create new channel anyway."
-                )
-            else:
-                logger.info("✅ Init channel opened successfully - SCTP is ready")
-        else:
-            logger.info("✅ Init channel already open - SCTP is ready")
 
-        # CRITICAL: Create new data channel BEFORE closing init channel
-        # The init channel must remain open for SCTP to properly negotiate
-        # the new channel
-        # Per spec step 9: Messages on RTCDataChannels use the message
-        # framing mechanism.
-        # We create a new channel with an empty label (per spec requirement).
-        # IMPORTANT: Create it while init channel is still open to ensure
-        # SCTP can negotiate it
+            # Wait for init channel to open
+            wait_start_time = trio.current_time()
+            max_wait_time = 60.0
+            check_interval = 0.2  # Check more frequently
+
+            with trio.move_on_after(max_wait_time) as init_open_scope:
+                while not init_channel_ready.is_set():
+                    current_channel_state = init_channel.readyState
+                    if current_channel_state == "open":
+                        logger.info("✅ Init channel is open (checked state directly)")
+                        init_channel_ready.set()
+                        break
+                    elif current_channel_state == "closed":
+                        logger.error("❌ Init channel closed before opening!")
+                        raise WebRTCError(
+                            "Init channel closed before opening - SCTP may have failed"
+                        )
+
+                    # Check connection state - if connection fails, abort
+                    conn_state = peer_connection.connectionState
+                    ice_state = peer_connection.iceConnectionState
+                    if conn_state == "failed" or ice_state == "failed":
+                        logger.error(
+                            f"❌ Connection failed while waiting for init channel "
+                            f"(conn_state: {conn_state}, ice_state: {ice_state})"
+                        )
+                        raise WebRTCError(
+                            f"Connection failed while waiting for init channel "
+                            f"(conn_state: {conn_state}, ice_state: {ice_state})"
+                        )
+
+                    # Check SCTP state periodically
+                    try:
+                        if hasattr(peer_connection, "sctp") and peer_connection.sctp:
+                            if hasattr(peer_connection.sctp, "transport"):
+                                sctp_state = getattr(
+                                    peer_connection.sctp.transport, "state", "N/A"
+                                )
+                                elapsed = trio.current_time() - wait_start_time
+                                if sctp_state == "connected":
+                                    if elapsed % 5.0 < check_interval:  # Log every 5s
+                                        logger.debug(
+                                            f"SCTP connected, awaiting init channel.."
+                                            f"(elapsed: {elapsed:.1f}s, "
+                                            f"channel_state: {current_channel_state})"
+                                        )
+                                elif sctp_state == "closed":
+                                    logger.error(
+                                        f"❌ SCTP closed while awaiting for "
+                                        f"init channel to open "
+                                        f"(elapsed: {elapsed:.1f}s, "
+                                        f"channel_state: {current_channel_state})"
+                                    )
+                                    raise WebRTCError(
+                                        "SCTP closed while awaiting for "
+                                        "init channel to open"
+                                    )
+                    except WebRTCError:
+                        raise
+                    except Exception as e:
+                        logger.debug(f"Error checking SCTP state: {e}")
+
+                    await trio.sleep(check_interval)
+
+                if init_channel_ready.is_set():
+                    elapsed = trio.current_time() - wait_start_time
+                    logger.info(
+                        f"✅ Init channel opened successfully - SCTP is ready "
+                        f"(waited {elapsed:.1f}s)"
+                    )
+
+            if init_open_scope.cancelled_caught:
+                init_state = init_channel.readyState
+                conn_state = peer_connection.connectionState
+                ice_state = peer_connection.iceConnectionState
+                # Check SCTP state one more time
+                sctp_state = "N/A"
+                try:
+                    if hasattr(peer_connection, "sctp") and peer_connection.sctp:
+                        if hasattr(peer_connection.sctp, "transport"):
+                            sctp_state = getattr(
+                                peer_connection.sctp.transport, "state", "N/A"
+                            )
+                except Exception:
+                    pass
+
+                elapsed = trio.current_time() - wait_start_time
+                logger.error(
+                    f"❌ Init channel did not open within {max_wait_time}s timeout "
+                    f"(elapsed: {elapsed:.1f}s, init_state: {init_state}, "
+                    f"sctp_state: {sctp_state}, conn_state: {conn_state}, "
+                    f"ice_state: {ice_state}). "
+                    "SCTP may not be fully established. This is a critical error."
+                )
+                raise WebRTCError(
+                    f"Init channel failed to open - SCTP not ready "
+                    f"(init_state: {init_state}, sctp_state: {sctp_state}, "
+                    f"conn_state: {conn_state}, ice_state: {ice_state})"
+                )
+
+        await trio.sleep(0.1)
+
+        # CRITICAL: Close init channel FIRST, then create new channel
+        # close init channel, wait for it to close,
+        # then create new channels through muxer (we create single channel here)
+        # This ensures channel IDs are properly freed before reuse
         logger.debug(
-            "Creating new data channel for communication (init channel is open)"
+            "Closing 'init' channel per spec step 8 (before creating new channel)"
         )
+        try:
+            if init_channel.readyState == "closed":
+                logger.debug("Init channel already closed")
+                init_channel_closed.set()
+            else:
+                bridge = TrioSafeWebRTCOperations._get_bridge()
+                await bridge.close_data_channel(init_channel)
+                # Wait for init channel to close (matching JavaScript behavior)
+                logger.debug("Waiting for init channel to close...")
+                with trio.move_on_after(10.0) as close_scope:
+                    await init_channel_closed.wait()
+                if close_scope.cancelled_caught:
+                    logger.warning(
+                        "Init channel close event not received, proceed anyway"
+                    )
+                else:
+                    logger.info("✅ Init channel closed successfully")
+        except Exception as e:
+            logger.warning(f"Error closing init channel: {e}")
+            # Continue anyway - channel might be closed already
+
+        await trio.sleep(0.2)
+
+        # Now create new data channel for communication
+        # Msgs on RTCDataChannels use the msg framing mechanism.
+        # We create a new channel with an empty label
+        logger.debug("Creating new data channel for communication")
         try:
             # Create incoming message buffer early to prevent message loss
             message_buffer_send, message_buffer_recv = trio.open_memory_channel(1000)
@@ -407,7 +507,6 @@ async def initiate_connection(
                 prevent loss.
                 """
                 try:
-                    # Extract data from message (same logic as in WebRTCRawConnection)
                     if hasattr(message, "data"):
                         data = message.data
                         if isinstance(data, bytes):
@@ -538,31 +637,6 @@ async def initiate_connection(
                 f"Failed to create communication data channel: {e}"
             ) from e
 
-        # Early handler and buffer are already created and attached above
-
-        # Now that new channel is created and opened, close init channel per spec step 8
-        logger.debug(
-            "Closing 'init' channel per spec step 8 (after new channel is ready)"
-        )
-        try:
-            # Check if channel is already closed
-            if init_channel.readyState == "closed":
-                logger.debug("Init channel already closed")
-                init_channel_closed.set()
-            else:
-                bridge = TrioSafeWebRTCOperations._get_bridge()
-                await bridge.close_data_channel(init_channel)
-                with trio.move_on_after(5.0) as close_scope:
-                    await init_channel_closed.wait()
-                if close_scope.cancelled_caught:
-                    logger.debug(
-                        "Init channel close event not received, proceeding anyway"
-                    )
-            logger.info("Init channel closed successfully")
-        except Exception as e:
-            logger.warning(f"Error closing init channel: {e}")
-
-        # Close signaling stream per spec step 8
         logger.debug("Closing signaling stream per spec step 8")
         try:
             await signaling_stream.close()
@@ -578,13 +652,113 @@ async def initiate_connection(
             incoming_message_buffer=message_buffer_recv,
         )
 
-        logger.info(f"Successfully established WebRTC connection to {target_peer_id}")
+        logger.info(
+            f"Successfully established WebRTC connection to {target_peer_id} "
+            f"(channel state: {new_data_channel.readyState}, "
+            f"conn_state: {peer_connection.connectionState})"
+        )
+
+        # CRITICAL: Verify connection is stable before registering handshake
+        await trio.sleep(0.1)
+
+        if peer_connection.connectionState == "closed":
+            raise WebRTCError(
+                "Peer connection closed immediately after creating WebRTCRawConnection"
+            )
+
+        if new_data_channel.readyState != "open":
+            raise WebRTCError(
+                f"Data channel closed immediately after creating WebRTCRawConnection "
+                f"(state: {new_data_channel.readyState})"
+            )
+
+        # CRITICAL: Verify DTLS and SCTP states before returning connection
+        # This prevents "ConnectionError: Cannot send encrypted data, not connected"
+        # Wait for DTLS to connect (with timeout)
+        # DTLS handshake happens after ICE completes, so we need to wait
+        dtls_connected = False
+        max_dtls_wait = 10.0
+        start_time = trio.current_time()
+        dtls_state = None
+
+        while trio.current_time() - start_time < max_dtls_wait:
+            dtls_state = get_dtls_state(peer_connection)
+            if dtls_state is not None:
+                if is_dtls_connected(peer_connection):
+                    dtls_connected = True
+                    break
+                # If DTLS state is available but not connected, log and continue waiting
+                if dtls_state in ("closed", "failed"):
+                    logger.error(
+                        f"DTLS in terminal state: {dtls_state}, "
+                        f"connectionState={peer_connection.connectionState}, "
+                        f"iceConnectionState={peer_connection.iceConnectionState}"
+                    )
+                    raise WebRTCError(
+                        f"DTLS transport in terminal state: {dtls_state} - "
+                        "cannot proceed with connection"
+                    )
+            # DTLS state might not be accessible yet, wait a bit
+            await trio.sleep(0.2)
+
+        if not dtls_connected:
+            final_dtls_state = get_dtls_state(peer_connection)
+            logger.error(
+                f"DTLS not connected after {max_dtls_wait}s: state={final_dtls_state}, "
+                f"connectionState={peer_connection.connectionState}, "
+                f"iceConnectionState={peer_connection.iceConnectionState}"
+            )
+            if final_dtls_state is None:
+                logger.warning(
+                    "DTLS state unavailable - proceeding anyway "
+                    "(may be aiortc version compatibility issue)"
+                )
+            else:
+                raise WebRTCError(
+                    f"DTLS transport not connected (state: {final_dtls_state}) - "
+                    "cannot proceed with connection"
+                )
+
+        # Verify SCTP is connected
+        sctp_state = get_sctp_state(peer_connection)
+        if sctp_state is not None and not is_sctp_connected(peer_connection):
+            logger.error(
+                f"SCTP not connected: state={sctp_state}, "
+                f"connectionState={peer_connection.connectionState}, "
+                f"iceConnectionState={peer_connection.iceConnectionState}"
+            )
+            raise WebRTCError(
+                f"SCTP transport not connected (state: {sctp_state}) - "
+                "cannot proceed with connection"
+            )
+
+        final_dtls_state = get_dtls_state(peer_connection)
+        final_sctp_state = get_sctp_state(peer_connection)
+        logger.info(
+            f"DTLS and SCTP verified before returning connection: "
+            f"DTLS={final_dtls_state}, SCTP={final_sctp_state}"
+        )
+
+        # This ensures handshake is only registered
+        #  if conn is stable and ready
+        # The handshake will be active during security upgrade
+        register_handshake(peer_connection)
+        logger.debug(
+            f"Registered handshake for peer connection {id(peer_connection)} "
+            f"(connection stable, DTLS/SCTP ready, ready for security upgrade)"
+        )
+
         return connection
 
     except Exception as e:
         logger.error(f"Failed to initiate WebRTC connection: {e}")
 
+        # CRITICAL: Unregister handshake if it was registered
+        # This prevents "SCTP closing while handshakes exist" warnings
         if peer_connection:
+            from ..aiortc_patch import unregister_handshake
+
+            unregister_handshake(peer_connection)
             try:
                 await aio_as_trio(peer_connection.close())
             except (RuntimeError, Exception) as cleanup_error:

@@ -9,7 +9,7 @@ DEFAULT_ICE_SERVERS = [
 ]
 
 # WebRTC signaling protocol
-SIGNALING_PROTOCOL = TProtocol("/libp2p/webrtc/signal/1.0.0")
+SIGNALING_PROTOCOL = TProtocol("/webrtc-signaling/0.0.1")
 
 # WebRTC muxer protocol
 MUXER_PROTOCOL = "/webrtc"

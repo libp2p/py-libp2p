@@ -26,6 +26,15 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.utils.varint import encode_uvarint, read_length_prefixed_protobuf
 
+from ..aiortc_patch import (
+    get_dtls_state,
+    get_sctp_state,
+    is_dtls_connected,
+    is_handshake_active,
+    is_sctp_connected,
+    register_handshake,
+    unregister_handshake,
+)
 from ..async_bridge import TrioSafeWebRTCOperations
 from ..connection import WebRTCRawConnection
 from ..constants import WebRTCError
@@ -60,6 +69,15 @@ async def handle_incoming_stream(
         # Create peer connection
         peer_connection = RTCPeerConnection(rtc_config)
 
+        # CRITICAL: Create negotiated init channel BEFORE setRemoteDescription
+        # This matches the initiator's init channel (negotiated=True, id=0)
+        # Both sides must create this with same parameters for it to open reliably
+        init_channel = peer_connection.createDataChannel("init", negotiated=True, id=0)
+        logger.debug(
+            f"Created negotiated init channel on answerer "
+            f"(id=0, state={init_channel.readyState})"
+        )
+
         # Create incoming message buffer early to prevent message loss
         # This must be created before any channels are received
         message_buffer_send, message_buffer_recv = trio.open_memory_channel(1000)
@@ -67,7 +85,6 @@ async def handle_incoming_stream(
         def _early_message_handler(message: Any) -> None:
             """Early handler that buffers all messages immediately to prevent loss."""
             try:
-                # Extract data from message (same logic as in WebRTCRawConnection)
                 if hasattr(message, "data"):
                     data = message.data
                     if isinstance(data, bytes):
@@ -104,16 +121,23 @@ async def handle_incoming_stream(
         def on_data_channel(channel: RTCDataChannel) -> None:
             """Handle incoming data channel from initiator"""
             nonlocal received_data_channel
+            channel_id = getattr(channel, "id", "N/A")
             logger.info(
                 f"🔔🔔🔔 datachannel event FIRED! Received channel from initiator: "
-                f"label='{channel.label}', state={channel.readyState}, "
-                f"id={getattr(channel, 'id', 'N/A')}"
+                f"label='{channel.label}', state={channel.readyState}, id={channel_id}"
             )
-            # If we already have a channel and this is the init channel, ignore it
-            if received_data_channel is not None and channel.label == "init":
-                logger.debug("Received init channel but we already have one, ignoring")
+
+            # CRITICAL: Ignore the negotiated "init" channel (id=0)
+            # Since we created it as negotiated=True, id=0, we should NOT receive it
+            # via datachannel event. If we do, it's a duplicate and should be ignored.
+            if channel.label == "init" or channel_id == 0:
+                logger.debug(
+                    "Ignoring init channel received via datachannel event "
+                    "(we created it as negotiated, id=0)"
+                )
                 return
 
+            # This is the application data channel from initiator
             received_data_channel = channel
             # Attach early handler immediately when channel is received
             channel.on("message", _early_message_handler)
@@ -122,7 +146,7 @@ async def handle_incoming_stream(
             logger.info(
                 f"✅ Set data_channel_received event "
                 f"(channel label: '{channel.label}', "
-                f"state: {channel.readyState})"
+                f"state: {channel.readyState}, id={channel_id})"
             )
 
         # Register data channel handler BEFORE setting remote description
@@ -144,22 +168,50 @@ async def handle_incoming_stream(
 
         # Read varint-prefixed offer from signaling stream
         try:
-            offer_data = await read_length_prefixed_protobuf(
-                stream, use_varint_format=True, max_length=1024 * 1024
-            )
+            # Check stream state before reading
+            if hasattr(stream, "is_closed") and stream.is_closed():
+                raise WebRTCError("Signaling stream is closed before reading offer")
+
+            # Read with timeout to prevent hanging
+            with trio.move_on_after(30.0) as timeout_scope:
+                offer_data = await read_length_prefixed_protobuf(
+                    stream, use_varint_format=True, max_length=1024 * 1024
+                )
+
+            if timeout_scope.cancelled_caught:
+                raise WebRTCError("Timeout reading offer from signaling stream (30s)")
+
             if not offer_data:
-                raise WebRTCError("No offer data received")
+                raise WebRTCError("No offer data received (empty response)")
+
             offer_message = Message()
-            offer_message.ParseFromString(offer_data)
+            try:
+                offer_message.ParseFromString(offer_data)
+            except Exception as parse_error:
+                raise WebRTCError(
+                    f"Failed to parse offer protobuf: {parse_error} "
+                    f"(received {len(offer_data)} bytes)"
+                ) from parse_error
+
             if offer_message.type != Message.SDP_OFFER:
-                raise WebRTCError(f"Expected offer, got: {offer_message.type}")
+                raise WebRTCError(
+                    f"Expected SDP_OFFER, got message type: {offer_message.type}"
+                )
+
+            if not offer_message.data:
+                raise WebRTCError("Offer message has no SDP data")
 
             offer = RTCSessionDescription(sdp=offer_message.data, type="offer")
 
             logger.info(f"Received SDP offer ({len(offer_data)} bytes)")
 
+        except WebRTCError:
+            raise
         except Exception as e:
-            raise WebRTCError(f"Failed to receive or parse offer: {e}")
+            error_type = type(e).__name__
+            raise WebRTCError(
+                f"Failed to receive or parse offer: {error_type}: {e}"
+            ) from e
 
         # Set remote description
         # Note: We're already in an open_loop()
@@ -199,13 +251,11 @@ async def handle_incoming_stream(
         logger.debug("Reading incoming ICE candidates until connected")
         await _read_candidates_until_connected(stream, peer_connection, timeout)
 
-        logger.debug("Closing signaling stream per spec")
-        try:
-            await stream.close()
-        except Exception as e:
-            logger.warning(f"Error closing signaling stream: {e}")
-
         # Verify connection is established
+        # NOTE: Do NOT close signaling stream here - keep it open until after
+        # we receive the new application data channel. The initiator needs
+        # the stream to stay open until after it closes init channel and creates
+        # the new channel. We'll close it at the end, after receiving the channel.
         # CRITICAL: We need BOTH connectionState AND ICE to be ready for SCTP to work
         connection_established = trio.Event()
         ice_connected = trio.Event()
@@ -293,10 +343,10 @@ async def handle_incoming_stream(
         )
 
         # The answerer receives the "init" data channel from the initiator.
-        # Per spec step 8: The "init" channel is closed by the initiator
+        # Per spec: The "init" channel is closed by the initiator
         # after connection.
-        # We may receive it, but we don't use it. Instead, we create a new
-        # data channel.
+        # We receive it, close it, then wait for the initiator to create
+        # a new application data channel (which we receive via datachannel event).
 
         # Wait briefly for "init" channel (if not already received) -
         # it will be closed by initiator
@@ -313,7 +363,6 @@ async def handle_incoming_stream(
                     "(may have been closed already by initiator)"
                 )
 
-        # Per spec: Close any received "init" channel
         if received_data_channel and received_data_channel.label == "init":
             logger.debug("Closing received 'init' channel per spec")
             try:
@@ -337,9 +386,13 @@ async def handle_incoming_stream(
         )
         if received_data_channel is None:
             # Wait for the initiator to create and send the new data channel
-            # Increase timeout to 20 seconds to give more time for channel
-            # creation and negotiation
-            with trio.move_on_after(20.0) as new_dc_scope:
+            # The initiator:
+            # 1) waits for init channel to open (up to 60s),
+            # 2) closes init channel,
+            # 3) waits for init channel to close,
+            # 4) creates new channel
+            # Using 90s for init channel wait + new channel creation
+            with trio.move_on_after(90.0) as new_dc_scope:
                 await data_channel_received.wait()
             if new_dc_scope.cancelled_caught:
                 conn_state = peer_connection.connectionState
@@ -428,6 +481,16 @@ async def handle_incoming_stream(
         # Early handler is already attached in on_data_channel callback above
         # Message buffer is already created above
 
+        # CRITICAL: Verify data channel is still open before creating connection
+        # The channel must be open for security upgrade to work
+        if received_data_channel.readyState != "open":
+            raise WebRTCError(
+                f"Data channel is not open when creating connection "
+                f"(state: {received_data_channel.readyState}, "
+                f"conn_state: {peer_connection.connectionState}, "
+                f"ice_state: {peer_connection.iceConnectionState})"
+            )
+
         # Create WebRTC connection wrapper with ED25519 peer ID and message buffer
         webrtc_connection = WebRTCRawConnection(
             remote_peer_id,
@@ -438,14 +501,116 @@ async def handle_incoming_stream(
         )
 
         logger.info(
-            f"WebRTC connection established with ED25519 peer: {remote_peer_id}"
+            f"WebRTC connection established with ED25519 peer: {remote_peer_id} "
+            f"(channel state: {received_data_channel.readyState}, "
+            f"conn_state: {peer_connection.connectionState})"
         )
+
+        # CRITICAL: Verify connection is still stable after creating WebRTCRawConnection
+        # Sometimes the connection can close during setup
+        await trio.sleep(0.1)
+
+        if peer_connection.connectionState == "closed":
+            raise WebRTCError(
+                "Peer connection closed immediately after creating WebRTCRawConnection"
+            )
+
+        if received_data_channel.readyState != "open":
+            raise WebRTCError(
+                f"Data channel closed immediately after creating WebRTCRawConnection "
+                f"(state: {received_data_channel.readyState})"
+            )
+
+        # CRITICAL: Verify DTLS and SCTP states before returning connection
+        # Wait for DTLS to connect (with timeout)
+        # DTLS handshake happens after ICE completes, so we need to wait
+        dtls_connected = False
+        max_dtls_wait = 10.0  # Wait up to 10 seconds for DTLS (more generous)
+        start_time = trio.current_time()
+        dtls_state = None
+
+        while trio.current_time() - start_time < max_dtls_wait:
+            dtls_state = get_dtls_state(peer_connection)
+            if dtls_state is not None:
+                if is_dtls_connected(peer_connection):
+                    dtls_connected = True
+                    break
+                # If DTLS state is available but not connected, log and continue waiting
+                if dtls_state in ("closed", "failed"):
+                    logger.error(
+                        f"DTLS in terminal state: {dtls_state}, "
+                        f"connectionState={peer_connection.connectionState}, "
+                        f"iceConnectionState={peer_connection.iceConnectionState}"
+                    )
+                    raise WebRTCError(
+                        f"DTLS transport in terminal state: {dtls_state} - "
+                        "cannot proceed with connection"
+                    )
+            await trio.sleep(0.2)
+
+        if not dtls_connected:
+            final_dtls_state = get_dtls_state(peer_connection)
+            logger.error(
+                f"DTLS not connected after {max_dtls_wait}s: state={final_dtls_state}, "
+                f"connectionState={peer_connection.connectionState}, "
+                f"iceConnectionState={peer_connection.iceConnectionState}"
+            )
+            if final_dtls_state is None:
+                logger.warning(
+                    "DTLS state unavailable - proceeding anyway "
+                    "(may be aiortc version compatibility issue)"
+                )
+            else:
+                raise WebRTCError(
+                    f"DTLS transport not connected (state: {final_dtls_state}) - "
+                    "cannot proceed with connection"
+                )
+
+        # Verify SCTP is connected
+        sctp_state = get_sctp_state(peer_connection)
+        if sctp_state is not None and not is_sctp_connected(peer_connection):
+            logger.error(
+                f"SCTP not connected: state={sctp_state}, "
+                f"connectionState={peer_connection.connectionState}, "
+                f"iceConnectionState={peer_connection.iceConnectionState}"
+            )
+            raise WebRTCError(
+                f"SCTP transport not connected (state: {sctp_state}) - "
+                "cannot proceed with connection"
+            )
+
+        final_dtls_state = get_dtls_state(peer_connection)
+        final_sctp_state = get_sctp_state(peer_connection)
+        logger.info(
+            f"DTLS and SCTP verified before returning connection: "
+            f"DTLS={final_dtls_state}, SCTP={final_sctp_state}"
+        )
+
+        # CRITICAL: Register handshake RIGHT BEFORE RETURNING
+        # This ensures it's only registered if connection is stable and ready
+        # The handshake will be active during security upgrade
+        register_handshake(peer_connection)
+        logger.debug(
+            f"Registered handshake for peer connection {id(peer_connection)} "
+            f"(connection stable, DTLS/SCTP ready, ready for security upgrade)"
+        )
+
+        # Close signaling stream(after receiving new channel)
+        logger.debug("Closing signaling stream")
+        try:
+            await stream.close()
+        except Exception as e:
+            logger.warning(f"Error closing signaling stream: {e}")
+
         return webrtc_connection
 
     except Exception as e:
         logger.error(f"Failed to handle incoming signaling stream: {e}")
 
+        # CRITICAL: Unregister handshake if it was registered
+        # This prevents "SCTP closing while handshakes exist" warnings
         if peer_connection:
+            unregister_handshake(peer_connection)
             try:
                 await aio_as_trio(peer_connection.close())
             except Exception as cleanup_error:
@@ -518,7 +683,8 @@ async def _send_ice_candidates(
             mline_index += 1
         elif line.startswith("a=candidate:"):
             cand_str = line[len("a=") :]
-            # Use the current m-line index (0-indexed in WebRTC, but we track 1-indexed)
+            # Use the current m-line index
+            # (0-indexed in WebRTC, but we track 1-indexed)
             # WebRTC uses 0-indexed, so subtract 1
             candidate_init = {
                 "candidate": cand_str,
@@ -554,7 +720,17 @@ async def _read_candidates_until_connected(
         if state == "connected":
             connection_established.set()
         elif state in ("failed", "disconnected", "closed"):
-            logger.warning(f"Connection state became {state}")
+            # CRITICAL: Don't close connection if handshake is registered
+            # The aiortc patch will handle this, but we should log it
+
+            handshake_active = is_handshake_active(peer_connection)
+            if handshake_active:
+                logger.warning(
+                    f"Connection state became {state} but handshake is active - "
+                    "aiortc patch should prevent closure"
+                )
+            else:
+                logger.warning(f"Connection state became {state}")
 
     # Register connection state handler
     peer_connection.on("connectionstatechange", on_connection_state_change)
