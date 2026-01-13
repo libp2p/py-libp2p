@@ -54,6 +54,9 @@ from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+)
 
 from ..exceptions import (
     MultiError,
@@ -347,11 +350,7 @@ class Swarm(Service, INetworkService):
         pre_scope = None
         if self._resource_manager is not None:
             try:
-                ep = None
-                try:
-                    ep = addr.value_for_protocol("ip4")
-                except Exception:
-                    ep = None
+                ep = extract_ip_from_multiaddr(addr)
                 pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
                 if pre_scope is None:
                     raise SwarmException("Connection denied by resource manager")
