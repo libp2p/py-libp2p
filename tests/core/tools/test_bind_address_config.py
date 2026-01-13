@@ -91,17 +91,17 @@ def test_multiaddr_construction():
     del os.environ["LIBP2P_BIND"]
 
 
-def test_invalid_ipv4_address_fallback():
-    """Test that invalid IPv4 addresses fallback to 127.0.0.1."""
+def test_invalid_ip_address_fallback():
+    """Test that invalid IP addresses fallback to 127.0.0.1."""
     invalid_addresses = [
         "17.0.0.",  # Incomplete IP address
         "256.1.1.1",  # Invalid octet
         "not.an.ip",  # Non-numeric
         "192.168.1",  # Missing octet
         "192.168.1.1.1",  # Too many octets
-        "::1",  # IPv6 address
         "",  # Empty string
         "localhost",  # Hostname
+        ":::1",  # Invalid IPv6
     ]
 
     for invalid_addr in invalid_addresses:
@@ -143,6 +143,32 @@ def test_valid_ipv4_addresses():
         # Verify the address is used as-is
         assert libp2p.tools.constants.DEFAULT_BIND_ADDRESS == valid_addr
         assert str(libp2p.tools.constants.LISTEN_MADDR) == f"/ip4/{valid_addr}/tcp/0"
+
+        # Clean up
+        del os.environ["LIBP2P_BIND"]
+
+
+def test_valid_ipv6_addresses():
+    """Test that various valid IPv6 addresses work correctly."""
+    valid_addresses = [
+        ("::1", "::1"),  # Localhost
+        ("::", "::"),  # All interfaces (wildcard)
+        ("2001:db8::1", "2001:db8::1"),  # Documentation address
+        ("fe80::1", "fe80::1"),  # Link-local
+    ]
+
+    for input_addr, expected_addr in valid_addresses:
+        os.environ["LIBP2P_BIND"] = input_addr
+
+        # Reload the constants module
+        import libp2p.tools.constants
+
+        importlib.reload(libp2p.tools.constants)
+
+        # Verify the address is used and creates IPv6 multiaddr
+        assert libp2p.tools.constants.DEFAULT_BIND_ADDRESS == expected_addr
+        assert libp2p.tools.constants.DEFAULT_BIND_IP_VERSION == 6
+        assert str(libp2p.tools.constants.LISTEN_MADDR) == f"/ip6/{expected_addr}/tcp/0"
 
         # Clean up
         del os.environ["LIBP2P_BIND"]

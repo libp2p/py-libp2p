@@ -23,32 +23,41 @@ from libp2p.pubsub import (
 MAX_READ_LEN = 65535
 
 
-def _validate_ipv4_address(address: str) -> str:
+def _validate_ip_address(address: str) -> tuple[str, int]:
     """
-    Validate that the given address is a valid IPv4 address.
+    Validate that the given address is a valid IPv4 or IPv6 address.
 
     Args:
         address: The IP address string to validate
 
     Returns:
-        The validated IPv4 address, or "127.0.0.1" if invalid
+        Tuple of (validated_address, ip_version) where ip_version is 4 or 6.
+        Falls back to ("127.0.0.1", 4) if invalid.
 
     """
     try:
-        # Validate that it's a valid IPv4 address
-        ipaddress.IPv4Address(address)
-        return address
+        # Try to parse as any IP address (IPv4 or IPv6)
+        ip = ipaddress.ip_address(address)
+        return str(ip), ip.version
     except (ipaddress.AddressValueError, ValueError):
-        # If invalid, return the secure default
-        return "127.0.0.1"
+        # If invalid, return the secure default (IPv4 loopback)
+        return "127.0.0.1", 4
 
 
 # Default bind address configuration with environment variable override
 # DEFAULT_BIND_ADDRESS defaults to "127.0.0.1" (secure) but can be overridden
-# via LIBP2P_BIND environment variable (e.g., "0.0.0.0" for tests)
-# Invalid IPv4 addresses will fallback to "127.0.0.1"
-DEFAULT_BIND_ADDRESS = _validate_ipv4_address(os.getenv("LIBP2P_BIND", "127.0.0.1"))
-LISTEN_MADDR = multiaddr.Multiaddr(f"/ip4/{DEFAULT_BIND_ADDRESS}/tcp/0")
+# via LIBP2P_BIND environment variable (e.g., "0.0.0.0" for IPv4 tests,
+# "::1" for IPv6 loopback, or "::" for IPv6 wildcard)
+# Invalid IP addresses will fallback to "127.0.0.1"
+_bind_addr, _bind_version = _validate_ip_address(os.getenv("LIBP2P_BIND", "127.0.0.1"))
+DEFAULT_BIND_ADDRESS = _bind_addr
+DEFAULT_BIND_IP_VERSION = _bind_version
+
+# Create LISTEN_MADDR with appropriate IP protocol based on address version
+if DEFAULT_BIND_IP_VERSION == 6:
+    LISTEN_MADDR = multiaddr.Multiaddr(f"/ip6/{DEFAULT_BIND_ADDRESS}/tcp/0")
+else:
+    LISTEN_MADDR = multiaddr.Multiaddr(f"/ip4/{DEFAULT_BIND_ADDRESS}/tcp/0")
 
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID

@@ -64,23 +64,17 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     if seen_v4 and "127.0.0.1" not in seen_v4:
         addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
 
-    # TODO: IPv6 support temporarily disabled due to libp2p handshake issues
-    # IPv6 connections fail during protocol negotiation (SecurityUpgradeFailure)
-    # Re-enable IPv6 support once the following issues are resolved:
-    # - libp2p security handshake over IPv6
-    # - multiselect protocol over IPv6
-    # - connection establishment over IPv6
-    #
-    # seen_v6: set[str] = set()
-    # for ip in _safe_get_network_addrs(6):
-    #     if ip not in seen_v6:  # Avoid duplicates
-    #         seen_v6.add(ip)
-    #         addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
-    #
-    # # Always include IPv6 loopback for testing purposes when IPv6 is available
-    # # This ensures IPv6 functionality can be tested even without global IPv6 addresses
-    # if "::1" not in seen_v6:
-    #     addrs.append(Multiaddr(f"/ip6/::1/{protocol}/{port}"))
+    # IPv6 enumeration - enabled for full dual-stack support
+    seen_v6: set[str] = set()
+    for ip in _safe_get_network_addrs(6):
+        if ip not in seen_v6:  # Avoid duplicates
+            seen_v6.add(ip)
+            addrs.append(Multiaddr(f"/ip6/{ip}/{protocol}/{port}"))
+
+    # Always include IPv6 loopback for testing purposes when IPv6 is available
+    # This ensures IPv6 functionality can be tested even without global IPv6 addresses
+    if seen_v6 and "::1" not in seen_v6:
+        addrs.append(Multiaddr(f"/ip6/::1/{protocol}/{port}"))
 
     # Fallback if nothing discovered
     if not addrs:
@@ -105,17 +99,22 @@ def expand_wildcard_address(
     return expanded
 
 
-def get_wildcard_address(port: int, protocol: str = "tcp") -> Multiaddr:
+def get_wildcard_address(
+    port: int, protocol: str = "tcp", ip_version: int = 4
+) -> Multiaddr:
     """
-    Get wildcard address (0.0.0.0) when explicitly needed.
+    Get wildcard address when explicitly needed.
 
     This function provides access to wildcard binding as a feature when
     explicitly required, preserving the ability to bind to all interfaces.
 
     :param port: Port number.
     :param protocol: Transport protocol.
-    :return: A Multiaddr with wildcard binding (0.0.0.0).
+    :param ip_version: IP version (4 for IPv4 0.0.0.0, 6 for IPv6 ::).
+    :return: A Multiaddr with wildcard binding.
     """
+    if ip_version == 6:
+        return Multiaddr(f"/ip6/::/{protocol}/{port}")
     return Multiaddr(f"/ip4/0.0.0.0/{protocol}/{port}")
 
 

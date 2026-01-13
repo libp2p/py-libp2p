@@ -39,6 +39,25 @@ async def test_tcp_listener(nursery):
 
 
 @pytest.mark.trio
+async def test_tcp_listener_ipv6(nursery):
+    """Test TCP listener with IPv6 address."""
+    transport = TCP()
+    ipv6_maddr = Multiaddr("/ip6/::1/tcp/0")
+
+    async def handler(tcp_stream):
+        pass
+
+    listener = transport.create_listener(handler)
+    assert len(listener.get_addrs()) == 0
+    await listener.listen(ipv6_maddr, nursery)
+    addrs = listener.get_addrs()
+    assert len(addrs) == 1
+    # Verify the returned address is IPv6
+    assert "/ip6/" in str(addrs[0])
+    assert "/tcp/" in str(addrs[0])
+
+
+@pytest.mark.trio
 async def test_tcp_dial(nursery):
     transport = TCP()
     raw_conn_other_side: RawConnection | None = None
@@ -64,6 +83,42 @@ async def test_tcp_dial(nursery):
     await event.wait()
 
     data = b"123"
+    assert raw_conn_other_side is not None
+    await raw_conn_other_side.write(data)
+    assert (await raw_conn.read(len(data))) == data
+
+
+@pytest.mark.trio
+async def test_tcp_dial_ipv6(nursery):
+    """Test TCP dial with IPv6 address."""
+    transport = TCP()
+    ipv6_maddr = Multiaddr("/ip6/::1/tcp/0")
+    raw_conn_other_side: RawConnection | None = None
+    event = trio.Event()
+
+    async def handler(tcp_stream):
+        nonlocal raw_conn_other_side
+        raw_conn_other_side = RawConnection(tcp_stream, False)
+        event.set()
+        await trio.sleep_forever()
+
+    # Test: `OpenConnectionError` is raised when trying to dial to a port which
+    #   no one is listening to (using IPv6).
+    with pytest.raises(OpenConnectionError):
+        await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
+
+    listener = transport.create_listener(handler)
+    await listener.listen(ipv6_maddr, nursery)
+    addrs = listener.get_addrs()
+    assert len(addrs) == 1
+    listen_addr = addrs[0]
+    # Verify the address is IPv6
+    assert "/ip6/" in str(listen_addr)
+
+    raw_conn = await transport.dial(listen_addr)
+    await event.wait()
+
+    data = b"hello ipv6"
     assert raw_conn_other_side is not None
     await raw_conn_other_side.write(data)
     assert (await raw_conn.read(len(data))) == data

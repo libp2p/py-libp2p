@@ -301,7 +301,7 @@ def create_html_page(wss_url, peer_id):
                 }};
 
                 ws.onmessage = function(event) {{
-                    log(`📥 Received: ${{event.data}}`);
+                    log(`📥 Received: ${{eveevent.data}}`);
                 }};
 
                 ws.onclose = function(event) {{
@@ -316,12 +316,12 @@ def create_html_page(wss_url, peer_id):
                 }};
 
                 ws.onerror = function(error) {{
-                    log(`❌ WebSocket error: ${{error}}`);
+                    log(`❌ WebSocket error: ${{ererror}}`);
                     updateStatus('Error', 'disconnected');
                 }};
 
             }} catch (error) {{
-                log(`❌ Failed to create WebSocket: ${{error}}`);
+                log(`❌ Failed to create WebSocket: ${{ererror}}`);
                 updateStatus('Error', 'disconnected');
             }}
         }}
@@ -342,7 +342,7 @@ def create_html_page(wss_url, peer_id):
             const message = input.value.trim();
 
             if (message) {{
-                log(`📤 Sending: ${{message}}`);
+                log(`📤 Sending: ${{mesmessage}}`);
                 ws.send(message);
                 input.value = '';
             }}

@@ -30,6 +30,10 @@ from libp2p.network.connection.raw_connection import (
 from libp2p.transport.exceptions import (
     OpenConnectionError,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+    multiaddr_from_trio_socket,
+)
 
 logger = logging.getLogger("libp2p.transport.tcp")
 
@@ -88,15 +92,15 @@ class TCPListener(IListener):
             )
             return False
 
-        ip4_host_str = maddr.value_for_protocol("ip4")
-        # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
-        # which typically means listen on all available interfaces.
+        # Extract IP address (IPv4 or IPv6) from multiaddr
+        # For trio.serve_tcp, host can be None, which means listen on all interfaces
+        host_str = extract_ip_from_multiaddr(maddr)
 
         started_listeners = await nursery.start(
             serve_tcp,
             handler,
             tcp_port,
-            ip4_host_str,
+            host_str,
         )
 
         if started_listeners is None:
@@ -138,12 +142,14 @@ class TCP(ITransport):
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
-        host_str = maddr.value_for_protocol("ip4")
+        # Extract IP address (IPv4 or IPv6) from multiaddr
+        host_str = extract_ip_from_multiaddr(maddr)
         port_str = maddr.value_for_protocol("tcp")
 
         if host_str is None:
             raise OpenConnectionError(
-                f"Failed to dial {maddr}: IP address not found in multiaddr."
+                f"Failed to dial {maddr}: "
+                "IP address (IPv4 or IPv6) not found in multiaddr."
             )
 
         if port_str is None:
@@ -194,5 +200,10 @@ class TCP(ITransport):
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
-    ip, port = socket.getsockname()
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}")
+    """
+    Create a multiaddr from a trio socket, detecting IPv4 or IPv6.
+
+    :param socket: Trio socket to get address from
+    :return: Multiaddr with appropriate IP protocol (ip4 or ip6)
+    """
+    return multiaddr_from_trio_socket(socket, "tcp")
