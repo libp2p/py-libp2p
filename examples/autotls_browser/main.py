@@ -340,7 +340,7 @@ class AutoTLSBrowserDemo:
                 }};
 
                 ws.onmessage = function(event) {{
-                    log(`📥 Received: ${{eveevent.data}}`);
+                    log(`📥 Received: ${{event.data}}`);
                 }};
 
                 ws.onclose = function(event) {{
@@ -356,12 +356,12 @@ class AutoTLSBrowserDemo:
                 }};
 
                 ws.onerror = function(error) {{
-                    log(`❌ WebSocket error: ${{ererror}}`);
+                    log(`❌ WebSocket error: ${{error}}`);
                     updateStatus('Error', 'disconnected');
                 }};
 
             }} catch (error) {{
-                log(`❌ Failed to create WebSocket: ${{ererror}}`);
+                log(`❌ Failed to create WebSocket: ${{error}}`);
                 updateStatus('Error', 'disconnected');
             }}
         }}
@@ -382,7 +382,7 @@ class AutoTLSBrowserDemo:
             const message = input.value.trim();
 
             if (message) {{
-                log(`📤 Sending echo: ${{mesmessage}}`);
+                log(`📤 Sending echo: ${{message}}`);
                 ws.send(message);
                 input.value = '';
             }}
@@ -398,7 +398,7 @@ class AutoTLSBrowserDemo:
             const message = input.value.trim();
 
             if (message) {{
-                log(`📤 Sending chat: ${{mesmessage}}`);
+                log(`📤 Sending chat: ${{message}}`);
                 ws.send(`CHAT:${{message}}`);
                 input.value = '';
             }}

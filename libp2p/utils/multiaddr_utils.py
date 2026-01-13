@@ -145,7 +145,7 @@ def multiaddr_from_socket_address(
 
 
 def multiaddr_from_trio_socket(
-    sock: "trio.socket.SocketType", transport_protocol: str = "tcp"
+    sock: trio.socket.SocketType, transport_protocol: str = "tcp"
 ) -> Multiaddr:
     """
     Create a multiaddr from a trio socket.
