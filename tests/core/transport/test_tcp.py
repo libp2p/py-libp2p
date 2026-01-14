@@ -38,7 +38,9 @@ async def test_tcp_listener(nursery):
     assert len(listener.get_addrs()) == 2
 
 
-@pytest.mark.skip(reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration")
+@pytest.mark.skip(
+    reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration"
+)
 @pytest.mark.trio
 async def test_tcp_listener_ipv6(nursery):
     """Test TCP listener with IPv6 address."""
@@ -89,7 +91,9 @@ async def test_tcp_dial(nursery):
     assert (await raw_conn.read(len(data))) == data
 
 
-@pytest.mark.skip(reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration")
+@pytest.mark.skip(
+    reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration"
+)
 @pytest.mark.trio
 async def test_tcp_dial_ipv6(nursery):
     """Test TCP dial with IPv6 address."""
