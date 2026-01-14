@@ -12,7 +12,6 @@ repos:
     hooks:
       - id: pyupgrade
         args: [--py310-plus]
-        exclude: 'examples/autotls_browser/main\.py|examples/browser_wss_demo\.py'
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.10
     hooks:

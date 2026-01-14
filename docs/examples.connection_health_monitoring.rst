@@ -38,7 +38,7 @@ health monitoring parameters and pass it to `new_host()`:
         load_balancing_strategy="health_based"  # Use health-based selection
     )
 
-    # Create host with health monitoring - API consistency fixed!
+    # Create host with health monitoring
     host = new_host(
         key_pair=create_new_key_pair(),
         connection_config=connection_config
@@ -109,6 +109,10 @@ The health monitoring features are now accessible through the high-level host AP
 Example: Health-Based Load Balancing
 ------------------------------------
 
+.. note::
+   The code snippets below are excerpts showing key concepts. For complete
+   runnable examples, see ``examples/health-monitoring/basic_example.py``.
+
 .. code-block:: python
 
     from libp2p import new_host
@@ -132,9 +136,10 @@ Example: Health-Based Load Balancing
     )
 
     # Use host as normal - health monitoring works transparently
-    async with host.run(listen_addrs=["/ip4/127.0.0.1/tcp/0"]):
-        # Health monitoring and load balancing happen automatically
-        stream = await host.new_stream(peer_id, ["/echo/1.0.0"])
+    # In your async main() function:
+    #   async with host.run(listen_addrs=["/ip4/127.0.0.1/tcp/0"]):
+    #       # Health monitoring and load balancing happen automatically
+    #       stream = await host.new_stream(peer_id, ["/echo/1.0.0"])
 
 Example: Advanced Health Monitoring
 ------------------------------------
@@ -170,16 +175,12 @@ The enhanced health monitoring provides advanced capabilities:
     )
 
     # Access advanced health metrics through host API
-    async with host.run(listen_addrs=["/ip4/127.0.0.1/tcp/0"]):
-        # Get detailed health information
-        peer_health = host.get_connection_health(peer_id)
-        global_health = host.get_network_health_summary()
-
-        # Export metrics in different formats
-        json_metrics = host.export_health_metrics("json")
-        prometheus_metrics = host.export_health_metrics("prometheus")
-
-        print(f"Network health summary: {global_health}")
+    # In your async main() function:
+    #   async with host.run(listen_addrs=["/ip4/127.0.0.1/tcp/0"]):
+    #       peer_health = host.get_connection_health(peer_id)
+    #       global_health = host.get_network_health_summary()
+    #       json_metrics = host.export_health_metrics("json")
+    #       prometheus_metrics = host.export_health_metrics("prometheus")
 
 Example: Latency-Based Load Balancing
 -------------------------------------
@@ -243,7 +244,7 @@ To run the connection health monitoring example:
 
 .. code-block:: bash
 
-    python examples/health_monitoring_example.py
+    python examples/health-monitoring/basic_example.py
 
 This will demonstrate:
 

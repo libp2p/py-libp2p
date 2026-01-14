@@ -72,7 +72,7 @@ class SwarmConn(INetConn):
             logging.warning(
                 f"Could not attach on_close hook for peer {muxed_conn.peer_id}: {e}"
             )
-            setattr(muxed_conn, "on_close", self._on_muxed_conn_closed)
+            # The muxed_conn doesn't support on_close; this is acceptable
 
     def set_resource_scope(self, scope: Any) -> None:
         """Set the resource scope for this connection."""

@@ -236,7 +236,8 @@ class ConnectionHealth:
 
         # Clean up old bandwidth data (keep last 10 windows)
         if len(self.bandwidth_usage) > 10:
-            oldest_key = min(self.bandwidth_usage.keys(), default=None)
+            # Use key=int to ensure numeric comparison, not lexicographic
+            oldest_key = min(self.bandwidth_usage.keys(), key=int, default=None)
             if oldest_key is not None:
                 del self.bandwidth_usage[oldest_key]
 

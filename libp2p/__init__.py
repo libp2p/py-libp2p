@@ -461,6 +461,7 @@ def new_host(
                 "min_ping_success_rate",
                 "max_failed_streams",
                 "unhealthy_grace_period",
+                "critical_health_threshold",
             ]
 
             for attr in connection_config_attrs:

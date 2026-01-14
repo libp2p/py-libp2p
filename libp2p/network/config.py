@@ -141,3 +141,7 @@ class ConnectionConfig:
                 raise ValueError("Min ping success rate must be between 0.0 and 1.0")
             if self.max_failed_streams < 0:
                 raise ValueError("Max failed streams must be non-negative")
+            if not 0.0 <= self.critical_health_threshold <= 1.0:
+                raise ValueError(
+                    "Critical health threshold must be between 0.0 and 1.0"
+                )
