@@ -111,7 +111,7 @@ Example: Health-Based Load Balancing
 
 .. note::
    The code snippets below are excerpts showing key concepts. For complete
-   runnable examples, see ``examples/health-monitoring/basic_example.py``.
+   runnable examples, see ``examples/health_monitoring/basic_example.py``.
 
 .. code-block:: python
 
@@ -244,7 +244,7 @@ To run the connection health monitoring example:
 
 .. code-block:: bash
 
-    python examples/health-monitoring/basic_example.py
+    python examples/health_monitoring/basic_example.py
 
 This will demonstrate:
 
