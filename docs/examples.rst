@@ -23,3 +23,4 @@ Examples
    examples.multiple_connections
    examples.websocket
    examples.connection_health_monitoring
+   examples.health_monitoring
