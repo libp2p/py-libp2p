@@ -80,11 +80,6 @@ class RoutingPoisoningScenario:
             max(0.99 - poison_ratio * 0.45, 0.05),
             0.97,
         ]
-        self.metrics.lookup_success_rate = [
-            0.99,
-            max(0.99 - poison_ratio * 0.45, 0.05),
-            0.97,
-        ]
         self.metrics.routing_incorrect_rate = poison_ratio * 0.25
         self.metrics.lookup_failure_rate = min(poison_ratio * 0.2, 0.95)
         self.metrics.avg_lookup_latency = [0.04, 0.04 + poison_ratio * 0.25, 0.06]
