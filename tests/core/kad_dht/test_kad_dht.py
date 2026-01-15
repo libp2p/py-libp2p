@@ -652,7 +652,16 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
     with pytest.raises(ValueError, match="Value must start with 'valid:'"):
         await dht_a.put_value(key, invalid_value)
 
-    # Test 3: Key with unregistered namespace should raise InvalidRecordType
+    # Test 3: Key with unregistered namespace should be accepted with
+    # strict_validation=False (default behavior for backward compatibility)
     unregistered_key = "/unknown/some-key"
-    with pytest.raises(InvalidRecordType):
-        await dht_a.put_value(unregistered_key, b"some-value")
+    # With default settings (strict_validation=False), this should succeed
+    await dht_a.put_value(unregistered_key, b"some-value")
+
+    # Test 4: Enable strict_validation and verify it rejects unregistered namespaces
+    if dht_a.validator is not None:
+        dht_a.validator.strict_validation = True
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            await dht_a.put_value(unregistered_key, b"another-value")
+        # Reset to default
+        dht_a.validator.strict_validation = False
