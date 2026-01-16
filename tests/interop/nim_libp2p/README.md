@@ -13,19 +13,22 @@ This directory contains interoperability tests for py-libp2p and nim-libp2p usin
 ## Prerequisites
 
 ### Python
-- Python 3.8+ 
+
+- Python 3.8+
 
 - Install required dependencies:
+
 ```bash
 pip install -e .
 ```
 
-
 ### Nim
+
 - Nim 2.0+ (required by nim-libp2p)
 - Nimble (Nim package manager)
 
 Install Nim (if not already installed):
+
 ```bash
 # Using choosenim (recommended)
 curl https://nim-lang.org/choosenim/init.sh -sSf | sh
@@ -39,6 +42,7 @@ brew install nim
 ```
 
 Verify Nim installation:
+
 ```bash
 nim --version
 nimble --version
@@ -62,6 +66,7 @@ chmod +x scripts/setup_nim_echo.sh
 ```
 
 This script will:
+
 - Check if Nim is available
 - Install nim-libp2p globally (if not already installed)
 - Compile `nim_echo_server.nim` with QUIC support
@@ -112,21 +117,21 @@ python test_echo_interop.py
 ### Test Cases
 
 1. **Basic Echo Test** (`test_basic_echo_interop`):
+
    - Sends multiple text messages including Unicode characters
    - Verifies each message is echoed back correctly
 
-2. **Large Message Test** (`test_large_message_echo`):
+1. **Large Message Test** (`test_large_message_echo`):
+
    - Sends larger payloads (1KB and 5KB)
    - Verifies large message handling works correctly
-
 
 ## Current Status
 
 ### Working:
+
 - QUIC transport with nim-libp2p
 - Echo protocol implementation
 - Varint length-prefixed message framing
 - Unicode message support
 - Automated server lifecycle management in tests
-
-
