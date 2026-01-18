@@ -5,7 +5,7 @@ from typing import (
 from multiaddr import (
     Multiaddr,
 )
-from p2pclient.libp2p_stubs.peer.id import ID as StubID  # type: ignore[import-error]
+from p2pclient.libp2p_stubs.peer.id import ID as StubID
 import trio
 
 from libp2p.abc import IHost
