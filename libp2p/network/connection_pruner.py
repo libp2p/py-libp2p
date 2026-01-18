@@ -2,9 +2,9 @@
 Connection pruner implementation for managing connection limits.
 
 This module provides connection pruning functionality that selects connections
-to close when connection limits are exceeded, matching JavaScript libp2p behavior.
+to close when connection limits are exceeded, matching go-libp2p behavior.
 
-Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/connection-pruner.ts
+Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
 import logging
@@ -14,16 +14,22 @@ from multiaddr import Multiaddr
 
 from libp2p.abc import INetConn, IPeerStore
 from libp2p.peer.id import ID
+from libp2p.rcmgr import Direction
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
+    from libp2p.network.tag_store import TagStore
 
 logger = logging.getLogger("libp2p.network.connection_pruner")
 
 
-def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
+def get_peer_tag_value(
+    peer_store: IPeerStore, peer_id: ID, tag_store: "TagStore | None" = None
+) -> int:
     """
     Calculate peer tag value by summing all tag values.
+
+    Uses TagStore if available, otherwise falls back to metadata-based lookup.
 
     Parameters
     ----------
@@ -31,6 +37,8 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
         Peer store to query
     peer_id : ID
         Peer ID to check
+    tag_store : TagStore | None
+        Optional TagStore for proper tag lookups
 
     Returns
     -------
@@ -38,9 +46,13 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
         Sum of all tag values (0 if no tags or peer not found)
 
     """
+    # Prefer TagStore if available
+    if tag_store is not None:
+        return tag_store.get_tag_value(peer_id)
+
+    # Fallback to metadata-based lookup for backward compatibility
     try:
         # Access peer_data_map - it exists on PeerStore implementation
-        # Use try/except instead of getattr for better error handling
         peer_data_map = peer_store.peer_data_map  # type: ignore[attr-defined]
         if peer_data_map is None:
             return 0
@@ -48,16 +60,11 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
         if peer_data is None:
             return 0
 
-        # TODO: Replace with proper tags support when peer tags are implemented
-        # For now, check metadata for tag-like values
-        # metadata is a common attribute on peer data
+        # Check metadata for tag-like values
         if hasattr(peer_data, "metadata") and peer_data.metadata:
             tag_value = 0
-            # Look for metadata keys that might represent tags
-            # For now, we'll sum any numeric metadata values as a proxy
             for key, value in peer_data.metadata.items():
                 if isinstance(key, str) and key.startswith("tag_"):
-                    # Extract tag value if stored as metadata
                     if isinstance(value, (int, float)):
                         tag_value += int(value)
                     elif isinstance(value, dict) and "value" in value:
@@ -67,11 +74,38 @@ def get_peer_tag_value(peer_store: IPeerStore, peer_id: ID) -> int:
 
         return 0
     except AttributeError:
-        # peer_data_map might not exist on all peer store implementations
         return 0
     except Exception as e:
         logger.debug(f"Error getting peer tag value for {peer_id}: {e}")
         return 0
+
+
+def get_connection_direction(connection: INetConn) -> Direction:
+    """
+    Get the direction of a connection.
+
+    Parameters
+    ----------
+    connection : INetConn
+        The connection to check
+
+    Returns
+    -------
+    Direction
+        INBOUND, OUTBOUND, or UNKNOWN
+
+    """
+    try:
+        direction = getattr(connection, "direction", None)
+        if direction is None:
+            direction = getattr(connection, "_direction", None)
+        if isinstance(direction, Direction):
+            return direction
+        elif isinstance(direction, str):
+            return Direction.from_string(direction)
+        return Direction.UNKNOWN
+    except Exception:
+        return Direction.UNKNOWN
 
 
 def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
@@ -156,6 +190,7 @@ class ConnectionPruner:
         Check if connections need to be pruned and prune if necessary.
 
         Triggered when a new connection is opened or periodically.
+        Uses high_watermark as the trigger point for pruning.
         """
         if not self._started:
             return
@@ -169,13 +204,16 @@ class ConnectionPruner:
         """Internal method to prune connections if needed."""
         connections = self.swarm.get_connections()
         num_connections = len(connections)
-        max_connections = self.swarm.connection_config.max_connections
+        high_watermark = self.swarm.connection_config.high_watermark
+        low_watermark = self.swarm.connection_config.low_watermark
 
         logger.debug(
-            f"Checking max connections limit {num_connections}/{max_connections}"
+            f"Checking connections: {num_connections} "
+            f"(low={low_watermark}, high={high_watermark})"
         )
 
-        if num_connections <= max_connections:
+        # Only prune if we're above high watermark
+        if num_connections <= high_watermark:
             return
 
         # Calculate peer values (sum of tag values)
@@ -185,8 +223,10 @@ class ConnectionPruner:
                 # muxed_conn is a required attribute of INetConn interface
                 peer_id = connection.muxed_conn.peer_id
                 if peer_id not in peer_values:
+                    # Get tag store from swarm if available
+                    tag_store = getattr(self.swarm, "tag_store", None)
                     peer_values[peer_id] = get_peer_tag_value(
-                        self.swarm.peerstore, peer_id
+                        self.swarm.peerstore, peer_id, tag_store
                     )
             except Exception as e:
                 logger.debug(f"Error getting peer_id from connection: {e}")
@@ -195,22 +235,31 @@ class ConnectionPruner:
         # Sort connections for pruning
         sorted_connections = self.sort_connections(connections, peer_values)
 
-        # Determine how many to prune
-        to_prune = max(num_connections - max_connections, 0)
+        # Prune down to low_watermark (not high_watermark)
+        # This avoids thrashing between high and low watermark
+        to_prune = max(num_connections - low_watermark, 0)
         to_close: list[INetConn] = []
 
         for connection in sorted_connections:
             try:
-                peer_id = connection.muxed_conn.peer_id
+                conn_peer_id = connection.muxed_conn.peer_id
                 logger.debug(
                     f"Too many connections open - considering connection "
-                    f"to peer {peer_id}"
+                    f"to peer {conn_peer_id}"
                 )
             except Exception:
                 logger.debug(
                     "Too many connections open - considering connection "
                     "with unknown peer"
                 )
+                conn_peer_id = None
+
+            # Check if peer is protected
+            tag_store = getattr(self.swarm, "tag_store", None)
+            if tag_store is not None and conn_peer_id is not None:
+                if tag_store.is_protected(conn_peer_id):
+                    logger.debug(f"Skipping protected peer {conn_peer_id}")
+                    continue
 
             # Check allow list (connections in allow list are never pruned)
             if is_connection_in_allow_list(connection, self.swarm):
@@ -301,16 +350,18 @@ class ConnectionPruner:
             # Get peer value
             peer_value = peer_values.get(peer_id, 0) if peer_id else 0
 
-            # Direction (inbound = 0, outbound = 1 for sorting)
-            # TODO: Get actual direction when available
-            direction = 0  # Default to inbound for sorting
+            # Get direction (inbound = 0, outbound = 1 for sorting)
+            # Inbound connections are pruned first as they were not initiated by us
+            direction = get_connection_direction(conn)
+            dir_value = direction.value if direction != Direction.UNKNOWN else 0
+            direction_sort_value = dir_value
 
             connection_data.append(
                 {
                     "conn": conn,
                     "peer_value": peer_value,
                     "stream_count": stream_count,
-                    "direction": direction,
+                    "direction": direction_sort_value,
                     "age": connection_age,
                 }
             )

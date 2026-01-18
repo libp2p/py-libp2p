@@ -1,26 +1,22 @@
 """
-Configuration constants matching JavaScript libp2p connection manager defaults.
+Configuration constants matching go-libp2p connection manager defaults.
 
-Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/constants.ts
+Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/p2p/net/connmgr
 """
 
-from collections.abc import (
-    Callable,
-)
 from dataclasses import (
     dataclass,
     field,
 )
-from typing import Any
 
-# Default connection limits (matching JS libp2p)
+# Default connection limits (matching go-libp2p)
 MAX_CONNECTIONS = 300
-MAX_PARALLEL_DIALS = 100
-MAX_DIAL_QUEUE_LENGTH = 500
+MIN_CONNECTIONS = 50  # Minimum connections to maintain (go-libp2p default)
+LOW_WATERMARK = 100  # Start auto-connecting when below this (go-libp2p default)
+HIGH_WATERMARK = 200  # Start pruning when above this (go-libp2p default)
 MAX_PEER_ADDRS_TO_DIAL = 25
-MAX_INCOMING_PENDING_CONNECTIONS = 10
 
-# Default timeout values (in seconds, matching JS libp2p defaults in ms / 1000)
+# Default timeout values (in seconds)
 DIAL_TIMEOUT = 10.0  # 10_000ms
 CONNECTION_CLOSE_TIMEOUT = 1.0  # 1_000ms
 INBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
@@ -28,17 +24,9 @@ OUTBOUND_UPGRADE_TIMEOUT = 10.0  # 10_000ms
 OUTBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 INBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 
-# Default reconnection settings
-RECONNECT_RETRIES = 5
-RECONNECT_RETRY_INTERVAL = 1.0  # 1_000ms
-RECONNECT_BACKOFF_FACTOR = 2.0
-MAX_PARALLEL_RECONNECTS = 5
-
-# Default rate limiting
-INBOUND_CONNECTION_THRESHOLD = 5  # connections per second
-
-# Default dial priority
-DEFAULT_DIAL_PRIORITY = 50
+# Auto-connection settings
+AUTO_CONNECT_INTERVAL = 30.0  # Interval in seconds between auto-connect attempts
+GRACE_PERIOD = 20.0  # Grace period in seconds before pruning new connections
 
 
 @dataclass
@@ -74,23 +62,26 @@ class RetryConfig:
 @dataclass
 class ConnectionConfig:
     """
-    Configuration for connection management matching JS libp2p behavior.
+    Configuration for connection management matching go-libp2p ConnManager.
 
-    This configuration controls connection limits, timeouts, rate limiting,
-    security, and queue management for libp2p connections.
+    This configuration controls connection limits, timeouts, and watermarks
+    for libp2p connections using go-libp2p style connection management.
 
     Attributes:
         max_connections: Maximum total connections (inbound + outbound).
                          Default: 300
+        min_connections: Minimum connections to maintain. The connection manager
+                        will try to keep at least this many connections open.
+                        Default: 50
+        low_watermark: When connection count falls below this, auto-connect to
+                      known peers. Default: 100
+        high_watermark: When connection count exceeds this, start pruning
+                       connections. Default: 200
         max_connections_per_peer: Maximum number of connections allowed to a single
                                  peer. Default: 3 connections
-        max_parallel_dials: Maximum concurrent dial attempts. Default: 100
-        max_dial_queue_length: Maximum dial queue size. Default: 500
         max_peer_addrs_to_dial: Maximum addresses to attempt per peer. Default: 25
-        max_incoming_pending_connections: Maximum pending inbound connections.
-                                         Default: 10
-        dial_timeout: Timeout in seconds for establishing dial connections
-                     (including DNS resolution). Default: 10.0
+        dial_timeout: Timeout in seconds for establishing dial connections.
+                     Default: 10.0
         connection_close_timeout: Timeout in seconds for closing connections.
                                  Default: 1.0
         inbound_upgrade_timeout: Timeout in seconds for inbound connection upgrades.
@@ -105,31 +96,23 @@ class ConnectionConfig:
                            Default: 30.0 (kept for backward compatibility)
         load_balancing_strategy: Strategy for distributing streams across connections.
                                 Options: "round_robin" (default) or "least_loaded"
-        inbound_connection_threshold: Maximum connections per second from a single
-                                      host. Default: 5
-        reconnect_retries: Number of reconnection attempts for KEEP_ALIVE peers.
-                         Default: 5
-        reconnect_retry_interval: Initial delay in seconds between reconnection
-                                  attempts. Default: 1.0
-        reconnect_backoff_factor: Exponential backoff factor for reconnections.
-                                 Default: 2.0
-        max_parallel_reconnects: Maximum concurrent reconnection attempts.
-                               Default: 5
+        auto_connect_interval: Interval between auto-connect attempts when below
+                              low_watermark. Default: 30.0 seconds
+        grace_period: Time to wait before pruning a new connection.
+                     Default: 20.0 seconds
         allow_list: List of IP addresses/networks (CIDR) that are always allowed
-                   to connect, even if max_connections is reached.
+                   to connect (ConnectionGater allow list).
         deny_list: List of IP addresses/networks (CIDR) that are never allowed
-                  to connect.
-        address_sorter: Optional function to sort addresses before dialing.
-                       If None, uses default sorting strategy.
+                  to connect (ConnectionGater deny list).
 
     """
 
-    # Global connection limits
+    # Global connection limits (go-libp2p style)
     max_connections: int = MAX_CONNECTIONS
-    max_parallel_dials: int = MAX_PARALLEL_DIALS
-    max_dial_queue_length: int = MAX_DIAL_QUEUE_LENGTH
+    min_connections: int = MIN_CONNECTIONS
+    low_watermark: int = LOW_WATERMARK
+    high_watermark: int = HIGH_WATERMARK
     max_peer_addrs_to_dial: int = MAX_PEER_ADDRS_TO_DIAL
-    max_incoming_pending_connections: int = MAX_INCOMING_PENDING_CONNECTIONS
 
     # Per-peer limits
     max_connections_per_peer: int = 3
@@ -151,21 +134,13 @@ class ConnectionConfig:
     # Load balancing
     load_balancing_strategy: str = "round_robin"  # or "least_loaded"
 
-    # Rate limiting
-    inbound_connection_threshold: int = INBOUND_CONNECTION_THRESHOLD
+    # Auto-connection configuration
+    auto_connect_interval: float = AUTO_CONNECT_INTERVAL
+    grace_period: float = GRACE_PERIOD
 
-    # Reconnection configuration
-    reconnect_retries: int = RECONNECT_RETRIES
-    reconnect_retry_interval: float = RECONNECT_RETRY_INTERVAL
-    reconnect_backoff_factor: float = RECONNECT_BACKOFF_FACTOR
-    max_parallel_reconnects: int = MAX_PARALLEL_RECONNECTS
-
-    # Security/access control
+    # Connection gating (go-libp2p ConnectionGater)
     allow_list: list[str] = field(default_factory=list)
     deny_list: list[str] = field(default_factory=list)
-
-    # Address management
-    address_sorter: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
@@ -183,8 +158,17 @@ class ConnectionConfig:
         if self.max_connections < 1:
             raise ValueError("Max connections should be at least 1")
 
-        if self.max_parallel_dials < 1:
-            raise ValueError("Max parallel dials should be at least 1")
+        if self.min_connections < 0:
+            raise ValueError("Min connections should be non-negative")
+
+        if self.low_watermark < self.min_connections:
+            raise ValueError("Low watermark should be >= min_connections")
+
+        if self.high_watermark < self.low_watermark:
+            raise ValueError("High watermark should be >= low_watermark")
+
+        if self.max_connections < self.high_watermark:
+            raise ValueError("Max connections should be >= high_watermark")
 
         if self.dial_timeout < 0:
             raise ValueError("Dial timeout should be positive")
@@ -198,5 +182,8 @@ class ConnectionConfig:
         if self.connection_timeout < 0:
             raise ValueError("Connection timeout should be positive")
 
-        if self.reconnect_backoff_factor <= 0:
-            raise ValueError("Reconnect backoff factor should be positive")
+        if self.auto_connect_interval <= 0:
+            raise ValueError("Auto connect interval should be positive")
+
+        if self.grace_period < 0:
+            raise ValueError("Grace period should be non-negative")

@@ -576,10 +576,6 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
         if isinstance(swarm_a, Swarm):
             # Add buffer to connection limit
             swarm_a.connection_config.max_connections = num_dummy_peers + 10
-            swarm_a.connection_config.max_parallel_dials = min(
-                200, num_dummy_peers + 10
-            )
-            swarm_a.connection_config.max_dial_queue_length = num_dummy_peers + 10
 
         # Create dummy peers with higher connection limits for incoming connections
         # Breaking with more than 500 peers
@@ -591,7 +587,6 @@ async def test_all_peers_receive_identify_push_with_semaphore_under_high_peer_lo
             dummy_swarm = dummy_host.get_network()
             if isinstance(dummy_swarm, Swarm):
                 dummy_swarm.connection_config.max_connections = num_dummy_peers + 10
-                dummy_swarm.connection_config.max_incoming_pending_connections = 100
             dummy_host.set_stream_handler(
                 ID_PUSH, identify_push_handler_for(dummy_host)
             )

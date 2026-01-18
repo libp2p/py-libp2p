@@ -387,6 +387,7 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
+    connection_config: ConnectionConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
@@ -406,6 +407,7 @@ def new_host(
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optinal choice to use QUIC for transport
     :param quic_transport_opt: optional configuration for quic transport
+    :param connection_config: optional connection configuration for connection manager
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
     :param resource_manager: optional resource manager for connection/stream limits
@@ -428,6 +430,14 @@ def new_host(
             # Fallback to leaving it None if creation fails for any reason.
             resource_manager = None
 
+    # Determine the connection config to use
+    # QUIC transport config takes precedence if QUIC is enabled
+    effective_config: ConnectionConfig | QUICTransportConfig | None
+    if enable_quic and quic_transport_opt is not None:
+        effective_config = quic_transport_opt
+    else:
+        effective_config = connection_config
+
     swarm = new_swarm(
         enable_quic=enable_quic,
         key_pair=key_pair,
@@ -436,7 +446,7 @@ def new_host(
         peerstore_opt=peerstore_opt,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,

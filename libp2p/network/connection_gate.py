@@ -2,9 +2,9 @@
 Connection gating implementation for IP allow/deny lists.
 
 This module provides connection filtering based on IP allow and deny lists,
-matching JavaScript libp2p behavior.
+implementing go-libp2p style ConnectionGater functionality.
 
-Reference: https://github.com/libp2p/js-libp2p/blob/main/packages/libp2p/src/connection-manager/index.ts
+Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/core/connmgr#ConnectionGater
 """
 
 import ipaddress
@@ -12,9 +12,41 @@ import logging
 
 from multiaddr import Multiaddr
 
-from libp2p.network.address_manager import extract_ip_from_multiaddr
-
 logger = logging.getLogger("libp2p.network.connection_gate")
+
+
+def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
+    """
+    Extract the IP address from a multiaddr.
+
+    Uses multiaddr's value_for_protocol method to extract IP addresses.
+
+    Parameters
+    ----------
+    addr : Multiaddr
+        Multiaddr to extract from
+
+    Returns
+    -------
+    str | None
+        IP address or None if not found
+
+    """
+    from multiaddr.exceptions import ProtocolLookupError
+
+    # Try IPv4 first
+    try:
+        return addr.value_for_protocol("ip4")
+    except ProtocolLookupError:
+        pass
+
+    # Try IPv6
+    try:
+        return addr.value_for_protocol("ip6")
+    except ProtocolLookupError:
+        pass
+
+    return None
 
 
 class ConnectionGate:

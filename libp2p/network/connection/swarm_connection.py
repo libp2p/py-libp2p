@@ -38,12 +38,13 @@ class SwarmConn(INetConn):
     streams: set[NetStream]
     event_closed: trio.Event
     _resource_scope: Any | None
+    _direction: Direction
 
     def __init__(
         self,
         muxed_conn: IMuxedConn,
         swarm: "Swarm",
-        direction: str = "unknown",
+        direction: Direction | str = Direction.UNKNOWN,
     ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
@@ -54,7 +55,11 @@ class SwarmConn(INetConn):
         self._created_at = time.time()
         self._resource_scope = None
         # Track connection direction (inbound/outbound)
-        self.direction = direction
+        # Support both Direction enum and string for backward compatibility
+        if isinstance(direction, Direction):
+            self._direction = direction
+        else:
+            self._direction = Direction.from_string(str(direction))
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -85,6 +90,35 @@ class SwarmConn(INetConn):
     def set_resource_scope(self, scope: Any) -> None:
         """Set the resource scope for this connection."""
         self._resource_scope = scope
+
+    @property
+    def direction(self) -> Direction:
+        """
+        Get the connection direction.
+
+        Returns
+        -------
+        Direction
+            INBOUND if we accepted the connection, OUTBOUND if we initiated it.
+
+        """
+        return self._direction
+
+    @direction.setter
+    def direction(self, value: Direction | str) -> None:
+        """
+        Set the connection direction.
+
+        Parameters
+        ----------
+        value : Direction | str
+            The direction value (enum or string).
+
+        """
+        if isinstance(value, Direction):
+            self._direction = value
+        else:
+            self._direction = Direction.from_string(str(value))
 
     @property
     def is_closed(self) -> bool:

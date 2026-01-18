@@ -32,17 +32,11 @@ from libp2p.custom_types import (
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
-from libp2p.network.address_manager import AddressManager
+from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
-from libp2p.network.connection_gate import ConnectionGate
+from libp2p.network.connection_gate import ConnectionGate, extract_ip_from_multiaddr
 from libp2p.network.connection_pruner import ConnectionPruner
-from libp2p.network.dial_queue import DialQueue
-from libp2p.network.metrics import (
-    ConnectionMetrics,
-    calculate_connection_metrics,
-)
-from libp2p.network.rate_limiter import ConnectionRateLimiter
-from libp2p.network.reconnect_queue import ReconnectQueue
+from libp2p.network.tag_store import TagInfo, TagStore
 from libp2p.peer.id import (
     ID,
 )
@@ -108,14 +102,12 @@ class Swarm(Service, INetworkService):
     _round_robin_index: dict[ID, int]
     _resource_manager: ResourceManager | None
 
-    # Connection management components
+    # Connection management components (go-libp2p style)
     connection_gate: ConnectionGate
-    rate_limiter: ConnectionRateLimiter
-    address_manager: AddressManager
     dns_resolver: DNSResolver
-    dial_queue: DialQueue
-    reconnect_queue: ReconnectQueue
     connection_pruner: ConnectionPruner
+    auto_connector: AutoConnector
+    tag_store: TagStore
 
     def __init__(
         self,
@@ -158,57 +150,38 @@ class Swarm(Service, INetworkService):
 
     def _init_connection_management(self) -> None:
         """
-        Initialize connection management components.
+        Initialize connection management components (go-libp2p style).
 
-        This sets up all the connection management infrastructure including
-        dial queue, reconnection queue, rate limiting, connection gating,
-        address management, DNS resolution, and connection pruning.
+        This sets up the connection management infrastructure including:
+        - ConnectionGate: IP allow/deny lists (InterceptAccept, InterceptAddrDial)
+        - ConnectionPruner: Trims connections when high watermark exceeded
+        - AutoConnector: Maintains minimum connections (low watermark)
+        - TagStore: Peer tagging and protection
+        - DNS resolver: For multiaddr resolution
         """
-        # Initialize connection gate (IP allow/deny lists)
+        # Initialize connection gate (go-libp2p ConnectionGater)
         self.connection_gate = ConnectionGate(
             allow_list=self.connection_config.allow_list,
             deny_list=self.connection_config.deny_list,
         )
 
-        # Initialize rate limiter for incoming connections
-        self.rate_limiter = ConnectionRateLimiter(
-            points=self.connection_config.inbound_connection_threshold,
-            duration=1.0,  # 1 second window
-        )
-
-        # Initialize address manager
-        self.address_manager = AddressManager(
-            connection_gate=self.connection_gate,
-            address_sorter=self.connection_config.address_sorter,
-        )
-
         # Initialize DNS resolver
         self.dns_resolver = DNSResolver()
 
-        # Initialize dial queue (depends on address_manager and dns_resolver)
-        self.dial_queue = DialQueue(
-            swarm=self,
-            max_parallel_dials=self.connection_config.max_parallel_dials,
-            max_dial_queue_length=self.connection_config.max_dial_queue_length,
-            dial_timeout=self.connection_config.dial_timeout,
-            address_manager=self.address_manager,
-            dns_resolver=self.dns_resolver,
-        )
-
-        # Initialize reconnection queue
-        self.reconnect_queue = ReconnectQueue(
-            swarm=self,
-            retries=self.connection_config.reconnect_retries,
-            retry_interval=self.connection_config.reconnect_retry_interval,
-            backoff_factor=self.connection_config.reconnect_backoff_factor,
-            max_parallel_reconnects=self.connection_config.max_parallel_reconnects,
-        )
-
-        # Initialize connection pruner
+        # Initialize connection pruner (go-libp2p TrimOpenConns)
         self.connection_pruner = ConnectionPruner(
             swarm=self,
             allow_list=self.connection_config.allow_list,
         )
+
+        # Initialize auto-connector for maintaining minimum connections
+        self.auto_connector = AutoConnector(
+            swarm=self,
+            auto_connect_interval=self.connection_config.auto_connect_interval,
+        )
+
+        # Initialize tag store for peer tagging/protection (go-libp2p TagPeer, Protect)
+        self.tag_store = TagStore()
 
     def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
         """Attach a ResourceManager to wire connection/stream scopes."""
@@ -230,11 +203,12 @@ class Swarm(Service, INetworkService):
                 # for connection management
                 self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
 
-            # Start connection management components
+            # Start connection management components (go-libp2p style)
             try:
-                await self.dial_queue.start()
-                await self.reconnect_queue.start()
                 await self.connection_pruner.start()
+                await self.auto_connector.start()
+                # Start auto-connector background task
+                await self.auto_connector.run_background_task(nursery)
             except Exception as e:
                 logger.error(f"Error starting connection management components: {e}")
                 raise
@@ -244,9 +218,8 @@ class Swarm(Service, INetworkService):
             finally:
                 # Stop connection management components
                 try:
-                    await self.dial_queue.stop()
-                    await self.reconnect_queue.stop()
                     await self.connection_pruner.stop()
+                    await self.auto_connector.stop()
                 except Exception as e:
                     logger.warning(
                         f"Error stopping connection management components: {e}"
@@ -330,32 +303,165 @@ class Swarm(Service, INetworkService):
         conns = self.get_connections(peer_id)
         return conns[0] if conns else None
 
-    def get_metrics(self) -> ConnectionMetrics:
+    def get_metrics(self) -> dict[str, int]:
         """
-        Get connection metrics including 90th percentile stream statistics.
+        Get connection metrics (go-libp2p style).
+
+        Returns a simple dict with connection counts.
+        For detailed metrics, use ResourceManager.
 
         Returns
         -------
-        ConnectionMetrics
-            Connection metrics object with counts, pending connections,
-            protocol streams, and 90th percentile statistics.
+        dict[str, int]
+            Connection metrics including total, inbound, and outbound counts.
 
         """
-        # Calculate metrics on-demand (matching JS libp2p behavior)
-        # Note: Pending connections tracking would need to be implemented
-        # in dial_queue and reconnect_queue for accurate counts
-        return calculate_connection_metrics(
-            self.connections,
-            inbound_pending=0,  # TODO: Track pending inbound connections
-            outbound_pending=0,  # TODO: Track pending outbound connections
-        )
+        total = 0
+        inbound = 0
+        outbound = 0
+
+        for conns in self.connections.values():
+            for conn in conns:
+                total += 1
+                # Check direction if available
+                direction = getattr(conn, "direction", None)
+                if direction is not None:
+                    from libp2p.rcmgr import Direction
+
+                    is_inbound = (
+                        direction == Direction.INBOUND
+                        or direction == Direction.INBOUND.value
+                    )
+                    is_outbound = (
+                        direction == Direction.OUTBOUND
+                        or direction == Direction.OUTBOUND.value
+                    )
+                    if is_inbound:
+                        inbound += 1
+                    elif is_outbound:
+                        outbound += 1
+
+        return {
+            "total": total,
+            "inbound": inbound,
+            "outbound": outbound,
+            "peers": len(self.connections),
+        }
+
+    # ============ Tagging Methods (like go-libp2p ConnManager) ============
+
+    def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
+        """
+        Tag a peer with a string, associating a weight with the tag.
+
+        Tags are used for connection management decisions. Peers with higher
+        total tag values are less likely to have their connections pruned.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to tag.
+        tag : str
+            The tag name.
+        value : int
+            The weight/value associated with the tag.
+
+        """
+        self.tag_store.tag_peer(peer_id, tag, value)
+
+    def untag_peer(self, peer_id: ID, tag: str) -> None:
+        """
+        Remove the tagged value from the peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to untag.
+        tag : str
+            The tag name to remove.
+
+        """
+        self.tag_store.untag_peer(peer_id, tag)
+
+    def get_tag_info(self, peer_id: ID) -> TagInfo | None:
+        """
+        Get the metadata associated with a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to get info for.
+
+        Returns
+        -------
+        TagInfo | None
+            The tag info for the peer, or None if no tags recorded.
+
+        """
+        return self.tag_store.get_tag_info(peer_id)
+
+    def protect(self, peer_id: ID, tag: str) -> None:
+        """
+        Protect a peer from having its connection(s) pruned.
+
+        Protected peers will never be disconnected during connection pruning,
+        regardless of their tag values.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to protect.
+        tag : str
+            Protection tag (different components can use different tags).
+
+        """
+        self.tag_store.protect(peer_id, tag)
+
+    def unprotect(self, peer_id: ID, tag: str) -> bool:
+        """
+        Remove a protection that may have been placed on a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to unprotect.
+        tag : str
+            The protection tag to remove.
+
+        Returns
+        -------
+        bool
+            True if the peer is still protected by other tags, False otherwise.
+
+        """
+        return self.tag_store.unprotect(peer_id, tag)
+
+    def is_protected(self, peer_id: ID, tag: str = "") -> bool:
+        """
+        Check if a peer is protected.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to check.
+        tag : str
+            If provided, check if protected by this specific tag.
+            If empty string, check if protected by any tag.
+
+        Returns
+        -------
+        bool
+            True if the peer is protected.
+
+        """
+        return self.tag_store.is_protected(peer_id, tag)
 
     async def dial_peer(self, peer_id: ID) -> list[INetConn]:
         """
-        Try to create connections to peer_id using dial queue.
+        Try to create connections to peer_id (go-libp2p style).
 
-        This method uses the dial queue for priority-based scheduling,
-        address sorting, DNS resolution, and connection gating.
+        This method directly dials the peer using known addresses from peerstore.
+        Connection gating is applied to filter addresses.
 
         :param peer_id: peer if we want to dial
         :raises SwarmException: raised when an error occurs
@@ -372,57 +478,6 @@ class Swarm(Service, INetworkService):
 
         logger.debug("attempting to dial peer %s", peer_id)
 
-        # Use dial queue for connection management if it's started
-        # The dial queue handles address resolution, sorting, DNS, and concurrency
-        if self.dial_queue._started:
-            try:
-                connection = await self.dial_queue.dial(peer_id)
-                # dial_queue.dial returns a single connection,
-                # but we need to return a list
-                if connection:
-                    return [connection]
-                else:
-                    raise SwarmException(f"Failed to establish connection to {peer_id}")
-            except RuntimeError as e:
-                # RuntimeError from dial queue (queue full, not started, etc.)
-                # Only fall back if it's a recoverable error
-                error_msg = str(e)
-                if "not started" in error_msg.lower():
-                    # Queue not started - use direct dialing
-                    logger.debug(f"Dial queue not started, using direct dial: {e}")
-                    return await self._dial_peer_direct(peer_id)
-                elif "queue is full" in error_msg.lower():
-                    # Queue full - fall back to direct dialing
-                    logger.debug(f"Dial queue full, using direct dial: {e}")
-                    return await self._dial_peer_direct(peer_id)
-                else:
-                    # Other RuntimeErrors should be re-raised or fall back
-                    logger.debug(
-                        f"Dial queue RuntimeError: {e}, falling back to direct dial"
-                    )
-                    return await self._dial_peer_direct(peer_id)
-            except (SwarmException, Exception) as e:
-                # For other exceptions (connection failures, etc.),
-                # check if it's a connection error
-                # If dial queue failed completely, fall back to direct dialing
-                logger.debug(
-                    f"Dial queue failed with {type(e).__name__}: {e}, "
-                    f"falling back to direct dial"
-                )
-                return await self._dial_peer_direct(peer_id)
-        else:
-            # Dial queue not started - use direct dialing
-            logger.debug("Dial queue not started, using direct dialing")
-            return await self._dial_peer_direct(peer_id)
-
-    async def _dial_peer_direct(self, peer_id: ID) -> list[INetConn]:
-        """
-        Direct dial without queue (fallback method).
-
-        :param peer_id: peer if we want to dial
-        :raises SwarmException: raised when an error occurs
-        :return: list of muxed connections
-        """
         try:
             # Get peer info from peer store
             addrs = self.peerstore.addrs(peer_id)
@@ -432,11 +487,19 @@ class Swarm(Service, INetworkService):
         if not addrs:
             raise SwarmException(f"No known addresses to peer {peer_id}")
 
+        # Filter addresses through connection gate (InterceptAddrDial)
+        gate = self.connection_gate
+        allowed_addrs = [addr for addr in addrs if gate.is_allowed(addr)]
+        if not allowed_addrs:
+            raise SwarmException(
+                f"All addresses for peer {peer_id} blocked by connection gate"
+            )
+
         connections = []
         exceptions: list[SwarmException] = []
 
-        # Enhanced: Try all known addresses with retry logic
-        for multiaddr in addrs:
+        # Try all allowed addresses with retry logic
+        for multiaddr in allowed_addrs:
             try:
                 connection = await self._dial_with_retry(multiaddr, peer_id)
                 connections.append(connection)
@@ -1144,14 +1207,7 @@ class Swarm(Service, INetworkService):
         if self.psk is not None:
             raw_conn = new_protected_conn(raw_conn, self.psk)
 
-        # Check pending incoming connections limit
-        # Note: We can't easily track pending connections here,
-        # but this is a best-effort check
-        # The actual enforcement happens at the listener level
-
-        # Extract IP address for rate limiting and connection gating
-        from libp2p.network.address_manager import extract_ip_from_multiaddr
-
+        # Extract IP address for connection gating (InterceptAccept)
         remote_ip: str | None = None
         if hasattr(raw_conn, "get_remote_address"):
             remote_addr = raw_conn.get_remote_address()
@@ -1162,7 +1218,7 @@ class Swarm(Service, INetworkService):
         if remote_ip is None:
             remote_ip = extract_ip_from_multiaddr(maddr)
 
-        # Check connection gate (IP allow/deny lists)
+        # Check connection gate (go-libp2p InterceptAccept)
         if remote_ip is not None:
             # Create a temporary multiaddr for connection gate check
             from multiaddr import Multiaddr
@@ -1185,17 +1241,8 @@ class Swarm(Service, INetworkService):
                 await raw_conn.close()
                 raise SwarmException("Connection denied by connection gate")
 
-            # Check rate limiting (only if not in allow list)
-            if not self.connection_gate.is_in_allow_list(check_addr):
-                if not self.rate_limiter.check_and_consume(remote_ip):
-                    logger.debug(
-                        f"Rejecting incoming connection from {remote_ip}: "
-                        f"rate limit exceeded"
-                    )
-                    await raw_conn.close()
-                    raise SwarmException("Rate limit exceeded for incoming connection")
-
         # Optional pre-upgrade admission using ResourceManager
+        # This handles rate limiting and resource constraints
         pre_scope = None
         if self._resource_manager is not None:
             try:
@@ -1571,13 +1618,6 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.connected, self, conn)
 
     async def notify_disconnected(self, conn: INetConn) -> None:
-        # Trigger reconnection if peer has KEEP_ALIVE tag
-        peer_id: ID | None = None
-        if hasattr(conn, "muxed_conn") and hasattr(conn.muxed_conn, "peer_id"):
-            peer_id = conn.muxed_conn.peer_id
-            # Trigger reconnection queue (it will check for KEEP_ALIVE tag internally)
-            await self.reconnect_queue.maybe_reconnect(peer_id)
-
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
                 nursery.start_soon(notifee.disconnected, self, conn)
