@@ -5,11 +5,14 @@ This module implements connection exhaustion attacks where an attacker
 attempts to exhaust the connection limits of target peers.
 """
 
+import logging
 from typing import Any
 
 import trio
 
 from ..utils.attack_metrics import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionExhaustionAttacker:
@@ -129,10 +132,10 @@ class ConnectionExhaustionScenario:
         self, attack_duration: float = 60.0
     ) -> dict[str, Any]:
         """Execute the complete connection exhaustion attack scenario"""
-        print("🔗 Executing Connection Exhaustion Attack Scenario")
-        print(f"📊 Honest peers: {len(self.honest_peers)}")
-        print(f"💔 Exhaustion attackers: {len(self.exhaustion_attackers)}")
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        logger.info("Executing Connection Exhaustion Attack Scenario")
+        logger.info("Honest peers: %d", len(self.honest_peers))
+        logger.info("Exhaustion attackers: %d", len(self.exhaustion_attackers))
+        logger.info("Attack duration: %f seconds", attack_duration)
 
         # Phase 1: Initial exhaustion
         async with trio.open_nursery() as nursery:
@@ -162,8 +165,8 @@ class ConnectionExhaustionScenario:
                 total_connections += len(connections)
             exhausted_targets.update(attacker.exhausted_targets)
 
-        print(f"🔗 Total connections established: {total_connections}")
-        print(f"💔 Targets exhausted: {len(exhausted_targets)}")
+        logger.info("Total connections established: %d", total_connections)
+        logger.info("Targets exhausted: %d", len(exhausted_targets))
 
         # Calculate exhaustion-specific metrics
         self._calculate_exhaustion_metrics(

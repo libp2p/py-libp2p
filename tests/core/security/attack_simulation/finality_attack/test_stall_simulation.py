@@ -4,8 +4,6 @@ Tests for Finality Stall Attack Simulation
 Tests the finality stall attack scenario with memory exhaustion tracking.
 """
 
-import trio
-
 from .stall_simulation import (
     FinalityStallAttacker,
     FinalityStallScenario,
@@ -438,10 +436,3 @@ def test_scenario_initialization():
     assert len(scenario.light_clients) == 2
     assert len(scenario.full_nodes) == 1
     assert len(scenario.attackers) == 1
-
-
-if __name__ == "__main__":
-    # Run a sample simulation
-    print("🧪 Running Finality Stall Attack Simulation Tests")
-    trio.run(test_run_finality_stall_simulation)
-    print("✅ Tests completed successfully!")

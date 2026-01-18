@@ -5,11 +5,14 @@ This module implements Sybil attacks where an attacker creates multiple fake ide
 to gain disproportionate influence in the network.
 """
 
+import logging
 from typing import Any
 
 import trio
 
 from ..utils.attack_metrics import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class SybilMaliciousPeer:
@@ -66,9 +69,9 @@ class SybilAttackScenario:
 
     async def execute_sybil_attack(self) -> dict[str, Any]:
         """Execute the complete Sybil attack scenario"""
-        print("🔄 Executing Sybil Attack Scenario")
-        print(f"📊 Honest peers: {len(self.honest_peers)}")
-        print(f"👥 Sybil attackers: {len(self.sybil_attackers)}")
+        logger.info("Executing Sybil Attack Scenario")
+        logger.info("Honest peers: %d", len(self.honest_peers))
+        logger.info("Sybil attackers: %d", len(self.sybil_attackers))
 
         # Phase 1: Create fake identities
         total_fake_ids = 0
@@ -76,7 +79,7 @@ class SybilAttackScenario:
             fake_ids = await attacker.create_fake_identities()
             total_fake_ids += len(fake_ids)
 
-        print(f"🆔 Created {total_fake_ids} fake identities")
+        logger.info("Created %d fake identities", total_fake_ids)
 
         # Phase 2: Establish connections
         for attacker in self.sybil_attackers:
@@ -88,7 +91,7 @@ class SybilAttackScenario:
             actions = await attacker.amplify_influence(self.honest_peers)
             total_influence_actions += len(actions)
 
-        print(f"🎯 Executed {total_influence_actions} influence actions")
+        logger.info("Executed %d influence actions", total_influence_actions)
 
         # Calculate Sybil-specific metrics
         self._calculate_sybil_metrics()

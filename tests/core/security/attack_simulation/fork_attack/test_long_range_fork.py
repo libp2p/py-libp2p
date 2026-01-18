@@ -308,10 +308,3 @@ def test_scenario_initialization():
     assert len(scenario.online_peers) == 2
     assert len(scenario.offline_peers) == 1
     assert len(scenario.fork_attackers) == 1
-
-
-if __name__ == "__main__":
-    # Run a sample simulation
-    print("🧪 Running Long-Range Fork Attack Simulation Tests")
-    trio.run(test_run_long_range_fork_simulation)
-    print("✅ Tests completed successfully!")

@@ -9,10 +9,13 @@ Key Insight: After sufficient time offline, nodes lose context about canonical c
 state and can be fed a plausible but stale alternative history.
 """
 
+import logging
 import random
 from typing import Any
 
 import trio
+
+logger = logging.getLogger(__name__)
 
 
 class ChainState:
@@ -150,11 +153,11 @@ class LongRangeForkScenario:
         self, attack_duration: float = 30.0
     ) -> dict[str, Any]:
         """Execute complete long-range fork replay attack scenario"""
-        print("🔱 Executing Long-Range Fork Replay Attack")
-        print(f"🟢 Online peers: {len(self.online_peers)}")
-        print(f"🔴 Offline peers: {len(self.offline_peers)}")
-        print(f"👹 Fork attackers: {len(self.fork_attackers)}")
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        logger.info("Executing Long-Range Fork Replay Attack")
+        logger.info("Online peers: %d", len(self.online_peers))
+        logger.info("Offline peers: %d", len(self.offline_peers))
+        logger.info("Fork attackers: %d", len(self.fork_attackers))
+        logger.info("Attack duration: %f seconds", attack_duration)
 
         # Phase 1: Execute fork replay attacks
         attack_start = trio.current_time()

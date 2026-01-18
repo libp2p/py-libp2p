@@ -5,7 +5,6 @@ Tests the invalid block propagation attack scenario for light clients.
 """
 
 import pytest
-import trio
 
 from .invalid_block import (
     Block,
@@ -426,10 +425,3 @@ def test_scenario_initialization():
     assert len(scenario.full_nodes) == 2
     assert len(scenario.light_clients) == 3
     assert len(scenario.malicious_validators) == 1
-
-
-if __name__ == "__main__":
-    # Run a sample simulation
-    print("🧪 Running Invalid Block Propagation Attack Simulation Tests")
-    trio.run(test_run_invalid_block_simulation)
-    print("✅ Tests completed successfully!")

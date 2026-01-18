@@ -5,6 +5,7 @@ This module collects actual performance metrics from real libp2p networks
 during eclipse attacks, measuring genuine network degradation and recovery.
 """
 
+import logging
 import time
 from typing import Any, cast
 
@@ -15,6 +16,8 @@ from libp2p.kad_dht import KadDHT
 from libp2p.peer.peerinfo import PeerInfo
 
 from .metrics_collector import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class RealAttackMetrics(AttackMetrics):
@@ -77,7 +80,7 @@ class RealAttackMetrics(AttackMetrics):
                 await source_dht.put_value(key, test_value)
                 await trio.sleep(0.01)
             except Exception as e:
-                print(f"Failed to populate key {key}: {e}")
+                logger.error("Failed to populate key %s: %s", key, e)
 
     async def measure_network_connectivity(self, hosts: list[IHost]) -> dict[str, Any]:
         """Measure real network connectivity between hosts"""
@@ -164,7 +167,7 @@ class RealAttackMetrics(AttackMetrics):
         }
 
         # Phase 1: Baseline measurements
-        print("📊 Measuring baseline network performance...")
+        logger.info("Measuring baseline network performance...")
         results["before_attack"][
             "lookup_performance"
         ] = await self.measure_real_lookup_performance(honest_dhts)
@@ -178,7 +181,7 @@ class RealAttackMetrics(AttackMetrics):
         )
 
         # Phase 2: Execute attack
-        print("🚨 Executing Eclipse attack...")
+        logger.info("Executing Eclipse attack...")
         self.attack_start_time = time.time()
 
         # Let malicious peers poison the network
@@ -200,7 +203,7 @@ class RealAttackMetrics(AttackMetrics):
         await trio.sleep(attack_duration)
 
         # Phase 3: Measure during attack
-        print("📈 Measuring network performance during attack...")
+        logger.info("Measuring network performance during attack...")
         results["during_attack"][
             "lookup_performance"
         ] = await self.measure_real_lookup_performance(honest_dhts)
@@ -214,7 +217,7 @@ class RealAttackMetrics(AttackMetrics):
         )
 
         # Phase 4: Recovery phase (stop attack)
-        print("🔄 Measuring network recovery...")
+        logger.info("Measuring network recovery...")
         self.attack_end_time = time.time()
 
         # Allow network to recover

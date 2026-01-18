@@ -5,11 +5,14 @@ This module implements flooding attacks where an attacker overwhelms the network
 with excessive messages, causing denial of service through resource exhaustion.
 """
 
+import logging
 from typing import Any
 
 import trio
 
 from ..utils.attack_metrics import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class FloodingMaliciousPeer:
@@ -136,10 +139,10 @@ class FloodingAttackScenario:
         self, attack_duration: float = 30.0
     ) -> dict[str, Any]:
         """Execute the complete flooding attack scenario"""
-        print("🌊 Executing Flooding Attack Scenario")
-        print(f"📊 Honest peers: {len(self.honest_peers)}")
-        print(f"💥 Flooding attackers: {len(self.flooding_attackers)}")
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        logger.info("Executing Flooding Attack Scenario")
+        logger.info("Honest peers: %d", len(self.honest_peers))
+        logger.info("Flooding attackers: %d", len(self.flooding_attackers))
+        logger.info("Attack duration: %f seconds", attack_duration)
 
         total_messages = 0
         total_connections = 0
@@ -174,8 +177,8 @@ class FloodingAttackScenario:
             total_messages += len(attacker.messages_sent)
             total_connections += len(attacker.connections_attempted)
 
-        print(f"📨 Total messages sent: {total_messages}")
-        print(f"🔗 Total connections attempted: {total_connections}")
+        logger.info("Total messages sent: %d", total_messages)
+        logger.info("Total connections attempted: %d", total_connections)
 
         # Calculate flooding-specific metrics
         self._calculate_flooding_metrics(

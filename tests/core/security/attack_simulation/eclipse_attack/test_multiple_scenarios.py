@@ -325,7 +325,7 @@ async def test_stress_test_multiple_runs():
                 f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
             )
 
-    print(f"\n✅ Stress test complete: {len(all_results)} scenarios run")
+    print(f"\n[PASSED] Stress test complete: {len(all_results)} scenarios run")
     print("All scenarios show consistent behavior across multiple runs")
 
 

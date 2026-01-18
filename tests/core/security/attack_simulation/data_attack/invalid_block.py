@@ -12,10 +12,13 @@ before finality confirmation.
 """
 
 from enum import Enum
+import logging
 import random
 from typing import Any
 
 import trio
+
+logger = logging.getLogger(__name__)
 
 
 class BlockInvalidityType(Enum):
@@ -158,12 +161,14 @@ class InvalidBlockScenario:
             finality_delay: Time until finality is reached (when invalidity is detected)
 
         """
-        print("🧱 Executing Invalid Block Propagation Attack")
-        print(f"🖥️  Full nodes: {len(self.full_nodes)}")
-        print(f"📱 Light clients: {len(self.light_clients)}")
-        print(f"👿 Malicious validators: {len(self.malicious_validators)}")
-        print(
-            f"⏱️  Attack duration: {attack_duration}s, Finality delay: {finality_delay}s"
+        logger.info("Executing Invalid Block Propagation Attack")
+        logger.info("Full nodes: %d", len(self.full_nodes))
+        logger.info("Light clients: %d", len(self.light_clients))
+        logger.info("Malicious validators: %d", len(self.malicious_validators))
+        logger.info(
+            "Attack duration: %fs, Finality delay: %fs",
+            attack_duration,
+            finality_delay,
         )
 
         # Phase 1: Create and propagate invalid blocks (pre-finality)

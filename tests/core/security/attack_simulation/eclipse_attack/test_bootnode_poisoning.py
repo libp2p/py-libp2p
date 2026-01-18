@@ -6,7 +6,6 @@ research.
 """
 
 import pytest
-import trio
 
 from .bootnode_poisoning import (
     BootnodeAttacker,
@@ -260,10 +259,3 @@ def test_bootnode_poisoning_scenario_initialization():
     assert len(scenario.malicious_bootnodes) == 1
     assert scenario.metrics is not None
     assert len(scenario.fallback_peers) == 0
-
-
-if __name__ == "__main__":
-    # Run a sample simulation
-    print("🧪 Running Bootnode Poisoning Attack Simulation Tests")
-    trio.run(test_run_bootnode_poisoning_simulation)
-    print("✅ Tests completed successfully!")

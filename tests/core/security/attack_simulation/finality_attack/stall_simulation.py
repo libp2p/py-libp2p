@@ -10,10 +10,13 @@ for extended periods while block production continues, memory usage grows unboun
 unless proper pruning and timeout mechanisms are in place.
 """
 
+import logging
 import random
 from typing import Any
 
 import trio
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryTracker:
@@ -189,13 +192,14 @@ class FinalityStallScenario:
             Comprehensive attack simulation results
 
         """
-        print("⏸️  Executing Finality Stall Attack")
-        print(f"📱 Light clients: {len(self.light_clients)}")
-        print(f"🖥️  Full nodes: {len(self.full_nodes)}")
-        print(f"👹 Attackers: {len(self.attackers)}")
-        print(
-            f"⏱️  Stall duration: {stall_duration}s, "
-            f"Block rate: {block_production_rate}/s"
+        logger.info("Executing Finality Stall Attack")
+        logger.info("Light clients: %d", len(self.light_clients))
+        logger.info("Full nodes: %d", len(self.full_nodes))
+        logger.info("Attackers: %d", len(self.attackers))
+        logger.info(
+            "Stall duration: %fs, Block rate: %f/s",
+            stall_duration,
+            block_production_rate,
         )
 
         # Phase 1: Cause finality stall and produce blocks

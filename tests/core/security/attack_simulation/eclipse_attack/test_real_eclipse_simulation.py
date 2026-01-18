@@ -35,15 +35,15 @@ class RealEclipseScenario(EclipseScenario):
 
     async def execute_real_attack(self, attack_duration: float = 30.0):
         """Execute a real eclipse attack against actual libp2p network"""
-        print("🎯 Starting Real Eclipse Attack Simulation")
+        print("Starting Real Eclipse Attack Simulation")
         print(
-            f"📊 Network: {len(self.honest_hosts)} honest nodes, "
+            f"Network: {len(self.honest_hosts)} honest nodes, "
             f"{len(self.malicious_peers)} malicious nodes"
         )
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        print(f"Attack duration: {attack_duration} seconds")
 
         # Execute comprehensive attack measurement
-        results = await self.metrics.measure_complete_attack_cycle(
+        results = await self.metrics.measure_real_eclipse(
             self.honest_hosts, self.honest_dhts, self.malicious_peers, attack_duration
         )
 
@@ -55,7 +55,7 @@ class RealEclipseScenario(EclipseScenario):
     def _print_attack_summary(self, results):
         """Print human-readable attack results summary"""
         print("\n" + "=" * 60)
-        print("🔍 ECLIPSE ATTACK SIMULATION RESULTS")
+        print("ECLIPSE ATTACK SIMULATION RESULTS")
         print("=" * 60)
 
         # Lookup performance summary
@@ -63,7 +63,7 @@ class RealEclipseScenario(EclipseScenario):
         during_lookup = results["during_attack"]["lookup_performance"]["success_rate"]
         after_lookup = results["after_attack"]["lookup_performance"]["success_rate"]
 
-        print("\n📈 DHT LOOKUP PERFORMANCE:")
+        print("\nDHT LOOKUP PERFORMANCE:")
         print(f"   Before Attack: {before_lookup:.2%} success rate")
         print(f"   During Attack: {during_lookup:.2%} success rate")
         print(f"   After Attack:  {after_lookup:.2%} success rate")
@@ -73,7 +73,7 @@ class RealEclipseScenario(EclipseScenario):
         during_conn = results["during_attack"]["connectivity"]["connectivity_ratio"]
         after_conn = results["after_attack"]["connectivity"]["connectivity_ratio"]
 
-        print("\n🔗 NETWORK CONNECTIVITY:")
+        print("\nNETWORK CONNECTIVITY:")
         print(f"   Before Attack: {before_conn:.2%} nodes connected")
         print(f"   During Attack: {during_conn:.2%} nodes connected")
         print(f"   After Attack:  {after_conn:.2%} nodes connected")
@@ -86,7 +86,7 @@ class RealEclipseScenario(EclipseScenario):
             "overall_contamination_rate"
         ]
 
-        print("\n🦠 ROUTING TABLE CONTAMINATION:")
+        print("\nROUTING TABLE CONTAMINATION:")
         print(f"   During Attack: {during_contamination:.2%} malicious entries")
         print(f"   After Recovery: {after_contamination:.2%} malicious entries")
 
@@ -96,7 +96,7 @@ class RealEclipseScenario(EclipseScenario):
         recovery_effectiveness = recovery_metrics["recovery_effectiveness_lookup"]
         network_resilience = recovery_metrics["overall_network_resilience"]
 
-        print("\n🎯 ATTACK EFFECTIVENESS:")
+        print("\nATTACK EFFECTIVENESS:")
         print(f"   Attack Impact: {attack_effectiveness:.2%} performance degradation")
         print(f"   Recovery Rate: {recovery_effectiveness:.2%} recovery achieved")
         print(f"   Network Resilience: {network_resilience:.2%} overall resilience")
@@ -132,7 +132,7 @@ async def test_real_eclipse_attack_simulation():
     assert scenario.honest_dhts == honest_dhts
     assert scenario.malicious_peers == malicious_peers
 
-    print("✅ Real Eclipse attack simulation structure test passed!")
+    print("[PASSED] Real Eclipse attack simulation structure test passed!")
 
 
 @pytest.mark.trio
@@ -167,7 +167,7 @@ async def test_real_malicious_peer_behavior():
     # In this simple test, we just verify the method runs without error
     assert final_table_size >= initial_table_size
 
-    print("✅ Real malicious peer behavior test passed!")
+    print("[PASSED] Real malicious peer behavior test passed!")
 
 
 @pytest.mark.trio
@@ -203,7 +203,7 @@ async def test_real_metrics_collection():
     assert "overall_contamination_rate" in contamination_results
     assert contamination_results["overall_contamination_rate"] >= 0
 
-    print("✅ Real metrics collection test passed!")
+    print("[PASSED] Real metrics collection test passed!")
 
 
 if __name__ == "__main__":
@@ -211,5 +211,5 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "demo":
-        print("🚀 Running Eclipse Attack Demo...")
+        print("Running Eclipse Attack Demo...")
         trio.run(test_real_eclipse_attack_simulation)

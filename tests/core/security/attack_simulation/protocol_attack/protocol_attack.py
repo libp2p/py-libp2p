@@ -5,12 +5,15 @@ This module implements protocol-level attacks that exploit weaknesses
 in libp2p protocols, such as malformed messages, protocol violations, etc.
 """
 
+import logging
 import random
 from typing import Any
 
 import trio
 
 from ..utils.attack_metrics import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class ProtocolExploitAttacker:
@@ -195,10 +198,10 @@ class ProtocolAttackScenario:
         self, attack_duration: float = 30.0
     ) -> dict[str, Any]:
         """Execute the complete protocol attack scenario"""
-        print("🔧 Executing Protocol Attack Scenario")
-        print(f"📊 Honest peers: {len(self.honest_peers)}")
-        print(f"🛠️  Protocol attackers: {len(self.protocol_attackers)}")
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        logger.info("Executing Protocol Attack Scenario")
+        logger.info("Honest peers: %d", len(self.honest_peers))
+        logger.info("Protocol attackers: %d", len(self.protocol_attackers))
+        logger.info("Attack duration: %f seconds", attack_duration)
 
         # Execute different types of protocol exploits
         async with trio.open_nursery() as nursery:
@@ -235,9 +238,9 @@ class ProtocolAttackScenario:
             successful_exploits += len(attacker.successful_exploits)
             affected_victims.update(attacker.victims_affected)
 
-        print(f"🎯 Total exploits attempted: {total_exploits}")
-        print(f"✅ Successful exploits: {successful_exploits}")
-        print(f"🎯 Victims affected: {len(affected_victims)}")
+        logger.info("Total exploits attempted: %d", total_exploits)
+        logger.info("Successful exploits: %d", successful_exploits)
+        logger.info("Victims affected: %d", len(affected_victims))
 
         # Calculate protocol-specific metrics
         self._calculate_protocol_metrics(

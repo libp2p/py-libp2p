@@ -10,12 +10,15 @@ Key Insight: Nodes discovering peers through poisoned bootnodes will only connec
 malicious peers, creating a persistent network partition.
 """
 
+import logging
 import random
 from typing import Any
 
 import trio
 
 from ..utils.attack_metrics import AttackMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class BootnodeAttacker:
@@ -97,11 +100,11 @@ class BootnodePoisoningScenario:
         self, attack_duration: float = 30.0
     ) -> dict[str, Any]:
         """Execute complete bootnode poisoning attack scenario"""
-        print("🔥 Executing Bootnode Poisoning Attack")
-        print(f"📊 Honest peers: {len(self.honest_peers)}")
-        print(f"☠️  Malicious bootnodes: {len(self.malicious_bootnodes)}")
-        print(f"🔄 Fallback peers available: {len(self.fallback_peers)}")
-        print(f"⏱️  Attack duration: {attack_duration} seconds")
+        logger.info("Executing Bootnode Poisoning Attack")
+        logger.info("Honest peers: %d", len(self.honest_peers))
+        logger.info("Malicious bootnodes: %d", len(self.malicious_bootnodes))
+        logger.info("Fallback peers available: %d", len(self.fallback_peers))
+        logger.info("Attack duration: %f seconds", attack_duration)
 
         # Phase 1: Poison bootstrap process
         attack_start = trio.current_time()

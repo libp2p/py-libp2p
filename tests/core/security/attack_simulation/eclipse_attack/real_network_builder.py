@@ -5,6 +5,8 @@ This module creates actual libp2p hosts and DHT instances for realistic attack t
 extending the simulation framework to work with real py-libp2p components.
 """
 
+import logging
+
 from multiaddr import Multiaddr
 import trio
 
@@ -18,6 +20,8 @@ from libp2p.peer.peerinfo import PeerInfo
 
 from .malicious_peer import MaliciousPeer
 from .network_builder import AttackNetworkBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class RealMaliciousPeer(MaliciousPeer):
@@ -46,7 +50,7 @@ class RealMaliciousPeer(MaliciousPeer):
             await trio.sleep(self.intensity * 0.1)
 
         except Exception as e:
-            print(f"DHT poisoning failed: {e}")
+            logger.error("DHT poisoning failed: %s", e)
 
     async def flood_real_peer_table(self, target_dht: KadDHT):
         """Flood a real DHT's routing table with malicious entries"""
@@ -63,7 +67,7 @@ class RealMaliciousPeer(MaliciousPeer):
                 await trio.sleep(0.01)
 
         except Exception as e:
-            print(f"Peer table flooding failed: {e}")
+            logger.error("Peer table flooding failed: %s", e)
 
 
 class RealNetworkBuilder(AttackNetworkBuilder):
@@ -114,7 +118,7 @@ class RealNetworkBuilder(AttackNetworkBuilder):
                     await hosts[i].connect(peer_info)
                     await trio.sleep(0.1)  # Allow connection to establish
                 except Exception as e:
-                    print(f"Connection failed between {i} and {j}: {e}")
+                    logger.error("Connection failed between %s and %s: %s", i, j, e)
 
     async def setup_real_attack_scenario(
         self, scenario_config: dict
