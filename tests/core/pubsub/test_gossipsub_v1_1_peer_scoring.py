@@ -801,6 +801,9 @@ class TestGossipSubScoringIntegration:
             "mesh_deliveries",
             "invalid_messages",
             "behavior_penalty",
+            "app_specific_score",
+            "ip_colocation_penalty",
+            "peer_ip",
             "total_score",
         }
         assert set(stats.keys()) == expected_keys
