@@ -93,9 +93,14 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
             # Get all available addresses with peer ID
             all_addrs = host.get_addrs()
+            transport_addrs = host.get_transport_addrs()
 
             print("Listener ready, listening on:\n")
             for addr in all_addrs:
+                print(f"{addr}")
+
+            print("\nRaw transport addresses (without peer ID):")
+            for addr in transport_addrs:
                 print(f"{addr}")
 
             print(

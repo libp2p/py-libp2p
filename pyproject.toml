@@ -1,10 +1,11 @@
+
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.4.0"
+version = "0.5.0"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -30,7 +31,7 @@ dependencies = [
     "noiseprotocol>=0.3.0",
     "protobuf>=4.25.0,<7.0.0",
     "pycryptodome>=3.9.2",
-    "pymultihash==0.8.2",
+    "py-multihash>=3.0.0",
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
     "trio-typing>=0.0.4",
@@ -61,37 +62,26 @@ identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
+floodsub-demo = "examples.pubsub.floodsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "build>=0.9.0",
-    "bump_my_version>=0.19.0",
+    { include-group = "docs" },
+    { include-group = "test" },
+    { include-group = "release" },
     "ipython",
     "mypy>=1.15.0",
     "pre-commit>=3.4.0",
     "tox>=4.0.0",
-    "twine",
-    "wheel",
-    "setuptools>=42",
-    "sphinx>=6.0.0",
-    "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=24,<25",
-    "p2pclient==0.2.0",
-    "pytest>=7.0.0",
-    "pytest-xdist>=2.4.0",
-    "pytest-trio>=0.5.2",
-    "pytest-timeout>=2.4.0",
-    "pytest-rerunfailures>=12.0",
-    "factory-boy>=2.12.0,<3.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
 ]
 docs = [
     "sphinx>=6.0.0",
     "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=24,<25",
+    "towncrier>=25,<26",
     "tomli; python_version < '3.11'",
 ]
 test = [
@@ -102,6 +92,15 @@ test = [
     "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
+    "pytest-mock>=3.15.1",
+    "pytest-rerunfailures>=12.0",
+]
+release = [
+    "build>=0.9.0",
+    "bump_my_version>=0.19.0",
+    "setuptools>=42",
+    "twine",
+    "wheel",
 ]
 
 [tool.setuptools]
@@ -142,7 +141,10 @@ warn_unused_ignores = false
 addopts = "-v --showlocals --durations 50 --maxfail 10"
 log_date_format = "%m-%d %H:%M:%S"
 log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
-markers = ["slow: mark test as slow"]
+markers = [
+    "slow: mark test as slow",
+    "flaky: mark test as flaky (may fail intermittently)",
+]
 xfail_strict = true
 
 [tool.towncrier]
@@ -200,7 +202,7 @@ name = "Removals"
 showcontent = true
 
 [tool.bumpversion]
-current_version = "0.4.0"
+current_version = "0.5.0"
 parse = """
     (?P<major>\\d+)
     \\.(?P<minor>\\d+)

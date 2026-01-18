@@ -69,6 +69,12 @@ jobs:
           cd tests/interop/nim_libp2p
           ./scripts/setup_nim_echo.sh
 
+      - name: Setup Node.js for interop testing
+        if: matrix.toxenv == 'interop'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - run: |
           uv venv venv
           source venv/bin/activate
