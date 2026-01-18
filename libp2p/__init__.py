@@ -301,12 +301,13 @@ def new_swarm(
     # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
     # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
-        NOISE_PROTOCOL_ID: NoiseTransport(
-            key_pair, noise_privkey=noise_key_pair.private_key
-        ),
         TLS_PROTOCOL_ID: TLSTransport (
             key_pair
         ),
+        NOISE_PROTOCOL_ID: NoiseTransport(
+            key_pair, noise_privkey=noise_key_pair.private_key
+        ),
+
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
             key_pair, peerstore=peerstore_opt
