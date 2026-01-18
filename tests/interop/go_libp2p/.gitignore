@@ -1,0 +1,11 @@
+# Built binary
+go_echo_server
+
+# Go build artifacts  
+go.sum
+
+# Setup lock file
+.setup_lock
+
+# Logs
+logs/
