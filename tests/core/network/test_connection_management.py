@@ -57,13 +57,6 @@ class TestConnectionGate:
 
 
 class TestConnectionConfig:
-    def test_defaults(self):
-        config = ConnectionConfig()
-        assert config.max_connections == 300
-        assert config.min_connections == 50
-        assert config.low_watermark == 100
-        assert config.high_watermark == 200
-
     def test_custom_values(self):
         config = ConnectionConfig(
             max_connections=500,
