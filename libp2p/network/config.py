@@ -10,10 +10,10 @@ from dataclasses import (
 )
 
 # Default connection limits (matching go-libp2p)
-MAX_CONNECTIONS = 300
-MIN_CONNECTIONS = 50  # Minimum connections to maintain (go-libp2p default)
-LOW_WATERMARK = 100  # Start auto-connecting when below this (go-libp2p default)
-HIGH_WATERMARK = 200  # Start pruning when above this (go-libp2p default)
+MAX_CONNECTIONS = 600
+MIN_CONNECTIONS = 50  # Minimum connections to maintain
+LOW_WATERMARK = 100  # Start auto-connecting when below this
+HIGH_WATERMARK = 550  # Start pruning when above this
 MAX_PEER_ADDRS_TO_DIAL = 25
 
 # Default timeout values (in seconds)
