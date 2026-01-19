@@ -57,16 +57,16 @@ class NimEchoServer:
                 if not line:
                     continue
 
-            logger.info(f"Server: {line}")
+                logger.info(f"Server: {line}")
 
-            if line.startswith("Peer ID:"):
-                self.peer_id = line.split(":", 1)[1].strip()
+                if line.startswith("Peer ID:"):
+                    self.peer_id = line.split(":", 1)[1].strip()
 
-            elif "/quic-v1/p2p/" in line and self.peer_id:
-                if line.strip().startswith("/"):
-                    self.listen_addr = line.strip()
-                    logger.info(f"Server ready: {self.listen_addr}")
-                    return self.peer_id, self.listen_addr
+                elif "/quic-v1/p2p/" in line and self.peer_id:
+                    if line.strip().startswith("/"):
+                        self.listen_addr = line.strip()
+                        logger.info(f"Server ready: {self.listen_addr}")
+                        return self.peer_id, self.listen_addr
 
         await self.stop()
         raise TimeoutError(f"Server failed to start within {SERVER_START_TIMEOUT}s")
@@ -181,7 +181,7 @@ async def test_large_message_echo(nim_server):
 
     # Run test with timeout
     with trio.move_on_after(TEST_TIMEOUT - 2):  # Leave 2s buffer for cleanup
-        responses = await run_echo_test(listen_addr, large_messages)
+        responses = await run_echo_test(listen_addr, large_messages)  # type: ignore[possibly-unbound]
 
         assert len(responses) == len(large_messages)
         for sent, received in zip(large_messages, responses):

@@ -293,5 +293,4 @@ project_excludes = [
     "**/*pb2.py",
     "**/*.pyi",
     ".venv/**",
-    "./tests/interop/nim_libp2p",
 ]
