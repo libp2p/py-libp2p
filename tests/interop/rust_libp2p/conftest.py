@@ -90,7 +90,8 @@ def rust_ping_binary():
 async def rust_server(rust_ping_binary):
     """Start and stop rust ping server for tests."""
     # Import here to avoid circular imports
-    from .test_ping_interop import RustPingServer
+    # pyrefly: ignore
+    from test_ping_interop import RustPingServer
 
     server = RustPingServer(rust_ping_binary)
 
