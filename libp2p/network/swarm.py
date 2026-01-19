@@ -24,6 +24,7 @@ from libp2p.abc import (
     INotifee,
     IPeerStore,
     IRawConnection,
+    ISecureConn,
     ITransport,
 )
 from libp2p.custom_types import (
@@ -34,7 +35,7 @@ from libp2p.io.abc import (
 )
 from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
-from libp2p.network.connection_gate import ConnectionGate, extract_ip_from_multiaddr
+from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.tag_store import TagInfo, TagStore
 from libp2p.peer.id import (
@@ -700,50 +701,46 @@ class Swarm(Service, INetworkService):
             ) from error
         logger.debug("Swarm: security upgrade completed for peer %s", peer_id)
 
-            logger.debug("upgraded security for peer %s", peer_id)
-
+        try:
+            # Apply outbound upgrade timeout for muxer upgrade
+            with trio.fail_after(self.connection_config.outbound_upgrade_timeout):
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, peer_id
+                )
+        except trio.TooSlowError:
+            timeout_val = self.connection_config.outbound_upgrade_timeout
+            logger.debug(
+                f"Outbound muxer upgrade timeout ({timeout_val}s) "
+                f"exceeded for peer {peer_id}"
+            )
+            # Clean up secured connection
             try:
-                # Apply outbound upgrade timeout for muxer upgrade
-                with trio.fail_after(self.connection_config.outbound_upgrade_timeout):
-                    muxed_conn = await self.upgrader.upgrade_connection(
-                        secured_conn, peer_id
-                    )
-            except trio.TooSlowError:
-                timeout_val = self.connection_config.outbound_upgrade_timeout
-                logger.debug(
-                    f"Outbound muxer upgrade timeout ({timeout_val}s) "
-                    f"exceeded for peer {peer_id}"
-                )
-                # Clean up secured connection
-                try:
-                    await secured_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"Outbound muxer upgrade timeout exceeded for peer {peer_id}"
-                )
-            except MuxerUpgradeFailure as error:
-                logger.debug("failed to upgrade mux for peer %s", peer_id)
-                # Clean up secured connection
-                try:
-                    await secured_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"failed to upgrade mux for peer {peer_id}"
-                ) from error
+                await secured_conn.close()
+            except Exception:
+                pass
+            # Clean up pre-scope
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                f"Outbound muxer upgrade timeout exceeded for peer {peer_id}"
+            )
+        except MuxerUpgradeFailure as error:
+            logger.debug("failed to upgrade mux for peer %s", peer_id)
+            # Clean up secured connection
+            try:
+                await secured_conn.close()
+            except Exception:
+                pass
+            # Clean up pre-scope
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
         except Exception:
             # Ensure cleanup on any unexpected exception
             if secured_conn is not None:
@@ -1158,7 +1155,6 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
-
         # Check global connection limit
         total_connections = len(self.get_connections())
         if total_connections >= self.connection_config.max_connections:
@@ -1170,36 +1166,10 @@ class Swarm(Service, INetworkService):
             raise SwarmException("Maximum connections limit reached")
 
         logger.debug("upgrade_inbound_raw_conn: starting for %s", maddr)
-        
+
         # Enable PNET is psk is provided
         if self.psk is not None:
             raw_conn = new_protected_conn(raw_conn, self.psk)
-
-        # secure the conn and then mux the conn
-        try:
-            logger.debug("upgrade_inbound_raw_conn: upgrading security for %s", maddr)
-            secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-            logger.debug("upgrade_inbound: security done for %s", maddr)
-        except SecurityUpgradeFailure as error:
-            logger.error("failed to upgrade security for peer at %s: %s", maddr, error)
-            await raw_conn.close()
-            raise SwarmException(
-                f"failed to upgrade security for peer at {maddr}"
-            ) from error
-        peer_id = secured_conn.get_remote_peer()
-        logger.debug(
-            "upgrade_inbound: peer=%s initiator=%s", peer_id, secured_conn.is_initiator
-        )
-
-        try:
-            logger.debug("upgrade_inbound: muxer upgrade for %s", peer_id)
-            muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
-            logger.debug("upgrade_inbound: muxer done for %s", peer_id)
-        except MuxerUpgradeFailure as error:
-            logger.error("fail to upgrade mux for peer %s: %s", peer_id, error)
-            await secured_conn.close()
-            raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
-        logger.debug("upgraded mux for peer %s", peer_id)
 
         # Optional pre-upgrade admission using ResourceManager
         # This handles rate limiting and resource constraints
@@ -1224,8 +1194,8 @@ class Swarm(Service, INetworkService):
                 pre_scope = None
 
         # secure the conn and then mux the conn
-        secured_conn = None
-        muxed_conn = None
+        secured_conn: ISecureConn | None = None
+        muxed_conn: IMuxedConn | None = None
         try:
             try:
                 secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
