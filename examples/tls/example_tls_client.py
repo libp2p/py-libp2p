@@ -43,6 +43,7 @@ import argparse
 import logging
 import random
 import secrets
+import sys
 
 import multiaddr
 import trio
@@ -72,6 +73,11 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
 
+if sys.version_info >= (3, 11):
+    from builtins import ExceptionGroup
+else:
+    from exceptiongroup import ExceptionGroup
+
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
 MAX_READ_LEN = 2**32 - 1
 
@@ -97,6 +103,16 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
 
         print(f"Received: {response.decode('utf-8')}")
 
+    except (KeyboardInterrupt, ExceptionGroup) as e:
+        # Handle KeyboardInterrupt directly or within ExceptionGroup
+        if isinstance(e, KeyboardInterrupt):
+            print("\nEcho mode interrupted")
+            raise
+        elif isinstance(e, ExceptionGroup):
+            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                print("\nEcho mode interrupted")
+                raise
+        raise
     except Exception as e:
         print(f"Error in echo mode: {e}")
         raise
@@ -180,12 +196,36 @@ async def chat_mode(host, server_maddr: str) -> None:
             except Exception as e:
                 print(f"Send task error: {e}")
 
-        async with trio.open_nursery() as nursery:
-            nursery.start_soon(receive_messages)
-            nursery.start_soon(send_messages)
+        try:
+            async with trio.open_nursery() as nursery:
+                nursery.start_soon(receive_messages)
+                nursery.start_soon(send_messages)
+        except (KeyboardInterrupt, ExceptionGroup) as e:
+            # Handle KeyboardInterrupt directly or within ExceptionGroup
+            if isinstance(e, KeyboardInterrupt):
+                print("\nChat interrupted")
+            elif isinstance(e, ExceptionGroup):
+                if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                    print("\nChat interrupted")
+                else:
+                    raise
+            else:
+                raise
+        except Exception as e:
+            print(f"Chat error: {e}")
+            raise
 
-    except KeyboardInterrupt:
-        print("Chat interrupted")
+    except (KeyboardInterrupt, ExceptionGroup) as e:
+        # Handle KeyboardInterrupt directly or within ExceptionGroup
+        if isinstance(e, KeyboardInterrupt):
+            print("\nChat session interrupted")
+        elif isinstance(e, ExceptionGroup):
+            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                print("\nChat session interrupted")
+            else:
+                raise
+        else:
+            raise
     except Exception as e:
         print(f"Chat error: {e}")
         raise
@@ -216,18 +256,29 @@ async def run(server: str, mode: str, message: str, seed: int | None = None) -> 
 
     host = new_host(key_pair=key_pair, sec_opt=sec_opt)
 
-    async with host.run(listen_addrs=[]):
-        print(f"TLS-enabled client started. Peer ID: {host.get_id().to_string()}")
+    try:
+        async with host.run(listen_addrs=[]):
+            print(f"TLS-enabled client started. Peer ID: {host.get_id().to_string()}")
 
-        if mode == "echo":
-            if not message:
-                message = "Hello from TLS client!"
-            await echo_mode(host, server, message)
-        elif mode == "chat":
-            await chat_mode(host, server)
-        else:
-            print(f"Unknown mode: {mode}")
-            return
+            if mode == "echo":
+                if not message:
+                    message = "Hello from TLS client!"
+                await echo_mode(host, server, message)
+            elif mode == "chat":
+                await chat_mode(host, server)
+            else:
+                print(f"Unknown mode: {mode}")
+                return
+    except (KeyboardInterrupt, ExceptionGroup) as e:
+        # Handle KeyboardInterrupt directly or within ExceptionGroup
+        if isinstance(e, KeyboardInterrupt):
+            print("\nClient shutdown requested...")
+            raise
+        elif isinstance(e, ExceptionGroup):
+            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                print("\nClient shutdown requested...")
+                raise
+        raise
 
 
 def main() -> None:

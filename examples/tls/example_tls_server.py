@@ -30,6 +30,7 @@ import argparse
 import logging
 import random
 import secrets
+import sys
 
 import trio
 
@@ -62,6 +63,11 @@ from libp2p.utils.address_validation import (
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
+
+if sys.version_info >= (3, 11):
+    from builtins import ExceptionGroup
+else:
+    from exceptiongroup import ExceptionGroup
 
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
 MAX_READ_LEN = 2**32 - 1
@@ -125,6 +131,17 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(receive_messages)
             nursery.start_soon(send_messages)
+    except (KeyboardInterrupt, ExceptionGroup) as e:
+        # Handle KeyboardInterrupt directly or within ExceptionGroup
+        if isinstance(e, KeyboardInterrupt):
+            print(f"Chat session with {peer_display} interrupted")
+        elif isinstance(e, ExceptionGroup):
+            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                print(f"Chat session with {peer_display} interrupted")
+            else:
+                raise
+        else:
+            raise
     except Exception as e:
         print(f"Chat handler error: {e}")
     finally:
@@ -180,7 +197,18 @@ async def run(port: int, seed: int | None = None) -> None:
             "--mode chat\n"
         )
         print("Waiting for incoming TLS connections...")
-        await trio.sleep_forever()
+        try:
+            await trio.sleep_forever()
+        except (KeyboardInterrupt, ExceptionGroup) as e:
+            # Handle KeyboardInterrupt directly or within ExceptionGroup
+            if isinstance(e, KeyboardInterrupt):
+                print("\nServer shutdown requested...")
+                raise
+            elif isinstance(e, ExceptionGroup):
+                if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
+                    print("\nServer shutdown requested...")
+                    raise
+            raise
 
 
 def main() -> None:
