@@ -85,6 +85,11 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport
+)
+
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
@@ -291,10 +296,16 @@ def new_swarm(
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()
 
-    # Default security transports (using Noise as primary)
+    # Default security transports
+    # NOTE: Using Noise as primary for now because Python's ssl module has limitations
+    # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
+    # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
+        ),
+        TLS_PROTOCOL_ID: TLSTransport (
+            key_pair
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
