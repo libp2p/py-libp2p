@@ -9,7 +9,6 @@ This directory contains interoperability tests between py-libp2p and rust-libp2p
   - `Cargo.toml`: Rust dependencies and project configuration.
 - `test_ping_interop.py`: Python pytest tests that connect to the Rust ping server.
 - `conftest.py`: Pytest fixtures for building and managing the Rust server lifecycle.
-- `pynode.py`: Python node helpers.
 - `README.md`: Contains details about running the tests.
 
 ## Prerequisites
