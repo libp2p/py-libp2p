@@ -1,7 +1,3 @@
-"""
-Pytest fixtures for rust-libp2p interop tests.
-"""
-
 import logging
 from pathlib import Path
 import shutil
