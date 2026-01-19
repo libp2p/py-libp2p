@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import multiaddr
 from multiaddr import (
@@ -21,6 +23,8 @@ from libp2p.transport.exceptions import (
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.trio
@@ -171,12 +175,12 @@ async def test_tcp_yamux_stress_ping():
                     await completion_event.wait()
 
         # === Result Summary ===
-        print("\n📊 TCP Ping Stress Test Summary")
-        print(f"Total Streams Launched: {STREAM_COUNT}")
-        print(f"Successful Pings: {len(latencies)}")
-        print(f"Failed Pings: {len(failures)}")
+        logger.info("TCP Ping Stress Test Summary")
+        logger.info(f"Total Streams Launched: {STREAM_COUNT}")
+        logger.info(f"Successful Pings: {len(latencies)}")
+        logger.info(f"Failed Pings: {len(failures)}")
         if failures:
-            print(f"❌ Failed stream indices: {failures}")
+            logger.warning(f"Failed stream indices: {failures}")
 
         # === Assertions ===
         assert len(latencies) == STREAM_COUNT, (
@@ -187,5 +191,5 @@ async def test_tcp_yamux_stress_ping():
         )
 
         avg_latency = sum(latencies) / len(latencies)
-        print(f"✅ Average Latency: {avg_latency:.2f} ms")
+        logger.info(f"Average Latency: {avg_latency:.2f} ms")
         assert avg_latency < 1000
