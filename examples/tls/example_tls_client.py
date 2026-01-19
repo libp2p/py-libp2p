@@ -24,14 +24,17 @@ Modes:
 
 Examples:
     # Echo mode (default)
-    python example_tls_client.py --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
+    python example_tls_client.py --server \
+        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
 
     # Bidirectional chat mode - real-time conversation
-    python example_tls_client.py --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
+    python example_tls_client.py --server \
+        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
         --mode chat
 
     # Custom message in echo mode
-    python example_tls_client.py --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
+    python example_tls_client.py --server \
+        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
         --message "Hello TLS!"
 
 """

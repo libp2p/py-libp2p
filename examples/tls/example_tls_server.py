@@ -109,7 +109,7 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
                         await stream.write(b"Server ended the session\n")
                         break
 
-                    await stream.write(f"{message}\n".encode("utf-8"))
+                    await stream.write(f"{message}\n".encode())
 
                 except (EOFError, KeyboardInterrupt):
                     print("Server input interrupted")
@@ -176,7 +176,8 @@ async def run(port: int, seed: int | None = None) -> None:
 
         print(
             "\nRun this from the same folder in another console:\n\n"
-            f"python example_tls_client.py --server {optimal_addr_with_peer} --mode chat\n"
+            f"python example_tls_client.py --server {optimal_addr_with_peer} "
+            "--mode chat\n"
         )
         print("Waiting for incoming TLS connections...")
         await trio.sleep_forever()
