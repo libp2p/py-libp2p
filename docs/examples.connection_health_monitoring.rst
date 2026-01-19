@@ -8,6 +8,12 @@ proactive monitoring, health-aware load balancing, and advanced metrics collecti
 Overview
 --------
 
+.. note::
+   The code snippets throughout this document are excerpts demonstrating key
+   concepts. They cannot be copy-pasted and run directly as they require an
+   async context. For complete, runnable examples, see
+   ``examples/health_monitoring/basic_example.py``.
+
 Connection health monitoring enhances the existing multiple connections per peer
 support by adding:
 
@@ -108,10 +114,6 @@ The health monitoring features are now accessible through the high-level host AP
 
 Example: Health-Based Load Balancing
 ------------------------------------
-
-.. note::
-   The code snippets below are excerpts showing key concepts. For complete
-   runnable examples, see ``examples/health_monitoring/basic_example.py``.
 
 .. code-block:: python
 
