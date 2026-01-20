@@ -51,12 +51,14 @@ class NamespacedValidator:
     Manages a collection of validators, each associated with a specific namespace.
 
     Following the go-libp2p pattern, this validator can operate in two modes:
+
     - strict_validation=False (default): Non-namespaced keys are accepted without
       validation using a fallback BlankValidator
     - strict_validation=True: All keys must match a registered namespace validator,
       otherwise validation fails with InvalidRecordType
 
     This aligns with go-libp2p/rust-libp2p behavior where:
+
     - Records are always validated through the validator system
     - Networks can enforce strict namespace requirements for security
     """
@@ -77,6 +79,7 @@ class NamespacedValidator:
                 keys. Default is False for backward compatibility.
             fallback_validator: Validator to use for non-namespaced keys when
                 strict_validation is False. Defaults to BlankValidator.
+
         """
         self._validators = validators
         self._strict_validation = strict_validation
@@ -118,21 +121,19 @@ class NamespacedValidator:
         """
         Validate a key-value pair using the appropriate namespaced validator.
 
-        This method follows the go-libp2p pattern where:
-        - Keys with registered namespace validators are validated by that validator
-        - Non-namespaced keys are handled based on strict_validation setting:
-          - If strict_validation=True: Raises InvalidRecordType (go-libp2p behavior)
-          - If strict_validation=False: Uses fallback validator (permissive mode)
+        This method follows the go-libp2p pattern where keys with registered
+        namespace validators are validated by that validator. Non-namespaced
+        keys are handled based on strict_validation setting: if True, raises
+        InvalidRecordType (go-libp2p behavior); if False, uses fallback
+        validator (permissive mode).
 
         Args:
             key (str): The key (e.g., "/pk/Qm..." or "my-plain-key").
             value (bytes): The value to be validated.
 
         Raises:
-            InvalidRecordType: If strict_validation is True and no matching
-                validator is found for the key's namespace.
+            InvalidRecordType: If strict_validation is True and no validator found.
             ValidationError: If the validator rejects the record.
-            Exception: Propagates any exception raised by the sub-validator.
 
         """
         validator = self.validator_by_key(key)
@@ -164,8 +165,7 @@ class NamespacedValidator:
 
         Raises:
             ValueError: If the values list is empty.
-            InvalidRecordType: If strict_validation is True and no matching
-                validator is found.
+            InvalidRecordType: If strict_validation is True and no validator found.
 
         """
         if not values:

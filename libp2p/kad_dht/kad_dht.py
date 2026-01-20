@@ -36,8 +36,7 @@ from libp2p.peer.peerinfo import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.records.pubkey import PublicKeyValidator
-from libp2p.records.utils import InvalidRecordType
-from libp2p.records.validator import BlankValidator, NamespacedValidator, Validator
+from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
     Service,
 )
@@ -164,7 +163,9 @@ class KadDHT(Service):
                 "pk": PublicKeyValidator(),
                 "myapp": MyAppValidator(),
             }, strict_validation=True)
-            dht = KadDHT(host, DHTMode.SERVER, validator=validator, strict_validation=True)
+            dht = KadDHT(
+                host, DHTMode.SERVER, validator=validator, strict_validation=True
+            )
 
             # Only namespaced keys are allowed:
             await dht.put_value("/myapp/key", b"value")  # OK

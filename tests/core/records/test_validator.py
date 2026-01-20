@@ -223,6 +223,7 @@ class TestStrictValidation:
 
     def test_custom_fallback_validator(self):
         """Test that custom fallback validators work correctly."""
+
         class RejectAllValidator(Validator):
             def validate(self, key: str, value: bytes) -> None:
                 raise ValueError("Rejected by fallback")
