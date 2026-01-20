@@ -116,6 +116,7 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
 
     if new == 1:
         libp2p.utils.paths.AUTOTLS_CERT_PATH = Path("new-autotls-cert.pem")
+        libp2p.utils.paths.AUTOTLS_KEY_PATH = Path("new-autotls-key.pem")
         libp2p.utils.paths.ED25519_PATH = Path("new-ed25519.key")
 
     key_pair = load_keypair()

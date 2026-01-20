@@ -15,6 +15,7 @@ PathLike = Union[str, Path]
 
 ED25519_PATH = Path("ed25519.key")
 AUTOTLS_CERT_PATH = Path("autotls-cert.pem")
+AUTOTLS_KEY_PATH = Path("autotls-key.pem")
 
 def get_temp_dir() -> Path:
     """

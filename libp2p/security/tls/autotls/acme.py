@@ -297,6 +297,14 @@ class ACMEClient:
             # Write PEM chain to file
             libp2p.utils.paths.AUTOTLS_CERT_PATH.write_text(pem_chain)
 
+            # Write private key to file (needed for SSL context)
+            key_pem = self.cert_rsa_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            ).decode()
+            libp2p.utils.paths.AUTOTLS_KEY_PATH.write_text(key_pem)
+
             # Read PEM chain back from file
             pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
             self.cert_chain = x509.load_pem_x509_certificates(pem_bytes)

@@ -173,9 +173,19 @@ class TLSTransport(ISecureTransport):
                         .value
                     )
                     dns_names = san.get_values_for_type(x509.DNSName)
-                    print(libp2p.utils.paths.AUTOTLS_CERT_PATH)
-                    ctx.load_cert_chain(certfile=libp2p.utils.paths.AUTOTLS_CERT_PATH)
-                    logger.info("Loaded existing cert, DNS: %s", dns_names)
+                    # Load both certificate and private key
+                    if libp2p.utils.paths.AUTOTLS_KEY_PATH.exists():
+                        ctx.load_cert_chain(
+                            certfile=libp2p.utils.paths.AUTOTLS_CERT_PATH,
+                            keyfile=libp2p.utils.paths.AUTOTLS_KEY_PATH,
+                        )
+                        logger.info("Loaded existing cert, DNS: %s", dns_names)
+                    else:
+                        logger.warning(
+                            "AutoTLS certificate found but private key missing. "
+                            "Falling back to self-signed certificate."
+                        )
+                        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
                 else:
                     logger.info(
@@ -364,17 +374,43 @@ class TLSTransport(ISecureTransport):
         if not peer_cert:
             raise ValueError("missing peer certificate")
 
-        # Extract and verify remote public key
-        remote_public_key = self._extract_public_key_from_cert(peer_cert)
-        remote_peer_id = ID.from_pubkey(remote_public_key)
+        # Try to extract peer ID from certificate
+        # Autotls certificates may not have the libp2p extension
+        try:
+            remote_public_key = self._extract_public_key_from_cert(peer_cert)
+            remote_peer_id = ID.from_pubkey(remote_public_key)
 
-        if remote_peer_id != peer_id:
-            logger.error("TLS: peer mismatch want=%s got=%s", peer_id, remote_peer_id)
-            raise ValueError(
-                f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
-            )
+            if remote_peer_id != peer_id:
+                logger.error("TLS: peer mismatch want=%s got=%s", peer_id, remote_peer_id)
+                raise ValueError(
+                    f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
+                )
 
-        logger.debug("TLS outbound: peer verified, connection established")
+            logger.debug("TLS outbound: peer verified from certificate, connection established")
+        except ValueError as e:
+            if "expected certificate to contain the key extension" in str(e):
+                # Autotls certificate without libp2p extension
+                # Skip certificate-based peer verification - rely on identify protocol
+                logger.warning(
+                    "TLS outbound: certificate missing libp2p extension "
+                    "(likely autotls cert). Skipping certificate-based peer verification. "
+                    "Peer identity will be verified via identify protocol."
+                )
+                # Use expected peer_id - identify protocol will verify it
+                remote_peer_id = peer_id
+                # Generate a temporary placeholder public key
+                # The identify protocol will provide the actual peer public key
+                from libp2p import generate_new_ed25519_identity
+                temp_key_pair = generate_new_ed25519_identity()
+                remote_public_key = temp_key_pair.public_key
+                logger.warning(
+                    "TLS outbound: using placeholder public key. "
+                    "Actual peer public key will be obtained via identify protocol."
+                )
+            else:
+                raise
+
+        logger.debug("TLS outbound: connection established")
 
         # Return SecureSession like noise does
         return SecureSession(

@@ -83,6 +83,9 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
+from libp2p.relay.circuit_v2.nat import (
+    is_private_ip,
+)
 from libp2p.security.tls.autotls.acme import (
     ACMEClient,
     compute_b36_peer_id,
@@ -489,13 +492,33 @@ class BasicHost(IHost):
         await acme.initiate_order()
         await acme.get_dns01_challenge()
 
-        # Temporary public IP
-        ec2_ip = "13.126.88.127"
-        port = self.get_addrs()[0].value_for_protocol("tcp")
+        # Extract public IP from host's listening addresses
+        # According to spec, only publicly reachable IP addresses should be sent to broker
+        # Use get_transport_addrs() to get addresses without /p2p/{peer_id} suffix
+        all_addrs = self.get_transport_addrs()
+        public_ip = None
+        port = None
+        
+        for addr in all_addrs:
+            try:
+                ip = addr.value_for_protocol("ip4")
+                if ip and not is_private_ip(ip):
+                    public_ip = ip
+                    port = addr.value_for_protocol("tcp")
+                    if port:
+                        break
+            except Exception:
+                continue
+        
+        if not public_ip or not port:
+            raise RuntimeError(
+                "No public IP address found in listening addresses. "
+                "AutoTLS requires at least one publicly reachable IPv4 address."
+            )
 
         broker = BrokerClient(
             self.get_private_key(),
-            multiaddr.Multiaddr(f"/ip4/{ec2_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            multiaddr.Multiaddr(f"/ip4/{public_ip}/tcp/{port}/p2p/{self.get_id()}"),
             acme.key_auth,
             acme.b36_peerid,
         )
