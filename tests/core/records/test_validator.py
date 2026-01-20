@@ -65,7 +65,9 @@ def test_namespaced_validator_validate_and_select():
 
 
 def test_namespaced_validator_invalid_key():
-    validators = NamespacedValidator({"dummy": DummyValidator()})
+    validators = NamespacedValidator(
+        {"dummy": DummyValidator()}, strict_validation=True
+    )
 
     # Invalid namespace
     with pytest.raises(InvalidRecordType):
