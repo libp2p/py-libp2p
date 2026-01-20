@@ -22,6 +22,7 @@ from libp2p.peer.id import ID
 ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 AUTOTLS_CERT_PATH = Path("autotls-cert.pem")
 
+
 def generate_rsa_key(bits: int = 2048) -> RSAPrivateKey:
     key = rsa.generate_private_key(
         public_exponent=65537,
@@ -29,6 +30,14 @@ def generate_rsa_key(bits: int = 2048) -> RSAPrivateKey:
         backend=default_backend(),
     )
     return key
+
+
+def compute_b36_peer_id(peerid: ID) -> str:
+    mh = base58.b58decode(str(peerid))
+    cid_bytes = bytes([0x01, 0x72]) + mh
+    b36_peer_bytes = multibase.encode("base36", cid_bytes)
+
+    return b36_peer_bytes.decode()
 
 
 class ACMEClient:
@@ -64,7 +73,7 @@ class ACMEClient:
     ):
         self.libp2p_privkey = libp2p_privkey
         self.local_peer = local_peer
-        self.b36_peerid = self.compute_b36_peer_id()
+        self.b36_peerid = compute_b36_peer_id(self.local_peer)
 
         self.acct_rsa_key = generate_rsa_key(2048)
         self.cert_rsa_key = generate_rsa_key(2048)
@@ -237,7 +246,7 @@ class ACMEClient:
 
         client = httpx.AsyncClient(http2=False, timeout=10.0)
         resp = await client.post(self.chall_url, headers=header, json=jws)
-        
+
         # print(resp)
         # print("\n", resp.headers)
 
@@ -308,18 +317,16 @@ class ACMEClient:
                 headers={"Content-Type": "application/jose+json"},
                 json=jws,
             )
-
             pem_chain = resp.text
-            print(pem_chain)
-            
+
             # Write PEM chain to file
             cert_path = Path("autotls_cert.pem")
             cert_path.write_text(pem_chain)
-            
+
             # Read PEM chain back from file
             pem_bytes = cert_path.read_bytes()
             self.cert_chain = x509.load_pem_x509_certificates(pem_bytes)
-            
+
             san = (
                 self.cert_chain[0]
                 .extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
@@ -409,13 +416,6 @@ class ACMEClient:
             raise RuntimeError("Failed to obtain ACME nonce from newNonce endpoint")
 
         return nonce
-
-    def compute_b36_peer_id(self) -> str:
-        mh = base58.b58decode(str(self.local_peer))
-        cid_bytes = bytes([0x01, 0x72]) + mh
-        b36_peer_bytes = multibase.encode("base36", cid_bytes)
-
-        return b36_peer_bytes.decode()
 
     def compute_jwk_thumbprint(self) -> str:
         ordered = {"e": self.jwk["e"], "kty": self.jwk["kty"], "n": self.jwk["n"]}

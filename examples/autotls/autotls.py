@@ -1,7 +1,5 @@
 import argparse
 
-from cryptography import x509
-from cryptography.x509.oid import ExtensionOID
 import multiaddr
 import trio
 
@@ -26,8 +24,6 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
-from libp2p.security.tls.autotls.acme import AUTOTLS_CERT_PATH, ACMEClient
-from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
@@ -63,7 +59,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
     key_pair = load_keypair()
     if key_pair:
-        print("Loaded pre-existing key-pair")
+        print("Loaded existing key-pair")
     else:
         print("Generated new key-pair...")
         key_pair = generate_new_ed25519_identity()
@@ -84,6 +80,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             listen_addrs=listen_addrs,
             psk=PSK,
             sec_opt=security_options,
+            enable_autotls=True,
         )
     else:
         host = new_host(
@@ -97,8 +94,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
         if not destination:
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
-
-            # Start the auto-tls procedure here, if the flag is set
+            await host.initiate_autotls_procedure()
 
             # Get all available addresses with peer ID
             all_addrs = host.get_addrs()
@@ -116,51 +112,6 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             else:
                 print("\nWarning: No listening addresses available")
             print("Waiting for incoming connection...")
-
-            try:
-                if AUTOTLS_CERT_PATH.exists():
-                    pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
-                    cert_chain = x509.load_pem_x509_certificates(pem_bytes)
-
-                    san = (
-                        cert_chain[0]
-                        .extensions.get_extension_for_oid(
-                            ExtensionOID.SUBJECT_ALTERNATIVE_NAME
-                        )
-                        .value
-                    )
-                    dns_names = san.get_values_for_type(x509.DNSName)
-                    print("Loaded existing cert, DNS:", dns_names)
-                    return
-
-                acme = ACMEClient(host.get_private_key(), host.get_id())
-                await acme.create_acme_acct()
-                await acme.initiate_order()
-                await acme.get_dns01_challenge()
-
-                ec2_ip = "13.126.88.127"
-                broker = BrokerClient(
-                    host.get_private_key(),
-                    multiaddr.Multiaddr(
-                        f"/ip4/{ec2_ip}/tcp/{port}/p2p/{host.get_id()}"
-                    ),
-                    acme.key_auth,
-                    acme.b36_peerid,
-                )
-
-                await broker.http_peerid_auth()
-                await broker.wait_for_dns()
-
-                await acme.notify_dns_ready()
-                await acme.fetch_cert_url()
-                await acme.fetch_certificate()
-
-                return
-            except Exception as e:
-                print(f"Error: {type(e).__name__}: {e}")
-                import traceback
-
-                traceback.print_exc()
 
         else:
             maddr = multiaddr.Multiaddr(destination)

@@ -96,7 +96,6 @@ def custom_identify_push_handler_for(host, use_varint_format: bool = True):
                 complete_multiaddr = f"{observed_multiaddr}/p2p/{peer_id}"
                 print(f"   Remote address: {complete_multiaddr}")
         except Exception as e:
-            print("\nERROR IN IDENTIFY-PUSH")
             logger.error("Error getting remote address: %s", e)
             print(f"\n🔗 Received identify/push request from peer: {peer_id}")
 

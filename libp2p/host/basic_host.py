@@ -15,6 +15,8 @@ from typing import (
 )
 import weakref
 
+from cryptography import x509
+from cryptography.x509.oid import ExtensionOID
 import multiaddr
 import trio
 
@@ -80,6 +82,12 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
+from libp2p.security.tls.autotls.acme import (
+    AUTOTLS_CERT_PATH,
+    ACMEClient,
+    compute_b36_peer_id,
+)
+from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.async_service import (
     background_trio_service,
 )
@@ -454,6 +462,48 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    async def initiate_autotls_procedure(self) -> None:
+        if AUTOTLS_CERT_PATH.exists():
+            pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
+            cert_chain = x509.load_pem_x509_certificates(pem_bytes)
+
+            san = (
+                cert_chain[0]
+                .extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                .value
+            )
+            dns_names = san.get_values_for_type(x509.DNSName)
+            b36_pid = compute_b36_peer_id(self.get_id())
+
+            print("Loaded existing cert, DNS:", dns_names, ", b36_pid: ", b36_pid, "\n")
+            return
+
+        print("ACME certificate not cached, initiating the procedure...")
+        acme = ACMEClient(self.get_private_key(), self.get_id())
+        await acme.create_acme_acct()
+        await acme.initiate_order()
+        await acme.get_dns01_challenge()
+
+        # Temporary public IP
+        ec2_ip = "13.126.88.127"
+        port = self.get_addrs()[0].value_for_protocol("tcp")
+
+        broker = BrokerClient(
+            self.get_private_key(),
+            multiaddr.Multiaddr(f"/ip4/{ec2_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            acme.key_auth,
+            acme.b36_peerid,
+        )
+
+        await broker.http_peerid_auth()
+        await broker.wait_for_dns()
+
+        await acme.notify_dns_ready()
+        await acme.fetch_cert_url()
+        await acme.fetch_certificate()
+
+        return
 
     async def new_stream(
         self,

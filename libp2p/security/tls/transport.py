@@ -4,12 +4,14 @@ import ssl
 from typing import Any
 
 from cryptography import x509
+from cryptography.x509.oid import ExtensionOID
 
 from libp2p.abc import IRawConnection, ISecureConn, ISecureTransport
 from libp2p.crypto.keys import KeyPair, PrivateKey
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.security.secure_session import SecureSession
+from libp2p.security.tls.autotls.acme import AUTOTLS_CERT_PATH
 from libp2p.security.tls.certificate import (
     ALPN_PROTOCOL,
     create_cert_template,
@@ -53,6 +55,7 @@ class TLSTransport(ISecureTransport):
         early_data: bytes | None = None,
         muxers: list[str] | None = None,
         identity_config: IdentityConfig | None = None,
+        enable_autotls: bool = False,
     ):
         """Initialize TLS transport."""
         self.libp2p_privkey = libp2p_keypair.private_key
@@ -73,6 +76,7 @@ class TLSTransport(ISecureTransport):
         )
         # Trusted peer certs (PEM) for accepting self-signed peers during tests
         self._trusted_peer_certs_pem: list[str] = []
+        self.enable_autotls = True
 
     def create_ssl_context(self, server_side: bool = False) -> ssl.SSLContext:
         """
@@ -151,7 +155,31 @@ class TLSTransport(ISecureTransport):
             key_file.close()
 
             # Now load the certificates - files are closed so Windows can access them
-            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            # Fetch the auto-tls certificate if already cached
+            if self.enable_autotls:
+                if AUTOTLS_CERT_PATH.exists():
+                    pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
+                    cert_chain = x509.load_pem_x509_certificates(pem_bytes)
+
+                    san = (
+                        cert_chain[0]
+                        .extensions.get_extension_for_oid(
+                            ExtensionOID.SUBJECT_ALTERNATIVE_NAME
+                        )
+                        .value
+                    )
+                    dns_names = san.get_values_for_type(x509.DNSName)
+                    print("Loaded existing cert, DNS:", dns_names)
+                    ctx.load_cert_chain(certfile=AUTOTLS_CERT_PATH)
+
+                else:
+                    print(
+                        "AUTO-TLS enabled, but ACME certificate not cached yet",
+                        "Reverting back to self-signed",
+                    )
+                    ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            else:
+                ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
         finally:
             # Manual cleanup - remove temp files
             try:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import ssl
-
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
 from libp2p.transport.quic.transport import QUICTransport
@@ -149,7 +148,6 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
             assert isinstance(pvt_key, Ed25519PrivateKey)
             key_path = Path("ed25519.key")
             key_path.write_bytes(pvt_key.to_bytes())
-            print(pvt_key.to_bytes())
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
     key_path = Path(f"{type}.key")
@@ -160,7 +158,6 @@ def load_keypair(type: str = "ed25519") -> KeyPair | None:
     match type:
         case "ed25519":
             pvt_key = Ed25519PrivateKey.from_bytes(data)
-            print(data)
             pub_key = pvt_key.get_public_key()
             return KeyPair(pvt_key, pub_key)
 
@@ -235,6 +232,7 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
+    enable_autotls: bool = False,
     retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
@@ -330,7 +328,7 @@ def new_swarm(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TLS_PROTOCOL_ID: TLSTransport (
-            key_pair
+            key_pair, enable_autotls= enable_autotls
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
@@ -419,6 +417,7 @@ def new_host(
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_mDNS: bool = False,
     enable_upnp: bool = False,
+    enable_autotls: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
@@ -470,6 +469,7 @@ def new_host(
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,
+        enable_autotls=enable_autotls,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
         connection_config=quic_transport_opt if enable_quic else None,
