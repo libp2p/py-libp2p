@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -15,17 +16,7 @@ import trio
 from libp2p.crypto.keys import KeyType, PrivateKey, PublicKey
 from libp2p.peer.id import ID
 
-# TLS imports disabled - testing Noise-only to verify broker fallback
-# from libp2p.security.tls.transport import (
-#     PROTOCOL_ID as TLS_PROTOCOL_ID,
-#     create_tls_transport,
-# )
-
-# Configure minimal logging
-# logging.basicConfig(level=logging.WARNING)
-# logging.getLogger("multiaddr").setLevel(logging.WARNING)
-# logging.getLogger("libp2p").setLevel(logging.WARNING)
-
+logger = logging.getLogger("libp2p.autotls.broker")
 resolver = dns.resolver.Resolver(configure=False)
 resolver.nameservers = ["1.1.1.1", "8.8.8.8"]
 resolver.timeout = 2.0
@@ -121,7 +112,7 @@ class BrokerClient:
             a = await trio.to_thread.run_sync(resolve_a_blocking, a_name)
 
             if txt and a:
-                print("\nDNS records set")
+                logger.info("[DNS] challenge, completed by AUTO-TLS broker")
                 return
 
             if time.monotonic() - start > timeout:
@@ -129,7 +120,7 @@ class BrokerClient:
                     f"DNS propagation timed out: txt={bool(txt)}, a={bool(a)}"
                 )
 
-            print("[DNS] awaiting...")
+            logger.info("[DNS] challenge completion awaiting...")
             await trio.sleep(delay)
             delay = min(delay * 1.5, 10.0)
 

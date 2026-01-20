@@ -476,10 +476,12 @@ class BasicHost(IHost):
             dns_names = san.get_values_for_type(x509.DNSName)
             b36_pid = compute_b36_peer_id(self.get_id())
 
-            print("Loaded existing cert, DNS:", dns_names, ", b36_pid: ", b36_pid, "\n")
+            logger.info(
+                "Loaded existing cert, DNS: %s, b36_pid: %s", dns_names, b36_pid
+            )
             return
 
-        print("ACME certificate not cached, initiating the procedure...")
+        logger.info("ACME certificate not cached, initiating the procedure...")
         acme = ACMEClient(self.get_private_key(), self.get_id())
         await acme.create_acme_acct()
         await acme.initiate_order()

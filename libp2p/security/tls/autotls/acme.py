@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ import trio
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
 
+logger = logging.getLogger("libp2p.autotls.acme")
 ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 AUTOTLS_CERT_PATH = Path("autotls-cert.pem")
 
@@ -120,7 +122,6 @@ class ACMEClient:
             )
 
         account_url = resp.headers.get("Location")
-        # print("\nACCOUNT-URL:", account_url)
         self.account_url = account_url
 
     async def initiate_order(self):
@@ -150,19 +151,6 @@ class ACMEClient:
         self.order_url = resp.headers["Location"]
         self.auth_url = resp.json()["authorizations"][0]
         self.finalize_url = resp.json()["finalize"]
-
-        # Log all the URLS fetched: TODO
-
-        print(
-            "\n",
-            self.account_url,
-            "\n",
-            self.order_url,
-            "\n",
-            self.auth_url,
-            "\n",
-            self.finalize_url,
-        )
 
     async def get_dns01_challenge(self):
         nonce = await self.get_nonce()
@@ -200,17 +188,7 @@ class ACMEClient:
         raw_key_auth = f"{self.token}.{self.jwk_thumbprint}"
         self.key_auth = self.compute_dns01_keyauth(raw_key_auth)
 
-        print(
-            "\n",
-            self.key_auth,
-            "\n",
-            self.chall_url,
-            "\n",
-            self.token,
-            "\n",
-        )
-
-        # TODO add proper logs
+        logger.info("Key-Auth fetched from ACME: %s", self.key_auth)
 
     async def notify_dns_ready(self, delay: int = 5):
         nonce = await self.get_nonce()
@@ -221,7 +199,7 @@ class ACMEClient:
             status = body.get("status")
 
             if status == "valid":
-                print("acme challenge notified")
+                logger.info("Notified ACME, about challenge completion")
                 break
 
             if status == "invalid":
@@ -246,9 +224,6 @@ class ACMEClient:
 
         client = httpx.AsyncClient(http2=False, timeout=10.0)
         resp = await client.post(self.chall_url, headers=header, json=jws)
-
-        # print(resp)
-        # print("\n", resp.headers)
 
         replay_nonce = resp.headers.get("Replay-Nonce")
         if not replay_nonce:
@@ -296,7 +271,6 @@ class ACMEClient:
 
                 if order["status"] == "valid":
                     self.cert_url = order["certificate"]
-                    print("\n", self.cert_url)
                     return
 
         raise RuntimeError("ACME order never reached valid state")
@@ -334,7 +308,11 @@ class ACMEClient:
             )
 
             dns_names = san.get_values_for_type(x509.DNSName)
-            print("DSN: ", dns_names)
+            logger.info(
+                "ACME-TLS certificate cached, DNS: %s, b36_pid: %s",
+                dns_names,
+                self.b36_peerid,
+            )
 
     def create_jws(self, protected: dict, payload: dict | None) -> dict:
         protected_b64 = self.b64url_encode(

@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 import multiaddr
 import trio
@@ -29,10 +30,27 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 
-# Configure minimal logging
-# logging.basicConfig(level=logging.WARNING)
-# logging.getLogger("multiaddr").setLevel(logging.WARNING)
-# logging.getLogger("libp2p").setLevel(logging.WARNING)
+# Configure logging to show debug logs
+root = logging.getLogger()
+root.handlers.clear()
+root.setLevel(logging.WARNING)
+
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+
+for name in [
+    "root",
+    "libp2p.network.basic_host",
+    "libp2p.security.tls",
+    "libp2p.autotls.acme",
+    "libp2p.autotls.broker",
+]:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.propagate = False
+
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -59,9 +77,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
     key_pair = load_keypair()
     if key_pair:
-        print("Loaded existing key-pair")
+        logging.info("Loaded existing key-pair")
     else:
-        print("Generated new key-pair...")
+        logging.info("Generated new key-pair...")
         key_pair = generate_new_ed25519_identity()
         save_keypair(key_pair)
 

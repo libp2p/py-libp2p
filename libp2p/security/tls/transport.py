@@ -20,7 +20,7 @@ from libp2p.security.tls.certificate import (
 )
 from libp2p.security.tls.io import TLSReadWriter
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("libp2p.security.tls")
 
 # Protocol ID for TLS transport
 PROTOCOL_ID = TProtocol("/tls/1.0.0")
@@ -169,14 +169,15 @@ class TLSTransport(ISecureTransport):
                         .value
                     )
                     dns_names = san.get_values_for_type(x509.DNSName)
-                    print("Loaded existing cert, DNS:", dns_names)
+                    logger.info("Loaded existing cert, DNS:", dns_names)
                     ctx.load_cert_chain(certfile=AUTOTLS_CERT_PATH)
 
                 else:
-                    print(
-                        "AUTO-TLS enabled, but ACME certificate not cached yet",
-                        "Reverting back to self-signed",
+                    logger.info(
+                        "[INC/OUT]: AUTO-TLS enabled, but ACME certificate not cached yet, "
+                        "so reverting back to self-signed TLS"
                     )
+
                     ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
             else:
                 ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
