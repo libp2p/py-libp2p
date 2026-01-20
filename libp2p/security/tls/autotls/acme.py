@@ -294,11 +294,10 @@ class ACMEClient:
             pem_chain = resp.text
 
             # Write PEM chain to file
-            cert_path = Path("autotls_cert.pem")
-            cert_path.write_text(pem_chain)
+            AUTOTLS_CERT_PATH.write_text(pem_chain)
 
             # Read PEM chain back from file
-            pem_bytes = cert_path.read_bytes()
+            pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
             self.cert_chain = x509.load_pem_x509_certificates(pem_bytes)
 
             san = (

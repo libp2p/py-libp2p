@@ -281,7 +281,7 @@ class TLSTransport(ISecureTransport):
             # TODO: Python ssl can't request client cert without CA verification.
             # Use placeholder peer ID - client can still verify server identity.
             logger.warning("TLS inbound: no peer cert (Python ssl limitation)")
-            logger.warning("TLS inbound: using placeholder remote peer ID")
+            logger.warning("TLS inbound: using placeholder remote psceer ID")
             # Use a placeholder - we'll need to identify the peer through multistream
             # For now, generate a temporary key for the remote peer
             logger.debug("TLS secure_inbound: generating temporary key pair")
