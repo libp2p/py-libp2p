@@ -35,7 +35,7 @@ message ControlMessage {
 }
 
 message ControlIHave {
-	optional bytes topicID = 1;
+	optional string topicID = 1;
 	repeated bytes messageIDs = 2;
 }
 
