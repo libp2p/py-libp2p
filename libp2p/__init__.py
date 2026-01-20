@@ -78,6 +78,7 @@ from libp2p.peer.persistent import (
     create_sync_rocksdb_peerstore,
     create_async_rocksdb_peerstore,
 )
+import libp2p
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
@@ -110,9 +111,11 @@ from libp2p.transport.transport_registry import (
     create_transport_for_multiaddr,
     get_supported_transport_protocols,
 )
+import libp2p.utils
 from libp2p.utils.logging import (
     setup_logging,
 )
+import libp2p.utils.paths
 
 # Initialize logging configuration
 setup_logging()
@@ -146,20 +149,19 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
     match type:
         case "ed25519":
             assert isinstance(pvt_key, Ed25519PrivateKey)
-            key_path = Path("ed25519.key")
-            key_path.write_bytes(pvt_key.to_bytes())
+            libp2p.utils.paths.ED25519_PATH.write_bytes(key_pair.private_key.to_bytes())
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
-    key_path = Path(f"{type}.key")
-    if not key_path.exists():
-        return None
-
-    data = key_path.read_bytes()
     match type:
         case "ed25519":
+            if not libp2p.utils.paths.ED25519_PATH.exists():
+                return None
+
+            data = libp2p.utils.paths.ED25519_PATH.read_bytes()
             pvt_key = Ed25519PrivateKey.from_bytes(data)
             pub_key = pvt_key.get_public_key()
             return KeyPair(pvt_key, pub_key)
+
 
 def get_default_muxer() -> str:
     """

@@ -2,7 +2,6 @@ import base64
 import hashlib
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import base58
@@ -17,12 +16,14 @@ import multibase
 import requests
 import trio
 
+import libp2p
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
+import libp2p.utils
+import libp2p.utils.paths
 
 logger = logging.getLogger("libp2p.autotls.acme")
 ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
-AUTOTLS_CERT_PATH = Path("autotls-cert.pem")
 
 
 def generate_rsa_key(bits: int = 2048) -> RSAPrivateKey:
@@ -294,10 +295,10 @@ class ACMEClient:
             pem_chain = resp.text
 
             # Write PEM chain to file
-            AUTOTLS_CERT_PATH.write_text(pem_chain)
+            libp2p.utils.paths.AUTOTLS_CERT_PATH.write_text(pem_chain)
 
             # Read PEM chain back from file
-            pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
+            pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
             self.cert_chain = x509.load_pem_x509_certificates(pem_bytes)
 
             san = (

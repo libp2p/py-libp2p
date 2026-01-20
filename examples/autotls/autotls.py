@@ -1,15 +1,18 @@
 import argparse
 import logging
+from pathlib import Path
 
 import multiaddr
 import trio
 
+import libp2p
 from libp2p import (
     generate_new_ed25519_identity,
     load_keypair,
     new_host,
     save_keypair,
 )
+from libp2p.abc import INetStream
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import (
     TProtocol,
@@ -25,10 +28,13 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+from libp2p.security.tls.autotls.acme import compute_b36_peer_id
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
 )
+import libp2p.utils
+import libp2p.utils.paths
 
 # Configure logging to show debug logs
 root = logging.getLogger()
@@ -61,7 +67,40 @@ ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 PEER_ID_AUTH_SCHEME = "libp2p-PeerID="
 
 
-async def run(port: int, destination: str, psk: int, transport: str) -> None:
+async def handle_ping(stream: INetStream) -> None:
+    while True:
+        try:
+            payload = await stream.read(PING_LENGTH)
+            peer_id = stream.muxed_conn.peer_id
+            if payload is not None:
+                print(f"received ping from {peer_id}")
+
+                await stream.write(payload)
+                print(f"responded with pong to {peer_id}")
+
+        except Exception:
+            await stream.reset()
+            break
+
+
+async def send_ping(stream: INetStream) -> None:
+    try:
+        payload = b"\x01" * PING_LENGTH
+        print(f"sending ping to {stream.muxed_conn.peer_id}")
+
+        await stream.write(payload)
+
+        with trio.fail_after(RESP_TIMEOUT):
+            response = await stream.read(PING_LENGTH)
+
+        if response == payload:
+            print(f"received pong from {stream.muxed_conn.peer_id}")
+
+    except Exception as e:
+        print(f"error occurred : {e}")
+
+
+async def run(port: int, destination: str, new: int, transport: str) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
         get_available_interfaces,
@@ -75,7 +114,12 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     if transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
 
+    if new == 1:
+        libp2p.utils.paths.AUTOTLS_CERT_PATH = Path("new-autotls-cert.pem")
+        libp2p.utils.paths.ED25519_PATH = Path("new-ed25519.key")
+
     key_pair = load_keypair()
+
     if key_pair:
         logging.info("Loaded existing key-pair")
     else:
@@ -85,25 +129,23 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
     noise_key_pair = create_new_x25519_key_pair()
     noise_transport = NoiseTransport(key_pair, noise_privkey=noise_key_pair.private_key)
-    tls_transport = TLSTransport(key_pair)
+    tls_transport = TLSTransport(key_pair, enable_autotls=True)
 
     security_options = {
         TLS_PROTOCOL_ID: tls_transport,
         NOISE_PROTOCOL_ID: noise_transport,
     }
 
-    if psk == 1:
-        host = new_host(
-            key_pair=key_pair,
-            listen_addrs=listen_addrs,
-            psk=PSK,
-            sec_opt=security_options,
-            enable_autotls=True,
-        )
-    else:
-        host = new_host(
-            key_pair=key_pair, listen_addrs=listen_addrs, sec_opt=security_options
-        )
+    host = new_host(
+        key_pair=key_pair,
+        listen_addrs=listen_addrs,
+        sec_opt=security_options,
+        enable_autotls=True,
+    )
+    
+    print(host.get_id())
+    print(compute_b36_peer_id(host.get_id()))
+    # return 
 
     base_identify_handler = identify_handler_for(host, use_varint_format=False)
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
@@ -112,11 +154,11 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
         if not destination:
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
+            host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
+
             await host.initiate_autotls_procedure()
 
-            # Get all available addresses with peer ID
             all_addrs = host.get_addrs()
-
             print("Listener ready, listening on:\n")
             for addr in all_addrs:
                 print(f"{addr}")
@@ -125,17 +167,22 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
             if all_addrs:
                 print(
                     f"\nRun this from the same folder in another console:\n\n"
-                    f"autotls-demo -d {all_addrs[0]} -psk {psk} -t {transport}\n"
+                    f"autotls-demo -d {all_addrs[0]} -new 1 -t {transport}\n"
                 )
             else:
                 print("\nWarning: No listening addresses available")
             print("Waiting for incoming connection...")
 
         else:
+            host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
+            await host.initiate_autotls_procedure()
+
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
             await host.connect(info)
             stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
+
+            nursery.start_soon(send_ping, stream)
             return
 
         await trio.sleep_forever()
@@ -164,7 +211,7 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "-psk", "--psk", default=0, type=int, help="Enable PSK in the transport layer"
+        "-new", "--new", default=0, type=int, help="Enable PSK in the transport layer"
     )
 
     parser.add_argument(
@@ -178,7 +225,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        trio.run(run, *(args.port, args.destination, args.psk, args.transport))
+        trio.run(run, *(args.port, args.destination, args.new, args.transport))
     except KeyboardInterrupt:
         pass
 

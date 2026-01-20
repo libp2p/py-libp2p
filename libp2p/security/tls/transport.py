@@ -6,12 +6,12 @@ from typing import Any
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 
+import libp2p
 from libp2p.abc import IRawConnection, ISecureConn, ISecureTransport
 from libp2p.crypto.keys import KeyPair, PrivateKey
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 from libp2p.security.secure_session import SecureSession
-from libp2p.security.tls.autotls.acme import AUTOTLS_CERT_PATH
 from libp2p.security.tls.certificate import (
     ALPN_PROTOCOL,
     create_cert_template,
@@ -19,6 +19,9 @@ from libp2p.security.tls.certificate import (
     verify_certificate_chain,
 )
 from libp2p.security.tls.io import TLSReadWriter
+import libp2p.utils
+from libp2p.utils.paths import AUTOTLS_CERT_PATH
+import libp2p.utils.paths
 
 logger = logging.getLogger("libp2p.security.tls")
 
@@ -76,7 +79,7 @@ class TLSTransport(ISecureTransport):
         )
         # Trusted peer certs (PEM) for accepting self-signed peers during tests
         self._trusted_peer_certs_pem: list[str] = []
-        self.enable_autotls = True
+        self.enable_autotls = enable_autotls
 
     def create_ssl_context(self, server_side: bool = False) -> ssl.SSLContext:
         """
@@ -156,9 +159,10 @@ class TLSTransport(ISecureTransport):
 
             # Now load the certificates - files are closed so Windows can access them
             # Fetch the auto-tls certificate if already cached
+            # TODO: remove this temp-bool
             if self.enable_autotls:
-                if AUTOTLS_CERT_PATH.exists():
-                    pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
+                if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
+                    pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
                     cert_chain = x509.load_pem_x509_certificates(pem_bytes)
 
                     san = (
@@ -169,8 +173,9 @@ class TLSTransport(ISecureTransport):
                         .value
                     )
                     dns_names = san.get_values_for_type(x509.DNSName)
-                    logger.info("Loaded existing cert, DNS:", dns_names)
-                    ctx.load_cert_chain(certfile=AUTOTLS_CERT_PATH)
+                    print(libp2p.utils.paths.AUTOTLS_CERT_PATH)
+                    ctx.load_cert_chain(certfile=libp2p.utils.paths.AUTOTLS_CERT_PATH)
+                    logger.info("Loaded existing cert, DNS: %s", dns_names)
 
                 else:
                     logger.info(
@@ -181,6 +186,9 @@ class TLSTransport(ISecureTransport):
                     ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
             else:
                 ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+                print(cert_path)
+                print(key_path)
+            
         finally:
             # Manual cleanup - remove temp files
             try:

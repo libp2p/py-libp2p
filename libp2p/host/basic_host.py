@@ -20,6 +20,7 @@ from cryptography.x509.oid import ExtensionOID
 import multiaddr
 import trio
 
+import libp2p
 from libp2p.abc import (
     IHost,
     IMuxedConn,
@@ -83,7 +84,6 @@ from libp2p.protocol_muxer.multiselect_communicator import (
 )
 from libp2p.rcmgr import ResourceManager
 from libp2p.security.tls.autotls.acme import (
-    AUTOTLS_CERT_PATH,
     ACMEClient,
     compute_b36_peer_id,
 )
@@ -92,6 +92,8 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
+import libp2p.utils
+import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
 )
@@ -464,8 +466,8 @@ class BasicHost(IHost):
         return None
 
     async def initiate_autotls_procedure(self) -> None:
-        if AUTOTLS_CERT_PATH.exists():
-            pem_bytes = AUTOTLS_CERT_PATH.read_bytes()
+        if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
+            pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
             cert_chain = x509.load_pem_x509_certificates(pem_bytes)
 
             san = (

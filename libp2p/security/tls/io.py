@@ -133,6 +133,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
             cert_bin = None
         if cert_bin:
             self._peer_certificate = x509.load_der_x509_certificate(cert_bin)
+            print(self._peer_certificate)
             logger.debug("TLS handshake: loaded peer certificate")
         raw_protocol = ssl_obj.selected_alpn_protocol()
         # Handle "libp2p" ALPN fallback: means no early muxer negotiation
