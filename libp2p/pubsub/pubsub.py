@@ -100,6 +100,83 @@ def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
     return base64.b64encode(hashlib.sha256(msg.data).digest())
 
 
+def get_topic_aware_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes topic information for better deduplication
+    across topics. Useful for v1.4 multi-topic scenarios.
+    """
+    # Include topics in the hash for better separation
+    topic_str = "|".join(sorted(msg.topicIDs))
+    combined = msg.seqno + msg.from_id + topic_str.encode()
+    return hashlib.sha256(combined).digest()
+
+
+def get_timestamp_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes timestamp for time-based deduplication.
+    Useful for v1.4 time-sensitive applications.
+    """
+    import time
+
+    timestamp = int(time.time() * 1000).to_bytes(8, byteorder="big")
+    return msg.seqno + msg.from_id + timestamp
+
+
+def get_secure_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate cryptographically secure message ID using HMAC.
+    Useful for v1.4 security-sensitive applications.
+    """
+    # Use a combination of message content for HMAC
+    key = msg.from_id + msg.seqno
+    content = msg.data + "|".join(msg.topicIDs).encode()
+    return hashlib.sha256(key + content).digest()
+
+
+class MessageIDGenerator:
+    """
+    Abstract base class for message ID generators in GossipSub v1.4.
+
+    Allows for more sophisticated message ID generation strategies
+    that can maintain state or use external configuration.
+    """
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        """Generate a message ID for the given message."""
+        raise NotImplementedError
+
+    def __call__(self, msg: rpc_pb2.Message) -> bytes:
+        """Make the generator callable like a function."""
+        return self.generate_id(msg)
+
+
+class CustomMessageIDGenerator(MessageIDGenerator):
+    """
+    Customizable message ID generator that allows users to provide
+    their own ID generation function.
+    """
+
+    def __init__(self, id_fn: Callable[[rpc_pb2.Message], bytes]):
+        self.id_fn = id_fn
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return self.id_fn(msg)
+
+
+class PeerAndSeqnoMessageIDGenerator(MessageIDGenerator):
+    """Standard peer+seqno message ID generator."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return msg.seqno + msg.from_id
+
+
+class ContentAddressedMessageIDGenerator(MessageIDGenerator):
+    """Content-addressed message ID generator using SHA256."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return base64.b64encode(hashlib.sha256(msg.data).digest())
+
+
 class TopicValidator(NamedTuple):
     validator: ValidatorFn
     is_async: bool
@@ -222,9 +299,8 @@ class Pubsub(Service, IPubsub):
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,
-        msg_id_constructor: Callable[
-            [rpc_pb2.Message], bytes
-        ] = get_peer_and_seqno_msg_id,
+        msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+        | MessageIDGenerator = get_peer_and_seqno_msg_id,
         max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
         validation_cache_ttl: int = 300,
         validation_cache_size: int = 1000,
@@ -243,7 +319,11 @@ class Pubsub(Service, IPubsub):
         self.host = host
         self.router = router
 
-        self._msg_id_constructor = msg_id_constructor
+        # Support both callable functions and MessageIDGenerator objects
+        if isinstance(msg_id_constructor, MessageIDGenerator):
+            self._msg_id_constructor = msg_id_constructor.generate_id
+        else:
+            self._msg_id_constructor = msg_id_constructor
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
