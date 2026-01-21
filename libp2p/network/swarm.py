@@ -192,7 +192,6 @@ class Swarm(Service, INetworkService):
         async with trio.open_nursery() as nursery:
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
-            self.event_listener_nursery_created.set()
 
             # Set background nursery BEFORE setting the event
             # This ensures transports have the nursery when they check
@@ -203,6 +202,10 @@ class Swarm(Service, INetworkService):
                 # WebSocket transport also needs background nursery
                 # for connection management
                 self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
+
+            # Set event after background nursery is configured
+            # This ensures transports have the nursery when they check the event
+            self.event_listener_nursery_created.set()
 
             # Start connection management components (go-libp2p style)
             try:
