@@ -7,13 +7,17 @@ it directly as a stream without additional message framing.
 """
 
 import logging
+from pathlib import Path
 import ssl
 
 from cryptography import x509
 import trio
 
 from libp2p.abc import IRawConnection
+from libp2p.crypto.ed25519 import Ed25519PublicKey
+from libp2p.crypto.keys import PublicKey
 from libp2p.io.abc import EncryptedMsgReadWriter, ReadWriteCloser
+from libp2p.peer.id import ID
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
         self,
         conn: IRawConnection,
         ssl_context: ssl.SSLContext,
+        local_prim_pk: bytes,
         server_side: bool = False,
         server_hostname: str | None = None,
     ):
@@ -44,10 +49,37 @@ class TLSStreamReadWriter(ReadWriteCloser):
         self._handshake_complete = False
         self._negotiated_protocol: str | None = None
         self._closed = False
+
+        self.local_prim_pk = local_prim_pk
+        self.remote_primitive_pk = None
+        self.remote_pid = None
+
         # Read buffer for bytes that arrive during/after handshake
         self._read_buffer = bytearray()
+        
+    def should_do_primitive_key_exchang(self, enable_autotls: bool) -> bool:
+        base = Path("libp2p-forge")
+        
+        # Autotls should be enabled
+        if not enable_autotls: 
+            return False
+        
+        for peer_dir in base.iterdir():
+            if not peer_dir.is_dir():
+                continue
+            
+            has_ed25519 = (peer_dir / "ed25519.pem").exists()
+            has_autotls_cert = (peer_dir / "autotls-cert.pem").exists()
+            
+            # Auto-Tls in progress
+            if has_ed25519 and not has_autotls_cert:
+                return False
+        
+        # All the peers either has completed autotls procedure,
+        # or not started yet
+        return True
 
-    async def handshake(self) -> None:
+    async def handshake(self, enable_autotls: bool = False) -> None:
         """Perform TLS handshake."""
         logger.debug("TLS handshake starting (server_side=%s)", self.server_side)
         in_bio = ssl.MemoryBIO()
@@ -65,6 +97,20 @@ class TLSStreamReadWriter(ReadWriteCloser):
         MAX_HANDSHAKE_TIME = 30
         handshake_attempts = 0
         MAX_ATTEMPTS = 100
+
+        # This kind of exchange is only applicable for py-libp2p, as it breaks
+        # interop with other libp2p implementations. So execute this only in
+        # autotls-enabled and autotls-cert not cached (prior to libp2p-forge negotiation)
+        if self.should_do_primitive_key_exchang(enable_autotls):
+            await self._do_primitive_key_exchange()
+            logger.info(
+                "Primitive key exchange complete, remote_peer: %s", self.remote_pid
+            )
+        else:
+            logger.info(
+                "Skipping the primitive key-exchange, "
+                "either remote != py-libp2p node, or autotls not enabled"
+            )
 
         with trio.move_on_after(MAX_HANDSHAKE_TIME):
             while handshake_attempts < MAX_ATTEMPTS:
@@ -133,7 +179,6 @@ class TLSStreamReadWriter(ReadWriteCloser):
             cert_bin = None
         if cert_bin:
             self._peer_certificate = x509.load_der_x509_certificate(cert_bin)
-            print(self._peer_certificate)
             logger.debug("TLS handshake: loaded peer certificate")
         raw_protocol = ssl_obj.selected_alpn_protocol()
         # Handle "libp2p" ALPN fallback: means no early muxer negotiation
@@ -146,6 +191,19 @@ class TLSStreamReadWriter(ReadWriteCloser):
                 logger.debug("TLS: ALPN muxer: %s", self._negotiated_protocol)
         self._handshake_complete = True
         logger.debug("TLS handshake: handshake complete flag set")
+
+    async def _do_primitive_key_exchange(self) -> None:
+        pk_bytes = self.local_prim_pk
+
+        # Exchange
+        await self.raw_connection.write(pk_bytes)
+        data = await self.raw_connection.read(36)
+
+        pub_key_pb = PublicKey.deserialize_from_protobuf(data)
+        ed25518_key = Ed25519PublicKey.from_bytes(pub_key_pb.data)
+
+        self.remote_primitive_pk = ed25518_key
+        self.remote_pid = ID.from_pubkey(ed25518_key)
 
     async def write(self, data: bytes) -> None:
         """Write raw bytes to TLS stream."""
@@ -337,6 +395,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         self,
         conn: IRawConnection,
         ssl_context: ssl.SSLContext,
+        local_prim_pk: bytes,
         server_side: bool = False,
         server_hostname: str | None = None,
     ):
@@ -352,10 +411,10 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         """
         # Create the underlying TLS stream handler
         self.stream_writer = TLSStreamReadWriter(
-            conn, ssl_context, server_side, server_hostname
+            conn, ssl_context, local_prim_pk, server_side, server_hostname
         )
 
-    async def handshake(self) -> None:
+    async def handshake(self, enable_autotls: bool = False) -> None:
         """
         Perform TLS handshake.
 
@@ -370,7 +429,9 @@ class TLSReadWriter(EncryptedMsgReadWriter):
             - Verifies minimum TLS version (1.3)
 
         """
-        await self.stream_writer.handshake()
+        await self.stream_writer.handshake(enable_autotls)
+        self.remote_primitive_pk = self.stream_writer.remote_primitive_pk
+        self.remote_primitive_peerid = self.stream_writer.remote_pid
 
     def get_peer_certificate(self) -> x509.Certificate | None:
         """

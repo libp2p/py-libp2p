@@ -1892,7 +1892,7 @@ class IHost(ABC):
         """
 
     @abstractmethod
-    async def initiate_autotls_procedure(self) -> None:
+    async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
         Initiate the ACME-AUTO-TLS-BROKER negotiation for TLS certificate
         """

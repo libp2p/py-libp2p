@@ -28,7 +28,6 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
-from libp2p.security.tls.autotls.acme import compute_b36_peer_id
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
@@ -100,11 +99,20 @@ async def send_ping(stream: INetStream) -> None:
         print(f"error occurred : {e}")
 
 
-async def run(port: int, destination: str, new: int, transport: str) -> None:
+async def run(port: int, destination: str, new: int, transport: str, tls: int) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
         get_available_interfaces,
     )
+
+    # Create a libp2p-forge directory for persisting keys and certificates
+    base = Path("libp2p-forge")
+    (base / "peer1").mkdir(parents=True, exist_ok=True)
+    (base / "peer2").mkdir(parents=True, exist_ok=True)
+    
+    enable_autotls = True
+    if tls == 1:
+        enable_autotls = False
 
     if port <= 0:
         port = find_free_port()
@@ -115,9 +123,11 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
 
     if new == 1:
-        libp2p.utils.paths.AUTOTLS_CERT_PATH = Path("new-autotls-cert.pem")
-        libp2p.utils.paths.AUTOTLS_KEY_PATH = Path("new-autotls-key.pem")
-        libp2p.utils.paths.ED25519_PATH = Path("new-ed25519.key")
+        libp2p.utils.paths.ED25519_PATH = Path("libp2p-forge/peer2/ed25519.pem")
+        libp2p.utils.paths.AUTOTLS_CERT_PATH = Path(
+            "libp2p-forge/peer2/autotls-cert.pem"
+        )
+        libp2p.utils.paths.AUTOTLS_KEY_PATH = Path("libp2p-forge/peer2/autotls-key.pem")
 
     key_pair = load_keypair()
 
@@ -130,7 +140,7 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
 
     noise_key_pair = create_new_x25519_key_pair()
     noise_transport = NoiseTransport(key_pair, noise_privkey=noise_key_pair.private_key)
-    tls_transport = TLSTransport(key_pair, enable_autotls=True)
+    tls_transport = TLSTransport(key_pair, enable_autotls=enable_autotls)
 
     security_options = {
         TLS_PROTOCOL_ID: tls_transport,
@@ -141,12 +151,8 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
         key_pair=key_pair,
         listen_addrs=listen_addrs,
         sec_opt=security_options,
-        enable_autotls=True,
+        enable_autotls=enable_autotls,
     )
-    
-    print(host.get_id())
-    print(compute_b36_peer_id(host.get_id()))
-    # return 
 
     base_identify_handler = identify_handler_for(host, use_varint_format=False)
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
@@ -157,7 +163,9 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
-            await host.initiate_autotls_procedure()
+            # @reviewers: replace/remove this hardcoded public IP when running on your own servers
+            if enable_autotls:
+                await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 
             all_addrs = host.get_addrs()
             print("Listener ready, listening on:\n")
@@ -168,15 +176,24 @@ async def run(port: int, destination: str, new: int, transport: str) -> None:
             if all_addrs:
                 print(
                     f"\nRun this from the same folder in another console:\n\n"
-                    f"autotls-demo -d {all_addrs[0]} -new 1 -t {transport}\n"
+                    f"autotls-demo -d {all_addrs[0]} -new 1 -t {transport} -tls {tls}\n"
                 )
             else:
                 print("\nWarning: No listening addresses available")
             print("Waiting for incoming connection...")
 
         else:
+            all_addrs = host.get_addrs()
+            print("Listener ready, listening on:\n")
+            for addr in all_addrs:
+                print(f"{addr}")
+            print("\n\n")
+
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
-            await host.initiate_autotls_procedure()
+            
+            # @reviewers: replace/remove this hardcoded public IP when running on your own servers
+            if enable_autotls:
+                await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 
             maddr = multiaddr.Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
@@ -212,7 +229,11 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "-new", "--new", default=0, type=int, help="Enable PSK in the transport layer"
+        "-new", "--new", default=0, type=int, help="Run client"
+    )
+    
+    parser.add_argument(
+        "-tls", "--tls", default=0, type=int, help="Run with self-signed TLS handshake"
     )
 
     parser.add_argument(
@@ -226,7 +247,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        trio.run(run, *(args.port, args.destination, args.new, args.transport))
+        trio.run(run, *(args.port, args.destination, args.new, args.transport, args.tls))
     except KeyboardInterrupt:
         pass
 

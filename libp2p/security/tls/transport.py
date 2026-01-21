@@ -20,7 +20,6 @@ from libp2p.security.tls.certificate import (
 )
 from libp2p.security.tls.io import TLSReadWriter
 import libp2p.utils
-from libp2p.utils.paths import AUTOTLS_CERT_PATH
 import libp2p.utils.paths
 
 logger = logging.getLogger("libp2p.security.tls")
@@ -131,7 +130,10 @@ class TLSTransport(ISecureTransport):
         # Python's ssl module can't request a client cert without CA verification.
         # TODO: Implement proper mutual TLS with custom verification
         ctx.check_hostname = False
-        # Default: no client cert verification
+
+        # TODO: Fix this default: no client cert verification
+        # INBOUND connection can't ask for tls cert from remote peers
+        # ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
         ctx.verify_mode = ssl.CERT_NONE
 
         # Load our cached self-signed certificate bound to libp2p identity
@@ -179,10 +181,12 @@ class TLSTransport(ISecureTransport):
                             certfile=libp2p.utils.paths.AUTOTLS_CERT_PATH,
                             keyfile=libp2p.utils.paths.AUTOTLS_KEY_PATH,
                         )
-                        logger.info("Loaded existing cert, DNS: %s", dns_names)
+                        logger.info(
+                            "[INC/OUT]: Loaded existing cert, DNS: %s", dns_names
+                        )
                     else:
                         logger.warning(
-                            "AutoTLS certificate found but private key missing. "
+                            "[INC/OUT]: AutoTLS certificate found but private key missing. "
                             "Falling back to self-signed certificate."
                         )
                         ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
@@ -196,9 +200,7 @@ class TLSTransport(ISecureTransport):
                     ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
             else:
                 ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
-                print(cert_path)
-                print(key_path)
-            
+
         finally:
             # Manual cleanup - remove temp files
             try:
@@ -217,6 +219,7 @@ class TLSTransport(ISecureTransport):
         # Load trusted peer certs as CA certificates if present
         # This enables mutual TLS when peers explicitly trust each other's certs
         if self._trusted_peer_certs_pem and server_side:
+            print("loading trust store")
             for i, cert_pem in enumerate(self._trusted_peer_certs_pem):
                 ca_file = tempfile.NamedTemporaryFile("w", delete=False, suffix=".pem")
                 ca_path = ca_file.name
@@ -284,37 +287,42 @@ class TLSTransport(ISecureTransport):
         ssl_context = self.create_ssl_context(server_side=True)
 
         # Create TLS reader/writer
+        local_prim_pk = self.libp2p_privkey.get_public_key().serialize()
         tls_reader_writer = TLSReadWriter(
-            conn=conn, ssl_context=ssl_context, server_side=True
+            conn=conn,
+            ssl_context=ssl_context,
+            local_prim_pk=local_prim_pk,
+            server_side=True,
         )
 
         # Perform handshake
         logger.debug("TLS secure_inbound: starting handshake")
-        await tls_reader_writer.handshake()
+        await tls_reader_writer.handshake(enable_autotls=self.enable_autotls)
         logger.debug("TLS secure_inbound: handshake completed successfully")
 
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
         if not peer_cert:
+            logger.warning("[INBOUND] Server couldn't fetch dialer's certificate")
+
             # TODO: Python ssl can't request client cert without CA verification.
             # Use placeholder peer ID - client can still verify server identity.
             logger.warning("TLS inbound: no peer cert (Python ssl limitation)")
-            logger.warning("TLS inbound: using placeholder remote psceer ID")
-            # Use a placeholder - we'll need to identify the peer through multistream
-            # For now, generate a temporary key for the remote peer
-            logger.debug("TLS secure_inbound: generating temporary key pair")
-            from libp2p import generate_new_ed25519_identity
+            
 
-            try:
-                temp_key_pair = generate_new_ed25519_identity()
-                logger.debug("TLS secure_inbound: temporary key pair generated")
-            except Exception as e:
-                logger.error("TLS secure_inbound: failed to generate temp key: %s", e)
-                raise
-            remote_public_key = temp_key_pair.public_key
-            remote_peer_id = ID.from_pubkey(remote_public_key)
-            logger.warning("TLS secure_inbound: temporary peer ID: %s", remote_peer_id)
-            logger.debug("TLS secure_inbound: creating SecureSession with placeholder")
+            # Extaract the keys from primitive key-exchange, if autotls enabled
+            if self.enable_autotls:
+                remote_public_key = tls_reader_writer.remote_primitive_pk
+                remote_peer_id = tls_reader_writer.remote_primitive_peerid
+                logger.warning(
+                "TLS inbound: using peerid obtained from primitive key-exchange")
+            else:
+                placeholder_keypair = libp2p.generate_new_ed25519_identity()
+                remote_public_key = placeholder_keypair.public_key
+                remote_peer_id = ID.from_pubkey(remote_public_key)
+                logger.error(
+                "TLS inbound: using peerid obtained from placeholder keypair")
+
             session = SecureSession(
                 local_peer=self.local_peer,
                 local_private_key=self.libp2p_privkey,
@@ -360,17 +368,47 @@ class TLSTransport(ISecureTransport):
         ssl_context = self.create_ssl_context(server_side=False)
 
         # Create TLS reader/writer
+        local_prim_pk = self.libp2p_privkey.get_public_key().serialize()
         tls_reader_writer = TLSReadWriter(
-            conn=conn, ssl_context=ssl_context, server_side=False
+            conn=conn,
+            ssl_context=ssl_context,
+            local_prim_pk=local_prim_pk,
+            server_side=False,
         )
 
         # Perform handshake
         logger.debug("TLS outbound: handshake starting (peer=%s)", peer_id)
-        await tls_reader_writer.handshake()
+        await tls_reader_writer.handshake(enable_autotls=self.enable_autotls)
         logger.debug("TLS secure_outbound: handshake completed successfully")
 
-        # Extract peer information
+        # Extract peer information and domain from the peer-cert
         peer_cert = tls_reader_writer.get_peer_certificate()
+        dns_names = None
+
+        # # TODO: These will be used in certificate verification
+        # local_cert_pubkey_pem = None
+        # cert_signature = None
+
+        if self.enable_autotls and peer_cert is not None:
+            # Extract DNS names
+            san = peer_cert.extensions.get_extension_for_oid(
+                ExtensionOID.SUBJECT_ALTERNATIVE_NAME
+            ).value
+            dns_names = san.get_values_for_type(x509.DNSName)
+
+            # # Pubkey and signature will be used in certificate verification
+            # # Extract public key
+            # pubkey = peer_cert.public_key()
+            # local_cert_pubkey_pem = pubkey.public_bytes(
+            #     encoding=serialization.Encoding.PEM,
+            #     format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            # ).decode()
+
+            # # Extract signature from the certificate
+            # cert_signature = peer_cert.signature.hex()
+            
+            logger.info("[OUTBOUND] Remote peer-cert: DNS: %s", dns_names)
+
         if not peer_cert:
             raise ValueError("missing peer certificate")
 
@@ -381,36 +419,49 @@ class TLSTransport(ISecureTransport):
             remote_peer_id = ID.from_pubkey(remote_public_key)
 
             if remote_peer_id != peer_id:
-                logger.error("TLS: peer mismatch want=%s got=%s", peer_id, remote_peer_id)
+                logger.error(
+                    "TLS: peer mismatch want=%s got=%s", peer_id, remote_peer_id
+                )
                 raise ValueError(
                     f"Peer ID mismatch: expected {peer_id} got {remote_peer_id}"
                 )
 
-            logger.debug("TLS outbound: peer verified from certificate, connection established")
+            logger.debug(
+                "TLS outbound: peer verified from certificate, connection established"
+            )
         except ValueError as e:
             if "expected certificate to contain the key extension" in str(e):
                 # Autotls certificate without libp2p extension
                 # Skip certificate-based peer verification - rely on identify protocol
                 logger.warning(
-                    "TLS outbound: certificate missing libp2p extension "
-                    "(likely autotls cert). Skipping certificate-based peer verification. "
-                    "Peer identity will be verified via identify protocol."
+                    "[TLS outbound]: certificate missing libp2p extension "
+                    "(likely autotls cert)."
                 )
-                # Use expected peer_id - identify protocol will verify it
-                remote_peer_id = peer_id
-                # Generate a temporary placeholder public key
-                # The identify protocol will provide the actual peer public key
-                from libp2p import generate_new_ed25519_identity
-                temp_key_pair = generate_new_ed25519_identity()
-                remote_public_key = temp_key_pair.public_key
+
+                logger.warning("Skipping certificate-based peer verification. ")
+
+                # Extract remote identify from primitive exchange
+                # and verify it against expected peer-id
+                prim_remote_public_key = tls_reader_writer.remote_primitive_pk
+                prim_remote_peer_id = tls_reader_writer.remote_primitive_peerid
+
+                if prim_remote_peer_id != peer_id:
+                    logger.error(
+                        "Primitive and expected peer-id mismatch."
+                        "Dropping the connection"
+                    )
+                    raise
+
+                remote_peer_id = prim_remote_peer_id
+                remote_public_key = prim_remote_public_key
+
                 logger.warning(
-                    "TLS outbound: using placeholder public key. "
-                    "Actual peer public key will be obtained via identify protocol."
+                    "[TLS outbound]: using public key, from primitive exchange. "
                 )
             else:
                 raise
 
-        logger.debug("TLS outbound: connection established")
+        logger.debug("[TLS outbound]: connection established")
 
         # Return SecureSession like noise does
         return SecureSession(

@@ -7,6 +7,9 @@ from pathlib import Path
 import ssl
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
+
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
@@ -149,18 +152,47 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
     match type:
         case "ed25519":
             assert isinstance(pvt_key, Ed25519PrivateKey)
-            libp2p.utils.paths.ED25519_PATH.write_bytes(key_pair.private_key.to_bytes())
+            raw = pvt_key.to_bytes()
+            crypto_key = ed25519.Ed25519PrivateKey.from_private_bytes(raw)
+
+            pem = crypto_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+
+            libp2p.utils.paths.ED25519_PATH.write_bytes(pem)
+
+        case _:
+            raise ValueError(f"unsupported key type: {type}")
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
     match type:
         case "ed25519":
-            if not libp2p.utils.paths.ED25519_PATH.exists():
+            path = libp2p.utils.paths.ED25519_PATH
+            if not path.exists():
                 return None
 
-            data = libp2p.utils.paths.ED25519_PATH.read_bytes()
-            pvt_key = Ed25519PrivateKey.from_bytes(data)
+            pem = path.read_bytes()
+            crypto_key = serialization.load_pem_private_key(
+                pem,
+                password=None,
+            )
+
+            assert isinstance(crypto_key, ed25519.Ed25519PrivateKey)
+            raw = crypto_key.private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+
+            pvt_key = Ed25519PrivateKey.from_bytes(raw)
             pub_key = pvt_key.get_public_key()
+
             return KeyPair(pvt_key, pub_key)
+
+        case _:
+            raise ValueError(f"unsupported key type: {type}")
 
 
 def get_default_muxer() -> str:

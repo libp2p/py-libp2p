@@ -84,7 +84,7 @@ class ACMEClient:
         self.jwk = self.jwk_from_rsa_privkey()
         self.jwk_thumbprint = self.compute_jwk_thumbprint()
 
-        csr_der = self.create_rsa_csr()
+        csr_der = self.create_csr()
         self.csr_b64 = self.b64url_encode(csr_der)
 
     async def create_acme_acct(self):
@@ -299,6 +299,7 @@ class ACMEClient:
 
             # Write private key to file (needed for SSL context)
             key_pem = self.cert_rsa_key.private_bytes(
+                # key_pem = self.cert_rsa_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption(),
@@ -350,7 +351,7 @@ class ACMEClient:
             "signature": signature_b64,
         }
 
-    def create_rsa_csr(self) -> bytes:
+    def create_csr(self) -> bytes:
         domain = f"*.{self.b36_peerid}.libp2p.direct"
 
         csr = (

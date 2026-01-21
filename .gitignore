@@ -192,3 +192,5 @@ tests/interop/js_libp2p/js_node/src/package-lock.json
 
 # Sphinx documentation build
 _build/
+
+libp2p-forge

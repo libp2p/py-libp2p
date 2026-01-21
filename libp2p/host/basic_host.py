@@ -83,9 +83,7 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
-from libp2p.relay.circuit_v2.nat import (
-    is_private_ip,
-)
+from libp2p.relay.circuit_v2.nat import is_private_ip
 from libp2p.security.tls.autotls.acme import (
     ACMEClient,
     compute_b36_peer_id,
@@ -468,7 +466,7 @@ class BasicHost(IHost):
             )
         return None
 
-    async def initiate_autotls_procedure(self) -> None:
+    async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
             pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
             cert_chain = x509.load_pem_x509_certificates(pem_bytes)
@@ -478,12 +476,16 @@ class BasicHost(IHost):
                 .extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
                 .value
             )
+            # DNS names
             dns_names = san.get_values_for_type(x509.DNSName)
             b36_pid = compute_b36_peer_id(self.get_id())
 
             logger.info(
-                "Loaded existing cert, DNS: %s, b36_pid: %s", dns_names, b36_pid
+                "AutoTLS procedure: Loaded existing cert, DNS: %s, b36_pid: %s",
+                dns_names,
+                b36_pid,
             )
+
             return
 
         logger.info("ACME certificate not cached, initiating the procedure...")
@@ -495,26 +497,29 @@ class BasicHost(IHost):
         # Extract public IP from host's listening addresses
         # According to spec, only publicly reachable IP addresses should be sent to broker
         # Use get_transport_addrs() to get addresses without /p2p/{peer_id} suffix
+
+        # For some reason this way of extracting pub-addr is working on Luca's end
+        # but not on mine
+
         all_addrs = self.get_transport_addrs()
-        public_ip = None
-        port = None
-        
-        for addr in all_addrs:
-            try:
-                ip = addr.value_for_protocol("ip4")
-                if ip and not is_private_ip(ip):
-                    public_ip = ip
-                    port = addr.value_for_protocol("tcp")
-                    if port:
-                        break
-            except Exception:
-                continue
-        
-        if not public_ip or not port:
-            raise RuntimeError(
-                "No public IP address found in listening addresses. "
-                "AutoTLS requires at least one publicly reachable IPv4 address."
-            )
+        if public_ip is None:
+            for addr in all_addrs:
+                try:
+                    ip = addr.value_for_protocol("ip4")
+                    if ip and not is_private_ip(ip):
+                        public_ip = ip
+                        port = addr.value_for_protocol("tcp")
+                        if port:
+                            break
+                except Exception:
+                    continue
+
+            if not public_ip or not port:
+                raise RuntimeError(
+                    "No public IP address found in listening addresses. "
+                    "AutoTLS requires at least one publicly reachable IPv4 address."
+                )
+        port = self.get_addrs()[0].value_for_protocol("tcp")
 
         broker = BrokerClient(
             self.get_private_key(),
