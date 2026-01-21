@@ -20,6 +20,7 @@ import trio
 from libp2p.abc import IMuxedConn, IRawConnection
 from libp2p.custom_types import TQUICStreamHandlerFn
 from libp2p.peer.id import ID
+from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import MuxedConnUnavailable
 
 from .exceptions import (
@@ -35,6 +36,7 @@ from .exceptions import (
 from .stream import QUICStream, StreamDirection
 
 if TYPE_CHECKING:
+    from .listener import QUICListener
     from .security import QUICTLSConfigManager
     from .transport import QUICTransport
 
@@ -72,6 +74,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         security_manager: Optional["QUICTLSConfigManager"] = None,
         resource_scope: Any | None = None,
         listener_socket: trio.socket.SocketType | None = None,
+        listener: "QUICListener | None" = None,
+        listener_connection_id: bytes | None = None,
     ):
         """
         Initialize QUIC connection with security integration.
@@ -87,6 +91,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
             security_manager: Security manager for TLS/certificate handling
             resource_scope: Resource manager scope for tracking
             listener_socket: Socket of listener to transmit data
+            listener: Owning listener for server-side connections (enables O(1)
+                Connection ID registration).
+            listener_connection_id: Listener's primary Connection ID for this
+                connection (used as the base CID when registering new CIDs).
 
         """
         self._quic = quic_connection
@@ -94,11 +102,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._remote_peer_id = remote_peer_id
         self._local_peer_id = local_peer_id
         self.peer_id = remote_peer_id or local_peer_id
-        self._is_initiator = is_initiator
+        # Derive initiator/client role from aioquic configuration when available.
+        # Only trust `is_client` when it's a real bool
+        #  (mocks may return truthy objects).
+        is_client = getattr(
+            getattr(quic_connection, "configuration", None), "is_client", None
+        )
+        self._is_initiator = is_client if isinstance(is_client, bool) else is_initiator
         self._maddr = maddr
         self._transport = transport
         self._security_manager = security_manager
         self._resource_scope = resource_scope
+        # Owning listener context (server-side). Used to register newly-issued
+        # Connection IDs in O(1) for correct packet routing.
+        self._listener: "QUICListener | None" = listener
+        self._listener_connection_id: bytes | None = listener_connection_id
 
         # Trio networking - socket may be provided by listener
         self._socket = listener_socket if listener_socket else None
@@ -115,26 +133,48 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._stream_lock = trio.Lock()
 
         # Stream counting and limits
-        self._outbound_stream_count = 0
-        self._inbound_stream_count = 0
+        self._outbound_stream_count: int = 0
+        self._inbound_stream_count: int = 0
 
         # Stream acceptance for incoming streams
         self._stream_accept_queue: list[QUICStream] = []
         self._stream_accept_event = trio.Event()
 
+        # Negotiation semaphores to limit concurrent multiselect negotiations
+        # Separate semaphores for client (outbound) and server (inbound) to prevent
+        # deadlocks where client holds all slots and server can't respond.
+        # This prevents overwhelming the connection with too many simultaneous
+        # negotiations, which can cause timeouts under high concurrency.
+        # Limit is configurable via transport config to allow tuning for
+        # different use cases. The separate client/server semaphores prevent
+        # deadlocks while maintaining reasonable resource usage. In CI/CD
+        # environments with limited resources, this helps prevent contention.
+        # Get negotiation limit from config, defaulting to 5 if not available
+        # or if it's a Mock object (in tests)
+        negotiation_limit = getattr(
+            self._transport._config, "NEGOTIATION_SEMAPHORE_LIMIT", 5
+        )
+        # Ensure it's an int (handles Mock objects in tests)
+        if not isinstance(negotiation_limit, int):
+            negotiation_limit = 5
+        self._client_negotiation_semaphore = trio.Semaphore(negotiation_limit)
+        self._server_negotiation_semaphore = trio.Semaphore(negotiation_limit)
+        # Keep _negotiation_semaphore for backward compatibility (maps to client)
+        self._negotiation_semaphore = self._client_negotiation_semaphore
+
         # Connection state
         self._closed: bool = False
-        self._established = False
-        self._started = False
-        self._handshake_completed = False
-        self._peer_verified = False
+        self._established: bool = False
+        self._started: bool = False
+        self._handshake_completed: bool = False
+        self._peer_verified: bool = False
 
         # Security state
         self._peer_certificate: x509.Certificate | None = None
         self._handshake_events: list[events.HandshakeCompleted] = []
 
         # Background task management
-        self._background_tasks_started = False
+        self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
@@ -144,21 +184,28 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._current_connection_id: bytes | None = None
         self._retired_connection_ids: set[bytes] = set()
         self._connection_id_sequence_numbers: set[int] = set()
+        # Sequence number counter for tracking Connection IDs (inspired by quinn)
+        # Starts at 0 for initial CID, increments for each new CID issued
+        self._connection_id_sequence_counter: int = 0
 
         # Event processing control with batching
-        self._event_processing_active = False
+        self._event_processing_active: bool = False
         self._event_batch: list[events.QuicEvent] = []
-        self._event_batch_size = 10
-        self._last_event_time = 0.0
+        self._event_batch_size: int = 10
+        self._last_event_time: float = 0.0
 
         # Set quic connection configuration
-        self.CONNECTION_CLOSE_TIMEOUT = transport._config.CONNECTION_CLOSE_TIMEOUT
-        self.MAX_INCOMING_STREAMS = transport._config.MAX_INCOMING_STREAMS
-        self.MAX_OUTGOING_STREAMS = transport._config.MAX_OUTGOING_STREAMS
+        self.CONNECTION_CLOSE_TIMEOUT = self._transport._config.CONNECTION_CLOSE_TIMEOUT
+        self.MAX_INCOMING_STREAMS = self._transport._config.MAX_INCOMING_STREAMS
+        self.MAX_OUTGOING_STREAMS = self._transport._config.MAX_OUTGOING_STREAMS
         self.CONNECTION_HANDSHAKE_TIMEOUT = (
-            transport._config.CONNECTION_HANDSHAKE_TIMEOUT
+            self._transport._config.CONNECTION_HANDSHAKE_TIMEOUT
         )
-        self.MAX_CONCURRENT_STREAMS = transport._config.MAX_CONCURRENT_STREAMS
+        self.MAX_CONCURRENT_STREAMS = self._transport._config.MAX_CONCURRENT_STREAMS
+        self.STREAM_OPEN_TIMEOUT = self._transport._config.STREAM_OPEN_TIMEOUT
+
+        # Performance monitoring thresholds
+        self.SLOW_NOTIFICATION_THRESHOLD_SECONDS = 0.01  # 10ms
 
         # Performance and monitoring
         self._connection_start_time = time.time()
@@ -177,10 +224,28 @@ class QUICConnection(IRawConnection, IMuxedConn):
         }
 
         logger.debug(
-            f"Created QUIC connection to {remote_peer_id} "
-            f"(initiator: {is_initiator}, addr: {remote_addr}, "
-            "security: {security_manager is not None})"
+            f"Created QUIC connection to {self._remote_peer_id} "
+            f"(initiator: {self._is_initiator}, addr: {self._remote_addr}, "
+            f"security: {self._security_manager is not None})"
         )
+
+    def set_listener_context(
+        self, listener: "QUICListener | None", listener_connection_id: bytes | None
+    ) -> None:
+        """
+        Set owning listener context for O(1) Connection ID registration.
+
+        For server-side connections, the listener is responsible for packet routing.
+        """
+        self._listener = listener
+        self._listener_connection_id = listener_connection_id
+
+    # Resource manager integration
+    def set_resource_scope(self, scope: Any) -> None:
+        """
+        Attach a resource scope to the connection for stream construction and cleanup.
+        """
+        self._resource_scope = scope
 
     def _calculate_initial_stream_id(self) -> int:
         """
@@ -286,17 +351,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
             raise QUICConnectionError("Cannot start a closed connection")
 
         self._started = True
-        self.event_started.set()
         logger.debug(f"Starting QUIC connection to {self._remote_peer_id}")
 
         try:
             # If this is a client connection, we need to establish the connection
             if self._is_initiator:
                 await self._initiate_connection()
+                # event_started will be set in connect() after connection is established
             else:
                 # For server connections, we're already connected via the listener
                 self._established = True
                 self._connected_event.set()
+                # Set event_started after connection is established for server
+                self.event_started.set()
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} started")
 
@@ -343,16 +410,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             with QUICErrorContext("connection_establishment", "connection"):
                 # Start the connection if not already started
-                logger.debug("STARTING TO CONNECT")
                 if not self._started:
                     await self.start()
 
                 # Start background event processing
                 if not self._background_tasks_started:
-                    logger.debug("STARTING BACKGROUND TASK")
                     await self._start_background_tasks()
-                else:
-                    logger.debug("BACKGROUND TASK ALREADY STARTED")
 
                 # Wait for handshake completion with timeout
                 with trio.move_on_after(
@@ -378,6 +441,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 logger.debug(f"QUICConnection {id(self)}: Peer identity verified")
                 self._established = True
                 logger.debug(f"QUIC connection established with {self._remote_peer_id}")
+
+                # Set event_started after connection is fully established for initiator
+                if self._is_initiator:
+                    self.event_started.set()
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
@@ -407,9 +474,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
         try:
+            consecutive_idle_iterations = 0
             while not self._closed:
-                # Batch process events
-                await self._process_quic_events_batched()
+                # Batch process events - returns True if events were processed
+                events_processed = await self._process_quic_events_batched()
 
                 # Handle timer events
                 await self._handle_timer_events()
@@ -417,8 +485,20 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Transmit any pending data
                 await self._transmit()
 
-                # Short sleep to prevent busy waiting
-                await trio.sleep(0.01)
+                # Adaptive sleep based on activity
+                # When processing events: use minimal sleep (just yield) for low latency
+                # When idle: use longer sleep to reduce CPU usage
+                if not events_processed:
+                    consecutive_idle_iterations += 1
+                    # Use longer sleep when idle to reduce CPU usage
+                    # Start with 1ms, increase to 10ms after several idle iterations
+                    sleep_time = 0.01 if consecutive_idle_iterations > 5 else 0.001
+                    await trio.sleep(sleep_time)
+                else:
+                    consecutive_idle_iterations = 0
+                    # Minimal sleep when processing events - just yield to allow
+                    # other tasks to run, but keep latency low
+                    await trio.sleep(0)  # Yield without sleeping
 
         except Exception as e:
             logger.error(f"Error in event processing loop: {e}")
@@ -503,7 +583,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
             QUICPeerVerificationError: If peer verification fails
 
         """
-        logger.debug("VERIFYING PEER IDENTITY")
         if not self._security_manager:
             logger.debug("No security manager available for peer verification")
             return None
@@ -685,12 +764,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     # Stream management methods (IMuxedConn interface)
 
-    async def open_stream(self, timeout: float = 5.0) -> QUICStream:
+    async def open_stream(self, timeout: float | None = None) -> QUICStream:
         """
         Open a new outbound stream
 
         Args:
             timeout: Timeout for stream creation
+                (defaults to STREAM_OPEN_TIMEOUT from config)
 
         Returns:
             New QUIC stream
@@ -707,6 +787,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
         if not self._started:
             raise QUICConnectionError("Connection not started")
 
+        # Use config timeout if not specified
+        if timeout is None:
+            timeout = self.STREAM_OPEN_TIMEOUT
+
         # Use single lock for all stream operations
         with trio.move_on_after(timeout):
             async with self._stream_lock:
@@ -721,11 +805,27 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 stream_id = self._next_stream_id
                 self._next_stream_id += 4  # Increment by 4 for bidirectional streams
 
+                # Acquire stream scope from resource manager if available
+                stream_scope = None
+                if self._resource_scope and hasattr(
+                    self._resource_scope, "_resource_manager"
+                ):
+                    try:
+                        stream_scope = (
+                            self._resource_scope._resource_manager.open_stream(
+                                peer_id=self._remote_peer_id,
+                                direction=Direction.OUTBOUND,
+                            )
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to acquire stream scope: {e}")
+                        raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
+
                 stream = QUICStream(
                     connection=self,
                     stream_id=stream_id,
                     direction=StreamDirection.OUTBOUND,
-                    resource_scope=self._resource_scope,
+                    resource_scope=stream_scope,
                     remote_addr=self._remote_addr,
                 )
 
@@ -777,11 +877,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(f"Accepted inbound stream {stream.stream_id}")
                     return stream
 
+                # If the event is already set but the queue is empty, reset it to avoid
+                # a busy loop that can starve the QUIC event loop under load.
+                if self._stream_accept_event.is_set():
+                    self._stream_accept_event = trio.Event()
+                    continue
+
+                accept_event = self._stream_accept_event
+
             if self._closed:
                 raise MuxedConnUnavailable("Connection closed while accepting stream")
 
             # Wait for new streams indefinitely
-            await self._stream_accept_event.wait()
+            await accept_event.wait()
 
         raise QUICConnectionError("Error occurred while waiting to accept stream")
 
@@ -826,12 +934,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
             logger.debug(f"Removed stream {stream_id} from connection")
 
     # Batched event processing to reduce overhead
-    async def _process_quic_events_batched(self) -> None:
-        """Process QUIC events in batches for better performance."""
+    async def _process_quic_events_batched(self) -> bool:
+        """
+        Process QUIC events in batches for better performance.
+
+        Returns:
+            True if events were processed, False if no events available
+
+        """
         if self._event_processing_active:
-            return  # Prevent recursion
+            return False  # Prevent recursion
 
         self._event_processing_active = True
+        result = False  # Default to False if no events processed
 
         try:
             current_time = time.time()
@@ -854,9 +969,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._process_event_batch()
                 self._event_batch.clear()
                 self._last_event_time = current_time
-
+                result = True
         finally:
             self._event_processing_active = False
+
+        return result
 
     async def _process_event_batch(self) -> None:
         """Process a batch of events efficiently."""
@@ -906,8 +1023,37 @@ class QUICConnection(IRawConnection, IMuxedConn):
                         await self._transmit()
                         continue
                 else:
+                    # Common benign case: we closed and removed a locally-initiated
+                    # stream wrapper, then received a late FIN-only event.
+                    fin_only = True
+                    for e in stream_events:
+                        data = getattr(e, "data", b"")
+                        end_stream = getattr(e, "end_stream", False)
+                        if data or not end_stream:
+                            fin_only = False
+                            break
+                    if fin_only:
+                        logger.debug(
+                            "Ignoring late FIN on closed outbound stream %s "
+                            "(is_initiator=%s, quic.is_client=%s)",
+                            stream_id,
+                            self._is_initiator,
+                            getattr(
+                                getattr(self._quic, "configuration", None),
+                                "is_client",
+                                None,
+                            ),
+                        )
+                        continue
+                    is_client = getattr(
+                        getattr(self._quic, "configuration", None), "is_client", None
+                    )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        f"Unexpected outbound stream {stream_id} in data event"
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     continue
 
@@ -935,12 +1081,25 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 logger.warning(f"Rejecting inbound stream {stream_id}: limit reached")
                 raise QUICStreamLimitError("Too many inbound streams")
 
+            # Acquire stream scope from resource manager if available
+            stream_scope = None
+            if self._resource_scope and hasattr(
+                self._resource_scope, "_resource_manager"
+            ):
+                try:
+                    stream_scope = self._resource_scope._resource_manager.open_stream(
+                        peer_id=self._remote_peer_id, direction=Direction.INBOUND
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to acquire stream scope: {e}")
+                    raise QUICStreamLimitError(f"Resource limit exceeded: {e}")
+
             # Create stream
             stream = QUICStream(
                 connection=self,
                 stream_id=stream_id,
                 direction=StreamDirection.INBOUND,
-                resource_scope=self._resource_scope,
+                resource_scope=stream_scope,
                 remote_addr=self._remote_addr,
             )
 
@@ -962,9 +1121,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
         await self._process_quic_events_batched()
 
     async def _handle_quic_event(self, event: events.QuicEvent) -> None:
-        """Handle a single QUIC event with COMPLETE event type coverage."""
+        """
+        Handle a single QUIC event with complete event type coverage.
+
+        NOTE: This is called by the connection's event loop for established connections.
+        For pending connections, the listener's _process_quic_events handles events
+        until the connection is promoted. This separation prevents double-processing
+        of events.
+        """
         logger.debug(f"Handling QUIC event: {type(event).__name__}")
-        logger.debug(f"QUIC event: {type(event).__name__}")
 
         try:
             if isinstance(event, events.ConnectionTerminated):
@@ -977,12 +1142,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._handle_stream_reset(event)
             elif isinstance(event, events.DatagramFrameReceived):
                 await self._handle_datagram_received(event)
-            # *** NEW: Connection ID event handlers - CRITICAL FIX ***
+            # Connection ID event handlers - critical for proper packet routing
             elif isinstance(event, events.ConnectionIdIssued):
                 await self._handle_connection_id_issued(event)
             elif isinstance(event, events.ConnectionIdRetired):
                 await self._handle_connection_id_retired(event)
-            # *** NEW: Additional event handlers for completeness ***
+            # Additional event handlers for completeness
             elif isinstance(event, events.PingAcknowledged):
                 await self._handle_ping_acknowledged(event)
             elif isinstance(event, events.ProtocolNegotiated):
@@ -991,7 +1156,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self._handle_stop_sending_received(event)
             else:
                 logger.debug(f"Unhandled QUIC event type: {type(event).__name__}")
-                logger.debug(f"Unhandled QUIC event: {type(event).__name__}")
 
         except Exception as e:
             logger.error(f"Error handling QUIC event {type(event).__name__}: {e}")
@@ -1003,28 +1167,101 @@ class QUICConnection(IRawConnection, IMuxedConn):
         Handle new connection ID issued by peer.
 
         This is the CRITICAL missing functionality that was causing your issue!
+        Tracks sequence numbers for proper Connection ID retirement ordering
+        (inspired by quinn).
         """
-        logger.debug(f"🆔 NEW CONNECTION ID ISSUED: {event.connection_id.hex()}")
-        logger.debug(f"🆔 NEW CONNECTION ID ISSUED: {event.connection_id.hex()}")
+        new_connection_id = event.connection_id
+
+        # Increment sequence counter for this new Connection ID
+        sequence = self._connection_id_sequence_counter
+        self._connection_id_sequence_counter += 1
+        self._connection_id_sequence_numbers.add(sequence)
+
+        logger.debug(
+            f"NEW CONNECTION ID ISSUED: {new_connection_id.hex()} (sequence {sequence})"
+        )
 
         # Add to available connection IDs
-        self._available_connection_ids.add(event.connection_id)
+        self._available_connection_ids.add(new_connection_id)
 
         # If we don't have a current connection ID, use this one
         if self._current_connection_id is None:
-            self._current_connection_id = event.connection_id
-            logger.debug(
-                f"🆔 Set current connection ID to: {event.connection_id.hex()}"
-            )
-            logger.debug(
-                f"🆔 Set current connection ID to: {event.connection_id.hex()}"
-            )
+            self._current_connection_id = new_connection_id
+            logger.debug(f"Set current connection ID to: {new_connection_id.hex()}")
+
+        # CRITICAL FIX: Notify listener to register this new Connection ID
+        # with sequence number. This ensures packets with the new Connection ID
+        # can be routed correctly
+        await self._notify_listener_of_new_connection_id(new_connection_id, sequence)
 
         # Update statistics
         self._stats["connection_ids_issued"] += 1
 
         logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
-        logger.debug(f"Available connection IDs: {len(self._available_connection_ids)}")
+
+    async def _notify_listener_of_new_connection_id(
+        self, new_connection_id: bytes, sequence: int
+    ) -> None:
+        """
+        Notify the parent listener to register a new Connection ID.
+
+        This is critical for proper packet routing when the peer issues
+        new Connection IDs after the handshake completes.
+
+        Args:
+            new_connection_id: New Connection ID to register
+            sequence: Sequence number for this Connection ID
+
+        """
+        notification_start = time.time()
+        try:
+            if self._listener and self._listener_connection_id:
+                await self._listener._registry.add_connection_id(
+                    new_connection_id, self._listener_connection_id, sequence
+                )
+                notification_duration = time.time() - notification_start
+                if notification_duration > self.SLOW_NOTIFICATION_THRESHOLD_SECONDS:
+                    logger.debug(
+                        f"Slow Connection ID notification: "
+                        f"{notification_duration * 1000:.2f}ms "
+                        f"for Connection ID {new_connection_id.hex()[:8]}"
+                    )
+                return
+
+            if not self._transport:
+                return
+
+            # Find the listener that owns this connection
+            for listener in self._transport._listeners:
+                # Find this connection in the listener's registry
+                cids = await listener._registry.get_all_cids_for_connection(self)
+                if cids:
+                    # Use the first Connection ID found as the original Connection ID
+                    original_connection_id = cids[0]
+                    # Register new Connection ID using the registry with sequence number
+                    await listener._registry.add_connection_id(
+                        new_connection_id, original_connection_id, sequence
+                    )
+                    notification_duration = time.time() - notification_start
+                    if notification_duration > 0.01:  # Log slow notifications (>10ms)
+                        logger.debug(
+                            f"Slow Connection ID notification: "
+                            f"{notification_duration * 1000:.2f}ms "
+                            f"for Connection ID {new_connection_id.hex()[:8]}"
+                        )
+                    logger.debug(
+                        f"Registered new Connection ID {new_connection_id.hex()[:8]} "
+                        f"(sequence {sequence}) for connection "
+                        f"{original_connection_id.hex()[:8]}"
+                    )
+                    return
+
+            logger.debug(
+                f"Could not find listener to register new Connection ID "
+                f"{new_connection_id.hex()[:8]}"
+            )
+        except Exception as e:
+            logger.error(f"Error notifying listener of new CID: {e}")
 
     async def _handle_connection_id_retired(
         self, event: events.ConnectionIdRetired
@@ -1033,8 +1270,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
         Handle connection ID retirement.
 
         This handles when the peer tells us to stop using a connection ID.
+        The listener will handle proper retirement ordering via the registry.
         """
-        logger.debug(f"🗑️ CONNECTION ID RETIRED: {event.connection_id.hex()}")
+        logger.debug(f"CONNECTION ID RETIRED: {event.connection_id.hex()}")
 
         # Remove from available IDs and add to retired set
         self._available_connection_ids.discard(event.connection_id)
@@ -1058,6 +1296,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         # Update statistics
         self._stats["connection_ids_retired"] += 1
+
+        # Note: The listener's _process_quic_events() will handle proper
+        # retirement ordering via the registry's
+        # retire_connection_ids_by_sequence_range()
 
     async def _handle_ping_acknowledged(self, event: events.PingAcknowledged) -> None:
         """Handle ping acknowledgment."""
@@ -1137,8 +1379,28 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     logger.debug(f"Creating new incoming stream {stream_id}")
                     stream = await self._create_inbound_stream(stream_id)
                 else:
+                    if not event.data and event.end_stream:
+                        logger.debug(
+                            "Ignoring late FIN on closed outbound stream %s "
+                            "(is_initiator=%s, quic.is_client=%s)",
+                            stream_id,
+                            self._is_initiator,
+                            getattr(
+                                getattr(self._quic, "configuration", None),
+                                "is_client",
+                                None,
+                            ),
+                        )
+                        return
+                    is_client = getattr(
+                        getattr(self._quic, "configuration", None), "is_client", None
+                    )
+                    parity = "even" if stream_id % 2 == 0 else "odd"
                     logger.error(
-                        f"Unexpected outbound stream {stream_id} in data event"
+                        f"Unexpected outbound stream {stream_id} in data event "
+                        f"(parity={parity}, is_initiator={self._is_initiator}, "
+                        f"quic.is_client={is_client}, streams={len(self._streams)}, "
+                        f"cached={stream_id in self._stream_cache})"
                     )
                     return
 
@@ -1281,7 +1543,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:
-            # Close all streams gracefully
+            # Close all streams gracefully, but limit concurrency to prevent
+            # excessive CPU usage when many streams fail simultaneously
             stream_close_tasks = []
             for stream in list(self._streams.values()):
                 if stream.can_write() or stream.can_read():
@@ -1289,17 +1552,24 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             if stream_close_tasks and self._nursery:
                 try:
-                    # Close streams concurrently with timeout
+                    # Close streams in batches to prevent overwhelming the system
+                    # when many streams fail simultaneously (e.g., 100 streams)
+                    batch_size = 20  # Close streams in batches of 20
                     with trio.move_on_after(self.CONNECTION_CLOSE_TIMEOUT):
-                        async with trio.open_nursery() as close_nursery:
-                            for task in stream_close_tasks:
-                                close_nursery.start_soon(task)
+                        for i in range(0, len(stream_close_tasks), batch_size):
+                            batch = stream_close_tasks[i : i + batch_size]
+                            async with trio.open_nursery() as close_nursery:
+                                for task in batch:
+                                    close_nursery.start_soon(task)
                 except Exception as e:
                     logger.warning(f"Error during graceful stream close: {e}")
-                    # Force reset remaining streams
-                    for stream in self._streams.values():
+                    # Force reset remaining streams quickly without batching
+                    # to prevent resource leaks
+                    for stream in list(self._streams.values()):
                         try:
-                            await stream.reset(error_code=0)
+                            # Use move_on_after to prevent hanging on stuck streams
+                            with trio.move_on_after(0.1):  # 100ms per stream max
+                                await stream.reset(error_code=0)
                         except Exception:
                             pass
 
@@ -1323,6 +1593,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 
+            # Release resource scope if present
+            try:
+                scope = getattr(self, "_resource_scope", None)
+                if scope is not None and hasattr(scope, "done"):
+                    scope.done()
+                    self._resource_scope = None
+            except Exception:
+                pass
+
         except Exception as e:
             logger.error(f"Error during connection close: {e}")
 
@@ -1337,17 +1616,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             if self._transport:
                 await self._transport._cleanup_terminated_connection(self)
                 logger.debug("Notified transport of connection termination")
+                # Also try to remove from listeners
+                for listener in self._transport._listeners:
+                    try:
+                        await listener._remove_connection_by_object(self)
+                        logger.debug(
+                            "Found and notified listener of connection termination"
+                        )
+                        break
+                    except Exception:
+                        continue
                 return
-
-            for listener in self._transport._listeners:
-                try:
-                    await listener._remove_connection_by_object(self)
-                    logger.debug(
-                        "Found and notified listener of connection termination"
-                    )
-                    return
-                except Exception:
-                    continue
 
             # Method 4: Use connection ID if we have one (most reliable)
             if self._current_connection_id:
@@ -1366,11 +1645,14 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Cleanup using connection ID as a fallback method."""
         try:
             for listener in self._transport._listeners:
-                for tracked_cid, tracked_conn in list(listener._connections.items()):
-                    if tracked_conn is self:
-                        await listener._remove_connection(tracked_cid)
-                        logger.debug(f"Removed connection {tracked_cid.hex()}")
-                        return
+                # Find this connection in the listener's registry
+                cids = await listener._registry.get_all_cids_for_connection(self)
+                if cids:
+                    # Remove using the first Connection ID found
+                    tracked_cid = cids[0]
+                    await listener._remove_connection(tracked_cid)
+                    logger.debug(f"Removed connection {tracked_cid.hex()}")
+                    return
 
             logger.debug("Fallback cleanup by connection ID completed")
         except Exception as e:

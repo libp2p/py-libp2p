@@ -1,1 +1,0 @@
-Added IPv4 address validation for LIBP2P_BIND environment variable to prevent invalid addresses from causing runtime errors. Invalid addresses now fallback to the secure default of 127.0.0.1.

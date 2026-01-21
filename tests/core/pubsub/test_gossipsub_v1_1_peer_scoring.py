@@ -453,6 +453,16 @@ class TestGossipSubScoringIntegration:
             # Initially peer should not be allowed for PX
             assert isinstance(gsub0, GossipSub)
             assert gsub0.scorer is not None
+
+            # Remove peer from mesh to reset their score to 0.0
+            # This ensures we start with a clean state for the test
+            # (Windows timing can cause peers to accumulate score before this check)
+            if topic in gsub0.mesh:
+                gsub0.mesh[topic].discard(peer_id)
+            # Reset their time_in_mesh score
+            scorer = cast(PeerScorer, gsub0.scorer)
+            scorer.time_in_mesh[peer_id][topic] = 0.0
+
             assert not gsub0.scorer.allow_px_from(peer_id, [topic])
 
             # Increase peer's score
@@ -791,6 +801,9 @@ class TestGossipSubScoringIntegration:
             "mesh_deliveries",
             "invalid_messages",
             "behavior_penalty",
+            "app_specific_score",
+            "ip_colocation_penalty",
+            "peer_ip",
             "total_score",
         }
         assert set(stats.keys()) == expected_keys

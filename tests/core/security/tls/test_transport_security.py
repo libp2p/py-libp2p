@@ -107,7 +107,6 @@ async def test_sensitive_data_handling(nursery: trio.Nursery) -> None:
             f"Temporary files remained after cleanup: "
             f"{[f.name for f in remaining_files]}"
         )
-
         # Verify no sensitive data in any new files
         for f in final_files - initial_files:
             if f.exists():  # Check if file still exists

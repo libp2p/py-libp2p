@@ -1,18 +1,20 @@
 """Tests for the Circuit Relay v2 protocol."""
 
 import logging
+import os
 import time
 from typing import Any
 
 import pytest
 import trio
 
-from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamError,
     StreamReset,
 )
+from libp2p.peer import peerstore
 from libp2p.peer.envelope import (
     Envelope,
     unmarshal_envelope,
@@ -24,6 +26,7 @@ from libp2p.peer.peerstore import (
     env_to_send_in_RPC,
 )
 from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
+from libp2p.relay.circuit_v2.pb.circuit_pb2 import Reservation as PbReservation
 from libp2p.relay.circuit_v2.protocol import (
     DEFAULT_RELAY_LIMITS,
     PROTOCOL_ID,
@@ -32,6 +35,7 @@ from libp2p.relay.circuit_v2.protocol import (
 )
 from libp2p.relay.circuit_v2.resources import (
     RelayLimits,
+    RelayResourceManager,
 )
 from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
@@ -54,6 +58,69 @@ CONNECT_TIMEOUT = 15  # seconds (increased)
 STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
 SLEEP_TIME = 1.0  # seconds (increased)
+
+
+@pytest.fixture
+def key_pair():
+    return create_new_key_pair()
+
+
+@pytest.fixture
+def peer_store():
+    return peerstore.PeerStore()
+
+
+@pytest.fixture
+def peer_id(key_pair, peer_store):
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store.add_key_pair(peer_id, key_pair)
+    return peer_id
+
+
+@pytest.fixture
+def limits():
+    return RelayLimits(
+        duration=3600, data=1_000_000, max_circuit_conns=10, max_reservations=100
+    )
+
+
+@pytest.fixture
+def manager(limits):
+    return RelayResourceManager(limits, None)
+
+
+@pytest.fixture
+def reservation(manager, peer_id):
+    return manager.create_reservation(peer_id)
+
+
+def test_circuit_v2_verify_reservation(limits, peer_id, key_pair):
+    # Create a mock host with the key pair
+    from unittest.mock import Mock
+
+    mock_host = Mock()
+    mock_host.get_private_key.return_value = key_pair.private_key
+    mock_host.get_public_key.return_value = key_pair.public_key
+
+    # Create manager with the mock host
+    manager = RelayResourceManager(limits, mock_host)
+
+    # Create a reservation
+    reservation = manager.create_reservation(peer_id)
+
+    # Get the proper signed protobuf reservation from the reservation object
+    proto_res = reservation.to_proto()
+
+    # This should pass since it's properly signed
+    assert manager.verify_reservation(peer_id, proto_res) is True
+
+    # Invalid protobuf reservation
+    invalid_proto = PbReservation(
+        expire=int(reservation.expires_at),
+        voucher=os.urandom(32),
+        signature=key_pair.private_key.sign(os.urandom(32)),
+    )
+    assert manager.verify_reservation(peer_id, invalid_proto) is False
 
 
 async def assert_stream_response(
@@ -314,6 +381,145 @@ async def test_circuit_v2_protocol_initialization():
             assert len(protocol.resource_manager._reservations) == 0, (
                 "Reservations should be empty"
             )
+
+
+@pytest.mark.trio
+async def test_circuit_v2_voucher_verification_complete():
+    """Test complete voucher verification with cryptographic signatures."""
+    async with HostFactory.create_batch_and_listen(2) as hosts:
+        relay_host, client_host = hosts
+        logger.info("Created hosts for test_circuit_v2_voucher_verification_complete")
+        logger.info("Relay host ID: %s", relay_host.get_id())
+        logger.info("Client host ID: %s", client_host.get_id())
+
+        # Create resource manager with host for cryptographic operations
+        limits = RelayLimits(
+            duration=3600,  # 1 hour
+            data=1024 * 1024 * 1024,  # 1GB
+            max_circuit_conns=4,
+            max_reservations=2,
+        )
+
+        # Create resource manager with the relay host
+        # Note: No need to add client's public key since we now use relay's key
+        # for signing/verification
+        resource_manager = RelayResourceManager(limits, relay_host)
+        client_peer_id = client_host.get_id()
+
+        logger.info("Creating reservation for peer %s", client_peer_id)
+        ttl = resource_manager.reserve(client_peer_id)
+        assert ttl > 0, "Should create reservation successfully"
+
+        # Get the reservation object
+        reservation = resource_manager._reservations.get(client_peer_id)
+        assert reservation is not None, "Reservation should exist"
+
+        # Ensure the reservation has the host reference
+        assert reservation.host is not None, "Reservation should have host reference"
+
+        # Convert to protobuf with signature
+        pb_reservation = reservation.to_proto()
+
+        # Verify the reservation has a signature
+        assert pb_reservation.signature != b"", "Reservation should have a signature"
+        assert len(pb_reservation.signature) > 0, "Signature should not be empty"
+
+        logger.info(
+            "Created reservation with signature length: %d bytes",
+            len(pb_reservation.signature),
+        )
+
+        # Verify the reservation with correct signature
+        logger.info("Verifying reservation with correct signature")
+        is_valid = resource_manager.verify_reservation(client_peer_id, pb_reservation)
+        assert is_valid is True, "Valid reservation should pass verification"
+        logger.info("Reservation verification succeeded with valid signature")
+
+        # Test with tampered voucher (should fail)
+        tampered_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=b"tampered-voucher-data",
+            signature=pb_reservation.signature,
+        )
+
+        is_valid_tampered = resource_manager.verify_reservation(
+            client_peer_id, tampered_reservation
+        )
+        assert is_valid_tampered is False, "Tampered voucher should fail verification"
+        logger.info("Tampered voucher correctly rejected")
+
+        # Test with wrong signature (should fail)
+        wrong_sig_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=pb_reservation.voucher,
+            signature=b"wrong-signature-data",
+        )
+
+        is_valid_wrong_sig = resource_manager.verify_reservation(
+            client_peer_id, wrong_sig_reservation
+        )
+        assert is_valid_wrong_sig is False, "Wrong signature should fail verification"
+        logger.info("Wrong signature correctly rejected")
+
+        # Test with different peer ID (should fail)
+        other_peer_id = relay_host.get_id()
+
+        is_valid_wrong_peer = resource_manager.verify_reservation(
+            other_peer_id, pb_reservation
+        )
+        assert is_valid_wrong_peer is False, (
+            "Reservation for different peer should fail verification"
+        )
+        logger.info("Reservation for wrong peer correctly rejected")
+
+        # Test with missing signature (should fail)
+        no_sig_reservation = proto.Reservation(
+            expire=pb_reservation.expire,
+            voucher=pb_reservation.voucher,
+            signature=b"",
+        )
+
+        is_valid_no_sig = resource_manager.verify_reservation(
+            client_peer_id, no_sig_reservation
+        )
+        assert is_valid_no_sig is False, (
+            "Reservation without signature should fail verification"
+        )
+        logger.info("Reservation without signature correctly rejected")
+
+        # Test with expired reservation
+        expired_reservation = resource_manager._reservations[client_peer_id]
+        expired_reservation.expires_at = int(time.time() - 1)
+
+        is_valid_expired = resource_manager.verify_reservation(
+            client_peer_id, pb_reservation
+        )
+        assert is_valid_expired is False, "Expired reservation should fail verification"
+        logger.info("Expired reservation correctly rejected")
+
+        # Test resource manager without host (should fail)
+        resource_manager_no_host = RelayResourceManager(limits, None)
+        temp_peer_id = client_host.get_id()
+        temp_ttl = resource_manager_no_host.reserve(temp_peer_id)
+        assert temp_ttl > 0, "Should create reservation even without host"
+
+        temp_reservation = resource_manager_no_host._reservations.get(temp_peer_id)
+        assert temp_reservation is not None, "Temp reservation should exist"
+
+        temp_pb_reservation = temp_reservation.to_proto()
+        assert temp_pb_reservation.signature == b"", (
+            "Should have empty signature without host"
+        )
+
+        is_valid_no_host = resource_manager_no_host.verify_reservation(
+            temp_peer_id, temp_pb_reservation
+        )
+        assert is_valid_no_host is False, (
+            "Reservation verification should fail when no host available"
+        )
+        logger.info("Reservation correctly rejected when no host available")
+
+        logger.info("All voucher verification tests passed successfully!")
 
 
 @pytest.mark.trio

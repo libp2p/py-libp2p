@@ -193,7 +193,8 @@ async def test_handle_prune():
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
         # Wait for heartbeat to allow mesh to connect
-        await trio.sleep(1)
+        # With heartbeat_interval=3, we need to wait longer for mesh establishment
+        await trio.sleep(3.5)
 
         # Check that they are each other's mesh peer
         assert id_alice in gossipsubs[index_bob].mesh[topic]
@@ -207,8 +208,8 @@ async def test_handle_prune():
 
         # NOTE: We increase `heartbeat_interval` to 3 seconds so that bob will not
         # add alice back to his mesh after heartbeat.
-        # Wait for bob to `handle_prune`
-        await trio.sleep(0.1)
+        # Wait for bob to `handle_prune` - increased wait time for Windows compatibility
+        await trio.sleep(0.5)
 
         # Check that alice is no longer bob's mesh peer
         assert id_alice not in gossipsubs[index_bob].mesh[topic]
@@ -460,6 +461,8 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         router_obj = pubsubs_gsub[0].router
         assert isinstance(router_obj, GossipSub)
         router = router_obj
+        # Disable adaptive gossip for this test to maintain expected behavior
+        router.adaptive_gossip_enabled = False
         monkeypatch.setattr(router, "peer_protocol", peer_protocol)
 
         topic_mesh_peer_count = 14
@@ -498,15 +501,19 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
         monkeypatch.setattr(router.mcache, "window", window)
 
         peers_to_gossip = router.gossip_heartbeat()
-        # If our mesh peer count is less than `GossipSubDegree`, we should gossip to up
-        # to `GossipSubDegree` peers (exclude mesh peers).
-        if topic_mesh_peer_count - initial_peer_count < router.degree:
-            # The same goes for fanout so it's two times the number of peers to gossip.
-            assert len(peers_to_gossip) == 2 * (
-                topic_mesh_peer_count - initial_peer_count
-            )
-        elif topic_mesh_peer_count - initial_peer_count >= router.degree:
-            assert len(peers_to_gossip) == 2 * (router.degree)
+        # According to Gossipsub spec, we gossip to
+        # max(Dlazy=6, GossipFactor * total_peers)
+        # where GossipFactor=0.25. For each topic (mesh and fanout), we calculate:
+        # gossip_count = max(6, int((topic_peer_count - current_peers) * 0.25))
+        # Total peers to gossip = 2 * gossip_count
+        # (one for mesh topic, one for fanout topic)
+        total_gossip_peers_per_topic = topic_mesh_peer_count - initial_peer_count
+        # Dlazy=6, GossipFactor=0.25
+        expected_gossip_count_per_topic = max(
+            6, int(total_gossip_peers_per_topic * 0.25)
+        )
+        expected_total = 2 * expected_gossip_count_per_topic
+        assert len(peers_to_gossip) == expected_total
 
         for peer in peers_to_gossip:
             if peer in peer_topics[topic_mesh]:
@@ -604,7 +611,7 @@ async def test_sparse_connect():
 async def test_connect_some_with_fewer_hosts_than_degree():
     """Test connect_some when there are fewer hosts than degree."""
     # Create 3 hosts with degree=5
-    async with PubsubFactory.create_batch_with_floodsub(3) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(3) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 5
 
@@ -625,7 +632,7 @@ async def test_connect_some_with_fewer_hosts_than_degree():
 async def test_connect_some_degree_limit_enforced():
     """Test that connect_some enforces degree limits and creates expected topology."""
     # Test with small network where we can verify exact behavior
-    async with PubsubFactory.create_batch_with_floodsub(6) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(6) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 2
 
@@ -673,7 +680,7 @@ async def test_connect_some_degree_limit_enforced():
 async def test_connect_some_degree_zero():
     """Test edge case: degree=0 should result in no connections."""
     # Create 5 hosts with degree=0
-    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(5) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 0
 
@@ -693,7 +700,7 @@ async def test_connect_some_degree_zero():
 async def test_connect_some_negative_degree():
     """Test edge case: negative degree should be handled gracefully."""
     # Create 5 hosts with degree=-1
-    async with PubsubFactory.create_batch_with_floodsub(5) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(5) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = -1
 
@@ -712,7 +719,7 @@ async def test_connect_some_negative_degree():
 @pytest.mark.trio
 async def test_sparse_connect_degree_zero():
     """Test sparse_connect with degree=0."""
-    async with PubsubFactory.create_batch_with_floodsub(8) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(8) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
         degree = 0
 
@@ -748,7 +755,7 @@ async def test_empty_host_list():
 @pytest.mark.trio
 async def test_single_host():
     """Test edge case: single host should be handled gracefully."""
-    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
         hosts = [pubsub.host for pubsub in pubsubs_fsub]
 
         # All functions should handle single host gracefully

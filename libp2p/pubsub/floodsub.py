@@ -3,6 +3,7 @@ from collections.abc import (
     Sequence,
 )
 import logging
+import time
 
 import trio
 
@@ -16,8 +17,10 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.utils import maybe_consume_signed_record
 
 from .exceptions import (
+    NoPubsubAttached,
     PubsubRouterError,
 )
 from .pb import (
@@ -33,13 +36,18 @@ logger = logging.getLogger("libp2p.pubsub.floodsub")
 
 
 class FloodSub(IPubsubRouter):
+    mesh: dict[str, set[ID]]
+    peer_protocol: dict[ID, TProtocol]
     protocols: list[TProtocol]
-
     pubsub: Pubsub | None
+    time_since_last_publish: dict[str, int]
 
     def __init__(self, protocols: Sequence[TProtocol]) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
+        self.mesh = {}
+        self.peer_protocol = {}
+        self.time_since_last_publish = {}
 
     def get_protocols(self) -> list[TProtocol]:
         """
@@ -55,6 +63,7 @@ class FloodSub(IPubsubRouter):
         :param pubsub: pubsub instance to attach to
         """
         self.pubsub = pubsub
+        logger.debug("attached to pubsub")
 
     def add_peer(self, peer_id: ID, protocol_id: TProtocol | None) -> None:
         """
@@ -62,6 +71,14 @@ class FloodSub(IPubsubRouter):
 
         :param peer_id: id of peer to add
         """
+        logger.debug("adding peer %s with protocol %s", peer_id, protocol_id)
+
+        if protocol_id is None:
+            raise ValueError("Protocol cannot be None")
+
+        if protocol_id not in (PROTOCOL_ID):
+            raise ValueError(f"Protocol={protocol_id} is not supported")
+        self.peer_protocol[peer_id] = protocol_id
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -69,6 +86,12 @@ class FloodSub(IPubsubRouter):
 
         :param peer_id: id of peer to remove
         """
+        logger.debug("removing peer %s", peer_id)
+
+        for topic in self.mesh:
+            self.mesh[topic].discard(peer_id)
+
+        self.peer_protocol.pop(peer_id, None)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -78,6 +101,12 @@ class FloodSub(IPubsubRouter):
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
         """
+        # Process the senderRecord if sent
+        if isinstance(self.pubsub, Pubsub):
+            if not maybe_consume_signed_record(rpc, self.pubsub.host, sender_peer_id):
+                logger.error("Received an invalid-signed-record, ignoring the message")
+                return
+
         # Checkpoint
         await trio.lowlevel.checkpoint()
 
@@ -122,6 +151,9 @@ class FloodSub(IPubsubRouter):
             stream = pubsub.peers[peer_id]
             await pubsub.write_msg(stream, rpc_msg)
 
+        for topic in pubsub_msg.topicIDs:
+            self.time_since_last_publish[topic] = int(time.time())
+
     async def join(self, topic: str) -> None:
         """
         Join notifies the router that we want to receive and forward messages
@@ -129,8 +161,17 @@ class FloodSub(IPubsubRouter):
 
         :param topic: topic to join
         """
-        # Checkpoint
-        await trio.lowlevel.checkpoint()
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        logger.debug("joining topic %s", topic)
+
+        if topic in self.mesh:
+            return
+
+        # Create mesh[topic] if it does not yet exist
+        self.mesh[topic] = set()
+        self.time_since_last_publish.pop(topic, None)
 
     async def leave(self, topic: str) -> None:
         """
@@ -139,8 +180,12 @@ class FloodSub(IPubsubRouter):
 
         :param topic: topic to leave
         """
-        # Checkpoint
-        await trio.lowlevel.checkpoint()
+        logger.debug("leaving topic %s", topic)
+
+        if topic not in self.mesh:
+            return
+
+        self.mesh.pop(topic, None)
 
     def _get_peers_to_send(
         self, topic_ids: Iterable[str], msg_forwarder: ID, origin: ID
@@ -163,5 +208,10 @@ class FloodSub(IPubsubRouter):
                 if peer_id in (msg_forwarder, origin):
                     continue
                 if peer_id not in pubsub.peers:
+                    continue
+                if peer_id not in self.peer_protocol:
+                    continue
+
+                if self.peer_protocol[peer_id] != PROTOCOL_ID:
                     continue
                 yield peer_id

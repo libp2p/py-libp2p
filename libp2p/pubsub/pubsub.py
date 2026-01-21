@@ -49,6 +49,7 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamEOF,
     StreamError,
+    StreamReset,
 )
 from libp2p.peer.id import (
     ID,
@@ -104,6 +105,79 @@ class TopicValidator(NamedTuple):
     is_async: bool
 
 
+class ValidationResult(NamedTuple):
+    """Result of message validation with caching metadata."""
+
+    is_valid: bool
+    timestamp: float
+    error_message: str | None = None
+
+
+class ValidationCache:
+    """Cache for validation results to avoid redundant validation."""
+
+    def __init__(self, ttl: int = 300, max_size: int = 1000):
+        """
+        Initialize validation cache.
+
+        :param ttl: Time-to-live for cache entries in seconds
+        :param max_size: Maximum number of entries to cache
+        """
+        self.ttl = ttl
+        self.max_size = max_size
+        self.cache: dict[bytes, ValidationResult] = {}
+        self.access_order: list[bytes] = []  # For LRU eviction
+
+    def get(self, msg_id: bytes) -> ValidationResult | None:
+        """Get cached validation result if still valid."""
+        if msg_id not in self.cache:
+            return None
+
+        result = self.cache[msg_id]
+        current_time = time.time()
+
+        # Check if result is still valid
+        if current_time - result.timestamp > self.ttl:
+            self._remove(msg_id)
+            return None
+
+        # Update access order for LRU
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+        self.access_order.append(msg_id)
+
+        return result
+
+    def put(self, msg_id: bytes, result: ValidationResult) -> None:
+        """Cache a validation result."""
+        # Evict old entries if cache is full
+        while len(self.cache) >= self.max_size and self.access_order:
+            oldest = self.access_order.pop(0)
+            self.cache.pop(oldest, None)
+
+        self.cache[msg_id] = result
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+        self.access_order.append(msg_id)
+
+    def _remove(self, msg_id: bytes) -> None:
+        """Remove entry from cache."""
+        self.cache.pop(msg_id, None)
+        if msg_id in self.access_order:
+            self.access_order.remove(msg_id)
+
+    def clear_expired(self) -> None:
+        """Clear expired entries from cache."""
+        current_time = time.time()
+        expired_keys = [
+            msg_id
+            for msg_id, result in self.cache.items()
+            if current_time - result.timestamp > self.ttl
+        ]
+        for msg_id in expired_keys:
+            self._remove(msg_id)
+
+
 MAX_CONCURRENT_VALIDATORS = 10
 
 
@@ -125,6 +199,8 @@ class Pubsub(Service, IPubsub):
     peers: dict[ID, INetStream]
 
     topic_validators: dict[str, TopicValidator]
+    validation_cache: ValidationCache
+    validation_timeout: float  # Timeout for async validators in seconds
 
     counter: int  # uint64
 
@@ -150,6 +226,9 @@ class Pubsub(Service, IPubsub):
             [rpc_pb2.Message], bytes
         ] = get_peer_and_seqno_msg_id,
         max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
+        validation_cache_ttl: int = 300,
+        validation_cache_size: int = 1000,
+        validation_timeout: float = 5.0,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -214,6 +293,12 @@ class Pubsub(Service, IPubsub):
         # Map of topic to topic validator
         self.topic_validators = {}
 
+        # Enhanced validation features (v2.0)
+        self.validation_cache = ValidationCache(
+            validation_cache_ttl, validation_cache_size
+        )
+        self.validation_timeout = validation_timeout
+
         self.counter = int(time.time())
 
         # Set of blacklisted peer IDs
@@ -225,6 +310,7 @@ class Pubsub(Service, IPubsub):
     async def run(self) -> None:
         self.manager.run_daemon_task(self.handle_peer_queue)
         self.manager.run_daemon_task(self.handle_dead_peer_queue)
+        self.manager.run_daemon_task(self._validation_cache_cleanup)
         await self.manager.wait_finished()
 
     @property
@@ -454,6 +540,11 @@ class Pubsub(Service, IPubsub):
         await self.event_handle_dead_peer_queue_started.wait()
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
+        # Check if we already have a pubsub stream with this peer to avoid duplicates
+        if peer_id in self.peers:
+            logger.debug("Peer %s already has pubsub stream, skipping", peer_id)
+            return
+
         if self.is_peer_blacklisted(peer_id):
             logger.debug("Rejecting blacklisted peer %s", peer_id)
             return
@@ -481,6 +572,17 @@ class Pubsub(Service, IPubsub):
 
         logger.debug("added new peer %s", peer_id)
 
+    async def _handle_new_peer_safe(self, peer_id: ID) -> None:
+        """
+        Safely handle new peer with exception handling.
+        This wrapper ensures that any exceptions during peer negotiation
+        don't crash the entire pubsub service.
+        """
+        try:
+            await self._handle_new_peer(peer_id)
+        except Exception as error:
+            logger.info(f"Protocol negotiation failed for peer {peer_id}: {error}")
+
     def _handle_dead_peer(self, peer_id: ID) -> None:
         if peer_id not in self.peers:
             return
@@ -503,18 +605,35 @@ class Pubsub(Service, IPubsub):
         async with self.peer_receive_channel:
             self.event_handle_peer_queue_started.set()
             async for peer_id in self.peer_receive_channel:
-                # Add Peer
-                self.manager.run_task(self._handle_new_peer, peer_id)
+                # Add Peer - wrap in exception handler to prevent service crash
+                self.manager.run_task(self._handle_new_peer_safe, peer_id)
 
     async def handle_dead_peer_queue(self) -> None:
         """
         Continuously read from dead peer channel and close the stream
         between that peer and remove peer info from pubsub and pubsub router.
+        Only removes the peer if there are no remaining active connections.
         """
         async with self.dead_peer_receive_channel:
             self.event_handle_dead_peer_queue_started.set()
             async for peer_id in self.dead_peer_receive_channel:
-                # Remove Peer
+                # Check if peer still has active connections before removing
+                # This prevents premature removal when multiple connections exist
+                network = self.host.get_network()
+                remaining_connections = network.get_connections(peer_id)
+                if remaining_connections:
+                    # Filter out closed connections
+                    active_connections = [
+                        c for c in remaining_connections if not c.muxed_conn.is_closed
+                    ]
+                    if active_connections:
+                        logger.debug(
+                            "Peer %s still has %d active connections, not removing",
+                            peer_id,
+                            len(active_connections),
+                        )
+                        continue
+                # Remove Peer - no more active connections
                 self._handle_dead_peer(peer_id)
 
     def handle_subscription(
@@ -691,11 +810,22 @@ class Pubsub(Service, IPubsub):
         msg: rpc_pb2.Message,
     ) -> None:
         """
-        Validate the received message.
+        Validate the received message with caching and timeout support.
 
         :param msg_forwarder: the peer who forward us the message.
         :param msg: the message.
         """
+        # Check validation cache first
+        msg_id = self._msg_id_constructor(msg)
+        cached_result = self.validation_cache.get(msg_id)
+        if cached_result is not None:
+            if not cached_result.is_valid:
+                error_msg = cached_result.error_message or "unknown error"
+                raise ValidationError(
+                    f"Cached validation failed for msg={msg}: {error_msg}"
+                )
+            return
+
         sync_topic_validators: list[SyncValidatorFn] = []
         async_topic_validators: list[AsyncValidatorFn] = []
         for topic_validator in self.get_msg_validators(msg):
@@ -708,26 +838,61 @@ class Pubsub(Service, IPubsub):
                     cast(SyncValidatorFn, topic_validator.validator)
                 )
 
-        for validator in sync_topic_validators:
-            if not validator(msg_forwarder, msg):
-                raise ValidationError(f"Validation failed for msg={msg}")
+        validation_error = None
+        try:
+            # Run synchronous validators first
+            for validator in sync_topic_validators:
+                if not validator(msg_forwarder, msg):
+                    validation_error = "Synchronous validation failed"
+                    raise ValidationError(f"Validation failed for msg={msg}")
 
-        if len(async_topic_validators) > 0:
-            # Appends to lists are thread safe in CPython
-            results: list[bool] = []
+            # Run asynchronous validators with timeout
+            if len(async_topic_validators) > 0:
+                try:
+                    with trio.move_on_after(self.validation_timeout) as cancel_scope:
+                        # Appends to lists are thread safe in CPython
+                        results: list[bool] = []
 
-            async with trio.open_nursery() as nursery:
-                for async_validator in async_topic_validators:
-                    nursery.start_soon(
-                        self._run_async_validator,
-                        async_validator,
-                        msg_forwarder,
-                        msg,
-                        results,
-                    )
+                        async with trio.open_nursery() as nursery:
+                            for async_validator in async_topic_validators:
+                                nursery.start_soon(
+                                    self._run_async_validator,
+                                    async_validator,
+                                    msg_forwarder,
+                                    msg,
+                                    results,
+                                )
 
-            if not all(results):
-                raise ValidationError(f"Validation failed for msg={msg}")
+                        if not all(results):
+                            validation_error = "Asynchronous validation failed"
+                            raise ValidationError(f"Validation failed for msg={msg}")
+
+                    if cancel_scope.cancelled_caught:
+                        validation_error = "Validation timeout"
+                        raise ValidationError(f"Validation timeout for msg={msg}")
+
+                except ValidationError:
+                    raise
+                except Exception as e:
+                    validation_error = f"Validation error: {e}"
+                    raise ValidationError(f"Validation error for msg={msg}: {e}")
+
+            # Cache successful validation
+            self.validation_cache.put(
+                msg_id, ValidationResult(is_valid=True, timestamp=time.time())
+            )
+
+        except ValidationError:
+            # Cache failed validation
+            self.validation_cache.put(
+                msg_id,
+                ValidationResult(
+                    is_valid=False,
+                    timestamp=time.time(),
+                    error_message=validation_error,
+                ),
+            )
+            raise
 
     async def _run_async_validator(
         self,
@@ -875,7 +1040,8 @@ class Pubsub(Service, IPubsub):
 
         :param stream: stream to write the message to
         :param rpc_msg: RPC message to write
-        :return: True if successful, False if stream was closed
+        :return: True if successful, False if stream was closed (StreamClosed)
+            or reset (StreamReset)
         """
         try:
             # Calculate message size first
@@ -899,8 +1065,19 @@ class Pubsub(Service, IPubsub):
             # Single write operation (like Go's s.Write(buf))
             await stream.write(bytes(buf))
             return True
-        except StreamClosed:
+        except (StreamClosed, StreamReset):
             peer_id = stream.muxed_conn.peer_id
-            logger.debug("Fail to write message to %s: stream closed", peer_id)
+            logger.debug("Fail to write message to %s: stream closed or reset", peer_id)
             self._handle_dead_peer(peer_id)
             return False
+
+    async def _validation_cache_cleanup(self) -> None:
+        """
+        Periodically clean up expired validation cache entries.
+        """
+        while self.manager.is_running:
+            await trio.sleep(60)  # Clean up every minute
+            try:
+                self.validation_cache.clear_expired()
+            except Exception as e:
+                logger.debug("Error during validation cache cleanup: %s", e)
