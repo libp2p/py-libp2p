@@ -2,6 +2,8 @@ from collections import (
     defaultdict,
 )
 from collections.abc import (
+    Awaitable,
+    Callable,
     Iterable,
     Sequence,
 )
@@ -228,7 +230,7 @@ class GossipSub(IPubsubRouter, Service):
         self.min_mesh_diversity_ips = min_mesh_diversity_ips
 
         # Extensions support (v1.3+)
-        self.extension_handlers: dict[str, callable] = {}
+        self.extension_handlers: dict[str, Callable[[bytes, ID], Awaitable[None]]] = {}
 
         # Rate limiting for v1.4 features
         self.iwant_request_limits: dict[ID, dict[str, list[float]]] = defaultdict(
@@ -245,6 +247,9 @@ class GossipSub(IPubsubRouter, Service):
         self.max_iwant_requests_per_second: float = 10.0
         self.max_ihave_messages_per_second: float = 10.0
         self.graft_flood_threshold: float = 10.0  # seconds
+
+        # v1.4 adaptive gossip parameters
+        self.opportunistic_graft_threshold: float = 0.5
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -323,17 +328,8 @@ class GossipSub(IPubsubRouter, Service):
         # Default to not supported for unknown features
         return False
 
-    def supports_scoring(self, peer_id: ID) -> bool:
-        """
-        Check if a peer supports the scoring system.
-
-        :param peer_id: ID of the peer to check
-        :return: True if the peer supports scoring, False otherwise
-        """
-        return self.supports_protocol_feature(peer_id, "scoring")
-
     def register_extension_handler(
-        self, extension_name: str, handler: callable
+        self, extension_name: str, handler: Callable[[bytes, ID], Awaitable[None]]
     ) -> None:
         """
         Register a handler for a specific extension.

@@ -52,14 +52,14 @@ async def test_v14_protocol_feature_detection():
     ) as pubsubs_gsub:
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
-        
+
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
         await trio.sleep(0.5)
-        
+
         # Get peer ID
         peer_id = pubsubs_gsub[1].host.get_id()
-        
+
         # Test v1.4 feature detection
         assert router.supports_protocol_feature(peer_id, "extensions")
         assert router.supports_protocol_feature(peer_id, "adaptive_gossip")
@@ -77,14 +77,14 @@ async def test_v13_protocol_feature_detection():
     ) as pubsubs_gsub:
         router = pubsubs_gsub[0].router
         assert isinstance(router, GossipSub)
-        
+
         # Connect peers
         await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
         await trio.sleep(0.5)
-        
+
         # Get peer ID
         peer_id = pubsubs_gsub[1].host.get_id()
-        
+
         # Test v1.3 feature detection
         assert router.supports_protocol_feature(peer_id, "extensions")
         assert not router.supports_protocol_feature(peer_id, "adaptive_gossip")
@@ -103,7 +103,7 @@ async def test_message_propagation_with_v14_features():
         p6_appl_slack_weight=0.5,
         p7_ip_colocation_weight=2.0,
     )
-    
+
     async with PubsubFactory.create_batch_with_gossipsub(
         3,
         protocols=[PROTOCOL_ID_V14],
@@ -153,7 +153,7 @@ async def test_message_propagation_with_v14_features():
 async def test_backward_compatibility_v14_to_v12():
     """Test backward compatibility between v1.4 and v1.2."""
     from libp2p.pubsub.gossipsub import PROTOCOL_ID_V12
-    
+
     async with PubsubFactory.create_batch_with_gossipsub(
         2, protocols=[PROTOCOL_ID_V14, PROTOCOL_ID_V12]
     ) as pubsubs:
@@ -185,14 +185,14 @@ async def test_adaptive_gossip_initialization():
     ) as pubsubs:
         router = pubsubs[0].router
         assert isinstance(router, GossipSub)
-        
+
         # Check adaptive gossip initialization
         assert router.adaptive_gossip_enabled
         assert router.network_health_score == 1.0  # Start optimistic
         assert router.adaptive_degree_low == router.degree_low
         assert router.adaptive_degree_high == router.degree_high
         assert router.gossip_factor == 0.25
-        
+
         # Check v1.4 metrics initialization
         assert router.message_delivery_success_rate == 1.0
         assert router.average_peer_score == 0.0
@@ -208,12 +208,12 @@ async def test_rate_limiting_initialization():
     ) as pubsubs:
         router = pubsubs[0].router
         assert isinstance(router, GossipSub)
-        
+
         # Check rate limiting initialization
         assert len(router.iwant_request_limits) == 0
         assert len(router.ihave_message_limits) == 0
         assert len(router.graft_flood_tracking) == 0
-        
+
         # Check rate limiting parameters
         assert router.max_iwant_requests_per_second == 10.0
         assert router.max_ihave_messages_per_second == 10.0
@@ -228,18 +228,18 @@ async def test_extensions_framework_initialization():
     ) as pubsubs:
         router = pubsubs[0].router
         assert isinstance(router, GossipSub)
-        
+
         # Check extensions initialization
         assert hasattr(router, "extension_handlers")
         assert len(router.extension_handlers) == 0
-        
+
         # Test extension registration
         async def test_handler(data: bytes, sender_peer_id):
             pass
-        
+
         router.register_extension_handler("test", test_handler)
         assert "test" in router.extension_handlers
-        
+
         # Test extension unregistration
         router.unregister_extension_handler("test")
         assert "test" not in router.extension_handlers

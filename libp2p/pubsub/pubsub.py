@@ -291,6 +291,8 @@ class Pubsub(Service, IPubsub):
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
 
+    _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+
     def __init__(
         self,
         host: IHost,
