@@ -75,6 +75,7 @@ class Mplex(IMuxedConn):
     event_closed: trio.Event
     event_started: trio.Event
     on_close: Callable[[], Awaitable[Any]] | None
+    _established: bool
 
     def __init__(
         self,
@@ -106,6 +107,23 @@ class Mplex(IMuxedConn):
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
         self.on_close = on_close
+        self._established: bool = False
+
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Mplex connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
 
     async def start(self) -> None:
         await self.handle_incoming()
@@ -218,6 +236,7 @@ class Mplex(IMuxedConn):
         Read a message off of the secured connection and add it to the
         corresponding message buffer.
         """
+        self._established = True
         self.event_started.set()
         while True:
             try:
