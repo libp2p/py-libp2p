@@ -43,7 +43,6 @@ import argparse
 import logging
 import random
 import secrets
-import sys
 
 import multiaddr
 import trio
@@ -73,11 +72,6 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
 
-if sys.version_info >= (3, 11):
-    from builtins import ExceptionGroup
-else:
-    from exceptiongroup import ExceptionGroup
-
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
 MAX_READ_LEN = 2**32 - 1
 
@@ -103,15 +97,8 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
 
         print(f"Received: {response.decode('utf-8')}")
 
-    except (KeyboardInterrupt, ExceptionGroup) as e:
-        # Handle KeyboardInterrupt directly or within ExceptionGroup
-        if isinstance(e, KeyboardInterrupt):
-            print("\nEcho mode interrupted")
-            raise
-        elif isinstance(e, ExceptionGroup):
-            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
-                print("\nEcho mode interrupted")
-                raise
+    except KeyboardInterrupt:
+        print("\nEcho mode interrupted")
         raise
     except Exception as e:
         print(f"Error in echo mode: {e}")
@@ -200,32 +187,14 @@ async def chat_mode(host, server_maddr: str) -> None:
             async with trio.open_nursery() as nursery:
                 nursery.start_soon(receive_messages)
                 nursery.start_soon(send_messages)
-        except (KeyboardInterrupt, ExceptionGroup) as e:
-            # Handle KeyboardInterrupt directly or within ExceptionGroup
-            if isinstance(e, KeyboardInterrupt):
-                print("\nChat interrupted")
-            elif isinstance(e, ExceptionGroup):
-                if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
-                    print("\nChat interrupted")
-                else:
-                    raise
-            else:
-                raise
+        except KeyboardInterrupt:
+            print("\nChat interrupted")
         except Exception as e:
             print(f"Chat error: {e}")
             raise
 
-    except (KeyboardInterrupt, ExceptionGroup) as e:
-        # Handle KeyboardInterrupt directly or within ExceptionGroup
-        if isinstance(e, KeyboardInterrupt):
-            print("\nChat session interrupted")
-        elif isinstance(e, ExceptionGroup):
-            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
-                print("\nChat session interrupted")
-            else:
-                raise
-        else:
-            raise
+    except KeyboardInterrupt:
+        print("\nChat session interrupted")
     except Exception as e:
         print(f"Chat error: {e}")
         raise
@@ -269,15 +238,8 @@ async def run(server: str, mode: str, message: str, seed: int | None = None) -> 
             else:
                 print(f"Unknown mode: {mode}")
                 return
-    except (KeyboardInterrupt, ExceptionGroup) as e:
-        # Handle KeyboardInterrupt directly or within ExceptionGroup
-        if isinstance(e, KeyboardInterrupt):
-            print("\nClient shutdown requested...")
-            raise
-        elif isinstance(e, ExceptionGroup):
-            if any(isinstance(exc, KeyboardInterrupt) for exc in e.exceptions):
-                print("\nClient shutdown requested...")
-                raise
+    except KeyboardInterrupt:
+        print("\nClient shutdown requested...")
         raise
 
 
