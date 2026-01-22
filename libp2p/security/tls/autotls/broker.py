@@ -47,9 +47,9 @@ class BrokerClient:
         self.public_maddr = pub_addr
         self.key_auth = key_auth
         self.b36_peer_id = b36_peerid
-        self.public_ip = self.public_maddr.value_for_protocol("ip4")
+        self.public_ip = self.public_maddr.value_for_protocol("ip4")  # type: ignore
 
-    async def http_peerid_auth(self):
+    async def http_peerid_auth(self) -> None:
         header = {"Authorization": self.get_challenge_header()}
 
         resp = await trio.to_thread.run_sync(
@@ -75,7 +75,7 @@ class BrokerClient:
                 f"Broker returned error: {resp.status_code} - {resp.text}"
             )
 
-    async def wait_for_dns(self, timeout: float = 100.0, delay: float = 2.0):
+    async def wait_for_dns(self, timeout: float = 100.0, delay: float = 2.0) -> None:
         # TODO: better logs
         peer = self.b36_peer_id
         txt_name = f"_acme-challenge.{peer}.libp2p.direct"
@@ -157,7 +157,7 @@ class BrokerClient:
             }
         )
 
-    def decode_auth_header(self, header: str) -> dict:
+    def decode_auth_header(self, header: str) -> dict[str, str]:
         # strip scheme prefix
         if header.startswith("libp2p-PeerID "):
             header = header[len("libp2p-PeerID ") :]
@@ -180,7 +180,7 @@ class BrokerClient:
 
         return f"libp2p-PeerID {params}"
 
-    def encode_auth_params(self, params: dict) -> str:
+    def encode_auth_params(self, params: dict[str, str]) -> str:
         # JS does "key=value" pairs, comma-separated
         parts = []
         for k, v in params.items():

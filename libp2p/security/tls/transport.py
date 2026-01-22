@@ -174,7 +174,7 @@ class TLSTransport(ISecureTransport):
                         )
                         .value
                     )
-                    dns_names = san.get_values_for_type(x509.DNSName)
+                    dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
                     # Load both certificate and private key
                     if libp2p.utils.paths.AUTOTLS_KEY_PATH.exists():
                         ctx.load_cert_chain(
@@ -186,15 +186,15 @@ class TLSTransport(ISecureTransport):
                         )
                     else:
                         logger.warning(
-                            "[INC/OUT]: AutoTLS certificate found but private key missing. "
-                            "Falling back to self-signed certificate."
+                            "[INC/OUT]: AutoTLS certificate found but private"
+                            "key missing. Falling back to self-signed certificate."
                         )
                         ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
                 else:
                     logger.info(
-                        "[INC/OUT]: AUTO-TLS enabled, but ACME certificate not cached yet, "
-                        "so reverting back to self-signed TLS"
+                        "[INC/OUT]: AUTO-TLS enabled, but ACME certificate"
+                        "not cached yet, so reverting back to self-signed TLS"
                     )
 
                     ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
@@ -308,20 +308,39 @@ class TLSTransport(ISecureTransport):
             # TODO: Python ssl can't request client cert without CA verification.
             # Use placeholder peer ID - client can still verify server identity.
             logger.warning("TLS inbound: no peer cert (Python ssl limitation)")
-            
 
             # Extaract the keys from primitive key-exchange, if autotls enabled
             if self.enable_autotls:
                 remote_public_key = tls_reader_writer.remote_primitive_pk
                 remote_peer_id = tls_reader_writer.remote_primitive_peerid
                 logger.warning(
-                "TLS inbound: using peerid obtained from primitive key-exchange")
+                    "TLS inbound: using peerid obtained from primitive key-exchange"
+                )
             else:
                 placeholder_keypair = libp2p.generate_new_ed25519_identity()
                 remote_public_key = placeholder_keypair.public_key
                 remote_peer_id = ID.from_pubkey(remote_public_key)
                 logger.error(
-                "TLS inbound: using peerid obtained from placeholder keypair")
+                    "TLS inbound: using peerid obtained from placeholder keypair"
+                )
+
+            # This is the case when the autotls is enabled, and we did a self-signed
+            # certificate handshake with AUTO-TLS BROKER, and naturally we didn't do the
+            # primitive peer-identify exchange, so again use a placeholde
+            if self.enable_autotls and remote_peer_id is None:
+                placeholder_keypair = libp2p.generate_new_ed25519_identity()
+                remote_public_key = placeholder_keypair.public_key
+                remote_peer_id = ID.from_pubkey(remote_public_key)
+
+            if remote_peer_id is None:
+                raise ValueError(
+                    "remote peer ID must be known before creating SecureSession"
+                )
+
+            if remote_public_key is None:
+                raise ValueError(
+                    "remote public-key must be known before creating SecureSession"
+                )
 
             session = SecureSession(
                 local_peer=self.local_peer,
@@ -394,7 +413,7 @@ class TLSTransport(ISecureTransport):
             san = peer_cert.extensions.get_extension_for_oid(
                 ExtensionOID.SUBJECT_ALTERNATIVE_NAME
             ).value
-            dns_names = san.get_values_for_type(x509.DNSName)
+            dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
 
             # # Pubkey and signature will be used in certificate verification
             # # Extract public key
@@ -406,7 +425,7 @@ class TLSTransport(ISecureTransport):
 
             # # Extract signature from the certificate
             # cert_signature = peer_cert.signature.hex()
-            
+
             logger.info("[OUTBOUND] Remote peer-cert: DNS: %s", dns_names)
 
         if not peer_cert:
@@ -429,6 +448,7 @@ class TLSTransport(ISecureTransport):
             logger.debug(
                 "TLS outbound: peer verified from certificate, connection established"
             )
+
         except ValueError as e:
             if "expected certificate to contain the key extension" in str(e):
                 # Autotls certificate without libp2p extension
@@ -460,6 +480,11 @@ class TLSTransport(ISecureTransport):
                 )
             else:
                 raise
+
+        if remote_public_key is None:
+            raise ValueError(
+                "remote_public_key must be set before creating SecureSession"
+            )
 
         logger.debug("[TLS outbound]: connection established")
 

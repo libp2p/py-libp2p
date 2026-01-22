@@ -109,7 +109,7 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
     base = Path("libp2p-forge")
     (base / "peer1").mkdir(parents=True, exist_ok=True)
     (base / "peer2").mkdir(parents=True, exist_ok=True)
-    
+
     enable_autotls = True
     if tls == 1:
         enable_autotls = False
@@ -163,7 +163,8 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
-            # @reviewers: replace/remove this hardcoded public IP when running on your own servers
+            # @reviewers: replace/remove this hardcoded public IP when
+            # running on your own servers
             if enable_autotls:
                 await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 
@@ -190,8 +191,9 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
             print("\n\n")
 
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
-            
-            # @reviewers: replace/remove this hardcoded public IP when running on your own servers
+
+            # @reviewers: replace/remove this hardcoded public IP when
+            # running on your own servers
             if enable_autotls:
                 await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 
@@ -228,10 +230,8 @@ def main() -> None:
         help=f"destination multiaddr string, e.g. {example_maddr}",
     )
 
-    parser.add_argument(
-        "-new", "--new", default=0, type=int, help="Run client"
-    )
-    
+    parser.add_argument("-new", "--new", default=0, type=int, help="Run client")
+
     parser.add_argument(
         "-tls", "--tls", default=0, type=int, help="Run with self-signed TLS handshake"
     )
@@ -247,7 +247,9 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        trio.run(run, *(args.port, args.destination, args.new, args.transport, args.tls))
+        trio.run(
+            run, *(args.port, args.destination, args.new, args.transport, args.tls)
+        )
     except KeyboardInterrupt:
         pass
 

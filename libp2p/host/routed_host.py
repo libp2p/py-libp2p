@@ -33,6 +33,7 @@ class RoutedHost(BasicHost):
         router: IPeerRouting,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
     ):
@@ -51,6 +52,7 @@ class RoutedHost(BasicHost):
             network,
             enable_mDNS,
             enable_upnp,
+            enable_autotls,
             bootstrap,
             resource_manager=resource_manager,
         )

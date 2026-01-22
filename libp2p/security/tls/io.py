@@ -51,30 +51,30 @@ class TLSStreamReadWriter(ReadWriteCloser):
         self._closed = False
 
         self.local_prim_pk = local_prim_pk
-        self.remote_primitive_pk = None
-        self.remote_pid = None
+        self.remote_primitive_pk: PublicKey | None = None
+        self.remote_pid: ID | None = None
 
         # Read buffer for bytes that arrive during/after handshake
         self._read_buffer = bytearray()
-        
+
     def should_do_primitive_key_exchang(self, enable_autotls: bool) -> bool:
         base = Path("libp2p-forge")
-        
+
         # Autotls should be enabled
-        if not enable_autotls: 
+        if not enable_autotls:
             return False
-        
+
         for peer_dir in base.iterdir():
             if not peer_dir.is_dir():
                 continue
-            
+
             has_ed25519 = (peer_dir / "ed25519.pem").exists()
             has_autotls_cert = (peer_dir / "autotls-cert.pem").exists()
-            
+
             # Auto-Tls in progress
             if has_ed25519 and not has_autotls_cert:
                 return False
-        
+
         # All the peers either has completed autotls procedure,
         # or not started yet
         return True
@@ -100,7 +100,8 @@ class TLSStreamReadWriter(ReadWriteCloser):
 
         # This kind of exchange is only applicable for py-libp2p, as it breaks
         # interop with other libp2p implementations. So execute this only in
-        # autotls-enabled and autotls-cert not cached (prior to libp2p-forge negotiation)
+        # autotls-enabled and autotls-cert not cached
+        # i.e prior to libp2p-forge negotiation
         if self.should_do_primitive_key_exchang(enable_autotls):
             await self._do_primitive_key_exchange()
             logger.info(
@@ -405,6 +406,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         Args:
             conn: Raw connection to wrap
             ssl_context: SSL context for TLS operations
+            local_prim_pk: Local libp2p-host public key
             server_side: Whether to act as TLS server
             server_hostname: Server hostname for client connections
 
@@ -430,8 +432,11 @@ class TLSReadWriter(EncryptedMsgReadWriter):
 
         """
         await self.stream_writer.handshake(enable_autotls)
-        self.remote_primitive_pk = self.stream_writer.remote_primitive_pk
-        self.remote_primitive_peerid = self.stream_writer.remote_pid
+
+        # There are lint errors here, telling to update the constructor of
+        # this class. Since this is only temporary, I will put type ignore here
+        self.remote_primitive_pk = self.stream_writer.remote_primitive_pk  # type: ignore
+        self.remote_primitive_peerid = self.stream_writer.remote_pid  # type: ignore
 
     def get_peer_certificate(self) -> x509.Certificate | None:
         """

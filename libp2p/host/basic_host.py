@@ -477,7 +477,7 @@ class BasicHost(IHost):
                 .value
             )
             # DNS names
-            dns_names = san.get_values_for_type(x509.DNSName)
+            dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
             b36_pid = compute_b36_peer_id(self.get_id())
 
             logger.info(
@@ -495,7 +495,8 @@ class BasicHost(IHost):
         await acme.get_dns01_challenge()
 
         # Extract public IP from host's listening addresses
-        # According to spec, only publicly reachable IP addresses should be sent to broker
+        # According to spec, only publicly reachable IP addresses
+        # should be sent to broker.
         # Use get_transport_addrs() to get addresses without /p2p/{peer_id} suffix
 
         # For some reason this way of extracting pub-addr is working on Luca's end

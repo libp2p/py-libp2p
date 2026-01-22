@@ -87,7 +87,7 @@ class ACMEClient:
         csr_der = self.create_csr()
         self.csr_b64 = self.b64url_encode(csr_der)
 
-    async def create_acme_acct(self):
+    async def create_acme_acct(self) -> None:
         # Fetch directory - run in therad pool to avoid blocking event loop
         resp = await trio.to_thread.run_sync(
             lambda: requests.get(ACME_DIRECTORY_URL, timeout=10)
@@ -123,9 +123,13 @@ class ACMEClient:
             )
 
         account_url = resp.headers.get("Location")
+
+        if account_url is None:
+            raise ValueError("Could not fetch account url from response")
+
         self.account_url = account_url
 
-    async def initiate_order(self):
+    async def initiate_order(self) -> None:
         new_order_url = self.directory["newOrder"]
         nonce = await self.get_nonce()
         domain = f"*.{self.b36_peerid}.libp2p.direct"
@@ -153,7 +157,7 @@ class ACMEClient:
         self.auth_url = resp.json()["authorizations"][0]
         self.finalize_url = resp.json()["finalize"]
 
-    async def get_dns01_challenge(self):
+    async def get_dns01_challenge(self) -> None:
         nonce = await self.get_nonce()
         protected = {
             "alg": "RS256",
@@ -191,12 +195,12 @@ class ACMEClient:
 
         logger.info("Key-Auth fetched from ACME: %s", self.key_auth)
 
-    async def notify_dns_ready(self, delay: int = 5):
+    async def notify_dns_ready(self, delay: int = 5) -> None:
         nonce = await self.get_nonce()
-        replay_nonce, _ = await self._dns_poll(nonce)
+        (replay_nonce, _) = await self._dns_poll(nonce)
 
         while True:
-            replay_nonce, body = await self._dns_poll(replay_nonce)
+            (replay_nonce, body) = await self._dns_poll(replay_nonce)
             status = body.get("status")
 
             if status == "valid":
@@ -208,8 +212,8 @@ class ACMEClient:
 
             await trio.sleep(delay)
 
-    async def _dns_poll(self, nonce: str):
-        payload = {}
+    async def _dns_poll(self, nonce: str) -> (str, Any):  # type: ignore
+        payload: dict[str, str] = {}
         protected = {
             "alg": "RS256",
             "kid": self.account_url,
@@ -230,9 +234,9 @@ class ACMEClient:
         if not replay_nonce:
             raise RuntimeError("No Replay-Nonce in ACME poll response")
 
-        return replay_nonce, resp.json()
+        return (replay_nonce, resp.json())
 
-    async def fetch_cert_url(self):
+    async def fetch_cert_url(self) -> None:
         payload = {"csr": self.csr_b64}
         nonce = await self.get_nonce()
         protected = {
@@ -276,7 +280,7 @@ class ACMEClient:
 
         raise RuntimeError("ACME order never reached valid state")
 
-    async def fetch_certificate(self):
+    async def fetch_certificate(self) -> None:
         nonce = await self.get_nonce()
         protected = {
             "alg": "RS256",
@@ -316,14 +320,18 @@ class ACMEClient:
                 .value
             )
 
-            dns_names = san.get_values_for_type(x509.DNSName)
+            dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
             logger.info(
                 "ACME-TLS certificate cached, DNS: %s, b36_pid: %s",
                 dns_names,
                 self.b36_peerid,
             )
 
-    def create_jws(self, protected: dict, payload: dict | None) -> dict:
+    def create_jws(
+        self,
+        protected: dict[str, Any],
+        payload: dict[str, Any] | None,
+    ) -> dict[str, str]:
         protected_b64 = self.b64url_encode(
             json.dumps(protected, separators=(",", ":"), sort_keys=True).encode("utf-8")
         )
@@ -370,7 +378,7 @@ class ACMEClient:
 
         return csr.public_bytes(serialization.Encoding.DER)
 
-    def jwk_from_rsa_privkey(self):
+    def jwk_from_rsa_privkey(self) -> dict[str, str]:
         pub = self.acct_rsa_key.public_key()
         numbers = pub.public_numbers()
 
@@ -384,13 +392,14 @@ class ACMEClient:
         """Base64url encode without padding, returning str."""
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
-    async def get_nonce(self):
+    async def get_nonce(self) -> str:
         new_nonce_url = self.directory["newNonce"]
 
         nonce_resp = await trio.to_thread.run_sync(
             lambda: requests.head(new_nonce_url, timeout=10)
         )
 
+        nonce: str | None = None
         if "Replay-Nonce" in nonce_resp.headers:
             nonce = nonce_resp.headers["Replay-Nonce"]
         else:

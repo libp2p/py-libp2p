@@ -27,6 +27,7 @@ dependencies = [
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "miniupnpc>=2.3",
+    "types-requests",
     "multiaddr==0.0.11",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
