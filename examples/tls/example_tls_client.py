@@ -18,6 +18,7 @@ Usage:
     python example_tls_client.py --server MULTIADDR [--mode MODE] [--message MESSAGE]
 
 Modes:
+
 - echo: Send a single message and receive the echo response (default)
 - chat: Full-duplex bidirectional chat where both parties can send/receive
   simultaneously
