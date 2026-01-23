@@ -38,6 +38,10 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
 from libp2p.utils.address_validation import get_available_interfaces
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
@@ -49,21 +53,45 @@ logger = logging.getLogger("libp2p.ping_test")
 
 def configure_logging():
     """Configure logging based on debug environment variable."""
-    debug_enabled = os.getenv("DEBUG", os.getenv("debug", "false")).upper() in [
+    debug_value = os.getenv("DEBUG") or "false"  # Optional, default to "false"
+    debug_enabled = debug_value.upper() in [
         "DEBUG",
         "1",
         "TRUE",
         "YES",
     ]
 
+    # Always suppress multiaddr DEBUG logs (they're too verbose)
+    multiaddr_loggers = [
+        "multiaddr",
+        "multiaddr.transforms",
+        "multiaddr.codecs",
+        "multiaddr.codecs.cid",
+    ]
+    for logger_name in multiaddr_loggers:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
     if debug_enabled:
+        # Enable DEBUG for core libp2p modules to see what's happening
         logger_names = [
             "",
             "libp2p.ping_test",
             "libp2p",
             "libp2p.transport",
+            "libp2p.transport.tcp",
             "libp2p.network",
+            "libp2p.network.swarm",
             "libp2p.protocol_muxer",
+            "libp2p.security",
+            "libp2p.security.tls",
+            "libp2p.security.tls.io",
+            "libp2p.security.tls.transport",
+            "libp2p.security.noise",
+            "libp2p.stream_muxer",
+            "libp2p.stream_muxer.yamux",
+            "libp2p.stream_muxer.mplex",
+            "libp2p.host",
+            "libp2p.tools.async_service",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
@@ -72,9 +100,6 @@ def configure_logging():
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger("libp2p.ping_test").setLevel(logging.INFO)
         warning_loggers = [
-            "multiaddr",
-            "multiaddr.transforms",
-            "multiaddr.codecs",
             "libp2p",
             "libp2p.transport",
         ]
@@ -85,20 +110,52 @@ def configure_logging():
 class PingTest:
     def __init__(self):
         """Initialize ping test with configuration from environment variables."""
-        # Support both uppercase (standard) and lowercase (legacy) env var names
-        self.transport = os.getenv("TRANSPORT", os.getenv("transport", "tcp"))
-        # SECURE_CHANNEL and MUXER may not be set for standalone transports
-        muxer_env = os.getenv("MUXER") or os.getenv("muxer")
-        self.muxer = muxer_env if muxer_env else "mplex"  # Default if not set
-        security_env = os.getenv("SECURE_CHANNEL") or os.getenv("security")
-        self.security = security_env if security_env else "noise"  # Default if not set
-        self.is_dialer = (
-            os.getenv("IS_DIALER", os.getenv("is_dialer", "false")).lower() == "true"
-        )
-        self.ip = os.getenv("LISTENER_IP", os.getenv("ip", "0.0.0.0"))
-        self.redis_addr = os.getenv("REDIS_ADDR", os.getenv("redis_addr", "redis:6379"))
+        # All environment variables use uppercase names only and are required
+        self.transport = os.getenv("TRANSPORT")
+        if not self.transport:
+            raise ValueError("TRANSPORT environment variable is required")
 
-        raw_timeout = int(os.getenv("test_timeout_seconds", "180"))
+        # Standalone transports don't use separate security/muxer
+        standalone_transports = ["quic-v1"]  # Python currently only supports quic-v1
+
+        # Check if transport is standalone before requiring MUXER/SECURE_CHANNEL
+        if self.transport not in standalone_transports:
+            # Non-standalone transports: MUXER and SECURE_CHANNEL are required
+            muxer_env = os.getenv("MUXER")
+            if muxer_env is None:
+                raise ValueError("MUXER environment variable is required")
+            self.muxer = muxer_env
+
+            security_env = os.getenv("SECURE_CHANNEL")
+            if security_env is None:
+                raise ValueError("SECURE_CHANNEL environment variable is required")
+            self.security = security_env
+        else:
+            # Standalone transports: MUXER and SECURE_CHANNEL are optional
+            # (not set by framework)
+            muxer_env = os.getenv("MUXER")
+            self.muxer = muxer_env if muxer_env else None
+
+            security_env = os.getenv("SECURE_CHANNEL")
+            self.security = security_env if security_env else None
+
+        is_dialer_value = os.getenv("IS_DIALER")
+        if is_dialer_value is None:
+            raise ValueError("IS_DIALER environment variable is required")
+        self.is_dialer = is_dialer_value == "true"  # Case-sensitive match
+
+        self.ip = os.getenv("LISTENER_IP")
+        if not self.ip:
+            raise ValueError("LISTENER_IP environment variable is required")
+
+        self.redis_addr = os.getenv("REDIS_ADDR")
+        if not self.redis_addr:
+            raise ValueError("REDIS_ADDR environment variable is required")
+
+        # Framework timeout: use TEST_TIMEOUT_SECS if set,
+        # otherwise default to 180 seconds
+        timeout_value = os.getenv("TEST_TIMEOUT_SECS") or "180"
+        raw_timeout = int(timeout_value)
         self.test_timeout_seconds = min(raw_timeout, MAX_TEST_TIMEOUT)
         self.resp_timeout = max(30, int(self.test_timeout_seconds * 0.6))
 
@@ -110,7 +167,7 @@ class PingTest:
             self.redis_port = 6379
 
         # Read TEST_KEY for Redis key namespacing (required by transport test framework)
-        self.test_key = os.getenv("TEST_KEY", os.getenv("test_key", ""))
+        self.test_key = os.getenv("TEST_KEY")
         if not self.test_key:
             raise ValueError("TEST_KEY environment variable is required")
 
@@ -123,7 +180,7 @@ class PingTest:
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
         valid_transports = ["tcp", "ws", "wss", "quic-v1"]
-        valid_security = ["noise", "plaintext"]
+        valid_security = ["noise", "plaintext", "tls"]
         valid_muxers = ["mplex", "yamux"]
         # Standalone transports don't use separate security/muxer
         standalone_transports = ["quic-v1"]
@@ -147,6 +204,15 @@ class PingTest:
 
     def create_security_options(self):
         """Create security options based on configuration."""
+        # Standalone transports (like quic-v1) have security built-in,
+        # no separate security needed
+        standalone_transports = ["quic-v1"]
+        if self.transport in standalone_transports:
+            # For standalone transports, return empty security options
+            # The security is handled by the transport itself
+            key_pair = create_new_key_pair()
+            return {}, key_pair
+
         key_pair = create_new_key_pair()
 
         if self.security == "noise":
@@ -157,6 +223,16 @@ class PingTest:
                 early_data=None,
             )
             return {NOISE_PROTOCOL_ID: transport}, key_pair
+        elif self.security == "tls":
+            # Create TLS transport - matching the working example pattern
+            # The working example doesn't pass muxers, so we'll try without first
+            # If ALPN negotiation is needed, it can be added later
+            transport = TLSTransport(
+                libp2p_keypair=key_pair,
+                early_data=None,
+                muxers=None,  # Don't pass muxers initially - match working example
+            )
+            return {TLS_PROTOCOL_ID: transport}, key_pair
         elif self.security == "plaintext":
             transport = InsecureTransport(
                 local_key_pair=key_pair,
@@ -169,6 +245,14 @@ class PingTest:
 
     def create_muxer_options(self):
         """Create muxer options based on configuration."""
+        # Standalone transports (like quic-v1) have muxing built-in,
+        # no separate muxer needed
+        standalone_transports = ["quic-v1"]
+        if self.transport in standalone_transports:
+            # For standalone transports, return None (no separate muxer)
+            # The muxing is handled by the transport itself
+            return None
+
         if self.muxer == "yamux":
             return create_yamux_muxer_option()
         elif self.muxer == "mplex":
@@ -1014,6 +1098,44 @@ class PingTest:
                             f"[DEBUG] Connection error cause: {e.__cause__}",
                             file=sys.stderr,
                         )
+                        # If it's a MultiError, show individual exceptions
+                        # MultiError uses 'errors' attribute, not 'exceptions'
+                        if hasattr(e.__cause__, "errors"):
+                            errors_list = e.__cause__.errors
+                            print(
+                                f"[DEBUG] MultiError contains "
+                                f"{len(errors_list)} exception(s):",
+                                file=sys.stderr,
+                            )
+                            for i, exc in enumerate(errors_list, 1):
+                                print(
+                                    f"[DEBUG]   Exception {i}: "
+                                    f"{type(exc).__name__}: {exc}",
+                                    file=sys.stderr,
+                                )
+                                if hasattr(exc, "__cause__") and exc.__cause__:
+                                    print(
+                                        f"[DEBUG]     Caused by: {exc.__cause__}",
+                                        file=sys.stderr,
+                                    )
+                                # Print full traceback for each exception
+                                import traceback
+
+                                print(
+                                    f"[DEBUG]     Traceback for exception {i}:",
+                                    file=sys.stderr,
+                                )
+                                traceback.print_exception(
+                                    type(exc), exc, exc.__traceback__, file=sys.stderr
+                                )
+                    # Print full traceback for debugging
+                    import traceback
+
+                    print(
+                        "[DEBUG] Full traceback:",
+                        file=sys.stderr,
+                    )
+                    traceback.print_exc(file=sys.stderr)
                     raise
                 print("Connected successfully", file=sys.stderr)
                 print(
