@@ -83,7 +83,6 @@ def test_create_invalid_block():
 
 
 @pytest.mark.trio
-@pytest.mark.trio
 async def test_propagate_invalid_block_to_light_clients():
     """Test propagating invalid block to light clients"""
     validator = MaliciousValidator("validator_0", 0.8)
