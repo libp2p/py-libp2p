@@ -171,14 +171,58 @@ def test_logger_name_matches_module_path_utils():
     assert multiselect_client.logger.name == "libp2p.protocol_muxer.multiselect_client"
 
 
+def test_logger_name_matches_module_path_kad_dht():
+    """Test kad_dht modules use correct logger names."""
+    from libp2p.kad_dht import (
+        kad_dht,
+        peer_routing,
+        provider_store,
+        routing_table,
+        utils,
+        value_store,
+    )
+
+    assert kad_dht.logger.name == "libp2p.kad_dht.kad_dht"
+    assert value_store.logger.name == "libp2p.kad_dht.value_store"
+    assert provider_store.logger.name == "libp2p.kad_dht.provider_store"
+    assert peer_routing.logger.name == "libp2p.kad_dht.peer_routing"
+    assert routing_table.logger.name == "libp2p.kad_dht.routing_table"
+    assert utils.logger.name == "libp2p.kad_dht.utils"
+
+
+def test_logger_name_matches_module_path_identity():
+    """Test identity modules use correct logger names."""
+    from libp2p.identity.identify import identify
+
+    assert identify.logger.name == "libp2p.identity.identify.identify"
+
+
+def test_logger_name_matches_module_path_pubsub_utils():
+    """Test pubsub utils module uses correct logger name."""
+    from libp2p.pubsub import utils
+
+    assert utils.logger.name == "libp2p.pubsub.utils"
+
+
+def test_logger_name_matches_module_path_relay_resources():
+    """Test relay circuit v2 resources module uses correct logger name."""
+    from libp2p.relay.circuit_v2 import resources
+
+    assert resources.logger.name == "libp2p.relay.circuit_v2.resources"
+
+
 def test_module_specific_logging_with_standardized_names(clean_env):
     """Test that module-specific logging works with standardized logger names."""
     os.environ["LIBP2P_DEBUG"] = (
         "network.swarm:DEBUG,"
         "pubsub:INFO,"
         "pubsub.gossipsub:WARNING,"
+        "pubsub.utils:DEBUG,"
         "relay.circuit_v2.transport:DEBUG,"
-        "discovery.bootstrap.bootstrap:INFO"
+        "relay.circuit_v2.resources:INFO,"
+        "discovery.bootstrap.bootstrap:INFO,"
+        "kad_dht.kad_dht:DEBUG,"
+        "identity.identify.identify:INFO"
     )
     setup_logging()
 
@@ -192,8 +236,20 @@ def test_module_specific_logging_with_standardized_names(clean_env):
     gossipsub_logger = logging.getLogger("libp2p.pubsub.gossipsub")
     assert gossipsub_logger.level == logging.WARNING
 
+    pubsub_utils_logger = logging.getLogger("libp2p.pubsub.utils")
+    assert pubsub_utils_logger.level == logging.DEBUG
+
     relay_transport_logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
     assert relay_transport_logger.level == logging.DEBUG
+
+    relay_resources_logger = logging.getLogger("libp2p.relay.circuit_v2.resources")
+    assert relay_resources_logger.level == logging.INFO
+
+    kad_dht_logger = logging.getLogger("libp2p.kad_dht.kad_dht")
+    assert kad_dht_logger.level == logging.DEBUG
+
+    identify_logger = logging.getLogger("libp2p.identity.identify.identify")
+    assert identify_logger.level == logging.INFO
 
     bootstrap_logger = logging.getLogger("libp2p.discovery.bootstrap.bootstrap")
     assert bootstrap_logger.level == logging.INFO
@@ -287,11 +343,33 @@ def test_all_updated_modules_have_correct_logger_names():
     import libp2p.discovery.upnp.upnp as upnp
     from libp2p.host import basic_host, ping
     import libp2p.host.autonat.autonat as autonat
+    from libp2p.identity.identify import identify
     from libp2p.io import trio as io_trio
+    from libp2p.kad_dht import (
+        kad_dht,
+        peer_routing,
+        provider_store,
+        routing_table,
+        utils as kad_dht_utils,
+        value_store,
+    )
     from libp2p.network import swarm
     from libp2p.protocol_muxer import multiselect_client
-    from libp2p.pubsub import floodsub, gossipsub, pubsub, validators
-    from libp2p.relay.circuit_v2 import discovery, nat, protocol, transport, utils
+    from libp2p.pubsub import (
+        floodsub,
+        gossipsub,
+        pubsub,
+        utils as pubsub_utils,
+        validators,
+    )
+    from libp2p.relay.circuit_v2 import (
+        discovery,
+        nat,
+        protocol,
+        resources,
+        transport,
+        utils,
+    )
     from libp2p.stream_muxer.mplex import mplex
     from libp2p.stream_muxer.yamux import yamux
     from libp2p.transport import transport_registry
@@ -311,11 +389,13 @@ def test_all_updated_modules_have_correct_logger_names():
         (floodsub, "libp2p.pubsub.floodsub"),
         (gossipsub, "libp2p.pubsub.gossipsub"),
         (validators, "libp2p.pubsub.validators"),
+        (pubsub_utils, "libp2p.pubsub.utils"),
         (transport, "libp2p.relay.circuit_v2.transport"),
         (protocol, "libp2p.relay.circuit_v2.protocol"),
         (discovery, "libp2p.relay.circuit_v2.discovery"),
         (utils, "libp2p.relay.circuit_v2.utils"),
         (nat, "libp2p.relay.circuit_v2.nat"),
+        (resources, "libp2p.relay.circuit_v2.resources"),
         (bootstrap_module, "libp2p.discovery.bootstrap.bootstrap"),
         (bootstrap_utils_module, "libp2p.discovery.bootstrap.utils"),
         (mdns, "libp2p.discovery.mdns.mdns"),
@@ -326,6 +406,13 @@ def test_all_updated_modules_have_correct_logger_names():
         (upnp, "libp2p.discovery.upnp.upnp"),
         (ping, "libp2p.host.ping"),
         (autonat, "libp2p.host.autonat.autonat"),
+        (identify, "libp2p.identity.identify.identify"),
+        (kad_dht, "libp2p.kad_dht.kad_dht"),
+        (value_store, "libp2p.kad_dht.value_store"),
+        (provider_store, "libp2p.kad_dht.provider_store"),
+        (peer_routing, "libp2p.kad_dht.peer_routing"),
+        (routing_table, "libp2p.kad_dht.routing_table"),
+        (kad_dht_utils, "libp2p.kad_dht.utils"),
         (multiselect_client, "libp2p.protocol_muxer.multiselect_client"),
         (io_trio, "libp2p.io.trio"),
         (version, "libp2p.utils.version"),
