@@ -796,9 +796,7 @@ class Swarm(Service, INetworkService):
             await self.add_conn(muxed_conn)
             logger.debug("successfully opened connection to peer %s", peer_id)
         except Exception:
-            logger.exception(
-                "failed to add connection for peer %s", peer_id
-            )
+            logger.exception("failed to add connection for peer %s", peer_id)
             await muxed_conn.close()
             return None  # type: ignore[return-value]
 
