@@ -65,8 +65,7 @@ from .value_store import (
     ValueStore,
 )
 
-logger = logging.getLogger("kademlia-example.kad_dht")
-# logger = logging.getLogger("libp2p.kademlia")
+logger = logging.getLogger(__name__)
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
