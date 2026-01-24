@@ -655,7 +655,7 @@ class Swarm(Service, INetworkService):
                 raw_conn = RawConnection(read_write_closer, False)
                 try:
                     await self.upgrade_inbound_raw_conn(raw_conn, maddr)
-                    # NOTE: This is an intentional barrier to prevent from the handler
+                    # NOTE: This is an intentional barrier to prevent the handler from
                     # exiting and closing the connection.
                     await self.manager.wait_finished()
                 except SwarmException as error:
