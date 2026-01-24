@@ -415,3 +415,78 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                         pytest.fail(
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
                         )
+
+
+@pytest.mark.trio
+async def test_swarm_listener_resilience_on_upgrade_failure(security_protocol):
+    """Test that the swarm listener continues to accept connections even when individual peer negotiations fail.""" # noqa: E501
+    from unittest.mock import patch
+    from libp2p.transport.exceptions import SecurityUpgradeFailure
+    
+    async with SwarmFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as swarms:
+        listener_swarm = swarms[0]
+        client_swarm = swarms[1]
+        
+        # Get listener address
+        listener_addr = tuple(
+            addr
+            for transport in listener_swarm.listeners.values()
+            for addr in transport.get_addrs()
+        )[0]
+        
+        # Add the listener's address to client's peerstore
+        client_swarm.peerstore.add_addrs(
+            listener_swarm.get_peer_id(), [listener_addr], 10000
+        )
+        
+        # First, establish a successful connection to verify setup
+        await client_swarm.dial_peer(listener_swarm.get_peer_id())
+        assert listener_swarm.get_peer_id() in client_swarm.connections
+        
+        # Close the first connection
+        await client_swarm.close_peer(listener_swarm.get_peer_id())
+        await trio.sleep(0.1)
+        
+        # Now simulate a failure during upgrade by patching upgrade_security
+        # We'll make one call fail, then let subsequent calls succeed
+        original_upgrade_security = listener_swarm.upgrader.upgrade_security
+        call_count = [0]
+        
+        async def failing_upgrade_security(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call after patch fails
+                raise SecurityUpgradeFailure("Simulated security upgrade failure")
+            # Subsequent calls succeed
+            return await original_upgrade_security(*args, **kwargs)
+        
+        with patch.object(
+            listener_swarm.upgrader,
+            'upgrade_security',
+            side_effect=failing_upgrade_security
+        ):
+            # This connection attempt should fail on the listener side
+            # The client will see a connection error, but the listener should NOT crash
+            try:
+                await client_swarm.dial_peer(listener_swarm.get_peer_id())
+            except Exception:
+                # Connection failure expected - client can't complete the dial
+                pass
+            
+            # Give time for any potential listener crash to occur
+            await trio.sleep(0.2)
+            
+            # Verify listener is still active by checking it has listeners
+            assert len(listener_swarm.listeners) > 0, "Listener crashed after upgrade failure!"
+        
+        # Now verify the listener can still accept new connections
+        # (upgrade_security is no longer patched, so this should succeed)
+        await trio.sleep(0.1)
+        await client_swarm.dial_peer(listener_swarm.get_peer_id())
+        
+        # Verify connection was established successfully
+        assert listener_swarm.get_peer_id() in client_swarm.connections
+        assert client_swarm.get_peer_id() in listener_swarm.connections
+
