@@ -107,7 +107,7 @@ class Mplex(IMuxedConn):
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
         self.on_close = on_close
-        self._established: bool = False
+        self._established = False
 
     @property
     def is_established(self) -> bool:
