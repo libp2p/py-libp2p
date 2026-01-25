@@ -68,7 +68,7 @@ from .utils import (
     maybe_consume_signed_record,
 )
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.transport")
+logger = logging.getLogger(__name__)
 TOP_N = 3
 RESERVATION_REFRESH_INTERVAL = 10  # seconds
 RESERVATION_REFRESH_MARGIN = 30  # seconds

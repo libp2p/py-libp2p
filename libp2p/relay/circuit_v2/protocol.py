@@ -75,7 +75,7 @@ from .resources import (
 )
 from .utils import maybe_consume_signed_record
 
-logger = logging.getLogger("libp2p.relay.circuit_v2")
+logger = logging.getLogger(__name__)
 
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")

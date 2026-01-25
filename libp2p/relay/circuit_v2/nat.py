@@ -22,7 +22,7 @@ from libp2p.peer.id import (
     ID,
 )
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
+logger = logging.getLogger(__name__)
 
 # Timeout for reachability checks
 REACHABILITY_TIMEOUT = 10  # seconds
