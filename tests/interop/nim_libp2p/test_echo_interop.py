@@ -37,7 +37,7 @@ class NimEchoServer:
         logger.info(f"Starting nim echo server: {self.binary_path}")
 
         self.process = subprocess.Popen(
-            [str(self.binary_path)],
+            [str(self.binary_path)],  # type: ignore[missing-attribute]
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -140,7 +140,7 @@ async def run_echo_test(server_addr: str, messages: list[str]):
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(TEST_TIMEOUT)
+@pytest.mark.timeout(TEST_TIMEOUT)  # type: ignore[not-callable]
 async def test_basic_echo_interop(nim_server):
     """Test basic echo functionality between py-libp2p and nim-libp2p."""
     server, peer_id, listen_addr = nim_server
@@ -167,12 +167,12 @@ async def test_basic_echo_interop(nim_server):
 
 
 @pytest.mark.trio
-@pytest.mark.timeout(TEST_TIMEOUT)
+@pytest.mark.timeout(TEST_TIMEOUT)  # type: ignore[not-callable]
 async def test_large_message_echo(nim_server):
     """Test echo with larger messages."""
     server, peer_id, listen_addr = nim_server
 
-    large_messages = [
+    large_messages: list[str] = [
         "x" * 1024,
         "y" * 5000,
     ]
@@ -181,7 +181,7 @@ async def test_large_message_echo(nim_server):
 
     # Run test with timeout
     with trio.move_on_after(TEST_TIMEOUT - 2):  # Leave 2s buffer for cleanup
-        responses = await run_echo_test(listen_addr, large_messages)  # type: ignore[possibly-unbound]
+        responses = await run_echo_test(listen_addr, large_messages)
 
         assert len(responses) == len(large_messages)
         for sent, received in zip(large_messages, responses):
