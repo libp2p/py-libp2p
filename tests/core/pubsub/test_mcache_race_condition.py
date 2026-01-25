@@ -51,3 +51,26 @@ def test_shift_handles_duplicates():
         mcache.shift()
 
     assert len(mcache.msgs) == 0
+
+
+def test_duplicate_put_keeps_first_topics():
+    """When same mid is put with different topicIDs, first one wins."""
+    mcache = MessageCache(window_size=3, history_size=5)
+
+    # Create two messages with the same mid but different topics
+    msg_first = rpc_pb2.Message(from_id=b"peer1", seqno=b"\x01", topicIDs=["topic-A"])
+    msg_second = rpc_pb2.Message(
+        from_id=b"peer1", seqno=b"\x01", topicIDs=["topic-A", "topic-B"]
+    )  # duplicate mid
+
+    mcache.put(msg_first)
+    mcache.put(msg_second)  # This will be ignored due to duplicate mid
+
+    mid = (b"\x01", b"peer1")
+
+    # First message's topics are preserved
+    window_a = mcache.window("topic-A")
+    assert mid in window_a
+
+    window_b = mcache.window("topic-B")
+    assert mid not in window_b  # Not present from the second (ignored) put
