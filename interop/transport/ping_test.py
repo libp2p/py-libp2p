@@ -18,6 +18,7 @@ import ssl
 import sys
 import tempfile
 import time
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -40,8 +41,8 @@ from libp2p.security.noise.transport import (
 )
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
-    TLSTransport,
     IdentityConfig,
+    TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
 
@@ -52,7 +53,7 @@ MAX_TEST_TIMEOUT = 300  # Max timeout (default Docker timeout is 600s)
 logger = logging.getLogger("libp2p.ping_test")
 
 
-def configure_logging():
+def configure_logging() -> None:
     """Configure logging based on debug environment variable."""
     debug_value = os.getenv("DEBUG") or "false"  # Optional, default to "false"
     debug_enabled = debug_value.upper() in [
@@ -109,7 +110,7 @@ def configure_logging():
 
 
 class PingTest:
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize ping test with configuration from environment variables."""
         # All environment variables use uppercase names only and are required
         self.transport = os.getenv("TRANSPORT")
@@ -120,6 +121,8 @@ class PingTest:
         standalone_transports = ["quic-v1"]  # Python currently only supports quic-v1
 
         # Check if transport is standalone before requiring MUXER/SECURE_CHANNEL
+        self.muxer: str | None = None
+        self.security: str | None = None
         if self.transport not in standalone_transports:
             # Non-standalone transports: MUXER and SECURE_CHANNEL are required
             muxer_env = os.getenv("MUXER")
@@ -172,8 +175,8 @@ class PingTest:
         if not self.test_key:
             raise ValueError("TEST_KEY environment variable is required")
 
-        self.host = None
-        self.redis_client: redis.Redis | None = None
+        self.host: Any = None
+        self.redis_client: redis.Redis[str] | None = None
         self.ping_received = False
 
     # Note: setup_redis() removed - _connect_redis_with_retry() is used instead
@@ -203,7 +206,9 @@ class PingTest:
                     f"Unsupported muxer: {self.muxer}. Supported: {valid_muxers}"
                 )
 
-    def create_security_options(self):
+    def create_security_options(
+        self,
+    ) -> tuple[dict[TProtocol, Any], Any]:
         """Create security options based on configuration."""
         # Standalone transports (like quic-v1) have security built-in,
         # no separate security needed
@@ -218,26 +223,26 @@ class PingTest:
 
         if self.security == "noise":
             noise_key_pair = create_new_x25519_key_pair()
-            transport = NoiseTransport(
+            noise_transport = NoiseTransport(
                 libp2p_keypair=key_pair,
                 noise_privkey=noise_key_pair.private_key,
                 early_data=None,
             )
-            return {NOISE_PROTOCOL_ID: transport}, key_pair
+            return {NOISE_PROTOCOL_ID: noise_transport}, key_pair
         elif self.security == "tls":
             # Create TLS transport with custom certificate template for Rust interop
             # Rust's libp2p-tls only understands the libp2p extension, so we must
             # set BasicConstraints and KeyUsage as non-critical (critical=False)
             # to avoid "UnsupportedCriticalExtension" errors.
             from datetime import timezone
-            
+
             serial = x509.random_serial_number()
             not_before = datetime.now(timezone.utc)
             not_after = not_before + timedelta(hours=24)
-            subject_name = issuer_name = x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, "libp2p")
-            ])
-            
+            subject_name = issuer_name = x509.Name(
+                [x509.NameAttribute(NameOID.COMMON_NAME, "libp2p")]
+            )
+
             # Custom cert template with critical=False for interop compatibility
             custom_template = (
                 x509.CertificateBuilder()
@@ -248,7 +253,7 @@ class PingTest:
                 .issuer_name(issuer_name)
                 .add_extension(
                     x509.BasicConstraints(ca=False, path_length=None),
-                    critical=False  # Must be False for Rust interop
+                    critical=False,  # Must be False for Rust interop
                 )
                 .add_extension(
                     x509.KeyUsage(
@@ -262,29 +267,29 @@ class PingTest:
                         encipher_only=False,
                         decipher_only=False,
                     ),
-                    critical=False  # Must be False for Rust interop
+                    critical=False,  # Must be False for Rust interop
                 )
             )
-            
+
             identity_config = IdentityConfig(cert_template=custom_template)
-            transport = TLSTransport(
+            tls_transport = TLSTransport(
                 libp2p_keypair=key_pair,
                 early_data=None,
                 muxers=None,
                 identity_config=identity_config,
             )
-            return {TLS_PROTOCOL_ID: transport}, key_pair
+            return {TLS_PROTOCOL_ID: tls_transport}, key_pair
         elif self.security == "plaintext":
-            transport = InsecureTransport(
+            plaintext_transport = InsecureTransport(
                 local_key_pair=key_pair,
                 secure_bytes_provider=None,
                 peerstore=None,
             )
-            return {PLAINTEXT_PROTOCOL_ID: transport}, key_pair
+            return {PLAINTEXT_PROTOCOL_ID: plaintext_transport}, key_pair
         else:
             raise ValueError(f"Unsupported security: {self.security}")
 
-    def create_muxer_options(self):
+    def create_muxer_options(self) -> Any:
         """Create muxer options based on configuration."""
         # Standalone transports (like quic-v1) have muxing built-in,
         # no separate muxer needed
@@ -412,15 +417,17 @@ class PingTest:
                 return None
         return None
 
-    def _get_ip_value(self, addr) -> str | None:
+    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
         return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
 
-    def _get_protocol_names(self, addr) -> list:
+    def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         """Get protocol names from multiaddr."""
         return [p.name for p in addr.protocols()]
 
-    def _extract_and_preserve_p2p(self, addr) -> tuple[multiaddr.Multiaddr, str | None]:
+    def _extract_and_preserve_p2p(
+        self, addr: multiaddr.Multiaddr
+    ) -> tuple[multiaddr.Multiaddr, str | None]:
         """
         Extract p2p component from address and return address without p2p.
 
@@ -477,7 +484,7 @@ class PingTest:
             base = multiaddr.Multiaddr(f"/ip4/{ip_value}/udp/{port}")
         return base.encapsulate(multiaddr.Multiaddr("/quic-v1"))
 
-    def create_listen_addresses(self, port: int = 0) -> list:
+    def create_listen_addresses(self, port: int = 0) -> list[multiaddr.Multiaddr]:
         """Create listen addresses based on transport type."""
         base_addrs = get_available_interfaces(port, protocol="tcp")
 
@@ -593,7 +600,7 @@ class PingTest:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                return stream.muxed_conn.peer_id
+                return str(stream.muxed_conn.peer_id)
             except (AttributeError, Exception):
                 return "unknown"
 
@@ -625,6 +632,7 @@ class PingTest:
     def log_protocols(self) -> None:
         """Log registered protocols for debugging."""
         try:
+            assert self.host is not None
             protocols = self.host.get_mux().get_protocols()
             protocol_strs = [str(p) for p in protocols if p is not None]
             print(f"Registered protocols: {protocol_strs}", file=sys.stderr)
@@ -654,7 +662,9 @@ class PingTest:
             print(f"error occurred: {e}", file=sys.stderr)
             raise
 
-    def _filter_addresses_by_transport(self, addresses: list) -> list:
+    def _filter_addresses_by_transport(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
         """Filter addresses to match current transport type."""
         filtered = []
         for addr in addresses:
@@ -671,7 +681,7 @@ class PingTest:
                 filtered.append(addr)
         return filtered if filtered else addresses
 
-    def _replace_loopback_ip(self, addr) -> str:
+    def _replace_loopback_ip(self, addr: multiaddr.Multiaddr) -> str:
         """
         Replace loopback IP (127.0.0.1, 0.0.0.0) with container's actual IP.
 
@@ -720,7 +730,7 @@ class PingTest:
                     return addr_str.replace(old_ip, f"/ip4/{actual_ip}/")
             return addr_str
 
-    def _get_publishable_address(self, addresses: list) -> str:
+    def _get_publishable_address(self, addresses: list[multiaddr.Multiaddr]) -> str:
         """
         Get the best address to publish to Redis for dialer coordination.
 
@@ -815,18 +825,20 @@ class PingTest:
 
             # Clean up any existing key to ensure it's a list type
             try:
+                assert self.redis_client is not None
                 self.redis_client.delete(redis_key)
             except Exception:
                 pass  # Ignore if key doesn't exist
 
             # Publish listener address using RPUSH (list operation)
             # Dialer will use BLPOP to block and read this value
+            assert self.redis_client is not None
             self.redis_client.rpush(redis_key, actual_addr)
             print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
 
             wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
             check_interval = 0.5
-            elapsed = 0
+            elapsed: float = 0
 
             while elapsed < wait_timeout:
                 if self.ping_received:
@@ -885,7 +897,7 @@ class PingTest:
                     await trio.sleep(retry_delay)
         raise RuntimeError(f"Failed to connect to Redis after {max_retries} attempts")
 
-    def _debug_connection_state(self, network, peer_id) -> None:
+    def _debug_connection_state(self, network: Any, peer_id: Any) -> None:
         """Debug connection state (only if debug logging enabled)."""
         try:
             if hasattr(network, "get_connections_to_peer"):
@@ -922,7 +934,7 @@ class PingTest:
         except Exception as e:
             print(f"[DEBUG] Error checking connections: {e}", file=sys.stderr)
 
-    async def _create_stream_with_retry(self, peer_id) -> INetStream:
+    async def _create_stream_with_retry(self, peer_id: Any) -> INetStream:
         """Create ping stream with retry mechanism for connection readiness."""
         max_retries = 3
         retry_delay = 0.5
@@ -935,6 +947,7 @@ class PingTest:
 
         for attempt in range(max_retries):
             try:
+                assert self.host is not None
                 stream = await self.host.new_stream(peer_id, [PING_PROTOCOL_ID])
                 print("Ping stream created successfully", file=sys.stderr)
                 return stream
@@ -979,6 +992,7 @@ class PingTest:
             # BLPOP will block until data is available or timeout is reached
             remaining_timeout = max(1, int(redis_wait_timeout))
             try:
+                assert self.redis_client is not None
                 blpop_result = self.redis_client.blpop(
                     redis_key, timeout=remaining_timeout
                 )
@@ -1263,7 +1277,7 @@ class PingTest:
             return "172.17.0.1"
 
 
-async def main():
+async def main() -> None:
     """Main entry point."""
     configure_logging()
     ping_test = PingTest()
