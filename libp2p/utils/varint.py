@@ -14,7 +14,7 @@ from libp2p.io.utils import (
     read_exactly,
 )
 
-logger = logging.getLogger("libp2p.utils.varint")
+logger = logging.getLogger(__name__)
 
 # Unsigned LEB128(varint codec)
 # Reference: https://github.com/ethereum/py-wasm/blob/master/wasm/parsers/leb128.py
