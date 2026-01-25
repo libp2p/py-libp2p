@@ -7,43 +7,37 @@ engage in true bidirectional chat sessions where both client and server can
 send and receive messages simultaneously.
 
 Features:
+
 - TLS 1.3 encryption for secure client-server communication
-- Three communication modes: single message echo, full-duplex bidirectional
-  chat, and ping
+- Three communication modes: single message echo, full-duplex bidirectional chat, and ping
 - Automatic certificate verification and peer identity validation
 - Graceful error handling and connection management
 - Concurrent send/receive operations for real-time chat experience
 - Both parties can initiate messages at any time
 
-Usage:
-    tls-client-demo --server MULTIADDR [--mode MODE] \\
-        [--message MESSAGE] [--count COUNT]
+Usage::
+
+    tls-client-demo --server MULTIADDR [--mode MODE] [--message MESSAGE] [--count COUNT]
 
 Modes:
 
 - echo: Send a single message and receive the echo response (default)
-- chat: Full-duplex bidirectional chat where both parties can send/receive
-  simultaneously
+- chat: Full-duplex bidirectional chat where both parties can send/receive simultaneously
 - ping: Send ping requests and measure round-trip time
 
-Examples:
+Examples::
+
     # Echo mode (default)
-    tls-client-demo --server \\
-        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
 
     # Bidirectional chat mode - real-time conversation
-    tls-client-demo --server \\
-        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
-        --mode chat
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --mode chat
 
     # Custom message in echo mode
-    tls-client-demo --server \\
-        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
-        --message "Hello TLS!"
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --message "Hello TLS!"
+
     # Ping mode - test latency
-    tls-client-demo --server \\
-        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \\
-        --mode ping --count 10
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --mode ping --count 10
 
 """
 
