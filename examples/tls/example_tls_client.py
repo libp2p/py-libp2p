@@ -9,11 +9,13 @@ send and receive messages simultaneously.
 Features:
 
 - TLS 1.3 encryption for secure client-server communication
-- Three communication modes: single message echo, full-duplex bidirectional chat, and ping
+- Three communication modes:
+  - single message echo,
+  - full-duplex bidirectional chat, and
+  - ping latency testing
 - Automatic certificate verification and peer identity validation
 - Graceful error handling and connection management
 - Concurrent send/receive operations for real-time chat experience
-- Both parties can initiate messages at any time
 
 Usage::
 
@@ -22,22 +24,25 @@ Usage::
 Modes:
 
 - echo: Send a single message and receive the echo response (default)
-- chat: Full-duplex bidirectional chat where both parties can send/receive simultaneously
+- chat: Both client and server can send/receive simultaneously
 - ping: Send ping requests and measure round-trip time
 
 Examples::
 
     # Echo mode (default)
-    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3Koo....
 
     # Bidirectional chat mode - real-time conversation
-    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --mode chat
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3Koo....
+    --mode chat
 
     # Custom message in echo mode
-    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --message "Hello TLS!"
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3Koo....
+    --message "Hello TLS!"
 
     # Ping mode - test latency
-    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop --mode ping --count 10
+    tls-client-demo --server /ip4/127.0.0.1/tcp/8000/p2p/12D3Koo....
+    --mode ping --count 10
 
 """
 
@@ -50,28 +55,16 @@ import time
 import multiaddr
 import trio
 
-from libp2p import (
-    new_host,
-)
-from libp2p.crypto.secp256k1 import (
-    create_new_key_pair,
-)
-from libp2p.custom_types import (
-    TProtocol,
-)
+from libp2p import new_host
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
     PING_LENGTH,
 )
-from libp2p.network.stream.exceptions import (
-    StreamEOF,
-)
-from libp2p.peer.id import (
-    ID,
-)
-from libp2p.peer.peerinfo import (
-    info_from_p2p_addr,
-)
+from libp2p.network.stream.exceptions import StreamEOF
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.tls import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
@@ -121,9 +114,9 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
         logger.debug("Echo mode interrupted by user")
         print("\nEcho mode interrupted")
         raise
-    except Exception as e:
-        logger.exception(f"Error in echo mode: {e}", exc_info=True)
-        print(f"Error in echo mode: {e}")
+    except Exception as exc:
+        logger.exception("Error in echo mode: %s", exc, exc_info=True)
+        print(f"Error in echo mode: {exc}")
         raise
     finally:
         if stream:
@@ -166,7 +159,7 @@ async def chat_mode(host, server_maddr: str) -> None:
                         break
 
                     text = data.decode("utf-8").strip()
-                    logger.debug(f"Received {len(data)} bytes: {text[:50]}...")
+                    logger.debug("Received %d bytes: %s...", len(data), text[:50])
                     if "ended the session" in text.lower():
                         print(f"\nServer: {text}")
                         break
@@ -176,9 +169,9 @@ async def chat_mode(host, server_maddr: str) -> None:
             except StreamEOF:
                 logger.debug("Stream EOF received from server")
                 print("Server disconnected")
-            except Exception as e:
-                logger.exception(f"Receive error: {e}", exc_info=True)
-                print(f"Receive error: {e}")
+            except Exception as exc:
+                logger.exception("Receive error: %s", exc, exc_info=True)
+                print(f"Receive error: {exc}")
 
         async def send_messages():
             """Send client messages to server."""
@@ -199,7 +192,7 @@ async def chat_mode(host, server_maddr: str) -> None:
                             break
 
                         await stream.write(message.encode("utf-8"))
-                        logger.debug(f"Sent message: {message[:50]}...")
+                        logger.debug("Sent message: %s...", message[:50])
 
                     except (EOFError, KeyboardInterrupt):
                         logger.debug("Input interrupted, ending session")
@@ -209,14 +202,14 @@ async def chat_mode(host, server_maddr: str) -> None:
                         except Exception:
                             pass
                         break
-                    except Exception as e:
-                        logger.exception(f"Send error: {e}", exc_info=True)
-                        print(f"Send error: {e}")
+                    except Exception as exc:
+                        logger.exception("Send error: %s", exc, exc_info=True)
+                        print(f"Send error: {exc}")
                         break
 
-            except Exception as e:
-                logger.exception(f"Send task error: {e}", exc_info=True)
-                print(f"Send task error: {e}")
+            except Exception as exc:
+                logger.exception("Send task error: %s", exc, exc_info=True)
+                print(f"Send task error: {exc}")
 
         try:
             async with trio.open_nursery() as nursery:
@@ -224,16 +217,16 @@ async def chat_mode(host, server_maddr: str) -> None:
                 nursery.start_soon(send_messages)
         except KeyboardInterrupt:
             print("\nChat interrupted")
-        except Exception as e:
-            print(f"Chat error: {e}")
+        except Exception as exc:
+            print(f"Chat error: {exc}")
             raise
 
     except KeyboardInterrupt:
         logger.debug("Chat session interrupted by user")
         print("\nChat session interrupted")
-    except Exception as e:
-        logger.exception(f"Chat error: {e}", exc_info=True)
-        print(f"Chat error: {e}")
+    except Exception as exc:
+        logger.exception("Chat error: %s", exc, exc_info=True)
+        print(f"Chat error: {exc}")
         raise
     finally:
         if stream:
@@ -270,7 +263,7 @@ async def ping_mode(host, server_maddr: str, count: int) -> None:
             before = time.time()
 
             await stream.write(ping_bytes)
-            logger.debug(f"Sent ping #{i + 1}")
+            logger.debug("Sent ping #%d", i + 1)
 
             pong_bytes = await stream.read(PING_LENGTH)
             rtt_ms = (time.time() - before) * 1000
@@ -296,9 +289,9 @@ async def ping_mode(host, server_maddr: str, count: int) -> None:
         logger.debug("Ping mode interrupted by user")
         print("\nPing interrupted")
         raise
-    except Exception as e:
-        logger.exception(f"Error in ping mode: {e}", exc_info=True)
-        print(f"Error in ping mode: {e}")
+    except Exception as exc:
+        logger.exception("Error in ping mode: %s", exc, exc_info=True)
+        print(f"Error in ping mode: {exc}")
         raise
     finally:
         if stream:
@@ -316,18 +309,18 @@ async def run(
     seed: int | None = None,
 ) -> None:
     logger = logging.getLogger(__name__)
-    if seed:
+    if seed is not None:
         random.seed(seed)
         secret_number = random.getrandbits(32 * 8)
         secret = secret_number.to_bytes(length=32, byteorder="big")
-        logger.debug(f"Using seed {seed} for key generation")
+        logger.debug("Using seed %d for key generation", seed)
     else:
         secret = secrets.token_bytes(32)
         logger.debug("Generated random secret for key pair")
 
     key_pair = create_new_key_pair(secret)
     peer_id = ID.from_pubkey(key_pair.public_key)
-    logger.debug(f"Created key pair, peer ID: {peer_id.to_string()}")
+    logger.debug("Created key pair, peer ID: %s", peer_id.to_string())
 
     # Create TLS security transport
     tls_transport = TLSTransport(key_pair)
@@ -335,30 +328,29 @@ async def run(
 
     # Create security options with TLS
     sec_opt = {TLS_PROTOCOL_ID: tls_transport}
-    logger.debug(f"Configured security options with TLS protocol: {TLS_PROTOCOL_ID}")
+    logger.debug("Configured security options with TLS protocol: %s", TLS_PROTOCOL_ID)
 
     host = new_host(key_pair=key_pair, sec_opt=sec_opt)
     logger.debug("Created libp2p host")
 
     try:
         async with host.run(listen_addrs=[]):
-            peer_id = host.get_id().to_string()
-            logger.debug(f"Host started, listening on: {[]}")
-            print(f"TLS-enabled client started. Peer ID: {peer_id}")
+            peer_id_str = host.get_id().to_string()
+            logger.debug("Host started, listening on: %s", [])
+            print(f"TLS-enabled client started. Peer ID: {peer_id_str}")
 
             if mode == "echo":
-                if not message:
-                    message = "Hello from TLS client!"
-                logger.debug(f"Starting echo mode with message: {message}")
-                await echo_mode(host, server, message)
+                msg = message or "Hello from TLS client!"
+                logger.debug("Starting echo mode with message: %s", msg)
+                await echo_mode(host, server, msg)
             elif mode == "chat":
                 logger.debug("Starting chat mode")
                 await chat_mode(host, server)
             elif mode == "ping":
-                logger.debug(f"Starting ping mode with count: {count}")
+                logger.debug("Starting ping mode with count: %d", count)
                 await ping_mode(host, server, count)
             else:
-                logger.warning(f"Unknown mode: {mode}")
+                logger.warning("Unknown mode: %s", mode)
                 print(f"Unknown mode: {mode}")
                 return
     except KeyboardInterrupt:
@@ -368,16 +360,18 @@ async def run(
 
 
 def main() -> None:
-    description = """
-    This example demonstrates how to connect to a TLS-enabled py-libp2p host.
-    It supports echo mode, interactive chat mode, and ping mode for latency testing.
-    """
+    description = (
+        "This example demonstrates how to connect to a TLS-enabled py-libp2p host.\n"
+        "It supports echo mode, chat mode, and ping mode for latency testing."
+    )
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--server",
         required=True,
-        help="Server multiaddr to connect to "
-        "(e.g. /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop)",
+        help=(
+            "Server multiaddr to connect to "
+            "(e.g. /ip4/127.0.0.1/tcp/8000/p2p/12D3Koo....)"
+        ),
     )
     parser.add_argument(
         "--mode",
@@ -400,8 +394,10 @@ def main() -> None:
         "-s",
         "--seed",
         type=int,
-        help="provide a seed to the random number generator "
-        "(e.g. to fix peer IDs across runs)",
+        help=(
+            "provide a seed to the random number generator "
+            "(e.g. to fix peer IDs across runs)"
+        ),
     )
     args = parser.parse_args()
 
@@ -409,8 +405,8 @@ def main() -> None:
         trio.run(run, args.server, args.mode, args.message, args.count, args.seed)
     except KeyboardInterrupt:
         print("\nTLS client shutting down gracefully...")
-    except Exception as e:
-        print(f"\nUnexpected error in TLS client: {e}")
+    except Exception as exc:
+        print(f"\nUnexpected error in TLS client: {exc}")
         raise
 
 
