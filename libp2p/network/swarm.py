@@ -74,7 +74,7 @@ from .exceptions import (
     SwarmException,
 )
 
-logger = logging.getLogger("libp2p.network.swarm")
+logger = logging.getLogger(__name__)
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
