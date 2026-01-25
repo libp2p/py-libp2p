@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 TLS-Enabled Py-libp2p Bidirectional Chat Client Example
 
 This example demonstrates how to connect to a TLS-enabled py-libp2p host and
@@ -8,35 +8,42 @@ send and receive messages simultaneously.
 
 Features:
 - TLS 1.3 encryption for secure client-server communication
-- Two communication modes: single message echo and full-duplex bidirectional chat
+- Three communication modes: single message echo, full-duplex bidirectional
+  chat, and ping
 - Automatic certificate verification and peer identity validation
 - Graceful error handling and connection management
 - Concurrent send/receive operations for real-time chat experience
 - Both parties can initiate messages at any time
 
 Usage:
-    python example_tls_client.py --server MULTIADDR [--mode MODE] [--message MESSAGE]
+    tls-client-demo --server MULTIADDR [--mode MODE] \\
+        [--message MESSAGE] [--count COUNT]
 
 Modes:
 
 - echo: Send a single message and receive the echo response (default)
 - chat: Full-duplex bidirectional chat where both parties can send/receive
   simultaneously
+- ping: Send ping requests and measure round-trip time
 
 Examples:
     # Echo mode (default)
-    python example_tls_client.py --server \
+    tls-client-demo --server \\
         /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop
 
     # Bidirectional chat mode - real-time conversation
-    python example_tls_client.py --server \
+    tls-client-demo --server \\
         /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
         --mode chat
 
     # Custom message in echo mode
-    python example_tls_client.py --server \
+    tls-client-demo --server \\
         /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \
         --message "Hello TLS!"
+    # Ping mode - test latency
+    tls-client-demo --server \\
+        /ip4/127.0.0.1/tcp/8000/p2p/12D3KooWAbcd1234567890efghijklmnop \\
+        --mode ping --count 10
 
 """
 
@@ -44,6 +51,7 @@ import argparse
 import logging
 import random
 import secrets
+import time
 
 import multiaddr
 import trio
@@ -57,8 +65,15 @@ from libp2p.crypto.secp256k1 import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+    PING_LENGTH,
+)
 from libp2p.network.stream.exceptions import (
     StreamEOF,
+)
+from libp2p.peer.id import (
+    ID,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -68,10 +83,14 @@ from libp2p.security.tls import (
     TLSTransport,
 )
 
-# Configure minimal logging
-logging.basicConfig(level=logging.WARNING)
-logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger("libp2p").setLevel(logging.WARNING)
+# Configure debug logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logging.getLogger("multiaddr").setLevel(logging.DEBUG)
+logging.getLogger("libp2p").setLevel(logging.DEBUG)
 
 PROTOCOL_ID = TProtocol("/bidirectional-chat/1.0.0")
 MAX_READ_LEN = 2**32 - 1
@@ -79,29 +98,37 @@ MAX_READ_LEN = 2**32 - 1
 
 async def echo_mode(host, server_maddr: str, message: str) -> None:
     """Send a single message and receive echo response."""
+    logger = logging.getLogger(__name__)
     stream = None
     try:
         maddr = multiaddr.Multiaddr(server_maddr)
         info = info_from_p2p_addr(maddr)
 
+        logger.debug(f"Parsed multiaddr: {maddr}, peer_id: {info.peer_id}")
         print(f"Connecting to {server_maddr}...")
         await host.connect(info)
+        logger.debug(f"Successfully connected to peer {info.peer_id}")
 
         print("Opening stream...")
         stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
+        logger.debug(f"Stream opened: {stream}")
 
         print(f"Sending: {message}")
         await stream.write(message.encode("utf-8"))
+        logger.debug(f"Sent {len(message)} bytes")
 
         print("Waiting for response...")
         response = await stream.read(MAX_READ_LEN)
+        logger.debug(f"Received {len(response)} bytes")
 
         print(f"Received: {response.decode('utf-8')}")
 
     except KeyboardInterrupt:
+        logger.debug("Echo mode interrupted by user")
         print("\nEcho mode interrupted")
         raise
     except Exception as e:
+        logger.exception(f"Error in echo mode: {e}", exc_info=True)
         print(f"Error in echo mode: {e}")
         raise
     finally:
@@ -114,16 +141,20 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
 
 async def chat_mode(host, server_maddr: str) -> None:
     """Bidirectional chat with server."""
+    logger = logging.getLogger(__name__)
     stream = None
     try:
         maddr = multiaddr.Multiaddr(server_maddr)
         info = info_from_p2p_addr(maddr)
 
+        logger.debug(f"Parsed multiaddr: {maddr}, peer_id: {info.peer_id}")
         print("Connecting to server...")
         await host.connect(info)
+        logger.debug(f"Successfully connected to peer {info.peer_id}")
 
         print("Opening chat stream...")
         stream = await host.new_stream(info.peer_id, [PROTOCOL_ID])
+        logger.debug(f"Chat stream opened: {stream}")
 
         print("Connected! Chat bidirectionally (Ctrl+C to quit)")
         print("-" * 50)
@@ -134,11 +165,14 @@ async def chat_mode(host, server_maddr: str) -> None:
                 return
             try:
                 while True:
+                    logger.debug("Waiting for server message...")
                     data = await stream.read(MAX_READ_LEN)
                     if not data:
+                        logger.debug("Received empty data, ending receive loop")
                         break
 
                     text = data.decode("utf-8").strip()
+                    logger.debug(f"Received {len(data)} bytes: {text[:50]}...")
                     if "ended the session" in text.lower():
                         print(f"\nServer: {text}")
                         break
@@ -146,8 +180,10 @@ async def chat_mode(host, server_maddr: str) -> None:
                     print(f"\nServer: {text}")
 
             except StreamEOF:
+                logger.debug("Stream EOF received from server")
                 print("Server disconnected")
             except Exception as e:
+                logger.exception(f"Receive error: {e}", exc_info=True)
                 print(f"Receive error: {e}")
 
         async def send_messages():
@@ -169,8 +205,10 @@ async def chat_mode(host, server_maddr: str) -> None:
                             break
 
                         await stream.write(message.encode("utf-8"))
+                        logger.debug(f"Sent message: {message[:50]}...")
 
                     except (EOFError, KeyboardInterrupt):
+                        logger.debug("Input interrupted, ending session")
                         print("Ending session")
                         try:
                             await stream.write(b"quit")
@@ -178,10 +216,12 @@ async def chat_mode(host, server_maddr: str) -> None:
                             pass
                         break
                     except Exception as e:
+                        logger.exception(f"Send error: {e}", exc_info=True)
                         print(f"Send error: {e}")
                         break
 
             except Exception as e:
+                logger.exception(f"Send task error: {e}", exc_info=True)
                 print(f"Send task error: {e}")
 
         try:
@@ -195,8 +235,10 @@ async def chat_mode(host, server_maddr: str) -> None:
             raise
 
     except KeyboardInterrupt:
+        logger.debug("Chat session interrupted by user")
         print("\nChat session interrupted")
     except Exception as e:
+        logger.exception(f"Chat error: {e}", exc_info=True)
         print(f"Chat error: {e}")
         raise
     finally:
@@ -208,38 +250,125 @@ async def chat_mode(host, server_maddr: str) -> None:
         print("Disconnected from server")
 
 
-async def run(server: str, mode: str, message: str, seed: int | None = None) -> None:
+async def ping_mode(host, server_maddr: str, count: int) -> None:
+    """Send ping requests and measure round-trip time."""
+    logger = logging.getLogger(__name__)
+    stream = None
+    try:
+        maddr = multiaddr.Multiaddr(server_maddr)
+        info = info_from_p2p_addr(maddr)
+
+        logger.debug(f"Parsed multiaddr: {maddr}, peer_id: {info.peer_id}")
+        print(f"Connecting to {server_maddr}...")
+        await host.connect(info)
+        logger.debug(f"Successfully connected to peer {info.peer_id}")
+
+        print("Opening ping stream...")
+        stream = await host.new_stream(info.peer_id, [PING_PROTOCOL_ID])
+        logger.debug(f"Ping stream opened: {stream}")
+
+        print(f"Pinging server ({count} requests)...")
+        print("-" * 50)
+
+        rtts = []
+        for i in range(count):
+            ping_bytes = secrets.token_bytes(PING_LENGTH)
+            before = time.time()
+
+            await stream.write(ping_bytes)
+            logger.debug(f"Sent ping #{i + 1}")
+
+            pong_bytes = await stream.read(PING_LENGTH)
+            rtt_ms = (time.time() - before) * 1000
+            rtts.append(rtt_ms)
+
+            if ping_bytes != pong_bytes:
+                logger.warning("Invalid pong response")
+                print(f"Ping #{i + 1}: ERROR - Invalid response")
+            else:
+                print(f"Ping #{i + 1}: {rtt_ms:.2f} ms")
+
+        if rtts:
+            avg_rtt = sum(rtts) / len(rtts)
+            min_rtt = min(rtts)
+            max_rtt = max(rtts)
+            print("-" * 50)
+            print(
+                f"Statistics: min={min_rtt:.2f} ms, max={max_rtt:.2f} ms, "
+                f"avg={avg_rtt:.2f} ms"
+            )
+
+    except KeyboardInterrupt:
+        logger.debug("Ping mode interrupted by user")
+        print("\nPing interrupted")
+        raise
+    except Exception as e:
+        logger.exception(f"Error in ping mode: {e}", exc_info=True)
+        print(f"Error in ping mode: {e}")
+        raise
+    finally:
+        if stream:
+            try:
+                await stream.close()
+            except Exception:
+                pass  # Best effort cleanup
+
+
+async def run(
+    server: str,
+    mode: str,
+    message: str,
+    count: int,
+    seed: int | None = None,
+) -> None:
+    logger = logging.getLogger(__name__)
     if seed:
         random.seed(seed)
         secret_number = random.getrandbits(32 * 8)
         secret = secret_number.to_bytes(length=32, byteorder="big")
+        logger.debug(f"Using seed {seed} for key generation")
     else:
         secret = secrets.token_bytes(32)
+        logger.debug("Generated random secret for key pair")
 
     key_pair = create_new_key_pair(secret)
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    logger.debug(f"Created key pair, peer ID: {peer_id.to_string()}")
 
     # Create TLS security transport
     tls_transport = TLSTransport(key_pair)
+    logger.debug("Created TLS transport")
 
     # Create security options with TLS
     sec_opt = {TLS_PROTOCOL_ID: tls_transport}
+    logger.debug(f"Configured security options with TLS protocol: {TLS_PROTOCOL_ID}")
 
     host = new_host(key_pair=key_pair, sec_opt=sec_opt)
+    logger.debug("Created libp2p host")
 
     try:
         async with host.run(listen_addrs=[]):
-            print(f"TLS-enabled client started. Peer ID: {host.get_id().to_string()}")
+            peer_id = host.get_id().to_string()
+            logger.debug(f"Host started, listening on: {[]}")
+            print(f"TLS-enabled client started. Peer ID: {peer_id}")
 
             if mode == "echo":
                 if not message:
                     message = "Hello from TLS client!"
+                logger.debug(f"Starting echo mode with message: {message}")
                 await echo_mode(host, server, message)
             elif mode == "chat":
+                logger.debug("Starting chat mode")
                 await chat_mode(host, server)
+            elif mode == "ping":
+                logger.debug(f"Starting ping mode with count: {count}")
+                await ping_mode(host, server, count)
             else:
+                logger.warning(f"Unknown mode: {mode}")
                 print(f"Unknown mode: {mode}")
                 return
     except KeyboardInterrupt:
+        logger.debug("Client shutdown requested by user")
         print("\nClient shutdown requested...")
         raise
 
@@ -247,7 +376,7 @@ async def run(server: str, mode: str, message: str, seed: int | None = None) -> 
 def main() -> None:
     description = """
     This example demonstrates how to connect to a TLS-enabled py-libp2p host.
-    It supports both simple echo mode and interactive chat mode.
+    It supports echo mode, interactive chat mode, and ping mode for latency testing.
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
@@ -258,14 +387,20 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["echo", "chat"],
+        choices=["echo", "chat", "ping"],
         default="echo",
-        help="Connection mode: echo (default) or chat",
+        help="Connection mode: echo (default), chat, or ping",
     )
     parser.add_argument(
         "--message",
         default="",
         help="Message to send in echo mode (default: 'Hello from TLS client!')",
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=5,
+        help="Number of ping requests to send (default: 5, only used in ping mode)",
     )
     parser.add_argument(
         "-s",
@@ -277,7 +412,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        trio.run(run, args.server, args.mode, args.message, args.seed)
+        trio.run(run, args.server, args.mode, args.message, args.count, args.seed)
     except KeyboardInterrupt:
         print("\nTLS client shutting down gracefully...")
     except Exception as e:
