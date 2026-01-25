@@ -35,7 +35,7 @@ from libp2p.utils.multiaddr_utils import (
     multiaddr_from_socket,
 )
 
-logger = logging.getLogger("libp2p.transport.tcp")
+logger = logging.getLogger(__name__)
 
 
 class TCPListener(IListener):

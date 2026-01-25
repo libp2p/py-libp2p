@@ -37,7 +37,7 @@ def _get_websocket_transport() -> Any:
     return WebsocketTransport
 
 
-logger = logging.getLogger("libp2p.transport.registry")
+logger = logging.getLogger(__name__)
 
 
 def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
