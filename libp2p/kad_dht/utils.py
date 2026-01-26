@@ -17,7 +17,7 @@ from .pb.kademlia_pb2 import (
     Message,
 )
 
-logger = logging.getLogger("kademlia-example.utils")
+logger = logging.getLogger(__name__)
 
 
 def maybe_consume_signed_record(

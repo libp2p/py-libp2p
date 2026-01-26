@@ -100,7 +100,7 @@ from multiaddr import Multiaddr
 # telling it to listen on the given listen addresses.
 
 
-logger = logging.getLogger("libp2p.network.basic_host")
+logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
 
