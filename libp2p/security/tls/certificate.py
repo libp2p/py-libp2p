@@ -179,18 +179,18 @@ def create_cert_template() -> x509.CertificateBuilder:
         .issuer_name(issuer_name)
     )
 
+    # Both extensions are set to critical=False for cross-implementation compatibility.
+    # Rust libp2p-tls doesn't understand these extensions, so they must be non-critical
+    # per spec: "Implementations MUST ignore non-critical extensions with unknown OIDs.
+    # Endpoints MUST abort the connection attempt if the certificate contains critical
+    # extensions that the endpoint does not understand."
+
     # Add Basic Constraints extension - not a CA
-    # Note: critical=False for cross-implementation compatibility.
-    # Rust libp2p-tls doesn't understand this extension, so it must be non-critical
-    # per spec: "Implementations MUST ignore non-critical extensions with unknown OIDs"
     builder = builder.add_extension(
         x509.BasicConstraints(ca=False, path_length=None), critical=False
     )
 
     # Add Key Usage - digital signature only
-    # Note: critical=False for cross-implementation compatibility.
-    # Rust libp2p-tls doesn't understand this extension, so it must be non-critical
-    # per spec: "Implementations MUST ignore non-critical extensions with unknown OIDs"
     builder = builder.add_extension(
         x509.KeyUsage(
             digital_signature=True,
