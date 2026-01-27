@@ -47,7 +47,6 @@ from libp2p.security.noise.transport import (
 )
 from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
-    IdentityConfig,
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
@@ -236,53 +235,11 @@ class PingTest:
             )
             return {NOISE_PROTOCOL_ID: noise_transport}, key_pair
         elif self.security == "tls":
-            # Create TLS transport with custom certificate template for Rust interop
-            # Rust's libp2p-tls only understands the libp2p extension, so we must
-            # set BasicConstraints and KeyUsage as non-critical (critical=False)
-            # to avoid "UnsupportedCriticalExtension" errors.
-            from datetime import timezone
-
-            serial = x509.random_serial_number()
-            not_before = datetime.now(timezone.utc)
-            not_after = not_before + timedelta(hours=24)
-            subject_name = issuer_name = x509.Name(
-                [x509.NameAttribute(NameOID.COMMON_NAME, "libp2p")]
-            )
-
-            # Custom cert template with critical=False for interop compatibility
-            custom_template = (
-                x509.CertificateBuilder()
-                .serial_number(serial)
-                .not_valid_before(not_before)
-                .not_valid_after(not_after)
-                .subject_name(subject_name)
-                .issuer_name(issuer_name)
-                .add_extension(
-                    x509.BasicConstraints(ca=False, path_length=None),
-                    critical=False,  # Must be False for Rust interop
-                )
-                .add_extension(
-                    x509.KeyUsage(
-                        digital_signature=True,
-                        content_commitment=False,
-                        key_encipherment=False,
-                        data_encipherment=False,
-                        key_agreement=False,
-                        key_cert_sign=False,
-                        crl_sign=False,
-                        encipher_only=False,
-                        decipher_only=False,
-                    ),
-                    critical=False,  # Must be False for Rust interop
-                )
-            )
-
-            identity_config = IdentityConfig(cert_template=custom_template)
+            # Use default certificate template (now has critical=False for Rust interop)
             tls_transport = TLSTransport(
                 libp2p_keypair=key_pair,
                 early_data=None,
                 muxers=None,
-                identity_config=identity_config,
             )
             return {TLS_PROTOCOL_ID: tls_transport}, key_pair
         elif self.security == "plaintext":
