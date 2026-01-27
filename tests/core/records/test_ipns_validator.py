@@ -449,3 +449,172 @@ class TestIPNSValidatorIntegration:
 
             # Check that pk validator is also registered
             assert "pk" in dht.validator._validators
+
+
+class TestIPNSSpecTestVectors:
+    """
+    Official IPNS test vectors from the IPNS Record Specification.
+    https://specs.ipfs.tech/ipns/ipns-record/#test-vectors
+    """
+
+    FIXTURES_DIR = "tests/core/records/fixtures"
+
+    # IPNS names (CIDv1 with libp2p-key multicodec) from the spec
+    TEST_VECTORS = {
+        # V1-only record -> invalid (missing signatureV2)
+        "v1_only": {
+            "file": "v1_only.ipns-record",
+            "name": "k51qzi5uqu5dm4tm0wt8srkg9h9suud4wuiwjimndrkydqm81cqtlb5ak6p7ku",
+            "valid": False,
+            "error": "signatureV2",
+        },
+        # V1+V2 with both signatures valid -> valid
+        "v1_v2_valid": {
+            "file": "v1_v2_valid.ipns-record",
+            "name": "k51qzi5uqu5dlkw8pxuw9qmqayfdeh4kfebhmreauqdc6a7c3y7d5i9fi8mk9w",
+            "valid": True,
+            "value": "/ipfs/bafkqaddwgevxmmraojswg33smq",
+        },
+        # V1+V2 but V1 value differs from V2 CBOR -> invalid
+        "v1_v2_broken_v1_value": {
+            "file": "v1_v2_broken_v1_value.ipns-record",
+            "name": "k51qzi5uqu5dlmit2tuwdvnx4sbnyqgmvbxftl0eo3f33wwtb9gr7yozae9kpw",
+            "valid": False,
+            "error": "V1 value doesn't match",
+        },
+        # V1+V2 but only signatureV1 is valid -> invalid
+        "v1_v2_broken_sig_v2": {
+            "file": "v1_v2_broken_sig_v2.ipns-record",
+            "name": "k51qzi5uqu5diamp7qnnvs1p1gzmku3eijkeijs3418j23j077zrkok63xdm8c",
+            "valid": False,
+            "error": "signatureV2|Signature",
+        },
+        # V1+V2 but only signatureV2 is valid -> valid (V1 sig ignored)
+        "v1_v2_broken_sig_v1": {
+            "file": "v1_v2_broken_sig_v1.ipns-record",
+            "name": "k51qzi5uqu5dilgf7gorsh9vcqqq4myo6jd4zmqkuy9pxyxi5fua3uf7axph4y",
+            "valid": True,
+            "value": "/ipfs/bafkqahtwgevxmmrao5uxi2bamjzg623fnyqhg2lhnzqxi5lsmuqhmmi",
+        },
+        # V2-only (no V1 fields) -> valid
+        "v2_only": {
+            "file": "v2_only.ipns-record",
+            "name": "k51qzi5uqu5dit2ku9mutlfgwyz8u730on38kd10m97m36bjt66my99hb6103f",
+            "valid": True,
+        },
+    }
+
+    @pytest.fixture
+    def validator(self) -> IPNSValidator:
+        return IPNSValidator()
+
+    def _ipns_name_to_key(self, name: str) -> str:
+        """
+        Convert CIDv1 IPNS name to the /ipns/<multihash> key format.
+
+        IPNS names are CIDv1 with libp2p-key multicodec (0x72).
+        We need to extract the multihash and convert to hex for our key format.
+        """
+        import base64
+        import multihash as mh
+
+        # Decode base36 CID (k prefix indicates base36)
+        alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+        name_lower = name.lower()
+
+        # Remove 'k' prefix if present (base36 indicator)
+        if name_lower.startswith("k"):
+            name_lower = name_lower[1:]
+
+        # Decode base36
+        num = 0
+        for char in name_lower:
+            num = num * 36 + alphabet.index(char)
+
+        # Convert to bytes
+        cid_bytes = []
+        while num > 0:
+            cid_bytes.append(num & 0xFF)
+            num >>= 8
+        cid_bytes = bytes(reversed(cid_bytes))
+
+        # CIDv1 format: <version><codec><multihash>
+        # version = 0x01, codec = 0x72 (libp2p-key)
+        # Skip version (varint) and codec (varint) to get multihash
+        # For these test vectors, version=1 and codec=0x72 are single bytes
+        if len(cid_bytes) > 2:
+            multihash_bytes = cid_bytes[2:]  # Skip version and codec
+            return "/ipns/" + multihash_bytes.hex()
+
+        return "/ipns/" + cid_bytes.hex()
+
+    def _load_fixture(self, filename: str) -> bytes:
+        """Load a test fixture file."""
+        import os
+
+        path = os.path.join(self.FIXTURES_DIR, filename)
+        with open(path, "rb") as f:
+            return f.read()
+
+    def test_v1_only_invalid(self, validator):
+        """V1-only record should be rejected (missing signatureV2)."""
+        vector = self.TEST_VECTORS["v1_only"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        with pytest.raises(InvalidRecordType, match=vector["error"]):
+            validator.validate(key, record_bytes)
+
+    def test_v1_v2_valid(self, validator):
+        """V1+V2 record with both signatures valid should pass."""
+        vector = self.TEST_VECTORS["v1_v2_valid"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        # Should not raise
+        validator.validate(key, record_bytes)
+
+        # Verify the value
+        entry = IpnsEntry()
+        entry.ParseFromString(record_bytes)
+        cbor_data = cbor2.loads(entry.data)
+        value = cbor_data.get("Value", b"")
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        assert value == vector["value"]
+
+    def test_v1_v2_broken_v1_value_invalid(self, validator):
+        """V1+V2 record with mismatched V1 value should be rejected."""
+        vector = self.TEST_VECTORS["v1_v2_broken_v1_value"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        with pytest.raises(InvalidRecordType, match=vector["error"]):
+            validator.validate(key, record_bytes)
+
+    def test_v1_v2_broken_sig_v2_invalid(self, validator):
+        """V1+V2 record with only signatureV1 valid should be rejected."""
+        vector = self.TEST_VECTORS["v1_v2_broken_sig_v2"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        with pytest.raises(InvalidRecordType, match=vector["error"]):
+            validator.validate(key, record_bytes)
+
+    def test_v1_v2_broken_sig_v1_valid(self, validator):
+        """V1+V2 record with only signatureV2 valid should pass (V1 ignored)."""
+        vector = self.TEST_VECTORS["v1_v2_broken_sig_v1"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        # Should not raise - signatureV1 is ignored per spec
+        validator.validate(key, record_bytes)
+
+    def test_v2_only_valid(self, validator):
+        """V2-only record (no V1 fields) should pass."""
+        vector = self.TEST_VECTORS["v2_only"]
+        record_bytes = self._load_fixture(vector["file"])
+        key = self._ipns_name_to_key(vector["name"])
+
+        # Should not raise
+        validator.validate(key, record_bytes)
