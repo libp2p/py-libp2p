@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # IPNS spec constants: https://specs.ipfs.tech/ipns/ipns-record/
 MAX_RECORD_SIZE = 10 * 1024  # 10 KiB per spec section 4.2.1
-SIGNATURE_PREFIX = b"ipns-signature:"  # V2 signature prefix (hex: 69706e732d7369676e61747572653a)
+SIGNATURE_PREFIX = b"ipns-signature:"  # V2 signature prefix
 VALIDITY_TYPE_EOL = 0  # End of Life - the only supported validity type
 IDENTITY_MULTIHASH_CODE = 0x00  # For Ed25519 keys inlined in IPNS name
 
@@ -47,6 +47,7 @@ class IPNSValidator(Validator):
 
         Raises:
             InvalidRecordType: If any validation step fails
+
         """
         ns, name_hash = split_key(key)
         if ns != "ipns":
@@ -106,7 +107,7 @@ class IPNSValidator(Validator):
                 return unmarshal_public_key(mh.digest)
             else:
                 raise InvalidRecordType(
-                    f"Public key not in record and not inlined (multihash code: {mh.code})"
+                    f"Public key not inlined in name (multihash code: {mh.code})"
                 )
         except InvalidRecordType:
             raise

@@ -515,9 +515,6 @@ class TestIPNSSpecTestVectors:
         IPNS names are CIDv1 with libp2p-key multicodec (0x72).
         We need to extract the multihash and convert to hex for our key format.
         """
-        import base64
-        import multihash as mh
-
         # Decode base36 CID (k prefix indicates base36)
         alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
         name_lower = name.lower()
