@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import multihash
 
@@ -114,15 +114,14 @@ class IPNSValidator(Validator):
         except Exception as e:
             raise InvalidRecordType(f"Failed to extract public key from name: {e}")
 
-    def _decode_cbor_data(self, data: bytes) -> dict:
+    def _decode_cbor_data(self, data: bytes) -> dict[str, Any]:
         """Decode DAG-CBOR data from IpnsEntry.data field."""
         try:
             import cbor2
+
             return cbor2.loads(data)
         except ImportError:
-            raise InvalidRecordType(
-                "cbor2 package required for IPNS validation"
-            )
+            raise InvalidRecordType("cbor2 package required for IPNS validation")
         except Exception as e:
             raise InvalidRecordType(f"Failed to decode DAG-CBOR data: {e}")
 
@@ -140,7 +139,9 @@ class IPNSValidator(Validator):
         except Exception as e:
             raise InvalidRecordType(f"Signature verification error: {e}")
 
-    def _validate_v1_v2_consistency(self, entry: IpnsEntry, cbor_data: dict) -> None:
+    def _validate_v1_v2_consistency(
+        self, entry: IpnsEntry, cbor_data: dict[str, Any]
+    ) -> None:
         """
         Ensure legacy V1 fields match signed V2 CBOR data when present.
 
@@ -172,7 +173,7 @@ class IPNSValidator(Validator):
         if entry.ttl != 0 and entry.ttl != cbor_data.get("TTL", 0):
             raise InvalidRecordType("V1 ttl doesn't match V2 CBOR TTL")
 
-    def _check_validity(self, cbor_data: dict) -> None:
+    def _check_validity(self, cbor_data: dict[str, Any]) -> None:
         """
         Check record expiration per ValidityType=0 (EOL).
 
