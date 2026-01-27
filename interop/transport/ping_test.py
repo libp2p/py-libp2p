@@ -18,6 +18,7 @@ import ssl
 import sys
 import tempfile
 import time
+from typing import Any
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -26,6 +27,12 @@ from cryptography.x509.oid import NameOID
 import multiaddr
 import redis
 import trio
+
+# ExceptionGroup is built-in in Python 3.11+, import for older versions
+try:
+    ExceptionGroup  # noqa: B018
+except NameError:
+    from exceptiongroup import ExceptionGroup  # type: ignore[no-redef]
 
 from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -38,6 +45,10 @@ from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
     Transport as NoiseTransport,
 )
+from libp2p.security.tls.transport import (
+    PROTOCOL_ID as TLS_PROTOCOL_ID,
+    TLSTransport,
+)
 from libp2p.utils.address_validation import get_available_interfaces
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
@@ -47,23 +58,47 @@ MAX_TEST_TIMEOUT = 300  # Max timeout (default Docker timeout is 600s)
 logger = logging.getLogger("libp2p.ping_test")
 
 
-def configure_logging():
+def configure_logging() -> None:
     """Configure logging based on debug environment variable."""
-    debug_enabled = os.getenv("DEBUG", os.getenv("debug", "false")).upper() in [
+    debug_value = os.getenv("DEBUG") or "false"  # Optional, default to "false"
+    debug_enabled = debug_value.upper() in [
         "DEBUG",
         "1",
         "TRUE",
         "YES",
     ]
 
+    # Always suppress multiaddr DEBUG logs (they're too verbose)
+    multiaddr_loggers = [
+        "multiaddr",
+        "multiaddr.transforms",
+        "multiaddr.codecs",
+        "multiaddr.codecs.cid",
+    ]
+    for logger_name in multiaddr_loggers:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
     if debug_enabled:
+        # Enable DEBUG for core libp2p modules to see what's happening
         logger_names = [
             "",
             "libp2p.ping_test",
             "libp2p",
             "libp2p.transport",
+            "libp2p.transport.tcp",
             "libp2p.network",
+            "libp2p.network.swarm",
             "libp2p.protocol_muxer",
+            "libp2p.security",
+            "libp2p.security.tls",
+            "libp2p.security.tls.io",
+            "libp2p.security.tls.transport",
+            "libp2p.security.noise",
+            "libp2p.stream_muxer",
+            "libp2p.stream_muxer.yamux",
+            "libp2p.stream_muxer.mplex",
+            "libp2p.host",
+            "libp2p.tools.async_service",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
@@ -72,9 +107,6 @@ def configure_logging():
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger("libp2p.ping_test").setLevel(logging.INFO)
         warning_loggers = [
-            "multiaddr",
-            "multiaddr.transforms",
-            "multiaddr.codecs",
             "libp2p",
             "libp2p.transport",
         ]
@@ -83,22 +115,56 @@ def configure_logging():
 
 
 class PingTest:
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize ping test with configuration from environment variables."""
-        # Support both uppercase (standard) and lowercase (legacy) env var names
-        self.transport = os.getenv("TRANSPORT", os.getenv("transport", "tcp"))
-        # SECURE_CHANNEL and MUXER may not be set for standalone transports
-        muxer_env = os.getenv("MUXER") or os.getenv("muxer")
-        self.muxer = muxer_env if muxer_env else "mplex"  # Default if not set
-        security_env = os.getenv("SECURE_CHANNEL") or os.getenv("security")
-        self.security = security_env if security_env else "noise"  # Default if not set
-        self.is_dialer = (
-            os.getenv("IS_DIALER", os.getenv("is_dialer", "false")).lower() == "true"
-        )
-        self.ip = os.getenv("LISTENER_IP", os.getenv("ip", "0.0.0.0"))
-        self.redis_addr = os.getenv("REDIS_ADDR", os.getenv("redis_addr", "redis:6379"))
+        # All environment variables use uppercase names only and are required
+        self.transport = os.getenv("TRANSPORT")
+        if not self.transport:
+            raise ValueError("TRANSPORT environment variable is required")
 
-        raw_timeout = int(os.getenv("test_timeout_seconds", "180"))
+        # Standalone transports don't use separate security/muxer
+        standalone_transports = ["quic-v1"]  # Python currently only supports quic-v1
+
+        # Check if transport is standalone before requiring MUXER/SECURE_CHANNEL
+        self.muxer: str | None = None
+        self.security: str | None = None
+        if self.transport not in standalone_transports:
+            # Non-standalone transports: MUXER and SECURE_CHANNEL are required
+            muxer_env = os.getenv("MUXER")
+            if muxer_env is None:
+                raise ValueError("MUXER environment variable is required")
+            self.muxer = muxer_env
+
+            security_env = os.getenv("SECURE_CHANNEL")
+            if security_env is None:
+                raise ValueError("SECURE_CHANNEL environment variable is required")
+            self.security = security_env
+        else:
+            # Standalone transports: MUXER and SECURE_CHANNEL are optional
+            # (not set by framework)
+            muxer_env = os.getenv("MUXER")
+            self.muxer = muxer_env if muxer_env else None
+
+            security_env = os.getenv("SECURE_CHANNEL")
+            self.security = security_env if security_env else None
+
+        is_dialer_value = os.getenv("IS_DIALER")
+        if is_dialer_value is None:
+            raise ValueError("IS_DIALER environment variable is required")
+        self.is_dialer = is_dialer_value == "true"  # Case-sensitive match
+
+        self.ip = os.getenv("LISTENER_IP")
+        if not self.ip:
+            raise ValueError("LISTENER_IP environment variable is required")
+
+        self.redis_addr = os.getenv("REDIS_ADDR")
+        if not self.redis_addr:
+            raise ValueError("REDIS_ADDR environment variable is required")
+
+        # Framework timeout: use TEST_TIMEOUT_SECS if set,
+        # otherwise default to 180 seconds
+        timeout_value = os.getenv("TEST_TIMEOUT_SECS") or "180"
+        raw_timeout = int(timeout_value)
         self.test_timeout_seconds = min(raw_timeout, MAX_TEST_TIMEOUT)
         self.resp_timeout = max(30, int(self.test_timeout_seconds * 0.6))
 
@@ -110,12 +176,12 @@ class PingTest:
             self.redis_port = 6379
 
         # Read TEST_KEY for Redis key namespacing (required by transport test framework)
-        self.test_key = os.getenv("TEST_KEY", os.getenv("test_key", ""))
+        self.test_key = os.getenv("TEST_KEY")
         if not self.test_key:
             raise ValueError("TEST_KEY environment variable is required")
 
-        self.host = None
-        self.redis_client: redis.Redis | None = None
+        self.host: Any = None
+        self.redis_client: redis.Redis[str] | None = None
         self.ping_received = False
 
     # Note: setup_redis() removed - _connect_redis_with_retry() is used instead
@@ -123,7 +189,7 @@ class PingTest:
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
         valid_transports = ["tcp", "ws", "wss", "quic-v1"]
-        valid_security = ["noise", "plaintext"]
+        valid_security = ["noise", "plaintext", "tls"]
         valid_muxers = ["mplex", "yamux"]
         # Standalone transports don't use separate security/muxer
         standalone_transports = ["quic-v1"]
@@ -145,30 +211,57 @@ class PingTest:
                     f"Unsupported muxer: {self.muxer}. Supported: {valid_muxers}"
                 )
 
-    def create_security_options(self):
+    def create_security_options(
+        self,
+    ) -> tuple[dict[TProtocol, Any], Any]:
         """Create security options based on configuration."""
+        # Standalone transports (like quic-v1) have security built-in,
+        # no separate security needed
+        standalone_transports = ["quic-v1"]
+        if self.transport in standalone_transports:
+            # For standalone transports, return empty security options
+            # The security is handled by the transport itself
+            key_pair = create_new_key_pair()
+            return {}, key_pair
+
         key_pair = create_new_key_pair()
 
         if self.security == "noise":
             noise_key_pair = create_new_x25519_key_pair()
-            transport = NoiseTransport(
+            noise_transport = NoiseTransport(
                 libp2p_keypair=key_pair,
                 noise_privkey=noise_key_pair.private_key,
                 early_data=None,
             )
-            return {NOISE_PROTOCOL_ID: transport}, key_pair
+            return {NOISE_PROTOCOL_ID: noise_transport}, key_pair
+        elif self.security == "tls":
+            # Use default certificate template (now has critical=False for Rust interop)
+            tls_transport = TLSTransport(
+                libp2p_keypair=key_pair,
+                early_data=None,
+                muxers=None,
+            )
+            return {TLS_PROTOCOL_ID: tls_transport}, key_pair
         elif self.security == "plaintext":
-            transport = InsecureTransport(
+            plaintext_transport = InsecureTransport(
                 local_key_pair=key_pair,
                 secure_bytes_provider=None,
                 peerstore=None,
             )
-            return {PLAINTEXT_PROTOCOL_ID: transport}, key_pair
+            return {PLAINTEXT_PROTOCOL_ID: plaintext_transport}, key_pair
         else:
             raise ValueError(f"Unsupported security: {self.security}")
 
-    def create_muxer_options(self):
+    def create_muxer_options(self) -> Any:
         """Create muxer options based on configuration."""
+        # Standalone transports (like quic-v1) have muxing built-in,
+        # no separate muxer needed
+        standalone_transports = ["quic-v1"]
+        if self.transport in standalone_transports:
+            # For standalone transports, return None (no separate muxer)
+            # The muxing is handled by the transport itself
+            return None
+
         if self.muxer == "yamux":
             return create_yamux_muxer_option()
         elif self.muxer == "mplex":
@@ -287,15 +380,17 @@ class PingTest:
                 return None
         return None
 
-    def _get_ip_value(self, addr) -> str | None:
+    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
         return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
 
-    def _get_protocol_names(self, addr) -> list:
+    def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         """Get protocol names from multiaddr."""
         return [p.name for p in addr.protocols()]
 
-    def _extract_and_preserve_p2p(self, addr) -> tuple[multiaddr.Multiaddr, str | None]:
+    def _extract_and_preserve_p2p(
+        self, addr: multiaddr.Multiaddr
+    ) -> tuple[multiaddr.Multiaddr, str | None]:
         """
         Extract p2p component from address and return address without p2p.
 
@@ -352,7 +447,7 @@ class PingTest:
             base = multiaddr.Multiaddr(f"/ip4/{ip_value}/udp/{port}")
         return base.encapsulate(multiaddr.Multiaddr("/quic-v1"))
 
-    def create_listen_addresses(self, port: int = 0) -> list:
+    def create_listen_addresses(self, port: int = 0) -> list[multiaddr.Multiaddr]:
         """Create listen addresses based on transport type."""
         base_addrs = get_available_interfaces(port, protocol="tcp")
 
@@ -468,9 +563,37 @@ class PingTest:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
-                return stream.muxed_conn.peer_id
+                return str(stream.muxed_conn.peer_id)
             except (AttributeError, Exception):
                 return "unknown"
+
+    def _is_connection_closed_error(self, exc: BaseException) -> bool:
+        """
+        Check if an exception is an expected 'Connection closed' error.
+
+        These errors occur during graceful shutdown when the muxer is still
+        trying to read from a connection that has been closed by the other side.
+        """
+        if exc is None:
+            return False
+
+        # Check direct exception message
+        exc_str = str(exc).lower()
+        if "connection closed" in exc_str:
+            return True
+
+        # Check cause chain
+        if hasattr(exc, "__cause__") and exc.__cause__:
+            if self._is_connection_closed_error(exc.__cause__):
+                return True
+
+        # Check nested ExceptionGroups
+        if isinstance(exc, ExceptionGroup):
+            return all(
+                self._is_connection_closed_error(inner) for inner in exc.exceptions
+            )
+
+        return False
 
     async def handle_ping(self, stream: INetStream) -> None:
         """Handle incoming ping requests."""
@@ -500,6 +623,7 @@ class PingTest:
     def log_protocols(self) -> None:
         """Log registered protocols for debugging."""
         try:
+            assert self.host is not None
             protocols = self.host.get_mux().get_protocols()
             protocol_strs = [str(p) for p in protocols if p is not None]
             print(f"Registered protocols: {protocol_strs}", file=sys.stderr)
@@ -529,7 +653,9 @@ class PingTest:
             print(f"error occurred: {e}", file=sys.stderr)
             raise
 
-    def _filter_addresses_by_transport(self, addresses: list) -> list:
+    def _filter_addresses_by_transport(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
         """Filter addresses to match current transport type."""
         filtered = []
         for addr in addresses:
@@ -546,7 +672,7 @@ class PingTest:
                 filtered.append(addr)
         return filtered if filtered else addresses
 
-    def _replace_loopback_ip(self, addr) -> str:
+    def _replace_loopback_ip(self, addr: multiaddr.Multiaddr) -> str:
         """
         Replace loopback IP (127.0.0.1, 0.0.0.0) with container's actual IP.
 
@@ -595,7 +721,7 @@ class PingTest:
                     return addr_str.replace(old_ip, f"/ip4/{actual_ip}/")
             return addr_str
 
-    def _get_publishable_address(self, addresses: list) -> str:
+    def _get_publishable_address(self, addresses: list[multiaddr.Multiaddr]) -> str:
         """
         Get the best address to publish to Redis for dialer coordination.
 
@@ -668,56 +794,101 @@ class PingTest:
         self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)
         self.log_protocols()
 
-        async with self.host.run(listen_addrs=listen_addrs):
-            all_addrs = self.host.get_addrs()
-            if not all_addrs:
-                raise RuntimeError("No listen addresses available")
+        listener_success = False
+        try:
+            async with self.host.run(listen_addrs=listen_addrs):
+                all_addrs = self.host.get_addrs()
+                if not all_addrs:
+                    raise RuntimeError("No listen addresses available")
 
-            actual_addr = self._get_publishable_address(all_addrs)
-            print(
-                f"Publishing address for transport {self.transport}: {actual_addr}",
-                file=sys.stderr,
-            )
-            # Redis Coordination Protocol:
-            # - Key format: {TEST_KEY}_listener_multiaddr
-            #   (per transport test framework spec)
-            # - Operation: RPUSH (Redis list operation) - creates list with multiaddr
-            # - Why RPUSH/BLPOP: Blocking list operations allow dialer to wait
-            #   efficiently without polling. Matches Rust/JS implementations.
-            # - Key cleanup: Delete key first to prevent WRONGTYPE errors from leftover
-            #   data (string vs list type conflicts) from previous test runs
-            redis_key = f"{self.test_key}_listener_multiaddr"
-
-            # Clean up any existing key to ensure it's a list type
-            try:
-                self.redis_client.delete(redis_key)
-            except Exception:
-                pass  # Ignore if key doesn't exist
-
-            # Publish listener address using RPUSH (list operation)
-            # Dialer will use BLPOP to block and read this value
-            self.redis_client.rpush(redis_key, actual_addr)
-            print("Listener ready, waiting for dialer to connect...", file=sys.stderr)
-
-            wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
-            check_interval = 0.5
-            elapsed = 0
-
-            while elapsed < wait_timeout:
-                if self.ping_received:
-                    print(
-                        "Ping received and responded, listener exiting", file=sys.stderr
-                    )
-                    return
-                await trio.sleep(check_interval)
-                elapsed += check_interval
-
-            if not self.ping_received:
+                actual_addr = self._get_publishable_address(all_addrs)
                 print(
-                    f"Timeout: No ping received within {wait_timeout} seconds",
+                    f"Publishing address for transport {self.transport}: {actual_addr}",
                     file=sys.stderr,
                 )
-            sys.exit(1)
+                # Redis Coordination Protocol:
+                # - Key format: {TEST_KEY}_listener_multiaddr
+                #   (per transport test framework spec)
+                # - Operation: RPUSH (Redis list operation) - creates list
+                #   with multiaddr
+                # - Why RPUSH/BLPOP: Blocking list operations allow dialer to wait
+                #   efficiently without polling. Matches Rust/JS implementations.
+                # - Key cleanup: Delete key first to prevent WRONGTYPE errors
+                #   from leftover data (string vs list type conflicts)
+                redis_key = f"{self.test_key}_listener_multiaddr"
+
+                # Clean up any existing key to ensure it's a list type
+                try:
+                    assert self.redis_client is not None
+                    self.redis_client.delete(redis_key)
+                except Exception:
+                    pass  # Ignore if key doesn't exist
+
+                # Publish listener address using RPUSH (list operation)
+                # Dialer will use BLPOP to block and read this value
+                assert self.redis_client is not None
+                self.redis_client.rpush(redis_key, actual_addr)
+                print(
+                    "Listener ready, waiting for dialer to connect...", file=sys.stderr
+                )
+
+                wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
+                check_interval = 0.5
+                elapsed: float = 0
+
+                while elapsed < wait_timeout:
+                    if self.ping_received:
+                        print(
+                            "Ping received and responded, listener exiting",
+                            file=sys.stderr,
+                        )
+                        listener_success = True
+                        # Small delay to allow muxer to drain before exit
+                        await trio.sleep(0.2)
+                        break
+                    await trio.sleep(check_interval)
+                    elapsed += check_interval
+
+                if not self.ping_received:
+                    print(
+                        f"Timeout: No ping received within {wait_timeout} seconds",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+        except ExceptionGroup as eg:
+            # Handle expected "Connection closed" errors during shutdown
+            if listener_success:
+                # Check if all errors are connection closed errors
+                all_conn_closed = True
+                for exc in eg.exceptions:
+                    if isinstance(exc, ExceptionGroup):
+                        for inner in exc.exceptions:
+                            if not self._is_connection_closed_error(inner):
+                                all_conn_closed = False
+                                break
+                    elif not self._is_connection_closed_error(exc):
+                        all_conn_closed = False
+                        break
+
+                if all_conn_closed:
+                    print(
+                        "Listener completed (connection closed during cleanup)",
+                        file=sys.stderr,
+                    )
+                    return
+            # Re-raise if we didn't succeed or if there are real errors
+            raise
+
+        except Exception as e:
+            # Check if it's a connection closed error after success
+            if listener_success and self._is_connection_closed_error(e):
+                print(
+                    "Listener completed (connection closed during cleanup)",
+                    file=sys.stderr,
+                )
+                return
+            raise
 
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
@@ -760,7 +931,7 @@ class PingTest:
                     await trio.sleep(retry_delay)
         raise RuntimeError(f"Failed to connect to Redis after {max_retries} attempts")
 
-    def _debug_connection_state(self, network, peer_id) -> None:
+    def _debug_connection_state(self, network: Any, peer_id: Any) -> None:
         """Debug connection state (only if debug logging enabled)."""
         try:
             if hasattr(network, "get_connections_to_peer"):
@@ -797,7 +968,7 @@ class PingTest:
         except Exception as e:
             print(f"[DEBUG] Error checking connections: {e}", file=sys.stderr)
 
-    async def _create_stream_with_retry(self, peer_id) -> INetStream:
+    async def _create_stream_with_retry(self, peer_id: Any) -> INetStream:
         """Create ping stream with retry mechanism for connection readiness."""
         max_retries = 3
         retry_delay = 0.5
@@ -810,6 +981,7 @@ class PingTest:
 
         for attempt in range(max_retries):
             try:
+                assert self.host is not None
                 stream = await self.host.new_stream(peer_id, [PING_PROTOCOL_ID])
                 print("Ping stream created successfully", file=sys.stderr)
                 return stream
@@ -854,6 +1026,7 @@ class PingTest:
             # BLPOP will block until data is available or timeout is reached
             remaining_timeout = max(1, int(redis_wait_timeout))
             try:
+                assert self.redis_client is not None
                 blpop_result = self.redis_client.blpop(
                     redis_key, timeout=remaining_timeout
                 )
@@ -1014,6 +1187,44 @@ class PingTest:
                             f"[DEBUG] Connection error cause: {e.__cause__}",
                             file=sys.stderr,
                         )
+                        # If it's a MultiError, show individual exceptions
+                        # MultiError uses 'errors' attribute, not 'exceptions'
+                        if hasattr(e.__cause__, "errors"):
+                            errors_list = e.__cause__.errors
+                            print(
+                                f"[DEBUG] MultiError contains "
+                                f"{len(errors_list)} exception(s):",
+                                file=sys.stderr,
+                            )
+                            for i, exc in enumerate(errors_list, 1):
+                                print(
+                                    f"[DEBUG]   Exception {i}: "
+                                    f"{type(exc).__name__}: {exc}",
+                                    file=sys.stderr,
+                                )
+                                if hasattr(exc, "__cause__") and exc.__cause__:
+                                    print(
+                                        f"[DEBUG]     Caused by: {exc.__cause__}",
+                                        file=sys.stderr,
+                                    )
+                                # Print full traceback for each exception
+                                import traceback
+
+                                print(
+                                    f"[DEBUG]     Traceback for exception {i}:",
+                                    file=sys.stderr,
+                                )
+                                traceback.print_exception(
+                                    type(exc), exc, exc.__traceback__, file=sys.stderr
+                                )
+                    # Print full traceback for debugging
+                    import traceback
+
+                    print(
+                        "[DEBUG] Full traceback:",
+                        file=sys.stderr,
+                    )
+                    traceback.print_exc(file=sys.stderr)
                     raise
                 print("Connected successfully", file=sys.stderr)
                 print(
@@ -1047,12 +1258,57 @@ class PingTest:
                 await stream.close()
                 print("Stream closed successfully", file=sys.stderr)
 
-        except Exception as e:
-            print(f"Dialer error: {e}", file=sys.stderr)
-            import traceback
+                # Graceful shutdown: close peer connection before exiting context
+                # This prevents mplex "Connection closed" errors during cleanup
+                try:
+                    await self.host.close_peer(info.peer_id)
+                    print("Peer connection closed gracefully", file=sys.stderr)
+                except Exception as close_err:
+                    print(
+                        f"[DEBUG] Error closing peer (expected): {close_err}",
+                        file=sys.stderr,
+                    )
 
-            traceback.print_exc(file=sys.stderr)
-            sys.exit(1)
+                # Small delay to allow muxer to drain
+                await trio.sleep(0.1)
+
+        except ExceptionGroup as eg:
+            # Handle expected "Connection closed" errors during shutdown
+            # These occur when the muxer is still reading while we close
+            non_connection_errors = []
+            for exc in eg.exceptions:
+                if isinstance(exc, ExceptionGroup):
+                    for inner in exc.exceptions:
+                        if not self._is_connection_closed_error(inner):
+                            non_connection_errors.append(inner)
+                elif not self._is_connection_closed_error(exc):
+                    non_connection_errors.append(exc)
+
+            if non_connection_errors:
+                print(f"Dialer error: {eg}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc(file=sys.stderr)
+                sys.exit(1)
+            else:
+                print(
+                    "Dialer completed (connection closed during cleanup)",
+                    file=sys.stderr,
+                )
+
+        except Exception as e:
+            # Check if it's a connection closed error (expected during shutdown)
+            if self._is_connection_closed_error(e):
+                print(
+                    "Dialer completed (connection closed during cleanup)",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"Dialer error: {e}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc(file=sys.stderr)
+                sys.exit(1)
 
     async def run(self) -> None:
         """Main run method."""
@@ -1065,12 +1321,36 @@ class PingTest:
             else:
                 await self.run_listener()
 
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            import traceback
+        except ExceptionGroup as eg:
+            # Check if all exceptions are "connection closed" (expected during cleanup)
+            all_conn_closed = True
+            for exc in eg.exceptions:
+                if isinstance(exc, ExceptionGroup):
+                    for inner in exc.exceptions:
+                        if not self._is_connection_closed_error(inner):
+                            all_conn_closed = False
+                            break
+                elif not self._is_connection_closed_error(exc):
+                    all_conn_closed = False
+                    break
 
-            traceback.print_exc(file=sys.stderr)
-            sys.exit(1)
+            if not all_conn_closed:
+                print(f"Error: {eg}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc(file=sys.stderr)
+                sys.exit(1)
+            # If all are connection closed, that's expected - exit normally
+
+        except Exception as e:
+            # Check if it's a connection closed error (expected during shutdown)
+            if not self._is_connection_closed_error(e):
+                print(f"Error: {e}", file=sys.stderr)
+                import traceback
+
+                traceback.print_exc(file=sys.stderr)
+                sys.exit(1)
+
         finally:
             if self.redis_client:
                 self.redis_client.close()
@@ -1100,7 +1380,7 @@ class PingTest:
             return "172.17.0.1"
 
 
-async def main():
+async def main() -> None:
     """Main entry point."""
     configure_logging()
     ping_test = PingTest()
