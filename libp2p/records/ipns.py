@@ -103,11 +103,11 @@ class IPNSValidator(Validator):
             name_bytes = bytes.fromhex(name_hash)
             mh = multihash.decode(name_bytes)
 
-            if mh.code == IDENTITY_MULTIHASH_CODE:
+            if mh.func == IDENTITY_MULTIHASH_CODE:
                 return unmarshal_public_key(mh.digest)
             else:
                 raise InvalidRecordType(
-                    f"Public key not inlined in name (multihash code: {mh.code})"
+                    f"Public key not inlined in name (multihash code: {mh.func})"
                 )
         except InvalidRecordType:
             raise

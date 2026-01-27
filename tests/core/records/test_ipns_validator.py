@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 import cbor2
@@ -457,7 +458,7 @@ class TestIPNSSpecTestVectors:
     https://specs.ipfs.tech/ipns/ipns-record/#test-vectors
     """
 
-    FIXTURES_DIR = "tests/core/records/fixtures"
+    FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
     # IPNS names (CIDv1 with libp2p-key multicodec) from the spec
     TEST_VECTORS = {
@@ -547,11 +548,8 @@ class TestIPNSSpecTestVectors:
 
     def _load_fixture(self, filename: str) -> bytes:
         """Load a test fixture file."""
-        import os
-
-        path = os.path.join(self.FIXTURES_DIR, filename)
-        with open(path, "rb") as f:
-            return f.read()
+        path = self.FIXTURES_DIR / filename
+        return path.read_bytes()
 
     def test_v1_only_invalid(self, validator):
         """V1-only record should be rejected (missing signatureV2)."""
