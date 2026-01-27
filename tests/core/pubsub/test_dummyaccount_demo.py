@@ -182,6 +182,12 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
             dummy_nodes, lambda n: n.get_balance("aspyn") == 20, timeout=10.0
         )
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
+        # Wait for the send operation to propagate to all nodes
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("aspyn") == 15 and n.get_balance("alex") == 5,
+            timeout=10.0,
+        )
 
     def assertion_func(dummy_node):
         assert dummy_node.get_balance("aspyn") == 15
