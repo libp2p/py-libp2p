@@ -275,11 +275,12 @@ class KadDHT(Service):
                     "Default validator was changed without marking it True"
                 )
 
-            if "pk" not in self.validator._validators:
-                self.validator._validators["pk"] = PublicKeyValidator()
-
-            if "ipns" not in self.validator._validators:
-                self.validator._validators["ipns"] = IPNSValidator()
+            if self.validator is not None:
+                if hasattr(self.validator, "_validators"):
+                    if "pk" not in self.validator._validators:
+                        self.validator._validators["pk"] = PublicKeyValidator()
+                    if "ipns" not in self.validator._validators:
+                        self.validator._validators["ipns"] = IPNSValidator()
 
     def validate_config(self) -> None:
         """

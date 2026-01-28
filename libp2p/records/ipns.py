@@ -239,7 +239,14 @@ class IPNSValidator(Validator):
 
         best_idx = 0
         best_seq = -1
-        best_validity: bytes | str | None = None
+        best_validity: str | None = None
+
+        def to_str(val: bytes | str | None) -> str:
+            if isinstance(val, bytes):
+                return val.decode("utf-8", errors="replace")
+            elif isinstance(val, str):
+                return val
+            return ""
 
         for i, value in enumerate(values):
             try:
@@ -254,14 +261,19 @@ class IPNSValidator(Validator):
                     seq = entry.sequence
                     validity = entry.validity
 
+                validity_str = to_str(validity)
+                best_validity_str = to_str(best_validity)
+
                 if seq > best_seq:
                     best_idx = i
                     best_seq = seq
-                    best_validity = validity
+                    best_validity = validity_str
                 elif seq == best_seq:
-                    if validity and (not best_validity or validity > best_validity):
+                    if validity_str and (
+                        not best_validity_str or validity_str > best_validity_str
+                    ):
                         best_idx = i
-                        best_validity = validity
+                        best_validity = validity_str
 
             except Exception as e:
                 logger.debug("Skipping invalid record during selection: %s", e)
