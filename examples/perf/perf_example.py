@@ -17,7 +17,7 @@ import trio
 
 from libp2p import new_host
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.perf import PerfService, PROTOCOL_NAME
+from libp2p.perf import PROTOCOL_NAME, PerfService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +34,7 @@ async def run_server(host, perf_service) -> None:
     """Run as a perf server - listens for incoming perf requests."""
     await perf_service.start()
 
-    print(f"\nPerf server ready, listening on:")
+    print("\nPerf server ready, listening on:")
     for addr in host.get_addrs():
         print(f"  {addr}")
 
@@ -57,9 +57,9 @@ async def run_client(
 
     print(f"\nConnecting to {info.peer_id}...")
     await host.connect(info)
-    print(f"Connected!")
+    print("Connected!")
 
-    print(f"\nMeasuring performance:")
+    print("\nMeasuring performance:")
     print(f"  Upload:   {upload_bytes} bytes")
     print(f"  Download: {download_bytes} bytes")
     print()
@@ -75,10 +75,14 @@ async def run_client(
 
             if upload_bytes_out > 0:
                 throughput = upload_bytes_out / time_s if time_s > 0 else 0
-                print(f"  Uploading: {upload_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)")
+                print(
+                    f"  Uploading: {upload_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)"
+                )
             elif download_bytes_out > 0:
                 throughput = download_bytes_out / time_s if time_s > 0 else 0
-                print(f"  Downloading: {download_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)")
+                print(
+                    f"  Downloading: {download_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)"
+                )
 
         elif output["type"] == "final":
             # Final summary
@@ -87,14 +91,14 @@ async def run_client(
             total_download = output["download_bytes"]
             total_data = total_upload + total_download
 
-            print(f"\n{'='*50}")
-            print(f"Performance Results:")
+            print(f"\n{'=' * 50}")
+            print("Performance Results:")
             print(f"  Total time:     {total_time:.3f} seconds")
             print(f"  Uploaded:       {total_upload} bytes")
             print(f"  Downloaded:     {total_download} bytes")
             print(f"  Total data:     {total_data} bytes")
             print(f"  Throughput:     {total_data / total_time:.0f} bytes/s")
-            print(f"{'='*50}")
+            print(f"{'=' * 50}")
 
     await perf_service.stop()
 
@@ -140,7 +144,11 @@ def main() -> None:
     parser.add_argument("-p", "--port", default=0, type=int, help="listening port")
     parser.add_argument("-d", "--destination", type=str, help="destination multiaddr")
     parser.add_argument(
-        "-u", "--upload", default=10, type=int, help="upload size in units of 256 bytes (default: 10)"
+        "-u",
+        "--upload",
+        default=10,
+        type=int,
+        help="upload size in units of 256 bytes (default: 10)",
     )
     parser.add_argument(
         "-D",

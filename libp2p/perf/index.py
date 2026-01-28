@@ -8,11 +8,10 @@ Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import (
     TYPE_CHECKING,
-    AsyncIterator,
     Literal,
-    Optional,
     TypedDict,
 )
 
@@ -83,7 +82,7 @@ class IPerf(ABC):
         multiaddr: "Multiaddr",
         send_bytes: int,
         recv_bytes: int,
-        options: Optional[PerfOptions] = None,
+        options: PerfOptions | None = None,
     ) -> AsyncIterator[PerfOutput]:
         """
         Measure transfer performance to a remote peer.

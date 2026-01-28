@@ -4,10 +4,10 @@ Perf protocol service implementation.
 This module implements the perf protocol for measuring transfer performance.
 """
 
+from collections.abc import AsyncIterator
 import logging
 import struct
 import time
-from typing import AsyncIterator, Optional
 
 from multiaddr import Multiaddr
 
@@ -36,7 +36,7 @@ class PerfService(IPerf):
     libp2p implementations.
     """
 
-    def __init__(self, host: IHost, init: Optional[PerfInit] = None) -> None:
+    def __init__(self, host: IHost, init: PerfInit | None = None) -> None:
         """
         Initialize the PerfService.
 
@@ -90,7 +90,7 @@ class PerfService(IPerf):
         from the first 8 bytes, then sends that many bytes back.
         """
         try:
-            bytes_to_send_back: Optional[int] = None
+            bytes_to_send_back: int | None = None
 
             # Read all incoming data
             while True:
@@ -103,7 +103,9 @@ class PerfService(IPerf):
                     if bytes_to_send_back is None and len(data) >= 8:
                         # Big-endian unsigned 64-bit integer
                         bytes_to_send_back = struct.unpack(">Q", data[:8])[0]
-                        logger.debug("Received request to send back %d bytes", bytes_to_send_back)
+                        logger.debug(
+                            "Received request to send back %d bytes", bytes_to_send_back
+                        )
                 except Exception:
                     break
 
@@ -129,7 +131,7 @@ class PerfService(IPerf):
         multiaddr: Multiaddr,
         send_bytes: int,
         recv_bytes: int,
-        options: Optional[PerfOptions] = None,
+        options: PerfOptions | None = None,
     ) -> AsyncIterator[PerfOutput]:
         """
         Measure transfer performance to a remote peer.
