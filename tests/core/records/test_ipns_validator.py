@@ -461,7 +461,7 @@ class TestIPNSSpecTestVectors:
     FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
     # IPNS names (CIDv1 with libp2p-key multicodec) from the spec
-    from typing import TypedDict, Any
+    from typing import Any, TypedDict
 
     class TestVector(TypedDict, total=False):
         file: str
