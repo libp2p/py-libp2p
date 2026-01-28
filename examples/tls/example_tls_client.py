@@ -115,7 +115,7 @@ async def echo_mode(host, server_maddr: str, message: str) -> None:
         print("\nEcho mode interrupted")
         raise
     except Exception as exc:
-        logger.exception("Error in echo mode: %s", exc, exc_info=True)
+        logger.exception("Error in echo mode: %s", exc)
         print(f"Error in echo mode: {exc}")
         raise
     finally:
@@ -170,7 +170,7 @@ async def chat_mode(host, server_maddr: str) -> None:
                 logger.debug("Stream EOF received from server")
                 print("Server disconnected")
             except Exception as exc:
-                logger.exception("Receive error: %s", exc, exc_info=True)
+                logger.exception("Receive error: %s", exc)
                 print(f"Receive error: {exc}")
 
         async def send_messages():
@@ -180,6 +180,7 @@ async def chat_mode(host, server_maddr: str) -> None:
             try:
                 while True:
                     try:
+                        # Use trio's run_sync_in_worker_thread to avoid blocking loop
                         message = await trio.to_thread.run_sync(input, "\nYou: ")
                         message = message.strip()
 
@@ -203,12 +204,12 @@ async def chat_mode(host, server_maddr: str) -> None:
                             pass
                         break
                     except Exception as exc:
-                        logger.exception("Send error: %s", exc, exc_info=True)
+                        logger.exception("Send error: %s", exc)
                         print(f"Send error: {exc}")
                         break
 
             except Exception as exc:
-                logger.exception("Send task error: %s", exc, exc_info=True)
+                logger.exception("Send task error: %s", exc)
                 print(f"Send task error: {exc}")
 
         try:
@@ -225,7 +226,7 @@ async def chat_mode(host, server_maddr: str) -> None:
         logger.debug("Chat session interrupted by user")
         print("\nChat session interrupted")
     except Exception as exc:
-        logger.exception("Chat error: %s", exc, exc_info=True)
+        logger.exception("Chat error: %s", exc)
         print(f"Chat error: {exc}")
         raise
     finally:
@@ -290,7 +291,7 @@ async def ping_mode(host, server_maddr: str, count: int) -> None:
         print("\nPing interrupted")
         raise
     except Exception as exc:
-        logger.exception("Error in ping mode: %s", exc, exc_info=True)
+        logger.exception("Error in ping mode: %s", exc)
         print(f"Error in ping mode: {exc}")
         raise
     finally:

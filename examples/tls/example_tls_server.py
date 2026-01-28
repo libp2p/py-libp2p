@@ -110,7 +110,7 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
             logger.debug(f"Stream EOF from {peer_display}")
             print(f"Client {peer_display} disconnected")
         except Exception as e:
-            logger.exception(f"Receive error from {peer_display}: {e}", exc_info=True)
+            logger.exception(f"Receive error from {peer_display}: {e}")
             print(f"Receive error from {peer_display}: {e}")
 
     async def send_messages():
@@ -119,6 +119,7 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
             print(f"Server chatting with {peer_display} (type 'quit' to end)")
             while True:
                 try:
+                    # Use trio's run_sync_in_worker_thread to avoid blocking loop
                     message = await trio.to_thread.run_sync(input, "\nServer: ")
                     message = message.strip()
 
@@ -138,12 +139,12 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
                     print("Server input interrupted")
                     break
                 except Exception as e:
-                    logger.exception(f"Send error: {e}", exc_info=True)
+                    logger.exception(f"Send error: {e}")
                     print(f"Send error: {e}")
                     break
 
         except Exception as e:
-            logger.exception(f"Send task error: {e}", exc_info=True)
+            logger.exception(f"Send task error: {e}")
             print(f"Send task error: {e}")
 
     try:
@@ -155,14 +156,14 @@ async def _bidirectional_chat_handler(stream: INetStream) -> None:
         logger.debug(f"Chat session with {peer_display} interrupted by user")
         print(f"Chat session with {peer_display} interrupted")
     except Exception as e:
-        logger.exception(f"Chat handler error: {e}", exc_info=True)
+        logger.exception(f"Chat handler error: {e}")
         print(f"Chat handler error: {e}")
     finally:
         try:
             logger.debug(f"Closing stream for {peer_display}")
             await stream.close()
         except Exception:
-            logger.debug(f"Error closing stream for {peer_display}", exc_info=True)
+            logger.exception(f"Error closing stream for {peer_display}")
             pass
         logger.debug(f"Session with {peer_display} closed")
         print(f"Session with {peer_display} closed")
@@ -270,7 +271,7 @@ def main() -> None:
         logger.debug("TLS server shutdown by user")
         print("\nTLS server shutting down gracefully...")
     except Exception as e:
-        logger.exception(f"Unexpected error in TLS server: {e}", exc_info=True)
+        logger.exception(f"Unexpected error in TLS server: {e}")
         print(f"\nUnexpected error in TLS server: {e}")
         raise
 
