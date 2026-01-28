@@ -461,7 +461,16 @@ class TestIPNSSpecTestVectors:
     FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
     # IPNS names (CIDv1 with libp2p-key multicodec) from the spec
-    TEST_VECTORS = {
+    from typing import TypedDict, Any
+
+    class TestVector(TypedDict, total=False):
+        file: str
+        name: str
+        valid: bool
+        error: str
+        value: str
+
+    TEST_VECTORS: dict[str, TestVector] = {
         # V1-only record -> invalid (missing signatureV2)
         "v1_only": {
             "file": "v1_only.ipns-record",
