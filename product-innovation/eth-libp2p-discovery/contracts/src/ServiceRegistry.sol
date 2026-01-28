@@ -6,7 +6,7 @@ pragma solidity ^0.8.20;
 contract ServiceRegistry {
     struct Service {
         address owner;
-        bytes pointer; 
+        bytes pointer;
     }
 
     mapping(bytes32 => Service) private services;
