@@ -36,8 +36,7 @@ from .pb.kademlia_pb2 import (
     Message,
 )
 
-# logger = logging.getLogger("libp2p.kademlia.routing_table")
-logger = logging.getLogger("kademlia-example.routing_table")
+logger = logging.getLogger(__name__)
 
 
 def peer_id_to_key(peer_id: ID) -> bytes:
