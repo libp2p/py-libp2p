@@ -13,7 +13,7 @@ from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
-logger = logging.getLogger("libp2p.discovery.mdns.listener")
+logger = logging.getLogger(__name__)
 
 
 class PeerListener(ServiceListener):
