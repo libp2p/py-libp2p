@@ -79,30 +79,18 @@ class EncryptedMsgReadWriter(MsgReadWriteCloser, Encrypter):
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Get remote address if supported by the underlying connection."""
-        if (
-            self.conn is not None
-            and hasattr(self, "conn")
-            and hasattr(self.conn, "get_remote_address")
-        ):
+        if self.conn is not None and hasattr(self.conn, "get_remote_address"):
             return self.conn.get_remote_address()
         return None
 
     def get_transport_addresses(self) -> list[Multiaddr]:
         """Get transport addresses if supported by the underlying connection."""
-        if (
-            self.conn is not None
-            and hasattr(self, "conn")
-            and hasattr(self.conn, "get_transport_addresses")
-        ):
+        if self.conn is not None and hasattr(self.conn, "get_transport_addresses"):
             return self.conn.get_transport_addresses()
         return []
 
     def get_connection_type(self) -> ConnectionType:
         """Get connection type if supported by the underlying connection."""
-        if (
-            self.conn is not None
-            and hasattr(self, "conn")
-            and hasattr(self.conn, "get_connection_type")
-        ):
+        if self.conn is not None and hasattr(self.conn, "get_connection_type"):
             return self.conn.get_connection_type()
         return ConnectionType.UNKNOWN

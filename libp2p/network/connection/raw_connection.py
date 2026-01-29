@@ -77,9 +77,19 @@ class RawConnection(IRawConnection):
             return []
         ip, port = remote_addr
         # Create multiaddr from IP and port
-        # Assume TCP for now, but this should be more sophisticated
+        # Note: This defaults to TCP as protocol. For proper protocol detection,
+        # transport-specific implementations should provide addresses via constructor.
         try:
-            addr = Multiaddr(f"/ip4/{ip}/tcp/{port}")
+            # Detect protocol from connection type or default to TCP
+            # In practice, only TCP connections use RawConnection directly;
+            # other protocols (QUIC) have dedicated implementations
+            protocol = "tcp"
+
+            # Try to infer IPv4 vs IPv6
+            if ":" in ip:
+                addr = Multiaddr(f"/ip6/{ip}/{protocol}/{port}")
+            else:
+                addr = Multiaddr(f"/ip4/{ip}/{protocol}/{port}")
             return [addr]
         except Exception:
             return []

@@ -906,11 +906,20 @@ class Swarm(Service, INetworkService):
             addresses = muxed_conn.get_transport_addresses()
             conn_type = muxed_conn.get_connection_type()
             swarm_conn.set_transport_info(addresses, conn_type)
-        except Exception as e:
+        except (AttributeError, TypeError, ValueError) as e:
+            # Log expected errors at debug level (e.g., missing methods, invalid data)
             logger.debug(
                 "Failed to set transport info for peer %s: %s",
                 muxed_conn.peer_id,
                 e,
+            )
+        except Exception as e:
+            # Log unexpected errors at warning level for investigation
+            logger.warning(
+                "Unexpected error setting transport info for peer %s: %s",
+                muxed_conn.peer_id,
+                e,
+                exc_info=True,
             )
 
         # For non-QUIC connections, set the resource scope on SwarmConn

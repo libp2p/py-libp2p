@@ -3,7 +3,6 @@ from collections.abc import (
     Callable,
     Mapping,
 )
-from enum import Enum
 from typing import TYPE_CHECKING, NewType, Union, cast
 
 from libp2p.transport.quic.stream import QUICStream
@@ -41,15 +40,3 @@ UnsubscribeFn = Callable[[], Awaitable[None]]
 TQUICStreamHandlerFn = Callable[[QUICStream], Awaitable[None]]
 TQUICConnHandlerFn = Callable[[QUICConnection], Awaitable[None]]
 MessageID = NewType("MessageID", str)
-
-
-class ConnectionType(Enum):
-    """
-    Enumeration of connection types.
-
-    Represents the type of connection (direct, relayed, etc.)
-    """
-
-    DIRECT = "direct"  # Direct peer-to-peer connection
-    RELAYED = "relayed"  # Connection through circuit relay
-    UNKNOWN = "unknown"  # Cannot determine
