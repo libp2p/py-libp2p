@@ -270,17 +270,20 @@ class KadDHT(Service):
         the default validator set hasn't been overridden.
         """
         if not self.validator_changed:
+            # Ensure validator is a NamespacedValidator (cannot be None at this point)
             if not isinstance(self.validator, NamespacedValidator):
                 raise ValueError(
                     "Default validator was changed without marking it True"
                 )
 
-            if self.validator is not None:
-                if hasattr(self.validator, "_validators"):
-                    if "pk" not in self.validator._validators:
-                        self.validator._validators["pk"] = PublicKeyValidator()
-                    if "ipns" not in self.validator._validators:
-                        self.validator._validators["ipns"] = IPNSValidator()
+            # Use a local variable to help type checker narrow the type
+            validator = self.validator
+
+            # Add missing default validators
+            if "pk" not in validator._validators:
+                validator._validators["pk"] = PublicKeyValidator()
+            if "ipns" not in validator._validators:
+                validator._validators["ipns"] = IPNSValidator()
 
     def validate_config(self) -> None:
         """
