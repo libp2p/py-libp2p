@@ -1,7 +1,6 @@
 """
 Perf protocol service implementation.
-
-This module implements the perf protocol for measuring transfer performance.
+Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
 """
 
 from collections.abc import AsyncIterator

@@ -1,9 +1,5 @@
 """
 Perf protocol interfaces and types.
-
-The perf protocol is used to measure transfer performance within and across
-libp2p implementations.
-
 Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
 """
 
