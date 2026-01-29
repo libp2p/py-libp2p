@@ -24,3 +24,4 @@ Examples
    tls-support
    gossipsub-1.2
    examples.websocket
+   examples.tls
