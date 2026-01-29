@@ -5,6 +5,7 @@ This module provides Ed25519 public and private key implementations using
 the PyNaCl library. Ed25519 is used for libp2p peer identity signatures.
 """
 
+from nacl.bindings import crypto_core_ed25519_is_valid_point
 from nacl.exceptions import (
     BadSignatureError,
 )
@@ -66,8 +67,25 @@ class Ed25519PrivateKey(PrivateKey):
     def new(cls, seed: bytes | None = None) -> "Ed25519PrivateKey":
         if seed:
             private_key_impl = PrivateKeyImpl(seed)
+            if not crypto_core_ed25519_is_valid_point(
+                bytes(private_key_impl.verify_key)
+            ):
+                raise ValueError(
+                    "Provided seed generates a public key that is not a "
+                    "valid Ed25519 curve point."
+                )
         else:
-            private_key_impl = PrivateKeyImpl.generate()
+            for _ in range(100):
+                private_key_impl = PrivateKeyImpl.generate()
+                if crypto_core_ed25519_is_valid_point(
+                    bytes(private_key_impl.verify_key)
+                ):
+                    break
+            else:
+                raise RuntimeError(
+                    "Failed to generate a valid Ed25519 key after 100 attempts."
+                )
+
         return cls(private_key_impl)
 
     def to_bytes(self) -> bytes:

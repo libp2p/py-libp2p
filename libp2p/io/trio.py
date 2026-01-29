@@ -6,7 +6,7 @@ from libp2p.io.abc import (
     ReadWriteCloser,
 )
 
-logger = logging.getLogger("libp2p.io.trio")
+logger = logging.getLogger(__name__)
 
 
 class TrioTCPStream(ReadWriteCloser):
