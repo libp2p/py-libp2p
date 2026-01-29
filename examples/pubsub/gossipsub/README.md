@@ -13,47 +13,63 @@ With the recent implementation of Gossipsub 2.0 support in py-libp2p, we now hav
 
 ## Examples
 
-### 1. Version Comparison Demo (`version_comparison.py`)
+### 1. Gossipsub 1.0 Demo (`gossipsub_v1.0.py`)
 
-Side-by-side demonstration of how different Gossipsub versions handle the same network scenarios.
+Basic mesh-based pubsub demo using Gossipsub 1.0 (`/meshsub/1.0.0`).
 
 **Features:**
-- **Network Simulation**: Creates identical network topologies running different protocol versions
-- **Scenario Testing**: Tests various network conditions (high churn, malicious peers, network partitions)
-- **Performance Metrics**: Compares message delivery rates, latency, and network overhead
-- **Visual Output**: Real-time comparison charts and statistics
+
+- Basic mesh-based pubsub
+- Simple flooding for message dissemination
+- Mesh topology maintenance
 
 **Usage:**
+
 ```bash
-# Normal operation scenario
-python version_comparison.py --scenario normal --duration 60
-
-# High peer churn scenario
-python version_comparison.py --scenario high_churn --duration 60
-
-# Spam attack scenario
-python version_comparison.py --scenario spam_attack --duration 60
-
-# Network partition scenario
-python version_comparison.py --scenario network_partition --duration 60
-
-# Save results to JSON
-python version_comparison.py --scenario normal --output results.json
+python gossipsub_v1.0.py --nodes 5 --duration 30
 ```
 
-**Scenarios:**
-- **Normal Operation**: Honest peers publishing regularly
-- **High Churn**: Peers joining/leaving frequently
-- **Spam Attack**: Some peers sending excessive messages
-- **Network Partition**: Network splits and recovers
+### 2. Gossipsub 1.1 Demo (`gossipsub_v1.1.py`)
 
-### 2. Gossipsub 2.0 Feature Showcase (`v2_showcase.py`)
+Demonstrates Gossipsub 1.1 (`/meshsub/1.1.0`) with peer scoring and behavioral penalties.
 
-Interactive demonstration of Gossipsub 2.0's advanced features.
+**Features:**
+
+- All Gossipsub 1.0 features
+- Peer scoring with P1–P4 topic-scoped parameters
+- Behavioral penalties (P5)
+- Honest vs. malicious publisher behaviour
+
+**Usage:**
+
+```bash
+python gossipsub_v1.1.py --nodes 5 --duration 30
+```
+
+### 3. Gossipsub 1.2 Demo (`gossipsub_v1.2.py`)
+
+Demonstrates Gossipsub 1.2 (`/meshsub/1.2.0`) with IDONTWANT message filtering.
+
+**Features:**
+
+- All Gossipsub 1.1 features
+- IDONTWANT messages and message filtering
+- Reduced redundant traffic in denser meshes
+
+**Usage:**
+
+```bash
+python gossipsub_v1.2.py --nodes 5 --duration 30
+```
+
+### 4. Gossipsub 2.0 Demo (`gossipsub_v2.0.py`)
+
+Demonstrates Gossipsub 2.0 (`/meshsub/2.0.0`) with adaptive gossip and advanced security features.
 
 **Features:**
 
 #### Peer Scoring Visualization
+
 - **Real-time Score Display**: Shows peer scores (P1-P7 parameters) updating in real-time
 - **Score Component Breakdown**: Visualizes individual scoring components
 - **Behavioral Penalties**: Demonstrates how misbehavior affects peer scores
@@ -61,40 +77,36 @@ Interactive demonstration of Gossipsub 2.0's advanced features.
 - **Application Scoring**: Demonstrates P6 custom application-defined scoring
 
 #### Adaptive Gossip Demonstration
+
 - **Network Health Monitoring**: Displays network health score calculation
 - **Dynamic Parameter Adjustment**: Shows how gossip parameters adapt to network conditions
 - **Mesh Quality Maintenance**: Visualizes mesh degree adjustments
 - **Opportunistic Grafting**: Demonstrates score-based peer selection
 
 #### Security Features
+
 - **Spam Protection**: Shows rate limiting in action
 - **Eclipse Attack Protection**: Demonstrates IP diversity enforcement
 - **Equivocation Detection**: Shows detection and penalties for duplicate messages
 - **Message Validation**: Demonstrates validation hooks and caching
 
 **Usage:**
+
 ```bash
-# Interactive mode - explore all features
-python v2_showcase.py --mode interactive
-
-# Demo specific features
-python v2_showcase.py --mode demo --feature scoring --duration 60
-python v2_showcase.py --mode demo --feature adaptive --duration 60
-python v2_showcase.py --mode demo --feature security --duration 60
-
-# Save monitoring data
-python v2_showcase.py --mode demo --feature scoring --output monitoring.json
+python gossipsub_v2.0.py --nodes 5 --duration 60
 ```
 
 ## Protocol Version Differences
 
 ### Gossipsub 1.0 (`/meshsub/1.0.0`)
+
 - Basic mesh-based pubsub protocol
 - Simple flooding for message dissemination
 - No peer scoring or advanced security features
 - Suitable for trusted networks with low adversarial activity
 
 ### Gossipsub 1.1 (`/meshsub/1.1.0`)
+
 - **Added Peer Scoring**: P1-P4 topic-scoped parameters
   - P1: Time in mesh
   - P2: First message deliveries
@@ -105,12 +117,14 @@ python v2_showcase.py --mode demo --feature scoring --output monitoring.json
 - Better resilience against basic attacks
 
 ### Gossipsub 1.2 (`/meshsub/1.2.0`)
+
 - **IDONTWANT Messages**: Peers can signal they don't want specific messages
 - **Message Filtering**: Reduces redundant message transmission
 - **Improved Efficiency**: Lower bandwidth usage in dense networks
 - All v1.1 features included
 
 ### Gossipsub 2.0 (`/meshsub/2.0.0`)
+
 - **Enhanced Peer Scoring**: P6 (application-specific) and P7 (IP colocation) parameters
 - **Adaptive Gossip**: Dynamic parameter adjustment based on network health
 - **Advanced Security Features**:
@@ -124,12 +138,14 @@ python v2_showcase.py --mode demo --feature scoring --output monitoring.json
 ## Peer Scoring Parameters (P1-P7)
 
 ### Topic-Scoped Parameters (P1-P4)
+
 - **P1 (Time in Mesh)**: Rewards peers for staying in the mesh longer
 - **P2 (First Message Deliveries)**: Rewards peers for delivering messages first
 - **P3 (Mesh Message Deliveries)**: Rewards peers for consistent message delivery
 - **P4 (Invalid Messages)**: Penalizes peers for sending invalid messages
 
 ### Global Parameters (P5-P7)
+
 - **P5 (Behavior Penalty)**: General behavioral penalty for misbehavior
 - **P6 (Application Score)**: Custom application-defined scoring
 - **P7 (IP Colocation)**: Penalizes multiple peers from same IP address
@@ -137,21 +153,25 @@ python v2_showcase.py --mode demo --feature scoring --output monitoring.json
 ## Security Features in Gossipsub 2.0
 
 ### Spam Protection
+
 - Rate limiting per peer per topic
 - Configurable message rate thresholds
 - Automatic penalty application for rate limit violations
 
 ### Eclipse Attack Protection
+
 - Minimum IP diversity requirements in mesh
 - Penalties for excessive peers from same IP range
 - Mesh diversity monitoring and enforcement
 
 ### Equivocation Detection
+
 - Detection of duplicate messages with same sequence number
 - Penalties for peers sending conflicting messages
 - Message deduplication and validation
 
 ### Message Validation
+
 - Configurable validation hooks
 - Validation result caching
 - Integration with peer scoring system
@@ -159,57 +179,30 @@ python v2_showcase.py --mode demo --feature scoring --output monitoring.json
 ## Running the Examples
 
 ### Basic Usage
+
 ```bash
 # Navigate to the examples directory
 cd examples/pubsub/gossipsub
 
-# Run version comparison
-python version_comparison.py --scenario normal
-
-# Run interactive showcase
-python v2_showcase.py --mode interactive
-```
-
-### Advanced Usage
-```bash
-# Compare all versions with custom parameters
-python version_comparison.py \
-    --scenario spam_attack \
-    --duration 120 \
-    --nodes 8 \
-    --output spam_comparison.json \
-    --verbose
-
-# Showcase specific features with monitoring
-python v2_showcase.py \
-    --mode demo \
-    --feature security \
-    --duration 180 \
-    --nodes 10 \
-    --output security_monitoring.json \
-    --verbose
+# Run per-version demos
+python gossipsub_v1.0.py --nodes 5 --duration 30
+python gossipsub_v1.1.py --nodes 5 --duration 30
+python gossipsub_v1.2.py --nodes 5 --duration 30
+python gossipsub_v2.0.py --nodes 5 --duration 60
 ```
 
 ## Understanding the Output
 
-### Version Comparison Results
-The comparison demo outputs a detailed table showing:
-- **Messages Sent/Received**: Total message counts per version
-- **Delivery Rate**: Percentage of messages successfully delivered
-- **Average Latency**: Mean message propagation time
-- **Spam Blocked**: Number of spam messages filtered (v2.0 only)
-- **Churn Events**: Number of peer join/leave events handled
+The per-version demos print statistics summarising:
 
-### Feature Showcase Output
-The v2.0 showcase provides real-time displays of:
-- **Peer Score Breakdown**: Individual P1-P7 component scores
-- **Network Health Metrics**: Connectivity and health scores
-- **Security Events**: Real-time security event notifications
-- **Adaptive Parameters**: Dynamic parameter adjustments
+- **Messages Sent/Received** per node
+- **Roles** (honest, malicious, spammer, validator) and their behaviour
+- **Feature Highlights** for the corresponding protocol version (for example, IDONTWANT support in v1.2, security and adaptive gossip in v2.0)
 
 ## Network Topologies
 
-Both examples create realistic network topologies:
+All demos create realistic network topologies:
+
 - **Mesh Connectivity**: Each node connects to 3-4 peers
 - **Realistic Latency**: Simulated network delays
 - **Diverse Roles**: Honest peers, spammers, validators, attackers
@@ -218,7 +211,8 @@ Both examples create realistic network topologies:
 ## Customization
 
 ### Adding Custom Scenarios
-To add new test scenarios to the version comparison:
+
+To add new test scenarios to the per-version demos:
 
 ```python
 async def _run_custom_scenario(self, duration: int):
@@ -232,6 +226,7 @@ elif scenario == "custom":
 ```
 
 ### Custom Scoring Functions
+
 To implement custom application scoring:
 
 ```python
@@ -248,6 +243,7 @@ score_params = ScoreParams(
 ```
 
 ### Custom Validation
+
 To add custom message validation:
 
 ```python
@@ -265,23 +261,20 @@ node._validate_message = custom_validator
 ### Common Issues
 
 1. **Port Conflicts**: If you get port binding errors, the examples will automatically find free ports
-2. **Connection Failures**: Ensure firewall allows local connections on the used ports
-3. **High CPU Usage**: Reduce the number of nodes or increase sleep intervals for testing
-4. **Memory Usage**: Large networks may consume significant memory; monitor usage
+1. **Connection Failures**: Ensure firewall allows local connections on the used ports
+1. **High CPU Usage**: Reduce the number of nodes or increase sleep intervals for testing
+1. **Memory Usage**: Large networks may consume significant memory; monitor usage
 
 ### Debug Mode
-Enable verbose logging for detailed information:
-```bash
-python version_comparison.py --scenario normal --verbose
-python v2_showcase.py --mode interactive --verbose
-```
 
-### Performance Tuning
-For better performance in large networks:
-- Reduce heartbeat frequency
-- Increase message intervals
-- Limit concurrent connections
-- Use smaller mesh degrees
+Enable verbose logging for detailed information:
+
+```bash
+python gossipsub_v1.0.py --verbose ...
+python gossipsub_v1.1.py --verbose ...
+python gossipsub_v1.2.py --verbose ...
+python gossipsub_v2.0.py --verbose ...
+```
 
 ## References
 
