@@ -70,7 +70,7 @@ PROTOCOL_ID_V13 = TProtocol("/meshsub/1.3.0")
 PROTOCOL_ID_V14 = TProtocol("/meshsub/1.4.0")
 PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
-logger = logging.getLogger("libp2p.pubsub.gossipsub")
+logger = logging.getLogger(__name__)
 
 
 class GossipSub(IPubsubRouter, Service):

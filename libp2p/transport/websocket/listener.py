@@ -27,7 +27,7 @@ from .autotls import AutoTLSConfig, AutoTLSManager
 from .connection import P2PWebSocketConnection
 from .tls_config import WebSocketTLSConfig
 
-logger = logging.getLogger("libp2p.transport.websocket.listener")
+logger = logging.getLogger(__name__)
 
 
 @dataclass

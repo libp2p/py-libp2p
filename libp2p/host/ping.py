@@ -22,7 +22,7 @@ ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 RESP_TIMEOUT = 60
 
-logger = logging.getLogger("libp2p.host.ping")
+logger = logging.getLogger(__name__)
 
 
 async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:

@@ -24,7 +24,7 @@ from .utils import (
     stringGen,
 )
 
-logger = logging.getLogger("libp2p.discovery.mdns")
+logger = logging.getLogger(__name__)
 
 SERVICE_TYPE = "_p2p._udp.local."
 MCAST_PORT = 5353
