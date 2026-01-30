@@ -1,115 +1,70 @@
 import asyncio
-import sys
-import logging
+import os
+import json
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from web3 import Web3
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from libp2p.peer.peerinfo import PeerInfo
-from multiaddr import Multiaddr
-
+from p2p.constants import get_eth_config
 from p2p.node import Libp2pNode
 from p2p.dht import DHTNode
 from p2p.service_resolver import ServiceResolver
 
-SERVICE_ID = bytes.fromhex(
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-)
+DEPLOY_JSON = "./deploy_output.json"
+if os.path.exists(DEPLOY_JSON):
+    with open(DEPLOY_JSON, 'r') as f:
+        deploy_data = json.load(f)
+        CONTRACT_ADDRESS = deploy_data["contract_address"]
+        SERVICE_ABI = deploy_data["abi"]["abi"]
+else:
+    print(f"Missing {DEPLOY_JSON}")
+    exit(1)
 
-TCP_PORT = 9000
-PEER_ID = "12D3KooWPcePNNK6uEasXG1YBgRpGUHJsCMompm9Qx9Lt4wBDv6f"
+async def main():
+    eth_config = get_eth_config()
+    service_id_str = eth_config["default_service_id"]
+    pubkey_file = f"keys/{service_id_str.replace(':', '_').replace('/', '_')}_pubkey.hex"
+    
+    if not os.path.exists(pubkey_file):
+        print(f"Missing: {pubkey_file}")
+        print("Run publish_service.py first")
+        exit(1)
+    
+    with open(pubkey_file, 'r') as f:
+        owner_pubkey_hex = f.read().strip()
+    
+    owner_public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(owner_pubkey_hex))
+    
+    w3 = Web3(Web3.HTTPProvider(eth_config["rpc_url"]))
+    service_id = Web3.keccak(text=service_id_str)
+    contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=SERVICE_ABI)
+    
+    print(f"Resolving: {service_id_str}")
 
-BOOTSTRAP_ADDR = f"/ip4/127.0.0.1/tcp/{TCP_PORT}/p2p/{PEER_ID}"
+    node = Libp2pNode()
+    await node.start()
+    print(f"Resolver ID: {node.peer_id.pretty()}")
 
-logger = logging.getLogger("resolve_service")
-logging.basicConfig(level=logging.INFO)
+    dht = DHTNode(node.host)
+    await dht.start()
 
-def parse_peerinfo_from_multiaddr(ma: Multiaddr):
-    components = str(ma).split("/")
-    try:
-        idx = components.index("p2p")
-        peer_id_str = components[idx + 1]
-        base_addr = "/" + "/".join(components[1:idx])
-        addr = Multiaddr(base_addr)
-        return PeerInfo(peer_id=peer_id_str, addrs=[addr])
-    except Exception as e:
-        raise ValueError("Could not parse p2p multiaddr") from e
+    resolver = ServiceResolver(dht=dht, owner_public_key=owner_public_key)
 
-async def run_resolver():
-    node = None
-    dht = None
-    bootstrap_peer = None
-    try:
-        node = Libp2pNode()
-        await node.start()
-        logger.info(f"Resolver peer ID: {node.peer_id.pretty()}")
+    pointer = contract.functions.getServicePointer(service_id).call()
+    if len(pointer) == 0:
+        print("No pointer on-chain")
+        return
+    
+    print(f"Pointer: {bytes(pointer).hex()}")
 
-        bootstrap_ma = Multiaddr(BOOTSTRAP_ADDR)
-        if hasattr(PeerInfo, "from_p2p_addr"):
-            bootstrap_peer = PeerInfo.from_p2p_addr(bootstrap_ma)
-        else:
-            bootstrap_peer = parse_peerinfo_from_multiaddr(bootstrap_ma)
+    peer = await resolver.resolve(bytes(pointer))
+    if not peer:
+        print("Not found/invalid")
+        return
 
-        await asyncio.sleep(0.1)
-
-        dht = DHTNode(node.host)
-        try:
-            await dht.start(bootstrap_peers=[bootstrap_peer])
-        except RuntimeError as err:
-            logger.error(f"Error starting DHT or connecting to peer: {err}")
-            logger.error("This error can occur if you receive 'must be called from async context'.")
-            logger.error(
-                "If you are using a library that utilizes 'trio', ensure trio is run with its event loop, "
-                "or prefer using a pure asyncio-based libp2p stack."
-            )
-            raise
-        except Exception as err:
-            logger.error(f"Unexpected error starting DHT or connecting to peer: {err}")
-            raise
-
-        owner_private_key = Ed25519PrivateKey.generate()
-        owner_public_key = owner_private_key.public_key()
-
-        resolver = ServiceResolver(
-            dht=dht,
-            service_id=SERVICE_ID,
-            owner_public_key=owner_public_key,
-        )
-
-        try:
-            peer = await resolver.resolve()
-        except Exception as e:
-            logger.error(f"Exception during service resolution: {e}")
-            raise
-
-        if not peer:
-            logger.info("Service not found")
-            return
-
-        logger.info("Service resolved:")
-        logger.info(f"Peer ID: {peer.peer_id.pretty()}")
-        logger.info("Addrs:")
-        for addr in peer.addrs:
-            logger.info(f"  {addr}")
-
-    except Exception as err:
-        pass
-    finally:
-        if dht:
-            await dht.stop()
-        if node:
-            await node.stop()
-
-def main():
-    try:
-        asyncio.run(run_resolver())
-    except RuntimeError as err:
-        logger.error(f"Failed to run asyncio main: {err}")
-        logger.error(
-            "If you encounter 'must be called from async context', your libp2p or dependencies may require 'trio' context or specific event loop integration."
-        )
-        sys.exit(1)
-    except Exception as err:
-        logger.error(f"Unexpected error: {err}")
-        sys.exit(1)
+    print("Resolved!")
+    print(f"ID: {peer.peer_id.pretty()}")
+    for i, addr in enumerate(peer.addrs, 1):
+        print(f"{i}. {addr}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

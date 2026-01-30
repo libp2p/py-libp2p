@@ -1,0 +1,4 @@
+libp2p>=0.1.0
+web3==6.15.0
+cryptography==42.0.5
+asyncio

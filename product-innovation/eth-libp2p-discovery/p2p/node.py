@@ -5,7 +5,7 @@ from libp2p.peer.peerinfo import PeerInfo
 from multiaddr import Multiaddr
 from libp2p.crypto.ed25519 import create_new_key_pair
 
-from p2p.config import DEFAULT_LISTEN_ADDRS
+from p2p.constants import DEFAULT_LISTEN_ADDRS
 
 @dataclass
 class Libp2pNode:
@@ -30,13 +30,13 @@ class Libp2pNode:
     @property
     def peer_id(self):
         if not self.host:
-            raise RuntimeError("host not started")
+            raise RuntimeError("Host not started")
         return self.host.get_id()
 
     @property
     def peer_info(self) -> PeerInfo:
         if not self.host:
-            raise RuntimeError("host not started")
+            raise RuntimeError("Host not started")
         return PeerInfo(
             peer_id=self.host.get_id(),
             addrs=list(self.host.get_addrs()),

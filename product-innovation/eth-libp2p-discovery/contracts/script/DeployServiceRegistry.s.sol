@@ -9,6 +9,21 @@ contract DeployServiceRegistry is Script {
         vm.startBroadcast();
         ServiceRegistry registry = new ServiceRegistry();
         vm.stopBroadcast();
+
+        string memory contractAddress = vm.toString(address(registry));
+        vm.writeJson(
+            contractAddress,
+            "../deploy_output.json",
+            ".contract_address"
+        );
+
+        string memory abiPath = string.concat(
+            vm.projectRoot(),
+            "/out/ServiceRegistry.sol/ServiceRegistry.json"
+        );
+        string memory contractABI = vm.readFile(abiPath);
+        vm.writeJson(contractABI, "../deploy_output.json", ".abi");
+
         return registry;
     }
 }
