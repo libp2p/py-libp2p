@@ -27,6 +27,13 @@ PEER_ID_AUTH_SCHEME = "libp2p-PeerID="
 
 
 class BrokerClient:
+    """
+    Client for interacting with the AutoTLS broker during DNS-01 challenges.
+
+    Handles registration of the DNS challenge with the broker and monitors
+    challenge state to coordinate ACME certificate issuance.
+    """
+
     libp2p_privkey: PrivateKey
     public_maddr: multiaddr.Multiaddr
     public_ip: str
@@ -43,6 +50,18 @@ class BrokerClient:
         key_auth: str,
         b36_peerid: str,
     ):
+        """
+        Initialize the broker client for a given peer.
+
+        Stores the peer's private key, public multiaddr, DNS-01 key authorization,
+        and base36-encoded Peer ID. Extracts the public IPv4 address from the
+        multiaddr for broker communication.
+
+        :param libp2p_privkey: Private key of the local libp2p peer.
+        :param pub_addr: Public multiaddr of the peer.
+        :param key_auth: DNS-01 challenge key authorization.
+        :param b36_peerid: Base36-encoded Peer ID of the peer.
+        """
         self.libp2p_privkey = libp2p_privkey
         self.public_maddr = pub_addr
         self.key_auth = key_auth
@@ -50,6 +69,21 @@ class BrokerClient:
         self.public_ip = self.public_maddr.value_for_protocol("ip4")  # type: ignore
 
     async def http_peerid_auth(self) -> None:
+        """
+        Authenticate with the AutoTLS broker using the peer's DNS-01 challenge.
+
+        Sends an initial OPTIONS request to retrieve the server challenge, verifies
+        the broker identity, and responds with the key authorization and public
+        addresses. This step establishes the peer's identity with the broker before
+        DNS propagation monitoring.
+
+        Network operations are executed in a thread pool to avoid blocking the Trio
+        event loop.
+
+        :return: None
+        :raises RuntimeError: if the broker returns a non-success response.
+        :raises Exception: if the broker challenge headers are missing.
+        """
         header = {"Authorization": self.get_challenge_header()}
 
         resp = await trio.to_thread.run_sync(
@@ -76,7 +110,18 @@ class BrokerClient:
             )
 
     async def wait_for_dns(self, timeout: float = 100.0, delay: float = 2.0) -> None:
-        # TODO: better logs
+        """
+        Poll DNS until the ACME TXT challenge is visible.
+
+        Repeatedly resolves the TXT record for the peer's DNS-01 challenge and waits
+        for it to propagate. Also prepares the expected A record name for reference.
+        Resolution is performed in a blocking function wrapped by the async context.
+
+        :param timeout: Maximum time in seconds to wait for DNS propagation.
+        :param delay: Interval in seconds between polling attempts.
+        :return: None
+        :raises RuntimeError: if the TXT record does not appear within the timeout.
+        """
         peer = self.b36_peer_id
         txt_name = f"_acme-challenge.{peer}.libp2p.direct"
         a_name = f"{self.public_ip.replace('.', '-')}.{peer}.libp2p.direct"
@@ -125,6 +170,18 @@ class BrokerClient:
             delay = min(delay * 1.5, 10.0)
 
     def verify_server(self, header: str) -> str:
+        """
+        Verify the broker server's challenge and prepare a signed response.
+
+        Decodes the server's authentication header, extracts the public key, and
+        derives the broker Peer ID. Signs a payload including the server challenge
+        and host information, returning the encoded response for broker submission.
+
+
+        :param header: Authentication header received from the broker.
+        :return: Base64-encoded signature payload to include in broker requests.
+        :raises Exception: if the handshake is invoked in the wrong order.
+        """
         if self.state != "challenge-server":
             raise Exception("Handshake order wrong")
 
@@ -158,6 +215,7 @@ class BrokerClient:
         )
 
     def decode_auth_header(self, header: str) -> dict[str, str]:
+        """Parse a libp2p-PeerID auth header into a dictionary of key-value pairs."""
         # strip scheme prefix
         if header.startswith("libp2p-PeerID "):
             header = header[len("libp2p-PeerID ") :]
@@ -169,6 +227,7 @@ class BrokerClient:
         return {k: v for k, v in matches}
 
     def get_challenge_header(self) -> str:
+        """Generate a new client challenge header and mark state as challenge-server"""
         self.state = "challenge-server"
 
         pubkey_protobuf = self.libp2p_privkey.get_public_key().serialize()
@@ -181,6 +240,7 @@ class BrokerClient:
         return f"libp2p-PeerID {params}"
 
     def encode_auth_params(self, params: dict[str, str]) -> str:
+        """Serialize a dictionary of key-value pairs into a libp2p-auth header."""
         # JS does "key=value" pairs, comma-separated
         parts = []
         for k, v in params.items():
@@ -188,6 +248,7 @@ class BrokerClient:
         return ", ".join(parts)
 
     def pubkey_from_protobuf_bytes(self, pk_bytes: bytes) -> PublicKey:
+        """Deserialize protobuf bytes into a libp2p PublicKey object."""
         # TODO: Restructure this
         pb = PublicKey.deserialize_from_protobuf(pk_bytes)
 
@@ -202,6 +263,7 @@ class BrokerClient:
             raise ValueError("Unsupported key type yet")
 
     def make_signature_payld(self, fields: list[tuple[str, bytes | str]]) -> bytes:
+        """Construct a byte payload from key-value fields for peer-authsigning."""
         out = bytearray()
         out.extend(PEER_ID_AUTH_SCHEME.encode())
         for k, v in fields:

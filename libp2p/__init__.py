@@ -147,6 +147,16 @@ def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     DEFAULT_MUXER = muxer_upper
 
 def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
+    """
+    Persist a private key to disk in PEM format.
+
+    Currently supports only Ed25519 keys. Writes the key to a predefined
+    path for later retrieval.
+
+    :param key_pair: KeyPair object containing private and public keys.
+    :param type: Type of key to save (default: "ed25519").
+    :raises ValueError: if an unsupported key type is provided.
+    """
     pvt_key = key_pair.private_key
 
     match type:
@@ -167,6 +177,17 @@ def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
             raise ValueError(f"unsupported key type: {type}")
 
 def load_keypair(type: str = "ed25519") -> KeyPair | None:
+    """
+    Load a private key from disk and reconstruct its KeyPair.
+
+    Currently supports only Ed25519 keys. Returns None if the key file does
+    not exist.
+
+    :param type: Type of key to load (default: "ed25519").
+    :return: KeyPair object if found, or None.
+    :raises ValueError: if an unsupported key type is provided.
+    """
+
     match type:
         case "ed25519":
             path = libp2p.utils.paths.ED25519_PATH
@@ -285,6 +306,7 @@ def new_swarm(
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
+    :param enable_autotls: enable autotls for security
     :param quic_transport_opt: options for transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
@@ -474,6 +496,7 @@ def new_host(
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optinal choice to use QUIC for transport
+    :param enable_autotls: optinal choice to use AutoTLS for security
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport

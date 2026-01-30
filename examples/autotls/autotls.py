@@ -106,6 +106,7 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
     )
 
     # Create a libp2p-forge directory for persisting keys and certificates
+    # Currently the config is for 2 peers exchanging ping/pong
     base = Path("libp2p-forge")
     (base / "peer1").mkdir(parents=True, exist_ok=True)
     (base / "peer2").mkdir(parents=True, exist_ok=True)
@@ -163,8 +164,8 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
             host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
 
-            # @reviewers: replace/remove this hardcoded public IP when
-            # running on your own servers
+            # Replace/remove this hardcoded IP when running on you own servers
+            # Check this function to more info: `inititate_autotls_procedure`
             if enable_autotls:
                 await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 
@@ -192,8 +193,8 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
 
             host.set_stream_handler(IDENTIFY_PROTOCOL_ID, base_identify_handler)
 
-            # @reviewers: replace/remove this hardcoded public IP when
-            # running on your own servers
+            # Replace/remove this hardcoded IP when running on you own servers
+            # Check this function to more info: `inititate_autotls_procedure`
             if enable_autotls:
                 await host.initiate_autotls_procedure(public_ip="13.126.88.127")
 

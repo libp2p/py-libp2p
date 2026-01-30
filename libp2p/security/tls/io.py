@@ -58,6 +58,15 @@ class TLSStreamReadWriter(ReadWriteCloser):
         self._read_buffer = bytearray()
 
     def should_do_primitive_key_exchang(self, enable_autotls: bool) -> bool:
+        """
+        Determine if the primitive key exchange can proceed.
+
+        Checks whether AutoTLS is enabled and whether any peers are in the middle
+        of the AutoTLS procedure. Returns True only if key exchange is safe to run.
+
+        :param enable_autotls: Flag indicating whether AutoTLS is enabled.
+        :return: True if primitive key exchange should proceed, False otherwise.
+        """
         base = Path("libp2p-forge")
 
         # Autotls should be enabled
@@ -194,6 +203,14 @@ class TLSStreamReadWriter(ReadWriteCloser):
         logger.debug("TLS handshake: handshake complete flag set")
 
     async def _do_primitive_key_exchange(self) -> None:
+        """
+        Perform a primitive key exchange with the remote peer.
+
+        Sends the local public key over the raw connection, receives the
+        peer's key, and stores it along with the derived Peer ID for subsequent use.
+
+        :return: None
+        """
         pk_bytes = self.local_prim_pk
 
         # Exchange

@@ -93,7 +93,6 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
-import libp2p.utils
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -103,15 +102,13 @@ if TYPE_CHECKING:
     from collections import (
         OrderedDict,
     )
-from multiaddr import Multiaddr
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
 
-
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("libp2p.network.basic_host")
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
 # Under load with 5 concurrent negotiations, some may take longer due to contention
 
@@ -467,6 +464,29 @@ class BasicHost(IHost):
         return None
 
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
+        """
+        Run the AutoTLS certificate provisioning flow for this host.
+
+        If a cached ACME certificate already exists on disk, it is loaded and validated
+        and procedure exists early. Otherwise the method performs the full AutoTLS flow:
+
+        - create or load an ACME account bound to the host's identity key
+        - initiate a certificate order
+        - obtain a DNS-01 challenge
+        - discover a publicly reachable IPv4 address from the host's listen addrs
+        - register the challenge with the AutoTLS broker
+        - wait for DNS propagation
+        - finalize the order and fetch the certificate
+
+        Only publicly reachable IPv4 addresses are considered valid for AutoTLS.
+        If no such address can be determined, the procedure fails.
+
+        :param public_ip: Optional externally known public IPv4 address. If not
+            provided, the address is inferred from the host's transport addresses.
+        :return: None
+        :raises RuntimeError: if no publicly reachable IPv4 address can be determined
+            for DNS challenge registration.
+        """
         if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
             pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
             cert_chain = x509.load_pem_x509_certificates(pem_bytes)
@@ -1061,7 +1081,7 @@ class BasicHost(IHost):
         return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
 
     async def upgrade_inbound_connection(
-        self, raw_conn: IRawConnection, maddr: Multiaddr
+        self, raw_conn: IRawConnection, maddr: multiaddr.Multiaddr
     ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection using the underlying network.

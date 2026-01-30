@@ -27,6 +27,12 @@ ACME_DIRECTORY_URL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
 
 def generate_rsa_key(bits: int = 2048) -> RSAPrivateKey:
+    """
+    Generate a new RSA private key.
+
+    :param bits: RSA key size in bits.
+    :return: Generated RSA private key.
+    """
     key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=bits,
@@ -36,6 +42,16 @@ def generate_rsa_key(bits: int = 2048) -> RSAPrivateKey:
 
 
 def compute_b36_peer_id(peerid: ID) -> str:
+    """
+    Compute the base36-encoded Peer ID representation used by AutoTLS.
+
+    The Peer ID multihash is wrapped in a CIDv1 (dag-pb) prefix and then encoded
+    using multibase base36. This format is required by the AutoTLS broker and
+    ACME DNS challenge flow.
+
+    :param peerid: Peer ID to encode.
+    :return: Base36-encoded CID representation of the Peer ID.
+    """
     mh = base58.b58decode(str(peerid))
     cid_bytes = bytes([0x01, 0x72]) + mh
     b36_peer_bytes = multibase.encode("base36", cid_bytes)
@@ -69,11 +85,27 @@ class ACMEClient:
     token: str
     key_auth: str
 
+    """
+    ACME client responsible for provisioning TLS certificates for a libp2p peer.
+
+    Manages account registration, DNS-01 challenge flow, and certificate issuance
+    using keys derived from the peer's identity.
+    """
+
     def __init__(
         self,
         libp2p_privkey: PrivateKey,
         local_peer: ID,
     ):
+        """
+        Initialize an ACME client bound to a libp2p peer identity.
+
+        Derives the base36 Peer ID, generates distinct RSA keys for the ACME account
+        and certificate, and prepares JWK and CSR material required for the ACME flow.
+
+        :param libp2p_privkey: Private key of the local libp2p peer.
+        :param local_peer: Peer ID of the local host.
+        """
         self.libp2p_privkey = libp2p_privkey
         self.local_peer = local_peer
         self.b36_peerid = compute_b36_peer_id(self.local_peer)
@@ -88,6 +120,20 @@ class ACMEClient:
         self.csr_b64 = self.b64url_encode(csr_der)
 
     async def create_acme_acct(self) -> None:
+        """
+        Create or fetch an ACME account for this client.
+
+        Fetches the ACME directory, constructs and signs a newAccount JWS using the
+        account RSA key, and registers the account with the ACME server. The resulting
+        account URL is stored for use in subsequent ACME requests.
+
+        Network operations are executed in a thread pool to avoid blocking the Trio
+        event loop.
+
+        :return: None
+        :raises RuntimeError: if account creation fails with a non-success response.
+        :raises ValueError: if the ACME server does not return an account URL.
+        """
         # Fetch directory - run in therad pool to avoid blocking event loop
         resp = await trio.to_thread.run_sync(
             lambda: requests.get(ACME_DIRECTORY_URL, timeout=10)
@@ -130,6 +176,20 @@ class ACMEClient:
         self.account_url = account_url
 
     async def initiate_order(self) -> None:
+        """
+        Create a new ACME certificate order for the peer's DNS name.
+
+        Submits a newOrder request for a wildcard domain derived from the peer's
+        base36 Peer ID and stores the returned order, authorization, and finalize
+        URLs for subsequent challenge and certificate finalization steps.
+
+        Network operations are executed in a thread pool to avoid blocking the Trio
+        event loop.
+
+        :return: None
+        :raises KeyError: if the ACME directory or response is missing required fields.
+        :raises requests.HTTPError: if the ACME server returns a non-success response.
+        """
         new_order_url = self.directory["newOrder"]
         nonce = await self.get_nonce()
         domain = f"*.{self.b36_peerid}.libp2p.direct"
@@ -158,6 +218,16 @@ class ACMEClient:
         self.finalize_url = resp.json()["finalize"]
 
     async def get_dns01_challenge(self) -> None:
+        """
+        Fetch and prepare the DNS-01 challenge for the current ACME order.
+
+        Queries the authorization URL, extracts the DNS-01 challenge, and computes
+        the key authorization value required for DNS record provisioning. Challenge
+        metadata is stored for use by the AutoTLS broker and order finalization.
+
+        :return: None
+        :raises RuntimeError: if no DNS-01 challenge is present in the authorization.
+        """
         nonce = await self.get_nonce()
         protected = {
             "alg": "RS256",
@@ -196,6 +266,17 @@ class ACMEClient:
         logger.info("Key-Auth fetched from ACME: %s", self.key_auth)
 
     async def notify_dns_ready(self, delay: int = 5) -> None:
+        """
+        Notify the ACME server that the DNS-01 challenge record is ready.
+
+        Polls the challenge URL until the ACME server validates the DNS record or
+        reports failure. The method blocks until the challenge reaches a terminal
+        state.
+
+        :param delay: Polling interval in seconds between challenge status checks.
+        :return: None
+        :raises RuntimeError: if the ACME server marks the challenge as invalid.
+        """
         nonce = await self.get_nonce()
         (replay_nonce, _) = await self._dns_poll(nonce)
 
@@ -213,6 +294,17 @@ class ACMEClient:
             await trio.sleep(delay)
 
     async def _dns_poll(self, nonce: str) -> (str, Any):  # type: ignore
+        """
+        Poll the ACME DNS-01 challenge endpoint.
+
+        Sends a signed POST-as-GET request to the challenge URL and returns the
+        updated replay nonce along with the decoded response body. This helper is
+        used to repeatedly check challenge status during DNS propagation.
+
+        :param nonce: Replay nonce to include in the ACME request.
+        :return: Tuple of (next replay nonce, response body).
+        :raises RuntimeError: if the ACME response does not include a Replay-Nonce.
+        """
         payload: dict[str, str] = {}
         protected = {
             "alg": "RS256",
@@ -237,6 +329,16 @@ class ACMEClient:
         return (replay_nonce, resp.json())
 
     async def fetch_cert_url(self) -> None:
+        """
+        Finalize the ACME order and retrieve the certificate download URL.
+
+        Submits the CSR to the ACME server, then repeatedly polls the order endpoint
+        until the order reaches a valid state. On success, the certificate URL is
+        extracted and stored for subsequent certificate retrieval.
+
+        :return: None
+        :raises RuntimeError: if the ACME order never transitions to a valid state.
+        """
         payload = {"csr": self.csr_b64}
         nonce = await self.get_nonce()
         protected = {
@@ -281,6 +383,15 @@ class ACMEClient:
         raise RuntimeError("ACME order never reached valid state")
 
     async def fetch_certificate(self) -> None:
+        """
+        Download and persist the issued ACME certificate.
+
+        Fetches the certificate chain from the ACME server, writes the PEM-encoded
+        certificate and private key to disk, and loads the parsed certificate chain
+        into memory for immediate use.
+
+        :return: None
+        """
         nonce = await self.get_nonce()
         protected = {
             "alg": "RS256",
@@ -332,6 +443,18 @@ class ACMEClient:
         protected: dict[str, Any],
         payload: dict[str, Any] | None,
     ) -> dict[str, str]:
+        """
+        Create a JSON Web Signature (JWS) object for ACME requests.
+
+        Encodes and signs the protected header and payload using the ACME account
+        RSA key. When payload is None, an empty payload is used to satisfy ACME
+        POST-as-GET semantics.
+
+        :param protected: JWS protected header fields.
+        :param payload: JWS payload, or None for POST-as-GET requests.
+        :return: Dictionary containing base64url-encoded protected header, payload,
+            and signature.
+        """
         protected_b64 = self.b64url_encode(
             json.dumps(protected, separators=(",", ":"), sort_keys=True).encode("utf-8")
         )
@@ -360,6 +483,15 @@ class ACMEClient:
         }
 
     def create_csr(self) -> bytes:
+        """
+        Create a certificate signing request for the peer's DNS name.
+
+        Builds and signs a CSR containing a wildcard DNS Subject Alternative Name
+        derived from the peer's base36 Peer ID. The CSR is signed using the
+        certificate RSA key and returned in DER format.
+
+        :return: DER-encoded certificate signing request.
+        """
         domain = f"*.{self.b36_peerid}.libp2p.direct"
 
         csr = (
@@ -379,6 +511,14 @@ class ACMEClient:
         return csr.public_bytes(serialization.Encoding.DER)
 
     def jwk_from_rsa_privkey(self) -> dict[str, str]:
+        """
+        Construct a JSON Web Key (JWK) from the ACME account RSA key.
+
+        Extracts the public modulus and exponent from the account key and encodes
+        them in base64url form as required by ACME JWS headers.
+
+        :return: Dictionary representing the RSA JWK.
+        """
         pub = self.acct_rsa_key.public_key()
         numbers = pub.public_numbers()
 
@@ -393,6 +533,12 @@ class ACMEClient:
         return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
     async def get_nonce(self) -> str:
+        """
+        Fetch a fresh replay nonce from the ACME server.
+
+        :return: Replay nonce value.
+        :raises RuntimeError: if a nonce cannot be obtained from the ACME server.
+        """
         new_nonce_url = self.directory["newNonce"]
 
         nonce_resp = await trio.to_thread.run_sync(
@@ -414,6 +560,15 @@ class ACMEClient:
         return nonce
 
     def compute_jwk_thumbprint(self) -> str:
+        """
+        Compute the JWK thumbprint for the ACME account key.
+
+        Generates the SHA-256 digest of the canonical JSON representation of the
+        account JWK and encodes it in base64url format. This thumbprint is used in
+        DNS-01 key authorization.
+
+        :return: Base64url-encoded JWK thumbprint.
+        """
         ordered = {"e": self.jwk["e"], "kty": self.jwk["kty"], "n": self.jwk["n"]}
         jwk_json = json.dumps(ordered, separators=(",", ":"), sort_keys=True)
         digest = hashlib.sha256(jwk_json.encode("utf-8")).digest()
@@ -421,6 +576,15 @@ class ACMEClient:
         return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
     def compute_dns01_keyauth(self, key_auth: str) -> str:
+        """
+        Compute the DNS-01 challenge key authorization record.
+
+        Hashes the key authorization string with SHA-256 and encodes it in
+        base64url format, suitable for inclusion in a DNS TXT record.
+
+        :param key_auth: Key authorization string for the challenge.
+        :return: Base64url-encoded DNS TXT record value.
+        """
         digest = hashlib.sha256(key_auth.encode("utf-8")).digest()
         txt = base64.urlsafe_b64encode(digest).decode("utf-8")
         txt = txt.rstrip("=")
