@@ -159,7 +159,7 @@ class TestIPNSValidator:
         entry.data = cbor2.dumps({"Value": b"/ipfs/test"})
         # entry.signatureV2 is not set
 
-        with pytest.raises(InvalidRecordType, match="Missing or empty signatureV2"):
+        with pytest.raises(InvalidRecordType, match="Missing signatureV2"):
             validator.validate(key, entry.SerializeToString())
 
     def test_validate_missing_data(self, validator, ed25519_keypair):
@@ -173,7 +173,7 @@ class TestIPNSValidator:
         entry.signatureV2 = b"fake_signature"
         # entry.data is not set
 
-        with pytest.raises(InvalidRecordType, match="Missing or empty data field"):
+        with pytest.raises(InvalidRecordType, match="Missing data field"):
             validator.validate(key, entry.SerializeToString())
 
     # ==================== Signature Verification Tests ====================

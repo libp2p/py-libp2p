@@ -64,37 +64,13 @@ class IPNSValidator(Validator):
         except Exception as e:
             raise InvalidRecordType(f"Failed to parse IPNS record: {e}")
 
-        # Both signatureV2 and data must be present and non-empty
-        if (
-            not entry.signatureV2
-            or not isinstance(entry.signatureV2, bytes)
-            or len(entry.signatureV2) == 0
-        ):
-            raise InvalidRecordType(
-                "Missing or empty signatureV2 (required for V2 records)"
-            )
-        if not entry.data or not isinstance(entry.data, bytes) or len(entry.data) == 0:
-            raise InvalidRecordType(
-                "Missing or empty data field (required for V2 records)"
-            )
+        if not entry.signatureV2:
+            raise InvalidRecordType("Missing signatureV2 (required for V2 records)")
+        if not entry.data:
+            raise InvalidRecordType("Missing data field (required for V2 records)")
 
         pubkey = self._extract_public_key(entry, name_hash)
-
         cbor_data = self._decode_cbor_data(entry.data)
-
-        # Check required CBOR fields and types
-        for field in ("Value", "Validity", "ValidityType", "Sequence"):
-            if field not in cbor_data:
-                raise InvalidRecordType(f"Missing required CBOR field: {field}")
-        if not isinstance(cbor_data["Value"], (bytes, str)):
-            raise InvalidRecordType("CBOR 'Value' must be bytes or str")
-        if not isinstance(cbor_data["Validity"], (bytes, str)):
-            raise InvalidRecordType("CBOR 'Validity' must be bytes or str")
-        if not isinstance(cbor_data["ValidityType"], int):
-            raise InvalidRecordType("CBOR 'ValidityType' must be int")
-        if not isinstance(cbor_data["Sequence"], int):
-            raise InvalidRecordType("CBOR 'Sequence' must be int")
-
         self._verify_signature(pubkey, entry.data, entry.signatureV2)
         self._validate_v1_v2_consistency(entry, cbor_data)
         self._check_validity(cbor_data)
@@ -173,21 +149,19 @@ class IPNSValidator(Validator):
         are present (non-default values), they must match the signed CBOR data
         to prevent tampering. signatureV1 is never used for verification.
         """
-
-        def to_bytes(val):
-            if isinstance(val, str):
-                return val.encode("utf-8")
-            return val
-
         # Check value if V1 has it set (non-empty bytes)
         if entry.value:
-            cbor_value = to_bytes(cbor_data.get("Value", b""))
+            cbor_value = cbor_data.get("Value", b"")
+            if isinstance(cbor_value, str):
+                cbor_value = cbor_value.encode("utf-8")
             if entry.value != cbor_value:
                 raise InvalidRecordType("V1 value doesn't match V2 CBOR Value")
 
         # Check validity if V1 has it set
         if entry.validity:
-            cbor_validity = to_bytes(cbor_data.get("Validity", b""))
+            cbor_validity = cbor_data.get("Validity", b"")
+            if isinstance(cbor_validity, str):
+                cbor_validity = cbor_validity.encode("utf-8")
             if entry.validity != cbor_validity:
                 raise InvalidRecordType("V1 validity doesn't match V2 CBOR Validity")
 
