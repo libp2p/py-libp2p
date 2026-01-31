@@ -3,6 +3,7 @@ from __future__ import (
 )
 
 import base64
+import multibase
 from collections.abc import (
     Callable,
     KeysView,
@@ -96,8 +97,17 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     return msg.seqno + msg.from_id
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(msg: rpc_pb2.Message, encoding: str = 'base64') -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+    Args:
+        msg: Pubsub message
+        encoding: Encoding to use (default: base64)
+    Returns:
+        Multibase-encoded message ID
+    """
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
 
 
 class TopicValidator(NamedTuple):
