@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import logging
 
 import multiaddr
 import trio
@@ -19,12 +18,6 @@ from libp2p import new_host
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.perf import PROTOCOL_NAME, PerfService
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Default transfer sizes (reduced for testing due to noise protocol message size limit)
-# Note: Noise protocol limits messages to 65535 bytes
 ONE_UNIT = 16 * 16  # 256 bytes
 UPLOAD_BYTES = ONE_UNIT * 10  # 2560 bytes upload
 DOWNLOAD_BYTES = ONE_UNIT * 10  # 2560 bytes download
