@@ -5,8 +5,9 @@ Decentralized off-chain service discovery using Ethereum smart contracts and lib
 ## Overview
 
 This example demonstrates a hybrid discovery system:
-1. **On-chain registry**: Ethereum smart contract stores service ownership and DHT pointers
-2. **Off-chain resolution**: libp2p Kademlia DHT stores actual peer addresses
+1. **On-chain registry**: Ethereum smart contract stores service ownership and DHT pointers.
+2. **Off-chain resolution**: libp2p Kademlia DHT stores signed, verifiable peer records.
+
 
 <img src="./images/sequence_diagram.png" alt="Workflow">
 
@@ -42,7 +43,7 @@ Create `.env` file:
 ```bash
 RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY
 PRIVATE_KEY=0x...your_private_key...
-SERVICE_ID_STR=my-service-name
+SERVICE_ID_STR=service1, service2, service3
 LISTEN_ADDRS=your-listening-addresses
 ```
 
@@ -76,7 +77,7 @@ A `deploy_output.json` file is created with deployed contract info:
 ### 4. Run Publisher
 
 ```bash
-python3 scripts/publish_service.py
+3 scripts/publish_service.py
 ```
 
 The publisher will:

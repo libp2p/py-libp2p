@@ -40,120 +40,96 @@ async def main():
         return
     
     eth_config = get_eth_config()
-    service_id_str = eth_config.default_service_id
+    service_ids_raw = eth_config.default_service_id.split(",") if eth_config.default_service_id else []
+    service_ids = [sid.strip() for sid in service_ids_raw if sid.strip()]
     
-    pubkey_file = get_service_key_path(service_id_str, "pubkey.hex")
-    addr_file = get_service_key_path(service_id_str, "publisher_addr.txt")
-    
-    if not os.path.exists(pubkey_file):
-        log.error(f"Missing: {pubkey_file}")
-        log.error("Run publish_service.py first")
+    if not service_ids:
+        log.error("No service IDs found in SERVICE_ID_STR")
         return
-    
-    if not os.path.exists(addr_file):
-        log.error(f"Missing: {addr_file}")
-        log.error("Run publish_service.py first")
-        return
-    
-    with open(pubkey_file, 'r') as f:
-        owner_pubkey_hex = f.read().strip()
-    
-    with open(addr_file, 'r') as f:
-        bootstrap_addrs = [line.strip() for line in f if line.strip()]
-    
-    owner_public_key = Ed25519PublicKey.from_bytes(bytes.fromhex(owner_pubkey_hex))
-    
+
     w3 = Web3(Web3.HTTPProvider(eth_config.rpc_url))
-    service_id = Web3.keccak(text=service_id_str)
     contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=SERVICE_ABI)
-    
-    log.info(f"Resolving: {service_id_str}")
 
     node = Libp2pNode()
     host = node.create_host()
     listen_addrs = node.get_listen_addrs()
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
-        with trio.CancelScope() as scope:
-            nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+        nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
+        log.info(f"Resolver ID: {node.peer_id.pretty()}")
 
-            log.info(f"Resolver ID: {node.peer_id.pretty()}")
+        dht = create_dht(host, DHTMode.CLIENT)
+        dht.register_validator("service", ServiceValidator())
 
-            connected = False
-            for addr_str in bootstrap_addrs:
-                try:
-                    peer_info = info_from_p2p_addr(Multiaddr(addr_str))
-                    host.get_peerstore().add_addrs(peer_info.peer_id, peer_info.addrs, 3600)
-                    await host.connect(peer_info)
-                    log.info(f"Connected to publisher: {peer_info.peer_id.pretty()}")
-                    connected = True
-                    break
-                except Exception as e:
-                    log.warning(f"Failed to connect: {e}")
+        async with background_trio_service(dht):
+            log.info("DHT started (CLIENT mode)")
 
-            if not connected:
-                log.error("Could not connect to publisher. Is it running?")
-                scope.cancel()
-                return
-
-            dht = create_dht(host, DHTMode.CLIENT)
-            dht.register_validator("service", ServiceValidator())
-
-            async with background_trio_service(dht):
-                log.info("DHT started (CLIENT mode)")
+            for service_id_str in service_ids:
+                log.info("-" * 40)
+                log.info(f"Resolving Service: {service_id_str}")
+                
+                pubkey_file = get_service_key_path(service_id_str, "pubkey.hex")
+                addr_file = get_service_key_path(service_id_str, "publisher_addr.txt")
+                
+                if not os.path.exists(pubkey_file) or not os.path.exists(addr_file):
+                    log.warning(f"Metadata missing for {service_id_str}. Skipping...")
+                    continue
+                
+                with open(pubkey_file, 'r') as f:
+                    owner_pubkey_hex = f.read().strip()
+                
+                with open(addr_file, 'r') as f:
+                    bootstrap_addrs = [line.strip() for line in f if line.strip()]
+                
+                owner_public_key = Ed25519PublicKey.from_bytes(bytes.fromhex(owner_pubkey_hex))
+                
+                for addr_str in bootstrap_addrs:
+                    try:
+                        peer_info = info_from_p2p_addr(Multiaddr(addr_str))
+                        host.get_peerstore().add_addrs(peer_info.peer_id, peer_info.addrs, 3600)
+                        await host.connect(peer_info)
+                        log.info(f"Connected to potential provider: {peer_info.peer_id.pretty()}")
+                    except Exception as e:
+                        log.debug(f"Connection attempt failed: {e}")
 
                 for peer_id in host.get_peerstore().peer_ids():
                     await dht.routing_table.add_peer(peer_id)
 
                 resolver = ServiceResolver(dht=dht, owner_public_key=owner_public_key)
-
-                pointer = contract.functions.getServicePointer(service_id).call()
-                if len(pointer) == 0:
-                    log.error("No pointer on-chain")
-                    scope.cancel()
-                    return
+                service_id_hash = Web3.keccak(text=service_id_str)
                 
-                pointer_hex = bytes(pointer).hex()
-                log.info(f"Pointer: {pointer_hex[:16]}...")
-
-                dht_key_base = derive_dht_key(service_id)
-                log.info(f"DHT Service Key: {dht_key_base}")
-
-                log.info("Searching for providers...")
+                pointer = contract.functions.getServicePointer(service_id_hash).call()
+                if len(pointer) == 0:
+                    log.error(f"[{service_id_str}] No pointer on-chain")
+                    continue
+                
+                dht_key_base = derive_dht_key(service_id_hash)
                 providers = await dht.find_providers(dht_key_base)
                 
                 if not providers:
-                    log.error("No providers found in DHT")
-                    scope.cancel()
-                    return
+                    log.error(f"[{service_id_str}] No providers found in DHT")
+                    continue
 
-                log.info(f"Found {len(providers)} potential providers")
+                log.info(f"[{service_id_str}] Found {len(providers)} providers")
                 
                 resolved_count = 0
                 for provider_info in providers:
-                    provider_id_str = provider_info.peer_id.to_base58()
-                    log.info(f"Querying provider: {provider_id_str[:16]}...")
-                    
                     await dht.routing_table.add_peer(provider_info.peer_id)
-                    
-                    dht_key_provider = f"{dht_key_base}/{provider_id_str}"
+                    dht_key_provider = f"{dht_key_base}/{provider_info.peer_id.to_base58()}"
                     peer = await resolver.resolve(dht_key_provider)
                     
                     if peer:
                         resolved_count += 1
-                        log.info(f"[{resolved_count}] Resolved: {peer.peer_id.pretty()}")
+                        log.info(f"[{service_id_str}] Provider {resolved_count}: {peer.peer_id.pretty()}")
                         for addr in peer.addrs:
                             log.info(f"  → {addr}")
-                    else:
-                        log.warning(f"Failed to resolve record for provider {provider_id_str[:16]}...")
-
-                if resolved_count == 0:
-                    log.error("Failed to resolve any service records")
-                else:
-                    log.info(f"Resolution complete. Found {resolved_count} active services.")
                 
-                scope.cancel()
+                if resolved_count == 0:
+                    log.error(f"[{service_id_str}] Failed to resolve records from providers")
 
+            log.info("-" * 40)
+            log.info("Resolution tasks complete.")
+            return
 
 if __name__ == "__main__":
     import sys

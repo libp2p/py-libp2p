@@ -88,7 +88,7 @@ def derive_dht_key(service_id: bytes) -> str:
 def derive_pointer_bytes(service_id: bytes) -> bytes:
     return hashlib.sha256(b"service-discovery:" + service_id).digest()
 
-def derive_owner_key(eth_private_key: str) -> Ed25519PrivateKey:
-    clean_key = eth_private_key[2:] if eth_private_key.startswith("0x") else eth_private_key
+def derive_owner_key(private_key: str) -> Ed25519PrivateKey:
+    clean_key = private_key[2:] if private_key.startswith("0x") else private_key
     seed = hashlib.sha256(f"eth-off-chain-discovery-seed:{clean_key}".encode()).digest()
     return Ed25519PrivateKey.from_bytes(seed)
