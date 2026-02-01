@@ -415,3 +415,40 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                         pytest.fail(
                             f"Failed to establish libp2p connection to {full_addr}: {e}"
                         )
+
+
+@pytest.mark.trio
+async def test_swarm_peer_id_validation(security_protocol):
+    """Test that the swarm correctly validates peer IDs during connection."""
+    async with SwarmFactory.create_batch_and_listen(
+        2, security_protocol=security_protocol
+    ) as swarms:
+        # Get the correct address and peer ID of swarm[1]
+        addrs = tuple(
+            addr
+            for transport in swarms[1].listeners.values()
+            for addr in transport.get_addrs()
+        )
+        correct_peer_id = swarms[1].get_peer_id()
+
+        # Create a fake peer ID (using swarm[0]'s ID which is definitely wrong)
+        wrong_peer_id = swarms[0].get_peer_id()
+
+        # Add the address with the WRONG peer ID to the peerstore
+        swarms[0].peerstore.add_addrs(wrong_peer_id, addrs, 10000)
+
+        # Attempt to dial with the wrong peer ID should fail with peer ID mismatch
+        with pytest.raises(SwarmException):
+            await swarms[0].dial_peer(wrong_peer_id)
+
+        # Ensure no connection was established
+        assert wrong_peer_id not in swarms[0].connections
+
+        # Now test with the correct peer ID - this should succeed
+        swarms[0].peerstore.add_addrs(correct_peer_id, addrs, 10000)
+        connections = await swarms[0].dial_peer(correct_peer_id)
+        assert len(connections) > 0, "Connection with correct peer ID should succeed"
+
+        # Verify connections are established
+        assert correct_peer_id in swarms[0].connections
+        assert swarms[0].get_peer_id() in swarms[1].connections
