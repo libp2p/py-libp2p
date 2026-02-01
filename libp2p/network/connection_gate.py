@@ -47,7 +47,7 @@ async def extract_ip_from_multiaddr(addr: Multiaddr) -> list[str]:
 
     # Try direct IPv4 first
     try:
-        ip = addr.value_for_protocol("ip4")
+        ip: str = addr.value_for_protocol("ip4")
         return [ip]
     except ProtocolLookupError:
         pass
@@ -75,7 +75,7 @@ async def extract_ip_from_multiaddr(addr: Multiaddr) -> list[str]:
                     hostname, None, family=address_family, type=socket.SOCK_STREAM
                 )
                 # Extract unique IP addresses
-                ips = list({info[4][0] for info in addrinfo})
+                ips: list[str] = list({str(info[4][0]) for info in addrinfo})
                 logger.debug(f"Resolved {hostname} ({protocol}) to {ips}")
                 return ips
             except (socket.gaierror, OSError) as e:
@@ -156,7 +156,10 @@ class ConnectionGate:
 
     def is_in_allow_list(self, remote_addr: Multiaddr) -> bool:
         """
-        Check if connection is explicitly in allow list.
+        Check if connection is explicitly in allow list (sync, no DNS).
+
+        This is a synchronous method that only checks direct IP addresses.
+        For DNS resolution, use is_allowed() instead.
 
         Parameters
         ----------
@@ -172,7 +175,18 @@ class ConnectionGate:
         if not self.allow_list:
             return False
 
-        ip_str = extract_ip_from_multiaddr(remote_addr)
+        # Extract direct IP only (no DNS resolution)
+        from multiaddr.exceptions import ProtocolLookupError
+
+        ip_str: str | None = None
+        try:
+            ip_str = remote_addr.value_for_protocol("ip4")
+        except ProtocolLookupError:
+            try:
+                ip_str = remote_addr.value_for_protocol("ip6")
+            except ProtocolLookupError:
+                return False
+
         if ip_str is None:
             return False
 
