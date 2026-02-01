@@ -492,8 +492,8 @@ async def test_swarm_listener_resilience_on_upgrade_failure(security_protocol):
         # Verify connection was established successfully
         assert listener_swarm.get_peer_id() in client_swarm.connections
         assert client_swarm.get_peer_id() in listener_swarm.connections
-  
-  
+
+
 @pytest.mark.trio
 async def test_swarm_peer_id_validation(security_protocol):
     """Test that the swarm correctly validates peer IDs during connection."""
