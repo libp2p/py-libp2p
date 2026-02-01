@@ -48,14 +48,14 @@ async def extract_ip_from_multiaddr(addr: Multiaddr) -> list[str]:
     # Try direct IPv4 first
     try:
         ip = addr.value_for_protocol("ip4")
-        return [ip]
+        return [str(ip)]
     except ProtocolLookupError:
         pass
 
     # Try direct IPv6
     try:
         ip = addr.value_for_protocol("ip6")
-        return [ip]
+        return [str(ip)]
     except ProtocolLookupError:
         pass
 
