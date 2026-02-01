@@ -17,17 +17,17 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir uv
 RUN uv --version
 
-# Build context is perf/images/python/v0.x (path in images.yaml)
-COPY py-libp2p /app/py-libp2p
+# Build context = repo root (same as interop/transport/Dockerfile for GitHub + local)
+COPY . /app/py-libp2p
 
 RUN uv venv /app/venv
 
 # Interop/perf project: depends on libp2p from copied clone
-COPY py-libp2p/interop/perf/pyproject.toml .
+COPY interop/perf/pyproject.toml .
 RUN uv pip install --python /app/venv/bin/python --upgrade pip && \
     uv pip install --python /app/venv/bin/python --no-cache-dir -e .
 
-COPY py-libp2p/interop/perf/perf_test.py .
+COPY interop/perf/perf_test.py .
 
 ENV PYTHONUNBUFFERED=1
 ENV CI=true
