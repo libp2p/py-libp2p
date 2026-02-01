@@ -10,20 +10,20 @@ Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/core/connmgr#Connectio
 import ipaddress
 import logging
 import socket
-from typing import List
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 logger = logging.getLogger("libp2p.network.connection_gate")
 
 
-async def extract_ip_from_multiaddr(addr: Multiaddr) -> List[str]:
+async def extract_ip_from_multiaddr(addr: Multiaddr) -> list[str]:
     """
     Extract IP addresses from a multiaddr.
 
-    Handles both direct IP addresses (ip4, ip6) and DNS resolution (dns4, dns6, dnsaddr).
-    Returns a list of IP addresses since DNS can resolve to multiple IPs.
+    Handles both direct IP addresses (ip4, ip6) and DNS resolution
+    (dns4, dns6, dnsaddr). Returns a list of IP addresses since DNS
+    can resolve to multiple IPs.
 
     Parameters
     ----------
@@ -75,13 +75,11 @@ async def extract_ip_from_multiaddr(addr: Multiaddr) -> List[str]:
                     hostname, None, family=address_family, type=socket.SOCK_STREAM
                 )
                 # Extract unique IP addresses
-                ips = list(set(info[4][0] for info in addrinfo))
+                ips = list({info[4][0] for info in addrinfo})
                 logger.debug(f"Resolved {hostname} ({protocol}) to {ips}")
                 return ips
             except (socket.gaierror, OSError) as e:
-                logger.debug(
-                    f"Failed to resolve {protocol} hostname '{hostname}': {e}"
-                )
+                logger.debug(f"Failed to resolve {protocol} hostname '{hostname}': {e}")
                 return []
         except ProtocolLookupError:
             continue
@@ -221,7 +219,8 @@ class ConnectionGate:
                 return True
             else:
                 logger.debug(
-                    f"No IP addresses in multiaddr {remote_addr}, denying due to allow_list"
+                    f"No IP addresses in multiaddr {remote_addr}, "
+                    f"denying due to allow_list"
                 )
                 return False
 

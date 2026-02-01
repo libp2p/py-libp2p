@@ -60,14 +60,18 @@ class TestExtractIpFromMultiaddr:
 
     async def test_p2p_circuit_address(self):
         # Test with p2p-circuit address (no IP to extract)
-        addr = Multiaddr("/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+        addr = Multiaddr(
+            "/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
         ips = await extract_ip_from_multiaddr(addr)
         # Should return empty list for circuit addresses
         assert ips == []
 
     async def test_complex_multiaddr_with_dns(self):
         # Test complex multiaddr with dns4
-        addr = Multiaddr("/dns4/example.com/tcp/4001/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+        addr = Multiaddr(
+            "/dns4/example.com/tcp/4001/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
         ips = await extract_ip_from_multiaddr(addr)
         # Should resolve example.com
         assert len(ips) > 0
@@ -109,10 +113,10 @@ class TestConnectionGate:
 
     async def test_non_ip_addresses_allowed_by_default(self):
         gate = ConnectionGate(allow_private_addresses=True)
-        # DNS and circuit relay addresses should be allowed when no allow list
-        dns_addr = Multiaddr("/dns4/example.com/tcp/1234")
-        circuit_addr = Multiaddr("/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
-        # Note: dns_addr will try to resolve, but for this test we just check it doesn't error
+        # Circuit relay addresses should be allowed when no allow list
+        circuit_addr = Multiaddr(
+            "/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
         assert await gate.is_allowed(circuit_addr) is True
 
     async def test_dns_with_deny_list(self):
@@ -155,19 +159,27 @@ class TestConnectionGate:
     async def test_circuit_relay_allowed_no_allow_list(self):
         gate = ConnectionGate(allow_private_addresses=True)
         # Circuit relay should be allowed when no allow list is configured
-        circuit_addr = Multiaddr("/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+        circuit_addr = Multiaddr(
+            "/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
         result = await gate.is_allowed(circuit_addr)
         assert result is True
 
     async def test_circuit_relay_denied_with_allow_list(self):
-        gate = ConnectionGate(allow_list=["192.168.1.0/24"], allow_private_addresses=True)
-        # Circuit relay should be denied when allow list is configured (no IP to check)
-        circuit_addr = Multiaddr("/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+        gate = ConnectionGate(
+            allow_list=["192.168.1.0/24"], allow_private_addresses=True
+        )
+        # Circuit relay denied when allow list configured (no IP to check)
+        circuit_addr = Multiaddr(
+            "/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
         result = await gate.is_allowed(circuit_addr)
         assert result is False
 
     async def test_dns_resolution_failure_with_allow_list(self):
-        gate = ConnectionGate(allow_list=["192.168.1.0/24"], allow_private_addresses=True)
+        gate = ConnectionGate(
+            allow_list=["192.168.1.0/24"], allow_private_addresses=True
+        )
         # Invalid DNS should be denied when allow list is configured
         dns_addr = Multiaddr("/dns4/invalid-domain-xyz-123.com/tcp/1234")
         result = await gate.is_allowed(dns_addr)
