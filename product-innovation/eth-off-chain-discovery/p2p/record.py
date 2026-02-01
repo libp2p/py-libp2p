@@ -25,7 +25,7 @@ class ServiceRecord:
         payload = {
             "version": RECORD_VERSION,
             "service_id": self.service_id.hex(),
-            "peer_id": str(self.peer_id),  
+            "peer_id": str(self.peer_id),
             "multiaddrs": [str(m) for m in self.multiaddrs],
             "timestamp": self.timestamp,
         }
@@ -74,12 +74,21 @@ def verify_record(
     max_age_seconds: int = RECORD_MAX_AGE_SECONDS,
 ) -> bool:
     try:
-        public_key.verify(record.signature, record.to_payload())
+        public_key.verify(record.to_payload(), record.signature)
     except Exception:
         return False
     if int(time.time()) - record.timestamp > max_age_seconds:
         return False
     return True
 
-def derive_dht_key(service_id: bytes) -> bytes:
+def derive_dht_key(service_id: bytes) -> str:
+    key_hash = hashlib.sha256(b"service-discovery:" + service_id).hexdigest()
+    return f"/service/{key_hash}"
+
+def derive_pointer_bytes(service_id: bytes) -> bytes:
     return hashlib.sha256(b"service-discovery:" + service_id).digest()
+
+def derive_owner_key(eth_private_key: str) -> Ed25519PrivateKey:
+    clean_key = eth_private_key[2:] if eth_private_key.startswith("0x") else eth_private_key
+    seed = hashlib.sha256(f"eth-off-chain-discovery-seed:{clean_key}".encode()).digest()
+    return Ed25519PrivateKey.from_bytes(seed)
