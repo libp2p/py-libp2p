@@ -9,44 +9,85 @@ Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/core/connmgr#Connectio
 
 import ipaddress
 import logging
+import socket
+from typing import List
 
+import trio
 from multiaddr import Multiaddr
 
 logger = logging.getLogger("libp2p.network.connection_gate")
 
 
-def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
+async def extract_ip_from_multiaddr(addr: Multiaddr) -> List[str]:
     """
-    Extract the IP address from a multiaddr.
+    Extract IP addresses from a multiaddr.
 
-    Uses multiaddr's value_for_protocol method to extract IP addresses.
+    Handles both direct IP addresses (ip4, ip6) and DNS resolution (dns4, dns6, dnsaddr).
+    Returns a list of IP addresses since DNS can resolve to multiple IPs.
 
     Parameters
     ----------
     addr : Multiaddr
-        Multiaddr to extract from
+        Multiaddr to extract IPs from
 
     Returns
     -------
-    str | None
-        IP address or None if not found
+    List[str]
+        List of IP addresses. Empty list if no IPs found or resolution fails.
+
+    Examples
+    --------
+    >>> await extract_ip_from_multiaddr(Multiaddr("/ip4/192.168.1.1/tcp/4001"))
+    ['192.168.1.1']
+    >>> await extract_ip_from_multiaddr(Multiaddr("/dns4/localhost/tcp/4001"))
+    ['127.0.0.1']
 
     """
     from multiaddr.exceptions import ProtocolLookupError
 
-    # Try IPv4 first
+    # Try direct IPv4 first
     try:
-        return addr.value_for_protocol("ip4")
+        ip = addr.value_for_protocol("ip4")
+        return [ip]
     except ProtocolLookupError:
         pass
 
-    # Try IPv6
+    # Try direct IPv6
     try:
-        return addr.value_for_protocol("ip6")
+        ip = addr.value_for_protocol("ip6")
+        return [ip]
     except ProtocolLookupError:
         pass
 
-    return None
+    # Try DNS resolution for dns4, dns6, dnsaddr
+    dns_protocols = [
+        ("dns4", socket.AF_INET),
+        ("dns6", socket.AF_INET6),
+        ("dnsaddr", socket.AF_UNSPEC),  # Both IPv4 and IPv6
+    ]
+
+    for protocol, address_family in dns_protocols:
+        try:
+            hostname = addr.value_for_protocol(protocol)
+            # Perform DNS resolution using trio
+            try:
+                addrinfo = await trio.socket.getaddrinfo(
+                    hostname, None, family=address_family, type=socket.SOCK_STREAM
+                )
+                # Extract unique IP addresses
+                ips = list(set(info[4][0] for info in addrinfo))
+                logger.debug(f"Resolved {hostname} ({protocol}) to {ips}")
+                return ips
+            except (socket.gaierror, OSError) as e:
+                logger.debug(
+                    f"Failed to resolve {protocol} hostname '{hostname}': {e}"
+                )
+                return []
+        except ProtocolLookupError:
+            continue
+
+    # No IP or resolvable DNS protocol found
+    return []
 
 
 class ConnectionGate:
@@ -148,9 +189,13 @@ class ConnectionGate:
 
         return False
 
-    def is_allowed(self, remote_addr: Multiaddr) -> bool:
+    async def is_allowed(self, remote_addr: Multiaddr) -> bool:
         """
         Check if a connection from the given address should be allowed.
+
+        Handles both direct IP addresses and DNS resolution automatically.
+        Non-IP multiaddrs (like /p2p-circuit) are allowed by default unless
+        an allow list is configured.
 
         Parameters
         ----------
@@ -163,17 +208,50 @@ class ConnectionGate:
             True if connection should be allowed, False otherwise
 
         """
-        # Extract IP address from multiaddr
-        ip_str = extract_ip_from_multiaddr(remote_addr)
-        if ip_str is None:
-            # No IP address found - default to deny for safety
-            logger.debug(f"No IP address found in multiaddr {remote_addr}")
-            return False
+        # Extract IP addresses from multiaddr (handles both direct IPs and DNS)
+        ip_addresses = await extract_ip_from_multiaddr(remote_addr)
 
+        if not ip_addresses:
+            # No IP addresses found (e.g., /p2p-circuit addresses)
+            # Allow by default unless an allow list is configured
+            if not self.allow_list:
+                logger.debug(
+                    f"No IP addresses in multiaddr {remote_addr}, allowing by default"
+                )
+                return True
+            else:
+                logger.debug(
+                    f"No IP addresses in multiaddr {remote_addr}, denying due to allow_list"
+                )
+                return False
+
+        # Check if any of the resolved IPs is allowed
+        for ip_str in ip_addresses:
+            if self._check_ip_allowed(ip_str):
+                return True
+
+        # None of the IPs are allowed
+        return False
+
+    def _check_ip_allowed(self, ip_str: str) -> bool:
+        """
+        Check if a specific IP address should be allowed.
+
+        Parameters
+        ----------
+        ip_str : str
+            IP address to check
+
+        Returns
+        -------
+        bool
+            True if IP should be allowed, False otherwise
+
+        """
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
-            logger.debug(f"Invalid IP address '{ip_str}' from multiaddr {remote_addr}")
+            logger.debug(f"Invalid IP address '{ip_str}'")
             return False
 
         # Check if IP is private and private addresses are not allowed

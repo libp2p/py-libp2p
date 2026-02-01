@@ -493,7 +493,11 @@ class Swarm(Service, INetworkService):
 
         # Filter addresses through connection gate (InterceptAddrDial)
         gate = self.connection_gate
-        allowed_addrs = [addr for addr in addrs if gate.is_allowed(addr)]
+        allowed_addrs = []
+        for addr in addrs:
+            if await gate.is_allowed(addr):
+                allowed_addrs.append(addr)
+
         if not allowed_addrs:
             raise SwarmException(
                 f"All addresses for peer {peer_id} blocked by connection gate"
