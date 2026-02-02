@@ -24,3 +24,4 @@ Examples
    examples.websocket
    examples.tls
    examples.autotls
+   examples.perf
