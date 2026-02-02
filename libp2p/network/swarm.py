@@ -653,10 +653,26 @@ class Swarm(Service, INetworkService):
                     return
 
                 raw_conn = RawConnection(read_write_closer, False)
-                await self.upgrade_inbound_raw_conn(raw_conn, maddr)
-                # NOTE: This is a intentional barrier to prevent from the handler
-                # exiting and closing the connection.
-                await self.manager.wait_finished()
+                try:
+                    await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+                    # NOTE: This is an intentional barrier to prevent the handler from
+                    # exiting and closing the connection.
+                    await self.manager.wait_finished()
+                except SwarmException as error:
+                    # Log the error but don't propagate - this prevents listener crash
+                    logger.debug(
+                        "connection handler failed to upgrade connection from %s: %s",
+                        maddr,
+                        error,
+                    )
+                    await read_write_closer.close()
+                except Exception:
+                    # Catch any other unexpected errors to prevent listener crash
+                    logger.exception(
+                        "unexpected error in connection handler for %s",
+                        maddr,
+                    )
+                    await read_write_closer.close()
 
             try:
                 # Success
@@ -776,8 +792,13 @@ class Swarm(Service, INetworkService):
                 # Let add_conn perform final guard if needed
                 pass
 
-        await self.add_conn(muxed_conn)
-        logger.debug("successfully opened connection to peer %s", peer_id)
+        try:
+            await self.add_conn(muxed_conn)
+            logger.debug("successfully opened connection to peer %s", peer_id)
+        except Exception:
+            logger.exception("failed to add connection for peer %s", peer_id)
+            await muxed_conn.close()
+            return None  # type: ignore[return-value]
 
         return muxed_conn
 
