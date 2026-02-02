@@ -157,8 +157,7 @@ class TestBasicQUICFlow:
 
             async with trio.open_nursery() as nursery:
                 # Start server listener
-                success = await listener.listen(listen_addr, nursery)
-                assert success, "Failed to start server listener"
+                await listener.listen(listen_addr, nursery)
 
                 # Get server address
                 server_addrs = listener.get_addrs()
@@ -296,8 +295,7 @@ class TestBasicQUICFlow:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
-                success = await listener.listen(listen_addr, nursery)
-                assert success, "Failed to start server listener"
+                await listener.listen(listen_addr, nursery)
 
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -711,8 +709,7 @@ async def test_quic_concurrent_streams():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
+            await listener.listen(listen_addr, nursery)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -871,8 +868,7 @@ async def test_quic_yamux_integration():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
+            await listener.listen(listen_addr, nursery)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"

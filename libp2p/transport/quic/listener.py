@@ -1190,7 +1190,7 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Transmission error: {e}", exc_info=True)
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """Start listening on the given multiaddr with enhanced connection handling."""
         if self._listening:
             raise QUICListenError("Already listening")
@@ -1229,7 +1229,6 @@ class QUICListener(IListener):
             logger.info(
                 f"QUIC listener started on {bound_maddr} with connection ID support"
             )
-            return True
 
         except Exception as e:
             await self.close()

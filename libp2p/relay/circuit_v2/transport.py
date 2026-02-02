@@ -1067,7 +1067,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1078,11 +1078,6 @@ class CircuitV2Listener(Service, IListener):
         nursery : trio.Nursery
             The nursery to run tasks in
 
-        Returns
-        -------
-        bool
-            True if listening successfully started
-
         """
         # Convert string to Multiaddr if needed
         addr = (
@@ -1091,7 +1086,6 @@ class CircuitV2Listener(Service, IListener):
             else multiaddr.Multiaddr(maddr)
         )
         self.multiaddrs.append(addr)
-        return True
 
     def get_addrs(self) -> tuple[multiaddr.Multiaddr, ...]:
         """
