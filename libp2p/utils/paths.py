@@ -13,6 +13,10 @@ from typing import Union
 
 PathLike = Union[str, Path]
 
+ED25519_PATH = Path("libp2p-forge/peer1/ed25519.pem")
+AUTOTLS_CERT_PATH = Path("libp2p-forge/peer1/autotls-cert.pem")
+AUTOTLS_KEY_PATH = Path("libp2p-forge/peer1/autotls-key.pem")
+
 
 def get_temp_dir() -> Path:
     """
