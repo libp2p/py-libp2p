@@ -15,9 +15,12 @@ from typing import (
 )
 import weakref
 
+from cryptography import x509
+from cryptography.x509.oid import ExtensionOID
 import multiaddr
 import trio
 
+import libp2p
 from libp2p.abc import (
     IHost,
     IMuxedConn,
@@ -80,10 +83,17 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
+from libp2p.relay.circuit_v2.nat import is_private_ip
+from libp2p.security.tls.autotls.acme import (
+    ACMEClient,
+    compute_b36_peer_id,
+)
+from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
+import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
 )
@@ -92,13 +102,11 @@ if TYPE_CHECKING:
     from collections import (
         OrderedDict,
     )
-from multiaddr import Multiaddr
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
-
 
 logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
@@ -172,6 +180,7 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
@@ -453,6 +462,101 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
+        """
+        Run the AutoTLS certificate provisioning flow for this host.
+
+        If a cached ACME certificate already exists on disk, it is loaded and validated
+        and procedure exists early. Otherwise the method performs the full AutoTLS flow:
+
+        - create or load an ACME account bound to the host's identity key
+        - initiate a certificate order
+        - obtain a DNS-01 challenge
+        - discover a publicly reachable IPv4 address from the host's listen addrs
+        - register the challenge with the AutoTLS broker
+        - wait for DNS propagation
+        - finalize the order and fetch the certificate
+
+        Only publicly reachable IPv4 addresses are considered valid for AutoTLS.
+        If no such address can be determined, the procedure fails.
+
+        :param public_ip: Optional externally known public IPv4 address. If not
+            provided, the address is inferred from the host's transport addresses.
+        :return: None
+        :raises RuntimeError: if no publicly reachable IPv4 address can be determined
+            for DNS challenge registration.
+        """
+        if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
+            pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
+            cert_chain = x509.load_pem_x509_certificates(pem_bytes)
+
+            san = (
+                cert_chain[0]
+                .extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                .value
+            )
+            # DNS names
+            dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
+            b36_pid = compute_b36_peer_id(self.get_id())
+
+            logger.info(
+                "AutoTLS procedure: Loaded existing cert, DNS: %s, b36_pid: %s",
+                dns_names,
+                b36_pid,
+            )
+
+            return
+
+        logger.info("ACME certificate not cached, initiating the procedure...")
+        acme = ACMEClient(self.get_private_key(), self.get_id())
+        await acme.create_acme_acct()
+        await acme.initiate_order()
+        await acme.get_dns01_challenge()
+
+        # Extract public IP from host's listening addresses
+        # According to spec, only publicly reachable IP addresses
+        # should be sent to broker.
+        # Use get_transport_addrs() to get addresses without /p2p/{peer_id} suffix
+
+        # For some reason this way of extracting pub-addr is working on Luca's end
+        # but not on mine
+
+        all_addrs = self.get_transport_addrs()
+        if public_ip is None:
+            for addr in all_addrs:
+                try:
+                    ip = addr.value_for_protocol("ip4")
+                    if ip and not is_private_ip(ip):
+                        public_ip = ip
+                        port = addr.value_for_protocol("tcp")
+                        if port:
+                            break
+                except Exception:
+                    continue
+
+            if not public_ip or not port:
+                raise RuntimeError(
+                    "No public IP address found in listening addresses. "
+                    "AutoTLS requires at least one publicly reachable IPv4 address."
+                )
+        port = self.get_addrs()[0].value_for_protocol("tcp")
+
+        broker = BrokerClient(
+            self.get_private_key(),
+            multiaddr.Multiaddr(f"/ip4/{public_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            acme.key_auth,
+            acme.b36_peerid,
+        )
+
+        await broker.http_peerid_auth()
+        await broker.wait_for_dns()
+
+        await acme.notify_dns_ready()
+        await acme.fetch_cert_url()
+        await acme.fetch_certificate()
+
+        return
 
     async def new_stream(
         self,
@@ -977,7 +1081,7 @@ class BasicHost(IHost):
         return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
 
     async def upgrade_inbound_connection(
-        self, raw_conn: IRawConnection, maddr: Multiaddr
+        self, raw_conn: IRawConnection, maddr: multiaddr.Multiaddr
     ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection using the underlying network.
