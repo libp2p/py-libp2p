@@ -11,7 +11,6 @@ Follows docs/write-a-perf-test-app.md:
 """
 
 from datetime import datetime, timedelta, timezone
-import ipaddress
 import logging
 import os
 import ssl
@@ -38,6 +37,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.perf import PROTOCOL_NAME, PerfService
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
 from libp2p.security.noise.transport import (
     PROTOCOL_ID as NOISE_PROTOCOL_ID,
@@ -48,7 +48,6 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
-from libp2p.perf import PerfService, PROTOCOL_NAME
 
 MAX_TEST_TIMEOUT = 300
 logger = logging.getLogger("libp2p.perf_test")
@@ -59,7 +58,12 @@ def configure_logging() -> None:
     debug_value = os.getenv("DEBUG") or "false"
     debug_enabled = debug_value.upper() in ["DEBUG", "1", "TRUE", "YES"]
 
-    for logger_name in ["multiaddr", "multiaddr.transforms", "multiaddr.codecs", "multiaddr.codecs.cid"]:
+    for logger_name in [
+        "multiaddr",
+        "multiaddr.transforms",
+        "multiaddr.codecs",
+        "multiaddr.codecs.cid",
+    ]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
     if debug_enabled:
@@ -101,8 +105,13 @@ def _compute_stats(samples: list[float], is_latency: bool = False) -> dict[str, 
     """Compute min, q1, median, q3, max, outliers, samples (IQR-based)."""
     if not samples:
         return {
-            "min": 0.0, "q1": 0.0, "median": 0.0, "q3": 0.0, "max": 0.0,
-            "outliers": [], "samples": [],
+            "min": 0.0,
+            "q1": 0.0,
+            "median": 0.0,
+            "q3": 0.0,
+            "max": 0.0,
+            "outliers": [],
+            "samples": [],
         }
     sorted_vals = sorted(samples)
     n = len(sorted_vals)
@@ -120,7 +129,11 @@ def _compute_stats(samples: list[float], is_latency: bool = False) -> dict[str, 
         min_val, max_val = sorted_vals[0], sorted_vals[-1]
     fmt = "{:.3f}" if is_latency else "{:.2f}"
     return {
-        "min": min_val, "q1": q1, "median": median, "q3": q3, "max": max_val,
+        "min": min_val,
+        "q1": q1,
+        "median": median,
+        "q3": q3,
+        "max": max_val,
         "outliers": [float(fmt.format(x)) for x in outliers],
         "samples": [float(fmt.format(x)) for x in sorted_vals],
     }
@@ -138,7 +151,9 @@ class PerfTest:
             self.muxer = os.getenv("MUXER") or ""
             self.security = os.getenv("SECURE_CHANNEL") or ""
             if not self.muxer or not self.security:
-                raise ValueError("MUXER and SECURE_CHANNEL required for non-standalone transport")
+                raise ValueError(
+                    "MUXER and SECURE_CHANNEL required for non-standalone transport"
+                )
         else:
             self.muxer = os.getenv("MUXER")
             self.security = os.getenv("SECURE_CHANNEL")
@@ -182,12 +197,18 @@ class PerfTest:
         valid_muxers = ["mplex", "yamux"]
         standalone = ["quic-v1"]
         if self.transport not in valid_transports:
-            raise ValueError(f"Unsupported transport: {self.transport}. Supported: {valid_transports}")
+            raise ValueError(
+                f"Unsupported transport: {self.transport}. Supported: {valid_transports}"
+            )
         if self.transport not in standalone:
             if self.security not in valid_security:
-                raise ValueError(f"Unsupported security: {self.security}. Supported: {valid_security}")
+                raise ValueError(
+                    f"Unsupported security: {self.security}. Supported: {valid_security}"
+                )
             if self.muxer not in valid_muxers:
-                raise ValueError(f"Unsupported muxer: {self.muxer}. Supported: {valid_muxers}")
+                raise ValueError(
+                    f"Unsupported muxer: {self.muxer}. Supported: {valid_muxers}"
+                )
 
     def create_security_options(self) -> tuple[dict[TProtocol, Any], Any]:
         standalone = ["quic-v1"]
@@ -239,9 +260,11 @@ class PerfTest:
         if self.transport == "wss":
             try:
                 pk = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-                subject = issuer = x509.Name([
-                    x509.NameAttribute(NameOID.COMMON_NAME, "libp2p.local"),
-                ])
+                subject = issuer = x509.Name(
+                    [
+                        x509.NameAttribute(NameOID.COMMON_NAME, "libp2p.local"),
+                    ]
+                )
                 cert = (
                     x509.CertificateBuilder()
                     .subject_name(subject)
@@ -255,14 +278,18 @@ class PerfTest:
                 ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
-                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as cf, \
-                     tempfile.NamedTemporaryFile(mode="wb", delete=False) as kf:
+                with (
+                    tempfile.NamedTemporaryFile(mode="wb", delete=False) as cf,
+                    tempfile.NamedTemporaryFile(mode="wb", delete=False) as kf,
+                ):
                     cf.write(cert.public_bytes(serialization.Encoding.PEM))
-                    kf.write(pk.private_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PrivateFormat.PKCS8,
-                        encryption_algorithm=serialization.NoEncryption(),
-                    ))
+                    kf.write(
+                        pk.private_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PrivateFormat.PKCS8,
+                            encryption_algorithm=serialization.NoEncryption(),
+                        )
+                    )
                     ctx.load_cert_chain(cf.name, kf.name)
                     try:
                         os.unlink(cf.name)
@@ -281,7 +308,9 @@ class PerfTest:
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         return [p.name for p in addr.protocols()]
 
-    def _extract_and_preserve_p2p(self, addr: multiaddr.Multiaddr) -> tuple[multiaddr.Multiaddr, str | None]:
+    def _extract_and_preserve_p2p(
+        self, addr: multiaddr.Multiaddr
+    ) -> tuple[multiaddr.Multiaddr, str | None]:
         p2p_value = None
         if "p2p" in self._get_protocol_names(addr):
             p2p_value = addr.value_for_protocol("p2p")
@@ -289,7 +318,9 @@ class PerfTest:
                 addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
         return addr, p2p_value
 
-    def _encapsulate_with_p2p(self, addr: multiaddr.Multiaddr, p2p_value: str | None) -> multiaddr.Multiaddr:
+    def _encapsulate_with_p2p(
+        self, addr: multiaddr.Multiaddr, p2p_value: str | None
+    ) -> multiaddr.Multiaddr:
         if p2p_value:
             return addr.encapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
         return addr
@@ -348,7 +379,9 @@ class PerfTest:
             return out if out else [multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}/wss")]
         return base_addrs
 
-    def _filter_addresses_by_transport(self, addresses: list[multiaddr.Multiaddr]) -> list[multiaddr.Multiaddr]:
+    def _filter_addresses_by_transport(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
         out = []
         for addr in addresses:
             names = self._get_protocol_names(addr)
@@ -358,15 +391,20 @@ class PerfTest:
                 out.append(addr)
             elif self.transport == "quic-v1" and "quic-v1" in names:
                 out.append(addr)
-            elif self.transport == "tcp" and not any(p in names for p in ["ws", "wss", "quic-v1"]):
+            elif self.transport == "tcp" and not any(
+                p in names for p in ["ws", "wss", "quic-v1"]
+            ):
                 out.append(addr)
         return out if out else addresses
 
     def get_container_ip(self) -> str:
         import socket
         import subprocess
+
         try:
-            r = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5)
+            r = subprocess.run(
+                ["hostname", "-I"], capture_output=True, text=True, timeout=5
+            )
             if r.returncode == 0 and r.stdout.strip():
                 return r.stdout.strip().split()[0]
         except Exception:
@@ -405,7 +443,9 @@ class PerfTest:
                 return str(addr)
         return self._replace_loopback_ip(filtered[0])
 
-    async def _connect_redis_with_retry(self, max_retries: int = 10, retry_delay: float = 1.0) -> None:
+    async def _connect_redis_with_retry(
+        self, max_retries: int = 10, retry_delay: float = 1.0
+    ) -> None:
         print("Connecting to Redis...", file=sys.stderr)
         for attempt in range(max_retries):
             try:
@@ -468,7 +508,9 @@ class PerfTest:
             if addr:
                 return addr
             await trio.sleep(0.5)
-        raise RuntimeError(f"Timeout waiting for listener address (key {redis_key}) after {timeout}s")
+        raise RuntimeError(
+            f"Timeout waiting for listener address (key {redis_key}) after {timeout}s"
+        )
 
     async def _one_measurement(
         self,
@@ -480,7 +522,9 @@ class PerfTest:
         assert self.perf_service is not None
         maddr = multiaddr.Multiaddr(self.listener_addr)
         start = time.monotonic()
-        async for _ in self.perf_service.measure_performance(maddr, send_bytes, recv_bytes):
+        async for _ in self.perf_service.measure_performance(
+            maddr, send_bytes, recv_bytes
+        ):
             pass
         return time.monotonic() - start
 
@@ -494,7 +538,9 @@ class PerfTest:
         sec_opt, key_pair = self.create_security_options()
         muxer_opt = self.create_muxer_options()
         # Dialer needs listen_addrs for ws/wss so transport is registered; for quic/tcp pass [] (host.run still starts swarm/nursery)
-        dialer_listen_addrs = self.create_listen_addresses(0) if self.transport in ["ws", "wss"] else None
+        dialer_listen_addrs = (
+            self.create_listen_addresses(0) if self.transport in ["ws", "wss"] else None
+        )
         tls_client = self.create_tls_client_config()
         tls_server = None
 
@@ -527,16 +573,30 @@ class PerfTest:
                 upload_samples: list[float] = []
                 for i in range(self.upload_iterations):
                     elapsed = await self._one_measurement(self.upload_bytes, 0)
-                    gbps = (self.upload_bytes * 8.0) / elapsed / 1e9 if elapsed > 0 else 0.0
+                    gbps = (
+                        (self.upload_bytes * 8.0) / elapsed / 1e9
+                        if elapsed > 0
+                        else 0.0
+                    )
                     upload_samples.append(gbps)
-                    print(f"Upload iteration {i+1}/{self.upload_iterations}: {gbps:.2f} Gbps", file=sys.stderr)
+                    print(
+                        f"Upload iteration {i + 1}/{self.upload_iterations}: {gbps:.2f} Gbps",
+                        file=sys.stderr,
+                    )
 
                 download_samples: list[float] = []
                 for i in range(self.download_iterations):
                     elapsed = await self._one_measurement(0, self.download_bytes)
-                    gbps = (self.download_bytes * 8.0) / elapsed / 1e9 if elapsed > 0 else 0.0
+                    gbps = (
+                        (self.download_bytes * 8.0) / elapsed / 1e9
+                        if elapsed > 0
+                        else 0.0
+                    )
                     download_samples.append(gbps)
-                    print(f"Download iteration {i+1}/{self.download_iterations}: {gbps:.2f} Gbps", file=sys.stderr)
+                    print(
+                        f"Download iteration {i + 1}/{self.download_iterations}: {gbps:.2f} Gbps",
+                        file=sys.stderr,
+                    )
 
                 latency_samples: list[float] = []
                 for i in range(self.latency_iterations):
@@ -610,6 +670,7 @@ class PerfTest:
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc(file=sys.stderr)
             if self.redis_client:
                 self.redis_client.close()
