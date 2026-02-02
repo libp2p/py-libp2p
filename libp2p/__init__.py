@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import ssl
-
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
+
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
@@ -34,6 +37,7 @@ from libp2p.crypto.keys import (
     KeyPair,
 )
 from libp2p.crypto.ed25519 import (
+    Ed25519PrivateKey,
     create_new_key_pair as create_new_ed25519_key_pair,
 )
 from libp2p.crypto.rsa import (
@@ -77,6 +81,7 @@ from libp2p.peer.persistent import (
     create_sync_rocksdb_peerstore,
     create_async_rocksdb_peerstore,
 )
+import libp2p
 from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
@@ -109,9 +114,11 @@ from libp2p.transport.transport_registry import (
     create_transport_for_multiaddr,
     get_supported_transport_protocols,
 )
+import libp2p.utils
 from libp2p.utils.logging import (
     setup_logging,
 )
+import libp2p.utils.paths
 
 # Initialize logging configuration
 setup_logging()
@@ -138,6 +145,75 @@ def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     if muxer_upper not in [MUXER_YAMUX, MUXER_MPLEX]:
         raise ValueError(f"Unknown muxer: {muxer_name}. Use 'YAMUX' or 'MPLEX'.")
     DEFAULT_MUXER = muxer_upper
+
+def save_keypair(key_pair: KeyPair, type: str= "ed25519") -> None:
+    """
+    Persist a private key to disk in PEM format.
+
+    Currently supports only Ed25519 keys. Writes the key to a predefined
+    path for later retrieval.
+
+    :param key_pair: KeyPair object containing private and public keys.
+    :param type: Type of key to save (default: "ed25519").
+    :raises ValueError: if an unsupported key type is provided.
+    """
+    pvt_key = key_pair.private_key
+
+    match type:
+        case "ed25519":
+            assert isinstance(pvt_key, Ed25519PrivateKey)
+            raw = pvt_key.to_bytes()
+            crypto_key = ed25519.Ed25519PrivateKey.from_private_bytes(raw)
+
+            pem = crypto_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+
+            libp2p.utils.paths.ED25519_PATH.write_bytes(pem)
+
+        case _:
+            raise ValueError(f"unsupported key type: {type}")
+
+def load_keypair(type: str = "ed25519") -> KeyPair | None:
+    """
+    Load a private key from disk and reconstruct its KeyPair.
+
+    Currently supports only Ed25519 keys. Returns None if the key file does
+    not exist.
+
+    :param type: Type of key to load (default: "ed25519").
+    :return: KeyPair object if found, or None.
+    :raises ValueError: if an unsupported key type is provided.
+    """
+
+    match type:
+        case "ed25519":
+            path = libp2p.utils.paths.ED25519_PATH
+            if not path.exists():
+                return None
+
+            pem = path.read_bytes()
+            crypto_key = serialization.load_pem_private_key(
+                pem,
+                password=None,
+            )
+
+            assert isinstance(crypto_key, ed25519.Ed25519PrivateKey)
+            raw = crypto_key.private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+
+            pvt_key = Ed25519PrivateKey.from_bytes(raw)
+            pub_key = pvt_key.get_public_key()
+
+            return KeyPair(pvt_key, pub_key)
+
+        case _:
+            raise ValueError(f"unsupported key type: {type}")
 
 
 def get_default_muxer() -> str:
@@ -211,6 +287,7 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
+    enable_autotls: bool = False,
     retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
@@ -229,6 +306,7 @@ def new_swarm(
     :param muxer_preference: optional explicit muxer preference
     :param listen_addrs: optional list of multiaddrs to listen on
     :param enable_quic: enable quic for transport
+    :param enable_autotls: enable autotls for security
     :param quic_transport_opt: options for transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
@@ -301,11 +379,12 @@ def new_swarm(
     # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
     # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
+        # TLS_PROTOCOL_ID: TLSTransport(key_pair),
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TLS_PROTOCOL_ID: TLSTransport (
-            key_pair
+            key_pair, enable_autotls= enable_autotls
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
@@ -394,6 +473,7 @@ def new_host(
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_mDNS: bool = False,
     enable_upnp: bool = False,
+    enable_autotls: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
@@ -416,6 +496,7 @@ def new_host(
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
     :param enable_quic: optinal choice to use QUIC for transport
+    :param enable_autotls: optinal choice to use AutoTLS for security
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
@@ -445,6 +526,7 @@ def new_host(
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
         peerstore_opt=peerstore_opt,
+        enable_autotls=enable_autotls,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
         connection_config=quic_transport_opt if enable_quic else None,
