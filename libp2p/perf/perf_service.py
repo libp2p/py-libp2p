@@ -10,7 +10,7 @@ import time
 
 from multiaddr import Multiaddr
 
-from libp2p.abc import IHost, INetStream
+from libp2p.abc import IHost, INetStream, IPerf
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerinfo import PeerInfo
@@ -22,7 +22,7 @@ from .constants import (
     RUN_ON_LIMITED_CONNECTION,
     WRITE_BLOCK_SIZE,
 )
-from .index import IPerf, PerfInit, PerfOptions, PerfOutput
+from .types import PerfInit, PerfOptions, PerfOutput
 
 logger = logging.getLogger(__name__)
 

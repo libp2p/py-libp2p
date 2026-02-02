@@ -12,13 +12,13 @@ from .constants import (
     RUN_ON_LIMITED_CONNECTION,
     WRITE_BLOCK_SIZE,
 )
-from .index import (
-    IPerf,
+from .types import (
     PerfComponents,
     PerfInit,
     PerfOptions,
     PerfOutput,
 )
+from libp2p.abc import IPerf
 from .perf_service import PerfService
 
 __all__ = [
