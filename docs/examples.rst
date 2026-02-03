@@ -25,3 +25,4 @@ Examples
    gossipsub-1.2
    examples.websocket
    examples.tls
+   examples.autotls

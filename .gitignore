@@ -138,6 +138,8 @@ fabric.properties
 
 # Django stuff:
 *.log
+*.pem
+*.key
 local_settings.py
 db.sqlite3
 
@@ -193,3 +195,4 @@ _build/
 
 # Attack simulation test results
 tests/security/attack_simulation/results/
+libp2p-forge
