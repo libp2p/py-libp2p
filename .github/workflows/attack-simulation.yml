@@ -43,9 +43,7 @@ jobs:
           uv venv venv
           source venv/bin/activate
           uv pip install --upgrade pip setuptools wheel
-          uv pip install -e ".[dev]"
-          uv pip install redis factory-boy
-          uv pip install pytest pytest-trio pytest-asyncio pytest-timeout
+          uv pip install -e ".[dev,test]"
 
       - name: Run attack simulation tests
         run: |
@@ -106,9 +104,7 @@ jobs:
           uv venv venv
           source venv/Scripts/activate
           uv pip install --upgrade pip setuptools wheel
-          uv pip install -e ".[dev]"
-          uv pip install redis factory-boy
-          uv pip install pytest pytest-trio pytest-asyncio pytest-timeout
+          uv pip install -e ".[dev,test]"
 
       - name: Run attack simulation tests
         shell: bash
