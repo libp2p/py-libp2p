@@ -89,29 +89,33 @@ class PerfService(IPerf):
         from the first 8 bytes, then sends that many bytes back.
         """
         try:
-            bytes_to_send_back: int | None = None
+            # Read exactly 8 bytes for the header (handle TCP fragmentation)
+            header = b""
+            while len(header) < 8:
+                try:
+                    chunk = await stream.read(8 - len(header))
+                    if not chunk:
+                        logger.error("Stream closed before header was fully received")
+                        await stream.reset()
+                        return
+                    header += chunk
+                except Exception:
+                    logger.error("Error reading header")
+                    await stream.reset()
+                    return
 
-            # Read all incoming data
+            # Parse the big-endian unsigned 64-bit integer
+            bytes_to_send_back = struct.unpack(">Q", header)[0]
+            logger.debug("Received request to send back %d bytes", bytes_to_send_back)
+
+            # Read remaining data until EOF (client closes write side)
             while True:
                 try:
                     data = await stream.read(self._write_block_size)
                     if not data:
                         break
-
-                    # First 8 bytes contain the number of bytes to send back
-                    if bytes_to_send_back is None and len(data) >= 8:
-                        # Big-endian unsigned 64-bit integer
-                        bytes_to_send_back = struct.unpack(">Q", data[:8])[0]
-                        logger.debug(
-                            "Received request to send back %d bytes", bytes_to_send_back
-                        )
                 except Exception:
                     break
-
-            if bytes_to_send_back is None:
-                logger.error("bytes_to_send_back was not set")
-                await stream.reset()
-                return
 
             # Send back the requested number of bytes
             while bytes_to_send_back > 0:
