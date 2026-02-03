@@ -69,12 +69,14 @@ async def run_client(
             if upload_bytes_out > 0:
                 throughput = upload_bytes_out / time_s if time_s > 0 else 0
                 print(
-                    f"  Uploading: {upload_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)"
+                    f"  Upload: {upload_bytes_out}B in {time_s:.2f}s "
+                    f"({throughput:.0f} B/s)"
                 )
             elif download_bytes_out > 0:
                 throughput = download_bytes_out / time_s if time_s > 0 else 0
                 print(
-                    f"  Downloading: {download_bytes_out} bytes in {time_s:.2f}s ({throughput:.0f} bytes/s)"
+                    f"  Download: {download_bytes_out}B in {time_s:.2f}s "
+                    f"({throughput:.0f} B/s)"
                 )
 
         elif output["type"] == "final":
