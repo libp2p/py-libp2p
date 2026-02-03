@@ -5,6 +5,8 @@ This test demonstrates the complete eclipse attack against actual py-libp2p
 networks, measuring real network degradation and recovery metrics.
 """
 
+import logging
+
 import pytest
 import trio
 
@@ -13,6 +15,8 @@ from libp2p.peer.peerinfo import PeerInfo
 from .attack_scenarios import EclipseScenario
 from .real_metrics_collector import RealAttackMetrics
 from .real_network_builder import RealNetworkBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class RealEclipseScenario(EclipseScenario):
@@ -35,12 +39,12 @@ class RealEclipseScenario(EclipseScenario):
 
     async def execute_real_attack(self, attack_duration: float = 30.0):
         """Execute a real eclipse attack against actual libp2p network"""
-        print("Starting Real Eclipse Attack Simulation")
-        print(
+        logger.info("Starting Real Eclipse Attack Simulation")
+        logger.info(
             f"Network: {len(self.honest_hosts)} honest nodes, "
             f"{len(self.malicious_peers)} malicious nodes"
         )
-        print(f"Attack duration: {attack_duration} seconds")
+        logger.info(f"Attack duration: {attack_duration} seconds")
 
         # Execute comprehensive attack measurement
         results = await self.metrics.measure_real_eclipse(
@@ -54,29 +58,27 @@ class RealEclipseScenario(EclipseScenario):
 
     def _print_attack_summary(self, results):
         """Print human-readable attack results summary"""
-        print("\n" + "=" * 60)
-        print("ECLIPSE ATTACK SIMULATION RESULTS")
-        print("=" * 60)
+        logger.info("ECLIPSE ATTACK SIMULATION RESULTS")
 
         # Lookup performance summary
         before_lookup = results["before_attack"]["lookup_performance"]["success_rate"]
         during_lookup = results["during_attack"]["lookup_performance"]["success_rate"]
         after_lookup = results["after_attack"]["lookup_performance"]["success_rate"]
 
-        print("\nDHT LOOKUP PERFORMANCE:")
-        print(f"   Before Attack: {before_lookup:.2%} success rate")
-        print(f"   During Attack: {during_lookup:.2%} success rate")
-        print(f"   After Attack:  {after_lookup:.2%} success rate")
+        logger.info("DHT LOOKUP PERFORMANCE:")
+        logger.info(f"  Before Attack: {before_lookup:.2%} success rate")
+        logger.info(f"  During Attack: {during_lookup:.2%} success rate")
+        logger.info(f"  After Attack:  {after_lookup:.2%} success rate")
 
         # Connectivity summary
         before_conn = results["before_attack"]["connectivity"]["connectivity_ratio"]
         during_conn = results["during_attack"]["connectivity"]["connectivity_ratio"]
         after_conn = results["after_attack"]["connectivity"]["connectivity_ratio"]
 
-        print("\nNETWORK CONNECTIVITY:")
-        print(f"   Before Attack: {before_conn:.2%} nodes connected")
-        print(f"   During Attack: {during_conn:.2%} nodes connected")
-        print(f"   After Attack:  {after_conn:.2%} nodes connected")
+        logger.info("NETWORK CONNECTIVITY:")
+        logger.info(f"  Before Attack: {before_conn:.2%} nodes connected")
+        logger.info(f"  During Attack: {during_conn:.2%} nodes connected")
+        logger.info(f"  After Attack:  {after_conn:.2%} nodes connected")
 
         # Contamination summary
         during_contamination = results["during_attack"]["contamination"][
@@ -86,9 +88,9 @@ class RealEclipseScenario(EclipseScenario):
             "overall_contamination_rate"
         ]
 
-        print("\nROUTING TABLE CONTAMINATION:")
-        print(f"   During Attack: {during_contamination:.2%} malicious entries")
-        print(f"   After Recovery: {after_contamination:.2%} malicious entries")
+        logger.info("ROUTING TABLE CONTAMINATION:")
+        logger.info(f"  During Attack: {during_contamination:.2%} malicious entries")
+        logger.info(f"  After Recovery: {after_contamination:.2%} malicious entries")
 
         # Recovery effectiveness
         recovery_metrics = results["recovery_metrics"]
@@ -96,12 +98,10 @@ class RealEclipseScenario(EclipseScenario):
         recovery_effectiveness = recovery_metrics["recovery_effectiveness_lookup"]
         network_resilience = recovery_metrics["overall_network_resilience"]
 
-        print("\nATTACK EFFECTIVENESS:")
-        print(f"   Attack Impact: {attack_effectiveness:.2%} performance degradation")
-        print(f"   Recovery Rate: {recovery_effectiveness:.2%} recovery achieved")
-        print(f"   Network Resilience: {network_resilience:.2%} overall resilience")
-
-        print("\n" + "=" * 60)
+        logger.info("ATTACK EFFECTIVENESS:")
+        logger.info(f"  Attack Impact: {attack_effectiveness:.2%} performance degradation")
+        logger.info(f"  Recovery Rate: {recovery_effectiveness:.2%} recovery achieved")
+        logger.info(f"  Network Resilience: {network_resilience:.2%} overall resilience")
 
 
 @pytest.mark.trio
@@ -132,7 +132,7 @@ async def test_real_eclipse_attack_simulation():
     assert scenario.honest_dhts == honest_dhts
     assert scenario.malicious_peers == malicious_peers
 
-    print("[PASSED] Real Eclipse attack simulation structure test passed!")
+    logger.debug("Real Eclipse attack simulation structure test passed")
 
 
 @pytest.mark.trio
@@ -167,7 +167,7 @@ async def test_real_malicious_peer_behavior():
     # In this simple test, we just verify the method runs without error
     assert final_table_size >= initial_table_size
 
-    print("[PASSED] Real malicious peer behavior test passed!")
+    logger.debug("Real malicious peer behavior test passed")
 
 
 @pytest.mark.trio
@@ -203,13 +203,4 @@ async def test_real_metrics_collection():
     assert "overall_contamination_rate" in contamination_results
     assert contamination_results["overall_contamination_rate"] >= 0
 
-    print("[PASSED] Real metrics collection test passed!")
-
-
-if __name__ == "__main__":
-    # Allow running individual test for development
-    import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "demo":
-        print("Running Eclipse Attack Demo...")
-        trio.run(test_real_eclipse_attack_simulation)
+    logger.debug("Real metrics collection test passed")

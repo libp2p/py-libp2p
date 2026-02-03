@@ -7,11 +7,14 @@ without complex imports, using trio.run() for proper async context.
 """
 
 from enum import Enum
+import logging
 import random
 import time
 from typing import Any
 
 import trio
+
+logger = logging.getLogger(__name__)
 
 
 class BlockInvalidityType(Enum):
@@ -117,11 +120,11 @@ class BootnodePoisoningScenario:
         self, attack_duration: float
     ) -> dict[str, Any]:
         """Execute bootnode poisoning attack"""
-        print("Executing Bootnode Poisoning Attack")
-        print(f"Honest peers: {len(self.honest_peers)}")
-        print(f"Malicious bootnodes: {len(self.malicious_bootnodes)}")
-        print(f"Fallback peers: {len(self.fallback_peers)}")
-        print(f"Attack duration: {attack_duration}s")
+        logger.debug("Executing Bootnode Poisoning Attack")
+        logger.debug(f"Honest peers: {len(self.honest_peers)}")
+        logger.debug(f"Malicious bootnodes: {len(self.malicious_bootnodes)}")
+        logger.debug(f"Fallback peers: {len(self.fallback_peers)}")
+        logger.debug(f"Attack duration: {attack_duration}s")
 
         start_time = trio.current_time()
         isolated_peers = set()
@@ -236,11 +239,11 @@ class FinalityStallScenario:
         finality_timeout: float,
     ) -> dict[str, Any]:
         """Execute finality stall attack"""
-        print("Executing Finality Stall Attack")
-        print(f"Light clients: {len(self.light_clients)}")
-        print(f"Full nodes: {len(self.full_nodes)}")
-        print(f"Attackers: {len(self.attackers)}")
-        print(
+        logger.debug("Executing Finality Stall Attack")
+        logger.debug(f"Light clients: {len(self.light_clients)}")
+        logger.debug(f"Full nodes: {len(self.full_nodes)}")
+        logger.debug(f"Attackers: {len(self.attackers)}")
+        logger.debug(
             f"Stall duration: {stall_duration}s, Block rate: {block_production_rate}/s"
         )
 
@@ -293,8 +296,7 @@ class FinalityStallScenario:
 
 async def test_invalid_block_basic():
     """Test basic invalid block functionality"""
-    print("Testing Invalid Block Basic Functionality")
-    print("-" * 50)
+    logger.debug("Testing Invalid Block Basic Functionality")
 
     # Test block creation
     validator = MaliciousValidator("validator_0", 0.8)
@@ -305,7 +307,7 @@ async def test_invalid_block_basic():
     assert block.block_number == 1000
     assert block.parent_hash == "parent_999"
     assert block.invalidity_type == BlockInvalidityType.INVALID_STATE_TRANSITION
-    print("[PASSED] Block creation")
+    logger.debug("Block creation test passed")
 
     # Test propagation to light clients
     light_clients = ["lc1", "lc2", "lc3", "lc4", "lc5"]
@@ -315,8 +317,8 @@ async def test_invalid_block_basic():
 
     assert "acceptance_rate" in result
     assert "propagation_time" in result
-    print(
-        f"[PASSED] Light client propagation (acceptance: "
+    logger.debug(
+        f"Light client propagation test passed (acceptance: "
         f"{result['acceptance_rate']:.1%})"
     )
 
@@ -328,18 +330,17 @@ async def test_invalid_block_basic():
 
     assert "acceptance_rate" in result
     assert "propagation_time" in result
-    print(
-        f"[PASSED] Full node propagation (acceptance: {result['acceptance_rate']:.1%})"
+    logger.debug(
+        f"Full node propagation test passed (acceptance: {result['acceptance_rate']:.1%})"
     )
 
-    print("[PASSED] Invalid Block Basic Tests: ALL PASSED")
+    logger.debug("Invalid Block Basic Tests: ALL PASSED")
     return True
 
 
 async def test_bootnode_poisoning_basic():
     """Test basic bootnode poisoning functionality"""
-    print("\nTesting Bootnode Poisoning Basic Functionality")
-    print("-" * 50)
+    logger.debug("Testing Bootnode Poisoning Basic Functionality")
 
     # Test bootnode attacker creation
     malicious_pool = [f"malicious_peer_{i}" for i in range(5)]
@@ -348,7 +349,7 @@ async def test_bootnode_poisoning_basic():
     assert attacker.bootnode_id == "bootnode_0"
     assert len(attacker.malicious_peer_pool) == 5
     assert attacker.intensity == 0.9
-    print("[PASSED] Bootnode attacker creation")
+    logger.debug("Bootnode attacker creation test passed")
 
     # Test bootnode poisoning scenario
     honest_peers = [f"honest_peer_{i}" for i in range(10)]
@@ -364,30 +365,29 @@ async def test_bootnode_poisoning_basic():
     assert "attack_type" in results
     assert "isolation_metrics" in results
     assert "recovery_metrics" in results
-    print("[PASSED] Bootnode poisoning scenario")
-    print(f"   - Isolation rate: {results['isolation_metrics']['isolation_rate']:.1%}")
-    print(f"   - Recovery rate: {results['recovery_metrics']['recovery_rate']:.1%}")
+    logger.debug("Bootnode poisoning scenario test passed")
+    logger.debug(f"  Isolation rate: {results['isolation_metrics']['isolation_rate']:.1%}")
+    logger.debug(f"  Recovery rate: {results['recovery_metrics']['recovery_rate']:.1%}")
 
-    print("[PASSED] Bootnode Poisoning Basic Tests: ALL PASSED")
+    logger.debug("Bootnode Poisoning Basic Tests: ALL PASSED")
     return True
 
 
 async def test_finality_stall_basic():
     """Test basic finality stall functionality"""
-    print("\nTesting Finality Stall Basic Functionality")
-    print("-" * 50)
+    logger.debug("Testing Finality Stall Basic Functionality")
 
     # Test light client node creation
     lc = LightClientNode("lc_0", memory_limit_mb=200.0)
     assert lc.node_id == "lc_0"
     assert lc.memory_limit_mb == 200.0
-    print("[PASSED] Light client node creation")
+    logger.debug("Light client node creation test passed")
 
     # Test finality stall attacker
     attacker = FinalityStallAttacker("attacker_0", 0.8)
     assert attacker.attacker_id == "attacker_0"
     assert attacker.intensity == 0.8
-    print("[PASSED] Finality stall attacker creation")
+    logger.debug("Finality stall attacker creation test passed")
 
     # Test finality stall scenario
     light_clients = [
@@ -405,67 +405,62 @@ async def test_finality_stall_basic():
     assert "attack_type" in results
     assert "memory_metrics" in results
     assert "detection_metrics" in results
-    print("[PASSED] Finality stall scenario")
-    print(f"   - Memory exhaustion: {results['memory_metrics']['exhaustion_rate']:.1%}")
-    print(
-        f"   - Timeout detection: "
+    logger.debug("Finality stall scenario test passed")
+    logger.debug(f"  Memory exhaustion: {results['memory_metrics']['exhaustion_rate']:.1%}")
+    logger.debug(
+        f"  Timeout detection: "
         f"{results['detection_metrics']['timeout_detection_rate']:.1%}"
     )
 
-    print("[PASSED] Finality Stall Basic Tests: ALL PASSED")
+    logger.debug("Finality Stall Basic Tests: ALL PASSED")
     return True
 
 
 async def run_all_tests():
     """Run all attack simulation tests"""
-    print("ATTACK SIMULATION TEST SUITE")
-    print("=" * 60)
-    print("Testing extended threat model attack simulations")
-    print("Using trio.run() for proper async context handling")
-    print()
+    logger.info("ATTACK SIMULATION TEST SUITE")
+    logger.info("Testing extended threat model attack simulations")
+    logger.info("Using trio.run() for proper async context handling")
 
     test_results = {}
 
     try:
         test_results["invalid_block"] = await test_invalid_block_basic()
     except Exception as e:
-        print(f"[FAILED] Invalid Block Tests: {e}")
+        logger.error(f"Invalid Block Tests failed: {e}")
         test_results["invalid_block"] = False
 
     try:
         test_results["bootnode_poisoning"] = await test_bootnode_poisoning_basic()
     except Exception as e:
-        print(f"[FAILED] Bootnode Poisoning Tests: {e}")
+        logger.error(f"Bootnode Poisoning Tests failed: {e}")
         test_results["bootnode_poisoning"] = False
 
     try:
         test_results["finality_stall"] = await test_finality_stall_basic()
     except Exception as e:
-        print(f"[FAILED] Finality Stall Tests: {e}")
+        logger.error(f"Finality Stall Tests failed: {e}")
         test_results["finality_stall"] = False
 
     # Summary
-    print("\n" + "=" * 60)
-    print("TEST RESULTS SUMMARY")
-    print("=" * 60)
+    logger.info("TEST RESULTS SUMMARY")
 
     passed_tests = sum(1 for result in test_results.values() if result)
     total_tests = len(test_results)
 
-    print(f"[PASSED] Passed: {passed_tests}/{total_tests}")
-    print()
+    logger.info(f"Passed: {passed_tests}/{total_tests}")
 
     for test_name, result in test_results.items():
-        status = "[PASSED]" if result else "[FAILED]"
+        status = "PASSED" if result else "FAILED"
         test_display = test_name.replace("_", " ").title()
-        print(f"{status} {test_display}")
+        logger.info(f"{status}: {test_display}")
 
     if passed_tests == total_tests:
-        print("\n[PASSED] ALL TESTS PASSED!")
-        print("Extended threat model attack simulations are working correctly")
+        logger.info("ALL TESTS PASSED")
+        logger.info("Extended threat model attack simulations are working correctly")
     else:
-        print(f"\n[FAILED] {total_tests - passed_tests} TESTS FAILED")
-        print("Some attack simulations need attention")
+        logger.error(f"{total_tests - passed_tests} TESTS FAILED")
+        logger.error("Some attack simulations need attention")
 
     return passed_tests == total_tests
 
@@ -477,7 +472,7 @@ def main():
         success = trio.run(run_all_tests)
         return 0 if success else 1
     except Exception as e:
-        print(f"[FAILED] Test runner failed: {e}")
+        logger.error(f"Test runner failed: {e}")
         return 1
 
 

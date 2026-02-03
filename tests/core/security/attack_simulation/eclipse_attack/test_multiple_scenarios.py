@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 import tempfile
@@ -8,6 +9,8 @@ import pytest
 from ..config.attack_configs import ECLIPSE_ATTACK_CONFIGS
 from .attack_scenarios import EclipseScenario
 from .network_builder import AttackNetworkBuilder
+
+logger = logging.getLogger(__name__)
 
 
 def get_results_directory() -> Path:
@@ -25,7 +28,7 @@ async def test_multiple_eclipse_scenarios():
     results = []
 
     for config in ECLIPSE_ATTACK_CONFIGS:
-        print(f"\nRunning scenario: {config['name']}")
+        logger.debug(f"Running scenario: {config['name']}")
 
         # Create network for this scenario
         honest, malicious = await builder.create_eclipse_test_network(
@@ -65,12 +68,12 @@ async def test_multiple_eclipse_scenarios():
         }
         results.append(result)
 
-        print(f"Results for {config['name']}:")
-        print(f"  - Lookup Success: {metrics.lookup_success_rate}")
-        print(f"  - Contamination: {max(metrics.peer_table_contamination):.1%}")
-        print(f"  - Affected Nodes: {metrics.affected_nodes_percentage:.1f}%")
-        print(f"  - Recovery Time: {metrics.recovery_time:.1f}s")
-        print(f"  - Resilience Score: {report['network_resilience_score']:.1f}/100")
+        logger.debug(f"Results for {config['name']}:")
+        logger.debug(f"  Lookup Success: {metrics.lookup_success_rate}")
+        logger.debug(f"  Contamination: {max(metrics.peer_table_contamination):.1%}")
+        logger.debug(f"  Affected Nodes: {metrics.affected_nodes_percentage:.1f}%")
+        logger.debug(f"  Recovery Time: {metrics.recovery_time:.1f}s")
+        logger.debug(f"  Resilience Score: {report['network_resilience_score']:.1f}/100")
 
     # Save detailed results to file
     results_dir = get_results_directory()
@@ -87,8 +90,8 @@ async def test_multiple_eclipse_scenarios():
     with open(summary_file, "w") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"\nDetailed results saved to: {results_file}")
-    print(f"Summary report saved to: {summary_file}")
+    logger.debug(f"Detailed results saved to: {results_file}")
+    logger.debug(f"Summary report saved to: {summary_file}")
 
     # Basic assertions
     assert len(results) == len(ECLIPSE_ATTACK_CONFIGS)
@@ -273,7 +276,7 @@ async def test_stress_test_multiple_runs():
     all_results = []
 
     for run_number in range(total_runs):
-        print(f"\n=== Stress Test Run {run_number + 1}/{total_runs} ===")
+        logger.debug(f"Stress Test Run {run_number + 1}/{total_runs}")
 
         for config in ECLIPSE_ATTACK_CONFIGS[:3]:  # Test first 3 scenarios for speed
             honest_nodes = int(config["honest_nodes"])
@@ -325,8 +328,8 @@ async def test_stress_test_multiple_runs():
                 f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
             )
 
-    print(f"\n[PASSED] Stress test complete: {len(all_results)} scenarios run")
-    print("All scenarios show consistent behavior across multiple runs")
+    logger.debug(f"Stress test complete: {len(all_results)} scenarios run")
+    logger.debug("All scenarios show consistent behavior across multiple runs")
 
 
 def generate_final_recommendations(summary: dict) -> list[str]:
