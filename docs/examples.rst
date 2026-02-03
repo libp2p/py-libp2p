@@ -23,3 +23,4 @@ Examples
    examples.multiple_connections
    examples.websocket
    examples.tls
+   examples.autotls
