@@ -114,7 +114,6 @@ def _compute_stats(samples: list[float], is_latency: bool = False) -> dict[str, 
             "samples": [],
         }
     sorted_vals = sorted(samples)
-    n = len(sorted_vals)
     q1 = _percentile(sorted_vals, 25.0)
     median = _percentile(sorted_vals, 50.0)
     q3 = _percentile(sorted_vals, 75.0)
@@ -198,12 +197,14 @@ class PerfTest:
         standalone = ["quic-v1"]
         if self.transport not in valid_transports:
             raise ValueError(
-                f"Unsupported transport: {self.transport}. Supported: {valid_transports}"
+                f"Unsupported transport: {self.transport}. "
+                f"Supported: {valid_transports}"
             )
         if self.transport not in standalone:
             if self.security not in valid_security:
                 raise ValueError(
-                    f"Unsupported security: {self.security}. Supported: {valid_security}"
+                    f"Unsupported security: {self.security}. "
+                    f"Supported: {valid_security}"
                 )
             if self.muxer not in valid_muxers:
                 raise ValueError(
@@ -537,7 +538,8 @@ class PerfTest:
 
         sec_opt, key_pair = self.create_security_options()
         muxer_opt = self.create_muxer_options()
-        # Dialer needs listen_addrs for ws/wss so transport is registered; for quic/tcp pass [] (host.run still starts swarm/nursery)
+        # Dialer needs listen_addrs for ws/wss so transport is registered;
+        # for quic/tcp pass [] (host.run still starts swarm/nursery)
         dialer_listen_addrs = (
             self.create_listen_addresses(0) if self.transport in ["ws", "wss"] else None
         )
@@ -558,7 +560,8 @@ class PerfTest:
         self.perf_service = PerfService(self.host)
         await self.perf_service.start()
 
-        # Must run host inside host.run() so swarm/nursery are active (required for connect and QUIC)
+        # Must run host inside host.run() so swarm/nursery are active
+        # (required for connect and QUIC)
         try:
             async with self.host.run(listen_addrs=dialer_listen_addrs or []):
                 # Brief delay so listener is fully listening before we dial
@@ -580,7 +583,7 @@ class PerfTest:
                     )
                     upload_samples.append(gbps)
                     print(
-                        f"Upload iteration {i + 1}/{self.upload_iterations}: {gbps:.2f} Gbps",
+                        f"Upload {i + 1}/{self.upload_iterations}: {gbps:.2f} Gbps",
                         file=sys.stderr,
                     )
 
@@ -594,7 +597,7 @@ class PerfTest:
                     )
                     download_samples.append(gbps)
                     print(
-                        f"Download iteration {i + 1}/{self.download_iterations}: {gbps:.2f} Gbps",
+                        f"Download {i + 1}/{self.download_iterations}: {gbps:.2f} Gbps",
                         file=sys.stderr,
                     )
 
@@ -606,7 +609,7 @@ class PerfTest:
 
                 u = _compute_stats(upload_samples, is_latency=False)
                 d = _compute_stats(download_samples, is_latency=False)
-                l = _compute_stats(latency_samples, is_latency=True)
+                lat = _compute_stats(latency_samples, is_latency=True)
 
                 # YAML to stdout only (per write-a-perf-test-app.md)
                 print("upload:")
@@ -631,16 +634,17 @@ class PerfTest:
                 print("  unit: Gbps")
                 print("latency:")
                 print(f"  iterations: {self.latency_iterations}")
-                print(f"  min: {l['min']:.3f}")
-                print(f"  q1: {l['q1']:.3f}")
-                print(f"  median: {l['median']:.3f}")
-                print(f"  q3: {l['q3']:.3f}")
-                print(f"  max: {l['max']:.3f}")
-                print(f"  outliers: {l['outliers']}")
-                print(f"  samples: {l['samples']}")
+                print(f"  min: {lat['min']:.3f}")
+                print(f"  q1: {lat['q1']:.3f}")
+                print(f"  median: {lat['median']:.3f}")
+                print(f"  q3: {lat['q3']:.3f}")
+                print(f"  max: {lat['max']:.3f}")
+                print(f"  outliers: {lat['outliers']}")
+                print(f"  samples: {lat['samples']}")
                 print("  unit: ms")
 
-                # Graceful close: disconnect listener so it sees a clean close, then stop services
+                # Graceful close: disconnect listener so it sees a clean
+                # close, then stop services
                 try:
                     await self.host.disconnect(listener_peer_id)
                     await trio.sleep(0.5)
@@ -656,7 +660,8 @@ class PerfTest:
                     except Exception:
                         pass
         except BaseException as e:
-            # Swarm/mplex may raise "Connection closed" when we disconnect; treat as success
+            # Swarm/mplex may raise "Connection closed" on disconnect;
+            # treat as success
             if not _is_connection_closed_error(e):
                 raise
 

@@ -214,7 +214,8 @@ class PerfService(IPerf):
             )
 
             # Close the write side to signal we're done sending
-            # Note: close_write() is available on NetStream but not on INetStream interface
+            # Note: close_write() is available on NetStream
+            # but not on INetStream interface
             if hasattr(stream, "close_write"):
                 await stream.close_write()  # type: ignore[attr-defined]
 
