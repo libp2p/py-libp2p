@@ -540,16 +540,19 @@ class BasicHost(IHost):
                     "No public IP address found in listening addresses. "
                     "AutoTLS requires at least one publicly reachable IPv4 address."
                 )
-        # Try TCP first, fall back to UDP for QUIC transport
+        # Detect transport type and construct appropriate multiaddr for broker
         addr = self.get_addrs()[0]
+        is_quic = "quic" in str(addr) or "quic-v1" in str(addr)
         try:
             port = addr.value_for_protocol("tcp")
+            transport_part = f"/tcp/{port}"
         except Exception:
             port = addr.value_for_protocol("udp")
+            transport_part = f"/udp/{port}/quic-v1" if is_quic else f"/udp/{port}"
 
         broker = BrokerClient(
             self.get_private_key(),
-            multiaddr.Multiaddr(f"/ip4/{public_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            multiaddr.Multiaddr(f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"),
             acme.key_auth,
             acme.b36_peerid,
         )
