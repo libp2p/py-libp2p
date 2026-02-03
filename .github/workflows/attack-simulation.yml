@@ -44,6 +44,7 @@ jobs:
           source venv/bin/activate
           uv pip install --upgrade pip setuptools wheel
           uv pip install -e ".[dev]"
+          uv pip install redis factory-boy
           uv pip install pytest pytest-trio pytest-asyncio pytest-timeout
 
       - name: Run attack simulation tests
@@ -100,21 +101,24 @@ jobs:
           version: "latest"
 
       - name: Create virtual environment and install dependencies
+        shell: bash
         run: |
           uv venv venv
           source venv/Scripts/activate
           uv pip install --upgrade pip setuptools wheel
           uv pip install -e ".[dev]"
+          uv pip install redis factory-boy
           uv pip install pytest pytest-trio pytest-asyncio pytest-timeout
 
       - name: Run attack simulation tests
+        shell: bash
         run: |
           source venv/Scripts/activate
-          pytest -v --timeout=120 `
-            --tb=short `
-            --log-cli-level=WARNING `
-            --durations=10 `
-            tests/core/security/attack_simulation/ `
+          pytest -v --timeout=120 \
+            --tb=short \
+            --log-cli-level=WARNING \
+            --durations=10 \
+            tests/core/security/attack_simulation/ \
             -m "not slow"
         env:
           TEST_TEMP_RESULTS: "1"
@@ -125,11 +129,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: attack-sim-results-windows-${{ matrix.python-version }}
-          path: $env:TEMP\attack_simulation_results\
+          path: /tmp/attack_simulation_results/
           retention-days: 7
 
       - name: Report test summary
         if: always()
+        shell: bash
         run: |
           source venv/Scripts/activate
           echo "### Attack Simulation Test Results (Windows)" >> $GITHUB_STEP_SUMMARY
