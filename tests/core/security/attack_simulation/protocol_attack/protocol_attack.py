@@ -68,7 +68,7 @@ class ProtocolExploitAttacker:
                     if target not in self.victims_affected:
                         self.victims_affected.append(target)
 
-            await trio.sleep(1.0)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
     async def execute_protocol_violation_attack(
         self, target_peers: list[str], duration: float = 30.0
@@ -110,7 +110,7 @@ class ProtocolExploitAttacker:
                     if target not in self.victims_affected:
                         self.victims_affected.append(target)
 
-            await trio.sleep(1.0)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
     async def execute_handshake_exploit(
         self, target_peers: list[str], duration: float = 30.0
@@ -149,7 +149,7 @@ class ProtocolExploitAttacker:
                     if target not in self.victims_affected:
                         self.victims_affected.append(target)
 
-            await trio.sleep(1.0)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
     def _generate_malformed_payload(self) -> bytes:
         """Generate a malformed payload for testing protocol robustness"""
@@ -225,8 +225,8 @@ class ProtocolAttackScenario:
                         attack_duration,
                     )
 
-        # Wait for attack to complete
-        await trio.sleep(attack_duration + 1)
+        # Wait for attack to complete (optimized for faster tests)
+        await trio.sleep(min(2.0, attack_duration / 5))
 
         # Collect statistics
         total_exploits = 0

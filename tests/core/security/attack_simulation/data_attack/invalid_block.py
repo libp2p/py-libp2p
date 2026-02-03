@@ -92,8 +92,8 @@ class MaliciousValidator:
         """
         self.propagation_attempts += 1
 
-        # Simulate network propagation delay
-        await trio.sleep(random.uniform(0.01, 0.05))
+        # Simulate network propagation delay (optimized)
+        await trio.sleep(random.uniform(0.001, 0.005))  # 10x faster
 
         accepted_peers = []
         rejected_peers = []

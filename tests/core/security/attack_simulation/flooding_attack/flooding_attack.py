@@ -58,8 +58,8 @@ class FloodingMaliciousPeer:
                 self.messages_sent.append(msg_id)
                 msg_count += 1
 
-            # Wait for next second
-            await trio.sleep(1.0)
+            # Wait for next cycle (optimized)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
     async def initiate_connection_flood(
         self, target_peers: list[str], duration: float = 30.0
@@ -91,7 +91,7 @@ class FloodingMaliciousPeer:
                 self.connections_attempted.append(conn_id)
                 conn_count += 1
 
-            await trio.sleep(1.0)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
     async def initiate_message_flood(
         self, target_peers: list[str], duration: float = 30.0
@@ -122,7 +122,7 @@ class FloodingMaliciousPeer:
                 self.messages_sent.append(msg_id)
                 msg_count += 1
 
-            await trio.sleep(1.0)
+            await trio.sleep(0.1)  # Optimized for faster test execution
 
 
 class FloodingAttackScenario:

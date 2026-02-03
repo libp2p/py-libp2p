@@ -146,7 +146,7 @@ class FinalityStallAttacker:
         while trio.current_time() - start_time < duration:
             blocks_this_interval = int(block_production_rate * self.intensity)
             self.blocks_produced_during_stall += blocks_this_interval
-            await trio.sleep(1.0)  # 1 second intervals
+            await trio.sleep(0.1)  # Optimized intervals for faster tests
 
         return {
             "stall_duration": self.stall_duration,
@@ -343,7 +343,7 @@ class FinalityStallScenario:
                     if not lc.timeout_triggered:
                         lc.trigger_timeout()
 
-            await trio.sleep(1.0)  # 1 second block production intervals
+            await trio.sleep(0.1)  # Optimized intervals for faster tests
 
     def _measure_memory_exhaustion(self) -> dict[str, Any]:
         """Measure memory exhaustion across light clients"""

@@ -71,8 +71,8 @@ class ForkAttacker:
         """
         self.replay_attempts += 1
 
-        # Simulate network delay
-        await trio.sleep(random.uniform(0.01, 0.05))
+        # Simulate network delay (optimized)
+        await trio.sleep(random.uniform(0.001, 0.005))  # 10x faster
 
         # Success probability increases with:
         # 1. Longer offline duration

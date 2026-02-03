@@ -33,7 +33,7 @@ async def test_invalid_block_attack():
     logger.debug(f"Vulnerability gap: {light_client_acceptance - full_node_acceptance:.2%}")
 
     # Simulate timing
-    await trio.sleep(0.1)
+    await trio.sleep(0.01)  # Optimized for faster test execution
 
     return {
         "attack_type": "invalid_block_propagation",
@@ -62,7 +62,7 @@ async def test_bootnode_poisoning_attack():
     logger.debug(f"Permanent isolation risk: {isolation_rate * 0.6:.2%}")
 
     # Simulate timing
-    await trio.sleep(0.1)
+    await trio.sleep(0.01)  # Optimized for faster test execution
 
     return {
         "attack_type": "bootnode_poisoning",
@@ -92,7 +92,7 @@ async def test_finality_stall_attack():
     logger.debug(f"Timeout detection rate: {timeout_detection:.2%}")
 
     # Simulate timing
-    await trio.sleep(0.1)
+    await trio.sleep(0.01)  # Optimized for faster test execution
 
     return {
         "attack_type": "finality_stall",
@@ -124,7 +124,7 @@ async def test_long_range_fork_attack():
     logger.debug(f"Resync success: {resync_success:.2%}")
 
     # Simulate timing
-    await trio.sleep(0.1)
+    await trio.sleep(0.01)  # Optimized for faster test execution
 
     return {
         "attack_type": "long_range_fork",
