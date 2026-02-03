@@ -540,7 +540,12 @@ class BasicHost(IHost):
                     "No public IP address found in listening addresses. "
                     "AutoTLS requires at least one publicly reachable IPv4 address."
                 )
-        port = self.get_addrs()[0].value_for_protocol("tcp")
+        # Try TCP first, fall back to UDP for QUIC transport
+        addr = self.get_addrs()[0]
+        try:
+            port = addr.value_for_protocol("tcp")
+        except Exception:
+            port = addr.value_for_protocol("udp")
 
         broker = BrokerClient(
             self.get_private_key(),

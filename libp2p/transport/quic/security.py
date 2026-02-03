@@ -19,12 +19,13 @@ from cryptography.x509.oid import NameOID
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.peer.id import ID
-import libp2p.utils.paths
 
 from .exceptions import (
     QUICCertificateError,
     QUICPeerVerificationError,
 )
+
+import libp2p.utils.paths
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -1125,7 +1126,6 @@ class QUICTLSConfigManager:
 
         Raises:
             QUICCertificateError: If loading fails
-
         """
         try:
             # Load certificate chain
@@ -1134,7 +1134,9 @@ class QUICTLSConfigManager:
 
             # Load private key
             key_pem = libp2p.utils.paths.AUTOTLS_KEY_PATH.read_bytes()
-            private_key = serialization.load_pem_private_key(key_pem, password=None)
+            private_key = serialization.load_pem_private_key(
+                key_pem, password=None
+            )
 
             logger.info(
                 "[QUIC] Loaded AutoTLS certificate with %d certs in chain",
