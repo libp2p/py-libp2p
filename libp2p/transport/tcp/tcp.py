@@ -8,6 +8,9 @@ import logging
 from multiaddr import (
     Multiaddr,
 )
+from multiaddr.exceptions import (
+    ProtocolLookupError,
+)
 import trio
 from trio_typing import (
     TaskStatus,
@@ -42,12 +45,13 @@ class TCPListener(IListener):
         self.handler = handler_function
 
     # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         Put listener in listening mode and wait for incoming connections.
 
         :param maddr: maddr of peer
-        :return: return True if successful
+        :raises OpenConnectionError: if listening fails (e.g. missing/invalid
+            port or failed start)
         """
 
         async def serve_tcp(
@@ -74,19 +78,26 @@ class TCPListener(IListener):
             except Exception:
                 logger.debug(f"Connection from {remote_host}:{remote_port} failed.")
 
-        tcp_port_str = maddr.value_for_protocol("tcp")
+        try:
+            tcp_port_str = maddr.value_for_protocol("tcp")
+        except ProtocolLookupError:
+            error_msg = f"Cannot listen: TCP port is missing in multiaddress {maddr}"
+            logger.error(error_msg)
+            raise OpenConnectionError(error_msg) from None
+
         if tcp_port_str is None:
-            logger.error(f"Cannot listen: TCP port is missing in multiaddress {maddr}")
-            return False
+            error_msg = f"Cannot listen: TCP port is missing in multiaddress {maddr}"
+            raise OpenConnectionError(error_msg)
 
         try:
             tcp_port = int(tcp_port_str)
         except ValueError:
-            logger.error(
+            error_msg = (
                 f"Cannot listen: Invalid TCP port '{tcp_port_str}' "
                 f"in multiaddress {maddr}"
             )
-            return False
+            logger.error(error_msg)
+            raise OpenConnectionError(error_msg)
 
         ip4_host_str = maddr.value_for_protocol("ip4")
         # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
@@ -102,16 +113,16 @@ class TCPListener(IListener):
         if started_listeners is None:
             # This implies that task_status.started() was not called within serve_tcp,
             # likely because trio.serve_tcp itself failed to start (e.g., port in use).
-            logger.error(
+            error_msg = (
                 f"Failed to start TCP listener for {maddr}: "
                 f"`nursery.start` returned None. "
                 "This might be due to issues like the port already "
                 "being in use or invalid host."
             )
-            return False
+            logger.error(error_msg)
+            raise OpenConnectionError(error_msg)
 
         self.listeners.extend(started_listeners)
-        return True
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
