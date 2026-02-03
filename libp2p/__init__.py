@@ -89,6 +89,12 @@ from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport
 )
+from libp2p.identity_utils import (
+    create_identity_from_seed,
+    identity_exists,
+    load_identity,
+    save_identity,
+)
 
 import libp2p.security.secio.transport as secio
 from libp2p.stream_muxer.mplex.mplex import (
