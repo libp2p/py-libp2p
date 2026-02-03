@@ -1,0 +1,66 @@
+name: Attack Simulation Tests
+
+on:
+  pull_request:
+    paths:
+      - 'tests/security/attack_simulation/**'
+      - 'tests/core/security/attack_simulation/**'  # During migration
+      - 'libp2p/**'
+      - '.github/workflows/attack-simulation.yml'
+  push:
+    branches: [ main, master, feature/attack-simulation ]
+
+jobs:
+  attack-simulation:
+    name: Attack Simulation (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Reasonable timeout for security tests
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.8', '3.11']  # Test oldest and newest supported
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+          pip install pytest pytest-trio pytest-asyncio pytest-timeout
+      
+      - name: Run attack simulation tests
+        run: |
+          pytest -v --timeout=120 \
+            --tb=short \
+            --log-cli-level=WARNING \
+            --durations=10 \
+            tests/core/security/attack_simulation/ \
+            -m "not slow"
+        env:
+          TEST_TEMP_RESULTS: "1"  # Use temp dir for test output files
+          PYTHONPATH: ${{ github.workspace }}
+      
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: attack-sim-results-${{ matrix.python-version }}
+          path: /tmp/attack_simulation_results/
+          retention-days: 7
+      
+      - name: Report test summary
+        if: always()
+        run: |
+          echo "### Attack Simulation Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Python Version: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
