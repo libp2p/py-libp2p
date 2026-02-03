@@ -1193,9 +1193,14 @@ class Swarm(Service, INetworkService):
                     None, endpoint_ip=endpoint_ip
                 )
                 if pre_scope is None:
-                    # Denied before upgrade; close socket and return early
+                    # Denied before upgrade; close socket and raise exception
                     await raw_conn.close()
-                    return None  # type: ignore[return-value]
+                    raise SwarmException(
+                        "Connection denied by resource manager (pre-upgrade admission)"
+                    )
+            except SwarmException:
+                # Re-raise SwarmException (connection denied)
+                raise
             except Exception:
                 # Fail-open on admission errors; guard later in add_conn
                 pre_scope = None

@@ -19,6 +19,7 @@ from libp2p.rcmgr import Direction
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
     from libp2p.network.tag_store import TagStore
+import time
 
 logger = logging.getLogger("libp2p.network.connection_pruner")
 
@@ -253,6 +254,22 @@ class ConnectionPruner:
                     "with unknown peer"
                 )
                 conn_peer_id = None
+
+            # Check grace period - skip recently established connections
+            try:
+                created_at = getattr(connection, "_created_at", None)
+                if created_at is not None and isinstance(created_at, (int, float)):
+                    grace_period = self.swarm.connection_config.grace_period
+                    connection_age = time.time() - created_at
+                    if connection_age < grace_period:
+                        logger.debug(
+                            f"Skipping connection to {conn_peer_id} - "
+                            f"within grace period "
+                            f"({connection_age:.1f}s < {grace_period}s)"
+                        )
+                        continue
+            except Exception as e:
+                logger.debug(f"Error checking grace period: {e}")
 
             # Check if peer is protected
             tag_store = getattr(self.swarm, "tag_store", None)
