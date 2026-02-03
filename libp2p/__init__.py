@@ -188,6 +188,16 @@ def generate_new_ed25519_identity() -> KeyPair:
 
 
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
+    """
+    Generate a deterministic peer ID from a keypair.
+    
+    The peer ID is derived from the public key, so the same keypair will
+    always produce the same peer ID. This enables identity persistence:
+    if you save and reuse the same keypair, you'll get the same peer ID.
+    
+    :param key_pair: The keypair to generate a peer ID from
+    :return: A deterministic peer ID
+    """
     public_key = key_pair.public_key
     return ID.from_pubkey(public_key)
 
@@ -243,11 +253,22 @@ def new_swarm(
     Note: Ed25519 keys are used by default for better interoperability with
           other libp2p implementations (Rust, Go) which often disable RSA support.
     """
+    # Identity Generation Flow:
+    # 1. If no keypair is provided, generate a new random Ed25519 keypair
+    # 2. If a keypair IS provided, use it (enables identity persistence)
+    # 3. Derive a deterministic peer ID from the keypair's public key
+    #
+    # For identity persistence, users can:
+    # - Save the keypair to disk and reload it on restart
+    # - Generate a keypair from a seed for deterministic identity
+    # - Pass the same keypair to new_host() or new_swarm()
     if key_pair is None:
         # Use Ed25519 by default for better interoperability with Rust/Go libp2p
         # which often compile without RSA support
         key_pair = generate_new_ed25519_identity()
 
+    # Generate deterministic peer ID from keypair
+    # Same keypair always produces the same peer ID
     id_opt = generate_peer_id_from(key_pair)
 
     transport: TCP | QUICTransport | ITransport
