@@ -200,7 +200,9 @@ class RealAttackMetrics(AttackMetrics):
                     nursery.start_soon(malicious_peer.flood_real_peer_table, honest_dht)
 
         # Wait during attack (optimized for faster tests)
-        await trio.sleep(min(5.0, attack_duration / 6))  # Reduced from full attack_duration
+        await trio.sleep(
+            min(5.0, attack_duration / 6)
+        )  # Reduced from full attack_duration
 
         # Phase 3: Measure during attack
         logger.info("Measuring network performance during attack...")

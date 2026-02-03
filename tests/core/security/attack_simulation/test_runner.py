@@ -331,7 +331,8 @@ async def test_invalid_block_basic():
     assert "acceptance_rate" in result
     assert "propagation_time" in result
     logger.debug(
-        f"Full node propagation test passed (acceptance: {result['acceptance_rate']:.1%})"
+        f"Full node propagation test passed "
+        f"(acceptance: {result['acceptance_rate']:.1%})"
     )
 
     logger.debug("Invalid Block Basic Tests: ALL PASSED")
@@ -366,8 +367,10 @@ async def test_bootnode_poisoning_basic():
     assert "isolation_metrics" in results
     assert "recovery_metrics" in results
     logger.debug("Bootnode poisoning scenario test passed")
-    logger.debug(f"  Isolation rate: {results['isolation_metrics']['isolation_rate']:.1%}")
-    logger.debug(f"  Recovery rate: {results['recovery_metrics']['recovery_rate']:.1%}")
+    isolation_rate = results["isolation_metrics"]["isolation_rate"]
+    logger.debug(f"  Isolation rate: {isolation_rate:.1%}")
+    recovery_rate = results["recovery_metrics"]["recovery_rate"]
+    logger.debug(f"  Recovery rate: {recovery_rate:.1%}")
 
     logger.debug("Bootnode Poisoning Basic Tests: ALL PASSED")
     return True
@@ -406,7 +409,8 @@ async def test_finality_stall_basic():
     assert "memory_metrics" in results
     assert "detection_metrics" in results
     logger.debug("Finality stall scenario test passed")
-    logger.debug(f"  Memory exhaustion: {results['memory_metrics']['exhaustion_rate']:.1%}")
+    exhaustion_rate = results["memory_metrics"]["exhaustion_rate"]
+    logger.debug(f"  Memory exhaustion: {exhaustion_rate:.1%}")
     logger.debug(
         f"  Timeout detection: "
         f"{results['detection_metrics']['timeout_detection_rate']:.1%}"

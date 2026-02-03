@@ -30,7 +30,8 @@ async def test_invalid_block_attack():
     logger.debug(f"Full nodes tested: {len(full_nodes)}")
     logger.debug(f"Light client acceptance rate: {light_client_acceptance:.2%}")
     logger.debug(f"Full node acceptance rate: {full_node_acceptance:.2%}")
-    logger.debug(f"Vulnerability gap: {light_client_acceptance - full_node_acceptance:.2%}")
+    vuln_gap = light_client_acceptance - full_node_acceptance
+    logger.debug(f"Vulnerability gap: {vuln_gap:.2%}")
 
     # Simulate timing
     await trio.sleep(0.01)  # Optimized for faster test execution
@@ -137,7 +138,8 @@ async def test_long_range_fork_attack():
 async def main():
     """Run all attack simulation tests"""
     logger.info("Extended Threat Model Attack Simulation Suite")
-    logger.info("Testing attack simulations inspired by Polkadot/Smoldot security research")
+    msg = "Testing attack simulations inspired by Polkadot/Smoldot security research"
+    logger.info(msg)
 
     # Run all attack tests
     results = {}

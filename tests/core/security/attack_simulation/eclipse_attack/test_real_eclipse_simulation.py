@@ -8,7 +8,6 @@ networks, measuring real network degradation and recovery metrics.
 import logging
 
 import pytest
-import trio
 
 from libp2p.peer.peerinfo import PeerInfo
 
@@ -99,9 +98,18 @@ class RealEclipseScenario(EclipseScenario):
         network_resilience = recovery_metrics["overall_network_resilience"]
 
         logger.info("ATTACK EFFECTIVENESS:")
-        logger.info(f"  Attack Impact: {attack_effectiveness:.2%} performance degradation")
-        logger.info(f"  Recovery Rate: {recovery_effectiveness:.2%} recovery achieved")
-        logger.info(f"  Network Resilience: {network_resilience:.2%} overall resilience")
+        attack_msg = (
+            f"  Attack Impact: {attack_effectiveness:.2%} performance degradation"
+        )
+        logger.info(attack_msg)
+        recovery_msg = (
+            f"  Recovery Rate: {recovery_effectiveness:.2%} recovery achieved"
+        )
+        logger.info(recovery_msg)
+        resilience_msg = (
+            f"  Network Resilience: {network_resilience:.2%} overall resilience"
+        )
+        logger.info(resilience_msg)
 
 
 @pytest.mark.trio

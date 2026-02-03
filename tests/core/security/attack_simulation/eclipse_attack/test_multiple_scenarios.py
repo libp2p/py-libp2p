@@ -73,7 +73,8 @@ async def test_multiple_eclipse_scenarios():
         logger.debug(f"  Contamination: {max(metrics.peer_table_contamination):.1%}")
         logger.debug(f"  Affected Nodes: {metrics.affected_nodes_percentage:.1f}%")
         logger.debug(f"  Recovery Time: {metrics.recovery_time:.1f}s")
-        logger.debug(f"  Resilience Score: {report['network_resilience_score']:.1f}/100")
+        resilience_score = report["network_resilience_score"]
+        logger.debug(f"  Resilience Score: {resilience_score:.1f}/100")
 
     # Save detailed results to file
     results_dir = get_results_directory()
