@@ -77,7 +77,7 @@ def get_peer_tag_value(
     except AttributeError:
         return 0
     except Exception as e:
-        logger.debug(f"Error getting peer tag value for {peer_id}: {e}")
+        logger.debug("Error getting peer tag value for %s: %s", peer_id, e)
         return 0
 
 
@@ -140,7 +140,7 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
             if swarm.connection_gate.is_in_allow_list(addr):
                 return True
     except Exception as e:
-        logger.debug(f"Error checking allow list for connection: {e}")
+        logger.debug("Error checking allow list for connection: %s", e)
         return False
 
     return False
@@ -199,7 +199,7 @@ class ConnectionPruner:
         try:
             await self._maybe_prune_connections()
         except Exception as e:
-            logger.error(f"Error while pruning connections: {e}", exc_info=e)
+            logger.error("Error while pruning connections: %s", e, exc_info=True)
 
     async def _maybe_prune_connections(self) -> None:
         """Internal method to prune connections if needed."""
@@ -209,13 +209,17 @@ class ConnectionPruner:
         low_watermark = self.swarm.connection_config.low_watermark
 
         logger.debug(
-            f"Checking connections: {num_connections} "
-            f"(low={low_watermark}, high={high_watermark})"
+            "Checking connections: %d (low=%d, high=%d)",
+            num_connections,
+            low_watermark,
+            high_watermark,
         )
 
         # Only prune if we're above high watermark
         if num_connections <= high_watermark:
             return
+
+        grace_period = self.swarm.connection_config.grace_period
 
         # Calculate peer values (sum of tag values)
         peer_values: dict[ID, int] = {}
@@ -230,7 +234,7 @@ class ConnectionPruner:
                         self.swarm.peerstore, peer_id, tag_store
                     )
             except Exception as e:
-                logger.debug(f"Error getting peer_id from connection: {e}")
+                logger.debug("Error getting peer_id from connection: %s", e)
                 continue
 
         # Sort connections for pruning
@@ -245,8 +249,8 @@ class ConnectionPruner:
             try:
                 conn_peer_id = connection.muxed_conn.peer_id
                 logger.debug(
-                    f"Too many connections open - considering connection "
-                    f"to peer {conn_peer_id}"
+                    "Too many connections open - considering connection to peer %s",
+                    conn_peer_id,
                 )
             except Exception:
                 logger.debug(
@@ -255,27 +259,20 @@ class ConnectionPruner:
                 )
                 conn_peer_id = None
 
-            # Check grace period - skip recently established connections
-            try:
-                created_at = getattr(connection, "_created_at", None)
-                if created_at is not None and isinstance(created_at, (int, float)):
-                    grace_period = self.swarm.connection_config.grace_period
-                    connection_age = time.time() - created_at
-                    if connection_age < grace_period:
-                        logger.debug(
-                            f"Skipping connection to {conn_peer_id} - "
-                            f"within grace period "
-                            f"({connection_age:.1f}s < {grace_period}s)"
-                        )
-                        continue
-            except Exception as e:
-                logger.debug(f"Error checking grace period: {e}")
+            # Respect ConnectionConfig.grace_period: skip recently established
+            # connections. Connections without _created_at are skipped (safe default).
+            if self._is_connection_within_grace_period(connection, grace_period):
+                logger.debug(
+                    "Skipping connection to %s - within grace period",
+                    conn_peer_id,
+                )
+                continue
 
             # Check if peer is protected
             tag_store = getattr(self.swarm, "tag_store", None)
             if tag_store is not None and conn_peer_id is not None:
                 if tag_store.is_protected(conn_peer_id):
-                    logger.debug(f"Skipping protected peer {conn_peer_id}")
+                    logger.debug("Skipping protected peer %s", conn_peer_id)
                     continue
 
             # Check allow list (connections in allow list are never pruned)
@@ -289,13 +286,33 @@ class ConnectionPruner:
 
         # Close selected connections
         if to_close:
-            logger.info(f"Pruning {len(to_close)} connections")
+            logger.info("Pruning %d connections", len(to_close))
             for connection in to_close:
                 try:
-                    # Close connection gracefully
                     await connection.close()
                 except Exception as e:
-                    logger.warning(f"Error closing connection during pruning: {e}")
+                    logger.warning("Error closing connection during pruning: %s", e)
+
+    def _is_connection_within_grace_period(
+        self, connection: INetConn, grace_period: float
+    ) -> bool:
+        """
+        Return True if this connection should not be pruned due to grace period.
+
+        Connections without _created_at (e.g. non-SwarmConn) are treated as
+        within grace period (not pruned) as a safe default.
+        """
+        try:
+            created_at = getattr(connection, "_created_at", None)
+        except (AttributeError, TypeError):
+            return True
+        if created_at is None or not isinstance(created_at, (int, float)):
+            return True
+        try:
+            age = time.time() - float(created_at)
+            return age < grace_period
+        except (TypeError, ValueError):
+            return True
 
     def sort_connections(
         self, connections: list[INetConn], peer_values: dict[ID, int]
