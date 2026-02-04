@@ -3104,3 +3104,56 @@ class IPubsub(ServiceAPI):
 
         """
         ...
+
+    @abstractmethod
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer stream is not established within the timeout period.
+
+        """
+        ...
+
+    @abstractmethod
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        topic_id : str
+            The topic to check subscription for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer does not subscribe within the timeout period.
+
+        """
+        ...
