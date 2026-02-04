@@ -64,6 +64,28 @@ def compute_cid_v1(data: bytes, codec: int = CODEC_RAW) -> bytes:
     return bytes([CID_V1, codec]) + multihash_bytes
 
 
+def compute_cid_v1_stream(file_obj, codec: int = CODEC_RAW) -> bytes:
+    """
+    Compute a CIDv1 for a file stream using py-multihash v3 sum_stream().
+
+    Memory-efficient for large files - processes in chunks without loading
+    entire file into memory.
+
+    Args:
+        file_obj: File-like object opened in binary mode
+        codec: Multicodec code (default: raw)
+
+    Returns:
+        CIDv1 as bytes
+
+    """
+    mh = multihash.sum_stream(file_obj, multihash.Func.sha2_256)
+    multihash_bytes = mh.encode()
+
+    # CIDv1 format: <version><codec><multihash>
+    return bytes([CID_V1, codec]) + multihash_bytes
+
+
 def get_cid_prefix(cid: bytes) -> bytes:
     """
     Extract the CID prefix (everything except the digest).
