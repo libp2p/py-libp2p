@@ -24,9 +24,11 @@ dependencies = [
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
+    "httpx>=0.25.0",
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "miniupnpc>=2.3",
+    "types-requests",
     "multiaddr==0.0.11",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
@@ -38,7 +40,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
-    "zeroconf (>=0.147.0,<0.148.0)"
+    "zeroconf (>=0.147.0,<0.148.0)",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -57,8 +59,9 @@ Homepage = "https://github.com/libp2p/py-libp2p"
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
-echo-quic-demo="examples.echo.echo_quic:main"
+echo-quic-demo = "examples.echo.echo_quic:main"
 ping-demo = "examples.ping.ping:main"
+autotls-demo = "examples.autotls.autotls:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
