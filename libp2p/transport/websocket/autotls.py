@@ -24,7 +24,7 @@ from cryptography.x509.oid import NameOID
 
 from libp2p.peer.id import ID
 
-logger = logging.getLogger("libp2p.websocket.autotls")
+logger = logging.getLogger(__name__)
 
 
 class TLSCertificate:

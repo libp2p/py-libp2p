@@ -11,7 +11,7 @@ from .pb import (
     rpc_pb2,
 )
 
-logger = logging.getLogger("libp2p.pubsub")
+logger = logging.getLogger(__name__)
 
 PUBSUB_SIGNING_PREFIX = "libp2p-pubsub:"
 

@@ -55,6 +55,9 @@ from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+)
 
 from ..exceptions import (
     MultiError,
@@ -68,7 +71,7 @@ from .exceptions import (
     SwarmException,
 )
 
-logger = logging.getLogger("libp2p.network.swarm")
+logger = logging.getLogger(__name__)
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -348,11 +351,7 @@ class Swarm(Service, INetworkService):
         pre_scope = None
         if self._resource_manager is not None:
             try:
-                ep = None
-                try:
-                    ep = addr.value_for_protocol("ip4")
-                except Exception:
-                    ep = None
+                ep = extract_ip_from_multiaddr(addr)
                 pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
                 if pre_scope is None:
                     raise SwarmException("Connection denied by resource manager")
@@ -427,6 +426,7 @@ class Swarm(Service, INetworkService):
             raise SwarmException(
                 f"failed to upgrade security for peer {peer_id}: {error}"
             ) from error
+        logger.debug("Swarm: security upgrade completed for peer %s", peer_id)
 
         logger.debug("upgraded security for peer %s", peer_id)
 
@@ -437,6 +437,7 @@ class Swarm(Service, INetworkService):
             await secured_conn.close()
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
 
+        logger.debug("Swarm: muxer upgrade completed for peer %s", peer_id)
         logger.debug("upgraded mux for peer %s", peer_id)
 
         # Pass endpoint IP to resource manager for outbound
@@ -475,7 +476,7 @@ class Swarm(Service, INetworkService):
                 pass
 
         swarm_conn = await self.add_conn(muxed_conn)
-        logger.debug("successfully dialed peer %s", peer_id)
+        logger.debug("Swarm: successfully dialed peer %s", peer_id)
         return swarm_conn
 
     async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
@@ -659,10 +660,26 @@ class Swarm(Service, INetworkService):
                     return
 
                 raw_conn = RawConnection(read_write_closer, False)
-                await self.upgrade_inbound_raw_conn(raw_conn, maddr)
-                # NOTE: This is a intentional barrier to prevent from the handler
-                # exiting and closing the connection.
-                await self.manager.wait_finished()
+                try:
+                    await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+                    # NOTE: This is an intentional barrier to prevent the handler from
+                    # exiting and closing the connection.
+                    await self.manager.wait_finished()
+                except SwarmException as error:
+                    # Log the error but don't propagate - this prevents listener crash
+                    logger.debug(
+                        "connection handler failed to upgrade connection from %s: %s",
+                        maddr,
+                        error,
+                    )
+                    await read_write_closer.close()
+                except Exception:
+                    # Catch any other unexpected errors to prevent listener crash
+                    logger.exception(
+                        "unexpected error in connection handler for %s",
+                        maddr,
+                    )
+                    await read_write_closer.close()
 
             try:
                 # Success
@@ -701,25 +718,33 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
+        logger.debug("upgrade_inbound_raw_conn: starting for %s", maddr)
         # Enable PNET is psk is provided
         if self.psk is not None:
             raw_conn = new_protected_conn(raw_conn, self.psk)
 
         # secure the conn and then mux the conn
         try:
+            logger.debug("upgrade_inbound_raw_conn: upgrading security for %s", maddr)
             secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
+            logger.debug("upgrade_inbound: security done for %s", maddr)
         except SecurityUpgradeFailure as error:
-            logger.error("failed to upgrade security for peer at %s", maddr)
+            logger.error("failed to upgrade security for peer at %s: %s", maddr, error)
             await raw_conn.close()
             raise SwarmException(
                 f"failed to upgrade security for peer at {maddr}"
             ) from error
         peer_id = secured_conn.get_remote_peer()
+        logger.debug(
+            "upgrade_inbound: peer=%s initiator=%s", peer_id, secured_conn.is_initiator
+        )
 
         try:
+            logger.debug("upgrade_inbound: muxer upgrade for %s", peer_id)
             muxed_conn = await self.upgrader.upgrade_connection(secured_conn, peer_id)
+            logger.debug("upgrade_inbound: muxer done for %s", peer_id)
         except MuxerUpgradeFailure as error:
-            logger.error("fail to upgrade mux for peer %s", peer_id)
+            logger.error("fail to upgrade mux for peer %s: %s", peer_id, error)
             await secured_conn.close()
             raise SwarmException(f"fail to upgrade mux for peer {peer_id}") from error
         logger.debug("upgraded mux for peer %s", peer_id)
@@ -774,8 +799,13 @@ class Swarm(Service, INetworkService):
                 # Let add_conn perform final guard if needed
                 pass
 
-        await self.add_conn(muxed_conn)
-        logger.debug("successfully opened connection to peer %s", peer_id)
+        try:
+            await self.add_conn(muxed_conn)
+            logger.debug("successfully opened connection to peer %s", peer_id)
+        except Exception:
+            logger.exception("failed to add connection for peer %s", peer_id)
+            await muxed_conn.close()
+            return None  # type: ignore[return-value]
 
         return muxed_conn
 
