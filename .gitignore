@@ -138,6 +138,8 @@ fabric.properties
 
 # Django stuff:
 *.log
+*.pem
+*.key
 local_settings.py
 db.sqlite3
 
@@ -192,3 +194,4 @@ tests/interop/js_libp2p/js_node/src/package-lock.json
 _build/
 
 *node_modules/
+libp2p-forge

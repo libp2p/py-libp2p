@@ -51,7 +51,7 @@ def _get_webrtc_direct_transport() -> Any:
     return WebRTCDirectTransport
 
 
-logger = logging.getLogger("libp2p.transport.registry")
+logger = logging.getLogger(__name__)
 
 
 def _is_valid_webrtc_multiaddr(maddr: Multiaddr) -> bool:

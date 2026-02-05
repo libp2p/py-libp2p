@@ -24,7 +24,7 @@ from libp2p.peer.id import (
 # Import the protobuf definitions
 from .pb.circuit_pb2 import Reservation as PbReservation
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.resources")
+logger = logging.getLogger(__name__)
 
 # Prefix for data to be signed, helps prevent signature reuse attacks
 RELAY_VOUCHER_DOMAIN_SEP = b"libp2p-relay-voucher:"

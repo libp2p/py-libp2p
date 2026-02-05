@@ -58,9 +58,18 @@ class TransportUpgrader:
             if is_initiator:
                 if peer_id is None:
                     raise ValueError("peer_id must be provided for outbout connection")
-                return await self.security_multistream.secure_outbound(
+                secure_conn = await self.security_multistream.secure_outbound(
                     raw_conn, peer_id
                 )
+                # Validate the authenticated peer ID matches the expected peer ID.
+                authenticated_peer_id = secure_conn.get_remote_peer()
+                if authenticated_peer_id != peer_id:
+                    await secure_conn.close()
+                    raise SecurityUpgradeFailure(
+                        f"Peer ID mismatch: expected {peer_id}, "
+                        f"got {authenticated_peer_id}"
+                    )
+                return secure_conn
             return await self.security_multistream.secure_inbound(raw_conn)
         except (MultiselectError, MultiselectClientError) as error:
             raise SecurityUpgradeFailure(
