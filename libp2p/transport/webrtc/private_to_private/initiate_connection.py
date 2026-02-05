@@ -658,6 +658,30 @@ async def initiate_connection(
             f"conn_state: {peer_connection.connectionState})"
         )
 
+        # CRITICAL: Start buffer consumer in async context
+        #  right after connection creation
+        # This ensures messages flow from
+        # early handler → buffer → receive_channel → read()
+        if message_buffer_recv is not None:
+            logger.info(
+                f"Starting buffer consumer in async context for {target_peer_id}..."
+            )
+            await connection.start_buffer_consumer_async()
+            # Wait for consumer to be ready (with timeout)
+            with trio.move_on_after(1.0) as timeout_scope:
+                await connection._buffer_consumer_ready.wait()
+
+            if timeout_scope.cancelled_caught:
+                logger.warning(
+                    f"Buffer consumer ready timeout for {target_peer_id} - "
+                    "proceeding anyway"
+                )
+            else:
+                logger.info(
+                    f"✅ Buffer consumer is ready for {target_peer_id} - "
+                    "messages will flow correctly"
+                )
+
         # CRITICAL: Verify connection is stable before registering handshake
         await trio.sleep(0.1)
 

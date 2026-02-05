@@ -41,6 +41,8 @@ class UDPHolePuncher:
             # Bind to local port (0 = random port)
             sock.bind(("", local_port))
             local_ip, local_port = sock.getsockname()
+            # Make recv polling feasible for offer/answer over the same socket.
+            sock.settimeout(0.5)
 
             # Best effort to discover outward-facing IP
             try:
@@ -80,6 +82,47 @@ class UDPHolePuncher:
             sock.close()
             logger.error("UDP hole punching failed: %s", exc)
             raise
+
+    async def send_json(
+        self, target_ip: str, target_port: int, payload: dict[str, Any]
+    ) -> None:
+        endpoint_key = f"{target_ip}:{target_port}"
+        sock = self.punch_sockets.get(endpoint_key)
+        if sock is None:
+            # Best-effort: create an ephemeral socket if punch_hole wasn't called.
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(("", 0))
+            sock.settimeout(0.5)
+            self.punch_sockets[endpoint_key] = sock
+            self.local_endpoints[endpoint_key] = sock.getsockname()
+
+        data = json.dumps(payload).encode("utf-8")
+        await trio.to_thread.run_sync(sock.sendto, data, (target_ip, target_port))
+
+    async def recv_json(
+        self, target_ip: str, target_port: int, *, timeout_s: float
+    ) -> dict[str, Any] | None:
+        endpoint_key = f"{target_ip}:{target_port}"
+        sock = self.punch_sockets.get(endpoint_key)
+        if sock is None:
+            return None
+
+        with trio.move_on_after(timeout_s) as scope:
+            while True:
+                try:
+                    data, _addr = await trio.to_thread.run_sync(sock.recvfrom, 65535)
+                except TimeoutError:
+                    if scope.cancelled_caught:
+                        return None
+                    continue
+                except Exception:
+                    return None
+                try:
+                    return json.loads(data.decode("utf-8"))
+                except Exception:
+                    # Ignore non-JSON packets.
+                    continue
+        return None
 
     def _get_local_ip(self) -> str:
         """Discover the local IP address used for outbound traffic."""

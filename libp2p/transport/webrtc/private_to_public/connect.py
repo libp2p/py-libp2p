@@ -29,17 +29,34 @@ from libp2p.transport.webrtc.private_to_public.util import (
 from ..connection import WebRTCRawConnection
 from ..constants import DEFAULT_DIAL_TIMEOUT
 from .direct_rtc_connection import DirectPeerConnection
+from .ice_connectivity_fix import ICEConnectivityFix
+
+# Import ICE diagnostics and fixes
+try:
+    from ..ice_diagnostics import ICEDiagnostics
+except ImportError:
+    # Fallback if module not available
+    ICEDiagnostics = None
+
+try:
+    from ..ice_debug_tool import ICEDebugger
+except ImportError:
+    ICEDebugger = None  # type: ignore[assignment,misc]
 
 # Import aiortc patch to prevent premature closure during handshake
 try:
     from libp2p.transport.webrtc.aiortc_patch import (
         register_handshake,
+        register_upgrade,
         unregister_handshake,
+        unregister_upgrade,
     )
 
     # Type ignore for conditional variants - both have compatible signatures
     register_handshake = register_handshake  # type: ignore[assignment]
     unregister_handshake = unregister_handshake  # type: ignore[assignment]
+    register_upgrade = register_upgrade  # type: ignore[assignment]
+    unregister_upgrade = unregister_upgrade  # type: ignore[assignment]
 except ImportError:
     # Patch not available, define no-op functions
     def register_handshake(peer_connection: Any) -> None:  # type: ignore[misc]
@@ -48,12 +65,220 @@ except ImportError:
     def unregister_handshake(peer_connection: Any) -> None:  # type: ignore[misc]
         pass
 
+    def register_upgrade(peer_connection: Any) -> None:  # type: ignore[misc]
+        pass
+
+    def unregister_upgrade(peer_connection: Any) -> None:  # type: ignore[misc]
+        pass
+
 
 if TYPE_CHECKING:
     from libp2p.abc import IRawConnection
     from libp2p.transport.webrtc.signal_service import SignalService
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
+
+
+async def _ensure_sctp_loop(rtc_pc: Any) -> None:
+    """
+    Set aiortc SCTP transport _loop to current asyncio loop when inside bridge.
+    Must be called from inside 'async with bridge' so call_later works.
+    """
+    import asyncio
+
+    try:
+        aio_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        from trio_asyncio._loop import current_loop
+
+        aio_loop = current_loop.get()
+    if (
+        aio_loop is not None
+        and rtc_pc is not None
+        and getattr(rtc_pc, "sctp", None) is not None
+    ):
+        sctp = rtc_pc.sctp
+        if getattr(sctp, "_loop", None) is None:
+            sctp._loop = aio_loop
+
+
+def _verify_ice_credentials_in_sdp(
+    sdp: str,
+    expected_ufrag: str,
+    expected_ice_pwd: str,
+    role: str,
+    label: str,
+) -> None:
+    """Log ICE credentials in SDP vs expected for debugging connectivity failures."""
+    got_ufrag, got_pwd = SDP.get_ice_credentials_from_sdp(sdp)
+    if got_ufrag is None and got_pwd is None:
+        logger.debug(f"{role} ICE credentials not found in SDP ({label})")
+        return
+    ufrag_ok = got_ufrag == expected_ufrag
+    pwd_ok = got_pwd == expected_ice_pwd
+    if ufrag_ok and pwd_ok:
+        logger.debug(f"{role} ICE credentials match in SDP ({label})")
+    else:
+        logger.warning(
+            f"{role} ICE credential mismatch in SDP ({label}): "
+            f"ufrag_match={ufrag_ok}, pwd_match={pwd_ok}; "
+            f"sdp_ufrag={got_ufrag!r}, expected_ufrag={expected_ufrag!r}"
+        )
+
+
+async def _ensure_ice_candidates_added(
+    peer_connection: DirectPeerConnection, sdp: str, bridge: Any, role: str
+) -> int:
+    """
+    Explicitly extract and add ICE candidates from SDP.
+
+    This is necessary because aiortc may not automatically process
+    localhost candidates properly, especially in test environments.
+    """
+    sdp_lines = sdp.splitlines()
+    candidates_added = 0
+
+    # Find media line indices
+    media_line_indices = []
+    for i, line in enumerate(sdp_lines):
+        if line.startswith("m="):
+            media_line_indices.append(i)
+
+    if not media_line_indices:
+        media_line_indices = [0]
+
+    # Extract candidates first (outside bridge context)
+    candidate_data: list[tuple[str, int]] = []
+    current_media_index = 0
+    for i, line in enumerate(sdp_lines):
+        if line.startswith("m="):
+            current_media_index = (
+                media_line_indices.index(i) if i in media_line_indices else 0
+            )
+        elif line.startswith("a=candidate:"):
+            cand_str = line[len("a=") :].strip()
+            candidate_data.append((cand_str, current_media_index))
+
+    # Add candidates within bridge context
+    async with bridge:
+        for cand_str, media_index in candidate_data:
+            try:
+                candidate_obj = candidate_from_aioice(Candidate.from_sdp(cand_str))
+                candidate_obj.sdpMLineIndex = media_index
+                if not hasattr(candidate_obj, "sdpMid") or candidate_obj.sdpMid is None:
+                    candidate_obj.sdpMid = str(media_index)
+
+                # Add to peer connection
+                await bridge.add_ice_candidate(peer_connection, candidate_obj)
+                candidates_added += 1
+
+                logger.debug(
+                    f"{role} explicitly added candidate {candidates_added}: "
+                    f"{cand_str[:80]}"
+                )
+            except Exception as e:
+                logger.warning(f"{role} Failed to add candidate: {e}", exc_info=True)
+
+        if candidates_added > 0:
+            # Add end-of-candidates marker
+            await bridge.add_ice_candidate(peer_connection, None)
+            logger.info(
+                f"{role} Explicitly added {candidates_added} ICE candidates from SDP"
+            )
+        else:
+            logger.error(
+                f"{role} WARNING: No candidates were explicitly added! "
+                f"ICE will likely fail."
+            )
+
+    return candidates_added
+
+
+def _get_aioice_connection(peer_connection: Any) -> Any:
+    """Extract aioice Connection from RTCPeerConnection."""
+    try:
+        return peer_connection.sctp.transport.transport.iceGatherer._connection
+    except (AttributeError, TypeError):
+        return None
+
+
+async def _wait_for_ice_connection(
+    peer_connection: DirectPeerConnection, role: str, timeout: float = 30.0
+) -> bool:
+    """
+    Wait for ICE with manual check pump.
+
+    aioice's check_periodic() task does not run under trio-asyncio (it spawns
+    asyncio tasks that are never awaited). We call conn._check_state() every
+    100ms from trio to drive connectivity checks synchronously.
+    """
+    current_state = peer_connection.iceConnectionState
+    if current_state in ("connected", "completed"):
+        logger.info(f"{role} ICE already connected")
+        return True
+    if current_state == "failed":
+        logger.error(f"{role} ICE already failed")
+        return False
+
+    conn = _get_aioice_connection(peer_connection)
+    if not conn:
+        logger.error(f"{role} No aioice connection found")
+        return False
+
+    logger.info(f"{role} Starting ICE wait with manual check pump (timeout={timeout}s)")
+    cancel_pump = trio.Event()
+    result = {"success": False}
+
+    async def pump_checks() -> None:
+        iteration = 0
+        while not cancel_pump.is_set():
+            try:
+                if hasattr(conn, "_check_state"):
+                    conn._check_state()
+                iteration += 1
+                if iteration % 20 == 0:
+                    logger.debug(f"{role} ICE pump iteration {iteration}")
+            except Exception as e:
+                logger.debug(f"{role} Check pump error: {e}")
+            await trio.sleep(0.1)
+
+    async def monitor_state() -> None:
+        while not cancel_pump.is_set():
+            state = peer_connection.iceConnectionState
+            if state in ("connected", "completed"):
+                logger.info(f"{role} ICE reached {state}")
+                result["success"] = True
+                cancel_pump.set()
+                return
+            if state == "failed":
+                logger.error(f"{role} ICE failed")
+                cancel_pump.set()
+                return
+            await trio.sleep(0.1)
+
+    try:
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(pump_checks)
+            nursery.start_soon(monitor_state)
+            with trio.move_on_after(timeout) as scope:
+                while not cancel_pump.is_set():
+                    await trio.sleep(0.1)
+            cancel_pump.set()
+            nursery.cancel_scope.cancel()
+
+            if scope.cancelled_caught:
+                final_state = peer_connection.iceConnectionState
+                logger.error(
+                    f"{role} ICE timeout after {timeout}s (state: {final_state})"
+                )
+                check_list = getattr(conn, "_check_list", [])
+                logger.error(f"{role} Candidate pairs: {len(check_list)}")
+                return False
+    except Exception as e:
+        logger.error(f"{role} ICE wait error: {e}", exc_info=True)
+        return False
+
+    return result["success"]
 
 
 async def _extract_and_add_ice_candidates_from_sdp(
@@ -163,6 +388,14 @@ async def connect(
     Establish a WebRTC-Direct connection, perform the noise handshake,
     and return the upgraded connection.
     """
+    # CRITICAL: Setup ICE diagnostics early for comprehensive logging
+    if ICEDiagnostics is not None:
+        try:
+            ICEDiagnostics.setup_detailed_ice_logging(peer_connection, role)
+            logger.info(f"{role} ICE diagnostics enabled")
+        except Exception as e:
+            logger.warning(f"{role} Failed to setup ICE diagnostics: {e}")
+
     # CRITICAL: Create data channel BEFORE createOffer() on peer_conn
     # This is required for ICE gathering to start
     # - RTCPeerConnection needs a media component to gather candidates.
@@ -182,57 +415,48 @@ async def connect(
         "", negotiated=True, id=0
     )
 
-    # CRITICAL: Create message buffer IMMEDIATELY after channel creation
-    # Messages can arrive BEFORE channel.open fires
-    # This buffer captures ALL messages, preventing loss during connection setup
-    message_buffer_send, message_buffer_recv = trio.open_memory_channel(1000)
+    # Set ICE credentials on aioice before offer/answer.
+    if hasattr(peer_connection, "_ensure_custom_ice_credentials"):
+        async with bridge:
+            peer_connection._ensure_custom_ice_credentials()
 
-    # CRITICAL: Attach permanent dumb handler IMMEDIATELY - before channel opens
-    # This handler does ONE thing: buffer bytes. No logic, no decoding, no state.
-    # It exists before open, before connection object, before handshake.
-    def _early_message_handler(message: Any) -> None:
-        """Permanent dumb handler that buffers all messages immediately."""
+    # CRITICAL FIX: Extract remote_peer_id early so
+    #  we can create connection immediately
+    # This allows the connection to own its inbound pipe from the start
+    if remote_peer_id is None and remote_addr is not None:
         try:
-            if hasattr(message, "data"):
-                data = message.data
-                if isinstance(data, bytes):
-                    pass
-                elif hasattr(data, "tobytes"):
-                    data = data.tobytes()
-                else:
-                    data = bytes(data) if data else b""
-            elif isinstance(message, bytes):
-                data = message
-            else:
-                try:
-                    data = bytes(message)
-                except (TypeError, ValueError):
-                    data = str(message).encode()
+            peer_id_str = remote_addr.value_for_protocol("p2p")
+            if peer_id_str:
+                remote_peer_id = ID.from_base58(peer_id_str)
+        except Exception:
+            pass
 
-            if data:
-                # Buffer immediately - this is thread-safe (send_nowait is atomic)
-                try:
-                    message_buffer_send.send_nowait(data)
-                    channel_state = getattr(handshake_channel, "readyState", "unknown")
-                    logger.debug(
-                        f"{role} early handler buffered {len(data)} bytes "
-                        f"(channel state: {channel_state})"
-                    )
-                except trio.WouldBlock:
-                    logger.warning(
-                        f"{role} message buffer full, dropping {len(data)} bytes "
-                        "(this should be rare)"
-                    )
-                except trio.ClosedResourceError:
-                    logger.debug(f"{role} message buffer closed, message dropped")
-        except Exception as e:
-            logger.error(f"{role} error in early message handler: {e}", exc_info=True)
+    # If we still don't have peer_id, create a temporary one (will be updated later)
+    if remote_peer_id is None:
+        remote_peer_id = ID(b"")
 
-    # Attach handler IMMEDIATELY - this is permanent and never unregistered
-    handshake_channel.on("message", _early_message_handler)
+    # CRITICAL FIX: Create WebRTCRawConnection EARLY so it owns its inbound pipe
+    # This prevents the 'ClosedResourceError' when connect() returns
+    # The connection's data pump is already running (started in __init__)
+    rtc_pc = peer_connection.peer_connection
+    raw_connection = WebRTCRawConnection(
+        remote_peer_id,
+        rtc_pc,
+        handshake_channel,
+        is_initiator=(role == "client"),
+        incoming_message_buffer=None,  # Connection owns its own channel now
+    )
     logger.info(
-        f"{role} attached permanent early message handler "
-        f"(channel state: {getattr(handshake_channel, 'readyState', 'unknown')})"
+        f"{role} created WebRTCRawConnection EARLY (before channel opens) "
+        f"- data pump is already running"
+    )
+
+    # Do NOT register handler here;
+    #  _setup_channel_handlers() in __init__ already does it.
+    logger.info(
+        "%s WebRTCRawConnection created with handler registered (channel: %s)",
+        role,
+        getattr(handshake_channel, "readyState", "unknown"),
     )
 
     # CRITICAL: Register handshake IMMEDIATELY after creating channel
@@ -373,7 +597,9 @@ async def connect(
     try:
         if role == "client":
             logger.debug("client creating local offer")
-            offer = await peer_connection.createOffer()
+            async with bridge:
+                offer = await peer_connection.createOffer()
+                await _ensure_sctp_loop(rtc_pc)
 
             # Wait for ICE gathering to complete
             logger.debug("client waiting for ICE gathering to complete...")
@@ -399,6 +625,18 @@ async def connect(
                 offer_sdp_with_candidates = offer.sdp
                 logger.warning("client localDesc None, using offer SDP")
 
+            # CRITICAL: Log SDP details using ICE diagnostics
+            if ICEDiagnostics is not None:
+                try:
+                    ICEDiagnostics.log_sdp_details(
+                        offer_sdp_with_candidates, "client", "offer"
+                    )
+                    ICEDiagnostics.log_peer_connection_state(
+                        peer_connection, "client", "after createOffer"
+                    )
+                except Exception:
+                    pass
+
             offer_candidates = [
                 line
                 for line in offer_sdp_with_candidates.splitlines()
@@ -418,7 +656,7 @@ async def connect(
                 )
             else:
                 # Log candidates for debugging
-                for i, cand_line in enumerate[Any](offer_candidates):
+                for i, cand_line in enumerate(offer_candidates):
                     logger.warning(f"client candidate {i}: {cand_line}")
 
             # Extract and send candidates via signal service if we have them
@@ -443,8 +681,11 @@ async def connect(
                     except Exception as e:
                         logger.debug(f"client failed to queue candidate: {e}")
 
-            # Munge the SDP for sending
-            munged_offer = SDP.munge_offer(offer_sdp_with_candidates, ufrag, ice_pwd)
+            # Use SDP from createOffer() (has our ufrag/ice_pwd).
+            #  Do not munge; must match aioice.
+            _verify_ice_credentials_in_sdp(
+                offer_sdp_with_candidates, ufrag, ice_pwd, "client", "offer"
+            )
 
             if remote_addr is None:
                 raise Exception("Remote address is required for client role")
@@ -455,9 +696,10 @@ async def connect(
                 except Exception:
                     certhash = None
 
-            # Create offer description with updated SDP (includes candidates)
+            # Offer from local description
+            # (credentials set by DirectPeerConnection).
             offer_desc_with_candidates = RTCSessionDescription(
-                sdp=munged_offer, type=offer.type
+                sdp=offer_sdp_with_candidates, type=offer.type
             )
 
             if offer_handler is not None:
@@ -485,13 +727,56 @@ async def connect(
                 f"current state: {peer_connection.connectionState}, "
                 f"ICE: {peer_connection.iceConnectionState}"
             )
-            await aio_as_trio(peer_connection.setRemoteDescription(answer_desc))
+            async with bridge:
+                await aio_as_trio(peer_connection.setRemoteDescription(answer_desc))
             logger.warning(
                 f"client set remote description, connection state: "
                 f"{peer_connection.connectionState}, "
                 f"ICE: {peer_connection.iceConnectionState}, "
                 f"iceGatheringState: {peer_connection.iceGatheringState}"
             )
+            _verify_ice_credentials_in_sdp(
+                peer_connection.localDescription.sdp
+                if peer_connection.localDescription
+                else "",
+                ufrag,
+                ice_pwd,
+                "client",
+                "local after setRemoteDescription",
+            )
+            ICEConnectivityFix.prioritize_localhost_pairs(peer_connection, "client")
+
+            # Explicitly extract and add ICE candidates from answer SDP
+            # This ensures localhost candidates are properly processed
+            if ICEDiagnostics is not None:
+                try:
+                    ICEDiagnostics.log_sdp_details(answer_desc.sdp, "client", "answer")
+                except Exception:
+                    pass
+
+            candidates_added = await _ensure_ice_candidates_added(
+                peer_connection, answer_desc.sdp, bridge, "client"
+            )
+            logger.info(
+                "client added %s ICE candidates from answer SDP", candidates_added
+            )
+            try:
+                if peer_connection.sctp is not None:
+                    ice_transport = peer_connection.sctp.transport.transport
+                    gatherer = ice_transport.iceGatherer
+                    conn = gatherer._connection
+                    pairs = conn._check_list
+                    logger.warning(
+                        "client after setRemoteDescription: %s candidate pairs",
+                        len(pairs),
+                    )
+                    if len(pairs) == 0:
+                        logger.error(
+                            "client NO PAIRS FORMED - "
+                            " BUG IN AIOICE OR CANDIDATE PROCESSING"
+                        )
+            except Exception as e:
+                logger.warning("client could not check candidate pairs: %s", e)
 
             # Signal that remote description is set
             # - now we can process queued candidates
@@ -528,8 +813,40 @@ async def connect(
             # when setRemoteDescription() is called.
             # Additional candidates may arrive via signal service (trickling).
 
-            # Give ICE a moment to process the remote description and candidates
-            await trio.sleep(0.3)
+            ICEConnectivityFix.prioritize_localhost_pairs(peer_connection, "client")
+            # Wait for ICE connection after setRemoteDescription.
+            ice_success = await _wait_for_ice_connection(
+                peer_connection, "client", timeout=30.0
+            )
+
+            if not ice_success:
+                if ICEDiagnostics is not None:
+                    try:
+                        local_desc = peer_connection.localDescription
+                        remote_desc = peer_connection.remoteDescription
+                        ICEDiagnostics.analyze_ice_failure(
+                            peer_connection,
+                            "client",
+                            local_sdp=local_desc.sdp if local_desc else None,
+                            remote_sdp=remote_desc.sdp if remote_desc else None,
+                        )
+                    except Exception:
+                        pass
+                if ICEDebugger is not None:
+                    try:
+                        result = ICEDebugger.analyze_ice_credentials(
+                            peer_connection, ufrag, ice_pwd, "client"
+                        )
+                        for issue in result.get("issues", []):
+                            logger.warning("client ICE debug: %s", issue)
+                    except Exception:
+                        pass
+                raise Exception(
+                    f"ICE connection failed for client "
+                    f"(state: {peer_connection.iceConnectionState})"
+                )
+
+            logger.info("client ICE connection established successfully")
         else:
             if incoming_offer is not None:
                 offer_desc = incoming_offer
@@ -567,12 +884,25 @@ async def connect(
                 f"current state: {peer_connection.connectionState}, "
                 f" ICE: {peer_connection.iceConnectionState}"
             )
-            await aio_as_trio(peer_connection.setRemoteDescription(offer_desc))
+            async with bridge:
+                await aio_as_trio(peer_connection.setRemoteDescription(offer_desc))
             logger.warning(
                 f"server set remote description, "
                 f" connection state: {peer_connection.connectionState}, "
                 f"ICE: {peer_connection.iceConnectionState}, "
                 f"iceGatheringState: {peer_connection.iceGatheringState}"
+            )
+            if ICEDiagnostics is not None:
+                try:
+                    ICEDiagnostics.log_sdp_details(offer_desc.sdp, "server", "offer")
+                except Exception:
+                    pass
+
+            candidates_added = await _ensure_ice_candidates_added(
+                peer_connection, offer_desc.sdp, bridge, "server"
+            )
+            logger.info(
+                "server added %s ICE candidates from offer SDP", candidates_added
             )
 
             # Signal that remote description is set -
@@ -606,17 +936,39 @@ async def connect(
                             )
                 queued_remote_candidates.clear()
 
+            try:
+                if peer_connection.sctp is not None:
+                    ice_transport = peer_connection.sctp.transport.transport
+                    gatherer = ice_transport.iceGatherer
+                    conn = gatherer._connection
+                    pairs = conn._check_list
+                    logger.warning(
+                        "server after setRemoteDescription: %s candidate pairs "
+                        "(0 expected here; pairs form after createAnswer)",
+                        len(pairs),
+                    )
+                    if len(pairs) == 0:
+                        logger.debug(
+                            "server no pairs yet "
+                            "(local candidates come from createAnswer)"
+                        )
+            except Exception as e:
+                logger.warning("server could not check candidate pairs: %s", e)
+
             # Note: aiortc automatically extracts and processes ICE candidates from SDP
             # when setRemoteDescription() is called.
             # Additional candidates may arrive via signal service (trickling).
 
-            # Give ICE a moment to process the remote description and candidates
-            await trio.sleep(0.3)
+            # Give ICE time to process
+            # remote description/candidates before createAnswer.
+            await trio.sleep(2.0)
 
             logger.debug("server creating local answer")
             # Note: DirectPeerConnection.createAnswer() already
             #  sets local description internally
-            answer_desc = await peer_connection.createAnswer()
+            async with bridge:
+                answer_desc = await peer_connection.createAnswer()
+                await _ensure_sctp_loop(rtc_pc)
 
             # Wait for ICE gathering to complete AFTER answer is created
             # Check on peer_connection (DirectPeerConnection)
@@ -643,6 +995,18 @@ async def connect(
                 # Fallback: use answer SDP (might not have candidates yet)
                 answer_sdp_with_candidates = answer_desc.sdp
                 logger.warning("server localDescription None, using answer SDP")
+
+            # CRITICAL: Log SDP details using ICE diagnostics
+            if ICEDiagnostics is not None:
+                try:
+                    ICEDiagnostics.log_sdp_details(
+                        answer_sdp_with_candidates, "server", "answer"
+                    )
+                    ICEDiagnostics.log_peer_connection_state(
+                        peer_connection, "server", "after createAnswer"
+                    )
+                except Exception:
+                    pass
 
             answer_candidates = [
                 line
@@ -692,6 +1056,9 @@ async def connect(
             answer_desc = RTCSessionDescription(
                 sdp=answer_sdp_with_candidates, type=answer_desc.type
             )
+            _verify_ice_credentials_in_sdp(
+                answer_sdp_with_candidates, ufrag, ice_pwd, "server", "answer (local)"
+            )
             if answer_handler is not None:
                 await answer_handler(answer_desc, ufrag)
             elif signal_service is not None and remote_peer_id is not None:
@@ -706,6 +1073,41 @@ async def connect(
                 raise Exception(
                     "Signal service or ans_handler required for WebRTC-Direct answer"
                 )
+
+            ICEConnectivityFix.prioritize_localhost_pairs(peer_connection, "server")
+            # CRITICAL FIX: Wait specifically for ICE connection after creating answer
+            ice_success = await _wait_for_ice_connection(
+                peer_connection, "server", timeout=30.0
+            )
+
+            if not ice_success:
+                if ICEDiagnostics is not None:
+                    try:
+                        local_desc = peer_connection.localDescription
+                        remote_desc = peer_connection.remoteDescription
+                        ICEDiagnostics.analyze_ice_failure(
+                            peer_connection,
+                            "server",
+                            local_sdp=local_desc.sdp if local_desc else None,
+                            remote_sdp=remote_desc.sdp if remote_desc else None,
+                        )
+                    except Exception:
+                        pass
+                if ICEDebugger is not None:
+                    try:
+                        result = ICEDebugger.analyze_ice_credentials(
+                            peer_connection, ufrag, ice_pwd, "server"
+                        )
+                        for issue in result.get("issues", []):
+                            logger.warning("server ICE debug: %s", issue)
+                    except Exception:
+                        pass
+                raise Exception(
+                    f"ICE connection failed for server "
+                    f"(state: {peer_connection.iceConnectionState})"
+                )
+
+            logger.info("server ICE connection established successfully")
 
         # Flush ICE candidates after SDP exchange to ensure they're sent
         # Note: We've already extracted candidates from SDP above, but we also need to
@@ -806,6 +1208,16 @@ async def connect(
         await trio.sleep(0.01)
         current_state = peer_connection.connectionState
         ice_state = peer_connection.iceConnectionState
+
+        # CRITICAL: Log peer connection state using ICE diagnostics
+        if ICEDiagnostics is not None:
+            try:
+                ICEDiagnostics.log_peer_connection_state(
+                    peer_connection, role, "after setRemoteDescription"
+                )
+            except Exception:
+                pass
+
         logger.info(
             f"{role} initial peer connection state after handler setup: "
             f"{current_state}, ICE connection state: {ice_state}"
@@ -975,33 +1387,31 @@ async def connect(
                 f"Connection state: {connection_state}. Proceeding with caution..."
             )
 
+        # Ensure SCTP uses bridge's asyncio loop so call_later works.
+        async with bridge:
+            import asyncio
+
+            try:
+                aio_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                from trio_asyncio._loop import current_loop
+
+                aio_loop = current_loop.get()
+            sctp = getattr(rtc_pc, "sctp", None)
+            if aio_loop is not None and sctp is not None:
+                if getattr(sctp, "_loop", None) is None:
+                    sctp._loop = aio_loop
+
         # Now wait for handshake channel to open
-        # CRITICAL: The handshake channel must be fully open and ready
-        # before we can start the Noise handshake
+        # Use asyncio.Future + aio_as_trio so asyncio events are processed;
+        # trio.Event() would block the asyncio loop and the 'open' callback never fires.
         if handshake_channel.readyState != "open":
-            logger.debug(
-                "%s wait for handshake channel to open, starting status %s",
-                role,
-                handshake_channel.readyState,
+            from .datachannel_fix import wait_for_datachannel_open
+
+            success = await wait_for_datachannel_open(
+                handshake_channel, role, timeout=30.0
             )
-            # Wait for the 'open' event or signal cancellation
-            open_event = trio.Event()
-
-            def on_open() -> None:
-                logger.debug(f"{role} handshake channel opened event received")
-                open_event.set()
-
-            handshake_channel.on("open", on_open)
-            # Check if already open
-            # (might have opened while we were waiting for conn)
-            if handshake_channel.readyState == "open":
-                logger.debug(f"{role} handshake channel already open")
-                open_event.set()
-            else:
-                logger.debug(f"{role} waiting for handshake channel to open...")
-                with trio.move_on_after(30):  # 30s timeout
-                    await open_event.wait()
-            if handshake_channel.readyState != "open":
+            if not success:
                 raise Exception(
                     f"Handshake data channel did not open in time "
                     f"(state: {handshake_channel.readyState}, "
@@ -1009,7 +1419,6 @@ async def connect(
                     f"ICE state: {peer_connection.iceConnectionState})"
                 )
 
-        # Verify channel is open
         if handshake_channel.readyState != "open":
             raise Exception(
                 f"Handshake channel not open (state: {handshake_channel.readyState})"
@@ -1017,40 +1426,44 @@ async def connect(
 
         logger.debug("%s handshake channel opened", role)
 
-        # CRITICAL: Extract remote_peer_id IMMEDIATELY after channel opens
-        # This is needed to create WebRTCRawConnection early
-        # so handlers are registered before any handshake data exchange begins
-        if remote_peer_id is None and remote_addr is not None:
-            try:
-                peer_id_str = remote_addr.value_for_protocol("p2p")
-                if peer_id_str:
-                    remote_peer_id = ID.from_base58(peer_id_str)
-            except Exception:
-                remote_peer_id = None
+        # CRITICAL: Update remote_peer_id if it was None initially
+        # (Connection was created early with temporary ID)
+        if remote_peer_id is None or remote_peer_id == ID(b""):
+            if remote_addr is not None:
+                try:
+                    peer_id_str = remote_addr.value_for_protocol("p2p")
+                    if peer_id_str:
+                        remote_peer_id = ID.from_base58(peer_id_str)
+                        # Update connection's peer_id
+                        raw_connection.peer_id = remote_peer_id
+                        raw_connection.remote_peer_id = remote_peer_id
+                except Exception:
+                    pass
 
-        if remote_peer_id is None:
+        if remote_peer_id is None or remote_peer_id == ID(b""):
             raise Exception("Remote peer ID could not be determined for WebRTC-Direct")
 
-        # CRITICAL: Create WebRTCRawConnection IMMEDIATELY after channel opens
-        # This registers message handlers early,
-        # createStream (which sets up handlers) happens immediately after channel opens
-        rtc_pc = peer_connection.peer_connection
-
         logger.info(
-            f"{role} creating WebRTCRawConn IMMEDIATELY after channel opens "
+            f"{role} using WebRTCRawConnection created early "
             f"(channel state: {handshake_channel.readyState}, "
             f"connection state: {peer_connection.connectionState})"
         )
 
-        raw_connection = WebRTCRawConnection(
-            remote_peer_id,
-            rtc_pc,
-            handshake_channel,
-            is_initiator=(role == "client"),
-            incoming_message_buffer=message_buffer_recv,
-        )
+        # Data pump already running in __init__; wait for ready.
+        logger.info("%s Data pump running, waiting ready for %s", role, remote_peer_id)
+        with trio.move_on_after(1.0) as timeout_scope:
+            await raw_connection._buffer_consumer_ready.wait()
 
-        logger.info(f"{role} WebRTCRawConnection created successfully")
+        if timeout_scope.cancelled_caught:
+            logger.warning(
+                f"{role} Data pump ready timeout for {remote_peer_id} - "
+                "proceeding anyway (pump may still be starting)"
+            )
+        else:
+            logger.info(
+                f"{role} ✅ Data pump is ready for {remote_peer_id} - "
+                "messages will flow correctly"
+            )
 
         # Mark handshake as in progress IMMEDIATELY after creating connection
         # This prevents the data channel's on_close handler from closing the connection
@@ -1296,6 +1709,8 @@ async def connect(
                         )
 
                 async def perform_handshake() -> ISecureConn:
+                    # - client waits for server to initiate Noise (secure_inbound)
+                    # - server initiates Noise (secure_outbound)
                     if role == "client":
                         logger.info(
                             f"{role} calling secure_inbound "
@@ -1304,16 +1719,18 @@ async def connect(
                         secure_conn = await transport.secure_inbound(raw_connection)
                         logger.info(f"{role} secure_inbound completed successfully")
                         return secure_conn
-                    else:
-                        logger.info(
-                            f"{role} calling secure_outbound (initiating handshake)... "
-                            f"remote_peer_id: {remote_peer_id}"
-                        )
-                        secure_conn = await transport.secure_outbound(
-                            raw_connection, remote_peer_id
-                        )
-                        logger.info(f"{role} secure_outbound completed successfully")
-                        return secure_conn
+
+                    if remote_peer_id is None:
+                        raise Exception("Server missing remote_peer_id for Noise")
+                    logger.info(
+                        f"{role} calling secure_outbound (initiating handshake)... "
+                        f"remote_peer_id: {remote_peer_id}"
+                    )
+                    secure_conn = await transport.secure_outbound(
+                        raw_connection, remote_peer_id
+                    )
+                    logger.info(f"{role} secure_outbound completed successfully")
+                    return secure_conn
 
                 # Run handshake and failure watcher concurrently - abort early
                 # if channel closes
@@ -1322,11 +1739,66 @@ async def connect(
                     secure_conn = await perform_handshake()
                     handshake_nursery.cancel_scope.cancel()
 
+                # CRITICAL: In WebRTC-Direct we may initiate Noise from the listener
+                # side to match js-libp2p behavior, but muxer negotiation must still
+                # follow connection direction (dialer initiates, listener responds).
+                try:
+                    secure_conn.is_initiator = raw_connection.is_initiator  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                # Attach the underlying aiortc peer connection for upgrade fencing.
+                # This lets the transport defer RTCPeerConnection.close() while muxer
+                # negotiation is in progress.
+                try:
+                    setattr(secure_conn, "_webrtc_peer_connection", rtc_pc)
+                except Exception:
+                    pass
+                sec_init = getattr(secure_conn, "is_initiator", None)
+                logger.info(
+                    "%s initiator: raw=%s secure=%s",
+                    role,
+                    raw_connection.is_initiator,
+                    sec_init,
+                )
+
                 # Mark handshake as complete
                 raw_connection._handshake_in_progress = False
                 raw_connection._handshake_failure_event = None
+
+                # Pattern B: register upgrade before unregister handshake (overlap).
+                register_upgrade(peer_connection)
+                logger.debug(
+                    f"{role} Registered upgrade protection (overlaps with handshake)"
+                )
+
+                # 2. Unregister handshake (upgrade protection now active)
                 unregister_handshake(peer_connection)
-                logger.info(f"{role} Noise handshake completed successfully")
+                logger.info(
+                    f"{role} Noise handshake completed, upgrade protection active"
+                )
+
+                # Validate secure_conn.write() uses real DataChannel
+                # (Noise wired to raw).
+                logger.debug(
+                    f"{role} Validating secure_conn.write() uses real DataChannel..."
+                )
+                try:
+                    test_ping = b"PING\n"
+                    await secure_conn.write(test_ping)
+                    logger.info(
+                        "%s secure_conn.write() OK - transport validation passed",
+                        role,
+                    )
+                except Exception as write_test_exc:
+                    logger.error(
+                        f"❌ {role} secure_conn.write() FAILED: {write_test_exc}",
+                        exc_info=True,
+                    )
+                    # This indicates Noise is not properly wired to the DataChannel
+                    raise RuntimeError(
+                        "Transport validation failed: secure_conn.write() %s"
+                        % write_test_exc
+                    ) from write_test_exc
             except Exception as handshake_error:
                 # Mark handshake as no longer in progress
                 raw_connection._handshake_in_progress = False
@@ -1367,20 +1839,36 @@ async def connect(
 
     except Exception as e:
         logger.error("%s noise handshake failed: %s", role, e, exc_info=True)
+
+        # CRITICAL: Log ICE failure analysis if connection failed
+        if ICEDiagnostics is not None:
+            try:
+                local_desc = peer_connection.localDescription
+                remote_desc = peer_connection.remoteDescription
+                ICEDiagnostics.analyze_ice_failure(
+                    peer_connection,
+                    role,
+                    local_sdp=local_desc.sdp if local_desc else None,
+                    remote_sdp=remote_desc.sdp if remote_desc else None,
+                )
+            except Exception:
+                pass
+
         # Provide more context about the failure
         if hasattr(e, "__cause__") and e.__cause__:
             logger.error(
                 "%s handshake failure cause: %s", role, e.__cause__, exc_info=True
             )
+            # On failure, connection cleanup will handle channel closure
         raise
     finally:
-        # Close message buffer send side (receive side closed by WebRTCRawConnection)
-        # This signals the buffer consumer to stop
-        try:
-            await message_buffer_send.aclose()
-            logger.debug(f"{role} closed message buffer send side")
-        except Exception as e:
-            logger.debug(f"{role} error closing message buffer: {e}")
+        # Connection now owns its inbound channel, so no cleanup needed here
+        # The connection will handle channel closure when it's closed
+
+        # We can detect success by checking if we are about to return successfully
+        # But in a finally block, that's hard.
+        # Instead, we rely on the fact that if we didn't raise, we succeeded.
+        pass
 
         if signal_service is not None and cleanup_handlers:
             for msg_type, handler in cleanup_handlers:

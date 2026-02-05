@@ -11,13 +11,11 @@ from aiortc.rtcicetransport import candidate_from_aioice
 from multiaddr import Multiaddr
 import trio
 import trio.socket
-from trio_asyncio import open_loop
 
 from libp2p.abc import IHost, IListener
 from libp2p.peer.id import ID
 from libp2p.transport.webrtc.async_bridge import get_webrtc_bridge
 
-from ..constants import WebRTCError
 from .connect import connect
 from .direct_rtc_connection import DirectPeerConnection
 from .gen_certificate import WebRTCCertificate
@@ -63,11 +61,14 @@ class PendingSession:
     finalized: bool = False
     finalizing: bool = False
     queued_remote_candidates: list[dict[str, Any]] | None = None
+    mux_server: UDPMuxServer | None = None
 
 
 UDP_MUX_LISTENERS: list[UDPMuxServer] = []
 UDP_BUFFER_SIZE = 2048
 PUNCH_MESSAGE_TYPE = "punch"
+OFFER_MESSAGE_TYPE = "offer"
+ANSWER_MESSAGE_TYPE = "answer"
 
 
 class WebRTCDirectListener(IListener):
@@ -328,7 +329,8 @@ class WebRTCDirectListener(IListener):
             )
             return
 
-        if message.get("type") != PUNCH_MESSAGE_TYPE:
+        msg_type = message.get("type")
+        if msg_type not in (PUNCH_MESSAGE_TYPE, OFFER_MESSAGE_TYPE):
             return
 
         ufrag = message.get("ufrag")
@@ -342,14 +344,32 @@ class WebRTCDirectListener(IListener):
         if session is None:
             session = PendingSession(ufrag=ufrag)
             self.sessions[ufrag] = session
+        session.mux_server = mux_server
 
-        session.remote_info = {
-            "peer_id": message.get("peer_id"),
-            "certhash": message.get("certhash"),
-            "fingerprint": message.get("fingerprint"),
-        }
-        session.remote_host = remote_host
-        session.remote_port = remote_port
+        if msg_type == PUNCH_MESSAGE_TYPE:
+            session.remote_info = {
+                "peer_id": message.get("peer_id"),
+                "certhash": message.get("certhash"),
+                "fingerprint": message.get("fingerprint"),
+            }
+            session.remote_host = remote_host
+            session.remote_port = remote_port
+            await self.incoming_connection(ufrag)
+            return
+
+        # OFFER_MESSAGE_TYPE
+        try:
+            session.offer = RTCSessionDescription(
+                sdp=message.get("sdp", ""),
+                type=message.get("sdpType", "offer"),
+            )
+        except Exception as exc:
+            logger.debug("Failed to parse UDP offer for session %s: %s", ufrag, exc)
+            return
+
+        # Ensure ice_pwd matches the ufrag for WebRTC-Direct session correlation.
+        if session.ice_pwd is None:
+            session.ice_pwd = session.ufrag
 
         await self.incoming_connection(ufrag)
 
@@ -368,7 +388,7 @@ class WebRTCDirectListener(IListener):
         if session.peer_connection is None:
             logger.info("Create peer connection for session %s", ufrag)
             if session.ice_pwd is None:
-                _, session.ice_pwd = generate_ice_credentials()
+                session.ice_pwd = session.ufrag
             session.peer_connection = (
                 await DirectPeerConnection.create_dialer_rtc_peer_connection(
                     role="server",
@@ -655,21 +675,32 @@ class WebRTCDirectListener(IListener):
         ):
             return
 
-        signal_service = self.transport.signal_service
-        if signal_service is None:
-            raise WebRTCError("Signal service not available for WebRTC-Direct listener")
+        mux_server = session.mux_server
+        if (
+            mux_server is None
+            or session.remote_host is None
+            or session.remote_port is None
+        ):
+            logger.debug(
+                "Session %s missing UDP mux server or remote endpoint", session.ufrag
+            )
+            return
 
         session.finalizing = True
 
         async def send_answer(
             answer_desc: RTCSessionDescription, handler_ufrag: str
         ) -> None:
-            await signal_service.send_answer(
-                session.remote_peer_id,
-                answer_desc.sdp,
-                answer_desc.type,
-                session.certhash or "",
-                extra={"ufrag": handler_ufrag},
+            payload = {
+                "type": ANSWER_MESSAGE_TYPE,
+                "ufrag": handler_ufrag,
+                "sdp": answer_desc.sdp,
+                "sdpType": answer_desc.type,
+                "certhash": session.certhash or "",
+            }
+            await mux_server.socket.sendto(
+                json.dumps(payload).encode("utf-8"),
+                (session.remote_host, session.remote_port),
             )
 
         try:
@@ -678,7 +709,11 @@ class WebRTCDirectListener(IListener):
                 swarm.upgrader.security_multistream if swarm is not None else None
             )
 
-            async with open_loop():
+            # CRITICAL FIX: Use bridge context for WebRTC operations, but keep it open
+            # for the entire connection lifecycle (connect, Noise, muxer negotiation)
+            # The bridge manages the asyncio loop lifecycle properly
+            bridge = get_webrtc_bridge()
+            async with bridge:
                 connection, _ = await connect(
                     session.peer_connection,
                     session.ufrag,
@@ -689,19 +724,18 @@ class WebRTCDirectListener(IListener):
                     incoming_offer=session.offer,
                     certhash=session.certhash,
                     answer_handler=send_answer,
-                    signal_service=signal_service,
+                    signal_service=None,
                     security_multistream=security_multistream,
                 )
 
-            # Process any queued remote candidates before connect() was called
-            if session.queued_remote_candidates:
-                logger.debug(
-                    "Processing %d queued remote candidates for session %s",
-                    len(session.queued_remote_candidates),
-                    session.ufrag,
-                )
-                bridge = get_webrtc_bridge()
-                async with bridge:
+                # Process any queued remote candidates before connect() was called
+                if session.queued_remote_candidates:
+                    logger.debug(
+                        "Processing %d queued remote candidates for session %s",
+                        len(session.queued_remote_candidates),
+                        session.ufrag,
+                    )
+                    # Bridge is already open in the outer context
                     for queued_msg in session.queued_remote_candidates:
                         candidate_payload = queued_msg.get("candidate")
                         if candidate_payload is None:
@@ -728,93 +762,138 @@ class WebRTCDirectListener(IListener):
                                     e,
                                     exc_info=True,
                                 )
-                session.queued_remote_candidates.clear()
+                    session.queued_remote_candidates.clear()
 
-            connection_any = cast(Any, connection)
+                connection_any = cast(Any, connection)
 
-            actual_certhash = None
-            remote_fingerprint = getattr(connection_any, "remote_fingerprint", None)
-            if remote_fingerprint:
-                try:
-                    actual_certhash = fingerprint_to_certhash(remote_fingerprint)
-                except Exception:
-                    actual_certhash = None
-            elif hasattr(session.peer_connection, "remoteFingerprint"):
-                try:
-                    fp_obj = session.peer_connection.remoteFingerprint()
-                except Exception:
-                    fp_obj = None
-                if fp_obj and fp_obj.value:
-                    remote_fingerprint = f"{fp_obj.algorithm} {fp_obj.value.upper()}"
-                    setattr(connection_any, "remote_fingerprint", remote_fingerprint)
+                actual_certhash = None
+                remote_fingerprint = getattr(connection_any, "remote_fingerprint", None)
+                if remote_fingerprint:
                     try:
                         actual_certhash = fingerprint_to_certhash(remote_fingerprint)
                     except Exception:
                         actual_certhash = None
+                elif hasattr(session.peer_connection, "remoteFingerprint"):
+                    try:
+                        fp_obj = session.peer_connection.remoteFingerprint()
+                    except Exception:
+                        fp_obj = None
+                    if fp_obj and fp_obj.value:
+                        remote_fingerprint = (
+                            f"{fp_obj.algorithm} {fp_obj.value.upper()}"
+                        )
+                        setattr(
+                            connection_any, "remote_fingerprint", remote_fingerprint
+                        )
+                        try:
+                            actual_certhash = fingerprint_to_certhash(
+                                remote_fingerprint
+                            )
+                        except Exception:
+                            actual_certhash = None
 
-            expected_certhash = session.certhash
-            if expected_certhash and actual_certhash:
-                if expected_certhash != actual_certhash:
-                    logger.warning(
-                        "Rejecting WebRTC-Direct conn due to certhash mismatch",
-                        session.ufrag,
-                    )
-                    await connection.close()
-                    return
+                expected_certhash = session.certhash
+                if expected_certhash and actual_certhash:
+                    if expected_certhash != actual_certhash:
+                        logger.warning(
+                            "Rejecting WebRTC-Direct conn due to certhash mismatch",
+                            session.ufrag,
+                        )
+                        await connection.close()
+                        return
 
-            if actual_certhash is None:
-                actual_certhash = expected_certhash
+                if actual_certhash is None:
+                    actual_certhash = expected_certhash
 
-            canonical_remote = (
-                canonicalize_certhash(session.client_multiaddr, actual_certhash)
-                if actual_certhash
-                else session.client_multiaddr
-            )
-            setattr(connection_any, "remote_multiaddr", canonical_remote)
+                canonical_remote = (
+                    canonicalize_certhash(session.client_multiaddr, actual_certhash)
+                    if actual_certhash
+                    else session.client_multiaddr
+                )
+                setattr(connection_any, "remote_multiaddr", canonical_remote)
 
-            if self._listen_addrs:
-                setattr(connection_any, "local_multiaddr", self._listen_addrs[0])
+                if self._listen_addrs:
+                    setattr(connection_any, "local_multiaddr", self._listen_addrs[0])
 
-            if getattr(connection_any, "local_fingerprint", None) is None:
-                setattr(connection_any, "local_fingerprint", self.cert.fingerprint)
+                if getattr(connection_any, "local_fingerprint", None) is None:
+                    setattr(connection_any, "local_fingerprint", self.cert.fingerprint)
 
-            fingerprint_hint = (
-                session.remote_info.get("fingerprint") if session.remote_info else None
-            )
-            if (
-                fingerprint_hint
-                and getattr(connection_any, "remote_fingerprint", None) is None
-            ):
-                setattr(connection_any, "remote_fingerprint", fingerprint_hint)
+                fingerprint_hint = (
+                    session.remote_info.get("fingerprint")
+                    if session.remote_info
+                    else None
+                )
+                if (
+                    fingerprint_hint
+                    and getattr(connection_any, "remote_fingerprint", None) is None
+                ):
+                    setattr(connection_any, "remote_fingerprint", fingerprint_hint)
 
-            if getattr(connection_any, "remote_peer_id", None) is None:
-                setattr(connection_any, "remote_peer_id", session.remote_peer_id)
+                if getattr(connection_any, "remote_peer_id", None) is None:
+                    setattr(connection_any, "remote_peer_id", session.remote_peer_id)
 
-            if (
-                self.transport.host is not None
-                and canonical_remote is not None
-                and session.remote_peer_id is not None
-            ):
+                if (
+                    self.transport.host is not None
+                    and canonical_remote is not None
+                    and session.remote_peer_id is not None
+                ):
+                    try:
+                        self.transport.host.get_peerstore().add_addrs(
+                            session.remote_peer_id,
+                            [canonical_remote],
+                            3600,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Failed to cache remote WebRTC-Direct address for %s",
+                            session.remote_peer_id,
+                        )
+
+                print(
+                    f"[LISTENER] About to call register_incoming_connection() "
+                    f"for {session.remote_peer_id}"
+                )
+                print(
+                    f"[LISTENER] connection type: {type(connection).__name__}, "
+                    f"is_initiator={getattr(connection, 'is_initiator', None)}"
+                )
+                print(
+                    f"[LISTENER] connection has conn attr: "
+                    f"{hasattr(connection, 'conn')}"
+                )
+                if hasattr(connection, "conn"):
+                    conn_wrapper = connection.conn
+                    print(f"[LISTENER] conn.conn  type: {type(conn_wrapper).__name__}")
+                    if hasattr(conn_wrapper, "read_writer"):
+                        read_writer = conn_wrapper.read_writer
+                        print(
+                            f"[LISTENER] conn.conn.read_writer "
+                            f" type: {type(read_writer).__name__}"
+                        )
+
                 try:
-                    self.transport.host.get_peerstore().add_addrs(
-                        session.remote_peer_id,
-                        [canonical_remote],
-                        3600,
+                    await self.transport.register_incoming_connection(connection)
+                    print(
+                        f"[LISTENER] register_incoming_connection() completed "
+                        f"for {session.remote_peer_id}"
                     )
-                except Exception:
-                    logger.debug(
-                        "Failed to cache remote WebRTC-Direct address for %s",
-                        session.remote_peer_id,
+                except Exception as reg_exc:
+                    print(
+                        "[LISTENER] register_incoming_connection() FAILED: %s", reg_exc
                     )
-
-            await self.transport.register_incoming_connection(connection)
-            logger.info(
-                "WebRTC-Direct incoming connection established with %s",
-                session.remote_peer_id,
-            )
-            await signal_service.flush_local_ice(session.remote_peer_id)
-            await signal_service.flush_ice_candidates(session.remote_peer_id)
-            session.finalized = True
+                    logger.error(
+                        "Listener failed to register incoming connection: %s",
+                        reg_exc,
+                        exc_info=True,
+                    )
+                    raise
+                logger.info(
+                    "WebRTC-Direct incoming connection established with %s",
+                    session.remote_peer_id,
+                )
+                session.finalized = True
+            # Bridge context exits here, after connection is fully established
+            # The connection's asyncio loop will remain active for its lifetime
         except Exception as exc:
             session.finalized = False
             session.finalizing = False

@@ -506,7 +506,8 @@ async def handle_incoming_stream(
             f"conn_state: {peer_connection.connectionState})"
         )
 
-        # CRITICAL: Verify connection is still stable after creating WebRTCRawConnection
+        # CRITICAL: Verify connection is still stable
+        #  after creating WebRTCRawConnection
         # Sometimes the connection can close during setup
         await trio.sleep(0.1)
 

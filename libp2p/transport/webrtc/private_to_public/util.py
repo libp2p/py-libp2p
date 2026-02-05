@@ -1,6 +1,5 @@
 import base64
 from collections.abc import ByteString
-import hashlib
 import logging
 import random
 import re
@@ -61,6 +60,19 @@ class SDP:
                 new_lines.append(line)
 
         return "".join(new_lines)
+
+    @staticmethod
+    def get_ice_credentials_from_sdp(sdp: str | None) -> tuple[str | None, str | None]:
+        """Extract ice-ufrag and ice-pwd from SDP. Returns (ufrag, ice_pwd)."""
+        if not sdp:
+            return None, None
+        ufrag, ice_pwd = None, None
+        for line in sdp.splitlines():
+            if line.startswith("a=ice-ufrag:"):
+                ufrag = line.split(":", 1)[1].strip()
+            elif line.startswith("a=ice-pwd:"):
+                ice_pwd = line.split(":", 1)[1].strip()
+        return ufrag, ice_pwd
 
     @staticmethod
     def get_fingerprint_from_sdp(sdp: str | None) -> str | None:
@@ -548,17 +560,21 @@ def generate_ice_credentials(
     ufrag_length: int = 16, pwd_length: int = 32
 ) -> tuple[str, str]:
     """
-    Generate a random ICE username fragment and password per RFC 8445.
+    Generate ICE username fragment and password.
+
+    For WebRTC-Direct (browser-to-server style), we use the same value for ufrag and
+    password to allow the listener side to correlate the session without requiring an
+    out-of-band signaling channel.
 
     The ICE password MUST be between 22 and 256 characters. The ufrag must be at least 4
-    characters. We default to longer values to reduce collision risk.
+    characters.
     """
-    if pwd_length < 22:
-        raise ValueError("ICE password length must be at least 22 characters")
-    ufrag = generate_ufrag(ufrag_length)
-    alphabet = ICE_ALLOWED_CHARS
-    ice_pwd = "".join(random.choices(alphabet, k=pwd_length))
-    return ufrag, ice_pwd
+    prefix = "libp2p+webrtc+v1/"
+    # Ensure we satisfy RFC 8445 minimum password length.
+    target_len = max(ufrag_length, pwd_length, 22)
+    suffix_len = max(target_len - len(prefix), 4)
+    ufrag = prefix + generate_ufrag(suffix_len)
+    return ufrag, ufrag
 
 
 def is_localhost_address(ip: str) -> bool:
@@ -668,13 +684,15 @@ def generate_noise_prologue(
     hex_part = hex_part.replace(":", "").replace(" ", "")
     local_fp_bytes = bytes.fromhex(hex_part)
 
-    # Create multihash digest: SHA256 of local fingerprint bytes
-    # js-libp2p returns local.bytes which is the FULL multihash
-    local_digest_raw = hashlib.sha256(local_fp_bytes).digest()
-    # Create full multihash bytes: code (0x12 for sha-256) + length (32) + digest
-    local_multihash = (
-        bytes([0x12, 0x20]) + local_digest_raw
-    )  # sha-256 code + 32-byte length + digest
+    # The DTLS fingerprint value is already a hash digest of the certificate.
+    # For the Noise prologue, we need the multihash framing (code + length + digest)
+    # around that digest - we MUST NOT hash it again.
+    if len(local_fp_bytes) != 32:
+        raise ValueError(
+            f"Unsupported local fingerprint length: {len(local_fp_bytes)} bytes"
+        )
+    # sha2-256 multihash framing: code 0x12, length 0x20 (32 bytes)
+    local_multihash = bytes([0x12, 0x20]) + local_fp_bytes
 
     # Extract remote certhash and decode to get FULL multihash bytes
     # This matches js-libp2p: sdp.multibaseDecoder.decode(sdp.certhash(remoteAddr))

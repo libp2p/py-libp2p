@@ -21,8 +21,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import Any, cast
 
 from multiaddr import Multiaddr
 import trio
@@ -66,7 +67,7 @@ DEFAULT_RELAY_LIMITS = RelayLimits(
 )
 
 
-def store_relay_addrs(peer_id: ID, addrs: list[Multiaddr], peerstore) -> None:
+def store_relay_addrs(peer_id: ID, addrs: list[Multiaddr], peerstore: Any) -> None:
     """Normalize relay addresses before storing them in the peerstore."""
     if not addrs:
         return
@@ -121,7 +122,7 @@ async def echo_stream_handler(stream: ReadWriteCloser) -> None:
 
 
 @asynccontextmanager
-async def setup_relay_server():
+async def setup_relay_server() -> AsyncGenerator[Any, None]:
     """
     Set up a Circuit Relay v2 server.
 
@@ -166,7 +167,7 @@ async def setup_relay_server():
 
 
 @asynccontextmanager
-async def setup_nat_peer(relay_host, peer_name: str):
+async def setup_nat_peer(relay_host: Any, peer_name: str) -> AsyncGenerator[Any, None]:
     """
     Set up a NAT peer that connects to the relay (equivalent to browser client).
 
@@ -226,7 +227,7 @@ async def setup_nat_peer(relay_host, peer_name: str):
         yield nat_peer
 
 
-async def test_webrtc_private_to_private():
+async def test_webrtc_private_to_private() -> None:
     """
     Main test function demonstrating WebRTC pvt-to-pvt connection:
     1. Start relay server
@@ -421,10 +422,12 @@ async def test_webrtc_private_to_private():
                             await stream.write(msg)
 
                             received = await stream.read(len(msg))
+                            exp_s = msg.decode("utf-8", errors="replace")
+                            got_s = received.decode("utf-8", errors="replace")
                             assert received == msg, (
-                                f"Data mismatch: expected {msg}, got {received}"
+                                f"Data mismatch: expected {exp_s!r}, got {got_s!r}"
                             )
-                            logger.info(f"📥 Received echo: {received.decode('utf-8')}")
+                            logger.info("Received echo: %s", received.decode("utf-8"))
                             logger.info("")
 
                         logger.info("🧹 Cleaning up...")
@@ -454,7 +457,7 @@ async def test_webrtc_private_to_private():
         logger.info("✅ Cleanup complete")
 
 
-async def main():
+async def main() -> None:
     """Main entry point."""
     try:
         await test_webrtc_private_to_private()

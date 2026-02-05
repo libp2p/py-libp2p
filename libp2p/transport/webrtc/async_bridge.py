@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 import logging
 from typing import (
     Any,
@@ -17,10 +18,15 @@ from trio_asyncio import (
     aio_as_trio,
     open_loop,
 )
+from trio_asyncio._loop import current_loop
 
 logger = logging.getLogger("libp2p.transport.webrtc.async_bridge")
 
 T = TypeVar("T")
+
+_BRIDGE_TOKEN_STACK: ContextVar[list[Any] | None] = ContextVar(
+    "webrtc_bridge_loop_tokens", default=None
+)
 
 
 class WebRTCAsyncBridge:
@@ -32,23 +38,41 @@ class WebRTCAsyncBridge:
 
     def __init__(self) -> None:
         self._loop_context: AsyncContextManager[Any] | None = None
-        self._in_context = False
+        self._context_refcount = 0
+        self._loop: Any = None
 
     async def __aenter__(self) -> "WebRTCAsyncBridge":
-        """Enter async context manager"""
-        if not self._in_context:
+        """
+        Enter async context manager
+        (refcounted so loop stays open across nested with).
+        """
+        if self._context_refcount == 0:
             self._loop_context = open_loop()
             if self._loop_context:
-                await self._loop_context.__aenter__()
-            self._in_context = True
+                self._loop = await self._loop_context.__aenter__()
+        self._context_refcount += 1
+        if self._context_refcount > 1 and self._loop is not None:
+            token = current_loop.set(self._loop)
+            stack = list(_BRIDGE_TOKEN_STACK.get() or [])
+            stack.append(token)
+            _BRIDGE_TOKEN_STACK.set(stack)
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        """Exit async context manager"""
-        if self._in_context and self._loop_context is not None:
+        """Exit async context manager; close loop only when refcount reaches 0."""
+        if self._context_refcount <= 0:
+            return
+        if self._context_refcount > 1:
+            stack = list(_BRIDGE_TOKEN_STACK.get() or [])
+            if stack:
+                token = stack.pop()
+                current_loop.reset(token)
+                _BRIDGE_TOKEN_STACK.set(stack)
+        self._context_refcount -= 1
+        if self._context_refcount == 0 and self._loop_context is not None:
             await self._loop_context.__aexit__(exc_type, exc_val, exc_tb)
-            self._in_context = False
             self._loop_context = None
+            self._loop = None
 
     async def create_peer_connection(
         self, config: RTCConfiguration

@@ -40,7 +40,7 @@ class WebRTCStream(INetStream):
         self.muxed_conn = cast(IMuxedConn, connection)
 
         channels: tuple[MemorySendChannel[bytes], MemoryReceiveChannel[bytes]] = (
-            trio.open_memory_channel(100)
+            trio.open_memory_channel(1000)
         )
         self.send_channel: MemorySendChannel[bytes] = channels[0]
         self.receive_channel: MemoryReceiveChannel[bytes] = channels[1]
@@ -159,18 +159,17 @@ class WebRTCRawConnection(IRawConnection):
         self.send_channel: MemorySendChannel[bytes] = channels[0]
         self.receive_channel: MemoryReceiveChannel[bytes] = channels[1]
 
-        # CRITICAL: Use provided message buffer if available (from early handler)
-        # Otherwise create our own (for backward compatibility)
-        # The early handler buffers messages immediately, preventing loss
+        # CRITICAL FIX: The connection now OWNS its inbound pipe.
+        inbound_channels: tuple[
+            MemorySendChannel[bytes], MemoryReceiveChannel[bytes]
+        ] = trio.open_memory_channel(1000)
+        self._inbound_send_channel: MemorySendChannel[bytes] = inbound_channels[0]
+        self._inbound_recv_channel: MemoryReceiveChannel[bytes] = inbound_channels[1]
+
+        # If an early buffer was provided, we'll drain it
         self._incoming_message_buffer: MemoryReceiveChannel[bytes] | None = (
             incoming_message_buffer
         )
-        if self._incoming_message_buffer is None:
-            # No buffer provided - we'll register our own handler (legacy mode)
-            logger.warning(
-                f"No incoming message buffer provided for {peer_id} - "
-                "using legacy handler registration (messages may be lost)"
-            )
 
         # Read buffer for partial reads (required for read(n) to return exactly n bytes)
         self._read_buffer = b""
@@ -191,6 +190,15 @@ class WebRTCRawConnection(IRawConnection):
         # Track handshake failure event for early abort
         self._handshake_failure_event: trio.Event | None = None
 
+        # CRITICAL: Single ownership barrier - libp2p controls connection lifecycle
+        # This event is set ONLY after:
+        # 1. muxer negotiation finished
+        # 2. Noise session established
+        # 3. swarm.add_conn(conn) returned successfully
+        # All WebRTC close paths must wait on this event, not check booleans.
+        # Waiting removes race conditions that checking creates.
+        self.libp2p_owner_ready = trio.Event()
+
         # Store trio token for async callback handling
         try:
             self._trio_token: Any | None = trio.lowlevel.current_trio_token()
@@ -202,14 +210,22 @@ class WebRTCRawConnection(IRawConnection):
         # Async bridge for WebRTC operations
         self._bridge = WebRTCAsyncBridge()
 
-        # Track buffer consumer task
-        self._buffer_consumer_task: trio.Nursery | None = None
+        # Event to signal when buffer consumer is ready
+        self._buffer_consumer_ready = trio.Event()
+
+        # Start data pump immediately so handshake can run
+        try:
+            trio.lowlevel.spawn_system_task(self._data_pump_task)
+            logger.info(f"🔵 Started data pump immediately for {peer_id}")
+        except Exception as e:
+            logger.error(f"Failed to start data pump: {e}", exc_info=True)
+            # Still signal ready to avoid deadlock
+            self._buffer_consumer_ready.set()
 
         # Setup channel event handlers with proper async bridging
         logger.info(
             f"Setting up channel handlers for WebRTC connection to {peer_id} "
-            f"(channel state: {data_channel.readyState}, "
-            f"has_buffer: {self._incoming_message_buffer is not None})"
+            f"(channel state: {data_channel.readyState})"
         )
         self._setup_channel_handlers()
 
@@ -267,17 +283,47 @@ class WebRTCRawConnection(IRawConnection):
         def _deliver_raw_message(data: bytes) -> None:
             """Deliver incoming raw message to send_channel"""
             try:
-                self.send_channel.send_nowait(data)
-                logger.debug(f"Delivered {len(data)} bytes to send_channel")
+                trio.lowlevel.current_task()
+                is_in_trio = True
+            except RuntimeError:
+                is_in_trio = False
+            try:
+                if is_in_trio:
+                    # We are in Trio (e.g. buffer consumer task),
+                    # call directly
+                    self.send_channel.send_nowait(data)
+                elif self._trio_token:
+                    # We are in asyncio thread, use bridge
+                    # Use from_thread.run_sync for safety when in asyncio callback
+                    try:
+                        trio.from_thread.run_sync(
+                            self.send_channel.send_nowait,
+                            data,
+                            trio_token=self._trio_token,
+                        )
+                    except Exception:
+                        # Fallback: send_nowait should be thread-safe anyway
+                        self.send_channel.send_nowait(data)
+                else:
+                    # No trio token - send_nowait should still work (it's thread-safe)
+                    self.send_channel.send_nowait(data)
+                logger.debug("Delivered %d bytes to send_channel", len(data))
             except trio.WouldBlock:
-                logger.warning("Message dropped - send_channel full!")
+                logger.error(
+                    "CHANNEL FULL - Message dropped (%d bytes)! "
+                    "This blocks multistream handshake!",
+                    len(data),
+                )
+                raise
             except trio.ClosedResourceError:
-                logger.debug("send_channel closed, message dropped")
+                logger.error("CHANNEL CLOSED - Cannot deliver message")
+                raise
             except Exception as e:
                 logger.error(
                     f"Failed to deliver raw message to send_channel: {e}",
                     exc_info=True,
                 )
+                raise
 
         def _deliver_stream_message(stream: "WebRTCStream", data: bytes) -> None:
             """Deliver incoming stream message to stream's send_channel"""
@@ -295,63 +341,47 @@ class WebRTCRawConnection(IRawConnection):
             except trio.ClosedResourceError:
                 logger.debug(f"Stream {stream.stream_id} send_channel closed")
 
-        def on_message(message: Any) -> None:
-            """Handle incoming message from WebRTC data channel"""
-            if self._closed:
-                logger.debug("Connection is closed, ignoring message")
+        def _process_inbound_payload(data: bytes) -> None:
+            """
+            Centralized logic to process inbound data from ANY source
+            (direct callback or buffer consumer).
+            Handles metrics, deduplication, JSON-muxing check, and delivery.
+            """
+            if not data:
                 return
 
-            try:
-                # aiortc may pass the data directly as bytes,
-                # or as an object with .data attribute
-                if hasattr(message, "data"):
-                    # Event-like object (similar to js-libp2p MessageEvent)
-                    data = message.data
-                    if isinstance(data, bytes):
-                        pass  # Already bytes
-                    elif hasattr(data, "tobytes"):
-                        data = data.tobytes()
-                    else:
-                        data = bytes(data) if data else b""
-                elif isinstance(message, bytes):
-                    data = message
-                else:
-                    # Try to convert to bytes
-                    try:
-                        data = bytes(message)
-                    except (TypeError, ValueError):
-                        data = str(message).encode()
+            # 1. Metrics & First Byte Logging
+            if not hasattr(self, "_bytes_received_count"):
+                self._bytes_received_count = 0
+                self._first_byte_received = False
+            self._bytes_received_count += len(data)
 
-                if not data:
-                    logger.debug("Received empty message, ignoring")
-                    return
-
-                # Deduplicate messages to prevent processing
-                #  the same message multiple times
-                # This can happen if aiortc calls the callback multiple times
-                message_hash = hashlib.sha256(data).digest()
-                with self._message_dedup_lock:
-                    if message_hash in self._processed_messages:
-                        logger.debug(f"Ignoring duplicate message ({len(data)} bytes)")
-                        return
-                    # Add to processed set
-                    self._processed_messages.add(message_hash)
-                    # Limit cache size to prevent memory growth
-                    if len(self._processed_messages) > self._max_dedup_cache:
-                        # Remove oldest entries (simple approach: clear and rebuild)
-                        # In practice, this should rarely happen
-                        self._processed_messages.clear()
-                        self._processed_messages.add(message_hash)
-
-                logger.debug(
-                    "WebRTC on_message received (%d bytes): %.64r%s",
-                    len(data),
-                    data[:64],
-                    "…" if len(data) > 64 else "",
+            if not self._first_byte_received:
+                self._first_byte_received = True
+                logger.info(
+                    f"🔵 FIRST BYTE PROCESSED for {self.peer_id} - "
+                    f"{len(data)} bytes, first_16_bytes={data[:16].hex()}, "
+                    f"total_bytes_received={self._bytes_received_count}"
                 )
 
-                # Try to parse as muxed stream data
-                try:
+            # 2. Deduplication
+            # This protects against both aiortc quirks AND race conditions between
+            # early buffer and late handlers.
+            message_hash = hashlib.sha256(data).digest()
+            with self._message_dedup_lock:
+                if message_hash in self._processed_messages:
+                    logger.debug(f"Ignoring duplicate message ({len(data)} bytes)")
+                    return
+                self._processed_messages.add(message_hash)
+                if len(self._processed_messages) > self._max_dedup_cache:
+                    self._processed_messages.clear()
+                    self._processed_messages.add(message_hash)
+
+            # 3. Muxed Stream Logic (JSON Check)
+            try:
+                # Only attempt JSON parse if it looks like JSON to avoid overhead
+                # Minimal check: starts with { and ends with }
+                if data.startswith(b'{"stream_id":'):
                     parsed_msg = json.loads(data.decode("utf-8"))
                     if isinstance(parsed_msg, dict) and "stream_id" in parsed_msg:
                         logger.debug(
@@ -361,17 +391,49 @@ class WebRTCRawConnection(IRawConnection):
                         )
                         self._handle_muxed_message(parsed_msg)
                         return
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    # Not a muxed message, treat as raw data
-                    pass
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
 
-                # Deliver raw message - call directly since send_nowait is thread-safe
-                try:
-                    _deliver_raw_message(data)
-                except Exception as deliver_err:
-                    logger.error(
-                        f"Failed to deliver raw message: {deliver_err}", exc_info=True
-                    )
+            # 4. Raw Delivery
+            try:
+                _deliver_raw_message(data)
+            except Exception as deliver_err:
+                logger.error(
+                    f"Failed to deliver raw message: {deliver_err}", exc_info=True
+                )
+
+        def on_message(message: Any) -> None:
+            """Handle incoming message from WebRTC data channel (Asyncio Callback)"""
+            if self._closed:
+                return
+
+            try:
+                # Extract bytes from message object
+                data = b""
+                if hasattr(message, "data"):
+                    raw = message.data
+                    if isinstance(raw, bytes):
+                        data = raw
+                    elif hasattr(raw, "tobytes"):
+                        data = raw.tobytes()
+                    else:
+                        data = bytes(raw) if raw else b""
+                elif isinstance(message, bytes):
+                    data = message
+                else:
+                    try:
+                        data = bytes(message)
+                    except (TypeError, ValueError):
+                        data = str(message).encode()
+
+                if not data:
+                    return
+
+                # Log trace for debugging bridge
+                logger.debug(f"🔵 [ASYNC BRIDGE] on_message received {len(data)} bytes")
+
+                # Process using unified pipeline
+                _process_inbound_payload(data)
 
             except Exception as e:
                 logger.critical(f"Error handling WebRTC message: {e}", exc_info=True)
@@ -410,11 +472,22 @@ class WebRTCRawConnection(IRawConnection):
                 pass
             buffered_amount = getattr(self.data_channel, "bufferedAmount", -1)
 
+            # CRITICAL: Check ownership barrier - if libp2p owns the connection,
+            # data channel close is just a transport event, not a shutdown signal
+            # In asyncio callback context, we check if event is set (can't await here)
+            if self.libp2p_owner_ready.is_set():
+                logger.info(
+                    f"Data channel closed but libp2p owns connection - "
+                    f"ignoring close event (conn={conn_state}, ice={ice_state})"
+                )
+                return
+
             logger.warning(
                 f"Data channel closed - states: "
                 f"conn={conn_state}, ice={ice_state}, iceGather={ice_gathering}, "
                 f"sctp={sctp_state}, buffered={buffered_amount}, "
-                f"handshake_in_progress={self._handshake_in_progress}"
+                f"handshake_in_progress={self._handshake_in_progress}, "
+                f"owner_ready={self.libp2p_owner_ready.is_set()}"
             )
             # Don't immediately mark as closed - allow handshake to complete
             # The connection might be closing during handshake, but we should
@@ -480,25 +553,14 @@ class WebRTCRawConnection(IRawConnection):
 
         # Register handlers - aiortc uses .on() for event registration
         try:
-            # CRITICAL: Only register message handler if no buffer was provided
-            # If buffer exists, early handler is already attached and buffering
-            # We consume from buffer instead of registering our own handler
-            if self._incoming_message_buffer is None:
-                # No buffer - register our own handler (legacy mode)
-                self.data_channel.on("message", on_message)
-                logger.info(
-                    "WebRTC message handler registered (legacy mode - no buffer)"
-                )
-            else:
-                # Buffer provided - start consuming from it
-                logger.info(
-                    f"Using incoming message buffer for {self.peer_id} "
-                    "(early handler already attached)"
-                )
-                # Start background task to consume from buffer
-                self._start_buffer_consumer()
+            # FIX: We use ONE handler and ONLY one handler.
+            # This prevents the double-delivery that was stalling Noise.
+            self.data_channel.on("message", self.on_data_channel_message)
+            logger.info(
+                f"Registered single thread-safe message handler for {self.peer_id}"
+            )
 
-            # Always register open/close/error handlers (these are safe to register)
+            # Standard lifecycle handlers
             self.data_channel.on("open", on_open)
             self.data_channel.on("close", on_close)
             self.data_channel.on("error", on_error)
@@ -524,58 +586,135 @@ class WebRTCRawConnection(IRawConnection):
             raise
 
     def _start_buffer_consumer(self) -> None:
-        """Start background task to consume messages from early handler buffer."""
+        """
+        Mark that buffer consumer should be started.
+
+        NOTE: The actual consumer task is started via start_buffer_consumer_async()
+        which must be called from an async context. This method just marks that
+        the consumer is needed.
+        """
         if self._incoming_message_buffer is None:
+            # No buffer - consumer not needed
+            self._buffer_consumer_ready.set()
             return
 
-        # Store local reference to ensure mypy knows it's not None
-        message_buffer: MemoryReceiveChannel[bytes] = self._incoming_message_buffer
+        # Mark that consumer needs to be started
+        # The actual start happens in start_buffer_consumer_async()
+        logger.info(
+            f"Buffer consumer marked for startup for {self.peer_id} "
+            "(will be started in async context)"
+        )
 
-        async def _consume_buffer() -> None:
-            """Consume messages from buffer and deliver to send_channel."""
+    async def _data_pump_task(self) -> None:
+        """Permanent background task that pumps data into the libp2p stack."""
+        logger.warning(f"🔵 Inbound Data Pump STARTED for {self.peer_id}")
+        self._buffer_consumer_ready.set()
+        messages_consumed = 0
+
+        # 1. Drain the early buffer first (one-time migration)
+        if self._incoming_message_buffer:
             try:
-                while not self._closed:
+                drained = 0
+                while True:
                     try:
-                        # Wait for message from buffer (this is async-safe)
-                        data = await message_buffer.receive()
-
-                        # Deliver to send_channel (same as on_message handler)
-                        try:
-                            self.send_channel.send_nowait(data)
-                            logger.debug(
-                                f"Consumed {len(data)} bytes from buffer "
-                                f"(channel state: {self.data_channel.readyState})"
-                            )
-                        except trio.WouldBlock:
-                            logger.warning("Message dropped - send_channel full!")
-                        except trio.ClosedResourceError:
-                            logger.debug(
-                                "send_channel closed, stopping buffer consumer"
-                            )
-                            break
-                    except (trio.ClosedResourceError, trio.EndOfChannel):
-                        # Channel closed or end of channel - normal shutdown
-                        logger.debug(
-                            "Message buffer closed (normal shutdown), stopping consumer"
-                        )
+                        data = self._incoming_message_buffer.receive_nowait()
+                        self._inbound_send_channel.send_nowait(data)
+                        drained += 1
+                    except trio.WouldBlock:
                         break
-                    except Exception as e:
-                        logger.error(
-                            f"Error consuming from message buffer: {e}",
-                            exc_info=True,
-                        )
-                        # On unexpected error, continue trying (may be transient)
-                        await trio.sleep(0.1)
+                    except trio.EndOfChannel:
+                        break
+                if drained > 0:
+                    logger.info("Drained %s msgs from early buffer", drained)
             except Exception as e:
-                logger.error(f"Buffer consumer task error: {e}", exc_info=True)
+                logger.debug(f"Error draining early buffer: {e}")
 
-        # Start consumer task in background
+        # 2. Process live data from the internal channel
         try:
-            trio.lowlevel.spawn_system_task(_consume_buffer)
-            logger.info("Started message buffer consumer task")
+            async for data in self._inbound_recv_channel:
+                if self._closed:
+                    break
+                messages_consumed += 1
+                if messages_consumed == 1:
+                    logger.warning(
+                        f"🔵 FIRST MESSAGE CONSUMED from buffer for {self.peer_id}"
+                    )
+
+                # Process via unified pipeline
+                try:
+                    if hasattr(self, "_process_inbound_payload"):
+                        self._process_inbound_payload(data)
+                    else:
+                        # Direct delivery if processor not initialized
+                        self.send_channel.send_nowait(data)
+                except Exception as proc_err:
+                    logger.error(f"Error processing buffered message: {proc_err}")
         except Exception as e:
-            logger.error(f"Failed to start buffer consumer: {e}", exc_info=True)
-            raise
+            if not self._closed:
+                logger.error(
+                    f"Data pump crashed: {e} (consumed {messages_consumed} messages)",
+                    exc_info=True,
+                )
+        finally:
+            logger.info(
+                f"🔵 Inbound Data Pump STOPPED for {self.peer_id} "
+                f"(consumed {messages_consumed} messages total)"
+            )
+
+    def on_data_channel_message(self, message: Any) -> None:
+        """Thread-safe entry point for aiortc callbacks."""
+        try:
+            # Extract bytes from message object
+            if hasattr(message, "data"):
+                data = message.data
+                if isinstance(data, bytes):
+                    pass
+                elif hasattr(data, "tobytes"):
+                    data = data.tobytes()
+                else:
+                    data = bytes(data) if data else b""
+            elif isinstance(message, bytes):
+                data = message
+            else:
+                try:
+                    data = bytes(message)
+                except (TypeError, ValueError):
+                    data = str(message).encode()
+
+            if not data:
+                return
+
+            # Transition data from Asyncio thread to Trio loop
+            if self._trio_token:
+                try:
+                    trio.from_thread.run_sync(
+                        self._inbound_send_channel.send_nowait,
+                        data,
+                        trio_token=self._trio_token,
+                    )
+                except Exception:
+                    # Fallback if loop is stopping or token invalid
+                    try:
+                        self._inbound_send_channel.send_nowait(data)
+                    except Exception:
+                        pass
+            else:
+                # No token - try direct send (should be thread-safe)
+                try:
+                    self._inbound_send_channel.send_nowait(data)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"Error in on_data_channel_message: {e}", exc_info=True)
+
+    async def start_buffer_consumer_async(self) -> None:
+        """Legacy method - pump is already running, just wait for it to be ready."""
+        # The pump is already started in __init__, just wait for it to signal ready
+        if not self._buffer_consumer_ready.is_set():
+            with trio.move_on_after(1.0) as timeout_scope:
+                await self._buffer_consumer_ready.wait()
+            if timeout_scope.cancelled_caught:
+                logger.warning(f"Buffer consumer ready timeout for {self.peer_id}")
 
     def _handle_muxed_message(self, message: dict[str, Any]) -> None:
         """Handle muxed stream message"""
@@ -752,6 +891,27 @@ class WebRTCRawConnection(IRawConnection):
             Data read from the channel (up to n bytes if n is specified)
 
         """
+        if not hasattr(self, "_read_call_count"):
+            self._read_call_count = 0
+            self._first_read_called = False
+        self._read_call_count += 1
+
+        if not self._first_read_called:
+            self._first_read_called = True
+            logger.info(
+                f"🔵 FIRST read() CALLED on WebRTCRawConnection for {self.peer_id} - "
+                f"n={n}, owner_ready={self.libp2p_owner_ready.is_set()}, "
+                f"channel_state={getattr(self.data_channel, 'readyState', 'unknown')}, "
+                f"read_call_count={self._read_call_count}"
+            )
+
+        logger.debug(
+            "read #%s n=%s state=%s",
+            self._read_call_count,
+            n,
+            getattr(self.data_channel, "readyState", "unknown"),
+        )
+
         if self._closed:
             logger.debug("Read called on closed connection")
             return b""
@@ -783,11 +943,17 @@ class WebRTCRawConnection(IRawConnection):
                 return b""
 
         async with self._read_lock:
-            # If n is None, return all buffered data or wait
+            logger.debug(
+                "MUXER read peer=%s call#%s buf=%s n=%s",
+                str(self.peer_id)[:12],
+                getattr(self, "_read_call_count", 0),
+                len(self._read_buffer),
+                n,
+            )
             if n is None:
                 if not self._read_buffer:
                     try:
-                        # Wait for data from channel
+                        logger.debug("MUXER read wait (n=None) peer=%s", self.peer_id)
                         data = await self.receive_channel.receive()
                         self._read_buffer = data
                     except trio.ClosedResourceError:
@@ -802,13 +968,20 @@ class WebRTCRawConnection(IRawConnection):
                 # Return all buffered data
                 result = self._read_buffer
                 self._read_buffer = b""
+
+                if result:
+                    logger.debug(
+                        "read returned %s bytes (n=None)",
+                        len(result),
+                    )
+
                 return result
 
             # For specific byte count requests, return UP TO n bytes from buffer
             # If buffer is empty, read from channel first
             if not self._read_buffer:
                 try:
-                    # Wait for data from channel
+                    logger.debug("MUXER read wait n=%s peer=%s", n, self.peer_id)
                     data = await self.receive_channel.receive()
                     self._read_buffer = data
                 except trio.ClosedResourceError:
@@ -823,102 +996,44 @@ class WebRTCRawConnection(IRawConnection):
             # Return up to n bytes from buffer
             result = self._read_buffer[:n]
             self._read_buffer = self._read_buffer[n:]
+
+            if result:
+                logger.debug("read returned %s bytes", len(result))
+
             return result
 
     async def write(self, data: bytes) -> None:
-        """Write data to the WebRTC data channel (raw mode)"""
+        """Write data thread-safely to the SCTP queue via the Asyncio loop."""
         if self._closed:
             raise RuntimeError("Connection is closed")
 
-        if self.data_channel.readyState == "closed":
-            conn_state = getattr(self.peer_connection, "connectionState", None)
-            if conn_state == "connected":
-                logger.debug(
-                    "Data channel reports closed but connection is connected - "
-                    "attempting write anyway (WebRTC quirk)"
-                )
-            elif self._handshake_in_progress:
-                logger.error(
-                    "Write called on closed data channel during handshake - "
-                    "handshake cannot complete. This indicates the data channel "
-                    "closed prematurely."
-                )
-                raise RuntimeError(
-                    "Data channel closed during handshake - "
-                    "cannot write handshake messages"
-                )
-            else:
-                # Handshake not in progress and connection not connected - raise error
-                raise RuntimeError(
-                    f"Data channel is closed and connection state is {conn_state}"
-                )
-
-        if self.data_channel.readyState != "open":
-            logger.warning(
-                f"Attempt write to data channel in: {self.data_channel.readyState}"
-            )
-
-        logger.info(
-            "WebRTC raw write (%d bytes): %.64r%s (channel state: %s)",
-            len(data),
-            data[:64],
-            "…" if len(data) > 64 else "",
-            self.data_channel.readyState,
-        )
-
+        # FIX: Use WebRTCAsyncBridge.send_data()
+        #  consistently for proper async context
+        # This ensures thread safety, proper error handling,
+        #  and channel state validation
         try:
-            # Use async bridge for robust trio-asyncio integration
             async with self._bridge:
                 await self._bridge.send_data(
                     self.data_channel, data, self.peer_connection
                 )
-            logger.debug("WebRTC raw write completed successfully")
-        except Exception as e:
-            # Check channel state after error
-            channel_state_after = getattr(self.data_channel, "readyState", "unknown")
-            conn_state_after = getattr(self.peer_connection, "connectionState", None)
-
-            logger.error(
-                f"Error writing to WebRTC connection: {e} - "
-                f"channel_state_after={channel_state_after}, "
-                f"connection_state_after={conn_state_after}, "
-                f"handshake_in_progress={self._handshake_in_progress}",
-                exc_info=True,
+            logger.debug(
+                f"🔵 write() successfully sent {len(data)} bytes via async bridge"
             )
-
-            # CRITICAL: Don't mark connection as closed if:
-            # 1. Channel is still open (might be a transient error)
-            # 2. Connection is still connected (might be a send buffer issue)
-            # 3. Handshake is in progress (let handshake error handling deal with it)
-            if channel_state_after == "closed":
-                if self._handshake_in_progress:
-                    logger.error(
-                        "Data channel closed during handshake write - "
-                        "handshake failure handler will deal with this"
-                    )
-                elif conn_state_after != "connected":
-                    # Channel closed and connection not connected - mark as closed
-                    self._closed = True
-                else:
-                    # Channel closed but connection still connected - WebRTC quirk
-                    logger.warning(
-                        "Data channel closed but connection still connected - "
-                        "this is a WebRTC quirk, connection may still be usable"
-                    )
-            elif channel_state_after == "open" and conn_state_after == "connected":
-                logger.warning(
-                    "Write failed but channel and connection are still open - "
-                    "this may be a transient error"
-                )
-            else:
-                # Unknown state - be conservative and mark as closed
-                logger.warning(
-                    f"Write failed with unknown state combination - "
-                    f"marking as closed (channel={channel_state_after}, "
-                    f"connection={conn_state_after})"
-                )
+        except Exception as e:
+            logger.error(
+                f"Failed to send WebRTC write via async bridge: {e}", exc_info=True
+            )
+            # Check if connection is still usable
+            channel_state = getattr(self.data_channel, "readyState", "unknown")
+            conn_state = getattr(self.peer_connection, "connectionState", None)
+            logger.error(
+                f"Write failed - channel_state={channel_state}, "
+                f"conn_state={conn_state}, "
+                f"handshake_in_progress={self._handshake_in_progress}"
+            )
+            # Only mark as closed if channel is actually closed
+            if channel_state == "closed":
                 self._closed = True
-
             raise
 
     def get_remote_address(self) -> tuple[str, int] | None:

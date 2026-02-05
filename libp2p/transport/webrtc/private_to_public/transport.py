@@ -9,15 +9,16 @@ from aiortc import (
 )
 from multiaddr import Multiaddr
 import trio
-from trio_asyncio import aio_as_trio, open_loop
 from trio_typing import TaskStatus
 
 from libp2p.abc import IHost, IListener, IRawConnection, ISecureConn, ITransport
 from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.nat import ReachabilityChecker
+from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.exceptions import OpenConnectionError
 
+from ..async_bridge import get_webrtc_bridge
 from ..constants import (
     DEFAULT_DIAL_TIMEOUT,
     DEFAULT_ICE_SERVERS,
@@ -40,10 +41,49 @@ from .util import (
     is_localhost_address,
 )
 
+try:
+    from libp2p.transport.webrtc.aiortc_patch import (
+        register_upgrade,
+        unregister_upgrade,
+    )
+except Exception:  # pragma: no cover
+
+    def register_upgrade(_: Any) -> None:  # type: ignore[misc]
+        return
+
+    def unregister_upgrade(_: Any) -> None:  # type: ignore[misc]
+        return
+
+
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
 
 logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
+
+
+# Import ICE configuration fixes
+try:
+    from ..ice_config_fix import (
+        create_ice_config_for_address,
+        enhanced_aioice_localhost_patch,
+    )
+
+    # Apply aioice localhost patch at module import
+    if enhanced_aioice_localhost_patch is not None:
+        try:
+            enhanced_aioice_localhost_patch()
+            logger.info("Enhanced aioice localhost patch applied")
+        except Exception as e:
+            logger.warning(f"Failed to apply aioice localhost patch: {e}")
+except ImportError:
+    # Fallback if module not available
+    create_ice_config_for_address = None
+    enhanced_aioice_localhost_patch = None
+    logger.warning("ICE config fixes not available - using default configuration")
+
+
+# NOTE: _verify_data_channel_open() removed - Noise now owns the DataChannel
+# If Noise handshake succeeded, the transport is already real and wired correctly.
 
 
 class WebRTCDirectTransport(ITransport):
@@ -66,6 +106,13 @@ class WebRTCDirectTransport(ITransport):
         self.signal_service: SignalService | None = None
         # NAT traversal detection
         self._reachability_checker: ReachabilityChecker | None = None
+        self.secure_conn: ISecureConn | None = None
+        self.libp2p_owner_ready = trio.Event()
+        # Store nursery for background tasks
+        self._nursery: trio.Nursery | None = None
+        self._loop_holder_stop = trio.Event()
+        self._loop_ready = trio.Event()
+        self._loop_holder_exited = trio.Event()
         logger.info("WebRTC-Direct Transport initialized")
 
     async def start(self, nursery: trio.Nursery) -> None:
@@ -88,6 +135,15 @@ class WebRTCDirectTransport(ITransport):
 
         if not self.host:
             raise WebRTCError("Host must be set before starting transport")
+
+        self._nursery = nursery
+        self._loop_holder_stop = trio.Event()
+        self._loop_ready = trio.Event()
+        self._loop_holder_exited = trio.Event()
+
+        self._nursery.start_soon(self._hold_loop_open)
+        await self._loop_ready.wait()
+        logger.info("WebRTC asyncio loop held open for transport lifetime")
 
         # Generate certificate for this transport
         self.cert_mgr = WebRTCCertificate()
@@ -178,8 +234,22 @@ class WebRTCDirectTransport(ITransport):
         # Clean up NAT detection
         self._reachability_checker = None
 
+        self._loop_holder_stop.set()
+        with trio.move_on_after(2.0):
+            await self._loop_holder_exited.wait()
+
         self._started = False
         logger.info("WebRTC-Direct Transport stopped")
+
+    async def _hold_loop_open(self) -> None:
+        """Keep asyncio loop open so aiortc/aioice run in a stable context."""
+        bridge = get_webrtc_bridge()
+        async with bridge:
+            self._loop_ready.set()
+            try:
+                await self._loop_holder_stop.wait()
+            finally:
+                self._loop_holder_exited.set()
 
     def can_handle(self, maddr: Multiaddr) -> bool:
         """Check if transport can handle the multiaddr."""
@@ -325,7 +395,9 @@ class WebRTCDirectTransport(ITransport):
 
             # Attempt UDP hole punching only when needed
             hole_punch_success = False
-            if needs_hole_punching:
+            # For private-to-public, we also use the punch socket as a lightweight
+            # UDP signaling path for offer/answer (avoids requiring a TCP addr).
+            if needs_hole_punching or is_localhost:
                 logger.debug(
                     f"Attempting UDP punching (peer reachable: {is_peer_reachable}, "
                     f"self reachable: {is_self_reachable})"
@@ -343,205 +415,474 @@ class WebRTCDirectTransport(ITransport):
             else:
                 logger.debug("Both peers appear reachable, skipping UDP hole punching")
 
-            # Configure ICE servers based on NAT status and localhost detection
-            ice_servers_dict: list[dict[str, str]] = []
-            if is_localhost:
-                # Localhost - no ICE servers needed
-                ice_servers_dict = []
-                logger.debug("Localhost connection - no ICE servers needed")
-            elif not is_self_reachable:
-                # Behind NAT - use STUN/TURN servers
-                ice_servers_dict = DEFAULT_ICE_SERVERS
-                logger.debug("Configured ICE servers for NAT traversal")
+            # CRITICAL FIX: Use optimized ICE configuration based on target address
+            # This ensures localhost connections work properly without ICE servers
+            # and remote connections get appropriate STUN/TURN configuration
+            if create_ice_config_for_address is not None:
+                rtc_config = create_ice_config_for_address(ip)
+                logger.info(
+                    f"Using optimized ICE configuration for {ip} "
+                    f"(localhost={is_localhost})"
+                )
             else:
-                # Public IP - minimal ICE servers (STUN only for discovery)
-                ice_servers_dict = (
-                    [{"urls": "stun:stun.l.google.com:19302"}]
-                    if DEFAULT_ICE_SERVERS
-                    else []
-                )
-                logger.debug("Configured minimal ICE servers for public IP")
+                # Fallback to original logic if ICE config fix not available
+                ice_servers_dict: list[dict[str, str]] = []
+                if is_localhost:
+                    # Localhost - no ICE servers needed
+                    ice_servers_dict = []
+                    logger.debug("Localhost connection - no ICE servers needed")
+                elif not is_self_reachable:
+                    # Behind NAT - use STUN/TURN servers
+                    ice_servers_dict = DEFAULT_ICE_SERVERS
+                    logger.debug("Configured ICE servers for NAT traversal")
+                else:
+                    # Public IP - minimal ICE servers (STUN only for discovery)
+                    ice_servers_dict = (
+                        [{"urls": "stun:stun.l.google.com:19302"}]
+                        if DEFAULT_ICE_SERVERS
+                        else []
+                    )
+                    logger.debug("Configured minimal ICE servers for public IP")
 
-            # Convert dict list to RTCIceServer list
-            rtc_ice_servers = [
-                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
-                for s in ice_servers_dict
-            ]
-
-            async with open_loop():
-                conn_id = str(peer_id)
+                # Convert dict list to RTCIceServer list
+                rtc_ice_servers = [
+                    RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                    for s in ice_servers_dict
+                ]
                 rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
-                direct_peer_connection = (
-                    await DirectPeerConnection.create_dialer_rtc_peer_connection(
-                        role="client",
-                        ufrag=ufrag,
-                        ice_pwd=ice_pwd,
-                        rtc_configuration=rtc_config,
-                        certificate=self.cert_mgr,
-                    )
+
+            # Loop managed at Transport level (no local open_loop);
+            #  persistent loop avoids SCTP freeze.
+            conn_id = str(peer_id)
+            direct_peer_connection = (
+                await DirectPeerConnection.create_dialer_rtc_peer_connection(
+                    role="client",
+                    ufrag=ufrag,
+                    ice_pwd=ice_pwd,
+                    rtc_configuration=rtc_config,
+                    certificate=self.cert_mgr,
                 )
+            )
 
-                try:
-                    swarm = cast("Swarm", self.host.get_network())
-                    if self.signal_service is None:
-                        raise WebRTCError(
-                            "Signal service not available for WebRTC-Direct dialing"
-                        )
+            try:
+                swarm = cast("Swarm", self.host.get_network())
+                if self.signal_service is None:
+                    raise WebRTCError(
+                        "Signal service not available for WebRTC-Direct dialing"
+                    )
+                swarm = cast("Swarm", self.host.get_network())
+                if self.signal_service is None:
+                    raise WebRTCError(
+                        "Signal service not available for WebRTC-Direct dialing"
+                    )
 
-                    async def handle_offer(
-                        offer_desc: RTCSessionDescription, handler_ufrag: str
-                    ) -> RTCSessionDescription:
-                        return await self._exchange_offer_answer_direct(
-                            peer_id,
-                            offer_desc,
-                            certhash or "",
-                            {"ufrag": handler_ufrag},
-                        )
-
-                    connection_timeout = DEFAULT_DIAL_TIMEOUT
-                    secure_conn = None
-                    connection_error = None
-
-                    with trio.move_on_after(connection_timeout) as timeout_scope:
-                        try:
-                            secure_conn, _ = await connect(
-                                role="client",
-                                ufrag=ufrag,
-                                ice_pwd=ice_pwd,
-                                peer_connection=direct_peer_connection,
-                                remote_addr=maddr,
-                                remote_peer_id=peer_id,
-                                signal_service=self.signal_service,
-                                certhash=certhash,
-                                offer_handler=handle_offer,
-                                security_multistream=swarm.upgrader.security_multistream,
-                            )
-                        except Exception as connect_exc:
-                            connection_error = connect_exc
-                            if not timeout_scope.cancelled_caught:
-                                raise
-
-                    # Check if connection timed out
-                    if timeout_scope.cancelled_caught or secure_conn is None:
-                        # Close peer connection on timeout
-                        try:
-                            await aio_as_trio(direct_peer_connection.close())
-                        except Exception:
-                            pass
-                        # Trigger fallback if both peers behind NAT
-                        if (
-                            not is_localhost
-                            and not is_self_reachable
-                            and not is_peer_reachable
-                            and self._reachability_checker
-                        ):
-                            logger.info(
-                                f"Direct conn timed out after {connection_timeout}s "
-                                "for NAT peers, attempting Circuit Relay v2 fallback"
-                            )
-                            try:
-                                return await self._dial_via_relay_fallback(
-                                    maddr, peer_id
-                                )
-                            except Exception as relay_exc:
-                                logger.warning(f"Relay fallback failed: {relay_exc}")
-                        # Raise timeout error
+                async def handle_offer(
+                    offer_desc: RTCSessionDescription, handler_ufrag: str
+                ) -> RTCSessionDescription:
+                    payload = {
+                        "type": "offer",
+                        "ufrag": handler_ufrag,
+                        "sdp": offer_desc.sdp,
+                        "sdpType": offer_desc.type,
+                        "certhash": certhash or "",
+                        "peer_id": str(self.host.get_id()) if self.host else "",
+                    }
+                    await self.udp_puncher.send_json(ip, port, payload)
+                    resp = await self.udp_puncher.recv_json(
+                        ip, port, timeout_s=DEFAULT_DIAL_TIMEOUT
+                    )
+                    if resp is None or resp.get("type") != "answer":
                         raise OpenConnectionError(
-                            f"WebRTC-Direct conn timed out after {connection_timeout}s"
-                        ) from connection_error
+                            "No UDP answer received for WebRTC-Direct offer"
+                        )
+                    answer_desc = RTCSessionDescription(
+                        sdp=resp.get("sdp", ""), type=resp.get("sdpType", "answer")
+                    )
+                    return answer_desc
 
-                    if secure_conn is None:
-                        raise OpenConnectionError("WebRTC-Direct connection failed")
-                    remote_fp = getattr(secure_conn, "remote_fingerprint", None)
-                    expected_certhash = None
+                connection_timeout = DEFAULT_DIAL_TIMEOUT
+                secure_conn = None
+                connection_error = None
+
+                with trio.move_on_after(connection_timeout) as timeout_scope:
                     try:
-                        expected_certhash = extract_certhash(maddr)
+                        secure_conn, _ = await connect(
+                            role="client",
+                            ufrag=ufrag,
+                            ice_pwd=ice_pwd,
+                            peer_connection=direct_peer_connection,
+                            remote_addr=maddr,
+                            remote_peer_id=peer_id,
+                            signal_service=None,
+                            certhash=certhash,
+                            offer_handler=handle_offer,
+                            security_multistream=swarm.upgrader.security_multistream,
+                        )
+                        # CRITICAL: Data pump is already running
+                        # wait for it to be ready if needed
+                        if hasattr(secure_conn, "_buffer_consumer_ready"):
+                            with trio.move_on_after(0.5) as timeout_scope:
+                                await secure_conn._buffer_consumer_ready.wait()
+                            if timeout_scope.cancelled_caught:
+                                logger.debug(
+                                    "Data pump ready timeout for %s, proceeding anyway",
+                                    peer_id,
+                                )
+                        logger.debug(
+                            f"[DEBUG] About to call upgrade_connection() for {peer_id}"
+                        )
+                    except Exception as connect_exc:
+                        connection_error = connect_exc
+                        if not timeout_scope.cancelled_caught:
+                            raise
+
+                # Check if connection timed out
+                if timeout_scope.cancelled_caught or secure_conn is None:
+                    # Close peer connection on timeout
+                    try:
+                        bridge = get_webrtc_bridge()
+                        async with bridge:
+                            await bridge.close_peer_connection(direct_peer_connection)
                     except Exception:
-                        expected_certhash = None
-                    actual_certhash = None
-                    if remote_fp:
-                        try:
-                            actual_certhash = fingerprint_to_certhash(remote_fp)
-                        except Exception:
-                            actual_certhash = None
-                    if expected_certhash and actual_certhash:
-                        if expected_certhash != actual_certhash:
-                            await secure_conn.close()
-                            raise OpenConnectionError(
-                                "Remote certhash mismatch detected during dial"
-                            )
-                    canonical_remote = (
-                        canonicalize_certhash(maddr, actual_certhash)
-                        if actual_certhash
-                        else maddr
-                    )
-                    setattr(secure_conn, "remote_multiaddr", canonical_remote)
-                    if self.cert_mgr is not None and self.host is not None:
-                        local_peer = self.host.get_id()
-                        local_ma = Multiaddr(
-                            f"/certhash/{self.cert_mgr.certhash}/p2p/{local_peer}"
-                        )
-                        setattr(secure_conn, "local_multiaddr", local_ma)
-                        if getattr(secure_conn, "local_fingerprint", None) is None:
-                            setattr(
-                                secure_conn,
-                                "local_fingerprint",
-                                self.cert_mgr.fingerprint,
-                            )
-                    if self.host is not None:
-                        try:
-                            self.host.get_peerstore().add_addrs(
-                                peer_id,
-                                [canonical_remote],
-                                3600,
-                            )
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist WebRTC-Direct remote address for %s",
-                                peer_id,
-                            )
-                    self.active_connections[conn_id] = secure_conn
-                    self.pending_connections.pop(conn_id, None)
-                    self.connection_events.pop(conn_id, None)
-
-                    logger.debug(
-                        f"Successfully established WebRTC-direct connection to{peer_id}"
-                    )
-                    return secure_conn
-                except Exception as e:
-                    logger.error(f"Failed to connect as client: {e}")
-                    # Close peer connection with async compatibility handling
-                    try:
-                        await aio_as_trio(direct_peer_connection.close())
-                    except Exception as close_err:
-                        logger.warning(
-                            f"Error closing peer connection during cleanup: {close_err}"
-                        )
-
-                    # Fallback to Circuit Relay v2 if both peers behind NAT
-                    #  and UDP hole punching failed
+                        pass
+                    # Trigger fallback if both peers behind NAT
                     if (
                         not is_localhost
                         and not is_self_reachable
                         and not is_peer_reachable
-                        and not hole_punch_success
                         and self._reachability_checker
                     ):
                         logger.info(
-                            "UDP hole punching failed for NAT peers, "
-                            "attempting Circuit Relay v2 fallback"
+                            f"Direct conn timed out after {connection_timeout}s "
+                            "for NAT peers, attempting Circuit Relay v2 fallback"
                         )
                         try:
                             return await self._dial_via_relay_fallback(maddr, peer_id)
                         except Exception as relay_exc:
-                            logger.warning(
-                                f"Circuit Relay v2 fallback also failed: {relay_exc}"
-                            )
-                            # Continue to raise original error
-
+                            logger.warning(f"Relay fallback failed: {relay_exc}")
+                    # Raise timeout error
                     raise OpenConnectionError(
-                        f"Failed to connect as client: {e}"
-                    ) from e
+                        f"WebRTC-Direct conn timed out after {connection_timeout}s"
+                    ) from connection_error
+
+                if secure_conn is None:
+                    raise OpenConnectionError("WebRTC-Direct connection failed")
+                remote_fp = getattr(secure_conn, "remote_fingerprint", None)
+                expected_certhash = None
+                try:
+                    expected_certhash = extract_certhash(maddr)
+                except Exception:
+                    expected_certhash = None
+                actual_certhash = None
+                if remote_fp:
+                    try:
+                        actual_certhash = fingerprint_to_certhash(remote_fp)
+                    except Exception:
+                        actual_certhash = None
+                if expected_certhash and actual_certhash:
+                    if expected_certhash != actual_certhash:
+                        await secure_conn.close()
+                        raise OpenConnectionError(
+                            "Remote certhash mismatch detected during dial"
+                        )
+                canonical_remote = (
+                    canonicalize_certhash(maddr, actual_certhash)
+                    if actual_certhash
+                    else maddr
+                )
+                setattr(secure_conn, "remote_multiaddr", canonical_remote)
+                if self.cert_mgr is not None and self.host is not None:
+                    local_peer = self.host.get_id()
+                    local_ma = Multiaddr(
+                        f"/certhash/{self.cert_mgr.certhash}/p2p/{local_peer}"
+                    )
+                    setattr(secure_conn, "local_multiaddr", local_ma)
+                    if getattr(secure_conn, "local_fingerprint", None) is None:
+                        setattr(
+                            secure_conn,
+                            "local_fingerprint",
+                            self.cert_mgr.fingerprint,
+                        )
+                if self.host is not None:
+                    try:
+                        self.host.get_peerstore().add_addrs(
+                            peer_id,
+                            [canonical_remote],
+                            3600,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist WebRTC-Direct remote address for %s",
+                            peer_id,
+                        )
+                self.active_connections[conn_id] = secure_conn
+                self.pending_connections.pop(conn_id, None)
+                self.connection_events.pop(conn_id, None)
+
+                logger.debug(
+                    f"Successfully established WebRTC-direct connection to {peer_id}"
+                )
+                # CRITICAL: Dialer owns the upgrade lifecycle.
+                # The dialer initiates muxer negotiation and registers with swarm.
+                # The listener waits and responds to the dialer's negotiation.
+
+                # Get peer connection and raw connection for ownership event
+                pc = getattr(secure_conn, "_webrtc_peer_connection", None)
+                raw_conn = None
+                try:
+                    # Try to access underlying raw connection
+                    if hasattr(secure_conn, "conn"):
+                        conn_wrapper = secure_conn.conn
+                        if hasattr(conn_wrapper, "read_writer"):
+                            read_writer = conn_wrapper.read_writer
+                            if hasattr(read_writer, "read_writer"):
+                                raw_conn = read_writer.read_writer
+                except Exception:
+                    pass
+
+                try:
+                    # Get raw connection for diagnostic logging
+                    raw_conn_check = None
+                    try:
+                        if hasattr(secure_conn, "conn"):
+                            conn_wrapper = secure_conn.conn
+                            if hasattr(conn_wrapper, "read_writer"):
+                                read_writer = conn_wrapper.read_writer
+                                if hasattr(read_writer, "read_writer"):
+                                    raw_conn_check = read_writer.read_writer
+                    except Exception:
+                        pass
+
+                    raw_is_initiator = (
+                        getattr(raw_conn_check, "is_initiator", None)
+                        if raw_conn_check
+                        else None
+                    )
+                    secure_is_initiator = getattr(secure_conn, "is_initiator", None)
+
+                    raw_typ = (
+                        type(raw_conn_check).__name__ if raw_conn_check else "None"
+                    )
+                    logger.info(
+                        "Before muxer: peer=%s raw_init=%s sec_init=%s "
+                        "raw_typ=%s sec_typ=%s",
+                        peer_id,
+                        raw_is_initiator,
+                        secure_is_initiator,
+                        raw_typ,
+                        type(secure_conn).__name__,
+                    )
+
+                    # CRITICAL: Validate read loop is active before muxer negotiation
+                    # The buffer consumer must be running to forward messages from
+                    # early handler buffer to receive_channel, which read() consumes
+                    if raw_conn_check is not None:
+                        has_buffer = hasattr(raw_conn_check, "_incoming_message_buffer")
+                        buffer_active = (
+                            raw_conn_check._incoming_message_buffer is not None
+                            if has_buffer
+                            else False
+                        )
+                        ch_state = getattr(
+                            raw_conn_check.data_channel, "readyState", "unknown"
+                        )
+                        logger.info(
+                            "Read loop validation peer=%s buf=%s active=%s ch=%s",
+                            peer_id,
+                            has_buffer,
+                            buffer_active,
+                            ch_state,
+                        )
+
+                        # Wait for buffer consumer before muxer so msgs flow to read().
+                        if buffer_active:
+                            if hasattr(raw_conn_check, "_buffer_consumer_ready"):
+                                logger.info(
+                                    "Waiting for buffer consumer ready for %s", peer_id
+                                )
+                                # Wait with timeout to avoid infinite wait
+                                with trio.move_on_after(2.0) as timeout_scope:
+                                    await raw_conn_check._buffer_consumer_ready.wait()
+
+                                if timeout_scope.cancelled_caught:
+                                    logger.warning(
+                                        "Buffer consumer ready timeout %s,"
+                                        " proceeding anyway",
+                                        peer_id,
+                                    )
+                                else:
+                                    logger.info(
+                                        "Buffer consumer ready %s,"
+                                        " msgs flow to receive_channel",
+                                        peer_id,
+                                    )
+                            else:
+                                # No ready event - give consumer a moment to start
+                                await trio.sleep(0.2)
+                                logger.info(
+                                    "Buffer consumer running for %s (sleep fallback)",
+                                    peer_id,
+                                )
+
+                    print(
+                        f"[webrtc-direct] dialer muxer negotiation: peer={peer_id} "
+                        f"is_initiator={secure_is_initiator}"
+                    )
+
+                    # Dialer initiates muxer negotiation (is_initiator=True)
+                    # Listener will respond automatically when it receives
+                    # the protocol select message
+                    logger.info(
+                        f"🟢 Calling upgrade_connection() for peer={peer_id} - "
+                        f"muxer negotiation will start now (read loop should be active)"
+                    )
+                    print(f"[DEBUG] About to call upgrade_connection() for {peer_id}")
+
+                    # CRITICAL: Register upgrade protection before muxer negotiation
+                    if pc is not None:
+                        register_upgrade(pc)
+                        logger.debug(
+                            f"Upgrade protection confirmed active for {peer_id}"
+                        )
+
+                    # Add timeout wrapper to detect hangs
+                    import traceback
+
+                    stack_str = "".join(traceback.format_stack()[-5:])
+                    print(f"[DEBUG] Stack before upgrade_connection:\n{stack_str}")
+
+                    try:
+                        muxed_conn = await swarm.upgrader.upgrade_connection(
+                            cast(ISecureConn, secure_conn), peer_id
+                        )
+                        print(f"[DEBUG] upgrade_connection() returned for {peer_id}")
+                        logger.info(
+                            f"✅ upgrade_connection() completed for {peer_id}, "
+                            f"muxed_conn type: {type(muxed_conn).__name__}"
+                        )
+                    except Exception as upgrade_inner_exc:
+                        print("[DEBUG] upgrade_connection() raised:", upgrade_inner_exc)
+                        logger.error(
+                            "upgrade_connection() failed for %s: %s",
+                            peer_id,
+                            upgrade_inner_exc,
+                            exc_info=True,
+                        )
+                        raise
+
+                    # Register the muxed connection with swarm
+                    await swarm.add_conn(muxed_conn)
+
+                    # CRITICAL: Unregister upgrade protection
+                    #  AFTER muxer negotiation + swarm.add_conn
+                    # Ownership event will be set next, which provides final protection
+                    if pc is not None:
+                        unregister_upgrade(pc)
+                        logger.debug(
+                            f"Upgrade protection unregistered for {peer_id} "
+                            "(muxer + swarm.add_conn complete)"
+                        )
+
+                    # Set ownership event ONLY here, after all three conditions:
+                    # 1. muxer negotiation finished (upgrade_connection returned)
+                    # 2. Noise session established
+                    # (already done before upgrade_connection)
+                    # 3. swarm.add_conn(conn) returned successfully
+                    if raw_conn is not None and hasattr(raw_conn, "libp2p_owner_ready"):
+                        raw_conn.libp2p_owner_ready.set()
+                        logger.info(
+                            f"✅ Ownership event SET for {peer_id} - "
+                            f"libp2p now owns connection lifecycle"
+                        )
+                    # Also store event reference on peer connection for aiortc patches
+                    if pc is not None and raw_conn is not None:
+                        if hasattr(raw_conn, "libp2p_owner_ready"):
+                            setattr(
+                                pc,
+                                "_libp2p_owner_ready_event",
+                                raw_conn.libp2p_owner_ready,
+                            )
+
+                    # Note: The event should be set immediately
+                    # after swarm.add_conn() succeeds,
+                    #  so this should never timeout.
+                    if raw_conn is not None and hasattr(raw_conn, "libp2p_owner_ready"):
+                        if not raw_conn.libp2p_owner_ready.is_set():
+                            raise RuntimeError(
+                                "libp2p ownership not set after swarm.add_conn(); "
+                                "bug in ownership transfer"
+                            )
+
+                    logger.info(
+                        "Dialer completed muxer negotiation and registered connection "
+                        "with swarm: peer=%s (ownership transferred to libp2p)",
+                        peer_id,
+                    )
+                except Exception as upgrade_exc:
+                    logger.error(
+                        "Dialer failed to upgrade/register WebRTC-Direct conn: %s",
+                        upgrade_exc,
+                        exc_info=True,
+                    )
+                    # Unregister upgrade protection on failure
+                    if pc is not None:
+                        unregister_upgrade(pc)
+                    try:
+                        await secure_conn.close()
+                    except Exception:
+                        pass
+                    raise OpenConnectionError(
+                        f"Failed to upgrade/register WebRTC-Direct conn: {upgrade_exc}"
+                    ) from upgrade_exc
+                return secure_conn
+            except trio.TooSlowError as exc:
+                logger.error(f"WebRTC-Direct dial timed out: {exc}")
+                # Close peer connection with async compatibility handling
+                try:
+                    bridge = get_webrtc_bridge()
+                    async with bridge:
+                        await bridge.close_peer_connection(direct_peer_connection)
+                except Exception as close_err:
+                    logger.warning(
+                        f"Error closing peer connection during cleanup: {close_err}"
+                    )
+                raise OpenConnectionError(
+                    f"WebRTC-Direct conn timed out after {connection_timeout}s"
+                ) from exc
+            except Exception as exc:
+                logger.error(f"Failed to connect as client: {exc}")
+                # Close peer connection with async compatibility handling
+                try:
+                    bridge = get_webrtc_bridge()
+                    async with bridge:
+                        await bridge.close_peer_connection(direct_peer_connection)
+                except Exception as close_err:
+                    logger.warning(
+                        f"Error closing peer connection during cleanup: {close_err}"
+                    )
+
+                # Fallback to Circuit Relay v2 if both peers behind NAT
+                #  and UDP hole punching failed
+                if (
+                    not is_localhost
+                    and not is_self_reachable
+                    and not is_peer_reachable
+                    and not hole_punch_success
+                    and self._reachability_checker
+                ):
+                    logger.info(
+                        "UDP hole punching failed for NAT peers, "
+                        "attempting Circuit Relay v2 fallback"
+                    )
+                    try:
+                        return await self._dial_via_relay_fallback(maddr, peer_id)
+                    except Exception as relay_exc:
+                        logger.warning(
+                            f"Circuit Relay v2 fallback also failed: {relay_exc}"
+                        )
+                        # Continue to raise original error
+
+                raise OpenConnectionError(f"WebRTC-Direct dial failed: {exc}") from exc
 
         except Exception as e:
             logger.error(f"Failed to dial WebRTC-Direct connection to {maddr}: {e}")
@@ -571,12 +912,20 @@ class WebRTCDirectTransport(ITransport):
     async def register_incoming_connection(
         self, connection: IRawConnection | ISecureConn
     ) -> None:
-        """Register an incoming connection from the listener."""
+        """
+        Register an incoming connection from the listener.
+
+        CRITICAL: The listener MUST call upgrade_connection() to start reading
+        for multistream negotiation. The listener reads first (is_initiator=False),
+        while the dialer writes first (is_initiator=True).
+        """
+        print("[LISTENER] register_incoming_connection() called")
         if self.host is None:
             await connection.close()
             return
 
         remote_peer_id = getattr(connection, "remote_peer_id", None)
+        print(f"[LISTENER] remote_peer_id={remote_peer_id}")
         if remote_peer_id is None:
             await connection.close()
             raise WebRTCError("Incoming WebRTC-Direct conn: missing remote peer ID")
@@ -597,16 +946,36 @@ class WebRTCDirectTransport(ITransport):
                 secured_conn = await swarm.upgrader.upgrade_security(
                     connection, False, remote_peer_id
                 )
-            muxed_conn = await swarm.upgrader.upgrade_connection(
-                secured_conn, remote_peer_id
-            )
-            await swarm.add_conn(muxed_conn)
+
+            # CRITICAL: Verify is_initiator is False on listener side
+            # The listener must read first (responder role)
+            # while dialer writes first (initiator role)
+            secured_conn_is_initiator = getattr(secured_conn, "is_initiator", None)
+            if secured_conn_is_initiator is None:
+                setattr(secured_conn, "is_initiator", False)
+                secured_conn_is_initiator = False
+                logger.info(
+                    "Listener: Set is_initiator=False on secured connection for %s",
+                    remote_peer_id,
+                )
+
+            if secured_conn_is_initiator:
+                logger.warning(
+                    "Listener: secured_conn.is_initiator is True (expected False) "
+                    "for %s - this may cause negotiation conflicts",
+                    remote_peer_id,
+                )
+
             logger.info(
-                "Registered incoming WebRTC-Direct connection from %s", remote_peer_id
+                "Listener registered incoming WebRTC-Direct connection from %s "
+                "(is_initiator=%s - will READ first, waiting for dialer to WRITE)",
+                remote_peer_id,
+                secured_conn_is_initiator,
             )
+
         except Exception as exc:
             logger.error(
-                "Failed to upgrade incoming WebRTC-Direct connection from %s: %s",
+                "Failed to register incoming WebRTC-Direct connection from %s: %s",
                 remote_peer_id,
                 exc,
             )
@@ -615,12 +984,155 @@ class WebRTCDirectTransport(ITransport):
             except Exception:
                 pass
             raise WebRTCError(
-                f"Failed to upgrade incoming WebRTC-Direct connection: {exc}"
+                f"Failed to register incoming WebRTC-Direct conn: {exc}"
             ) from exc
 
         conn_id = str(remote_peer_id)
         self.pending_connections.pop(conn_id, None)
         self.active_connections[conn_id] = secured_conn
+
+        # CRITICAL: Listener MUST call upgrade_connection() to start the responder
+        # path (reads first, waits for dialer to write). The listener has
+        # is_initiator=False, so it uses multiselect.negotiate() which READS first,
+        # then responds. This is different from the dialer which WRITES first.
+        #
+        # We start this in a background task so it doesn't block, and the responder
+        # path will naturally wait for the dialer to write the handshake.
+        logger.info(
+            "🟢 Listener starting muxer negotiation for %s "
+            "(is_initiator=False, will READ first, waiting for dialer to WRITE)",
+            remote_peer_id,
+        )
+
+        async def listener_upgrade_task() -> None:
+            """Background task to handle listener's muxer negotiation."""
+            try:
+                # Get peer connection for upgrade protection
+                pc = getattr(secured_conn, "_webrtc_peer_connection", None)
+                if pc is not None:
+                    register_upgrade(pc)
+                    logger.debug(
+                        f"Listener: Upgrade protection registered for {remote_peer_id}"
+                    )
+
+                # CRITICAL FIX: Ensure read loop is active before muxer negotiation
+                # Get raw connection to check buffer consumer status
+                raw_conn_check = None
+                try:
+                    if hasattr(secured_conn, "conn"):
+                        conn_wrapper = secured_conn.conn
+                        if hasattr(conn_wrapper, "read_writer"):
+                            read_writer = conn_wrapper.read_writer
+                            if hasattr(read_writer, "read_writer"):
+                                raw_conn_check = read_writer.read_writer
+                except Exception:
+                    pass
+
+                # Wait for buffer consumer to be ready before starting muxer negotiation
+                if raw_conn_check is not None:
+                    if hasattr(raw_conn_check, "_buffer_consumer_ready"):
+                        logger.info(
+                            f"🔵 Listener waiting for buffer consumer "
+                            f"to be ready for {remote_peer_id}..."
+                        )
+                        with trio.move_on_after(2.0) as timeout_scope:
+                            await raw_conn_check._buffer_consumer_ready.wait()
+
+                        if timeout_scope.cancelled_caught:
+                            logger.warning(
+                                f"⚠️ Listener buffer consumer ready timeout "
+                                f"for {remote_peer_id} - "
+                                "proceeding anyway (consumer may still start)"
+                            )
+                        else:
+                            logger.info(
+                                f"✅Listener buffer ready for {remote_peer_id} - "
+                                "messages will flow correctly"
+                            )
+
+                logger.info(
+                    "🟢 Listener calling upgrade_connection() for %s "
+                    "(responder path: will READ first, waiting for dialer)",
+                    remote_peer_id,
+                )
+                muxed_conn = await swarm.upgrader.upgrade_connection(
+                    secured_conn, remote_peer_id
+                )
+
+                # CRITICAL FIX: Set ownership event
+                # ONLY AFTER muxer negotiation completes
+                # This matches the dialer pattern and
+                #  ensures proper lifecycle management
+                if hasattr(secured_conn, "libp2p_owner_ready"):
+                    secured_conn.libp2p_owner_ready.set()
+                    logger.info(
+                        f"✅ Listener ownership event SET for {remote_peer_id} - "
+                        "libp2p now owns connection lifecycle"
+                    )
+
+                # Unregister upgrade protection after muxer negotiation completes
+                if pc is not None:
+                    unregister_upgrade(pc)
+                    logger.debug(f"Listener: Upgrade unregistered for {remote_peer_id}")
+                logger.info(
+                    "✅ Listener completed muxer for %s (muxed_conn type: %s)",
+                    remote_peer_id,
+                    type(muxed_conn).__name__,
+                )
+
+                if isinstance(muxed_conn, Yamux):
+                    logger.info(
+                        "🟢 Starting listener yamux read loop for %s",
+                        remote_peer_id,
+                    )
+                    try:
+                        await muxed_conn.start()
+                        logger.info(
+                            "✅ Listener yamux read loop started for %s", remote_peer_id
+                        )
+                    except Exception as start_exc:
+                        logger.error(
+                            "❌ Failed to start listener yamux for %s: %s",
+                            remote_peer_id,
+                            start_exc,
+                            exc_info=True,
+                        )
+            except Exception as listener_upgrade_exc:
+                logger.error(
+                    "Listener failed to upgrade connection for %s: %s",
+                    remote_peer_id,
+                    listener_upgrade_exc,
+                    exc_info=True,
+                )
+                # Unregister upgrade protection on failure
+                pc = getattr(secured_conn, "_webrtc_peer_connection", None)
+                if pc is not None:
+                    unregister_upgrade(pc)
+                # Don't raise - let the dialer handle the error
+
+        # Start listener upgrade in background - responder path will wait for dialer
+        # Use transport's nursery or listener's nursery as fallback
+        nursery_to_use: trio.Nursery | None = None
+
+        # Prefer transport's nursery (most reliable)
+        if self._nursery is not None:
+            nursery_to_use = self._nursery
+            logger.debug("Using transport's nursery for listener upgrade task")
+        else:
+            # Fallback to listener's nursery if available
+            listener = getattr(self, "_listener", None)
+            if listener and hasattr(listener, "_nursery") and listener._nursery:
+                nursery_to_use = listener._nursery
+                logger.debug("Using listener's nursery for listener upgrade task")
+
+        if nursery_to_use is not None:
+            nursery_to_use.start_soon(listener_upgrade_task)
+            logger.debug("Started listener upgrade task in background")
+        else:
+            logger.warning(
+                "No nursery for listener upgrade; running synchronously (e.g. tests)"
+            )
+            await listener_upgrade_task()
 
         event = self.connection_events.get(conn_id)
         if event is not None:
@@ -650,8 +1162,9 @@ class WebRTCDirectTransport(ITransport):
         if conn_id in self.pending_connections:
             pc = self.pending_connections.pop(conn_id)
             try:
-                async with open_loop():
-                    await aio_as_trio(pc.close())
+                bridge = get_webrtc_bridge()
+                async with bridge:
+                    await bridge.close_peer_connection(pc)
             except Exception as e:
                 logger.warning(f"Error closing peer connection {conn_id}: {e}")
 

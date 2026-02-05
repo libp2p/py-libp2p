@@ -26,6 +26,8 @@ logger = logging.getLogger("libp2p.transport.webrtc")
 
 # Track active handshakes to prevent premature closure
 _active_handshakes: set[RTCPeerConnection] = set()
+# Track active upgrades (Noise complete, muxer negotiation in progress)
+_active_upgrades: set[RTCPeerConnection] = set()
 
 
 def register_handshake(peer_connection: RTCPeerConnection) -> None:
@@ -47,6 +49,68 @@ def unregister_handshake(peer_connection: RTCPeerConnection) -> None:
 def is_handshake_active(peer_connection: RTCPeerConnection) -> bool:
     """Check if a peer connection has an active handshake."""
     return peer_connection in _active_handshakes
+
+
+def register_upgrade(peer_connection: RTCPeerConnection) -> None:
+    """Register a peer connection as having an active libp2p upgrade in progress."""
+    if peer_connection is not None:
+        _active_upgrades.add(peer_connection)
+        logger.debug(f"Registered upgrade for peer connection {id(peer_connection)}")
+
+
+def unregister_upgrade(peer_connection: RTCPeerConnection) -> None:
+    """Unregister a peer connection from active upgrades."""
+    if peer_connection is not None:
+        _active_upgrades.discard(peer_connection)
+        logger.debug(f"Unregistered upgrade for peer connection {id(peer_connection)}")
+
+
+def is_upgrade_active(peer_connection: RTCPeerConnection) -> bool:
+    """Check if a peer connection has an active libp2p upgrade in progress."""
+    return peer_connection in _active_upgrades
+
+
+def is_upgrade_active_on_peer(peer_connection: RTCPeerConnection) -> bool:
+    """
+    Check if upgrade is active on this peer connection.
+
+    This checks both the global set and the per-connection flag.
+    """
+    if peer_connection is None:
+        return False
+
+    # Check global set (for backward compatibility)
+    if peer_connection in _active_upgrades:
+        return True
+
+    # Check per-connection flag
+    if hasattr(peer_connection, "_upgrade_active"):
+        return getattr(peer_connection, "_upgrade_active", False)
+
+    return False
+
+
+def get_libp2p_owner_ready_event(peer_connection: RTCPeerConnection) -> Any | None:
+    """
+    Get the libp2p ownership event from peer connection.
+
+    The event is set ONLY after:
+    1. muxer negotiation finished
+    2. Noise session established
+    3. swarm.add_conn(conn) returned successfully
+
+    Returns the trio.Event if found, None otherwise.
+    """
+    if peer_connection is None:
+        return None
+
+    # Check if event is stored directly on peer connection
+    if hasattr(peer_connection, "_libp2p_owner_ready_event"):
+        return getattr(peer_connection, "_libp2p_owner_ready_event", None)
+
+    # Traverse secure_conn->conn->read_writer->libp2p_owner_ready is complex;
+    # we store the event on peer_connection instead.
+    return None
 
 
 def get_dtls_state(peer_connection: RTCPeerConnection) -> str | None:
@@ -215,24 +279,60 @@ def _patch_peer_connection_close() -> None:
         except Exception:
             pass
 
-        logger.error(
-            f"peer_connection.close() CALLED on {id(self)} - "
-            f"handshake_active={is_handshake_active(self)}, "
-            f"conn_state={conn_state}, ice_state={ice_state}, sctp_state={sctp_state}\n"
-            f"Stack trace:\n{stack_trace}"
-        )
+        # Block closure if handshake/upgrade active or libp2p owns it.
+        handshake_active = is_handshake_active(self)
+        upgrade_active = is_upgrade_active(self)
+        owner_ready_event = get_libp2p_owner_ready_event(self)
 
-        if is_handshake_active(self):
+        # Block if handshake is active
+        if handshake_active:
             logger.warning(
-                f"Attempted to close peer connection {id(self)} "
-                f"during active handshake - "
-                "deferring closure until handshake completes"
+                "peer_connection.close() BLOCKED %s - handshake active; "
+                "conn=%s ice=%s sctp=%s",
+                id(self),
+                conn_state,
+                ice_state,
+                sctp_state,
             )
-            # Don't close immediately - let handshake complete or fail naturally
-            # The handshake error handling will clean up properly
             return
 
-        # Normal closure when no handshake is active
+        if upgrade_active:
+            logger.warning(
+                "peer_connection.close() BLOCKED %s - upgrade active; "
+                "conn=%s ice=%s sctp=%s",
+                id(self),
+                conn_state,
+                ice_state,
+                sctp_state,
+            )
+            return
+
+        if owner_ready_event is not None and owner_ready_event.is_set():
+            logger.warning(
+                "peer_connection.close() BLOCKED %s - libp2p owns; "
+                "conn=%s ice=%s sctp=%s",
+                id(self),
+                conn_state,
+                ice_state,
+                sctp_state,
+            )
+            return
+
+        owner_set = owner_ready_event.is_set() if owner_ready_event else False
+        logger.debug(
+            "peer_connection.close() CALLED %s handshake=%s upgrade=%s "
+            "owner_set=%s conn=%s ice=%s sctp=%s\nStack:\n%s",
+            id(self),
+            handshake_active,
+            upgrade_active,
+            owner_set,
+            conn_state,
+            ice_state,
+            sctp_state,
+            stack_trace,
+        )
+
+        # Normal closure - ownership not transferred or event doesn't exist
         await original_close(self)
 
     RTCPeerConnection.close = patched_close  # type: ignore[assignment]
@@ -336,37 +436,61 @@ def _patch_dtls_transport_state() -> bool:
             peer_conn = _find_peer_connection_from_dtls(self)
 
             if peer_conn:
+                # Block if handshake, upgrade, or ownership active
+                if is_handshake_active(peer_conn):
+                    logger.warning(
+                        "DTLS _set_state(CLOSED) BLOCKED %s - handshake active "
+                        "pc=%s state=%s",
+                        id(self),
+                        id(peer_conn),
+                        current_state_name,
+                    )
+                    return
+                if is_upgrade_active(peer_conn):
+                    logger.warning(
+                        "DTLS _set_state(CLOSED) BLOCKED %s - upgrade active "
+                        "pc=%s state=%s",
+                        id(self),
+                        id(peer_conn),
+                        current_state_name,
+                    )
+                    return
+                owner_ready_event = get_libp2p_owner_ready_event(peer_conn)
+                if owner_ready_event is not None and owner_ready_event.is_set():
+                    logger.warning(
+                        f"DTLS _set_state(CLOSED) BLOCKED on {id(self)} - "
+                        f"libp2p owns peer connection {id(peer_conn)} "
+                        f"(ownership event is set), WebRTC must not close DTLS. "
+                        f"current_state={current_state_name}"
+                    )
+                    return
+
                 conn_state = getattr(peer_conn, "connectionState", None)
                 ice_state = getattr(peer_conn, "iceConnectionState", None)
-                handshake_active = is_handshake_active(peer_conn)
 
                 # Capture stack trace for debugging
                 stack_trace = "".join(traceback.format_stack())
-
+                owner_set = owner_ready_event.is_set() if owner_ready_event else False
                 logger.warning(
-                    f"DTLS _set_state(CLOSED) CALLED on {id(self)} - "
-                    f"current_state={current_state_name}, "
-                    f"peer_conn={id(peer_conn)}, "
-                    f"handshake_active={handshake_active}, "
-                    f"conn_state={conn_state}, ice_state={ice_state}\n"
-                    f"Stack trace:\n{stack_trace}"
+                    "DTLS _set_state(CLOSED) CALLED %s state=%s pc=%s "
+                    "owner_set=%s conn=%s ice=%s\nStack:\n%s",
+                    id(self),
+                    current_state_name,
+                    id(peer_conn),
+                    owner_set,
+                    conn_state,
+                    ice_state,
+                    stack_trace,
                 )
-
-                # CRITICAL: Prevent DTLS closure if handshake is active
-                if handshake_active:
-                    logger.warning(
-                        f"Attempted to close DTLS transport {id(self)} "
-                        f"during active handshake on peer connection {id(peer_conn)} - "
-                        "deferring closure until handshake completes"
-                    )
-                    # Don't close DTLS - return early without calling original method
-                    return
             else:
-                # Couldn't find peer connection, but still log it
+                # Couldn't find peer connection - default to blocking close
+                # This is safer than allowing close when we're uncertain
                 logger.warning(
-                    f"DTLS _set_state(CLOSED) CALLED on {id(self)} - "
-                    f"current_state={current_state_name}, peer_conn=unknown"
+                    f"DTLS _set_state(CLOSED) BLOCKED on {id(self)} - "
+                    f"current_state={current_state_name}, peer_conn=unknown "
+                    f"(cannot verify ownership, blocking to be safe)"
                 )
+                return
 
         # Call original method for non-CLOSED transitions
         #  or when handshake is not active
@@ -488,6 +612,36 @@ def _patch_sctp_transport_state() -> bool:
             if hasattr(self, "_pc") and self._pc:
                 peer_conn = self._pc
 
+            if peer_conn:
+                # Block if handshake, upgrade, or ownership active
+                if is_handshake_active(peer_conn):
+                    logger.warning(
+                        "SCTP _set_state(CLOSED) BLOCKED %s - handshake active "
+                        "pc=%s state=%s",
+                        id(self),
+                        id(peer_conn),
+                        current_state_name,
+                    )
+                    return
+                if is_upgrade_active(peer_conn):
+                    logger.warning(
+                        "SCTP _set_state(CLOSED) BLOCKED %s - upgrade active "
+                        "pc=%s state=%s",
+                        id(self),
+                        id(peer_conn),
+                        current_state_name,
+                    )
+                    return
+                owner_ready_event = get_libp2p_owner_ready_event(peer_conn)
+                if owner_ready_event is not None and owner_ready_event.is_set():
+                    logger.warning(
+                        f"SCTP _set_state(CLOSED) BLOCKED on {id(self)} - "
+                        f"libp2p owns peer connection {id(peer_conn)} "
+                        f"(ownership event is set), WebRTC must not close SCTP. "
+                        f"current_state={current_state_name}"
+                    )
+                    return
+
             # Get peer connection states
             if peer_conn:
                 conn_state = getattr(peer_conn, "connectionState", None)
@@ -495,28 +649,29 @@ def _patch_sctp_transport_state() -> bool:
             else:
                 conn_state = None
                 ice_state = None
-
-            handshake_active = is_handshake_active(peer_conn) if peer_conn else False
-            peer_conn_id = id(peer_conn) if peer_conn else None
-            logger.error(
-                f"SCTP _set_state(CLOSED) CALLED on {id(self)} - "
-                f"current_state={current_state_name}, "
-                f"peer_conn={peer_conn_id}, "
-                f"handshake_active={handshake_active}, "
-                f"conn_state={conn_state}, ice_state={ice_state}\n"
-                f"Stack trace:\n{stack_trace}"
-            )
-
-            # If we found the peer connection and it has an active handshake,
-            # defer closure
-            if peer_conn and is_handshake_active(peer_conn):
                 logger.warning(
-                    f"SCTP transport {id(self)} attempting to close "
-                    f"during active handshake "
-                    f"(peer connection {id(peer_conn)}) - deferring closure"
+                    f"SCTP _set_state(CLOSED) BLOCKED on {id(self)} - "
+                    f"current_state={current_state_name}, peer_conn=unknown "
+                    f"(cannot verify ownership, blocking to be safe)"
                 )
-                # Don't transition to CLOSED - let handshake complete or fail naturally
                 return
+
+            peer_conn_id = id(peer_conn) if peer_conn else None
+            owner_ready_event = (
+                get_libp2p_owner_ready_event(peer_conn) if peer_conn else None
+            )
+            owner_set = owner_ready_event.is_set() if owner_ready_event else False
+            logger.error(
+                "SCTP _set_state(CLOSED) CALLED %s state=%s pc=%s "
+                "owner_set=%s conn=%s ice=%s\nStack:\n%s",
+                id(self),
+                current_state_name,
+                peer_conn_id,
+                owner_set,
+                conn_state,
+                ice_state,
+                stack_trace,
+            )
 
             # Log warning if any handshakes are active
             # (even if we can't find the specific PC)
@@ -550,7 +705,7 @@ def _patch_data_channel_close() -> None:
     original_close = RTCDataChannel.close
 
     async def patched_close(self: RTCDataChannel) -> None:
-        """Patched close method that checks for active handshake."""
+        """Patched close method that checks for ownership and active handshake."""
         # Try to find associated peer connection
         # Data channels have a _transport attribute that links to SCTP transport
         # SCTP transport links to peer connection
@@ -560,12 +715,30 @@ def _patch_data_channel_close() -> None:
             if hasattr(sctp_transport, "_pc") and sctp_transport._pc:
                 peer_conn = sctp_transport._pc
 
-        if peer_conn and is_handshake_active(peer_conn):
-            logger.warning(
-                f"Attempted to close data channel {id(self)} during active handshake - "
-                "deferring closure"
-            )
-            return
+        if peer_conn:
+            # Block if handshake, upgrade, or ownership active
+            if is_handshake_active(peer_conn):
+                logger.warning(
+                    f"data_channel.close() BLOCKED on {id(self)} - "
+                    f"handshake active on peer connection {id(peer_conn)}, "
+                    f"WebRTC must not close data channel"
+                )
+                return
+            if is_upgrade_active(peer_conn):
+                logger.warning(
+                    f"data_channel.close() BLOCKED on {id(self)} - "
+                    f"upgrade active on peer connection {id(peer_conn)}, "
+                    f"WebRTC must not close data channel"
+                )
+                return
+            owner_ready_event = get_libp2p_owner_ready_event(peer_conn)
+            if owner_ready_event is not None and owner_ready_event.is_set():
+                logger.warning(
+                    f"data_channel.close() BLOCKED on {id(self)} - "
+                    f"libp2p owns peer connection {id(peer_conn)} "
+                    f"(ownership event is set), WebRTC must not close data channel"
+                )
+                return
 
         close_result = original_close(self)
         if close_result is not None:
@@ -616,7 +789,6 @@ def install_patches() -> None:
         )
 
 
-# Auto-install patches on import
 try:
     install_patches()
 except Exception as e:

@@ -53,22 +53,30 @@ class DirectPeerConnection(RTCPeerConnection):
         self._ice_credentials_applied = False
 
     def _ensure_custom_ice_credentials(self) -> None:
-        if self._ice_credentials_applied:
-            return
         if self.sctp is None or self.sctp.transport is None:
             return
-        ice_transport = self.sctp.transport.transport
-        ice_gatherer = ice_transport.iceGatherer
-        connection = ice_gatherer._connection
-        connection._local_username = self.ufrag  # type: ignore[attr-defined]
-        connection._local_password = self.ice_pwd  # type: ignore[attr-defined]
-        self._ice_credentials_applied = True
+        try:
+            ice_transport = self.sctp.transport.transport
+            ice_gatherer = getattr(ice_transport, "iceGatherer", None)
+            if ice_gatherer is None:
+                return
+            connection = getattr(ice_gatherer, "_connection", None)
+            if connection is None:
+                return
+            connection._local_username = self.ufrag  # type: ignore[attr-defined]
+            connection._local_password = self.ice_pwd  # type: ignore[attr-defined]
+            self._ice_credentials_applied = True
+        except (AttributeError, TypeError):
+            return
 
     async def createOffer(self) -> RTCSessionDescription:
         """
-        Create SDP offer, patching ICE ufrag and pwd to self.ufrag and self.upwd,
+        Create SDP offer, patching ICE ufrag and pwd to self.ufrag and self.ice_pwd,
         set as local description, and return the patched RTCSessionDescription.
+        The underlying aioice connection is patched after setLocalDescription so
+        STUN connectivity checks use the same credentials as the SDP.
         """
+        self._ice_credentials_applied = False
         self._ensure_custom_ice_credentials()
         offer = await aio_as_trio(super().createOffer())
 
@@ -84,14 +92,19 @@ class DirectPeerConnection(RTCPeerConnection):
         patched_sdp = "\r\n".join(new_lines) + "\r\n"
 
         patched_offer = RTCSessionDescription(sdp=patched_sdp, type=offer.type)
+        self._ice_credentials_applied = False
+        self._ensure_custom_ice_credentials()
         await aio_as_trio(self.setLocalDescription(patched_offer))
         return patched_offer
 
     async def createAnswer(self) -> RTCSessionDescription:
         """
-        Create SDP answer, patching ICE ufrag and pwd to self.ufrag and self.upwd,
+        Create SDP answer, patching ICE ufrag and pwd to self.ufrag and self.ice_pwd,
         set as local description, and return the patched RTCSessionDescription.
+        The underlying aioice connection is patched after setLocalDescription so
+        STUN connectivity checks use the same credentials as the SDP.
         """
+        self._ice_credentials_applied = False
         self._ensure_custom_ice_credentials()
         answer = await aio_as_trio(super().createAnswer())
 
@@ -107,6 +120,8 @@ class DirectPeerConnection(RTCPeerConnection):
         patched_sdp = "\r\n".join(new_lines) + "\r\n"
 
         patched_answer = RTCSessionDescription(sdp=patched_sdp, type=answer.type)
+        self._ice_credentials_applied = False
+        self._ensure_custom_ice_credentials()
         await aio_as_trio(self.setLocalDescription(patched_answer))
         return patched_answer
 

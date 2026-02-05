@@ -261,6 +261,12 @@ class WebRTCTransport(ITransport):
             logger.info(
                 f"Successfully established WebRTC connection to {remote_peer_id}"
             )
+
+            # Return raw connection - let swarm upgrade it naturally
+            # The swarm will detect this is an outbound connection
+            #  and use is_initiator=True
+            # (dialer initiates Noise handshake,
+            # following standard libp2p semantics)
             return connection
 
         except Exception as e:
@@ -954,8 +960,20 @@ class WebRTCTransport(ITransport):
                 else "N/A"
             )
 
+            # For incoming connections, swarm uses is_initiator=False (responder)
+            # The connection listener waits for the dialer
+            #  to send the first Noise message
+            # This follows standard libp2p semantics:
+            #  outbound=initiator, inbound=responder
             secured_conn = await swarm.upgrader.upgrade_security(
-                connection, False, remote_peer_id
+                connection,
+                False,
+                remote_peer_id,  # is_initiator=False: listener is responder
+            )
+
+            logger.debug(
+                f"Listener's WebRTC connection secured for {remote_peer_id} "
+                f"(waiting for dialer to initiate Noise handshake)"
             )
 
             # Verify data channel is still open after security upgrade
