@@ -225,6 +225,7 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
 @pytest.mark.skip(
     reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration"
 )
+# TODO: Open follow-up issue to re-enable when IPv6 listen/dial is stable
 async def test_ipv6_tcp_listen_and_dial(nursery):
     """Test that TCP transport can listen and dial using IPv6 addresses."""
     transport = TCP()

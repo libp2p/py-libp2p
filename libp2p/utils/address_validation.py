@@ -39,7 +39,7 @@ def find_free_port(ip_version: int = 4) -> int:
 
 def _validate_ipv4_address(address: str) -> str:
     """
-    Validate that's a given address is a valid IPv4 address.
+    Validate that a given address is a valid IPv4 address.
 
     Args:
         address: The IP address string to validate
@@ -57,7 +57,7 @@ def _validate_ipv4_address(address: str) -> str:
 
 def _validate_ipv6_address(address: str) -> str:
     """
-    Validate that's a given address is a valid IPv6 address.
+    Validate that a given address is a valid IPv6 address.
 
     Args:
         address: The IP address string to validate

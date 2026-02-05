@@ -25,7 +25,7 @@ MAX_READ_LEN = 65535
 
 def _validate_ipv4_address(address: str) -> str:
     """
-    Validate that's a given address is a valid IPv4 address.
+    Validate that a given address is a valid IPv4 address.
 
     Args:
         address: The IP address string to validate
@@ -35,17 +35,16 @@ def _validate_ipv4_address(address: str) -> str:
 
     """
     try:
-        # Validate that's a valid IPv4 address
+        # Validate that the given address is a valid IPv4 address
         ipaddress.IPv4Address(address)
         return address
     except (ipaddress.AddressValueError, ValueError):
-        # If invalid, return to's secure default
-        return "127.0.0.1"
+        return "127.0.0.1"  # If invalid, return to the secure default
 
 
 def _validate_ipv6_address(address: str) -> str:
     """
-    Validate that's a given address is a valid IPv6 address.
+    Validate that a given address is a valid IPv6 address.
 
     Args:
         address: The IP address string to validate
@@ -55,12 +54,11 @@ def _validate_ipv6_address(address: str) -> str:
 
     """
     try:
-        # Validate that's a valid IPv6 address
+        # Validate that the given address is a valid IPv6 address
         ipaddress.IPv6Address(address)
         return address
     except (ipaddress.AddressValueError, ValueError):
-        # If invalid, return to's secure default
-        return "::1"
+        return "::1"  # If invalid, return to the secure default
 
 
 # Default bind address configuration with environment variable override
