@@ -40,8 +40,7 @@ from .pb.kademlia_pb2 import (
     Message,
 )
 
-# logger = logging.getLogger("libp2p.kademlia.provider_store")
-logger = logging.getLogger("kademlia-example.provider_store")
+logger = logging.getLogger(__name__)
 
 # Constants for provider records (based on IPFS standards)
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
