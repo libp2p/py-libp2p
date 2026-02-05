@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 import logging
 
+import trio
+
 from libp2p.abc import IMultiselectClient, IMultiselectCommunicator
 from libp2p.custom_types import TProtocol
 from libp2p.utils.trio_timeout import with_timeout
@@ -95,29 +97,22 @@ class MultiselectClient(IMultiselectClient):
                     logger.debug("MultiselectClient: trying %s", protocol)
                     try:
                         selected_protocol = await self.try_select(
-                            communicator, protocol
+                            communicator, protocol, negotiate_timeout
                         )
                         return selected_protocol
                     except ProtocolNotSupportedError as error:
                         unsupported_errors.append(str(error))
                         continue
 
-        unsupported_errors: list[str] = []
-        for protocol in protocols:
-            try:
-                selected_protocol = await self.try_select(
-                    communicator, protocol, negotiate_timeout
+                raise MultiselectClientError(
+                    _build_protocols_not_supported_message(
+                        protocols, negotiate_timeout, unsupported_errors
+                    )
                 )
-                return selected_protocol
-            except ProtocolNotSupportedError as error:
-                unsupported_errors.append(str(error))
-                continue
-
-        raise MultiselectClientError(
-            _build_protocols_not_supported_message(
-                protocols, negotiate_timeout, unsupported_errors
-            )
-        )
+        except trio.TooSlowError as e:
+            raise MultiselectClientError(
+                f"response timed out after {negotiate_timeout}s"
+            ) from e
 
     async def query_multistream_command(
         self,

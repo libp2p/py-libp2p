@@ -79,8 +79,8 @@ class Multiselect(IMultiselectMuxer):
 
                 while True:
                     try:
-                        await with_timeout(
-                            communicator.write(command),
+                        command = await with_timeout(
+                            communicator.read(),
                             negotiate_timeout,
                             "handshake read timeout",
                             MultiselectError,
