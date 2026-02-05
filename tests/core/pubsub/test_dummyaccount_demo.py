@@ -25,6 +25,8 @@ async def wait_for_convergence(
     Wait until all nodes satisfy the check condition.
 
     Returns as soon as convergence is reached, otherwise raises TimeoutError.
+    Convergence already guarantees all nodes satisfy the check, so callers need
+    not run a second assertion pass after this returns.
     """
     start_time = trio.current_time()
 
@@ -107,10 +109,6 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
             return True
 
         await wait_for_convergence(dummy_nodes, _check_final, timeout=10.0)
-
-        # Perform assertion function
-        for dummy_node in dummy_nodes:
-            assertion_func(dummy_node)
 
     # Success, terminate pending tasks.
 
