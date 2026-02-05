@@ -25,7 +25,7 @@ MAX_READ_LEN = 65535
 
 def _validate_ipv4_address(address: str) -> str:
     """
-    Validate that the given address is a valid IPv4 address.
+    Validate that a given address is a valid IPv4 address.
 
     Args:
         address: The IP address string to validate
@@ -35,12 +35,30 @@ def _validate_ipv4_address(address: str) -> str:
 
     """
     try:
-        # Validate that it's a valid IPv4 address
+        # Validate that the given address is a valid IPv4 address
         ipaddress.IPv4Address(address)
         return address
     except (ipaddress.AddressValueError, ValueError):
-        # If invalid, return the secure default
-        return "127.0.0.1"
+        return "127.0.0.1"  # If invalid, return to the secure default
+
+
+def _validate_ipv6_address(address: str) -> str:
+    """
+    Validate that a given address is a valid IPv6 address.
+
+    Args:
+        address: The IP address string to validate
+
+    Returns:
+        The validated IPv6 address, or "::1" if invalid
+
+    """
+    try:
+        # Validate that the given address is a valid IPv6 address
+        ipaddress.IPv6Address(address)
+        return address
+    except (ipaddress.AddressValueError, ValueError):
+        return "::1"  # If invalid, return to the secure default
 
 
 # Default bind address configuration with environment variable override
@@ -49,6 +67,13 @@ def _validate_ipv4_address(address: str) -> str:
 # Invalid IPv4 addresses will fallback to "127.0.0.1"
 DEFAULT_BIND_ADDRESS = _validate_ipv4_address(os.getenv("LIBP2P_BIND", "127.0.0.1"))
 LISTEN_MADDR = multiaddr.Multiaddr(f"/ip4/{DEFAULT_BIND_ADDRESS}/tcp/0")
+
+# IPv6 default bind address configuration with environment variable override
+# DEFAULT_BIND_ADDRESS_V6 defaults to "::1" (secure) but can be overridden
+# via LIBP2P_BIND_V6 environment variable (e.g., "::" for tests)
+# Invalid IPv6 addresses will fallback to "::1"
+DEFAULT_BIND_ADDRESS_V6 = _validate_ipv6_address(os.getenv("LIBP2P_BIND_V6", "::1"))
+LISTEN_MADDR_V6 = multiaddr.Multiaddr(f"/ip6/{DEFAULT_BIND_ADDRESS_V6}/tcp/0")
 
 
 FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
