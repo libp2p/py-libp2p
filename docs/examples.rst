@@ -22,5 +22,6 @@ Examples
    examples.random_walk
    examples.multiple_connections
    examples.websocket
+   examples.webrtc
    examples.tls
    examples.autotls
