@@ -30,6 +30,10 @@ from libp2p.network.connection.raw_connection import (
 from libp2p.transport.exceptions import (
     OpenConnectionError,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+    multiaddr_from_socket,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +92,15 @@ class TCPListener(IListener):
             )
             return False
 
-        ip4_host_str = maddr.value_for_protocol("ip4")
-        # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
+        host_str = extract_ip_from_multiaddr(maddr)
+        # For trio.serve_tcp, host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
         started_listeners = await nursery.start(
             serve_tcp,
             handler,
             tcp_port,
-            ip4_host_str,
+            host_str,
         )
 
         if started_listeners is None:
@@ -138,7 +142,7 @@ class TCP(ITransport):
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
-        host_str = maddr.value_for_protocol("ip4")
+        host_str = extract_ip_from_multiaddr(maddr)
         port_str = maddr.value_for_protocol("tcp")
 
         if host_str is None:
@@ -194,5 +198,4 @@ class TCP(ITransport):
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
-    ip, port = socket.getsockname()
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}")
+    return multiaddr_from_socket(socket)
