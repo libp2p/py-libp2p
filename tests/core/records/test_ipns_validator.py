@@ -123,7 +123,7 @@ class TestIPNSValidator:
         key = f"/pk/{name_hash}"  # Wrong namespace
         value = self._create_valid_ipns_record(private_key)
 
-        with pytest.raises(InvalidRecordType, match="namespace not 'ipns'"):
+        with pytest.raises(InvalidRecordType, match="Invalid namespace.*'ipns'"):
             validator.validate(key, value)
 
     def test_validate_record_too_large(self, validator, ed25519_keypair):
@@ -627,3 +627,226 @@ class TestIPNSSpecTestVectors:
 
         # Should not raise
         validator.validate(key, record_bytes)
+
+
+class TestIPNSValidatorEdgeCases:
+    """Tests for IPNS validator features edge cases."""
+
+    @pytest.fixture
+    def validator(self) -> IPNSValidator:
+        """Create an IPNS validator instance."""
+        return IPNSValidator()
+
+    @pytest.fixture
+    def validator_no_expiry_check(self) -> IPNSValidator:
+        """Create an IPNS validator that doesn't check expiration."""
+        return IPNSValidator(check_expiration=False)
+
+    @pytest.fixture
+    def ed25519_keypair(self):
+        """Create an Ed25519 key pair for testing."""
+        keypair = create_ed25519_keypair()
+        return keypair.private_key, keypair.public_key
+
+    def _create_ipns_name(self, private_key: Ed25519PrivateKey) -> str:
+        """Create an IPNS name from a private key."""
+        peer_id = ID.from_pubkey(private_key.get_public_key())
+        return peer_id.to_bytes().hex()
+
+    def _create_ipns_record(
+        self,
+        private_key: Ed25519PrivateKey,
+        value: bytes = b"/ipfs/QmTest123",
+        sequence: int = 1,
+        ttl: int = 300_000_000_000,
+        validity_delta: timedelta = timedelta(hours=1),
+    ) -> bytes:
+        """Create a valid IPNS record for testing."""
+        expiry = datetime.now(timezone.utc) + validity_delta
+        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        validity_bytes = validity.encode("ascii")
+
+        cbor_data = {
+            "Sequence": sequence,
+            "TTL": ttl,
+            "Validity": validity_bytes,
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": value,
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.value = value
+        entry.validityType = IpnsEntry.ValidityType.EOL
+        entry.validity = validity_bytes
+        entry.sequence = sequence
+        entry.ttl = ttl
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        return entry.SerializeToString()
+
+    def test_validator_check_expiration_disabled(
+        self, validator_no_expiry_check, ed25519_keypair
+    ):
+        """Test that expired records pass when expiration check is disabled."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        # Create an expired record
+        value = self._create_ipns_record(
+            private_key,
+            validity_delta=timedelta(hours=-1),  # Already expired
+        )
+
+        # Should not raise when expiration check is disabled
+        validator_no_expiry_check.validate(key, value)
+
+    def test_validate_empty_record(self, validator, ed25519_keypair):
+        """Test that empty records are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        with pytest.raises(InvalidRecordType, match="empty"):
+            validator.validate(key, b"")
+
+    def test_validate_missing_cbor_field(self, validator, ed25519_keypair):
+        """Test that records missing required CBOR fields are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        # Create record with missing Sequence field
+        expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        validity_bytes = validity.encode("ascii")
+
+        cbor_data = {
+            "TTL": 300_000_000_000,
+            "Validity": validity_bytes,
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": b"/ipfs/QmTest123",
+            # Missing "Sequence" field
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        with pytest.raises(InvalidRecordType, match="Missing required CBOR field"):
+            validator.validate(key, entry.SerializeToString())
+
+    def test_validate_invalid_sequence_type(self, validator, ed25519_keypair):
+        """Test that records with wrong Sequence type are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        validity_bytes = validity.encode("ascii")
+
+        cbor_data = {
+            "Sequence": "not_an_int",  # Wrong type
+            "TTL": 300_000_000_000,
+            "Validity": validity_bytes,
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": b"/ipfs/QmTest123",
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        with pytest.raises(InvalidRecordType, match="Sequence.*must be int"):
+            validator.validate(key, entry.SerializeToString())
+
+    def test_validate_negative_sequence(self, validator, ed25519_keypair):
+        """Test that records with negative sequence are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        validity_bytes = validity.encode("ascii")
+
+        cbor_data = {
+            "Sequence": -1,  # Negative
+            "TTL": 300_000_000_000,
+            "Validity": validity_bytes,
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": b"/ipfs/QmTest123",
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        with pytest.raises(InvalidRecordType, match="non-negative"):
+            validator.validate(key, entry.SerializeToString())
+
+    def test_validate_empty_value(self, validator, ed25519_keypair):
+        """Test that records with empty Value are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+        validity_bytes = validity.encode("ascii")
+
+        cbor_data = {
+            "Sequence": 1,
+            "TTL": 300_000_000_000,
+            "Validity": validity_bytes,
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": b"",  # Empty
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        with pytest.raises(InvalidRecordType, match="cannot be empty"):
+            validator.validate(key, entry.SerializeToString())
+
+    def test_validate_invalid_validity_format(self, validator, ed25519_keypair):
+        """Test that records with invalid validity timestamp are rejected."""
+        private_key, _ = ed25519_keypair
+        name_hash = self._create_ipns_name(private_key)
+        key = f"/ipns/{name_hash}"
+
+        cbor_data = {
+            "Sequence": 1,
+            "TTL": 300_000_000_000,
+            "Validity": b"not-a-valid-timestamp",  # Invalid
+            "ValidityType": VALIDITY_TYPE_EOL,
+            "Value": b"/ipfs/QmTest123",
+        }
+        data_bytes = cbor2.dumps(cbor_data, canonical=True)
+        signature_payload = SIGNATURE_PREFIX + data_bytes
+        signature = private_key.sign(signature_payload)
+
+        entry = IpnsEntry()
+        entry.signatureV2 = signature
+        entry.data = data_bytes
+
+        with pytest.raises(InvalidRecordType, match="not a valid RFC3339"):
+            validator.validate(key, entry.SerializeToString())
