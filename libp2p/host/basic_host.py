@@ -552,7 +552,9 @@ class BasicHost(IHost):
 
         broker = BrokerClient(
             self.get_private_key(),
-            multiaddr.Multiaddr(f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"),
+            multiaddr.Multiaddr(
+                f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"
+            ),
             acme.key_auth,
             acme.b36_peerid,
         )
