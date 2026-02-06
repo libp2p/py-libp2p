@@ -2,7 +2,6 @@ from __future__ import (
     annotations,
 )
 
-import base64
 import multibase
 from collections.abc import (
     Callable,
@@ -17,7 +16,6 @@ from typing import (
     cast,
 )
 
-import base58
 import trio
 
 from libp2p.abc import (
@@ -980,7 +978,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
@@ -999,7 +997,7 @@ class Pubsub(Service, IPubsub):
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
         if (
-            base58.b58encode(msg.from_id).decode() == self_id
+            ID(msg.from_id) == self_id
             and msg_forwarder != self_id
         ):
             logger.debug(
