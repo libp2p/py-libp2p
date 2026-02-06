@@ -25,7 +25,7 @@ class RawConnection(IRawConnection):
         """Raise `RawConnError` if the underlying connection breaks."""
         try:
             await self.stream.write(data)
-        except IOException as error:
+        except (IOException, ConnectionResetError) as error:
             raise RawConnError from error
 
     async def read(self, n: int | None = None) -> bytes:
@@ -37,7 +37,7 @@ class RawConnection(IRawConnection):
         """
         try:
             return await self.stream.read(n)
-        except IOException as error:
+        except (IOException, ConnectionResetError) as error:
             raise RawConnError from error
 
     async def close(self) -> None:
