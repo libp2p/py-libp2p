@@ -86,18 +86,18 @@ class ID:
     def from_pubkey(cls, key: PublicKey) -> "ID":
         """
         Create a deterministic peer ID from a public key.
-        
+
         This method generates a peer ID by hashing the serialized public key.
         The same public key will ALWAYS produce the same peer ID, which is
         fundamental for identity persistence in libp2p.
-        
+
         For small keys (≤42 bytes, like Ed25519), the key is embedded directly
         in the peer ID using an identity multihash. For larger keys (like RSA),
         a SHA-256 hash is used.
-        
+
         :param key: The public key to generate a peer ID from
         :return: A deterministic peer ID derived from the public key
-        
+
         Example:
             >>> from libp2p.crypto.ed25519 import create_new_key_pair
             >>> kp1 = create_new_key_pair()
@@ -108,6 +108,7 @@ class ID:
             >>> # Different keypairs produce different peer IDs
             >>> ID.from_pubkey(kp1.public_key) == ID.from_pubkey(kp2.public_key)
             False
+
         """
         serialized_key = key.serialize()
         algo = multihash.Func.sha2_256
