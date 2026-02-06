@@ -1161,17 +1161,6 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
-        # Check connection gate (allow/deny lists) for inbound connections
-        # This ensures inbound connections respect IP filtering
-        if not await self.connection_gate.is_allowed(maddr):
-            logger.debug(
-                f"Rejecting incoming connection from {maddr}: blocked by connection gate"
-            )
-            await raw_conn.close()
-            raise SwarmException(
-                f"Incoming connection from {maddr} blocked by connection gate"
-            )
-
         # Check global connection limit
         total_connections = len(self.get_connections())
         if total_connections >= self.connection_config.max_connections:
@@ -1220,29 +1209,7 @@ class Swarm(Service, INetworkService):
         muxed_conn: IMuxedConn | None = None
         try:
             try:
-                # Apply inbound upgrade timeout for security upgrade
-                with trio.fail_after(self.connection_config.inbound_upgrade_timeout):
-                    secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-            except trio.TooSlowError:
-                timeout_val = self.connection_config.inbound_upgrade_timeout
-                logger.debug(
-                    f"Inbound security upgrade timeout ({timeout_val}s) "
-                    f"exceeded for connection from {maddr}"
-                )
-                # Clean up raw connection
-                try:
-                    await raw_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"Inbound security upgrade timeout exceeded for connection from {maddr}"
-                )
+                secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
             except SecurityUpgradeFailure as error:
                 logger.error("failed to upgrade security for peer at %s", maddr)
                 # Clean up raw connection
@@ -1262,35 +1229,8 @@ class Swarm(Service, INetworkService):
             peer_id = secured_conn.get_remote_peer()
 
             try:
-                # Apply inbound upgrade timeout for muxer upgrade
-                with trio.fail_after(self.connection_config.inbound_upgrade_timeout):
-                    muxed_conn = await self.upgrader.upgrade_connection(
-                        secured_conn, peer_id
-                    )
-            except trio.TooSlowError:
-                timeout_val = self.connection_config.inbound_upgrade_timeout
-                logger.debug(
-                    f"Inbound muxer upgrade timeout ({timeout_val}s) "
-                    f"exceeded for peer {peer_id}"
-                )
-                # Clean up secured connection
-                try:
-                    await secured_conn.close()
-                except Exception:
-                    pass
-                # Clean up raw connection
-                try:
-                    await raw_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"Inbound muxer upgrade timeout exceeded for peer {peer_id}"
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, peer_id
                 )
             except MuxerUpgradeFailure as error:
                 logger.error("fail to upgrade mux for peer %s", peer_id)
