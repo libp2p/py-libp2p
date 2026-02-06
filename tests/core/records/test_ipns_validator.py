@@ -343,8 +343,8 @@ class TestIPNSValidator:
         assert best_idx == 1, "Valid record should be selected"
 
 
-class TestIPNSValidatorEdgeCases:
-    """Edge case tests for IPNSValidator."""
+class TestIPNSValidatorOptionalFeatures:
+    """Tests for optional IPNS record features and format variations."""
 
     @pytest.fixture
     def validator(self) -> IPNSValidator:
@@ -629,8 +629,8 @@ class TestIPNSSpecTestVectors:
         validator.validate(key, record_bytes)
 
 
-class TestIPNSValidatorEdgeCases:
-    """Tests for IPNS validator features edge cases."""
+class TestIPNSValidatorErrorHandling:
+    """Tests for IPNS validator error handling and configuration options."""
 
     @pytest.fixture
     def validator(self) -> IPNSValidator:
