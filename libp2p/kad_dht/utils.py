@@ -8,6 +8,8 @@ import base58
 import multibase
 import multihash
 
+from libp2p.encoding_config import get_default_encoding
+
 from libp2p.abc import IHost
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
@@ -130,15 +132,20 @@ def xor_distance(key1: bytes, key2: bytes) -> int:
 
 
 
-def bytes_to_multibase(data: bytes, encoding: str = 'base58btc') -> str:
+def bytes_to_multibase(data: bytes, encoding: str | None = None) -> str:
     """
     Convert bytes to multibase-encoded string.
+
     Args:
         data: Bytes to encode
-        encoding: Encoding to use (default: base58btc for compatibility)
+        encoding: Encoding to use.  When *None* the process-wide default
+            from :mod:`libp2p.encoding_config` is used.
+
     Returns:
         Multibase-encoded string
     """
+    if encoding is None:
+        encoding = get_default_encoding()
     return multibase.encode(encoding, data).decode()
 
 def multibase_to_bytes(multibase_str: str) -> bytes:

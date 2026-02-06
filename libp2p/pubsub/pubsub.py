@@ -7,6 +7,7 @@ from collections.abc import (
     Callable,
     KeysView,
 )
+
 import functools
 import hashlib
 import logging
@@ -95,15 +96,24 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     return msg.seqno + msg.from_id
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message, encoding: str = 'base64') -> bytes:
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
     """
     Generate content-addressed message ID using multibase encoding.
+
     Args:
         msg: Pubsub message
-        encoding: Encoding to use (default: base64)
+        encoding: Encoding to use.  When *None* the process-wide default
+            from :mod:`libp2p.encoding_config` is used.
+
     Returns:
         Multibase-encoded message ID
     """
+    from libp2p.encoding_config import get_default_encoding
+
+    if encoding is None:
+        encoding = get_default_encoding()
     digest = hashlib.sha256(msg.data).digest()
     return multibase.encode(encoding, digest)
 

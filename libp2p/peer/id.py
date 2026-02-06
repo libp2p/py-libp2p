@@ -9,6 +9,7 @@ from libp2p.crypto.keys import (
     PublicKey,
 )
 from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.encoding_config import get_default_encoding
 
 # NOTE: On inlining...
 # See: https://github.com/libp2p/specs/issues/138
@@ -59,8 +60,18 @@ class ID:
     def to_base58(self) -> str:
         return self.base58
 
-    def to_multibase(self, encoding: str = 'base58btc') -> str:
-        """Return multibase-encoded peer ID."""
+    def to_multibase(self, encoding: str | None = None) -> str:
+        """Return multibase-encoded peer ID.
+
+        Parameters
+        ----------
+        encoding : str | None
+            Multibase encoding to use.  When *None* (the default) the
+            process-wide default from :mod:`libp2p.encoding_config` is
+            used.
+        """
+        if encoding is None:
+            encoding = get_default_encoding()
         return multibase.encode(encoding, self._bytes).decode()
 
 
