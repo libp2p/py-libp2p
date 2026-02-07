@@ -19,6 +19,7 @@ from cryptography.x509.oid import NameOID
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.serialization import deserialize_public_key
 from libp2p.peer.id import ID
+import libp2p.utils.paths
 
 from .exceptions import (
     QUICCertificateError,
@@ -1081,16 +1082,74 @@ class QUICTLSConfigManager:
     Integrates with aioquic's TLS configuration system.
     """
 
-    def __init__(self, libp2p_private_key: PrivateKey, peer_id: ID) -> None:
+    def __init__(
+        self,
+        libp2p_private_key: PrivateKey,
+        peer_id: ID,
+        enable_autotls: bool = False,
+    ) -> None:
         self.libp2p_private_key = libp2p_private_key
         self.peer_id = peer_id
         self.certificate_generator = CertificateGenerator()
         self.peer_authenticator = PeerAuthenticator()
+        self.enable_autotls = enable_autotls
 
-        # Generate certificate for this peer
-        self.tls_config = self.certificate_generator.generate_certificate(
-            libp2p_private_key, peer_id
-        )
+        # Check for cached AutoTLS certificate (same paths as TLSTransport)
+        if (
+            enable_autotls
+            and libp2p.utils.paths.AUTOTLS_CERT_PATH.exists()
+            and libp2p.utils.paths.AUTOTLS_KEY_PATH.exists()
+        ):
+            logger.info(
+                "[QUIC] Loading AutoTLS certificate from %s",
+                libp2p.utils.paths.AUTOTLS_CERT_PATH,
+            )
+            self.tls_config = self._load_autotls_certificate()
+        else:
+            if enable_autotls:
+                logger.info(
+                    "[QUIC] AutoTLS enabled but ACME certificate not cached yet. "
+                    "Using self-signed certificate."
+                )
+            # Generate self-signed certificate for this peer
+            self.tls_config = self.certificate_generator.generate_certificate(
+                libp2p_private_key, peer_id
+            )
+
+    def _load_autotls_certificate(self) -> TLSConfig:
+        """
+        Load AutoTLS certificate and key from disk.
+
+        Returns:
+            TLSConfig with loaded certificate and private key
+
+        Raises:
+            QUICCertificateError: If loading fails
+
+        """
+        try:
+            # Load certificate chain
+            cert_pem = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
+            cert_chain = x509.load_pem_x509_certificates(cert_pem)
+
+            # Load private key
+            key_pem = libp2p.utils.paths.AUTOTLS_KEY_PATH.read_bytes()
+            private_key = serialization.load_pem_private_key(key_pem, password=None)
+
+            logger.info(
+                "[QUIC] Loaded AutoTLS certificate with %d certs in chain",
+                len(cert_chain),
+            )
+
+            return TLSConfig(
+                certificate=cert_chain[0],
+                private_key=private_key,  # type: ignore
+                peer_id=self.peer_id,
+            )
+        except Exception as e:
+            raise QUICCertificateError(
+                f"Failed to load AutoTLS certificate: {e}"
+            ) from e
 
     def create_server_config(self) -> QUICTLSSecurityConfig:
         """
@@ -1149,7 +1208,9 @@ class QUICTLSConfigManager:
 
 # Factory function for creating QUIC security transport
 def create_quic_security_transport(
-    libp2p_private_key: PrivateKey, peer_id: ID
+    libp2p_private_key: PrivateKey,
+    peer_id: ID,
+    enable_autotls: bool = False,
 ) -> QUICTLSConfigManager:
     """
     Factory function to create QUIC security transport.
@@ -1157,9 +1218,10 @@ def create_quic_security_transport(
     Args:
         libp2p_private_key: The libp2p identity private key
         peer_id: The libp2p peer ID
+        enable_autotls: Whether to use AutoTLS certificates if available
 
     Returns:
         Configured QUIC TLS manager
 
     """
-    return QUICTLSConfigManager(libp2p_private_key, peer_id)
+    return QUICTLSConfigManager(libp2p_private_key, peer_id, enable_autotls)

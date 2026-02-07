@@ -74,7 +74,10 @@ class QUICTransport(ITransport):
     """
 
     def __init__(
-        self, private_key: PrivateKey, config: QUICTransportConfig | None = None
+        self,
+        private_key: PrivateKey,
+        config: QUICTransportConfig | None = None,
+        enable_autotls: bool = False,
     ) -> None:
         """
         Initialize QUIC transport with security integration.
@@ -82,11 +85,13 @@ class QUICTransport(ITransport):
         Args:
             private_key: libp2p private key for identity and TLS cert generation
             config: QUIC transport configuration options
+            enable_autotls: Whether to use AutoTLS certificates if available
 
         """
         self._private_key = private_key
         self._peer_id = ID.from_pubkey(private_key.get_public_key())
         self._config = config or QUICTransportConfig()
+        self._enable_autotls = enable_autotls
 
         # Connection management
         self._connections: dict[str, QUICConnection] = {}
@@ -94,7 +99,7 @@ class QUICTransport(ITransport):
 
         # Security manager for TLS integration
         self._security_manager = create_quic_security_transport(
-            self._private_key, self._peer_id
+            self._private_key, self._peer_id, enable_autotls
         )
 
         # QUIC configurations for different versions
