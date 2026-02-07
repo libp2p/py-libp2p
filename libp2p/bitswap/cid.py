@@ -7,18 +7,26 @@ Note: This is a simplified implementation for demonstration. In production,
 use a proper CID library like py-cid or multiformats.
 """
 
-import multihash
+import hashlib
+
+from multicodec import Code, add_prefix, get_codec, is_codec
+from multicodec.code_table import DAG_PB, RAW, SHA2_256
 
 # Simplified CID version constants
 CID_V0 = 0
 CID_V1 = 1
 
-# Simplified multicodec constants
-CODEC_DAG_PB = 0x70
-CODEC_RAW = 0x55
+# Multicodec and multihash constants (type-safe Code objects)
+CODEC_DAG_PB: Code = DAG_PB
+CODEC_RAW: Code = RAW
+HASH_SHA256: Code = SHA2_256
 
-# Simplified multihash constants
-HASH_SHA256 = 0x12
+
+def _compute_multihash_sha256(data: bytes) -> bytes:
+    """Compute multihash (SHA2-256) for data."""
+    digest = hashlib.sha256(data).digest()
+    # Multihash format: <hash-type><hash-length><hash-digest>
+    return bytes([int(HASH_SHA256), len(digest)]) + digest
 
 
 def compute_cid_v0(data: bytes) -> bytes:
@@ -35,11 +43,29 @@ def compute_cid_v0(data: bytes) -> bytes:
         CIDv0 as bytes (multihash format)
 
     """
-    mh = multihash.digest(data, multihash.Func.sha2_256)
-    return mh.encode()
+    # CIDv0 is just the multihash
+    return _compute_multihash_sha256(data)
 
 
-def compute_cid_v1(data: bytes, codec: int = CODEC_RAW) -> bytes:
+def _normalise_codec(codec: Code | str | int) -> Code:
+    """Normalise codec input to a Code object with validation."""
+    if isinstance(codec, Code):
+        return codec
+
+    if isinstance(codec, str):
+        if not is_codec(codec):
+            raise ValueError(f"Unknown codec: {codec}")
+        return Code.from_string(codec)
+
+    # Integer code path
+    normalised = Code(codec)
+    # If the name is unknown, the code is not registered
+    if normalised.name in ("<unknown>", "", None):
+        raise ValueError(f"Unknown codec code: 0x{codec:x}")
+    return normalised
+
+
+def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
     """
     Compute a CIDv1 for data using py-multihash v3 API.
 
@@ -53,11 +79,16 @@ def compute_cid_v1(data: bytes, codec: int = CODEC_RAW) -> bytes:
         CIDv1 as bytes
 
     """
-    mh = multihash.digest(data, multihash.Func.sha2_256)
-    multihash_bytes = mh.encode()
+    # Normalise codec and compute multihash
+    code_obj = _normalise_codec(codec)
+    multihash = _compute_multihash_sha256(data)
 
-    # CIDv1 format: <version><codec><multihash>
-    return bytes([CID_V1, codec]) + multihash_bytes
+    # Use multicodec to get the properly varint-encoded codec prefix.
+    # add_prefix returns <codec-varint><data>; we only need the prefix bytes.
+    codec_prefixed = add_prefix(str(code_obj), b"")
+
+    # CIDv1 format: <version><codec-varint><multihash>
+    return bytes([CID_V1]) + codec_prefixed + multihash
 
 
 def get_cid_prefix(cid: bytes) -> bytes:
@@ -80,11 +111,16 @@ def get_cid_prefix(cid: bytes) -> bytes:
 
     # Check if CIDv1 (starts with 0x01)
     if cid[0] == CID_V1:
-        # CIDv1: <version><codec><hash-type><hash-length><digest>
-        # Prefix is: <version><codec><hash-type><hash-length>
+        # For CIDv1 produced by this module, the structure is:
+        # <version><codec-varint><hash-type><hash-length><digest>
+        #
+        # We don't parse the varint here; instead, we preserve the prefix
+        # up to (but not including) the digest, which is everything except
+        # the last `hash_length` bytes.
         if len(cid) >= 4:
-            # Return first 4 bytes (version + codec + hash type + hash length)
-            return cid[:4]
+            hash_length = cid[-1]
+            prefix_len = len(cid) - hash_length
+            return cid[:prefix_len]
 
     # For CIDv0 or unknown, return empty prefix
     return b""
@@ -108,15 +144,10 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
         # No prefix means CIDv0
         return compute_cid_v0(data)
 
-    # Read hash algorithm from prefix (prefix[2] contains hash function code)
-    # Note: multihash.digest() accepts both raw int codes and Func enum values
-    hash_code = prefix[2] if len(prefix) > 2 else multihash.Func.sha2_256
-
-    # Compute hash digest using multihash API
-    mh = multihash.digest(data, hash_code)
-
-    # Reconstruct CID: prefix + digest
-    return prefix + mh.digest
+    # Compute hash digest and recompute full CID by delegating to verify_cid logic.
+    # The prefix already contains version, codec-varint, hash-type and hash-length.
+    digest = hashlib.sha256(data).digest()
+    return prefix + digest
 
 
 def verify_cid(cid: bytes, data: bytes) -> bool:
@@ -139,28 +170,35 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
     logger.debug(f"        CID: {cid.hex()}")
     logger.debug(f"        Data size: {len(data)} bytes")
 
-    try:
-        # Extract multihash from CID
-        if len(cid) >= 4 and cid[0] == CID_V1:
-            # CIDv1: <version><codec><multihash>
-            multihash_bytes = cid[2:]
-            logger.debug(f"        CIDv1 detected, codec={hex(cid[1])}")
-        elif len(cid) >= 2:
-            # CIDv0: just multihash (starts with hash code)
-            multihash_bytes = cid
-            logger.debug("        CIDv0 detected")
-        else:
-            logger.debug("        Invalid CID length")
-            return False
+    # For CIDv0 (multihash)
+    if len(cid) >= 2 and cid[0] == int(HASH_SHA256):
+        # Extract digest from multihash
+        hash_length = cid[1]
+        if len(cid) >= 2 + hash_length:
+            cid_digest = cid[2 : 2 + hash_length]
+            match = digest == cid_digest
+            logger.debug(f"        CIDv0 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.debug(f"        Expected digest: {cid_digest.hex()}")
+            return match
 
-        # Decode and verify using multihash API
-        mh = multihash.decode(multihash_bytes)
-        match = mh.verify(data)
-        logger.debug(f"        Verification: {'MATCH' if match else 'MISMATCH'}")
-        return match
-    except Exception as e:
-        logger.debug(f"        Verification failed: {e}")
-        return False
+    # For CIDv1
+    if len(cid) >= 4 and cid[0] == CID_V1:
+        # Extract digest from CIDv1 produced by this module:
+        # <version><codec-varint><hash-type><hash-length><digest>
+        # We know the hash type and length are the last two header bytes
+        hash_type = cid[-(1 + 1 + len(digest))]
+        hash_length = cid[-(1 + len(digest))]
+        logger.debug(f"        CIDv1: hash_type={hex(hash_type)}, length={hash_length}")
+        if hash_type == int(HASH_SHA256) and hash_length == len(digest):
+            cid_digest = cid[-len(digest) :]
+            match = digest == cid_digest
+            logger.debug(f"        CIDv1 check: {'MATCH' if match else 'MISMATCH'}")
+            logger.debug(f"        Expected digest: {cid_digest.hex()}")
+            logger.debug(f"        Computed digest: {digest.hex()}")
+            return match
+
+    logger.debug("        No valid CID format detected")
+    return False
 
 
 def cid_to_string(cid: bytes) -> str:
@@ -198,7 +236,9 @@ def parse_cid_version(cid: bytes) -> int:
     return CID_V0
 
 
-def compute_cid(data: bytes, version: int = CID_V0, codec: int = CODEC_RAW) -> bytes:
+def compute_cid(
+    data: bytes, version: int = CID_V0, codec: Code | str | int = CODEC_RAW
+) -> bytes:
     """
     Compute a CID for data with specified version.
 
@@ -215,3 +255,20 @@ def compute_cid(data: bytes, version: int = CID_V0, codec: int = CODEC_RAW) -> b
         return compute_cid_v0(data)
     else:
         return compute_cid_v1(data, codec)
+
+
+def parse_cid_codec(cid: bytes) -> str:
+    """
+    Extract the codec name from a CID.
+
+    For CIDv0, there is no explicit codec, and callers should treat this
+    as the legacy dag-pb form used by IPFS (often reported as "cidv0").
+    For CIDv1, this uses multicodec's `get_codec` helper.
+    """
+    if len(cid) < 2 or cid[0] != CID_V1:
+        # CIDv0 - codec is implicit (typically dag-pb), we return a sentinel.
+        return "cidv0"
+
+    # Skip version byte and let multicodec parse the leading codec varint.
+    codec_prefixed = cid[1:]
+    return get_codec(codec_prefixed)
