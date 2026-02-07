@@ -34,7 +34,7 @@ async def async_example():
             auto_sync=True,
         ) as peerstore:
             # Create a test peer
-            peer_id = ID.from_base58("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
+            peer_id = ID.from_string("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
 
             # Add some addresses
             addr1 = Multiaddr("/ip4/127.0.0.1/tcp/4001")
@@ -73,7 +73,7 @@ def sync_example():
             auto_sync=False,  # Manual sync control
         ) as peerstore:
             # Create a test peer
-            peer_id = ID.from_base58("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
+            peer_id = ID.from_string("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
 
             # Add some addresses
             addr1 = Multiaddr("/ip4/192.168.1.100/tcp/4001")

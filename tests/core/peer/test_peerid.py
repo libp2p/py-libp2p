@@ -1,3 +1,37 @@
+import multibase
+import pytest
+def test_peer_id_multibase_encode_decode():
+    peer_id = ID(b'\x12\x34\x56')
+    multibase_str = peer_id.to_multibase('base58btc')
+    assert multibase_str.startswith('z')
+    decoded = ID.from_multibase(multibase_str)
+    assert decoded == peer_id
+
+def test_backward_compatibility():
+    # Old base58 strings should still work
+    old_format = base58.b58encode(b'\x12\x34\x56').decode()
+    peer_id = ID.from_string(old_format)
+    assert peer_id.to_bytes() == b'\x12\x34\x56'
+
+def test_encoding_detection():
+    peer_id = ID(b'\x12\x34\x56')
+    multibase_str = peer_id.to_multibase('base64')
+    assert multibase_str.startswith('m')
+    encoding = multibase.get_codec(multibase_str).encoding
+    assert encoding == 'base64'
+
+def test_invalid_multibase():
+    with pytest.raises(multibase.InvalidMultibaseStringError):
+        ID.from_multibase('invalid')
+
+def test_multiple_encodings():
+    peer_id = ID(b'\x12\x34\x56')
+    base58btc = peer_id.to_multibase('base58btc')
+    base64 = peer_id.to_multibase('base64')
+    base32 = peer_id.to_multibase('base32')
+    assert ID.from_multibase(base58btc) == peer_id
+    assert ID.from_multibase(base64) == peer_id
+    assert ID.from_multibase(base32) == peer_id
 import random
 
 import base58

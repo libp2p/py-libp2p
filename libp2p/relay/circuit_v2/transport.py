@@ -239,11 +239,11 @@ class CircuitV2Transport(ITransport):
 
         logger.debug(f"Relay peer ID: {relay_id_str} , \n {relay_maddr}")
 
-        dest_info = PeerInfo(ID.from_base58(dest_id_str), [maddr])
+        dest_info = PeerInfo(ID.from_string(dest_id_str), [maddr])
         logger.debug(f"Dialing destination peer ID: {dest_id_str} , \n {maddr}")
         # Use the internal dial_peer_info method
         if isinstance(relay_id_str, str):
-            relay_peer_id = ID.from_base58(relay_id_str)
+            relay_peer_id = ID.from_string(relay_id_str)
         elif isinstance(relay_id_str, ID):
             relay_peer_id = relay_id_str
         else:
@@ -487,7 +487,7 @@ class CircuitV2Transport(ITransport):
             if isinstance(val, ID):
                 target_peer_id = val
             else:
-                target_peer_id = ID.from_base58(val)
+                target_peer_id = ID.from_string(val)
         except Exception as e:
             raise ValueError(f"Invalid peer ID in circuit Multiaddr: {val}") from e
 
@@ -556,7 +556,7 @@ class CircuitV2Transport(ITransport):
         if not relay_peer_id_str:
             raise ConnectionError("Relay multiaddr missing peer id")
 
-        relay_peer_id = ID.from_base58(relay_peer_id_str)
+        relay_peer_id = ID.from_string(relay_peer_id_str)
 
         # open stream to the relay and request hop connect
         relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
@@ -701,7 +701,7 @@ class CircuitV2Transport(ITransport):
         relay_peer_id_str = relay_ma.value_for_protocol("p2p")
         if not relay_peer_id_str:
             raise ValueError("Relay multiaddr missing peer id")
-        return ID.from_base58(relay_peer_id_str)
+        return ID.from_string(relay_peer_id_str)
 
     async def discover_peers(self, key: bytes, max_results: int = 5) -> list[PeerInfo]:
         if not self.dht:

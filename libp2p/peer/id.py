@@ -2,12 +2,14 @@ import functools
 import hashlib
 
 import base58
+import multibase
 import multihash
 
 from libp2p.crypto.keys import (
     PublicKey,
 )
 from libp2p.crypto.serialization import deserialize_public_key
+from libp2p.encoding_config import get_default_encoding
 
 # NOTE: On inlining...
 # See: https://github.com/libp2p/specs/issues/138
@@ -57,6 +59,49 @@ class ID:
 
     def to_base58(self) -> str:
         return self.base58
+
+    def to_multibase(self, encoding: str | None = None) -> str:
+        """Return multibase-encoded peer ID.
+
+        Parameters
+        ----------
+        encoding : str | None
+            Multibase encoding to use.  When *None* (the default) the
+            process-wide default from :mod:`libp2p.encoding_config` is
+            used.
+        """
+        if encoding is None:
+            encoding = get_default_encoding()
+        return multibase.encode(encoding, self._bytes).decode()
+
+
+    @classmethod
+    def from_multibase(cls, multibase_str: str) -> "ID":
+        """Parse from multibase-encoded string."""
+        if not multibase.is_encoded(multibase_str):
+            # For test compatibility: raise InvalidMultibaseStringError if not multibase
+            raise multibase.InvalidMultibaseStringError("Not a multibase string")
+        try:
+            peer_id_bytes = multibase.decode(multibase_str)
+            return cls(peer_id_bytes)
+        except (multibase.InvalidMultibaseStringError, multibase.DecodingError) as e:
+            raise
+        except Exception as e:
+            raise multibase.DecodingError(f"Failed to decode multibase data: {e}") from e
+
+
+    @classmethod
+    def from_string(cls, peer_id_str: str) -> "ID":
+        """Smart parser that tries multibase first, then base58."""
+        if multibase.is_encoded(peer_id_str):
+            try:
+                return cls.from_multibase(peer_id_str)
+            except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
+                # Fallback to base58 for backward compatibility
+                return cls.from_base58(peer_id_str)
+        else:
+            # Assume base58 for backward compatibility
+            return cls.from_base58(peer_id_str)
 
     def __repr__(self) -> str:
         return f"<libp2p.peer.id.ID ({self!s})>"
