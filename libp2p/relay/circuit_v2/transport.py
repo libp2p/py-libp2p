@@ -20,6 +20,9 @@ from libp2p.abc import (
     IRawConnection,
     ITransport,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     THandler,
 )
@@ -122,6 +125,23 @@ class TrackedRawConnection(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Get remote address from the wrapped connection."""
         return self._wrapped.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        For relayed connections, this should include /p2p-circuit in the path.
+        Delegates to wrapped connection but ensures relay context is preserved.
+        """
+        return self._wrapped.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection.
+
+        This is always RELAYED since TrackedRawConnection wraps relay connections.
+        """
+        return ConnectionType.RELAYED
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped connection."""
@@ -581,8 +601,12 @@ class CircuitV2Transport(ITransport):
                 await relay_stream.close()
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            # Wrap in TrackedRawConnection for tracking
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
