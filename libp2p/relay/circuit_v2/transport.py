@@ -601,11 +601,16 @@ class CircuitV2Transport(ITransport):
                 await relay_stream.close()
                 raise ConnectionError(f"Relay connection failed: {status_msg}")
 
-            return RawConnection(
+            raw_conn = RawConnection(
                 stream=relay_stream,
                 initiator=True,
                 connection_type=ConnectionType.RELAYED,
                 addresses=[circuit_ma],
+            )
+            return TrackedRawConnection(
+                wrapped=raw_conn,
+                relay_id=relay_peer_id,
+                tracker=self.performance_tracker,
             )
 
         except Exception:
