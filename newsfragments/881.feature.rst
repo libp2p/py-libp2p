@@ -1,0 +1,1 @@
+Implemented hybrid on-chain/off-chain service discovery as a new product-innovation example. Features deterministic libp2p key derivation from Ethereum private keys, a monolith publisher capable of handling multiple service IDs concurrently, and periodic DHT re-publishing for mesh stability.
