@@ -7,7 +7,7 @@ from zeroconf import (
     Zeroconf,
 )
 
-logger = logging.getLogger("libp2p.discovery.mdns.broadcaster")
+logger = logging.getLogger(__name__)
 
 
 class PeerBroadcaster:

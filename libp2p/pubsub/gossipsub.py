@@ -66,7 +66,7 @@ PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
 PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
-logger = logging.getLogger("libp2p.pubsub.gossipsub")
+logger = logging.getLogger(__name__)
 
 
 class GossipSub(IPubsubRouter, Service):
@@ -921,7 +921,7 @@ class GossipSub(IPubsubRouter, Service):
         gossipsub_peers_in_topic = {
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
-            if self.peer_protocol[peer_id]
+            if self.peer_protocol.get(peer_id)
             in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12, PROTOCOL_ID_V20)
         }
         if backoff_check:

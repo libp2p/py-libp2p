@@ -61,6 +61,9 @@ from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+)
 
 from ..exceptions import (
     MultiError,
@@ -74,7 +77,7 @@ from .exceptions import (
     SwarmException,
 )
 
-logger = logging.getLogger("libp2p.network.swarm")
+logger = logging.getLogger(__name__)
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -192,7 +195,6 @@ class Swarm(Service, INetworkService):
         async with trio.open_nursery() as nursery:
             # Create a nursery for listener tasks.
             self.listener_nursery = nursery
-            self.event_listener_nursery_created.set()
 
             # Set background nursery BEFORE setting the event
             # This ensures transports have the nursery when they check
@@ -203,6 +205,10 @@ class Swarm(Service, INetworkService):
                 # WebSocket transport also needs background nursery
                 # for connection management
                 self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
+
+            # Set event after background nursery is configured
+            # This ensures transports have the nursery when they check the event
+            self.event_listener_nursery_created.set()
 
             # Start connection management components (go-libp2p style)
             try:
@@ -490,7 +496,11 @@ class Swarm(Service, INetworkService):
 
         # Filter addresses through connection gate (InterceptAddrDial)
         gate = self.connection_gate
-        allowed_addrs = [addr for addr in addrs if gate.is_allowed(addr)]
+        allowed_addrs = []
+        for addr in addrs:
+            if await gate.is_allowed(addr):
+                allowed_addrs.append(addr)
+
         if not allowed_addrs:
             raise SwarmException(
                 f"All addresses for peer {peer_id} blocked by connection gate"
@@ -595,11 +605,7 @@ class Swarm(Service, INetworkService):
         pre_scope = None
         if self._resource_manager is not None:
             try:
-                ep = None
-                try:
-                    ep = addr.value_for_protocol("ip4")
-                except Exception:
-                    ep = None
+                ep = extract_ip_from_multiaddr(addr)
                 pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
                 if pre_scope is None:
                     raise SwarmException("Connection denied by resource manager")
@@ -1198,9 +1204,14 @@ class Swarm(Service, INetworkService):
                     None, endpoint_ip=endpoint_ip
                 )
                 if pre_scope is None:
-                    # Denied before upgrade; close socket and return early
+                    # Denied before upgrade; close socket and raise exception
                     await raw_conn.close()
-                    return None  # type: ignore[return-value]
+                    raise SwarmException(
+                        "Connection denied by resource manager (pre-upgrade admission)"
+                    )
+            except SwarmException:
+                # Re-raise SwarmException (connection denied)
+                raise
             except Exception:
                 # Fail-open on admission errors; guard later in add_conn
                 pre_scope = None
