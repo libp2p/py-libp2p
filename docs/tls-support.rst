@@ -181,9 +181,6 @@ Troubleshooting
    * - SSL handshake failure
      - TLS version mismatch or clock skew
      - Enforce TLS 1.3, sync system clock.
-   * - `ImportError: No module named libp2p.security.tls`
-     - TLS extras not installed
-     - Run `pip install "libp2p[tls]"`.
    * - Connection refused
      - Port blocked or listener not running
      - Check firewall rules and listener status.
