@@ -1079,6 +1079,18 @@ class Swarm(Service, INetworkService):
             async def conn_handler(
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
+                # Enforce connection gate on inbound connections
+                if not self.connection_gate.is_allowed(maddr):
+                    logger.debug(
+                        "Inbound connection from %s denied by connection gate",
+                        maddr,
+                    )
+                    try:
+                        await read_write_closer.close()
+                    except Exception:
+                        pass
+                    return
+
                 # No need to upgrade QUIC Connection
                 if isinstance(self.transport, QUICTransport):
                     try:
@@ -1196,55 +1208,10 @@ class Swarm(Service, INetworkService):
         # secure the conn and then mux the conn
         secured_conn: ISecureConn | None = None
         muxed_conn: IMuxedConn | None = None
-        try:
-            try:
-                secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-            except SecurityUpgradeFailure as error:
-                logger.error("failed to upgrade security for peer at %s", maddr)
-                # Clean up raw connection
-                try:
-                    await raw_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"failed to upgrade security for peer at {maddr}"
-                ) from error
-            peer_id = secured_conn.get_remote_peer()
+        inbound_timeout = self.connection_config.inbound_upgrade_timeout
 
-            try:
-                muxed_conn = await self.upgrader.upgrade_connection(
-                    secured_conn, peer_id
-                )
-            except MuxerUpgradeFailure as error:
-                logger.error("fail to upgrade mux for peer %s", peer_id)
-                # Clean up secured connection
-                try:
-                    await secured_conn.close()
-                except Exception:
-                    pass
-                # Clean up raw connection
-                try:
-                    await raw_conn.close()
-                except Exception:
-                    pass
-                # Clean up pre-scope
-                try:
-                    if pre_scope is not None and hasattr(pre_scope, "close"):
-                        pre_scope.close()
-                except Exception:
-                    pass
-                raise SwarmException(
-                    f"fail to upgrade mux for peer {peer_id}"
-                ) from error
-            logger.debug("upgraded mux for peer %s", peer_id)
-        except Exception:
-            # Ensure cleanup on any unexpected exception
+        async def _cleanup_inbound_upgrade() -> None:
+            """Clean up all resources from a failed inbound upgrade."""
             if muxed_conn is not None:
                 try:
                     await muxed_conn.close()
@@ -1259,12 +1226,47 @@ class Swarm(Service, INetworkService):
                 await raw_conn.close()
             except Exception:
                 pass
-            # Clean up pre-scope
             try:
                 if pre_scope is not None and hasattr(pre_scope, "close"):
                     pre_scope.close()
             except Exception:
                 pass
+
+        try:
+            # Apply inbound_upgrade_timeout so a stalled security/muxer
+            # handshake cannot hang indefinitely.
+            with trio.fail_after(inbound_timeout):
+                try:
+                    secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
+                except SecurityUpgradeFailure as error:
+                    logger.error("failed to upgrade security for peer at %s", maddr)
+                    await _cleanup_inbound_upgrade()
+                    raise SwarmException(
+                        f"failed to upgrade security for peer at {maddr}"
+                    ) from error
+                peer_id = secured_conn.get_remote_peer()
+
+                try:
+                    muxed_conn = await self.upgrader.upgrade_connection(
+                        secured_conn, peer_id
+                    )
+                except MuxerUpgradeFailure as error:
+                    logger.error("fail to upgrade mux for peer %s", peer_id)
+                    await _cleanup_inbound_upgrade()
+                    raise SwarmException(
+                        f"fail to upgrade mux for peer {peer_id}"
+                    ) from error
+                logger.debug("upgraded mux for peer %s", peer_id)
+        except trio.TooSlowError:
+            logger.debug(
+                "Inbound upgrade timeout (%.1fs) exceeded for %s",
+                inbound_timeout,
+                maddr,
+            )
+            await _cleanup_inbound_upgrade()
+            raise SwarmException(f"Inbound upgrade timeout exceeded for {maddr}")
+        except Exception:
+            await _cleanup_inbound_upgrade()
             raise
         # Pass endpoint IP to resource manager, if available
         if self._resource_manager is not None:
