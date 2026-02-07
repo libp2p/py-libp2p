@@ -143,7 +143,7 @@ class KadDHT(Service):
         """
         super().__init__()
 
-        self.host = host
+        self.host: IHost = host
         self.local_peer_id = host.get_id()
 
         # Validate that mode is a DHTMode enum
@@ -154,7 +154,7 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id, self.host)
+        self.routing_table = RoutingTable(self.local_peer_id, host)
 
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
