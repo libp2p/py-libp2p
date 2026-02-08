@@ -19,6 +19,9 @@ class PublicKeyValidator(Validator):
         """
         Validate a public key record.
 
+        Uses py-multihash v3 is_valid() for efficient validation without
+        exception overhead.
+
         Args:
             key (str): The key associated with the record.
             value (bytes): The value of the record, expected to be a public key.
@@ -35,9 +38,7 @@ class PublicKeyValidator(Validator):
             raise InvalidRecordType("namespace not 'pk'")
 
         keyhash = bytes.fromhex(key)
-        try:
-            _ = multihash.decode(keyhash)
-        except Exception:
+        if not multihash.is_valid(keyhash):
             raise InvalidRecordType("key did not contain valid multihash")
 
         try:
