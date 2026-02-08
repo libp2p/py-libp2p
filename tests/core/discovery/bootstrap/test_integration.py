@@ -7,13 +7,11 @@ import secrets
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from multiaddr import Multiaddr
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
-
 
 # Valid peer IDs (must be valid CIDs; from test_utils.py validated set)
 BOOTSTRAP_PEER_ID = "QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ"
@@ -83,13 +81,13 @@ def test_bootstrap_no_addresses():
 
 @pytest.mark.trio
 async def test_bootstrap_dns_resolution_failure_continues():
-    """Test that when DNS resolution fails for one address, bootstrap continues with others."""
+    """When DNS resolution fails for one address, bootstrap continues with others."""
     from libp2p.discovery.bootstrap.bootstrap import (
         BootstrapDiscovery,
         resolver,
     )
 
-    # First address: DNS that will "fail"; second: DNS that "succeeds" with a resolved IP
+    # First DNS addr fails; second DNS addr succeeds with a resolved IP
     bootstrap_addrs: list[str] = [
         "/dns4/fail.example.com/tcp/4001/p2p/" + BOOTSTRAP_PEER_ID,
         "/dns4/ok.example.com/tcp/4001/p2p/" + BOOTSTRAP_PEER_ID,
@@ -104,11 +102,10 @@ async def test_bootstrap_dns_resolution_failure_continues():
     swarm.peerstore = MagicMock()
     swarm.dial_peer = AsyncMock()
 
-    call_count = 0
+    resolve_calls: list[int] = [0]
 
     async def mock_resolve(maddr):
-        nonlocal call_count
-        call_count += 1
+        resolve_calls[0] += 1
         s = str(maddr)
         if "fail.example.com" in s:
             raise OSError("DNS resolution failed (mocked)")
@@ -120,15 +117,17 @@ async def test_bootstrap_dns_resolution_failure_continues():
         discovery = BootstrapDiscovery(swarm, bootstrap_addrs)
         await discovery.start()
 
-    # Resolver should have been called for both addresses
-    assert call_count == 2
+    assert resolve_calls[0] == 2
     # First call raised; second returned resolved addrs and add_addr was used
     swarm.peerstore.add_addrs.assert_called()
 
 
 @pytest.mark.trio
 async def test_bootstrap_dns_empty_results_continues():
-    """Test that when DNS resolution returns no addresses, bootstrap continues without crashing."""
+    """
+    When DNS resolution returns no addresses,
+    bootstrap continues without crashing.
+    """
     from libp2p.discovery.bootstrap.bootstrap import (
         BootstrapDiscovery,
         resolver,

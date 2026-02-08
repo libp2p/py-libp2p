@@ -503,12 +503,10 @@ class CircuitV2Transport(ITransport):
                 if not isinstance(relay_ma, multiaddr.Multiaddr):
                     continue
 
-                # Construct /p2p-circuit address (Phase 3.2: Multiaddr.join)
-                circuit_ma = multiaddr.Multiaddr.join(
-                    str(relay_ma),
-                    "/p2p-circuit",
-                    f"/p2p/{peer_info.peer_id}",
-                )
+                # Construct /p2p-circuit address
+                circuit_ma = relay_ma.encapsulate(
+                    multiaddr.Multiaddr("/p2p-circuit")
+                ).encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
 
                 peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31 - 1)
                 logger.debug(
