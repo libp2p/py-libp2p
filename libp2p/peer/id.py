@@ -83,7 +83,9 @@ class ID:
             # For test compatibility: raise InvalidMultibaseStringError if not multibase
             raise multibase.InvalidMultibaseStringError("Not a multibase string")
         try:
-            peer_id_bytes = multibase.decode(multibase_str)
+            result = multibase.decode(multibase_str)
+            # multibase.decode returns (encoding, bytes) tuple
+            peer_id_bytes = result[1] if isinstance(result, tuple) else result
             return cls(peer_id_bytes)
         except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
             raise
