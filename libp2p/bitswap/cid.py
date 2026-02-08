@@ -114,11 +114,11 @@ def get_cid_prefix(cid: bytes) -> bytes:
         # For CIDv1 produced by this module, the structure is:
         # <version><codec-varint><hash-type><hash-length><digest>
         #
-        # We don't parse the varint here; instead, we preserve the prefix
-        # up to (but not including) the digest, which is everything except
-        # the last `hash_length` bytes.
-        if len(cid) >= 4:
-            hash_length = cid[-1]
+        # The multihash at the end is <hash-type><hash-length><digest>, so the
+        # digest length is the byte immediately before the digest. For SHA2-256
+        # the digest is 32 bytes, so the length byte is at cid[-33].
+        if len(cid) >= 4 + 32:  # version + codec + type + length + digest
+            hash_length = cid[-33]  # multihash length byte before digest
             prefix_len = len(cid) - hash_length
             return cid[:prefix_len]
 
