@@ -474,21 +474,6 @@ def new_swarm(
 
     return swarm
 
-    # Set resource manager if provided
-    # Auto-create a default ResourceManager if one was not provided
-    if resource_manager is None:
-        try:
-            from libp2p.rcmgr import new_resource_manager as _new_rm
-
-            resource_manager = _new_rm()
-        except Exception:
-            resource_manager = None
-
-    if resource_manager is not None:
-        swarm.set_resource_manager(resource_manager)
-
-    return swarm
-
 
 def new_host(
     key_pair: KeyPair | None = None,
