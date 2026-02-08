@@ -83,5 +83,17 @@ def peer_info_from_bytes(data: bytes) -> PeerInfo:
         raise InvalidAddrError(f"failed to decode PeerInfo: {e}")
 
 
-class InvalidAddrError(ValueError):
+from libp2p.exceptions import (
+    PeerError,
+)
+
+
+class InvalidAddrError(PeerError, ValueError):
+    """
+    Raised when an invalid address is encountered.
+    
+    This exception uses multiple inheritance to maintain compatibility
+    with code that catches ValueError while also being part of the
+    libp2p exception hierarchy.
+    """
     pass

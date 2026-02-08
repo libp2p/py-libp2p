@@ -4,12 +4,16 @@ QUIC Transport exceptions
 
 from typing import Any, Literal
 
+from libp2p.exceptions import (
+    NetworkError,
+)
 
-class QUICError(Exception):
+
+class QUICError(NetworkError):
     """Base exception for all QUIC transport errors."""
 
     def __init__(self, message: str, error_code: int | None = None):
-        super().__init__(message)
+        super().__init__(message, error_code=error_code)
         self.error_code = error_code
 
 

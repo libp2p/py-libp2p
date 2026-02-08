@@ -1,9 +1,10 @@
 from libp2p.exceptions import (
-    BaseLibp2pError,
+    PubsubError,
 )
 
 
-class PubsubRouterError(BaseLibp2pError):
+class PubsubRouterError(PubsubError):
+    """Exception raised by pubsub router operations."""
     pass
 
 
