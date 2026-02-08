@@ -1,6 +1,7 @@
 import logging
 
 from multiaddr import Multiaddr
+from multiaddr.protocols import P_IP4, P_TCP
 from multiaddr.resolvers import DNSResolver
 import trio
 
@@ -99,9 +100,17 @@ class BootstrapDiscovery:
                 return
 
             if self.is_dns_addr(multiaddr):
-                resolved_addrs = await resolver.resolve(multiaddr)
-                if resolved_addrs is None:
-                    logger.warning(f"DNS resolution returned None for: {addr_str}")
+                try:
+                    resolved_addrs = await resolver.resolve(multiaddr)
+                except Exception as e:
+                    logger.warning(
+                        "DNS resolution failed for %s: %s", addr_str, e
+                    )
+                    return
+                if not resolved_addrs:
+                    logger.warning(
+                        "No addresses resolved for DNS address: %s", addr_str
+                    )
                     return
 
                 peer_id_str = multiaddr.get_peer_id()
@@ -109,11 +118,7 @@ class BootstrapDiscovery:
                     logger.warning(f"Missing peer ID in DNS address: {addr_str}")
                     return
                 peer_id = ID.from_base58(peer_id_str)
-                addrs = [addr for addr in resolved_addrs]
-                if not addrs:
-                    logger.warning(f"No addresses resolved for DNS address: {addr_str}")
-                    return
-                peer_info = PeerInfo(peer_id, addrs)
+                peer_info = PeerInfo(peer_id, list(resolved_addrs))
                 await self.add_addr(peer_info)
             else:
                 peer_info = info_from_p2p_addr(multiaddr)
@@ -122,8 +127,11 @@ class BootstrapDiscovery:
             logger.warning(f"Failed to process bootstrap address {addr_str}: {e}")
 
     def is_dns_addr(self, addr: Multiaddr) -> bool:
-        """Check if the address is a DNS address."""
-        return any(protocol.name == "dnsaddr" for protocol in addr.protocols())
+        """Check if the address is a DNS address (dns, dns4, dns6, or dnsaddr)."""
+        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
+        return any(
+            protocol.name in dns_protocols for protocol in addr.protocols()
+        )
 
     async def add_addr(self, peer_info: PeerInfo) -> None:
         """
@@ -291,17 +299,18 @@ class BootstrapDiscovery:
 
         Filters out IPv6, UDP, QUIC, WebSocket, and other unsupported protocols.
         Only IPv4+TCP addresses are supported by the current transport.
+        Uses protocol codes for type-safe comparison.
         """
         try:
-            protocols = addr.protocols()
+            protocols = list(addr.protocols())
 
-            # Must have IPv4 protocol
-            has_ipv4 = any(p.name == "ip4" for p in protocols)
+            # Must have IPv4 protocol (by code)
+            has_ipv4 = any(p.code == P_IP4 for p in protocols)
             if not has_ipv4:
                 return False
 
-            # Must have TCP protocol
-            has_tcp = any(p.name == "tcp" for p in protocols)
+            # Must have TCP protocol (by code)
+            has_tcp = any(p.code == P_TCP for p in protocols)
             if not has_tcp:
                 return False
 

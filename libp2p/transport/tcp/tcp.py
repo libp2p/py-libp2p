@@ -5,9 +5,8 @@ from collections.abc import (
 )
 import logging
 
-from multiaddr import (
-    Multiaddr,
-)
+from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 from trio_typing import (
     TaskStatus,
@@ -138,10 +137,42 @@ class TCP(ITransport):
         """
         Dial a transport to peer listening on multiaddr.
 
+        Resolves DNS (dns, dns4, dns6, dnsaddr) before dialing (Phase 3.1).
+
         :param maddr: multiaddr of peer
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
+        protocols = list(maddr.protocols())
+        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
+        if protocols and protocols[0].name in dns_protocols:
+            try:
+                resolver = DNSResolver()
+                resolved = await resolver.resolve(maddr)
+            except Exception as e:
+                logger.warning("DNS resolution failed for %s: %s", maddr, e)
+                raise OpenConnectionError(
+                    f"Failed to resolve DNS for {maddr}: {e}"
+                ) from e
+            if not resolved:
+                raise OpenConnectionError(
+                    f"No addresses resolved for DNS multiaddr: {maddr}"
+                )
+            last_error: Exception | None = None
+            for resolved_addr in resolved:
+                try:
+                    return await self._dial_resolved(resolved_addr)
+                except Exception as e:
+                    last_error = e
+                    logger.debug("Dial to resolved address %s failed: %s", resolved_addr, e)
+                    continue
+            raise OpenConnectionError(
+                f"Failed to connect to any resolved address for {maddr}"
+            ) from last_error
+        return await self._dial_resolved(maddr)
+
+    async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
+        """Dial using a multiaddr that has an IP (no DNS)."""
         host_str = extract_ip_from_multiaddr(maddr)
         port_str = maddr.value_for_protocol("tcp")
 
@@ -163,21 +194,17 @@ class TCP(ITransport):
             )
 
         try:
-            # trio.open_tcp_stream requires host to be str or bytes, not None.
             logger.debug("=== OPENING TCP STREAM ===")
             logger.debug("Host: %s", host_str)
             logger.debug("Port: %d", port_int)
             stream = await trio.open_tcp_stream(host_str, port_int)
             logger.debug("Successfully opened TCP stream")
         except OSError as error:
-            # OSError is common for network issues like "Connection refused"
-            # or "Host unreachable".
             logger.error("Failed to open TCP stream: %s", error)
             raise OpenConnectionError(
                 f"Failed to open TCP stream to {maddr}: {error}"
             ) from error
         except Exception as error:
-            # Catch other potential errors from trio.open_tcp_stream and wrap them.
             logger.error("Unexpected error opening TCP stream: %s", error)
             raise OpenConnectionError(
                 f"An unexpected error occurred when dialing {maddr}: {error}"

@@ -3,21 +3,35 @@ Multiaddr utility functions for IPv4/IPv6 handling.
 
 This module provides helper functions to extract IP addresses from multiaddrs
 in a version-agnostic way, supporting both IPv4 and IPv6.
+Uses py-multiaddr utilities (e.g. get_multiaddr_options) when available.
 """
 
 import socket
 from typing import Any
 
 from multiaddr import Multiaddr
+from multiaddr.utils import get_multiaddr_options
 
 
 def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
     """
-    Extract IP address (IPv4 or IPv6) from multiaddr.
+    Extract IP address (IPv4 or IPv6) from multiaddr using py-multiaddr utilities.
+
+    Prefers get_multiaddr_options for consistent parsing; falls back to
+    value_for_protocol for ip4/ip6 when options do not provide a host.
 
     :param maddr: Multiaddr to extract from
     :return: IP address string or None if not found
     """
+    try:
+        options = get_multiaddr_options(maddr)
+        if options:
+            host = options.get("host")
+            if host:
+                return host
+    except Exception:
+        pass
+
     try:
         ip4 = maddr.value_for_protocol("ip4")
         if ip4:
