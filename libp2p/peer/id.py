@@ -100,6 +100,7 @@ class ID:
 
         Example:
             >>> from libp2p.crypto.ed25519 import create_new_key_pair
+            >>> from libp2p.peer.id import ID
             >>> kp1 = create_new_key_pair()
             >>> kp2 = create_new_key_pair()
             >>> # Same keypair produces same peer ID

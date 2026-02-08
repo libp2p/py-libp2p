@@ -272,11 +272,11 @@ def generate_new_ed25519_identity() -> KeyPair:
 def generate_peer_id_from(key_pair: KeyPair) -> ID:
     """
     Generate a deterministic peer ID from a keypair.
-    
+
     The peer ID is derived from the public key, so the same keypair will
     always produce the same peer ID. This enables identity persistence:
     if you save and reuse the same keypair, you'll get the same peer ID.
-    
+
     :param key_pair: The keypair to generate a peer ID from
     :return: A deterministic peer ID
     """
