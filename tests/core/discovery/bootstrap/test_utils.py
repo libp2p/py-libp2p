@@ -58,9 +58,7 @@ def test_is_dns_addr_dns_protocols():
     ]
     for addr_str in dns_addrs:
         maddr = Multiaddr(addr_str)
-        assert discovery.is_dns_addr(maddr), (
-            f"Expected DNS address: {addr_str}"
-        )
+        assert discovery.is_dns_addr(maddr), f"Expected DNS address: {addr_str}"
 
     # Non-DNS addresses
     non_dns_addrs = [
@@ -69,6 +67,4 @@ def test_is_dns_addr_dns_protocols():
     ]
     for addr_str in non_dns_addrs:
         maddr = Multiaddr(addr_str)
-        assert not discovery.is_dns_addr(maddr), (
-            f"Expected non-DNS address: {addr_str}"
-        )
+        assert not discovery.is_dns_addr(maddr), f"Expected non-DNS address: {addr_str}"

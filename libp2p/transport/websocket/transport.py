@@ -850,9 +850,13 @@ class WebsocketTransport(ITransport):
                         e,
                     )
                     continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
             raise OpenConnectionError(
                 f"Failed to connect to any resolved address for {maddr}"
-            ) from last_error
+            )
         return await self._dial_resolved(maddr)
 
     async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
@@ -873,9 +877,7 @@ class WebsocketTransport(ITransport):
         except Exception as e:
             if isinstance(e, OpenConnectionError):
                 raise
-            raise OpenConnectionError(
-                f"Failed to dial {maddr}: {str(e)}"
-            ) from e
+            raise OpenConnectionError(f"Failed to dial {maddr}: {str(e)}") from e
 
     def create_listener(self, handler: THandler) -> IListener:  # type: ignore[override]
         """

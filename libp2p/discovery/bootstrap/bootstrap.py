@@ -103,9 +103,7 @@ class BootstrapDiscovery:
                 try:
                     resolved_addrs = await resolver.resolve(multiaddr)
                 except Exception as e:
-                    logger.warning(
-                        "DNS resolution failed for %s: %s", addr_str, e
-                    )
+                    logger.warning("DNS resolution failed for %s: %s", addr_str, e)
                     return
                 if not resolved_addrs:
                     logger.warning(
@@ -129,9 +127,7 @@ class BootstrapDiscovery:
     def is_dns_addr(self, addr: Multiaddr) -> bool:
         """Check if the address is a DNS address (dns, dns4, dns6, or dnsaddr)."""
         dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
-        return any(
-            protocol.name in dns_protocols for protocol in addr.protocols()
-        )
+        return any(protocol.name in dns_protocols for protocol in addr.protocols())
 
     async def add_addr(self, peer_info: PeerInfo) -> None:
         """

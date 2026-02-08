@@ -164,11 +164,17 @@ class TCP(ITransport):
                     return await self._dial_resolved(resolved_addr)
                 except Exception as e:
                     last_error = e
-                    logger.debug("Dial to resolved address %s failed: %s", resolved_addr, e)
+                    logger.debug(
+                        "Dial to resolved address %s failed: %s", resolved_addr, e
+                    )
                     continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
             raise OpenConnectionError(
                 f"Failed to connect to any resolved address for {maddr}"
-            ) from last_error
+            )
         return await self._dial_resolved(maddr)
 
     async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:

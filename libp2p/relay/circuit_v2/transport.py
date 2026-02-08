@@ -223,7 +223,9 @@ class CircuitV2Transport(ITransport):
         logger.debug("Relay peer ID: %s , \n %s", relay_id_str, relay_maddr)
 
         dest_info = PeerInfo(dest_peer_id, [maddr])
-        logger.debug("Dialing destination peer ID: %s , \n %s", dest_info.peer_id, maddr)
+        logger.debug(
+            "Dialing destination peer ID: %s , \n %s", dest_info.peer_id, maddr
+        )
         # Use the internal dial_peer_info method
         if isinstance(relay_id_str, str):
             relay_peer_id = ID.from_base58(relay_id_str)

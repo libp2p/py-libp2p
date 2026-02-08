@@ -1665,9 +1665,7 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
 def test_valid_circuit_multiaddr(circuit_v2_transport):
     """Parse circuit multiaddr using decapsulate_code (Phase 2.3)."""
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-    ma = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}"
-    )
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}")
     relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
 
     assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
@@ -1679,17 +1677,13 @@ def test_invalid_circuit_multiaddr(circuit_v2_transport):
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
 
     # Case 1: Missing /p2p-circuit (only /p2p at end)
-    ma1 = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}"
-    )
+    ma1 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}")
     with pytest.raises(ValueError) as exc_info:
         circuit_v2_transport.parse_circuit_ma(ma1)
     assert "Missing /p2p-circuit" in str(exc_info.value)
 
     # Case 2: Has /p2p-circuit but no /p2p/<peerID> at end
-    ma2 = multiaddr.Multiaddr(
-        "/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1"
-    )
+    ma2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
     with pytest.raises(ValueError) as exc_info:
         circuit_v2_transport.parse_circuit_ma(ma2)
     assert "Missing /p2p/<peerID>" in str(exc_info.value)
@@ -1701,9 +1695,7 @@ def test_invalid_circuit_multiaddr(circuit_v2_transport):
     assert "Missing" in str(exc_info.value) or "Invalid" in str(exc_info.value)
 
     # Case 4: No /p2p-circuit in path (ip6 before p2p)
-    ma4 = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}"
-    )
+    ma4 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}")
     with pytest.raises(ValueError) as exc_info:
         circuit_v2_transport.parse_circuit_ma(ma4)
     assert "Missing /p2p-circuit" in str(exc_info.value)
