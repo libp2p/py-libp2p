@@ -2,12 +2,10 @@ from __future__ import (
     annotations,
 )
 
-import multibase
 from collections.abc import (
     Callable,
     KeysView,
 )
-
 import functools
 import hashlib
 import logging
@@ -17,6 +15,7 @@ from typing import (
     cast,
 )
 
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -102,13 +101,10 @@ def get_content_addressed_msg_id(
     """
     Generate content-addressed message ID using multibase encoding.
 
-    Args:
-        msg: Pubsub message
-        encoding: Encoding to use.  When *None* the process-wide default
-            from :mod:`libp2p.encoding_config` is used.
-
-    Returns:
-        Multibase-encoded message ID
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
     """
     from libp2p.encoding_config import get_default_encoding
 
@@ -1006,10 +1002,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            ID(msg.from_id) == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,

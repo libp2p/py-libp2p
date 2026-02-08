@@ -61,7 +61,8 @@ class ID:
         return self.base58
 
     def to_multibase(self, encoding: str | None = None) -> str:
-        """Return multibase-encoded peer ID.
+        """
+        Return multibase-encoded peer ID.
 
         Parameters
         ----------
@@ -69,11 +70,11 @@ class ID:
             Multibase encoding to use.  When *None* (the default) the
             process-wide default from :mod:`libp2p.encoding_config` is
             used.
+
         """
         if encoding is None:
             encoding = get_default_encoding()
         return multibase.encode(encoding, self._bytes).decode()
-
 
     @classmethod
     def from_multibase(cls, multibase_str: str) -> "ID":
@@ -84,11 +85,12 @@ class ID:
         try:
             peer_id_bytes = multibase.decode(multibase_str)
             return cls(peer_id_bytes)
-        except (multibase.InvalidMultibaseStringError, multibase.DecodingError) as e:
+        except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
             raise
         except Exception as e:
-            raise multibase.DecodingError(f"Failed to decode multibase data: {e}") from e
-
+            raise multibase.DecodingError(
+                f"Failed to decode multibase data: {e}"
+            ) from e
 
     @classmethod
     def from_string(cls, peer_id_str: str) -> "ID":

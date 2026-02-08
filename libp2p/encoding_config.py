@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+import threading
 
 import multibase
 
 _lock = threading.Lock()
 _default_encoding: str = "base58btc"
+
 
 def get_default_encoding() -> str:
     """Return the current default multibase encoding (e.g. ``'base58btc'``)."""
@@ -36,8 +37,7 @@ def set_default_encoding(encoding: str) -> None:
     if not multibase.is_encoding_supported(encoding):
         supported = ", ".join(multibase.list_encodings())
         raise ValueError(
-            f"Unsupported encoding {encoding!r}. "
-            f"Supported encodings: {supported}"
+            f"Unsupported encoding {encoding!r}. Supported encodings: {supported}"
         )
 
     with _lock:

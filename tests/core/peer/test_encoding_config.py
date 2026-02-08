@@ -1,6 +1,5 @@
 """Tests for encoding_config module and encoding preference integration."""
 
-import multibase
 import pytest
 
 from libp2p.encoding_config import (

@@ -52,6 +52,7 @@ async def receive_loop(subscription, termination_event):
         try:
             message = await subscription.get()
             from libp2p.peer.id import ID
+
             logger.info(f"From peer: {ID(message.from_id).to_base58()}")
             print(f"Received message: {message.data.decode('utf-8')}")
         except Exception:
