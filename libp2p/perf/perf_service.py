@@ -47,18 +47,19 @@ class PerfService(IPerf):
             Initialization options for the service.
 
         """
-        if init is None:
-            init = {}
+        init_opts: PerfInit = init if init is not None else {}
 
         self._host = host
         self._started = False
-        self._protocol = TProtocol(init.get("protocol_name", PROTOCOL_NAME))
-        self._write_block_size = init.get("write_block_size", WRITE_BLOCK_SIZE)
-        self._max_inbound_streams = init.get("max_inbound_streams", MAX_INBOUND_STREAMS)
-        self._max_outbound_streams = init.get(
+        self._protocol = TProtocol(init_opts.get("protocol_name", PROTOCOL_NAME))
+        self._write_block_size = init_opts.get("write_block_size", WRITE_BLOCK_SIZE)
+        self._max_inbound_streams = init_opts.get(
+            "max_inbound_streams", MAX_INBOUND_STREAMS
+        )
+        self._max_outbound_streams = init_opts.get(
             "max_outbound_streams", MAX_OUTBOUND_STREAMS
         )
-        self._run_on_limited_connection = init.get(
+        self._run_on_limited_connection = init_opts.get(
             "run_on_limited_connection", RUN_ON_LIMITED_CONNECTION
         )
 
@@ -90,7 +91,7 @@ class PerfService(IPerf):
         """
         try:
             # Read exactly 8 bytes for the header (handle TCP fragmentation)
-            header = b""
+            header: bytes = b""
             while len(header) < 8:
                 try:
                     chunk = await stream.read(8 - len(header))
@@ -156,8 +157,7 @@ class PerfService(IPerf):
             Progress reports during the transfer, with a final summary at the end.
 
         """
-        if options is None:
-            options = {}
+        opts: PerfOptions = options if options is not None else {}
 
         initial_start_time = time.time()
         last_reported_time = time.time()
