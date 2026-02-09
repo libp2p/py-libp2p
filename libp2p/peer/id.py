@@ -31,9 +31,6 @@ if ENABLE_INLINING:
         def digest(self) -> bytes:
             return self._digest
 
-    # Note: FuncReg is not available in pymultihash 0.8.2
-    # Identity hash is handled manually in from_pubkey method
-
 
 class ID:
     _bytes: bytes

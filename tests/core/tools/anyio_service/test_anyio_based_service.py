@@ -21,12 +21,6 @@ from libp2p.tools.anyio_service import (
     background_anyio_service,
 )
 
-# Skip all tests in this module - AnyIO manager needs additional work
-# All existing py-libp2p code uses TrioManager which works correctly
-pytestmark = pytest.mark.skip(
-    reason="AnyIO tests need adaptation - use trio tests instead"
-)
-
 
 class WaitCancelledService(Service):
     async def run(self) -> None:

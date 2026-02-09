@@ -6,12 +6,6 @@ from libp2p.tools.anyio_service import (
     Service,
 )
 
-# Skip all tests in this module - AnyIO manager needs additional work
-# All existing py-libp2p code uses TrioManager which works correctly
-pytestmark = pytest.mark.skip(
-    reason="AnyIO tests need adaptation - use trio tests instead"
-)
-
 
 async def checkpoint():
     """AnyIO checkpoint helper for tests."""
