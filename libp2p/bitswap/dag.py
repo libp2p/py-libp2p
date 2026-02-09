@@ -5,8 +5,6 @@ This module provides a high-level API for adding and fetching files
 using the Bitswap protocol with automatic chunking, linking, and
 multi-block resolution.
 
-Uses py-multihash v3 sum_stream() for memory-efficient streaming hash
-computation of large files, avoiding loading entire files into memory.
 """
 
 from collections.abc import Awaitable, Callable
@@ -28,7 +26,6 @@ from .cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
     compute_cid_v1,
-    compute_cid_v1_stream,
     verify_cid,
 )
 from .client import BitswapClient
@@ -158,13 +155,10 @@ class MerkleDag:
         if file_size <= chunk_size:
             logger.debug("File fits in single block")
 
-            # Use streaming hash for memory efficiency (py-multihash v3)
-            with open(file_path, "rb") as f:
-                cid = compute_cid_v1_stream(f, codec=CODEC_RAW)
-
-            # Read data for storage (after computing CID)
             with open(file_path, "rb") as f:
                 data = f.read()
+
+            cid = compute_cid_v1(data, codec=CODEC_RAW)
 
             await self.bitswap.add_block(cid, data)
 

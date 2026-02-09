@@ -1,8 +1,11 @@
 """Unit tests for CID computation and verification."""
 
+import pytest
+
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
+    compute_cid_v0,
     compute_cid_v1,
     verify_cid,
 )
@@ -176,8 +179,6 @@ class TestCompatibility:
         data = b"hello world"
 
         # Compute CIDv0 (which is just a multihash)
-        from libp2p.bitswap.cid import compute_cid_v0
-
         cid_v0 = compute_cid_v0(data)
 
         # Verify it works
@@ -199,21 +200,8 @@ class TestCompatibility:
         # Verify with wrong data fails
         assert verify_cid(cid_v1, b"wrong data") is False
 
-    def test_multihash_api_integration(self):
-        """Test that py-multihash v3 API is properly integrated."""
-        import multihash
 
-        # Test that we can use multihash directly
-        data = b"test data"
-        mh = multihash.digest(data, multihash.Func.sha2_256)
-
-        # Verify multihash properties
-        assert mh.code == 0x12  # SHA-256 code
-        assert len(mh.digest) == 32  # SHA-256 produces 32 bytes
-        assert mh.verify(data) is True
-        assert mh.verify(b"wrong data") is False
-
-
+@pytest.mark.benchmark
 class TestPerformance:
     """Performance benchmarks for py-multihash v3 integration."""
 

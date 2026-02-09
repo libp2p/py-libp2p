@@ -7,6 +7,8 @@ Note: This is a simplified implementation for demonstration. In production,
 use a proper CID library like py-cid or multiformats.
 """
 
+from typing import BinaryIO
+
 import multihash
 
 # Simplified CID version constants
@@ -28,8 +30,6 @@ def compute_cid_v0(data: bytes) -> bytes:
     CIDv0 is just a base58-encoded multihash (SHA-256).
     For simplicity, we return the raw multihash bytes.
 
-    Uses py-multihash v3 API for robust multihash handling.
-
     Args:
         data: The data to hash
 
@@ -47,8 +47,6 @@ def compute_cid_v1(data: bytes, codec: int = CODEC_RAW) -> bytes:
 
     CIDv1 format: <version><codec><multihash>
 
-    Uses py-multihash v3 API for robust multihash handling.
-
     Args:
         data: The data to hash
         codec: Multicodec code (default: raw)
@@ -64,7 +62,7 @@ def compute_cid_v1(data: bytes, codec: int = CODEC_RAW) -> bytes:
     return bytes([CID_V1, codec]) + multihash_bytes
 
 
-def compute_cid_v1_stream(file_obj, codec: int = CODEC_RAW) -> bytes:
+def compute_cid_v1_stream(file_obj: BinaryIO, codec: int = CODEC_RAW) -> bytes:
     """
     Compute a CIDv1 for a file stream using py-multihash v3 sum_stream().
 
@@ -122,8 +120,6 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
 
     Used when receiving v1.1.0+ Block messages with prefix.
 
-    Uses py-multihash v3 API for robust multihash handling.
-
     Args:
         prefix: CID prefix (version, codec, hash type, hash length)
         data: Block data
@@ -136,8 +132,11 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
         # No prefix means CIDv0
         return compute_cid_v0(data)
 
+    # Read hash algorithm from prefix (prefix[2] contains hash function code)
+    hash_code = prefix[2] if len(prefix) > 2 else multihash.Func.sha2_256
+
     # Compute hash digest using multihash API
-    mh = multihash.digest(data, multihash.Func.sha2_256)
+    mh = multihash.digest(data, hash_code)
 
     # Reconstruct CID: prefix + digest
     return prefix + mh.digest
@@ -145,13 +144,11 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
 
 def verify_cid(cid: bytes, data: bytes) -> bool:
     """
-    Verify that data matches the given CID using py-multihash v3 API.
-
-    Uses py-multihash v3 API for robust multihash handling and verification.
+    Verify that data matches the given CID.
 
     Args:
-        cid: The CID to verify
-        data: The data to check
+        cid: The CID to verify against
+        data: The data to verify
 
     Returns:
         True if data matches CID, False otherwise
@@ -184,7 +181,7 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         match = mh.verify(data)
         logger.debug(f"        Verification: {'MATCH' if match else 'MISMATCH'}")
         return match
-    except (ValueError, IndexError) as e:
+    except Exception as e:
         logger.debug(f"        Verification failed: {e}")
         return False
 
