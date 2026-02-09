@@ -17,21 +17,21 @@ Example usage:
     >>> loaded_key_pair = load_identity("my_peer.key")
 """
 
+import os
 from pathlib import Path
 
-from libp2p.crypto.ed25519 import (
-    Ed25519PrivateKey,
-    create_new_key_pair as create_new_ed25519_key_pair,
-)
+from libp2p.crypto.ed25519 import create_new_key_pair as create_new_ed25519_key_pair
 from libp2p.crypto.keys import KeyPair
+from libp2p.crypto.serialization import deserialize_private_key
 
 
 def save_identity(key_pair: KeyPair, filepath: str | Path) -> None:
     """
     Save a keypair to disk for later reuse.
 
-    The private key is serialized and saved to the specified file.
-    The file should be kept secure as it contains the peer's private key.
+    The private key is serialized using protobuf format and saved to the
+    specified file with restrictive permissions (0600). The file is created
+    atomically with the correct permissions to prevent security race conditions.
 
     Args:
         key_pair: The KeyPair to save
@@ -48,26 +48,28 @@ def save_identity(key_pair: KeyPair, filepath: str | Path) -> None:
     """
     filepath = Path(filepath)
 
-    # Serialize the private key to bytes
-    private_key_bytes = key_pair.private_key.to_bytes()
+    # Create parent directories if they don't exist
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    # Write to file with restrictive permissions (owner read/write only)
-    filepath.write_bytes(private_key_bytes)
+    # Serialize the private key to protobuf format
+    # This uses the standardized libp2p protobuf format for interoperability
+    private_key_bytes = key_pair.private_key.serialize()
 
-    # Set file permissions to 0600 (owner read/write only) for security
+    # Create file with 0600 permissions atomically to prevent race condition
+    # where another process could read the file between write and chmod
+    fd = os.open(filepath, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     try:
-        filepath.chmod(0o600)
-    except (OSError, NotImplementedError):
-        # Some filesystems don't support chmod, ignore the error
-        pass
+        os.write(fd, private_key_bytes)
+    finally:
+        os.close(fd)
 
 
 def load_identity(filepath: str | Path) -> KeyPair:
     """
     Load a keypair from disk.
 
-    Reads a previously saved private key and reconstructs the full keypair.
-    Currently only supports Ed25519 keys.
+    Reads a previously saved private key (in protobuf format) and reconstructs
+    the full keypair. Supports Ed25519, RSA, and Secp256k1 keys.
 
     Args:
         filepath: Path to the saved private key file
@@ -77,7 +79,7 @@ def load_identity(filepath: str | Path) -> KeyPair:
 
     Raises:
         FileNotFoundError: If the file doesn't exist
-        ValueError: If the file contains invalid key data
+        ValueError: If the file contains invalid or corrupted key data
 
     Example:
         >>> key_pair = load_identity("my_peer_identity.key")
@@ -90,11 +92,21 @@ def load_identity(filepath: str | Path) -> KeyPair:
     # Read the private key bytes
     private_key_bytes = filepath.read_bytes()
 
-    # Reconstruct the Ed25519 private key
-    private_key = Ed25519PrivateKey.from_bytes(private_key_bytes)
+    # Deserialize from protobuf format with validation
+    try:
+        private_key = deserialize_private_key(private_key_bytes)
+    except Exception as e:
+        raise ValueError(
+            f"Invalid or corrupted private key file '{filepath}': {e}"
+        ) from e
 
-    # Derive the public key
-    public_key = private_key.get_public_key()
+    # Verify the key is valid by deriving the public key
+    try:
+        public_key = private_key.get_public_key()
+        # Additional validation: verify roundtrip serialization works
+        _ = public_key.serialize()
+    except Exception as e:
+        raise ValueError(f"Corrupted private key in file '{filepath}': {e}") from e
 
     return KeyPair(private_key, public_key)
 

@@ -104,10 +104,13 @@ class ID:
             >>> kp1 = create_new_key_pair()
             >>> kp2 = create_new_key_pair()
             >>> # Same keypair produces same peer ID
-            >>> ID.from_pubkey(kp1.public_key) == ID.from_pubkey(kp1.public_key)
+            >>> id1_a = ID.from_pubkey(kp1.public_key)
+            >>> id1_b = ID.from_pubkey(kp1.public_key)
+            >>> id1_a == id1_b
             True
             >>> # Different keypairs produce different peer IDs
-            >>> ID.from_pubkey(kp1.public_key) == ID.from_pubkey(kp2.public_key)
+            >>> id2 = ID.from_pubkey(kp2.public_key)
+            >>> id1_a == id2
             False
 
         """
