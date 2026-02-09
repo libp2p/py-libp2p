@@ -25,6 +25,19 @@ RESP_TIMEOUT = 60
 logger = logging.getLogger(__name__)
 
 
+class PingEvent:
+    peer_id: PeerID
+    rtts: list[int] | None
+    failure_error: Exception | None
+
+    def __init__(
+        self, peer_id: PeerID, rtts: list[int] | None, failure_error: Exception | None
+    ):
+        self.peer_id = peer_id
+        self.rtts = rtts
+        self.failure_error = failure_error
+
+
 async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     """
     Return a boolean indicating if we expect more pings from the peer at ``peer_id``.
@@ -81,13 +94,18 @@ async def _ping(stream: INetStream) -> int:
     returns integer value rtt - which denotes round trip time for a ping request in ms
     """
     ping_bytes = secrets.token_bytes(PING_LENGTH)
-    before = time.time()
+
+    start = time.time()
     await stream.write(ping_bytes)
     pong_bytes = await stream.read(PING_LENGTH)
-    rtt = int((time.time() - before) * (10**6))
+    end = time.time()
+
+    rtt = int((end - start) * (10**6))  # in microseconds
+
     if ping_bytes != pong_bytes:
         logger.debug("invalid pong response")
         raise
+
     return rtt
 
 
@@ -103,7 +121,20 @@ class PingService:
         try:
             rtts = [await _ping(stream) for _ in range(ping_amt)]
             await stream.close()
+
+            event = PingEvent(
+                peer_id=peer_id,
+                rtts=rtts,
+                failure_error=None,
+            )
+
             return rtts
-        except Exception:
+
+        except Exception as error:
             await stream.close()
+
+            event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
             raise
+
+        finally:
+            await stream.metric_send_channel.send(event)
