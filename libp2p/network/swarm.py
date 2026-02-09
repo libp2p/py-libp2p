@@ -125,6 +125,7 @@ class Swarm(Service, INetworkService):
         retry_config: RetryConfig | None = None,
         connection_config: ConnectionConfig | QUICTransportConfig | None = None,
         psk: str | None = None,
+        metric_send_channel: trio.MemorySendChannel | None = None,
     ):
         self.self_id = peer_id
         self.peerstore = peerstore
@@ -152,6 +153,9 @@ class Swarm(Service, INetworkService):
         self._round_robin_index = {}
         self._resource_manager = None
         self._stream_semaphore: trio.Semaphore | None = None
+
+        # Metrics
+        self.metric_send_channel = metric_send_channel
 
         # Initialize connection management components
         self._init_connection_management()
@@ -826,6 +830,9 @@ class Swarm(Service, INetworkService):
                 pass
 
         swarm_conn = await self.add_conn(muxed_conn, direction="outbound")
+
+        swarm_conn._metric_send_channel = self.metric_send_channel
+
         logger.debug("successfully dialed peer %s", peer_id)
         return swarm_conn
 
