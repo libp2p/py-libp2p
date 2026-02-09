@@ -79,6 +79,36 @@ Now that you have configured a **Transport**, **Crypto** and **Stream Multiplexe
 .. literalinclude:: ../examples/doc-examples/example_running.py
    :language: python
 
+Bind address and IPv6
+^^^^^^^^^^^^^^^^^^^^^
+
+Default listen addresses are controlled by environment variables. Use ``LIBP2P_BIND`` for IPv4 (default ``127.0.0.1``) and ``LIBP2P_BIND_V6`` for IPv6 (default ``::1``). Invalid values fall back to these secure defaults.
+
+**IPv4 (LIBP2P_BIND):**
+
+.. code-block:: bash
+
+    # Listen on all IPv4 interfaces (e.g. for tests)
+    export LIBP2P_BIND=0.0.0.0
+    python your_script.py
+
+**IPv6 (LIBP2P_BIND_V6):**
+
+.. code-block:: bash
+
+    # Use default IPv6 loopback (::1)
+    python your_script.py
+
+    # Listen on all IPv6 interfaces (e.g. for tests or dual-stack)
+    export LIBP2P_BIND_V6=::
+    python your_script.py
+
+    # Custom IPv6 address
+    export LIBP2P_BIND_V6=fd00::1
+    python your_script.py
+
+Multiaddr formats for IPv6 include ``/ip6/::1/tcp/PORT`` and ``/ip6/::1/tcp/PORT/ws`` for WebSocket.
+
 Resource Management
 ^^^^^^^^^^^^^^^^^^^
 
