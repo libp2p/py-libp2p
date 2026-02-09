@@ -327,6 +327,7 @@ class INetStream(ReadWriteCloser):
     """
 
     muxed_conn: IMuxedConn
+    metric_send_channel: trio.MemorySendChannel | None
 
     @abstractmethod
     def get_protocol(self) -> TProtocol | None:
@@ -2206,6 +2207,10 @@ class IHost(ABC):
             If the upgrade process (security handshake or multiplexer negotiation) fails
 
         """
+
+    @abstractmethod
+    async def next_event(self) -> None:
+        """"""
 
 
 # -------------------------- peer-record interface.py --------------------------
