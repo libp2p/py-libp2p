@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import ssl
+
+import trio
 from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -293,7 +295,8 @@ def new_swarm(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
+    metric_send_channel: trio.MemorySendChannel | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
@@ -438,7 +441,8 @@ def new_swarm(
         transport,
         retry_config=retry_config,
         connection_config=connection_config,
-        psk=psk
+        psk=psk,
+        metric_send_channel=metric_send_channel
     )
 
     # Set resource manager if provided
@@ -468,6 +472,7 @@ def new_host(
     enable_mDNS: bool = False,
     enable_upnp: bool = False,
     enable_autotls: bool = False,
+    enable_metrics: bool = False,
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
@@ -513,6 +518,11 @@ def new_host(
     if not enable_quic and quic_transport_opt is not None:
         logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
 
+    # Metric emit/consume endpoints
+    metric_send_channel, metric_recv_channel = None, None
+    if enable_metrics:
+        metric_send_channel, metric_recv_channel = trio.open_memory_channel(100)
+
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
     if resource_manager is None:
@@ -545,7 +555,8 @@ def new_host(
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
-        psk=psk
+        psk=psk,
+        metric_send_channel=metric_send_channel
     )
 
     if disc_opt is not None:
@@ -568,6 +579,7 @@ def new_host(
         enable_upnp=enable_upnp,
         negotiate_timeout=negotiate_timeout,
         resource_manager=resource_manager,
+        metric_recv_channel=metric_recv_channel
         bootstrap_allow_ipv6=bootstrap_allow_ipv6,
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,

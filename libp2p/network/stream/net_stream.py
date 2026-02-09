@@ -122,9 +122,13 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
+    metric_send_channel: trio.MemorySendChannel | None
 
     def __init__(
-        self, muxed_stream: IMuxedStream, swarm_conn: "SwarmConn | None"
+        self,
+        muxed_stream: IMuxedStream,
+        swarm_conn: "SwarmConn | None",
+        metric_send_channel: trio.MemorySendChannel | None,
     ) -> None:
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
@@ -140,6 +144,9 @@ class NetStream(INetStream):
 
         # Thread safety for state operations (following AkMo3's approach)
         self._state_lock = trio.Lock()
+
+        # Metrics emit endpoint
+        self.metric_send_channel = metric_send_channel
 
     def get_protocol(self) -> TProtocol | None:
         """
