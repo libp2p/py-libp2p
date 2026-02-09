@@ -1,6 +1,13 @@
 """
 Perf protocol service implementation.
 Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
+
+Note:
+    This service is designed for benchmarking and performance testing.
+    The server accepts any uint64 value for bytes to send back, which
+    is intentional to support high-volume stress testing. This service
+    should only be enabled in trusted environments or test networks.
+
 """
 
 from collections.abc import AsyncIterator
