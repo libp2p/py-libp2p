@@ -33,6 +33,7 @@ class RoutedHost(BasicHost):
         router: IPeerRouting,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
     ):
@@ -43,6 +44,7 @@ class RoutedHost(BasicHost):
         :param router: Peer routing implementation
         :param enable_mDNS: Enable mDNS discovery
         :param enable_upnp: Enable UPnP port mapping
+        :param enable_autotls: Enable AutoTLS certificate provisioning.
         :param bootstrap: Bootstrap peer addresses
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
@@ -51,6 +53,7 @@ class RoutedHost(BasicHost):
             network,
             enable_mDNS,
             enable_upnp,
+            enable_autotls,
             bootstrap,
             resource_manager=resource_manager,
         )
