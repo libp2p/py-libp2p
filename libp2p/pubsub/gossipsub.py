@@ -126,6 +126,10 @@ class GossipSub(IPubsubRouter, Service):
     eclipse_protection_enabled: bool
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
+    # Pending messages for peers that haven't completed protocol identification yet.
+    # Maps peer_id -> list of RPC messages queued for delivery once identify completes.
+    _pending_messages: DefaultDict[ID, list[rpc_pb2.RPC]]
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -212,6 +216,9 @@ class GossipSub(IPubsubRouter, Service):
         self.equivocation_detection = {}
         self.eclipse_protection_enabled = eclipse_protection_enabled
         self.min_mesh_diversity_ips = min_mesh_diversity_ips
+
+        # Pending publish queue for identify-aware delivery
+        self._pending_messages = defaultdict(list)
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -300,6 +307,62 @@ class GossipSub(IPubsubRouter, Service):
         if self.scorer is not None and self.pubsub is not None:
             self._track_peer_ip(peer_id)
 
+        # NOTE: Pending messages are NOT flushed here because
+        # ``pubsub.peers[peer_id]`` (the stream) is not yet set at this
+        # point.  Flushing happens in ``flush_pending_messages`` which is
+        # called by Pubsub._handle_new_peer after the stream is registered.
+
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Send any messages that were queued while the peer's protocol
+        identification was still in progress.
+
+        This **must** be called only after both ``add_peer`` and
+        ``pubsub.peers[peer_id]`` have been set so that we have the stream
+        available for writing.
+
+        :param peer_id: the peer whose pending queue should be drained
+        """
+        if peer_id not in self._pending_messages:
+            return
+
+        queued = self._pending_messages.pop(peer_id)
+        if not queued:
+            return
+
+        if self.pubsub is None:
+            logger.warning(
+                "Cannot flush pending messages for %s: pubsub not attached",
+                peer_id,
+            )
+            return
+
+        # Type narrowing for pyrefly
+        assert self.pubsub is not None
+
+        if peer_id not in self.pubsub.peers:
+            logger.warning(
+                "Cannot flush pending messages for %s: no stream available",
+                peer_id,
+            )
+            return
+
+        stream = self.pubsub.peers[peer_id]
+        logger.debug(
+            "flushing %d pending message(s) to newly identified peer %s",
+            len(queued),
+            peer_id,
+        )
+        for rpc_msg in queued:
+            try:
+                await self.pubsub.write_msg(stream, rpc_msg)
+            except Exception:
+                logger.debug(
+                    "failed to flush pending message to peer %s",
+                    peer_id,
+                    exc_info=True,
+                )
+
     def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected.
@@ -324,6 +387,9 @@ class GossipSub(IPubsubRouter, Service):
 
         # Clean up security state
         self._cleanup_security_state(peer_id)
+
+        # Discard any pending messages for this peer
+        self._pending_messages.pop(peer_id, None)
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -415,6 +481,26 @@ class GossipSub(IPubsubRouter, Service):
 
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
             await self.pubsub.write_msg(stream, rpc_msg)
+
+        # Queue messages for peers that are subscribed to topics but not yet
+        # identified (protocol negotiation still in progress).  These will be
+        # flushed once ``add_peer`` / ``flush_pending_messages`` is called.
+        if self.pubsub is not None:
+            # Type narrowing for pyrefly
+            assert self.pubsub is not None
+            for topic in pubsub_msg.topicIDs:
+                if topic not in self.pubsub.peer_topics:
+                    continue
+                for peer_id in self.pubsub.peer_topics[topic]:
+                    if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
+                        continue
+                    # Peer is in topic but not yet identified – queue the msg
+                    if (
+                        peer_id not in self.peer_protocol
+                        and peer_id not in self.direct_peers
+                    ):
+                        self._pending_messages[peer_id].append(rpc_msg)
+                        logger.debug("queued message for unidentified peer %s", peer_id)
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
