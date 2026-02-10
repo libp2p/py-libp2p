@@ -29,7 +29,7 @@ from .constants import (
     RUN_ON_LIMITED_CONNECTION,
     WRITE_BLOCK_SIZE,
 )
-from .types import PerfInit, PerfOptions, PerfOutput
+from .types import PerfInit, PerfOutput
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,7 @@ class PerfService(IPerf):
                     return
 
             # Parse the big-endian unsigned 64-bit integer
+            header = bytes(header)
             bytes_to_send_back = struct.unpack(">Q", header)[0]
             logger.debug("Received request to send back %d bytes", bytes_to_send_back)
 
@@ -142,7 +143,6 @@ class PerfService(IPerf):
         multiaddr: Multiaddr,
         send_bytes: int,
         recv_bytes: int,
-        options: PerfOptions | None = None,
     ) -> AsyncIterator[PerfOutput]:
         """
         Measure transfer performance to a remote peer.
@@ -155,8 +155,6 @@ class PerfService(IPerf):
             Number of bytes to upload to the remote peer.
         recv_bytes : int
             Number of bytes to request the remote peer to send back.
-        options : PerfOptions, optional
-            Options for the performance run.
 
         Yields
         ------
@@ -164,8 +162,6 @@ class PerfService(IPerf):
             Progress reports during the transfer, with a final summary at the end.
 
         """
-        opts: PerfOptions = options if options is not None else {}
-
         initial_start_time = time.time()
         last_reported_time = time.time()
 

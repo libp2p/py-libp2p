@@ -33,12 +33,6 @@ class PerfInit(TypedDict, total=False):
     write_block_size: int  # Default: 65536 (64KB)
 
 
-class PerfOptions(TypedDict, total=False):
-    """Options for a performance measurement run."""
-
-    reuse_existing_connection: bool  # Default: False
-
-
 class PerfComponents(TypedDict):
     """Components required by the perf service."""
 

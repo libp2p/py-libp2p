@@ -15,7 +15,6 @@ from .constants import (
 from .types import (
     PerfComponents,
     PerfInit,
-    PerfOptions,
     PerfOutput,
 )
 from libp2p.abc import IPerf
@@ -31,7 +30,6 @@ __all__ = [
     # Types
     "PerfOutput",
     "PerfInit",
-    "PerfOptions",
     "PerfComponents",
     # Interface
     "IPerf",
