@@ -307,6 +307,126 @@ class GossipSub(IPubsubRouter, Service):
         if self.scorer is not None and self.pubsub is not None:
             self._track_peer_ip(peer_id)
 
+        # NOTE: Pending messages are NOT flushed here because
+        # ``pubsub.peers[peer_id]`` (the stream) is not yet set at this
+        # point.  Flushing happens in ``flush_pending_messages`` which is
+        # called by Pubsub._handle_new_peer after the stream is registered.
+
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Flush any messages queued for a peer once they are identified.
+
+        This **must** be called only after both ``add_peer`` and
+        ``pubsub.peers[peer_id]`` have been set so that we have the stream
+        available for writing.
+
+        :param peer_id: the peer whose pending queue should be drained
+        """
+        if peer_id not in self._pending_messages:
+            return
+
+        queued = self._pending_messages.pop(peer_id)
+        if not queued:
+            return
+
+        if self.pubsub is None:
+            logger.warning(
+                "Cannot flush pending messages for %s: pubsub not attached",
+                peer_id,
+            )
+            return
+
+        # Store pubsub in local variable for type narrowing
+        pubsub = self.pubsub
+
+        if peer_id not in pubsub.peers:
+            logger.warning(
+                "Cannot flush pending messages for %s: no stream available",
+                peer_id,
+            )
+            return
+
+        stream = pubsub.peers[peer_id]
+        logger.debug(
+            "flushing %d pending message(s) to newly identified peer %s",
+            len(queued),
+            peer_id,
+        )
+        for rpc_msg in queued:
+            try:
+                await pubsub.write_msg(stream, rpc_msg)
+            except Exception:
+                logger.debug(
+                    "failed to flush pending message to peer %s",
+                    peer_id,
+                    exc_info=True,
+                )
+
+    async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Send recent messages from mcache for a topic to a newly subscribed peer.
+
+        This handles the race condition where messages are published before a
+        peer appears in pubsub.peers (during connection setup). When the peer
+        later subscribes to the topic, we send them recent messages they might
+        have missed.
+
+        :param peer_id: the peer to send messages to
+        :param topic: the topic to send recent messages for
+        """
+        if self.pubsub is None:
+            logger.warning(
+                "Cannot send recent messages for %s: pubsub not attached",
+                peer_id,
+            )
+            return
+
+        # Store pubsub in local variable for type narrowing
+        pubsub = self.pubsub
+
+        if peer_id not in pubsub.peers:
+            logger.debug(
+                "Cannot send recent messages for %s: no stream available yet",
+                peer_id,
+            )
+            return
+
+        # Get recent message IDs for this topic from the cache
+        recent_mids = self.mcache.window(topic)
+        if not recent_mids:
+            return
+
+        stream = pubsub.peers[peer_id]
+        logger.debug(
+            "sending %d recent message(s) for topic %s to peer %s",
+            len(recent_mids),
+            topic,
+            peer_id,
+        )
+
+        # Send each recent message
+        for mid in recent_mids:
+            msg = self.mcache.get(mid)
+            if msg is None:
+                continue
+
+            # Create RPC with this message
+            rpc_msg = rpc_pb2.RPC(publish=[msg])
+
+            # Add the senderRecord if available
+            if isinstance(pubsub, Pubsub):
+                envelope_bytes, _ = env_to_send_in_RPC(pubsub.host)
+                rpc_msg.senderRecord = envelope_bytes
+
+            try:
+                await pubsub.write_msg(stream, rpc_msg)
+            except Exception:
+                logger.debug(
+                    "failed to send recent message to peer %s",
+                    peer_id,
+                    exc_info=True,
+                )
+
     def remove_peer(self, peer_id: ID) -> None:
         """
         Notifies the router that a peer has been disconnected.
@@ -425,6 +545,56 @@ class GossipSub(IPubsubRouter, Service):
 
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
             await self.pubsub.write_msg(stream, rpc_msg)
+
+        # Queue messages for peers whose subscriptions we haven't received yet.
+        # This handles two cases:
+        # 1. Peer connected but protocol negotiation not complete
+        # 2. Peer identified but subscription exchange not complete
+        # Messages flushed when peer added or subscription received.
+        if self.pubsub is not None:
+            # Store pubsub in local variable for type narrowing
+            pubsub = self.pubsub
+            queued_peers: set[ID] = set()
+
+            for topic in pubsub_msg.topicIDs:
+                # Queue for peers already in topic but not yet identified
+                if topic in pubsub.peer_topics:
+                    for peer_id in pubsub.peer_topics[topic]:
+                        if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
+                            continue
+                        if (
+                            peer_id not in self.peer_protocol
+                            and peer_id not in self.direct_peers
+                            and peer_id not in queued_peers
+                        ):
+                            self._pending_messages[peer_id].append(rpc_msg)
+                            queued_peers.add(peer_id)
+                            logger.debug(
+                                "queued message for peer %s (in topic, not identified)",
+                                peer_id,
+                            )
+
+                # Queue for connected peers not yet in this topic's peer_topics.
+                # This handles the race where a peer is connected and identified
+                # but we haven't processed their subscription message yet.
+                for peer_id in pubsub.peers:
+                    if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
+                        continue
+                    if peer_id in self.direct_peers:
+                        continue
+                    if peer_id in queued_peers:
+                        continue
+                    # Queue optimistically if peer not in peer_topics
+                    if (
+                        topic not in pubsub.peer_topics
+                        or peer_id not in pubsub.peer_topics[topic]
+                    ):
+                        self._pending_messages[peer_id].append(rpc_msg)
+                        queued_peers.add(peer_id)
+                        logger.debug(
+                            "queued message for peer %s (connected, sub pending)",
+                            peer_id,
+                        )
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
