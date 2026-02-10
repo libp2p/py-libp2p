@@ -58,8 +58,11 @@ class Envelope:
 
         # Normalise payload_type to a Code instance
         if isinstance(payload_type, bytes):
-            codec_name = get_codec(payload_type)
-            self.payload_type_code = Code.from_string(codec_name)
+            try:
+                codec_name = get_codec(payload_type)
+                self.payload_type_code = Code.from_string(codec_name)
+            except Exception as e:
+                raise ValueError(f"Invalid codec: {e}")
         elif isinstance(payload_type, str):
             self.payload_type_code = Code.from_string(payload_type)
         else:
