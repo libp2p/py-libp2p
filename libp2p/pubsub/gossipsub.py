@@ -337,17 +337,17 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
-        # Type narrowing for pyrefly
-        assert self.pubsub is not None
+        # Store pubsub in local variable for type narrowing
+        pubsub = self.pubsub
 
-        if peer_id not in self.pubsub.peers:
+        if peer_id not in pubsub.peers:
             logger.warning(
                 "Cannot flush pending messages for %s: no stream available",
                 peer_id,
             )
             return
 
-        stream = self.pubsub.peers[peer_id]
+        stream = pubsub.peers[peer_id]
         logger.debug(
             "flushing %d pending message(s) to newly identified peer %s",
             len(queued),
@@ -355,7 +355,7 @@ class GossipSub(IPubsubRouter, Service):
         )
         for rpc_msg in queued:
             try:
-                await self.pubsub.write_msg(stream, rpc_msg)
+                await pubsub.write_msg(stream, rpc_msg)
             except Exception:
                 logger.debug(
                     "failed to flush pending message to peer %s",
@@ -486,12 +486,12 @@ class GossipSub(IPubsubRouter, Service):
         # identified (protocol negotiation still in progress).  These will be
         # flushed once ``add_peer`` / ``flush_pending_messages`` is called.
         if self.pubsub is not None:
-            # Type narrowing for pyrefly
-            assert self.pubsub is not None
+            # Store pubsub in local variable for type narrowing
+            pubsub = self.pubsub
             for topic in pubsub_msg.topicIDs:
-                if topic not in self.pubsub.peer_topics:
+                if topic not in pubsub.peer_topics:
                     continue
-                for peer_id in self.pubsub.peer_topics[topic]:
+                for peer_id in pubsub.peer_topics[topic]:
                     if peer_id in (msg_forwarder, ID(pubsub_msg.from_id)):
                         continue
                     # Peer is in topic but not yet identified – queue the msg
