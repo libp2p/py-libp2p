@@ -660,12 +660,38 @@ class Pubsub(Service, IPubsub):
         :param origin_id: id of the peer who subscribe to the message
         :param sub_message: RPC.SubOpts
         """
+        was_newly_added = False
         if sub_message.subscribe:
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = {origin_id}
+                was_newly_added = True
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
+                was_newly_added = True
+
+            # Flush any messages that were queued while waiting for this
+            # peer's subscription (identify-aware publishing).
+            # This handles messages that were queued explicitly for this peer.
+            if was_newly_added and hasattr(self.router, "flush_pending_messages"):
+                # Must use run_task since flush_pending_messages is async
+                # but handle_subscription is sync
+                if self.manager.is_running:
+                    self.manager.run_task(
+                        self.router.flush_pending_messages,  # type: ignore[attr-defined]
+                        origin_id,
+                    )
+
+            # Also send recent messages from mcache for this topic.
+            # This handles the case where messages were published before this
+            # peer was even in pubsub.peers (race during connection setup).
+            if was_newly_added and hasattr(self.router, "send_recent_messages"):
+                if self.manager.is_running:
+                    self.manager.run_task(
+                        self.router.send_recent_messages,  # type: ignore[attr-defined]
+                        origin_id,
+                        sub_message.topicid,
+                    )
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
