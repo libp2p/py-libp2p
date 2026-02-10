@@ -570,6 +570,19 @@ class Pubsub(Service, IPubsub):
 
         self.peers[peer_id] = stream
 
+        # Flush any messages that were queued while this peer's protocol
+        # identification was still in progress (identify-aware publishing).
+        if hasattr(self.router, "flush_pending_messages"):
+            try:
+                # Type narrowing: router has flush_pending_messages method
+                await self.router.flush_pending_messages(peer_id)  # type: ignore[attr-defined]
+            except Exception as error:
+                logger.debug(
+                    "failed to flush pending messages for peer %s: %s",
+                    peer_id,
+                    error,
+                )
+
         logger.debug("added new peer %s", peer_id)
 
     async def _handle_new_peer_safe(self, peer_id: ID) -> None:
