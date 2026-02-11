@@ -4,13 +4,40 @@ Multiaddr utility functions for IPv4/IPv6 handling.
 This module provides helper functions to extract IP addresses from multiaddrs
 in a version-agnostic way, supporting both IPv4 and IPv6.
 Uses py-multiaddr utilities (e.g. get_multiaddr_options) when available.
+Section 7.1: uses Multiaddr.join() when available (py-multiaddr 0.1.x), else encapsulate chain.
 """
 
 import socket
-from typing import Any
+from typing import Any, Union
 
 from multiaddr import Multiaddr
 from multiaddr.utils import get_multiaddr_options
+
+
+def join_multiaddrs(*addrs: Union[str, bytes, Multiaddr]) -> Multiaddr:
+    """
+    Concatenate multiple multiaddrs (Section 7.1).
+
+    Uses Multiaddr.join() when available (py-multiaddr 0.1.x / fork), otherwise
+    chains encapsulate() for compatibility with older versions.
+
+    :param addrs: One or more multiaddr strings, bytes, or Multiaddr instances
+    :return: Single Multiaddr combining all parts in order
+    """
+    if not addrs:
+        return Multiaddr("")
+    # Normalize to Multiaddr for fallback path
+    normalized = [
+        a if isinstance(a, Multiaddr) else Multiaddr(a)
+        for a in addrs
+    ]
+    join_method = getattr(Multiaddr, "join", None)
+    if callable(join_method):
+        return Multiaddr.join(*addrs)
+    result = normalized[0]
+    for a in normalized[1:]:
+        result = result.encapsulate(a)
+    return result
 
 
 def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
@@ -105,5 +132,6 @@ __all__ = [
     "extract_ip_from_multiaddr",
     "get_ip_protocol_from_multiaddr",
     "get_protocol_layers",
+    "join_multiaddrs",
     "multiaddr_from_socket",
 ]

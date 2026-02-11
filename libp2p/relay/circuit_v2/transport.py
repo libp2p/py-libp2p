@@ -34,6 +34,9 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
+)
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
@@ -503,10 +506,12 @@ class CircuitV2Transport(ITransport):
                 if not isinstance(relay_ma, multiaddr.Multiaddr):
                     continue
 
-                # Construct /p2p-circuit address
-                circuit_ma = relay_ma.encapsulate(
-                    multiaddr.Multiaddr("/p2p-circuit")
-                ).encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
+                # Construct /p2p-circuit address (Section 7.1: join when available)
+                circuit_ma = join_multiaddrs(
+                    relay_ma,
+                    multiaddr.Multiaddr("/p2p-circuit"),
+                    multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"),
+                )
 
                 peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31 - 1)
                 logger.debug(

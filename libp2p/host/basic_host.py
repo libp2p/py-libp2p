@@ -46,6 +46,9 @@ from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
+)
 from libp2p.host.exceptions import (
     StreamFailure,
 )
@@ -352,7 +355,7 @@ class BasicHost(IHost):
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [addr.encapsulate(p2p_part) for addr in self.get_transport_addrs()]
+        return [join_multiaddrs(addr, p2p_part) for addr in self.get_transport_addrs()]
 
     def get_connected_peers(self) -> list[ID]:
         """
