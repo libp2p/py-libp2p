@@ -14,11 +14,15 @@ class TrioTCPStream(ReadWriteCloser):
     # NOTE: Add both read and write lock to avoid `trio.BusyResourceError`
     read_lock: trio.Lock
     write_lock: trio.Lock
+    # Cache remote address to avoid repeated lookups and handle cases where
+    # socket becomes unavailable after connection establishment
+    _cached_remote_address: tuple[str, int] | None
 
     def __init__(self, stream: trio.SocketStream) -> None:
         self.stream = stream
         self.read_lock = trio.Lock()
         self.write_lock = trio.Lock()
+        self._cached_remote_address = None
 
     async def write(self, data: bytes) -> None:
         """Handle write operations gracefully when resources are closed."""
@@ -49,9 +53,72 @@ class TrioTCPStream(ReadWriteCloser):
         await self.stream.aclose()
 
     def get_remote_address(self) -> tuple[str, int] | None:
-        """Return the remote address as (host, port) tuple."""
+        """
+        Return the remote address as (host, port) tuple.
+
+        This method caches the remote address on first successful retrieval
+        to handle cases where the socket might become unavailable later
+        (e.g., during connection teardown or in certain error states).
+
+        Returns:
+            A tuple of (host, port) or None if the address cannot be determined.
+
+        """
+        # Return cached value if available
+        if self._cached_remote_address is not None:
+            return self._cached_remote_address
+
+        # Try to get remote address from socket
         try:
-            return self.stream.socket.getpeername()
-        except (AttributeError, OSError) as e:
-            logger.error("Error getting remote address: %s", e)
+            # Check if socket attribute exists
+            if not hasattr(self.stream, "socket"):
+                logger.debug("SocketStream has no 'socket' attribute")
+                return None
+
+            socket = self.stream.socket
+            if socket is None:
+                logger.debug("Socket is None")
+                return None
+
+            # Attempt to get remote address
+            remote_addr = socket.getpeername()
+
+            # Validate the result
+            if not isinstance(remote_addr, tuple) or len(remote_addr) != 2:
+                logger.debug(f"Invalid remote address format: {remote_addr}")
+                return None
+
+            # Convert to (str, int) tuple as expected by the interface
+            host, port = remote_addr
+            result = (str(host), int(port))
+
+            # Cache the result for future calls
+            self._cached_remote_address = result
+            return result
+
+        except AttributeError as e:
+            # Socket attribute doesn't exist or is not accessible
+            logger.debug(
+                "AttributeError getting remote address: %s (stream type: %s)",
+                e,
+                type(self.stream),
+            )
+            return None
+        except OSError as e:
+            # OSError can occur if:
+            # - Socket is closed
+            # - Socket is not connected
+            # - Socket is in an invalid state
+            # This is expected in some scenarios (e.g., connection teardown)
+            logger.debug(
+                "OSError getting remote address (socket may be closed/invalid): %s", e
+            )
+            return None
+        except Exception as e:
+            # Catch any other unexpected errors
+            logger.warning(
+                "Unexpected error getting remote address: %s (stream type: %s)",
+                e,
+                type(self.stream),
+            )
             return None
