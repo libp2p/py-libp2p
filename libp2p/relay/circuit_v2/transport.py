@@ -684,7 +684,7 @@ class CircuitV2Transport(ITransport):
     def _extract_relay_id_from_ma(self, ma: multiaddr.Multiaddr) -> ID:
         """Extract relay peer ID from a circuit multiaddr."""
         relay_ma, _ = self.parse_circuit_ma(ma)
-        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        relay_peer_id_str = relay_ma.get_peer_id()
         if not relay_peer_id_str:
             raise ValueError("Relay multiaddr missing peer id")
         return ID.from_base58(relay_peer_id_str)

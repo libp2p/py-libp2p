@@ -39,6 +39,9 @@ from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr as extract_ip_from_multiaddr_util,
+)
 
 from .exceptions import (
     NoPubsubAttached,
@@ -1436,23 +1439,44 @@ class GossipSub(IPubsubRouter, Service):
                 if conn is not None and hasattr(conn, "remote_addr"):
                     remote_addr = getattr(conn, "remote_addr", None)
                     if remote_addr:
-                        # Extract IP from multiaddr
-                        ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
+                        ip_str = self._extract_ip_from_remote_addr(remote_addr)
                         if ip_str:
                             self.scorer.add_peer_ip(peer_id, ip_str)
         except Exception as e:
             logger.debug("Failed to track IP for peer %s: %s", peer_id, e)
 
-    def _extract_ip_from_multiaddr(self, multiaddr_str: str) -> str | None:
+    def _extract_ip_from_remote_addr(self, remote_addr: Any) -> str | None:
         """
-        Extract IP address from a multiaddr string.
+        Extract IP address from a remote address (Multiaddr, (host, port), or string).
+
+        Uses libp2p.utils.multiaddr_utils when possible for consistency.
+        """
+        try:
+            from multiaddr import Multiaddr
+
+            if isinstance(remote_addr, Multiaddr):
+                return extract_ip_from_multiaddr_util(remote_addr)
+            if isinstance(remote_addr, (tuple, list)) and len(remote_addr) >= 1:
+                return str(remote_addr[0])
+            addr_str = str(remote_addr)
+            # Try parsing as multiaddr and use shared util
+            try:
+                maddr = Multiaddr(addr_str)
+                return extract_ip_from_multiaddr_util(maddr)
+            except Exception:
+                pass
+            return self._extract_ip_from_multiaddr_str(addr_str)
+        except Exception:
+            return None
+
+    def _extract_ip_from_multiaddr_str(self, multiaddr_str: str) -> str | None:
+        """
+        Extract IP from multiaddr string (fallback when Multiaddr parse fails).
 
         :param multiaddr_str: The multiaddr string
         :return: The IP address or None if extraction fails
         """
         try:
-            # Simple extraction for common cases like /ip4/127.0.0.1/tcp/4001
-            # or /ip6/::1/tcp/4001
             parts = multiaddr_str.split("/")
             for i, part in enumerate(parts):
                 if part in ("ip4", "ip6") and i + 1 < len(parts):

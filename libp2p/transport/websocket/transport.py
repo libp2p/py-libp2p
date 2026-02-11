@@ -17,6 +17,7 @@ from libp2p.transport.websocket.multiaddr_utils import (
     ParsedWebSocketMultiaddr,
     parse_websocket_multiaddr,
 )
+from libp2p.utils.dns_utils import resolve_multiaddr_with_retry
 
 from .autotls import AutoTLSConfig, AutoTLSManager, initialize_autotls
 from .connection import P2PWebSocketConnection
@@ -826,17 +827,15 @@ class WebsocketTransport(ITransport):
         protocols = list(maddr.protocols())
         dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
         if protocols and protocols[0].name in dns_protocols:
-            try:
-                resolver = DNSResolver()
-                resolved = await resolver.resolve(maddr)
-            except Exception as e:
-                logger.warning("DNS resolution failed for %s: %s", maddr, e)
-                raise OpenConnectionError(
-                    f"Failed to resolve DNS for {maddr}: {e}"
-                ) from e
+            resolved = await resolve_multiaddr_with_retry(
+                maddr,
+                resolver=DNSResolver(),
+                max_retries=3,
+                timeout_seconds=5.0,
+            )
             if not resolved:
                 raise OpenConnectionError(
-                    f"No addresses resolved for DNS multiaddr: {maddr}"
+                    f"Failed to resolve DNS for {maddr} (retries exhausted)"
                 )
             last_error: Exception | None = None
             for resolved_addr in resolved:

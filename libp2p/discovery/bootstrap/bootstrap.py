@@ -1,7 +1,7 @@
 import logging
 
 from multiaddr import Multiaddr
-from multiaddr.protocols import P_IP4, P_TCP
+from multiaddr.protocols import P_IP4, P_IP6, P_TCP
 from multiaddr.resolvers import DNSResolver
 import trio
 
@@ -11,6 +11,10 @@ from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
+from libp2p.utils.dns_utils import (
+    DNSResolutionMetrics,
+    resolve_multiaddr_with_retry,
+)
 
 logger = logging.getLogger(__name__)
 resolver = DNSResolver()
@@ -24,13 +28,27 @@ class BootstrapDiscovery:
     Connects to predefined bootstrap peers and adds them to peerstore.
     """
 
-    def __init__(self, swarm: INetworkService, bootstrap_addrs: list[str]):
+    def __init__(
+        self,
+        swarm: INetworkService,
+        bootstrap_addrs: list[str],
+        *,
+        allow_ipv6: bool = False,
+        dns_resolution_timeout: float = 10.0,
+        dns_max_retries: int = 3,
+        dns_metrics: DNSResolutionMetrics | None = None,
+    ):
         """
         Initialize BootstrapDiscovery.
 
         Args:
             swarm: The network service (swarm) instance
             bootstrap_addrs: List of bootstrap peer multiaddresses
+            allow_ipv6: If True, accept IPv6+TCP addresses in addition to IPv4+TCP
+                (enable when handshake/transport supports IPv6).
+            dns_resolution_timeout: Timeout in seconds per DNS resolution attempt.
+            dns_max_retries: Max DNS resolution attempts (with backoff) per address.
+            dns_metrics: Optional metrics to record DNS success/failure counts.
 
         """
         self.swarm = swarm
@@ -38,6 +56,10 @@ class BootstrapDiscovery:
         self.bootstrap_addrs = bootstrap_addrs or []
         self.discovered_peers: set[str] = set()
         self.connection_timeout: int = DEFAULT_CONNECTION_TIMEOUT
+        self.allow_ipv6 = allow_ipv6
+        self.dns_resolution_timeout = dns_resolution_timeout
+        self.dns_max_retries = dns_max_retries
+        self.dns_metrics = dns_metrics
 
     async def start(self) -> None:
         """Process bootstrap addresses and emit peer discovery events in parallel."""
@@ -100,11 +122,13 @@ class BootstrapDiscovery:
                 return
 
             if self.is_dns_addr(multiaddr):
-                try:
-                    resolved_addrs = await resolver.resolve(multiaddr)
-                except Exception as e:
-                    logger.warning("DNS resolution failed for %s: %s", addr_str, e)
-                    return
+                resolved_addrs = await resolve_multiaddr_with_retry(
+                    multiaddr,
+                    resolver=resolver,
+                    max_retries=self.dns_max_retries,
+                    timeout_seconds=self.dns_resolution_timeout,
+                    metrics=self.dns_metrics,
+                )
                 if not resolved_addrs:
                     logger.warning(
                         "No addresses resolved for DNS address: %s", addr_str
@@ -143,32 +167,35 @@ class BootstrapDiscovery:
             logger.debug(f"Skipping own peer ID: {peer_info.peer_id}")
             return
 
-        # Filter addresses to only include IPv4+TCP (only supported protocol)
-        ipv4_tcp_addrs = []
-        filtered_out_addrs = []
+        # Filter addresses to supported protocols (IPv4+TCP; IPv6+TCP if allow_ipv6)
+        supported_addrs: list[Multiaddr] = []
+        filtered_out_addrs: list[Multiaddr] = []
 
         for addr in peer_info.addrs:
-            if self._is_ipv4_tcp_addr(addr):
-                ipv4_tcp_addrs.append(addr)
+            if self._is_supported_addr(addr):
+                supported_addrs.append(addr)
             else:
                 filtered_out_addrs.append(addr)
 
         # Log filtering results
         logger.debug(
-            f"Address filtering for {peer_info.peer_id}: "
-            f"{len(ipv4_tcp_addrs)} IPv4+TCP, {len(filtered_out_addrs)} filtered"
+            "Address filtering for %s: %s supported, %s filtered",
+            peer_info.peer_id,
+            len(supported_addrs),
+            len(filtered_out_addrs),
         )
 
-        # Skip peer if no IPv4+TCP addresses available
-        if not ipv4_tcp_addrs:
+        # Skip peer if no supported addresses available
+        if not supported_addrs:
             logger.warning(
-                f"❌ No IPv4+TCP addresses for {peer_info.peer_id} - "
-                f"skipping connection attempts"
+                "No supported (IPv4+TCP or IPv6+TCP) addresses for %s - "
+                "skipping connection attempts",
+                peer_info.peer_id,
             )
             return
 
-        # Add only IPv4+TCP addresses to peerstore
-        self.peerstore.add_addrs(peer_info.peer_id, ipv4_tcp_addrs, PERMANENT_ADDR_TTL)
+        # Add only supported addresses to peerstore
+        self.peerstore.add_addrs(peer_info.peer_id, supported_addrs, PERMANENT_ADDR_TTL)
 
         # Only emit discovery event if this is the first time we see this peer
         peer_id_str = str(peer_info.peer_id)
@@ -289,28 +316,30 @@ class BootstrapDiscovery:
             )
             # Don't re-raise to prevent killing the nursery and other parallel tasks
 
-    def _is_ipv4_tcp_addr(self, addr: Multiaddr) -> bool:
+    def _is_supported_addr(self, addr: Multiaddr) -> bool:
         """
-        Check if address is IPv4 with TCP protocol only.
+        Check if address is IPv4+TCP or (when allow_ipv6) IPv6+TCP.
 
-        Filters out IPv6, UDP, QUIC, WebSocket, and other unsupported protocols.
-        Only IPv4+TCP addresses are supported by the current transport.
+        Filters out UDP, QUIC, WebSocket, and other unsupported protocols.
         Uses protocol codes for type-safe comparison.
+        When allow_ipv6 is True, IPv6+TCP is accepted (for when handshake supports it).
         """
         try:
             protocols = list(addr.protocols())
-
-            # Must have IPv4 protocol (by code)
-            has_ipv4 = any(p.code == P_IP4 for p in protocols)
-            if not has_ipv4:
-                return False
 
             # Must have TCP protocol (by code)
             has_tcp = any(p.code == P_TCP for p in protocols)
             if not has_tcp:
                 return False
 
-            return True
+            # IPv4+TCP always supported
+            if any(p.code == P_IP4 for p in protocols):
+                return True
+            # IPv6+TCP supported only when allow_ipv6 is True (handshake allows)
+            if self.allow_ipv6 and any(p.code == P_IP6 for p in protocols):
+                return True
+
+            return False
 
         except Exception:
             # If we can't parse the address, don't use it

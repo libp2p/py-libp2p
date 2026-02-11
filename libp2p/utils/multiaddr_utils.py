@@ -49,6 +49,22 @@ def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
     return None
 
 
+def get_protocol_layers(maddr: Multiaddr, maxsplit: int = -1) -> list[Multiaddr]:
+    """
+    Return protocol stack as per-layer multiaddrs (Section 3.2 multiaddr integration).
+
+    Uses Multiaddr.split() for protocol stack analysis and debugging.
+
+    :param maddr: Multiaddr to analyze
+    :param maxsplit: Optional max number of splits (-1 for no limit)
+    :return: List of Multiaddr, one per protocol layer
+    """
+    try:
+        return list(maddr.split(maxsplit=maxsplit))
+    except Exception:
+        return [maddr]
+
+
 def get_ip_protocol_from_multiaddr(maddr: Multiaddr) -> str | None:
     """
     Get the IP protocol name (ip4 or ip6) from multiaddr.
@@ -88,5 +104,6 @@ def multiaddr_from_socket(socket_obj: socket.socket | Any) -> Multiaddr:
 __all__ = [
     "extract_ip_from_multiaddr",
     "get_ip_protocol_from_multiaddr",
+    "get_protocol_layers",
     "multiaddr_from_socket",
 ]
