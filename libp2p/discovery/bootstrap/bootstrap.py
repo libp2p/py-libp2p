@@ -137,7 +137,7 @@ class BootstrapDiscovery:
 
                 peer_id_str = multiaddr.get_peer_id()
                 if peer_id_str is None:
-                    logger.warning(f"Missing peer ID in DNS address: {addr_str}")
+                    logger.warning("Missing peer ID in DNS address: %s", addr_str)
                     return
                 peer_id = ID.from_base58(peer_id_str)
                 peer_info = PeerInfo(peer_id, list(resolved_addrs))

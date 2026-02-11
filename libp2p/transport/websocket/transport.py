@@ -46,6 +46,10 @@ class WebsocketConfig:
     max_buffered_amount: int = 4 * 1024 * 1024
     max_connections: int = 1000
 
+    # DNS resolution (for dial when multiaddr has dns/dns4/dns6/dnsaddr)
+    dns_resolution_timeout: float = 5.0
+    dns_max_retries: int = 3
+
     # Proxy configuration
     proxy_url: str | None = None
     proxy_auth: tuple[str, str] | None = None
@@ -830,8 +834,8 @@ class WebsocketTransport(ITransport):
             resolved = await resolve_multiaddr_with_retry(
                 maddr,
                 resolver=DNSResolver(),
-                max_retries=3,
-                timeout_seconds=5.0,
+                max_retries=self._config.dns_max_retries,
+                timeout_seconds=self._config.dns_resolution_timeout,
             )
             if not resolved:
                 raise OpenConnectionError(

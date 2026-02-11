@@ -134,6 +134,19 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
+    def __init__(
+        self,
+        *,
+        dns_resolution_timeout: float = 5.0,
+        dns_max_retries: int = 3,
+    ) -> None:
+        """
+        :param dns_resolution_timeout: Per-attempt timeout in seconds for DNS.
+        :param dns_max_retries: Max DNS resolution attempts (with backoff).
+        """
+        self._dns_resolution_timeout = dns_resolution_timeout
+        self._dns_max_retries = dns_max_retries
+
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
         Dial a transport to peer listening on multiaddr.
@@ -150,8 +163,8 @@ class TCP(ITransport):
             resolved = await resolve_multiaddr_with_retry(
                 maddr,
                 resolver=DNSResolver(),
-                max_retries=3,
-                timeout_seconds=5.0,
+                max_retries=self._dns_max_retries,
+                timeout_seconds=self._dns_resolution_timeout,
             )
             if not resolved:
                 raise OpenConnectionError(
