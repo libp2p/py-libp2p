@@ -13,6 +13,7 @@ from libp2p.relay.circuit_v2.nat import (
     is_ip_in_range,
     is_private_ip,
 )
+from libp2p.utils.multiaddr_utils import get_protocol_layers
 
 
 def test_ip_to_int_ipv4():
@@ -91,6 +92,19 @@ def test_extract_ip_from_multiaddr():
     # Complex multiaddr (without p2p to avoid base58 issues)
     addr6 = Multiaddr("/ip4/192.168.1.1/tcp/1234/udp/5678")
     assert extract_ip_from_multiaddr(addr6) == "192.168.1.1"
+
+
+def test_get_protocol_layers():
+    """Test get_protocol_layers uses Multiaddr.split() for stack (Section 3.2)."""
+    maddr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+    layers = get_protocol_layers(maddr)
+    assert len(layers) == 2
+    assert str(layers[0]) == "/ip4/127.0.0.1"
+    assert str(layers[1]) == "/tcp/4001"
+    # maxsplit=1: first component only
+    one = get_protocol_layers(maddr, maxsplit=1)
+    assert len(one) == 2  # split(maxsplit=1) yields 2 parts
+    assert str(one[0]) == "/ip4/127.0.0.1"
 
 
 def test_reachability_checker_init():

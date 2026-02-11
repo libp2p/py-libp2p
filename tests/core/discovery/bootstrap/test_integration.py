@@ -114,10 +114,11 @@ async def test_bootstrap_dns_resolution_failure_continues():
         return []
 
     with patch.object(resolver, "resolve", side_effect=mock_resolve):
-        discovery = BootstrapDiscovery(swarm, bootstrap_addrs)
+        # dns_max_retries=1 so we get one resolve attempt per address (2 total)
+        discovery = BootstrapDiscovery(swarm, bootstrap_addrs, dns_max_retries=1)
         await discovery.start()
 
-    assert resolve_calls[0] == 2
+    assert resolve_calls[0] == 2, "one resolve per address (no retries)"
     # First call raised; second returned resolved addrs and add_addr was used
     swarm.peerstore.add_addrs.assert_called()
 
