@@ -1,9 +1,9 @@
-# Monitoring Demo
+# Health Monitoring Demo
 
 Configure Prometheus target (match exporter port):
 
 ```bash
-cd examples/monitoring-demo
+cd examples/health_monitoring
 python configure.py --port 8000   # or: DEMO_EXPORTER_PORT=8010 python configure.py
 docker compose up -d
 ```
@@ -13,7 +13,7 @@ Run exporter (auto-picks a free port; you can also set DEMO_EXPORTER_PORT):
 ```bash
 cd ../../
 . .venv/bin/activate
-python examples/monitoring-demo/run_demo.py  # or: DEMO_EXPORTER_PORT=8010 python examples/monitoring-demo/run_demo.py
+python examples/health_monitoring/run_demo.py  # or: DEMO_EXPORTER_PORT=8010 python examples/health_monitoring/run_demo.py
 ```
 
 Open UIs:
@@ -30,6 +30,6 @@ Stop:
 
 ```bash
 pkill -f run_demo.py || true
-cd examples/monitoring-demo
+cd examples/health_monitoring
 docker compose down
 ```
