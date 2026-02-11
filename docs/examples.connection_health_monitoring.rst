@@ -26,7 +26,8 @@ Basic Setup
 -----------
 
 To enable connection health monitoring, configure the `ConnectionConfig` with
-health monitoring parameters and pass it to `new_host()`:
+health monitoring parameters and pass it to `new_host()`. The following is a
+snippet; the full runnable script is in ``examples/health_monitoring/basic_example.py``.
 
 .. code-block:: python
 

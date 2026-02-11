@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import fields
 from pathlib import Path
 import ssl
 from libp2p.transport.quic.utils import is_quic_multiaddr
@@ -531,31 +532,13 @@ def new_host(
         effective_connection_config = quic_transport_opt
 
         # If both connection_config and quic_transport_opt are provided,
-        # merge ALL connection and health monitoring settings
+        # merge ALL connection and health monitoring settings (including
+        # critical_health_threshold) so new ConnectionConfig fields are never missed.
         if connection_config is not None:
-            # Merge all ConnectionConfig attributes from connection_config
-            # into quic_transport_opt (which inherits from ConnectionConfig)
+            # ConnectionConfig is a dataclass; pyrefly doesn't narrow it for fields()
             connection_config_attrs = [
-                "max_connections_per_peer",
-                "connection_timeout",
-                "load_balancing_strategy",
-                "enable_health_monitoring",
-                "health_initial_delay",
-                "health_warmup_window",
-                "health_check_interval",
-                "ping_timeout",
-                "min_health_threshold",
-                "min_connections_per_peer",
-                "latency_weight",
-                "success_rate_weight",
-                "stability_weight",
-                "max_ping_latency",
-                "min_ping_success_rate",
-                "max_failed_streams",
-                "unhealthy_grace_period",
-                "critical_health_threshold",
+                f.name for f in fields(ConnectionConfig)  # type: ignore[arg-type]
             ]
-
             for attr in connection_config_attrs:
                 if hasattr(connection_config, attr):
                     setattr(quic_transport_opt, attr, getattr(connection_config, attr))
