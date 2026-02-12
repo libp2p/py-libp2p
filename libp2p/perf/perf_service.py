@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 import logging
 import struct
 import time
+from typing import cast
 
 from multiaddr import Multiaddr
 
@@ -101,7 +102,7 @@ class PerfService(IPerf):
             header: bytes = b""
             while len(header) < 8:
                 try:
-                    chunk: bytes = await stream.read(8 - len(header))
+                    chunk = cast(bytes, await stream.read(8 - len(header)))  # type: ignore[redundant-cast]
                     if not chunk:
                         logger.error("Stream closed before header was fully received")
                         await stream.reset()
