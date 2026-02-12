@@ -133,6 +133,7 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
         return compute_cid_v0(data)
 
     # Read hash algorithm from prefix (prefix[2] contains hash function code)
+    # Note: multihash.digest() accepts both raw int codes and Func enum values
     hash_code = prefix[2] if len(prefix) > 2 else multihash.Func.sha2_256
 
     # Compute hash digest using multihash API
