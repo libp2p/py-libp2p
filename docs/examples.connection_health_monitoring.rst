@@ -275,22 +275,11 @@ Health monitoring integrates seamlessly with existing host-based code:
 - Health monitoring can be enabled/disabled per host instance
 - Existing examples work unchanged - just add `connection_config` parameter
 - Backward compatibility is maintained
-- No need to switch from `new_host()` to low-level swarm APIs - the API inconsistency is fixed
-
-**Before (Previous Implementation - API Inconsistency):**
+- No need to switch from `new_host()` to low-level swarm APIs
 
 .. code-block:: python
 
-    # ❌ Forced to use different APIs
-    host = new_host()  # High-level API for basic usage
-    # Health monitoring required low-level swarm API - INCONSISTENT!
-
-**After (Current Implementation - API Consistency):**
-
-.. code-block:: python
-
-    # ✅ Consistent API for all use cases
     host = new_host()  # Basic usage
-    host = new_host(connection_config=config)  # Health monitoring - same API!
+    host = new_host(connection_config=config)  # Health monitoring - same API
 
 For more information, see the :doc:`../libp2p.network` module documentation.

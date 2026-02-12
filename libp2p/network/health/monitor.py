@@ -130,6 +130,8 @@ class ConnectionHealthMonitor(Service):
             warmup = getattr(self.config, "health_warmup_window", 0.0)
             if warmup:
                 # Check if we have health data with established_at timestamp
+                # Use time.time() (wall clock) to match ConnectionHealth.established_at,
+                # which is set with time.time() in data_structures.
                 if self._has_health_data(peer_id, conn):
                     import time
 

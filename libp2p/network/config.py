@@ -145,3 +145,5 @@ class ConnectionConfig:
                 raise ValueError(
                     "Critical health threshold must be between 0.0 and 1.0"
                 )
+            if self.unhealthy_grace_period < 0:
+                raise ValueError("unhealthy_grace_period must be non-negative")
