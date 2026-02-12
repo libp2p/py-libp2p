@@ -391,7 +391,7 @@ Internal Changes - for py-libp2p Contributors
   - Implement ``get_available_interfaces()``, ``get_optimal_binding_address()``, and ``expand_wildcard_address()``
   - Update echo example to use dynamic address discovery instead of hardcoded wildcard
   - Add safe fallbacks for environments lacking Thin Waist support
-  - Temporarily disable IPv6 support due to libp2p handshake issues (TODO: re-enable when resolved) (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
+  - Temporarily disable IPv6 support due to libp2p handshake issues (re-enabled later; use ``LIBP2P_BIND_V6`` to configure IPv6 bind address) (`#811 <https://github.com/libp2p/py-libp2p/issues/811>`__)
 - The TODO IK patterns in Noise has been deprecated in specs: https://github.com/libp2p/specs/tree/master/noise#handshake-pattern (`#816 <https://github.com/libp2p/py-libp2p/issues/816>`__)
 - Remove the already completed TODO tasks in Peerstore:
   TODO: Set up an async task for periodic peer-store cleanup for expired addresses and records.
