@@ -46,9 +46,6 @@ from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
 )
-from libp2p.utils.multiaddr_utils import (
-    join_multiaddrs,
-)
 from libp2p.host.exceptions import (
     StreamFailure,
 )
@@ -96,6 +93,9 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
+)
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
