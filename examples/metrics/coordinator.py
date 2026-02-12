@@ -59,8 +59,6 @@ class Node:
                         await self.host.connect(info)
                         await self.ping_service.ping(info.peer_id, int(parts[2]))
 
-                        # Then the rtts will be fed to the prometheus-metrics
-
                     if cmd == "local":
                         maddr = self.host.get_addrs()[0]
                         print(maddr)
