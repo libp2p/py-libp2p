@@ -101,7 +101,7 @@ class PerfService(IPerf):
             header: bytes = b""
             while len(header) < 8:
                 try:
-                    chunk = await stream.read(8 - len(header))
+                    chunk: bytes = await stream.read(8 - len(header))
                     if not chunk:
                         logger.error("Stream closed before header was fully received")
                         await stream.reset()
@@ -113,7 +113,6 @@ class PerfService(IPerf):
                     return
 
             # Parse the big-endian unsigned 64-bit integer
-            header = bytes(header)
             bytes_to_send_back = struct.unpack(">Q", header)[0]
             logger.debug("Received request to send back %d bytes", bytes_to_send_back)
 
