@@ -115,6 +115,12 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
+### Identity Persistence
+
+For a stable Peer ID across restarts, see `libp2p.identity_utils`. You can save/load identities to disk or create deterministic identities from a seed.
+
+______________________________________________________________________
+
 ## Explanation of Basic Two Node Communication
 
 ### Core Concepts
