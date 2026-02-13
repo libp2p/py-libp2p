@@ -78,34 +78,85 @@ class ID:
 
     @classmethod
     def from_multibase(cls, multibase_str: str) -> "ID":
-        """Parse from multibase-encoded string."""
+        """
+        Parse a peer ID from a multibase-encoded string.
+
+        Parameters
+        ----------
+        multibase_str : str
+            A multibase-encoded string (e.g. ``"zQm…"`` for base58btc,
+            ``"bafz…"`` for base32).
+
+        Raises
+        ------
+        multibase.InvalidMultibaseStringError
+            If *multibase_str* is not a valid multibase-encoded string.
+        multibase.DecodingError
+            If the multibase prefix is recognised but the payload cannot
+            be decoded.
+
+        """
         if not multibase.is_encoded(multibase_str):
-            # For test compatibility: raise InvalidMultibaseStringError if not multibase
-            raise multibase.InvalidMultibaseStringError("Not a multibase string")
+            raise multibase.InvalidMultibaseStringError(
+                f"Not a valid multibase string: {multibase_str!r}"
+            )
         try:
             result = multibase.decode(multibase_str)
-            # multibase.decode returns (encoding, bytes) tuple
+            # py-multibase may return ``bytes`` or ``(encoding, bytes)``
+            # depending on version — handle both.
             peer_id_bytes = result[1] if isinstance(result, tuple) else result
             return cls(peer_id_bytes)
         except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
             raise
         except Exception as e:
             raise multibase.DecodingError(
-                f"Failed to decode multibase data: {e}"
+                f"Failed to decode multibase peer ID: {e}"
             ) from e
 
     @classmethod
     def from_string(cls, peer_id_str: str) -> "ID":
-        """Smart parser that tries multibase first, then base58."""
+        """
+        Decode a peer ID string that may be multibase or base58.
+
+        Tries multibase first if the prefix is recognised by
+        *py-multibase*, otherwise falls back to base58.
+
+        Parameters
+        ----------
+        peer_id_str : str
+            A peer ID encoded as either a multibase string or a legacy
+            base58 string.
+
+        Raises
+        ------
+        ValueError
+            If *peer_id_str* cannot be decoded as either multibase or
+            base58.
+
+        """
         if multibase.is_encoded(peer_id_str):
             try:
                 return cls.from_multibase(peer_id_str)
             except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
-                # Fallback to base58 for backward compatibility
+                # The string starts with a valid multibase prefix character
+                # but could not be decoded as multibase — fall back to
+                # legacy base58.  This happens e.g. when a plain base58
+                # string like "77em" starts with "7" (the base8 prefix).
+                pass
+            try:
                 return cls.from_base58(peer_id_str)
+            except Exception as e:
+                raise ValueError(
+                    f"Cannot decode peer ID {peer_id_str!r}: "
+                    f"multibase payload invalid and base58 fallback failed: {e}"
+                ) from e
         else:
-            # Assume base58 for backward compatibility
-            return cls.from_base58(peer_id_str)
+            try:
+                return cls.from_base58(peer_id_str)
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to decode peer ID {peer_id_str!r} as base58: {e}"
+                ) from e
 
     def __repr__(self) -> str:
         return f"<libp2p.peer.id.ID ({self!s})>"

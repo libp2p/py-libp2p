@@ -19,6 +19,10 @@ def set_default_encoding(encoding: str) -> None:
     """
     Set the process-wide default multibase encoding.
 
+    Writes are protected by an internal lock.  Reads via
+    :func:`get_default_encoding` are **not** locked, so a concurrent
+    reader may briefly see a stale value.
+
     Parameters
     ----------
     encoding : str
@@ -50,6 +54,17 @@ def encoding_override(encoding: str) -> Iterator[None]:
     Temporarily override the default encoding within a ``with`` block.
 
     The previous encoding is restored when the block exits—even on exceptions.
+
+    .. warning:: **Thread-safety caveat**
+
+       The lock is only held for the individual *write* operations (setting
+       and restoring the default), **not** for the entire duration of the
+       ``with`` block.  This means that if two threads use
+       ``encoding_override`` concurrently, they can interleave and one
+       thread's override may be visible to the other.  For multi-threaded
+       applications that require isolation, prefer passing an explicit
+       *encoding* parameter to ``to_multibase()`` / ``bytes_to_multibase()``
+       instead of relying on the global default.
 
     Parameters
     ----------

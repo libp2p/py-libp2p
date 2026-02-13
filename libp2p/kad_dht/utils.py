@@ -161,7 +161,8 @@ def multibase_to_bytes(multibase_str: str) -> bytes:
         # Fallback to base58 for backward compatibility
         return base58.b58decode(multibase_str)
     result = multibase.decode(multibase_str)
-    # multibase.decode returns (encoding, bytes) tuple
+    # py-multibase may return bytes or (encoding, bytes) depending on
+    # version — handle both.
     return result[1] if isinstance(result, tuple) else result
 
 
