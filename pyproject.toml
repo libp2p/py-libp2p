@@ -27,6 +27,7 @@ dependencies = [
     "grpcio>=1.41.0",
     "lru-dict>=1.1.6",
     "miniupnpc>=2.3",
+    "requests>=2.28.0",
     "types-requests",
     "multiaddr==0.0.11",
     "mypy-protobuf>=3.0.0",
@@ -152,6 +153,7 @@ markers = [
     "benchmark: performance/sanity benchmarks (deselect with -m 'not benchmark')",
 ]
 xfail_strict = true
+trio_mode = true
 
 [tool.towncrier]
 # Read https://github.com/libp2p/py-libp2p/blob/main/newsfragments/README.md for instructions
