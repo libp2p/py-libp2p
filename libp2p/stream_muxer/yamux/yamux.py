@@ -31,6 +31,7 @@ from libp2p.abc import (
     ISecureConn,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IncompleteReadError,
     IOException,
 )
@@ -190,18 +191,26 @@ class YamuxStream(IMuxedStream):
             )
             try:
                 await self.conn.secured_conn.write(header)
-            except (RawConnError, IOException) as e:
+            except ConnectionClosedError as e:
+                # Typed exception from transports (e.g., WebSocket) that
+                # properly signal connection closure — handle gracefully.
                 # Connection may be closed by peer (e.g., WebSocket closed
                 # immediately after sending data, as seen with Nim).
-                # This is acceptable - the data was already read successfully.
-                # Log and continue rather than raising, to allow read() to complete.
+                # This is acceptable — the data was already read successfully.
+                logger.debug(
+                    f"Stream {self.stream_id}: Window update failed due to "
+                    f"connection closure (data was already read): {e}"
+                )
+                return
+            except (RawConnError, IOException) as e:
+                # Fallback for transports that don't yet raise
+                # ConnectionClosedError (e.g., TCP RawConnError).
                 error_str = str(e).lower()
                 if any(
                     keyword in error_str
                     for keyword in [
                         "connection closed",
                         "closed by peer",
-                        "websocket connection closed",
                         "connection is closed",
                     ]
                 ):

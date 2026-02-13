@@ -10,7 +10,7 @@ import trio
 from trio_websocket import WebSocketConnection
 
 from libp2p.io.abc import ReadWriteCloser
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import ConnectionClosedError, IOException
 
 logger = logging.getLogger(__name__)
 
@@ -213,16 +213,21 @@ class P2PWebSocketConnection(ReadWriteCloser):
 
     def _handle_connection_closed_exception(
         self, e: Exception, operation: str = "read"
-    ) -> IOException:
+    ) -> ConnectionClosedError:
         """
-        Handle a connection closure exception by creating an appropriate IOException.
+        Handle a connection closure exception by creating a ConnectionClosedError.
+
+        Returns a ``ConnectionClosedError`` (subclass of ``IOException``) that
+        carries the close code and reason as structured attributes.  This lets
+        upstream code (e.g. yamux) catch connection closures by *type* instead
+        of doing fragile string matching on the error message.
 
         Args:
             e: The exception that indicates connection closure
             operation: The operation that was being performed (read/write)
 
         Returns:
-            IOException with detailed information about the closure
+            ConnectionClosedError with close_code and close_reason attributes
 
         """
         self._closed = True
@@ -231,13 +236,17 @@ class P2PWebSocketConnection(ReadWriteCloser):
             f"WebSocket connection closed during {operation}: "
             f"code={close_code}, reason={close_reason}"
         )
-        # Return IOException to be raised by caller
-        # This allows read_exactly() to immediately detect connection closure
-        # instead of returning empty bytes which would cause retries
-        return IOException(
+        # Return ConnectionClosedError (subclass of IOException) to be raised
+        # by caller.  This allows read_exactly() to immediately detect
+        # connection closure instead of returning empty bytes which would cause
+        # retries, and lets yamux catch the typed exception directly.
+        return ConnectionClosedError(
             f"WebSocket connection closed by peer during "
             f"{operation} operation: code={close_code}, "
-            f"reason={close_reason}."
+            f"reason={close_reason}.",
+            close_code=close_code,
+            close_reason=close_reason,
+            transport="websocket",
         )
 
     async def _start_keepalive(self) -> None:
