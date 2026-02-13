@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds
 STREAM_TIMEOUT = 15  # seconds
 HANDLER_TIMEOUT = 15  # seconds
-SLEEP_TIME = 1.0  # seconds
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 RELAY_TIMEOUT = 20  # seconds
 
 # Default limits for relay
