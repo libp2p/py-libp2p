@@ -530,7 +530,11 @@ class HostFactory(factory.Factory):
             number, security_protocol=security_protocol, muxer_opt=muxer_opt
         ) as swarms:
             hosts = tuple(BasicHost(swarm) for swarm in swarms)
-            yield hosts
+            try:
+                yield hosts
+            finally:
+                for host in hosts:
+                    await host.close()
 
 
 class DummyRouter(IPeerRouting):
