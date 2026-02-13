@@ -53,6 +53,51 @@ def get_ip_protocol_from_multiaddr(maddr: Multiaddr) -> str | None:
             return None
 
 
+def extract_host_from_multiaddr(maddr: Multiaddr) -> str | None:
+    """
+    Extract host (IP or DNS name) from multiaddr.
+
+    Tries ip4, ip6, dns, dns4, dns6 in order. Returns the first found value,
+    or None if no host protocol is present. Handles ``ProtocolLookupError``
+    gracefully for each protocol.
+
+    :param maddr: Multiaddr to extract host from
+    :return: Host string or None if not found
+    """
+    for protocol in ("ip4", "ip6", "dns", "dns4", "dns6"):
+        try:
+            value = maddr.value_for_protocol(protocol)
+            if value:
+                return value
+        except Exception:
+            continue
+    return None
+
+
+def format_host_for_url(host: str) -> str:
+    """
+    Format host for use in URLs.
+
+    IPv6 addresses (detected by presence of ``:``) are wrapped in square
+    brackets per `RFC 3986 <https://www.rfc-editor.org/rfc/rfc3986>`_.
+
+    Examples::
+
+        >>> format_host_for_url("127.0.0.1")
+        '127.0.0.1'
+        >>> format_host_for_url("::1")
+        '[::1]'
+        >>> format_host_for_url("example.com")
+        'example.com'
+
+    :param host: Hostname or IP address string
+    :return: Host formatted for URL inclusion
+    """
+    if ":" in host:
+        return f"[{host}]"
+    return host
+
+
 def multiaddr_from_socket(socket_obj: socket.socket | Any) -> Multiaddr:
     """
     Create multiaddr from socket, detecting IPv4 or IPv6.
@@ -72,7 +117,9 @@ def multiaddr_from_socket(socket_obj: socket.socket | Any) -> Multiaddr:
 
 
 __all__ = [
+    "extract_host_from_multiaddr",
     "extract_ip_from_multiaddr",
+    "format_host_for_url",
     "get_ip_protocol_from_multiaddr",
     "multiaddr_from_socket",
 ]
