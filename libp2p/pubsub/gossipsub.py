@@ -438,8 +438,12 @@ class GossipSub(IPubsubRouter, Service):
         current_time = time.time()
         last_prune_time = self.graft_flood_tracking[peer_id].get(topic, 0.0)
 
+        # Use the smaller of graft_flood_threshold and prune_back_off so that
+        # peers can re-graft after the configured backoff period.
+        threshold = min(self.graft_flood_threshold, float(self.prune_back_off))
+
         # Check if GRAFT comes too soon after PRUNE (flood threshold)
-        if current_time - last_prune_time < self.graft_flood_threshold:
+        if current_time - last_prune_time < threshold:
             return False
 
         return True
@@ -2036,10 +2040,10 @@ class GossipSub(IPubsubRouter, Service):
             self.adaptive_degree_high = self.degree_high + 1
             self.gossip_factor = 0.25 * 1.1
         else:
-            # Excellent health: optimize for efficiency
-            self.adaptive_degree_low = max(self.degree_low - 1, 3)  # Don't go too low
+            # Excellent health: use base parameters (no further reduction)
+            self.adaptive_degree_low = self.degree_low
             self.adaptive_degree_high = self.degree_high
-            self.gossip_factor = 0.25 * 0.9  # Slightly reduce gossip
+            self.gossip_factor = 0.25
 
         # Additional v1.4 adaptive features
         self._adapt_opportunistic_grafting_parameters(health)
