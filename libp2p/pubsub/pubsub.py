@@ -2,7 +2,6 @@ from __future__ import (
     annotations,
 )
 
-import base64
 from collections.abc import (
     Callable,
     KeysView,
@@ -16,7 +15,7 @@ from typing import (
     cast,
 )
 
-import base58
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -96,8 +95,23 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     return msg.seqno + msg.from_id
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
+    """
+    from libp2p.encoding_config import get_default_encoding
+
+    if encoding is None:
+        encoding = get_default_encoding()
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
 
 
 class TopicValidator(NamedTuple):
@@ -970,7 +984,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
@@ -988,10 +1002,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,
