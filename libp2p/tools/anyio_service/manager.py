@@ -249,9 +249,17 @@ class AnyIOManager(InternalManagerAPI):
 
                             # Block here until all tasks complete
 
-                    except Exception:
+                    except Exception as exc:
                         # Collect exceptions from tasks
-                        self._errors.append(cast(EXC_INFO, sys.exc_info()))
+                        # Handle both single exceptions and ExceptionGroups
+                        if isinstance(exc, ExceptionGroup):
+                            # Extract individual exceptions from the group
+                            for sub_exc in exc.exceptions:
+                                self._errors.append(
+                                    (type(sub_exc), sub_exc, sub_exc.__traceback__)
+                                )
+                        else:
+                            self._errors.append(cast(EXC_INFO, sys.exc_info()))
 
                     finally:
                         # Cancel system task group to clean up
@@ -290,7 +298,7 @@ class AnyIOManager(InternalManagerAPI):
         )
         # Poll for cancellation (since cancel() is sync, we use a flag)
         while not self._cancel_requested:
-            await anyio.sleep(0.01)  # Small sleep to avoid busy loop
+            await anyio.sleep(0)  # Yield to other tasks without delay
 
         self.logger.debug(
             "%s: _handle_cancelled triggering task cancellation", self._service
@@ -300,12 +308,6 @@ class AnyIOManager(InternalManagerAPI):
         for task in tuple(self._root_tasks):
             await task.cancel()
 
-        # Final cancellation of task group
-        if (
-            self._task_nursery is not None
-            and self._task_nursery.cancel_scope is not None
-        ):
-            self._task_nursery.cancel_scope.cancel()
 
     # ========================================================================
     # HIGH COMPLEXITY: Parent Task Finding
@@ -349,30 +351,18 @@ class AnyIOManager(InternalManagerAPI):
         if not self.is_running:
             raise LifecycleError(ERROR_CANNOT_SCHEDULE_AFTER_STOP)
 
-        # Queue task for spawning (spawn is async in anyio 4.x)
-        self._task_queue.append((task, str(task)))
-        self._has_queued_tasks = True
+        # Spawn task immediately (start_soon is synchronous in anyio)
+        self._task_nursery.start_soon(
+            self._run_and_manage_task, task, name=str(task)
+        )
 
     async def _task_spawner(self) -> None:
-        """Background task that spawns queued tasks."""
+        """Background task (kept for compatibility, tasks now spawn synchronously)."""
+        # Tasks are now spawned synchronously in _schedule_task,
+        # so this just waits to be cancelled
         try:
-            while self.is_running or self._has_queued_tasks:
-                # Check if there are queued tasks
-                if self._has_queued_tasks and self._task_nursery is not None:
-                    # Spawn all queued tasks
-                    while self._task_queue and self._task_nursery is not None:
-                        task, name = self._task_queue.pop(0)
-                        try:
-                            self._task_nursery.start_soon(
-                                self._run_and_manage_task, task, name=name
-                            )
-                        except RuntimeError:
-                            # Task group is closed, stop spawning
-                            return
-                    self._has_queued_tasks = bool(self._task_queue)
-
-                # Very fast polling to avoid missing tasks
-                await anyio.sleep(0)
+            while self.is_running:
+                await anyio.sleep(0.1)
         except anyio.get_cancelled_exc_class():
             # Gracefully handle cancellation
             pass
@@ -417,6 +407,15 @@ class AnyIOManager(InternalManagerAPI):
                             new_parent or "root",
                         )
 
+        except anyio.get_cancelled_exc_class():
+            # Cancellation is expected during shutdown, not an error
+            if self._verbose:
+                self.logger.debug("%s: task %s was cancelled", self._service, task)
+            # Don't collect as error or trigger additional cancellation
+            # But still clean up root task tracking
+            if task.parent is None:
+                self._root_tasks.discard(task)
+
         except Exception as err:
             self.logger.error(
                 "%s: task %s exited with error: %s",
@@ -425,9 +424,13 @@ class AnyIOManager(InternalManagerAPI):
                 err,
                 exc_info=not isinstance(err, DaemonTaskExit),
             )
-            # HIGH COMPLEXITY: Collect error and trigger cancellation
-            self._errors.append(cast(EXC_INFO, sys.exc_info()))
+            # HIGH COMPLEXITY: Trigger cancellation and re-raise
+            # Don't collect here - let the outer task_group handler collect
+            self.logger.debug("%s: calling cancel() due to exception", self._service)
             self.cancel()
+            self.logger.debug("%s: cancel() called, is_cancelled=%s", self._service, self.is_cancelled)
+            # Re-raise so AnyIO's task group can cancel all other tasks immediately
+            raise
 
         else:
             # Task completed successfully
@@ -465,10 +468,14 @@ class AnyIOManager(InternalManagerAPI):
         """
         count_in_stats = not _internal
 
+        # Find parent task in the task hierarchy
+        current_anyio_task = anyio.get_current_task()
+        parent = self._find_parent_task(current_anyio_task)
+
         task = FunctionTask(
             name=get_task_name(async_fn, name),
             daemon=daemon,
-            parent=None,  # type: ignore[arg-type]
+            parent=parent,
             async_fn=async_fn,
             async_fn_args=args,
             count_in_stats=count_in_stats,
@@ -503,10 +510,14 @@ class AnyIOManager(InternalManagerAPI):
         - Adds to task hierarchy
         - Returns child manager for external control
         """
+        # Find parent task in the task hierarchy
+        current_anyio_task = anyio.get_current_task()
+        parent = self._find_parent_task(current_anyio_task)
+
         task = ChildServiceTask(
             name=get_task_name(service, name),
             daemon=daemon,
-            parent=None,  # type: ignore[arg-type]
+            parent=parent,
             child_service=service,
         )
 
