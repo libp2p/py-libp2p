@@ -1,0 +1,1 @@
+Integrate py-multihash v3 API in Bitswap CID module and records validation. Replaces manual multihash construction and exception-based validation with efficient library methods. Improves code maintainability while maintaining 100% backward compatibility.
