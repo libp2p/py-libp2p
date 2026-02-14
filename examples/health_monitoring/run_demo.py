@@ -20,6 +20,7 @@ import time
 from libp2p.rcmgr import Direction
 from libp2p.rcmgr.manager import ResourceLimits, ResourceManager
 from libp2p.rcmgr.monitoring import Monitor
+from libp2p.rcmgr.prometheus_exporter import create_prometheus_exporter
 
 
 def _is_port_free(port: int) -> bool:
@@ -74,6 +75,44 @@ def main() -> None:
         type=str,
         default=os.getenv("DEMO_LOG_LEVEL", "INFO"),
     )
+    parser.add_argument(
+        "--max-connections",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Resource limit: max connections (default: 10)",
+    )
+    parser.add_argument(
+        "--max-streams",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Resource limit: max streams (default: 20)",
+    )
+    parser.add_argument(
+        "--max-memory-mb",
+        type=int,
+        default=32,
+        metavar="MB",
+        help="Resource limit: max memory in MB (default: 32)",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        metavar="SECS",
+        help="Seconds between iterations (default: 1.0)",
+    )
+    parser.add_argument(
+        "--no-connection-tracking",
+        action="store_true",
+        help="Disable connection tracking in the monitor",
+    )
+    parser.add_argument(
+        "--no-protocol-metrics",
+        action="store_true",
+        help="Disable protocol metrics in the monitor",
+    )
     args = parser.parse_args()
 
     _setup_logging(args.log_level)
@@ -81,26 +120,35 @@ def main() -> None:
     port = _pick_port(args.port)
 
     limits = ResourceLimits(
-        max_connections=10,
-        max_streams=20,
-        max_memory_mb=32,
+        max_connections=args.max_connections,
+        max_streams=args.max_streams,
+        max_memory_mb=args.max_memory_mb,
     )
 
+    # Single shared exporter so only one HTTP server binds to the port
+    shared_exporter = create_prometheus_exporter(port=port, enable_server=True)
+
     monitor = Monitor(
-        enable_prometheus=True,
-        prometheus_port=port,
-        enable_connection_tracking=True,
-        enable_protocol_metrics=True,
+        prometheus_exporter=shared_exporter,
+        enable_connection_tracking=not args.no_connection_tracking,
+        enable_protocol_metrics=not args.no_protocol_metrics,
     )
 
     rcmgr = ResourceManager(
         limits=limits,
-        enable_prometheus=True,
-        prometheus_port=port,
+        prometheus_exporter=shared_exporter,
         enable_metrics=True,
     )
 
-    logging.info("Resource Manager initialized on port %s", port)
+    logging.info(
+        "Resource Manager initialized on port %s (limits: %s conns, %s streams, "
+        "%s MB; interval %.2fs)",
+        port,
+        limits.max_connections,
+        limits.max_streams,
+        args.max_memory_mb,
+        args.interval,
+    )
 
     connection_count = 0
     blocked_connections = 0
@@ -276,7 +324,7 @@ def main() -> None:
                 monitor.prometheus_exporter.update_from_metrics(rcmgr.metrics)
 
         iteration += 1
-        time.sleep(1)
+        time.sleep(args.interval)
 
     logging.info(
         "%s active connections, %s blocked",

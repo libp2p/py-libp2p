@@ -838,6 +838,12 @@ class BasicHost(IHost):
             # Protocol caching just won't be available for this peer
             logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
 
+        # TEST MEASURE: Also trigger identify directly from connect() as a fallback
+        # to the notifee system. This ensures identify runs even if the notifee
+        # callback has timing issues or doesn't fire reliably.
+        # TODO: Remove this if notifee system proves reliable, or keep as fallback
+        self._schedule_identify(peer_id, reason="connect")
+
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
@@ -974,6 +980,42 @@ class BasicHost(IHost):
             return False
         muxed_conn = getattr(connection, "muxed_conn", None)
         return self._is_quic_muxer(muxed_conn)
+
+    def get_connection_health(self, peer_id: ID) -> dict[str, Any]:
+        """
+        Get health summary for peer connections.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_peer_health_summary"):
+            return self._network.get_peer_health_summary(peer_id)
+        return {}
+
+    def get_network_health_summary(self) -> dict[str, Any]:
+        """
+        Get overall network health summary.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_global_health_summary"):
+            return self._network.get_global_health_summary()
+        return {}
+
+    def export_health_metrics(self, format: str = "json") -> str:
+        """
+        Export health metrics in specified format.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "export_health_metrics"):
+            return self._network.export_health_metrics(format)
+        return "{}" if format == "json" else ""
+
+    async def get_health_monitor_status(self) -> dict[str, Any]:
+        """
+        Get status information about the health monitoring service.
+        Delegates to the network layer if health monitoring is available.
+        """
+        if hasattr(self._network, "get_health_monitor_status"):
+            return await self._network.get_health_monitor_status()
+        return {"enabled": False}
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
