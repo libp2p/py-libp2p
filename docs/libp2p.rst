@@ -16,6 +16,7 @@ Subpackages
    libp2p.kad_dht
    libp2p.network
    libp2p.peer
+   libp2p.perf
    libp2p.protocol_muxer
    libp2p.pubsub
    libp2p.rcmgr
