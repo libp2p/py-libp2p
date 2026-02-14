@@ -379,9 +379,10 @@ async def test_health_update_timing():
 
         # Manually set last update to be old enough
         router.last_health_update = int(time.time()) - 35  # 35 seconds ago
+        old_health_update = router.last_health_update
 
         # Now update should proceed
         router._update_network_health()
 
-        # Update time should be current
-        assert router.last_health_update > initial_time
+        # Update time should be current (greater than the old value we set)
+        assert router.last_health_update > old_health_update
