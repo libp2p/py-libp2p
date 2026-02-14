@@ -22,6 +22,7 @@ from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 from .autotls import AutoTLSConfig, AutoTLSManager
 from .connection import P2PWebSocketConnection
@@ -225,11 +226,7 @@ class WebsocketListener(IListener):
                 )
 
             # Extract host and port from the rest_multiaddr
-            host = (
-                proto_info.rest_multiaddr.value_for_protocol("ip4")
-                or proto_info.rest_multiaddr.value_for_protocol("ip6")
-                or "0.0.0.0"
-            )
+            host = extract_ip_from_multiaddr(proto_info.rest_multiaddr) or "0.0.0.0"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             # Create WebSocket server using nursery.start pattern
