@@ -1,0 +1,1 @@
+Fixed WebSocket transport crashing on IPv6 multiaddrs due to unhandled ``ProtocolLookupError`` in host extraction, and corrected IPv6 dial URL construction to use RFC 3986 bracket notation.
