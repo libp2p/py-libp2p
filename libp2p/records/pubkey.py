@@ -38,7 +38,8 @@ class PublicKeyValidator(Validator):
             raise InvalidRecordType("namespace not 'pk'")
 
         keyhash = bytes.fromhex(key)
-        if not multihash.is_valid(keyhash):
+        is_valid = getattr(multihash, "is_valid", None)
+        if is_valid is None or not is_valid(keyhash):
             raise InvalidRecordType("key did not contain valid multihash")
 
         try:

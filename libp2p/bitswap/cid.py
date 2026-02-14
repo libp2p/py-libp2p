@@ -232,9 +232,13 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
 
     logger = logging.getLogger(__name__)
 
+    # Compute hash of data
+    digest = hashlib.sha256(data).digest()
+
     logger.debug("      verify_cid:")
     logger.debug(f"        CID: {cid.hex()}")
     logger.debug(f"        Data size: {len(data)} bytes")
+    logger.debug(f"        Computed digest: {digest.hex()}")
 
     # For CIDv0 (multihash: <hash-type><hash-length><digest>)
     if len(cid) >= 2 and cid[0] == int(HASH_SHA256):
@@ -244,6 +248,7 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
             match = digest == cid_digest
             logger.debug(f"        CIDv0 check: {'MATCH' if match else 'MISMATCH'}")
             logger.debug(f"        Expected digest: {cid_digest.hex()}")
+            logger.debug(f"        Computed digest: {digest.hex()}")
             return match
 
     # For CIDv1: <version><codec-varint><hash-type><hash-length><digest>
