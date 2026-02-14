@@ -13,7 +13,9 @@ async def checkpoint():
 
 
 @pytest.mark.anyio
-@pytest.mark.skip_on_anyio_backend("trio", reason="Trio backend hangs with synchronous task spawning in this test")
+@pytest.mark.skip_on_anyio_backend(
+    "trio", reason="Trio backend hangs with synchronous task spawning in this test"
+)
 async def test_anyio_manager_stats():
     ready = anyio.Event()
 

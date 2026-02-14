@@ -308,7 +308,6 @@ class AnyIOManager(InternalManagerAPI):
         for task in tuple(self._root_tasks):
             await task.cancel()
 
-
     # ========================================================================
     # HIGH COMPLEXITY: Parent Task Finding
     # ========================================================================
@@ -352,9 +351,7 @@ class AnyIOManager(InternalManagerAPI):
             raise LifecycleError(ERROR_CANNOT_SCHEDULE_AFTER_STOP)
 
         # Spawn task immediately (start_soon is synchronous in anyio)
-        self._task_nursery.start_soon(
-            self._run_and_manage_task, task, name=str(task)
-        )
+        self._task_nursery.start_soon(self._run_and_manage_task, task, name=str(task))
 
     async def _task_spawner(self) -> None:
         """Background task (kept for compatibility, tasks now spawn synchronously)."""
@@ -428,7 +425,11 @@ class AnyIOManager(InternalManagerAPI):
             # Don't collect here - let the outer task_group handler collect
             self.logger.debug("%s: calling cancel() due to exception", self._service)
             self.cancel()
-            self.logger.debug("%s: cancel() called, is_cancelled=%s", self._service, self.is_cancelled)
+            self.logger.debug(
+                "%s: cancel() called, is_cancelled=%s",
+                self._service,
+                self.is_cancelled,
+            )
             # Re-raise so AnyIO's task group can cancel all other tasks immediately
             raise
 
