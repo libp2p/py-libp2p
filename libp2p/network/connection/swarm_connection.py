@@ -8,6 +8,7 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     INetConn,
@@ -37,6 +38,9 @@ class SwarmConn(INetConn):
     streams: set[NetStream]
     event_closed: trio.Event
     _resource_scope: Any | None
+    _actual_transport_addresses: list[Multiaddr] | None
+    _connection_type: ConnectionType
+    _connection_metadata: dict[str, Any]
 
     def __init__(
         self,
@@ -49,6 +53,9 @@ class SwarmConn(INetConn):
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
         self._resource_scope = None
+        self._actual_transport_addresses = None
+        self._connection_type = ConnectionType.UNKNOWN
+        self._connection_metadata = {}
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -233,7 +240,10 @@ class SwarmConn(INetConn):
 
     def get_transport_addresses(self) -> list[Multiaddr]:
         """
-        Retrieve the transport addresses used by this connection.
+        Retrieve the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
 
         Returns
         -------
@@ -241,13 +251,33 @@ class SwarmConn(INetConn):
             A list of multiaddresses used by the transport.
 
         """
-        # Return the addresses from the peerstore for this peer
+        if self._actual_transport_addresses is not None:
+            return self._actual_transport_addresses
+        # Fallback to peerstore addresses if not set
         try:
             peer_id = self.muxed_conn.peer_id
             return self.swarm.peerstore.addrs(peer_id)
         except Exception as e:
             logging.warning(f"Error getting transport addresses: {e}")
             return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        return self._connection_type
+
+    def set_transport_info(
+        self, addresses: list[Multiaddr], conn_type: ConnectionType
+    ) -> None:
+        """
+        Set the actual transport addresses and connection type.
+
+        This should be called during connection establishment with the real
+        transport information.
+        """
+        self._actual_transport_addresses = addresses
+        self._connection_type = conn_type
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:
