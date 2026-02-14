@@ -15,6 +15,9 @@ from typing import Any
 
 import multiaddr
 
+from libp2p.exceptions import (
+    ResourceError,
+)
 from libp2p.peer.id import ID
 
 
@@ -192,7 +195,7 @@ class ErrorContext:
         )
 
 
-class ResourceLimitExceededError(Exception):
+class ResourceLimitExceededError(ResourceError):
     """Enhanced exception for resource limit exceeded errors."""
 
     def __init__(
@@ -266,7 +269,7 @@ class ResourceLimitExceededError(Exception):
         return self._build_error_message()
 
 
-class SystemResourceError(Exception):
+class SystemResourceError(ResourceError):
     """Enhanced exception for system resource errors."""
 
     def __init__(
@@ -332,7 +335,7 @@ class SystemResourceError(Exception):
         return self._build_error_message()
 
 
-class ConfigurationError(Exception):
+class ConfigurationError(ResourceError):
     """Enhanced exception for configuration errors."""
 
     def __init__(
@@ -389,7 +392,7 @@ class ConfigurationError(Exception):
         return self._build_error_message()
 
 
-class OperationalError(Exception):
+class OperationalError(ResourceError):
     """Enhanced exception for operational errors."""
 
     def __init__(

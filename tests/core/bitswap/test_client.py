@@ -11,7 +11,7 @@ from libp2p.bitswap.config import (
     BITSWAP_PROTOCOL_V100,
     BITSWAP_PROTOCOL_V120,
 )
-from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
+from libp2p.bitswap.errors import BitswapTimeoutError
 from libp2p.peer.id import ID as PeerID
 
 

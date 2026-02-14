@@ -17,6 +17,9 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.exceptions import (
+    PeerError,
+)
 
 """
 Latency EWMA Smoothing governs the deacy of the EWMA (the speed at which
@@ -231,5 +234,11 @@ class PeerData(IPeerData):
         return False
 
 
-class PeerDataError(KeyError):
-    """Raised when a key is not found in peer metadata."""
+class PeerDataError(PeerError, KeyError):
+    """
+    Raised when a key is not found in peer metadata.
+    
+    This exception uses multiple inheritance to maintain compatibility
+    with code that catches KeyError while also being part of the
+    libp2p exception hierarchy.
+    """

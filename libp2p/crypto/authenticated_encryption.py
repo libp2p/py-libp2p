@@ -8,8 +8,13 @@ from Crypto.Cipher import (
 )
 import Crypto.Util.Counter as Counter
 
+from libp2p.crypto.exceptions import (
+    CryptographyError,
+)
 
-class InvalidMACException(Exception):
+
+class InvalidMACException(CryptographyError):
+    """Raised when MAC validation fails."""
     pass
 
 

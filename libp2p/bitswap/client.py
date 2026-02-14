@@ -35,7 +35,7 @@ from .errors import (
     BlockNotFoundError,
     BlockTooLargeError,
     MessageTooLargeError,
-    TimeoutError as BitswapTimeoutError,
+    BitswapTimeoutError,
 )
 from .messages import create_message, create_wantlist_entry
 from .pb.bitswap_pb2 import Message

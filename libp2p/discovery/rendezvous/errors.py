@@ -2,10 +2,14 @@
 Rendezvous protocol error handling.
 """
 
+from libp2p.exceptions import (
+    DiscoveryError,
+)
+
 from .pb.rendezvous_pb2 import Message
 
 
-class RendezvousError(Exception):
+class RendezvousError(DiscoveryError):
     """Base exception for rendezvous protocol errors."""
 
     def __init__(self, status: Message.ResponseStatus.ValueType, message: str = ""):

@@ -2,8 +2,12 @@
 Bitswap protocol errors.
 """
 
+from libp2p.exceptions import (
+    ProtocolError,
+)
 
-class BitswapError(Exception):
+
+class BitswapError(ProtocolError):
     """Base exception for Bitswap errors."""
 
     pass
@@ -27,8 +31,8 @@ class MessageTooLargeError(BitswapError):
     pass
 
 
-class TimeoutError(BitswapError):
-    """Raised when an operation times out."""
+class BitswapTimeoutError(BitswapError):
+    """Raised when a Bitswap operation times out."""
 
     pass
 
