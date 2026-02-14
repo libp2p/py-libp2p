@@ -70,8 +70,12 @@ logger = logging.getLogger(__name__)
 
 class QUICTransport(ITransport):
     """
-    QUIC Stream implementation following libp2p IMuxedStream interface.
+    QUIC transport: dial() returns an IMuxedConn (secure and muxed already).
     """
+
+    # Capabilities: swarm skips security and muxer upgrade for this transport
+    provides_secure_connection: bool = True
+    provides_muxed_connection: bool = True
 
     def __init__(
         self, private_key: PrivateKey, config: QUICTransportConfig | None = None

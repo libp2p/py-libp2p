@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 from multiaddr import (
     Multiaddr,
@@ -31,6 +33,11 @@ from libp2p.tools.async_service import (
 )
 from libp2p.tools.utils import (
     connect_swarm,
+)
+from libp2p.transport.capabilities import (
+    transport_provides_muxed_connection,
+    transport_provides_secure_connection,
+    transport_provides_secure_muxed,
 )
 from libp2p.transport.tcp.tcp import (
     TCP,
@@ -267,6 +274,24 @@ def test_new_swarm_quic_multiaddr_supported():
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
     assert isinstance(swarm.transport, QUICTransport)
+
+
+def test_swarm_tcp_transport_has_no_capability_flags():
+    """TCP transport does not set secure/muxed capability flags."""
+    addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
+    swarm = cast(Swarm, new_swarm(listen_addrs=[addr]))
+    assert transport_provides_secure_connection(swarm.transport) is False
+    assert transport_provides_muxed_connection(swarm.transport) is False
+    assert transport_provides_secure_muxed(swarm.transport) is False
+
+
+def test_swarm_quic_transport_has_secure_and_muxed_capabilities():
+    """QUIC transport declares both provides_secure and provides_muxed."""
+    addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
+    swarm = cast(Swarm, new_swarm(listen_addrs=[addr]))
+    assert transport_provides_secure_connection(swarm.transport) is True
+    assert transport_provides_muxed_connection(swarm.transport) is True
+    assert transport_provides_secure_muxed(swarm.transport) is True
 
 
 def test_new_swarm_defaults_to_ed25519():

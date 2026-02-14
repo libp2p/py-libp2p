@@ -92,7 +92,9 @@ from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.async_service import (
     background_trio_service,
 )
-from libp2p.transport.quic.connection import QUICConnection
+from libp2p.transport.capabilities import (
+    muxed_conn_has_negotiation_semaphore,
+)
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -665,8 +667,9 @@ class BasicHost(IHost):
                 # Get registry stats if QUIC connection
                 # Try to get stats from server listener (for server-side connections)
                 # or from client transport's listeners (if available)
-                if connection_type == "QUICConnection" and hasattr(
-                    muxed_conn, "_transport"
+                if (
+                    hasattr(muxed_conn, "_transport")
+                    and getattr(muxed_conn, "_transport", None) is not None
                 ):
                     transport = getattr(muxed_conn, "_transport", None)
                     if transport:
@@ -943,7 +946,7 @@ class BasicHost(IHost):
         if not is_initiator:
             # Only the dialer (initiator) needs to actively run identify.
             return
-        if not self._is_quic_muxer(muxed_conn):
+        if not self._muxed_conn_has_negotiation_throttling(muxed_conn):
             return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
@@ -965,22 +968,23 @@ class BasicHost(IHost):
             return connections[0]
         return None
 
-    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
+    def _muxed_conn_has_negotiation_throttling(
+        self, muxed_conn: IMuxedConn | None
+    ) -> bool:
+        """True if connection uses a semaphore to throttle negotiations."""
+        return muxed_conn is not None and muxed_conn_has_negotiation_semaphore(
+            muxed_conn
+        )
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         connection = self._get_first_connection(peer_id)
         if connection is None:
             return False
         muxed_conn = getattr(connection, "muxed_conn", None)
-        return self._is_quic_muxer(muxed_conn)
+        return self._muxed_conn_has_negotiation_throttling(muxed_conn)
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
-        # Perform protocol muxing to determine protocol to use
-        # For QUIC connections, use connection-level semaphore to limit
-        # concurrent negotiations and prevent server-side overload
-        # This matches the client-side protection for symmetric behavior
         muxed_conn = getattr(net_stream, "muxed_conn", None)
         negotiation_semaphore = None
         if muxed_conn is not None:
@@ -1006,7 +1010,6 @@ class BasicHost(IHost):
                         MultiselectCommunicator(net_stream), self.negotiate_timeout
                     )
             else:
-                # For non-QUIC connections, negotiate directly (no semaphore needed)
                 protocol, handler = await self.multiselect.negotiate(
                     MultiselectCommunicator(net_stream), self.negotiate_timeout
                 )
