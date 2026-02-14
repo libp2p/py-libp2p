@@ -7,6 +7,28 @@ class IOException(BaseLibp2pError):
     pass
 
 
+class ConnectionClosedError(IOException):
+    """
+    Raised when a connection is closed by the peer.
+
+    Carries structured close information so that upstream code can make
+    decisions based on exception type (``except ConnectionClosedError``)
+    rather than fragile string matching on the message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        close_code: int | None = None,
+        close_reason: str = "",
+        transport: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.close_code = close_code
+        self.close_reason = close_reason
+        self.transport = transport
+
+
 class IncompleteReadError(IOException):
     """Fewer bytes were read than requested."""
 
