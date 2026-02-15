@@ -102,6 +102,9 @@ class GossipSub(IPubsubRouter, Service):
     prune_back_off: int
     unsubscribe_back_off: int
 
+    # Scoring
+    scorer: PeerScorer | None
+
     # Gossipsub v1.2 features
     dont_send_message_ids: dict[ID, set[bytes]]
     max_idontwant_messages: (
@@ -201,7 +204,7 @@ class GossipSub(IPubsubRouter, Service):
         self.unsubscribe_back_off = unsubscribe_back_off
 
         # Scoring
-        self.scorer: PeerScorer | None = PeerScorer(score_params or ScoreParams())
+        self.scorer = PeerScorer(score_params or ScoreParams())
         # Gossipsub v1.2 features
         self.dont_send_message_ids = dict()
         self.max_idontwant_messages = max_idontwant_messages
@@ -407,9 +410,9 @@ class GossipSub(IPubsubRouter, Service):
 
         for timestamp, rpc_msg in self._pending_messages[peer_id]:
             # Extract topics from the RPC message's publish field
-            msg_topics = []
-            for pub_msg in rpc_msg.publish:
-                msg_topics.extend(pub_msg.topicIDs)
+            msg_topics: list[str] = [
+                topic_id for pub_msg in rpc_msg.publish for topic_id in pub_msg.topicIDs
+            ]
 
             # Drop message if peer isn't subscribed to any of these topics
             if not peer_topics or not any(topic in peer_topics for topic in msg_topics):
@@ -417,9 +420,11 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             # Apply same publish gate as normal publish path
-            if self.scorer is not None and not self.scorer.allow_publish:
-                messages_blocked += 1
-                continue
+            scorer = self.scorer
+            if scorer is not None:
+                if not scorer.allow_publish(peer_id, msg_topics):
+                    messages_blocked += 1
+                    continue
 
             try:
                 await pubsub.write_msg(stream, rpc_msg)
@@ -619,10 +624,10 @@ class GossipSub(IPubsubRouter, Service):
             if peer_id not in self.pubsub.peers:
                 continue
             # Publish gate
-            if self.scorer is not None and not self.scorer.allow_publish(
-                peer_id, list(pubsub_msg.topicIDs)
-            ):
-                continue
+            scorer = self.scorer
+            if scorer is not None:
+                if not scorer.allow_publish(peer_id, list(pubsub_msg.topicIDs)):
+                    continue
             stream = self.pubsub.peers[peer_id]
 
             # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
@@ -743,12 +748,13 @@ class GossipSub(IPubsubRouter, Service):
                 self.fanout[topic] = fanout_peers
                 gossipsub_peers = fanout_peers
             # Apply gossip score gate
-            if self.scorer is not None and gossipsub_peers:
+            scorer = self.scorer
+            if scorer is not None and gossipsub_peers:
                 allowed = {
                     p
                     for p in gossipsub_peers
-                    if self.scorer.allow_gossip(p, [topic])
-                    and not self.scorer.is_graylisted(p, [topic])
+                    if scorer.allow_gossip(p, [topic])
+                    and not scorer.is_graylisted(p, [topic])
                 }
                 send_to.update(allowed)
             else:
@@ -1404,8 +1410,9 @@ class GossipSub(IPubsubRouter, Service):
         topic: str = graft_msg.topicID
 
         # Score gate for GRAFT acceptance
-        if self.scorer is not None:
-            if self.scorer.is_graylisted(sender_peer_id, [topic]):
+        scorer = self.scorer
+        if scorer is not None:
+            if scorer.is_graylisted(sender_peer_id, [topic]):
                 await self.emit_prune(topic, sender_peer_id, False, False)
                 return
 
