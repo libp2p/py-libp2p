@@ -127,8 +127,11 @@ class GossipSub(IPubsubRouter, Service):
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
     # Pending messages for peers that haven't completed protocol identification yet.
-    # Maps peer_id -> list of RPC messages queued for delivery once identify completes.
-    _pending_messages: DefaultDict[ID, list[rpc_pb2.RPC]]
+    # Maps peer_id -> list of (timestamp, RPC message) tuples queued for delivery
+    # once identify completes.
+    _pending_messages: DefaultDict[ID, list[tuple[float, rpc_pb2.RPC]]]
+    _max_pending_messages_per_peer: int  # Maximum messages queued per peer
+    _pending_messages_ttl: float  # Time-to-live for queued messages in seconds
 
     def __init__(
         self,
@@ -155,6 +158,8 @@ class GossipSub(IPubsubRouter, Service):
         max_messages_per_topic_per_second: float = 10.0,
         eclipse_protection_enabled: bool = True,
         min_mesh_diversity_ips: int = 3,
+        max_pending_messages_per_peer: int = 100,
+        pending_messages_ttl: float = 30.0,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -219,6 +224,8 @@ class GossipSub(IPubsubRouter, Service):
 
         # Pending publish queue for identify-aware delivery
         self._pending_messages = defaultdict(list)
+        self._max_pending_messages_per_peer = max_pending_messages_per_peer
+        self._pending_messages_ttl = pending_messages_ttl
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -312,6 +319,40 @@ class GossipSub(IPubsubRouter, Service):
         # point.  Flushing happens in ``flush_pending_messages`` which is
         # called by Pubsub._handle_new_peer after the stream is registered.
 
+    def _prune_pending_messages(self, peer_id: ID) -> None:
+        """
+        Remove expired messages and enforce queue size limits for a peer.
+
+        :param peer_id: the peer whose pending queue should be pruned
+        """
+        if peer_id not in self._pending_messages:
+            return
+
+        current_time = time.time()
+        queue = self._pending_messages[peer_id]
+
+        # Remove expired messages (older than TTL)
+        queue[:] = [
+            (ts, msg)
+            for ts, msg in queue
+            if current_time - ts <= self._pending_messages_ttl
+        ]
+
+        # Enforce max queue size (keep most recent messages)
+        if len(queue) > self._max_pending_messages_per_peer:
+            logger.warning(
+                "pending message queue for peer %s exceeded limit "
+                "(%d > %d), dropping oldest messages",
+                peer_id,
+                len(queue),
+                self._max_pending_messages_per_peer,
+            )
+            queue[:] = queue[-self._max_pending_messages_per_peer :]
+
+        # Remove peer entry if queue is now empty
+        if not queue:
+            self._pending_messages.pop(peer_id, None)
+
     async def flush_pending_messages(self, peer_id: ID) -> None:
         """
         Flush any messages queued for a peer once they are identified.
@@ -320,13 +361,17 @@ class GossipSub(IPubsubRouter, Service):
         ``pubsub.peers[peer_id]`` have been set so that we have the stream
         available for writing.
 
+        Only sends messages for topics the peer has subscribed to. The queue
+        handles the identify race; once the peer is identified, standard
+        GossipSub rules apply (drop if not subscribed).
+        Applies the same scorer.allow_publish gate as the normal publish path.
+
         :param peer_id: the peer whose pending queue should be drained
         """
-        if peer_id not in self._pending_messages:
-            return
+        # First, prune expired and excess messages
+        self._prune_pending_messages(peer_id)
 
-        queued = self._pending_messages.pop(peer_id)
-        if not queued:
+        if peer_id not in self._pending_messages:
             return
 
         if self.pubsub is None:
@@ -347,20 +392,57 @@ class GossipSub(IPubsubRouter, Service):
             return
 
         stream = pubsub.peers[peer_id]
-        logger.debug(
-            "flushing %d pending message(s) to newly identified peer %s",
-            len(queued),
-            peer_id,
-        )
-        for rpc_msg in queued:
+
+        peer_topics: set[str] = set()
+        for topic, peers in pubsub.peer_topics.items():
+            if peer_id in peers:
+                peer_topics.add(topic)
+
+        # Process queue: send matching messages, drop non-matching
+        # The queue only handles the identify race; once identified,
+        # standard GossipSub rules apply (peer must be subscribed)
+        messages_sent = 0
+        messages_dropped = 0
+        messages_blocked = 0
+
+        for timestamp, rpc_msg in self._pending_messages[peer_id]:
+            # Extract topics from the RPC message's publish field
+            msg_topics = []
+            for pub_msg in rpc_msg.publish:
+                msg_topics.extend(pub_msg.topicIDs)
+
+            # Drop message if peer isn't subscribed to any of these topics
+            if not peer_topics or not any(topic in peer_topics for topic in msg_topics):
+                messages_dropped += 1
+                continue
+
+            # Apply same publish gate as normal publish path
+            if self.scorer is not None and not self.scorer.allow_publish:
+                messages_blocked += 1
+                continue
+
             try:
                 await pubsub.write_msg(stream, rpc_msg)
+                messages_sent += 1
             except Exception:
                 logger.debug(
                     "failed to flush pending message to peer %s",
                     peer_id,
                     exc_info=True,
                 )
+
+        # Clear the queue - identify is complete
+        self._pending_messages.pop(peer_id, None)
+
+        if messages_sent > 0 or messages_dropped > 0 or messages_blocked > 0:
+            logger.debug(
+                "flushed identify-pending messages to peer %s: "
+                "%d sent, %d dropped, %d blocked",
+                peer_id,
+                messages_sent,
+                messages_dropped,
+                messages_blocked,
+            )
 
     async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
         """
@@ -567,10 +649,13 @@ class GossipSub(IPubsubRouter, Service):
                             and peer_id not in self.direct_peers
                             and peer_id not in queued_peers
                         ):
-                            self._pending_messages[peer_id].append(rpc_msg)
+                            self._prune_pending_messages(peer_id)
+                            self._pending_messages[peer_id].append(
+                                (time.time(), rpc_msg)
+                            )
                             queued_peers.add(peer_id)
                             logger.debug(
-                                "queued message for peer %s (in topic, not identified)",
+                                "queued message for peer %s (identify pending)",
                                 peer_id,
                             )
 
@@ -589,10 +674,11 @@ class GossipSub(IPubsubRouter, Service):
                         topic not in pubsub.peer_topics
                         or peer_id not in pubsub.peer_topics[topic]
                     ):
-                        self._pending_messages[peer_id].append(rpc_msg)
+                        self._prune_pending_messages(peer_id)
+                        self._pending_messages[peer_id].append((time.time(), rpc_msg))
                         queued_peers.add(peer_id)
                         logger.debug(
-                            "queued message for peer %s (connected, sub pending)",
+                            "queued message for peer %s (identify pending)",
                             peer_id,
                         )
 

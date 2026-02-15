@@ -11,6 +11,7 @@ once the peer is fully registered.
 """
 
 import logging
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -53,7 +54,7 @@ class TestPendingMessageQueue:
     def test_pending_messages_cleaned_on_remove_peer(self):
         gs = self._make_gossipsub()
         peer = IDFactory()
-        gs._pending_messages[peer].append(rpc_pb2.RPC())
+        gs._pending_messages[peer].append((time.time(), rpc_pb2.RPC()))
         assert peer in gs._pending_messages
 
         # Simulate add_peer so remove_peer doesn't error
@@ -63,7 +64,7 @@ class TestPendingMessageQueue:
 
     @pytest.mark.trio
     async def test_flush_pending_messages_sends_queued(self):
-        """flush_pending_messages should write all queued RPCs to the stream."""
+        """flush_pending_messages should write queued RPCs for subscribed topics."""
         gs = self._make_gossipsub()
         peer = IDFactory()
 
@@ -74,30 +75,75 @@ class TestPendingMessageQueue:
         mock_pubsub.write_msg = AsyncMock()
         gs.pubsub = mock_pubsub
 
-        # Queue two messages
+        # Queue two messages for test-topic
         rpc1 = rpc_pb2.RPC()
+        rpc1.publish.add(topicIDs=["test-topic"])
         rpc2 = rpc_pb2.RPC()
-        gs._pending_messages[peer].extend([rpc1, rpc2])
+        rpc2.publish.add(topicIDs=["test-topic"])
+        gs._pending_messages[peer].extend([(time.time(), rpc1), (time.time(), rpc2)])
+
+        # Peer subscribes to test-topic
+        mock_pubsub.peer_topics = {"test-topic": {peer}}
 
         await gs.flush_pending_messages(peer)
 
-        # Both should have been written
+        # Both messages should be sent since peer subscribed to test-topic
         assert mock_pubsub.write_msg.call_count == 2
         # Queue should be drained
         assert peer not in gs._pending_messages
 
     @pytest.mark.trio
-    async def test_flush_no_op_when_no_pending(self):
-        """flush_pending_messages should be a no-op if there's nothing queued."""
+    async def test_flush_drops_messages_when_no_subscriptions(self):
+        """Messages should be dropped if peer identified but hasn't subscribed."""
         gs = self._make_gossipsub()
         peer = IDFactory()
         mock_pubsub = MagicMock()
         mock_pubsub.write_msg = AsyncMock()
         mock_pubsub.peers = {peer: MagicMock()}
+        mock_pubsub.peer_topics = {}  # No subscriptions
         gs.pubsub = mock_pubsub
 
+        rpc1 = rpc_pb2.RPC()
+        rpc1.publish.add(topicIDs=["test-topic"])
+        gs._pending_messages[peer].append((time.time(), rpc1))
+
         await gs.flush_pending_messages(peer)
+
+        # Message should NOT be sent since peer hasn't subscribed
         mock_pubsub.write_msg.assert_not_called()
+        # Queue should be cleared (identify complete, drop unsubscribed)
+        assert peer not in gs._pending_messages
+
+    @pytest.mark.trio
+    async def test_flush_filters_by_topic(self):
+        """Only messages for subscribed topics should be sent; others dropped."""
+        gs = self._make_gossipsub()
+        peer = IDFactory()
+
+        mock_pubsub = MagicMock()
+        mock_stream = MagicMock()
+        mock_pubsub.peers = {peer: mock_stream}
+        mock_pubsub.peer_topics = {"topic-a": {peer}}  # Subscribed to topic-a only
+        mock_pubsub.write_msg = AsyncMock()
+        gs.pubsub = mock_pubsub
+
+        rpc1 = rpc_pb2.RPC()
+        rpc1.publish.add(topicIDs=["topic-a"])
+        rpc2 = rpc_pb2.RPC()
+        rpc2.publish.add(topicIDs=["topic-b"])  # Different topic
+        rpc3 = rpc_pb2.RPC()
+        rpc3.publish.add(topicIDs=["topic-a"])
+
+        gs._pending_messages[peer].extend(
+            [(time.time(), rpc1), (time.time(), rpc2), (time.time(), rpc3)]
+        )
+
+        await gs.flush_pending_messages(peer)
+
+        # Only 2 messages should be sent (topic-a), topic-b dropped
+        assert mock_pubsub.write_msg.call_count == 2
+        # Queue should be cleared (identify complete)
+        assert peer not in gs._pending_messages
 
     @pytest.mark.trio
     async def test_flush_handles_write_failure_gracefully(self):
@@ -120,12 +166,18 @@ class TestPendingMessageQueue:
         mock_pubsub.write_msg = AsyncMock(side_effect=write_msg_side_effect)
         gs.pubsub = mock_pubsub
 
-        gs._pending_messages[peer].extend([rpc_pb2.RPC(), rpc_pb2.RPC()])
+        rpc1 = rpc_pb2.RPC()
+        rpc1.publish.add(topicIDs=["test-topic"])
+        rpc2 = rpc_pb2.RPC()
+        rpc2.publish.add(topicIDs=["test-topic"])
+        mock_pubsub.peer_topics = {"test-topic": {peer}}  # Peer subscribed
+        gs._pending_messages[peer].extend([(time.time(), rpc1), (time.time(), rpc2)])
 
         # Should not raise
         await gs.flush_pending_messages(peer)
         # Both attempts should have been made
         assert call_tracker[0] == 2
+        # Queue should be drained (messages were for subscribed topic)
         assert peer not in gs._pending_messages
 
 
