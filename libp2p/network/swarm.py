@@ -2,6 +2,7 @@ from collections.abc import (
     Awaitable,
     Callable,
 )
+import ipaddress
 import logging
 import random
 from typing import TYPE_CHECKING, Any, cast
@@ -1086,16 +1087,24 @@ class Swarm(Service, INetworkService):
                 read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
             ) -> None:
                 # Enforce connection gate on inbound connections
-                if not self.connection_gate.is_allowed(maddr):
-                    logger.debug(
-                        "Inbound connection from %s denied by connection gate",
-                        maddr,
-                    )
-                    try:
-                        await read_write_closer.close()
-                    except Exception:
-                        pass
-                    return
+                # Build multiaddr from remote address tuple
+                logger.debug(
+                    f"[conn_handler] Handling inbound connection on listener {maddr}"
+                )
+                remote_maddr = self._build_remote_multiaddr(read_write_closer)
+                logger.debug(f"[conn_handler] Built remote_maddr: {remote_maddr}")
+
+                if remote_maddr is not None:
+                    if not await self.connection_gate.is_allowed(remote_maddr):
+                        logger.debug(
+                            "Inbound connection from %s denied by connection gate",
+                            remote_maddr,
+                        )
+                        try:
+                            await read_write_closer.close()
+                        except Exception:
+                            pass
+                        return
 
                 # No need to upgrade QUIC Connection
                 if isinstance(self.transport, QUICTransport):
@@ -1498,6 +1507,62 @@ class Swarm(Service, INetworkService):
         # Call notifiers since event occurred
         await self.notify_connected(swarm_conn)
         return swarm_conn
+
+    def _build_remote_multiaddr(
+        self, read_write_closer: ReadWriteCloser
+    ) -> Multiaddr | None:
+        """
+        Build a Multiaddr from the remote address of a connection.
+
+        Parameters
+        ----------
+        read_write_closer : ReadWriteCloser
+            The connection to get the remote address from
+
+        Returns
+        -------
+        Multiaddr | None
+            The remote peer's multiaddr, or None if unavailable
+
+        """
+        remote_addr = read_write_closer.get_remote_address()
+        logger.debug(
+            f"[_build_remote_multiaddr] raw remote_addr from "
+            f"get_remote_address(): {remote_addr}"
+        )
+
+        if remote_addr is None:
+            logger.debug(
+                "[_build_remote_multiaddr] remote_addr is None, returning None"
+            )
+            return None
+
+        host, port = remote_addr
+        logger.debug(f"[_build_remote_multiaddr] host={host}, port={port}")
+
+        # Determine if IPv4 or IPv6
+        try:
+            ip = ipaddress.ip_address(host)
+            if isinstance(ip, ipaddress.IPv6Address):
+                result = Multiaddr(f"/ip6/{host}/tcp/{port}")
+                logger.debug(
+                    f"[_build_remote_multiaddr] Built IPv6 multiaddr: {result}"
+                )
+                return result
+            else:
+                result = Multiaddr(f"/ip4/{host}/tcp/{port}")
+                logger.debug(
+                    f"[_build_remote_multiaddr] Built IPv4 multiaddr: {result}"
+                )
+                return result
+        except ValueError:
+            # If not a valid IP address, assume IPv4
+            result = Multiaddr(f"/ip4/{host}/tcp/{port}")
+            logger.debug(
+                f"[_build_remote_multiaddr] Invalid IP (ValueError), "
+                f"assuming IPv4: {result}"
+            )
+            return result
 
     def _trim_connections(self, peer_id: ID) -> None:
         """
