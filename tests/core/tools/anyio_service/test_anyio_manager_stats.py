@@ -4,6 +4,7 @@ import anyio
 from libp2p.tools.anyio_service import (
     AnyIOManager,
     Service,
+    background_anyio_service,
 )
 
 
@@ -13,9 +14,6 @@ async def checkpoint():
 
 
 @pytest.mark.anyio
-@pytest.mark.skip_on_anyio_backend(
-    "trio", reason="Trio backend hangs with synchronous task spawning in this test"
-)
 async def test_anyio_manager_stats():
     ready = anyio.Event()
 
@@ -41,31 +39,24 @@ async def test_anyio_manager_stats():
             self.manager.run_task(checkpoint)
 
     service = StatsTest()
-    async with anyio.create_task_group() as tg:
-        manager = AnyIOManager(service)
-        tg.start_soon(manager.run)  # type: ignore[arg-type]
-        await manager.wait_started()
+    async with background_anyio_service(service) as manager:
+        service.run_external_root()
+        assert len(manager._root_tasks) == 2
+        with anyio.fail_after(1):
+            await ready.wait()
 
-        try:
-            service.run_external_root()
-            assert len(manager._root_tasks) == 2
-            with anyio.fail_after(1):
-                await ready.wait()
+        # we need to yield to the event loop a few times to allow the various
+        # tasks to schedule themselves and get running.
+        for _ in range(50):
+            await checkpoint()
 
-            # we need to yield to the event loop a few times to allow the various
-            # tasks to schedule themselves and get running.
-            for _ in range(50):
-                await checkpoint()
+        assert manager.stats.tasks.total_count == 10
+        assert manager.stats.tasks.finished_count == 4
+        assert manager.stats.tasks.pending_count == 6
 
-            assert manager.stats.tasks.total_count == 10
-            assert manager.stats.tasks.finished_count == 4
-            assert manager.stats.tasks.pending_count == 6
-
-            # With synchronous task spawning, the child tasks become root tasks
-            # This is an implementation detail that doesn't affect the statistics
-            assert len(manager._root_tasks) >= 1
-        finally:
-            await manager.stop()
+        # With synchronous task spawning, the child tasks become root tasks
+        # This is an implementation detail that doesn't affect the statistics
+        assert len(manager._root_tasks) >= 1
 
     # now check after exiting
     assert manager.stats.tasks.total_count == 10
@@ -83,25 +74,18 @@ async def test_anyio_manager_stats_does_not_count_main_run_method():
             ready.set()
 
     service = StatsTest()
-    async with anyio.create_task_group() as tg:
-        manager = AnyIOManager(service)
-        tg.start_soon(manager.run)  # type: ignore[arg-type]
-        await manager.wait_started()
+    async with background_anyio_service(service) as manager:
+        with anyio.fail_after(1):  # type: ignore[misc]
+            await ready.wait()
 
-        try:
-            with anyio.fail_after(1):  # type: ignore[misc]
-                await ready.wait()
+        # we need to yield to the event loop a few times to allow the various
+        # tasks to schedule themselves and get running.
+        for _ in range(10):
+            await checkpoint()
 
-            # we need to yield to the event loop a few times to allow the various
-            # tasks to schedule themselves and get running.
-            for _ in range(10):
-                await checkpoint()
-
-            assert manager.stats.tasks.total_count == 1
-            assert manager.stats.tasks.finished_count == 0
-            assert manager.stats.tasks.pending_count == 1
-        finally:
-            await manager.stop()
+        assert manager.stats.tasks.total_count == 1
+        assert manager.stats.tasks.finished_count == 0
+        assert manager.stats.tasks.pending_count == 1
 
     # now check after exiting
     assert manager.stats.tasks.total_count == 1
