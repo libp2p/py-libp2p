@@ -1,0 +1,1 @@
+Fixed WebSocket transport to immediately raise ``IOException`` on connection closure instead of returning empty bytes, preventing retry loops in ``read_exactly()``. Also added graceful error handling in yamux ``send_window_update()`` for connections closed by peers during window updates.
