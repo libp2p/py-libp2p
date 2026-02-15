@@ -1,3 +1,7 @@
+from collections.abc import (
+    Callable,
+)
+
 import pytest
 import trio
 
@@ -7,6 +11,67 @@ from libp2p.tools.utils import (
 from tests.utils.pubsub.dummy_account_node import (
     DummyAccountNode,
 )
+
+
+async def wait_for_convergence(
+    nodes: tuple[DummyAccountNode, ...],
+    check: Callable[[DummyAccountNode], bool],
+    timeout: float = 10.0,
+    poll_interval: float = 0.02,
+    log_success: bool = False,
+    raise_last_exception_on_timeout: bool = True,
+) -> None:
+    """
+    Wait until all nodes satisfy the check condition.
+
+    Returns as soon as convergence is reached, otherwise raises TimeoutError.
+    Convergence already guarantees all nodes satisfy the check, so callers need
+    not run a second assertion pass after this returns.
+    """
+    start_time = trio.current_time()
+
+    last_exception: Exception | None = None
+    last_exception_node: int | None = None
+
+    while True:
+        failed_indices: list[int] = []
+        for i, node in enumerate(nodes):
+            try:
+                ok = check(node)
+            except Exception as exc:
+                ok = False
+                last_exception = exc
+                last_exception_node = i
+            if not ok:
+                failed_indices.append(i)
+
+        if not failed_indices:
+            elapsed = trio.current_time() - start_time
+            if log_success:
+                print(f"✓ Converged in {elapsed:.3f}s with {len(nodes)} nodes")
+            return
+
+        elapsed = trio.current_time() - start_time
+        if elapsed > timeout:
+            if raise_last_exception_on_timeout and last_exception is not None:
+                # Preserve the underlying assertion/exception signal (and its message)
+                # instead of hiding it behind a generic timeout.
+                node_hint = (
+                    f" (node index {last_exception_node})"
+                    if last_exception_node is not None
+                    else ""
+                )
+                raise AssertionError(
+                    f"Convergence failed{node_hint}: {last_exception}"
+                ) from last_exception
+
+            raise TimeoutError(
+                f"Convergence timeout after {elapsed:.2f}s. "
+                f"Failed nodes: {failed_indices}. "
+                f"(Hint: run with -s and pass log_success=True for timing logs)"
+            )
+
+        await trio.sleep(poll_interval)
 
 
 async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
@@ -38,12 +103,12 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
         # Perform action function
         await action_func(dummy_nodes)
 
-        # Allow time for action function to be performed (i.e. messages to propogate)
-        await trio.sleep(1)
+        # Wait until all nodes satisfy the expected final state.
+        def _check_final(node: DummyAccountNode) -> bool:
+            assertion_func(node)
+            return True
 
-        # Perform assertion function
-        for dummy_node in dummy_nodes:
-            assertion_func(dummy_node)
+        await wait_for_convergence(dummy_nodes, _check_final, timeout=10.0)
 
     # Success, terminate pending tasks.
 
@@ -111,8 +176,16 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.5)  # Increased for better tree propagation
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("aspyn") == 20, timeout=10.0
+        )
         await dummy_nodes[0].publish_send_crypto("aspyn", "alex", 5)
+        # Wait for the send operation to propagate to all nodes
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("aspyn") == 15 and n.get_balance("alex") == 5,
+            timeout=10.0,
+        )
 
     def assertion_func(dummy_node):
         assert dummy_node.get_balance("aspyn") == 15
@@ -128,7 +201,9 @@ async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[6].publish_set_crypto("aspyn", 20)
-        await trio.sleep(0.5)  # Increased for better tree propagation
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("aspyn") == 20, timeout=10.0
+        )
         await dummy_nodes[4].publish_send_crypto("aspyn", "alex", 5)
 
     def assertion_func(dummy_node):
@@ -159,7 +234,12 @@ async def test_set_then_send_from_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await trio.sleep(1.0)  # Increased from 0.25 to allow proper ring propagation
+        # Ensure `set` has reached all nodes before sending, otherwise late `set`
+        # can overwrite the effects of `send` on nodes
+        # that receive messages out-of-order.
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("alex") == 20, timeout=10.0
+        )
         await dummy_nodes[3].publish_send_crypto("alex", "rob", 12)
 
     def assertion_func(dummy_node):
@@ -177,13 +257,32 @@ async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
 
     async def action_func(dummy_nodes):
         await dummy_nodes[0].publish_set_crypto("alex", 20)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes, lambda n: n.get_balance("alex") == 20, timeout=10.0
+        )
         await dummy_nodes[1].publish_send_crypto("alex", "rob", 3)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17 and n.get_balance("rob") == 3,
+            timeout=10.0,
+        )
         await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 2,
+            timeout=10.0,
+        )
         await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
-        await trio.sleep(1)
+        await wait_for_convergence(
+            dummy_nodes,
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 1
+            and n.get_balance("zx") == 1,
+            timeout=10.0,
+        )
         await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
 
     def assertion_func(dummy_node):
