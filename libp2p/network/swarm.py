@@ -781,7 +781,15 @@ class Swarm(Service, INetworkService):
                     peer_id, endpoint_ip=ep
                 )
                 if conn_scope is None:
-                    await secured_conn.close()
+                    # Clean up connections
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
                     # Release pre-upgrade scope
                     try:
                         if pre_scope is not None and hasattr(pre_scope, "close"):
@@ -1302,6 +1310,10 @@ class Swarm(Service, INetworkService):
                 )
                 if conn_scope is None:
                     # Clean up connections
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
                     try:
                         await secured_conn.close()
                     except Exception:
