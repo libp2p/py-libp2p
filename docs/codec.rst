@@ -24,9 +24,8 @@ Migration Required
 
 If you use ``dag-jose``, ``dag-json``, or custom codecs :math:`\ge 128`:
 
-1. **Identify affected CIDs** using :func:`libp2p.bitswap.cid.detect_cid_encoding_format`.
-2. **Recompute CIDs** from original data using
-   :func:`libp2p.bitswap.cid.recompute_cid_from_data`.
+1. **Identify affected CIDs** using ``detect_cid_encoding_format()`` (in ``libp2p.bitswap.cid``).
+2. **Recompute CIDs** from original data using ``recompute_cid_from_data()`` (in ``libp2p.bitswap.cid``).
 3. **Update storage** (databases, caches, indexes) with the new CIDs.
 
 Code Examples

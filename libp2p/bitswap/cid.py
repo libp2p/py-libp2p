@@ -348,9 +348,8 @@ def parse_cid_codec(cid: bytes) -> str:
     """
     Extract the codec name from a CID.
 
-    For CIDv0, there is no explicit codec, and callers should treat this
-    as the legacy dag-pb form used by IPFS (often reported as "cidv0").
-    For CIDv1, this uses multicodec's `get_codec` helper.
+    For CIDv0 (no explicit codec), returns ``dag-pb`` (the implicit codec).
+    For CIDv1, uses multicodec's `get_codec` helper.
     """
     if len(cid) < 2 or cid[0] != CID_V1:
         # CIDv0 - we return the name of the implicit codec.

@@ -64,7 +64,10 @@ class Envelope:
             except Exception as e:
                 raise ValueError(f"Invalid codec: {e}")
         elif isinstance(payload_type, str):
-            self.payload_type_code = Code.from_string(payload_type)
+            try:
+                self.payload_type_code = Code.from_string(payload_type)
+            except Exception as e:
+                raise ValueError(f"Invalid codec: {e}")
         else:
             self.payload_type_code = payload_type
 
