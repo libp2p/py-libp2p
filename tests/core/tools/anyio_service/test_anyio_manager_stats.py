@@ -2,7 +2,6 @@ import pytest
 import anyio
 
 from libp2p.tools.anyio_service import (
-    AnyIOManager,
     Service,
     background_anyio_service,
 )
