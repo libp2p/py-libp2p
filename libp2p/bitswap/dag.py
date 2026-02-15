@@ -4,6 +4,7 @@ Merkle DAG manager for file operations.
 This module provides a high-level API for adding and fetching files
 using the Bitswap protocol with automatic chunking, linking, and
 multi-block resolution.
+
 """
 
 from collections.abc import Awaitable, Callable
@@ -21,7 +22,12 @@ from .chunker import (
     estimate_chunk_count,
     get_file_size,
 )
-from .cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
+from .cid import (
+    CODEC_DAG_PB,
+    CODEC_RAW,
+    compute_cid_v1,
+    verify_cid,
+)
 from .client import BitswapClient
 from .dag_pb import (
     create_file_node,
@@ -148,10 +154,12 @@ class MerkleDag:
         # If file is small enough, store as single RAW block
         if file_size <= chunk_size:
             logger.debug("File fits in single block")
+
             with open(file_path, "rb") as f:
                 data = f.read()
 
             cid = compute_cid_v1(data, codec=CODEC_RAW)
+
             await self.bitswap.add_block(cid, data)
 
             if progress_callback:
