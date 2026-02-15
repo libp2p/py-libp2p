@@ -297,11 +297,11 @@ async def test_periodic_rate_limiting_cleanup():
 
         peer_id = IDFactory()
 
-        # Add old data
+        # Add old data (graft_flood uses 30s window, so use >30s ago to avoid boundary)
         old_time = time.time() - 10.0
         router.iwant_request_limits[peer_id]["requests"] = [old_time]
         router.ihave_message_limits[peer_id]["topic"] = [old_time]
-        router.graft_flood_tracking[peer_id]["topic"] = old_time - 20.0
+        router.graft_flood_tracking[peer_id]["topic"] = time.time() - 35.0
 
         # Trigger periodic cleanup
         router._periodic_security_cleanup()

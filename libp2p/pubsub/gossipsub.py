@@ -2775,7 +2775,7 @@ class GossipSub(IPubsubRouter, Service):
         graft_cutoff = current_time - 30.0
         for peer_id in list(self.graft_flood_tracking.keys()):
             for topic in list(self.graft_flood_tracking[peer_id].keys()):
-                if self.graft_flood_tracking[peer_id][topic] < graft_cutoff:
+                if self.graft_flood_tracking[peer_id][topic] <= graft_cutoff:
                     del self.graft_flood_tracking[peer_id][topic]
 
             if not self.graft_flood_tracking[peer_id]:
