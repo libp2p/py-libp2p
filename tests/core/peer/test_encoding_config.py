@@ -129,3 +129,15 @@ class TestDHTUtilsWithConfig:
         set_default_encoding("base32")
         encoded = bytes_to_multibase(data, "base64")
         assert encoded.startswith("m")
+
+    def test_bytes_to_base58_no_prefix(self) -> None:
+        """bytes_to_base58 must return plain base58 without a multibase prefix."""
+        import base58 as b58
+
+        from libp2p.kad_dht.utils import bytes_to_base58
+
+        data = b"hello"
+        result = bytes_to_base58(data)
+        expected = b58.b58encode(data).decode()
+        assert result == expected
+        assert not result.startswith("z") or expected.startswith("z")

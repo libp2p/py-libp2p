@@ -118,8 +118,14 @@ class ID:
         """
         Decode a peer ID string that may be multibase or base58.
 
-        Tries multibase first if the prefix is recognised by
-        *py-multibase*, otherwise falls back to base58.
+        Follows the same logic as go-libp2p's ``peer.Decode()``:
+
+        * Strings starting with ``"Qm"`` or ``"1"`` are treated as legacy
+          base58-encoded peer IDs (SHA-256 and identity multihashes
+          respectively).
+        * Everything else is tried as multibase first.  If multibase
+          decoding succeeds **and** the result is a valid multihash the
+          peer ID is returned.  Otherwise we fall back to base58.
 
         Parameters
         ----------
@@ -134,29 +140,35 @@ class ID:
             base58.
 
         """
-        if multibase.is_encoded(peer_id_str):
-            try:
-                return cls.from_multibase(peer_id_str)
-            except (multibase.InvalidMultibaseStringError, multibase.DecodingError):
-                # The string starts with a valid multibase prefix character
-                # but could not be decoded as multibase — fall back to
-                # legacy base58.  This happens e.g. when a plain base58
-                # string like "77em" starts with "7" (the base8 prefix).
-                pass
-            try:
-                return cls.from_base58(peer_id_str)
-            except Exception as e:
-                raise ValueError(
-                    f"Cannot decode peer ID {peer_id_str!r}: "
-                    f"multibase payload invalid and base58 fallback failed: {e}"
-                ) from e
-        else:
+        # Legacy base58: "Qm" = SHA-256 multihash, "1" = identity multihash.
+        if peer_id_str.startswith("Qm") or peer_id_str.startswith("1"):
             try:
                 return cls.from_base58(peer_id_str)
             except Exception as e:
                 raise ValueError(
                     f"Failed to decode peer ID {peer_id_str!r} as base58: {e}"
                 ) from e
+
+        if multibase.is_encoded(peer_id_str):
+            try:
+                pid = cls.from_multibase(peer_id_str)
+                multihash.decode(pid._bytes)
+                return pid
+            except (
+                multibase.InvalidMultibaseStringError,
+                multibase.DecodingError,
+                ValueError,
+            ):
+                pass  # fall through to base58
+
+        # Fallback to base58.
+        try:
+            return cls.from_base58(peer_id_str)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to decode peer ID {peer_id_str!r}: not valid "
+                f"multibase or base58: {e}"
+            ) from e
 
     def __repr__(self) -> str:
         return f"<libp2p.peer.id.ID ({self!s})>"
@@ -204,16 +216,10 @@ class ID:
 
         """
         try:
-            # Decode the multihash to check if it's an identity hash
             mh_decoded = multihash.decode(self._bytes)
-
-            # Identity multihash func code is 0x00
             if mh_decoded.func == IDENTITY_MULTIHASH_CODE:
-                # The digest is the serialized public key protobuf
                 return deserialize_public_key(mh_decoded.digest)
-            else:
-                # Not an identity hash, key cannot be extracted
-                return None
+            return None
         except Exception:
             return None
 

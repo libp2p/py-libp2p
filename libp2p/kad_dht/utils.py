@@ -169,7 +169,7 @@ def multibase_to_bytes(multibase_str: str) -> bytes:
 # Keep old function for backward compatibility
 def bytes_to_base58(data: bytes) -> str:
     """Deprecated: Use bytes_to_multibase instead."""
-    return bytes_to_multibase(data, "base58btc")
+    return base58.b58encode(data).decode()
 
 
 def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]:

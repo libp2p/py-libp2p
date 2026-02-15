@@ -30,6 +30,35 @@ def test_backward_compatibility():
     assert peer_id.to_bytes() == b"\x12\x34\x56"
 
 
+def test_from_string_legacy_qm_prefix():
+    mh_bytes = multihash.digest(b"test-key", "sha2-256").encode()
+    pid = ID(mh_bytes)
+    b58 = pid.to_base58()
+    assert b58.startswith("Qm")
+    assert ID.from_string(b58) == pid
+
+
+def test_from_string_legacy_1_prefix():
+    mh_bytes = multihash.digest(b"key", 0x00).encode()
+    pid = ID(mh_bytes)
+    b58 = pid.to_base58()
+    assert b58.startswith("1")
+    assert ID.from_string(b58) == pid
+
+
+def test_from_string_multibase_base32():
+    mh_bytes = multihash.digest(b"some-key", "sha2-256").encode()
+    pid = ID(mh_bytes)
+    mb32 = pid.to_multibase("base32")
+    assert ID.from_string(mb32) == pid
+
+
+def test_from_string_ambiguous_prefers_base58():
+    result = ID.from_string("f123abc")
+    expected = ID.from_base58("f123abc")
+    assert result == expected
+
+
 def test_encoding_detection():
     peer_id = ID(b"\x12\x34\x56")
     multibase_str = peer_id.to_multibase("base64")
