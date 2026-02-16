@@ -141,3 +141,69 @@ class TestDHTUtilsWithConfig:
         expected = b58.b58encode(data).decode()
         assert result == expected
         assert not result.startswith("z") or expected.startswith("z")
+
+
+class TestContentAddressedMsgId:
+    """Tests for get_content_addressed_msg_id multibase encoding."""
+
+    def setup_method(self) -> None:
+        set_default_encoding("base58btc")
+
+    def teardown_method(self) -> None:
+        set_default_encoding("base58btc")
+
+    def test_returns_multibase_encoded_hash(self) -> None:
+        import hashlib
+
+        import multibase
+
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg = rpc_pb2.Message(data=b"hello world")
+        result = get_content_addressed_msg_id(msg)
+        expected_digest = hashlib.sha256(b"hello world").digest()
+        expected = multibase.encode("base58btc", expected_digest)
+        assert result == expected
+
+    def test_uses_default_encoding(self) -> None:
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg = rpc_pb2.Message(data=b"test data")
+        result = get_content_addressed_msg_id(msg)
+        assert bytes(result).decode().startswith("z")
+
+    def test_follows_config_change(self) -> None:
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg = rpc_pb2.Message(data=b"test data")
+        set_default_encoding("base32")
+        result = get_content_addressed_msg_id(msg)
+        assert bytes(result).decode().startswith("b")
+
+    def test_explicit_encoding_overrides_config(self) -> None:
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg = rpc_pb2.Message(data=b"test data")
+        set_default_encoding("base32")
+        result = get_content_addressed_msg_id(msg, encoding="base64")
+        assert bytes(result).decode().startswith("m")
+
+    def test_different_data_produces_different_ids(self) -> None:
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg1 = rpc_pb2.Message(data=b"message one")
+        msg2 = rpc_pb2.Message(data=b"message two")
+        assert get_content_addressed_msg_id(msg1) != get_content_addressed_msg_id(msg2)
+
+    def test_same_data_produces_same_id(self) -> None:
+        from libp2p.pubsub.pb import rpc_pb2
+        from libp2p.pubsub.pubsub import get_content_addressed_msg_id
+
+        msg1 = rpc_pb2.Message(data=b"same content")
+        msg2 = rpc_pb2.Message(data=b"same content")
+        assert get_content_addressed_msg_id(msg1) == get_content_addressed_msg_id(msg2)
