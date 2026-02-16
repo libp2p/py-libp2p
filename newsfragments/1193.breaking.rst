@@ -1,14 +1,12 @@
 Bitswap CIDv1 now uses proper varint encoding for codec values per the multicodec specification. This is a breaking change for CIDs using codecs with value ≥ 128.
 
-Summary
--------
+**Summary**
 
 CIDv1 now uses proper **varint encoding** for codec values, as specified in the
 `multicodec specification <https://github.com/multiformats/multicodec>`_. This
 changes the binary format for CIDs using codecs with values :math:`\ge 128`.
 
-Impact
-------
+**Impact**
 
 - **95% of CIDs unaffected**: Common codecs (``raw``, ``dag-pb``, ``dag-cbor``)
   use values ``< 128``, which encode identically in both the legacy
@@ -18,8 +16,7 @@ Impact
   :math:`\ge 128` now use multi-byte varint encoding. Their CIDv1 byte layout
   changes and thus their CID *identities* change.
 
-Migration Required
-------------------
+**Migration Required**
 
 If you use ``dag-jose``, ``dag-json``, or custom codecs :math:`\ge 128`:
 
@@ -27,11 +24,9 @@ If you use ``dag-jose``, ``dag-json``, or custom codecs :math:`\ge 128`:
 2. **Recompute CIDs** from original data using ``recompute_cid_from_data()`` (in ``libp2p.bitswap.cid``).
 3. **Update storage** (databases, caches, indexes) with the new CIDs.
 
-Code Examples
--------------
+**Code Examples**
 
-Check if your CIDs are affected
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+*Check if your CIDs are affected*
 
 .. code-block:: python
 
@@ -42,8 +37,7 @@ Check if your CIDs are affected
    if info["is_breaking"]:
        print(f"CID uses {info['codec_name']} and needs migration")
 
-Recompute affected CIDs
-^^^^^^^^^^^^^^^^^^^^^^^
+*Recompute affected CIDs*
 
 .. code-block:: python
 
@@ -53,8 +47,7 @@ Recompute affected CIDs
    # original_data: the original data that was hashed
    new_cid = recompute_cid_from_data(old_cid, original_data)
 
-Backward Compatibility
-----------------------
+*Backward Compatibility*
 
 Code continues to accept integer codec values for API compatibility:
 
