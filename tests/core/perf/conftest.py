@@ -66,6 +66,8 @@ def mock_host():
 
 
 @pytest.fixture
-def perf_service(mock_host):
+async def perf_service(mock_host):
     """Provide a PerfService instance for testing."""
-    return PerfService(mock_host)
+    service = PerfService(mock_host)
+    await service.start()
+    return service

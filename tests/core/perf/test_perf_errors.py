@@ -61,6 +61,17 @@ async def test_server_read_error_after_partial_header(perf_service):
     assert stream._reset_called is True
 
 
+@pytest.mark.trio
+async def test_server_resets_stream_when_service_stopped(perf_service):
+    """Stopped service should reject inbound perf streams."""
+    await perf_service.stop()
+    stream = MockNetStream(struct.pack(">Q", 64) + b"x" * 32)
+    await perf_service._handle_message(stream)
+
+    assert stream._reset_called is True
+    assert stream._write_buffer == b""
+
+
 # =============================================================================
 # Client Error Path Tests
 # =============================================================================

@@ -97,6 +97,14 @@ class PerfService(IPerf):
         Reads data from the stream, extracts the number of bytes to send back
         from the first 8 bytes, then sends that many bytes back.
         """
+        if not self._started:
+            logger.debug("Perf service received stream while stopped; resetting")
+            try:
+                await stream.reset()
+            except Exception:
+                logger.debug("Failed to reset stopped perf stream", exc_info=True)
+            return
+
         try:
             # Read exactly 8 bytes for the header (handle TCP fragmentation)
             header: bytes = b""
