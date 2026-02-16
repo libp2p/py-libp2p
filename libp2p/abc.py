@@ -1532,7 +1532,7 @@ class INetwork(ABC):
 
         Parameters
         ----------
-        raw_conn : IRawConnection
+        raw_coset_strenn : IRawConnection
             The raw connection to upgrade.
         peer_id : ID
             The peer to which this connection is established.

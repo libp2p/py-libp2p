@@ -27,9 +27,6 @@ class PerfInit(TypedDict, total=False):
     """Initialization options for the perf service."""
 
     protocol_name: str
-    max_inbound_streams: int
-    max_outbound_streams: int
-    run_on_limited_connection: bool
     write_block_size: int  # Default: 65536 (64KB)
 
 

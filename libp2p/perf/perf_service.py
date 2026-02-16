@@ -24,10 +24,7 @@ from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerinfo import PeerInfo
 
 from .constants import (
-    MAX_INBOUND_STREAMS,
-    MAX_OUTBOUND_STREAMS,
     PROTOCOL_NAME,
-    RUN_ON_LIMITED_CONNECTION,
     WRITE_BLOCK_SIZE,
 )
 from .types import PerfInit, PerfOutput
@@ -61,15 +58,6 @@ class PerfService(IPerf):
         self._started = False
         self._protocol = TProtocol(init_opts.get("protocol_name", PROTOCOL_NAME))
         self._write_block_size = init_opts.get("write_block_size", WRITE_BLOCK_SIZE)
-        self._max_inbound_streams = init_opts.get(
-            "max_inbound_streams", MAX_INBOUND_STREAMS
-        )
-        self._max_outbound_streams = init_opts.get(
-            "max_outbound_streams", MAX_OUTBOUND_STREAMS
-        )
-        self._run_on_limited_connection = init_opts.get(
-            "run_on_limited_connection", RUN_ON_LIMITED_CONNECTION
-        )
 
         # Pre-allocate buffer for sending data
         self._buf = bytes(self._write_block_size)
