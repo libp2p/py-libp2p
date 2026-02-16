@@ -2,9 +2,9 @@
 
 import hashlib
 
+import pytest
 import base58 as b58
 import multibase
-import pytest
 
 from libp2p.encoding_config import (
     encoding_override,
