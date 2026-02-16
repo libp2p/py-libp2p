@@ -337,17 +337,21 @@ class TLSStreamReadWriter(ReadWriteCloser):
                 logger.debug("TLS read: SSLWantReadError attempt=%d", attempt)
                 continue
             except ssl.SSLError as e:
-                # SSL errors can occur for various reasons
-                error_str = str(e)
+                # Use ssl.SSLError structured attributes instead of string matching.
                 logger.debug("TLS read: SSL error: %s", e)
 
-                # TLS alerts from peer are usually fatal
-                if "alert" in error_str.lower():
+                # TLS alerts from peer are usually fatal.
+                # ssl.SSLError.reason is e.g. 'TLSV1_ALERT_DECRYPT_ERROR'.
+                reason = getattr(e, "reason", None) or ""
+                if reason and "ALERT" in reason:
                     logger.warning("TLS read: TLS alert from peer: %s", e)
                     break
 
-                # EOF errors indicate connection closed
-                if "EOF" in error_str:
+                # EOF errors indicate connection closed.
+                if (
+                    getattr(e, "errno", None) == ssl.SSL_ERROR_EOF
+                    or reason == "EOF_OCCURRED"
+                ):
                     logger.debug("TLS read: EOF error, connection closed")
                     break
 

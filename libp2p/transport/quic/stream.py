@@ -19,6 +19,15 @@ from .exceptions import (
     QUICStreamTimeoutError,
 )
 
+try:
+    from aioquic.quic.connection import (
+        QuicConnectionError,
+        StreamFinishedError,
+    )
+except ImportError:
+    QuicConnectionError = None  # type: ignore[assignment,misc]
+    StreamFinishedError = None  # type: ignore[assignment,misc]
+
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedStream
     from libp2p.custom_types import TProtocol
@@ -305,9 +314,15 @@ class QUICStream(IMuxedStream):
 
         except Exception as e:
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
-            # Convert QUIC-specific errors
-            if "flow control" in str(e).lower():
-                raise QUICStreamBackpressureError(f"Flow control limit reached: {e}")
+            # Convert QUIC-specific errors using isinstance checks
+            if QuicConnectionError is not None and isinstance(e, QuicConnectionError):
+                error_code = getattr(e, "error_code", None)
+                # QUIC flow control error code is 0x03
+                if error_code == 0x03:
+                    raise QUICStreamBackpressureError(
+                        f"Flow control limit reached: {e}",
+                        error_code=error_code,
+                    )
             await self._handle_stream_error(e)
             raise
 
@@ -363,9 +378,19 @@ class QUICStream(IMuxedStream):
             logger.debug(f"Stream {self.stream_id} write side closed")
 
         except Exception as e:
-            msg = str(e).lower()
-            # These usually happen during shutdown races / late FIN handling.
-            if "after fin" in msg or "unknown peer-initiated stream" in msg:
+            # Classify the exception using isinstance instead of string matching.
+            # AssertionError: aioquic raises this for "after FIN" / "after reset".
+            # ValueError: aioquic raises this for unknown peer-initiated streams.
+            # StreamFinishedError: explicit stream-finished signal.
+            is_expected_shutdown = (
+                isinstance(e, AssertionError)
+                or (
+                    StreamFinishedError is not None
+                    and isinstance(e, StreamFinishedError)
+                )
+                or (isinstance(e, ValueError) and "peer-initiated" in str(e))
+            )
+            if is_expected_shutdown:
                 self._write_closed = True
                 async with self._state_lock:
                     if self._read_closed:
@@ -425,8 +450,9 @@ class QUICStream(IMuxedStream):
             await self._connection._transmit()
 
         except Exception as e:
-            msg = str(e).lower()
-            if "unknown peer-initiated stream" in msg:
+            # ValueError for unknown peer-initiated streams is expected
+            # during shutdown races; downgrade to debug.
+            if isinstance(e, ValueError) and "peer-initiated" in str(e):
                 logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
             else:
                 logger.error(f"Error sending reset for stream {self.stream_id}: {e}")

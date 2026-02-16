@@ -45,6 +45,7 @@ from .config import (
 from .discovery import (
     RelayDiscovery,
 )
+from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
     StopMessage,
@@ -421,7 +422,11 @@ class CircuitV2Transport(ITransport):
             status_msg = getattr(resp.status, "message", "Unknown error")
 
             if status_code != StatusCode.OK:
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed: {status_msg}",
+                    status_code=status_code,
+                    status_msg=status_msg,
+                )
 
             # Record successful connection attempt
             latency_ms = (trio.current_time() - connection_start_time) * 1000
@@ -579,7 +584,11 @@ class CircuitV2Transport(ITransport):
 
             if status_code != StatusCode.OK:
                 await relay_stream.close()
-                raise ConnectionError(f"Relay connection failed: {status_msg}")
+                raise RelayConnectionError(
+                    f"Relay connection failed: {status_msg}",
+                    status_code=status_code,
+                    status_msg=status_msg,
+                )
 
             # Wrap in TrackedRawConnection for tracking
             raw_conn = RawConnection(stream=relay_stream, initiator=True)
