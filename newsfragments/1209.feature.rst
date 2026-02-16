@@ -1,1 +1,0 @@
-Added py-multibase support for peer IDs, DHT keys, and pubsub message IDs with ``ID.to_multibase()``, ``ID.from_multibase()``, ``ID.from_string()``, and a configurable default encoding via ``libp2p.encoding_config``. Backward-compatible with existing base58 peer IDs.
