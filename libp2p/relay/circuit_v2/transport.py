@@ -458,7 +458,16 @@ class CircuitV2Transport(ITransport):
             self._store_multiaddrs(dest_info, relay_peer_id)
 
             # Create raw connection from stream and wrap it to track closure
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{destination}
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_info.peer_id.to_base58()}"
+            )
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
@@ -1046,8 +1055,19 @@ class CircuitV2Listener(Service, IListener):
             if stop_msg.type != StopMessage.CONNECT:
                 raise ConnectionError("Invalid STOP message type")
 
-            # Create raw connection
-            return RawConnection(stream=stream, initiator=False)
+            # Create raw connection for relayed connection
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{source}
+            peer_id = ID(stop_msg.peer)
+            relay_peer_id = self.host.get_id()
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+            )
+            return RawConnection(
+                stream=stream,
+                initiator=False,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
 
         except Exception as e:
             await stream.close()

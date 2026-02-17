@@ -548,9 +548,13 @@ class CircuitV2Protocol(Service):
 
         """
         try:
-            # Create raw connection
+            # Create raw connection with proper circuit relay multiaddr
             peer_id = ID(remote_peer_id)
-            ma = multiaddr.Multiaddr(f"/p2p/{peer_id.to_base58()}")
+            relay_peer_id = self.host.get_id()
+            # Construct circuit relay multiaddr: /p2p/{relay}/p2p-circuit/p2p/{remote}
+            ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+            )
             raw_conn = RawConnection(
                 stream=stream,
                 initiator=False,
