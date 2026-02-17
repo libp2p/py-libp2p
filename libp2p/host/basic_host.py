@@ -256,6 +256,7 @@ class BasicHost(IHost):
         # Automatic identify coordination
         self._identify_inflight: set[ID] = set()
         self._identified_peers: set[ID] = set()
+        self._identify_scopes: dict[ID, trio.CancelScope] = {}
         self._network.register_notifee(_IdentifyNotifee(self))
 
     def get_id(self) -> ID:
@@ -842,6 +843,31 @@ class BasicHost(IHost):
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        """
+        Close the host and its underlying network service.
+        """
+        # Stop background services
+        if self.mDNS is not None:
+            self.mDNS.stop()
+        
+        if self.bootstrap is not None:
+            self.bootstrap.stop()
+            
+        # Cleanup UPnP mappings if active
+        if self.upnp and self.upnp.get_external_ip():
+            try:
+                logger.debug("Removing UPnP port mappings due to host closure")
+                for addr in self.get_addrs():
+                    if port := addr.value_for_protocol("tcp"):
+                        await self.upnp.remove_port_mapping(int(port), "TCP")
+            except Exception as e:
+                logger.warning(f"Error removing UPnP mappings during close: {e}")
+
+        # Cancel inflight identify tasks
+        for scope in list(self._identify_scopes.values()):
+            scope.cancel()
+        
+        # Close network
         await self._network.close()
 
     def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
@@ -857,14 +883,28 @@ class BasicHost(IHost):
             return
         if not self._should_identify_peer(peer_id):
             return
+        
         self._identify_inflight.add(peer_id)
-        trio.lowlevel.spawn_system_task(self._identify_task_entry, peer_id, reason)
+        
+        # Create a new cancel scope for this identify task
+        cancel_scope = trio.CancelScope()
+        self._identify_scopes[peer_id] = cancel_scope
+        
+        trio.lowlevel.spawn_system_task(
+            self._identify_task_entry, peer_id, reason, cancel_scope
+        )
 
-    async def _identify_task_entry(self, peer_id: ID, reason: str) -> None:
+    async def _identify_task_entry(
+        self, peer_id: ID, reason: str, cancel_scope: trio.CancelScope
+    ) -> None:
         try:
-            await self._identify_peer(peer_id, reason=reason)
+            with cancel_scope:
+                await self._identify_peer(peer_id, reason=reason)
         finally:
             self._identify_inflight.discard(peer_id)
+            # Remove scope from tracking if it matches (to avoid race conditions)
+            if self._identify_scopes.get(peer_id) is cancel_scope:
+                self._identify_scopes.pop(peer_id, None)
 
     def _has_cached_protocols(self, peer_id: ID) -> bool:
         """
