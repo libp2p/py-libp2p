@@ -1,1 +1,0 @@
-Fixed TLS certificate interoperability with Rust libp2p by setting BasicConstraints and KeyUsage X.509 extensions to non-critical, allowing cross-implementation compatibility per libp2p TLS spec.
