@@ -40,6 +40,13 @@ from tests.utils.factories import (
 )
 
 
+class _FakeQUICTransport:
+    def __init__(self, private_key, config=None, enable_autotls=False):
+        self.private_key = private_key
+        self.config = config
+        self.enable_autotls = enable_autotls
+
+
 @pytest.mark.trio
 async def test_swarm_dial_peer(security_protocol):
     async with SwarmFactory.create_batch_and_listen(
@@ -267,6 +274,70 @@ def test_new_swarm_quic_multiaddr_supported():
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
     assert isinstance(swarm.transport, QUICTransport)
+
+
+def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
+    import libp2p as libp2p_module
+    from libp2p.transport import transport_registry
+
+    key_pair = generate_new_ed25519_identity()
+    original_quic_transport = libp2p_module.QUICTransport
+
+    # Path 1: direct QUIC creation when listen_addrs is None and enable_quic=True.
+    monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
+    swarm_direct = new_swarm(
+        key_pair=key_pair,
+        enable_quic=True,
+        enable_autotls=True,
+    )
+    assert isinstance(swarm_direct.transport, _FakeQUICTransport)
+    assert swarm_direct.transport.enable_autotls is True
+
+    # Path 2: registry-based creation should receive enable_autotls in kwargs.
+    registry_calls = []
+
+    def fake_create_transport_for_multiaddr(maddr, upgrader, **kwargs):
+        registry_calls.append(kwargs)
+        return _FakeQUICTransport(
+            kwargs["private_key"],
+            config=kwargs.get("config"),
+            enable_autotls=kwargs.get("enable_autotls", False),
+        )
+
+    monkeypatch.setattr(
+        transport_registry,
+        "create_transport_for_multiaddr",
+        fake_create_transport_for_multiaddr,
+    )
+    swarm_registry = new_swarm(
+        key_pair=key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/udp/9999/quic")],
+        enable_autotls=True,
+    )
+    assert registry_calls[0]["enable_autotls"] is True
+    assert isinstance(swarm_registry.transport, _FakeQUICTransport)
+    assert swarm_registry.transport.enable_autotls is True
+
+    # Path 3: forced-QUIC fallback when enable_quic=True but registry gives non-QUIC.
+    monkeypatch.setattr(libp2p_module, "QUICTransport", original_quic_transport)
+
+    def fake_create_transport_for_multiaddr_non_quic(maddr, upgrader, **kwargs):
+        return TCP()
+
+    monkeypatch.setattr(
+        transport_registry,
+        "create_transport_for_multiaddr",
+        fake_create_transport_for_multiaddr_non_quic,
+    )
+    monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
+    swarm_forced = new_swarm(
+        key_pair=key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/9999")],
+        enable_quic=True,
+        enable_autotls=True,
+    )
+    assert isinstance(swarm_forced.transport, _FakeQUICTransport)
+    assert swarm_forced.transport.enable_autotls is True
 
 
 def test_new_swarm_defaults_to_ed25519():
