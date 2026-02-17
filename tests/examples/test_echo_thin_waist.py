@@ -21,8 +21,8 @@ EXAMPLES_DIR: Path = project_root / "examples" / "echo"
 
 def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
     """Run echo server and validate printed multiaddr and peer id."""
-    # Run echo example as server
-    cmd = [sys.executable, "-u", str(EXAMPLES_DIR / "echo.py"), "-p", "0"]
+    # Run echo example as server via module so imports resolve correctly
+    cmd = [sys.executable, "-u", "-m", "examples.echo.echo", "-p", "0"]
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     proc: subprocess.Popen[str] = subprocess.Popen(
         cmd,
@@ -30,6 +30,7 @@ def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
         stderr=subprocess.STDOUT,
         text=True,
         env=env,
+        cwd=str(project_root),
     )
 
     if proc.stdout is None:
