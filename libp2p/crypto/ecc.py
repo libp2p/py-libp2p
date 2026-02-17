@@ -13,7 +13,6 @@ if sys.platform != "win32":
         keys,
         point,
     )
-    from fastecdsa.encoding.pem import PEMEncoder
     from fastecdsa.encoding.sec1 import SEC1Encoder
 else:
     from coincurve import (
@@ -78,10 +77,10 @@ if sys.platform != "win32":
             return cls(private_key_impl, curve_type)
 
         def to_bytes(self) -> bytes:
-            key_str = keys.export_private_key(self.impl, self.curve, PEMEncoder())
+            key_str = keys.export_key(self.impl, self.curve, encoder=keys.PEMEncoder)
             if key_str is None:
                 raise Exception("Key not found")
-            return key_str
+            return key_str.encode()
 
         def get_type(self) -> KeyType:
             return KeyType.ECC_P256
