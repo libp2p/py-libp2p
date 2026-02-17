@@ -5,9 +5,11 @@ Utility functions for Kademlia DHT implementation.
 import logging
 
 import base58
+import multibase
 import multihash
 
 from libp2p.abc import IHost
+from libp2p.encoding_config import get_default_encoding
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import (
     ID,
@@ -128,18 +130,46 @@ def xor_distance(key1: bytes, key2: bytes) -> int:
     return k1 ^ k2
 
 
+def bytes_to_multibase(data: bytes, encoding: str | None = None) -> str:
+    """
+    Convert bytes to multibase-encoded string.
+
+    :param data: Bytes to encode
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded string
+    """
+    if encoding is None:
+        encoding = get_default_encoding()
+    return multibase.encode(encoding, data).decode()
+
+
+def multibase_to_bytes(multibase_str: str) -> bytes:
+    """
+    Convert multibase-encoded string to bytes.
+
+    Args:
+        multibase_str: Multibase-encoded string
+    Returns:
+        Decoded bytes
+    Raises:
+        multibase.InvalidMultibaseStringError: If string is not valid multibase
+        multibase.DecodingError: If decoding fails
+
+    """
+    if not multibase.is_encoded(multibase_str):
+        # Fallback to base58 for backward compatibility
+        return base58.b58decode(multibase_str)
+    result = multibase.decode(multibase_str)
+    # py-multibase may return bytes or (encoding, bytes) depending on
+    # version — handle both.
+    return result[1] if isinstance(result, tuple) else result
+
+
+# Keep old function for backward compatibility
 def bytes_to_base58(data: bytes) -> str:
-    """
-    Convert bytes to base58 encoded string.
-
-    params: data: Input bytes
-
-    Returns
-    -------
-        str: Base58 encoded string
-
-    """
-    return base58.b58encode(data).decode("utf-8")
+    """Deprecated: Use bytes_to_multibase instead."""
+    return base58.b58encode(data).decode()
 
 
 def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]:
