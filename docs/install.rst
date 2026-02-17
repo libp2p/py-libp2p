@@ -1,43 +1,65 @@
-Install
+ Install
 ================
 
-Follow the steps below to install `py-libp2p` on your platform.
+ Follow the steps below to install `py-libp2p` on your platform.
 
-**Linux / macOS / Windows**
+ **Recommended (using ``uv``, same as CI)**
 
-1. Create a Python virtual environment:
+ 1. Install ``uv`` (if you don't have it yet):
 
-   .. code:: sh
+    .. code:: sh
 
-       python -m venv venv
+        curl -LsSf https://astral.sh/uv/install.sh | sh
 
-2. Activate the virtual environment:
+ 2. Create a Python virtual environment:
 
-   - **Linux / macOS**
+    .. code:: sh
 
-     .. code:: sh
+        uv venv venv
 
-         source venv/bin/activate
+ 3. Activate the virtual environment:
 
-   - **Windows (cmd)**
+    - **Linux / macOS**
 
-     .. code:: batch
+      .. code:: sh
 
-         venv\Scripts\activate.bat
+          source venv/bin/activate
 
-   - **Windows (PowerShell)**
+    - **Windows (cmd)**
 
-     .. code:: powershell
+      .. code:: batch
 
-         venv\Scripts\Activate.ps1
+          venv\Scripts\activate.bat
 
-3. Install `py-libp2p`:
+    - **Windows (PowerShell)**
 
-   .. code:: sh
+      .. code:: powershell
 
-       python -m pip install libp2p
+          venv\Scripts\Activate.ps1
 
-Usage
+ 4. Install `py-libp2p` from PyPI:
+
+    .. code:: sh
+
+        uv pip install libp2p
+
+ **Alternative: using standard ``pip``**
+
+ If you prefer not to use ``uv``, you can instead:
+
+ 1. Create a Python virtual environment:
+
+    .. code:: sh
+
+        python -m venv venv
+
+ 2. Activate the virtual environment (as shown above) and install:
+
+    .. code:: sh
+
+        python -m pip install libp2p
+
+ Usage
 -----
 Configuration
 ~~~~~~~~~~~~~~
