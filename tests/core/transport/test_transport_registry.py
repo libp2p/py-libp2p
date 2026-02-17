@@ -107,6 +107,7 @@ class TestTransportRegistry:
         """Test that QUIC transport creation forwards enable_autotls flag."""
         mock_transport = Mock()
         mock_quic_class = Mock(return_value=mock_transport)
+        mock_quic_class.__name__ = "MockQUICTransport"
         private_key = object()
 
         with patch(
