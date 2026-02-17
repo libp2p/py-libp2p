@@ -527,15 +527,14 @@ class BasicHost(IHost):
             for addr in all_addrs:
                 try:
                     ip = addr.value_for_protocol("ip4")
-                    if ip and not is_private_ip(ip):
-                        public_ip = ip
-                        port = addr.value_for_protocol("tcp")
-                        if port:
-                            break
                 except Exception:
                     continue
 
-            if not public_ip or not port:
+                if ip and not is_private_ip(ip):
+                    public_ip = ip
+                    break
+
+            if not public_ip:
                 raise RuntimeError(
                     "No public IP address found in listening addresses. "
                     "AutoTLS requires at least one publicly reachable IPv4 address."

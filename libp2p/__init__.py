@@ -393,7 +393,7 @@ def new_swarm(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TLS_PROTOCOL_ID: TLSTransport (
-            key_pair, enable_autotls= enable_autotls
+            key_pair, enable_autotls = enable_autotls
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
