@@ -1,1 +1,0 @@
-Fixed intermittent Windows CI failure in pubsub dummyaccount ring-topology tests by replacing fixed sleep timers with a state-based `wait_for_convergence` helper. Tests now wait until all nodes satisfy the expected condition (or timeout with a clear assertion) instead of relying on platform-sensitive delays, resolving nested ExceptionGroup flakiness on Windows.
