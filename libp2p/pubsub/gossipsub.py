@@ -1864,7 +1864,7 @@ class GossipSub(IPubsubRouter, Service):
                 all_mesh_peers.update(peers)
 
             if not all_mesh_peers:
-                return 1.0
+                return 0.0  # No peers means poor health
 
             # Calculate average score
             total_score = 0.0
@@ -1908,7 +1908,12 @@ class GossipSub(IPubsubRouter, Service):
                 )  # Assume all tracked are successful
 
             if total_deliveries == 0:
-                return 1.0  # No data, assume good
+                # If we have no deliveries but have mesh peers, assume moderate health
+                # If we have no mesh peers, return poor health
+                total_mesh_peers = sum(len(peers) for peers in self.mesh.values())
+                if total_mesh_peers == 0:
+                    return 0.0  # No mesh peers means poor health
+                return 0.5  # No delivery data but have peers, assume moderate
 
             self.message_delivery_success_rate = (
                 successful_deliveries / total_deliveries
@@ -1929,7 +1934,7 @@ class GossipSub(IPubsubRouter, Service):
             total_mesh_peers = sum(len(peers) for peers in self.mesh.values())
 
             if total_mesh_peers == 0:
-                return 1.0
+                return 0.0  # No mesh peers means poor stability
 
             # In a real implementation, track mesh changes over time
             # For now, use a simple heuristic based on mesh size vs target
