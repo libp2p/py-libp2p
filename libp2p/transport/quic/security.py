@@ -38,7 +38,6 @@ CERTIFICATE_NOT_BEFORE_BUFFER = 3600  # 1 hour before now
 
 
 @dataclass
-@dataclass
 class TLSConfig:
     """TLS configuration for QUIC transport with libp2p extensions."""
 
