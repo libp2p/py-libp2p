@@ -55,6 +55,7 @@ from .config import (
     DEFAULT_PROTOCOL_READ_TIMEOUT,
     DEFAULT_PROTOCOL_WRITE_TIMEOUT,
 )
+from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
@@ -774,8 +775,10 @@ class CircuitV2Protocol(Service):
                         status_msg,
                         status_code,
                     )
-                    raise ConnectionError(
-                        f"Destination rejected connection: {status_msg}"
+                    raise RelayConnectionError(
+                        f"Destination rejected connection: {status_msg}",
+                        status_code=status_code,
+                        status_msg=status_msg,
                     )
 
             # Update active relays with destination stream
