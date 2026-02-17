@@ -2778,6 +2778,10 @@ class ITransport(ABC):
 
     Provides methods for dialing peers and creating listeners on a transport.
 
+    Optional capabilities: set ``provides_secure_connection`` and/or
+    ``provides_muxed_connection`` on the transport class so the swarm skips
+    security and/or muxer upgrade when dial() already returns ISecureConn
+    or IMuxedConn. See :mod:`libp2p.transport.capabilities`.
     """
 
     @abstractmethod
