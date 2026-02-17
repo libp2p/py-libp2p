@@ -153,6 +153,7 @@ markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
     "benchmark: performance/sanity benchmarks (deselect with -m 'not benchmark')",
+    "integration: mark test as integration (requires external service or proxy)",
 ]
 xfail_strict = true
 trio_mode = true
