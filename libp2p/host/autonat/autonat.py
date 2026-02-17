@@ -115,13 +115,13 @@ class AutoNATService:
         else:
             message = request
 
-        if message.type == Type.Value("DIAL"):
+        if message.type == Type.DIAL:
             response = await self._handle_dial(message)
             return response
 
         # Handle unknown request type
         response = Message()
-        response.type = Type.Value("DIAL_RESPONSE")
+        response.type = Type.DIAL_RESPONSE
         error_response = DialResponse()
         error_response.status = Status.E_INTERNAL_ERROR
         response.dial_response.CopyFrom(error_response)
@@ -145,7 +145,7 @@ class AutoNATService:
 
         """
         response = Message()
-        response.type = Type.Value("DIAL_RESPONSE")
+        response.type = Type.DIAL_RESPONSE
         dial_response = DialResponse()
         dial_response.status = Status.OK
 

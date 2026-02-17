@@ -226,7 +226,7 @@ class CircuitV2Transport(ITransport):
         logger.debug("Relay peer ID: %s , \n %s", relay_id_str, relay_maddr)
 
         dest_info = PeerInfo(dest_peer_id, [maddr])
-        logger.debug(f"Dialing destination peer ID: {dest_id_str} , \n {maddr}")
+        logger.debug(f"Dialing destination peer ID: {dest_peer_id} , \n {maddr}")
         # Use the internal dial_peer_info method
         if isinstance(relay_id_str, str):
             relay_peer_id = ID.from_string(relay_id_str)
@@ -472,10 +472,6 @@ class CircuitV2Transport(ITransport):
 
         try:
             target_peer_id = ID.from_base58(dest_id_str)
-            if isinstance(val, ID):
-                target_peer_id = val
-            else:
-                target_peer_id = ID.from_string(val)
         except Exception as e:
             raise ValueError(
                 f"Invalid peer ID in circuit Multiaddr: {dest_id_str}"
