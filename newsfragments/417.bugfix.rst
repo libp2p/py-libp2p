@@ -1,1 +1,0 @@
-Fixed swarm listener crash on inbound peer negotiation failures by handling security and muxer upgrade exceptions gracefully, allowing the listener to continue accepting new connections.
