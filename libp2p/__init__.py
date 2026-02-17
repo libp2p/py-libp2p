@@ -478,11 +478,11 @@ def new_host(
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
-    connection_config: ConnectionConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
+    connection_config: ConnectionConfig | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -499,12 +499,12 @@ def new_host(
     :param enable_quic: optinal choice to use QUIC for transport
     :param enable_autotls: optinal choice to use AutoTLS for security
     :param quic_transport_opt: optional configuration for quic transport
-    :param connection_config: optional connection configuration for connection manager
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
+    :param connection_config: optional connection configuration for connection manager
     :return: return a host instance
     """
 
