@@ -74,7 +74,7 @@ class PeerListener(ServiceListener):
             pid_bytes = info.properties.get(b"id")
             if not pid_bytes:
                 return None
-            pid = ID.from_base58(pid_bytes.decode())
+            pid = ID.from_string(pid_bytes.decode())
             return PeerInfo(peer_id=pid, addrs=addrs)
         except Exception:
             return None
