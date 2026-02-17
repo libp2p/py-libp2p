@@ -1,1 +1,0 @@
-Multicodec integration for Bitswap CIDs: CIDv1 uses varint-encoded codec prefixes (via ``add_prefix()``). New helpers: ``detect_cid_encoding_format()``, ``recompute_cid_from_data()``, and ``analyze_cid_collection()``. See the breaking fragment and codec documentation for impact and migration.
