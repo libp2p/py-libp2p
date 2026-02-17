@@ -1,1 +1,0 @@
-Fixed MessageCache KeyError crash when async topic validators process the same message concurrently by adding duplicate detection in put() and defensive pop with default None in shift().

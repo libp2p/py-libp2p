@@ -1,5 +1,0 @@
-Bitswap CIDv1 now uses proper varint encoding for codec values per the multicodec specification. This is a breaking change for CIDs using codecs with value ≥ 128.
-
-- **Unchanged (backward compatible):** Codecs **< 128** (e.g. ``raw``, ``dag-pb``) encode identically; no migration needed.
-- **Breaking:** Codecs **≥ 128** (e.g. ``dag-jose``, ``dag-json``) now use multi-byte varint encoding; their CIDv1 byte layout and CID identity change.
-- **Migration:** Identify affected CIDs with ``detect_cid_encoding_format()``, recompute from original data with ``recompute_cid_from_data()``, and update storage/indexes. See the codec documentation in the docs for steps and examples.
