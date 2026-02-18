@@ -55,7 +55,7 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if peer_id_str is None:
         raise InvalidAddrError("Missing value for /p2p protocol in multiaddr")
 
-    peer_id: ID = ID.from_base58(peer_id_str)
+    peer_id: ID = ID.from_string(peer_id_str)
 
     # we might have received just an / p2p part, which means there's no addr.
     # Decapsulate the p2p part to get the address
@@ -76,7 +76,7 @@ def peer_info_from_bytes(data: bytes) -> PeerInfo:
         if not lines:
             raise InvalidAddrError("no data to decode PeerInfo")
 
-        peer_id = ID.from_base58(lines[0])
+        peer_id = ID.from_string(lines[0])
         addrs = [multiaddr.Multiaddr(addr_str) for addr_str in lines[1:]]
         return PeerInfo(peer_id, addrs)
     except Exception as e:
