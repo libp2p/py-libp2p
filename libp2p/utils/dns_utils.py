@@ -80,30 +80,36 @@ async def resolve_multiaddr_with_retry(
         result: list[Multiaddr] | None = None
         try:
             if timeout_seconds is not None and timeout_seconds > 0:
-                with trio.move_on_after(timeout_seconds):
+                with trio.move_on_after(timeout_seconds) as cancel_scope:
                     result = await resolver.resolve(maddr)
-                # On timeout, trio cancels the block and result may be unset
-                if not result:
+                # Check if the cancel scope caught a timeout
+                if cancel_scope.cancelled_caught:
                     last_error = TimeoutError(
                         f"DNS resolution timed out after {timeout_seconds}s"
                     )
+                elif not result:
+                    # Resolver returned empty list [] or None
+                    last_error = ValueError("Resolver returned no addresses")
                 else:
                     if used_metrics:
                         used_metrics.record_success()
                     return result
             else:
                 result = await resolver.resolve(maddr)
-                if result:
+                if not result:
+                    last_error = ValueError("Resolver returned no addresses")
+                else:
                     if used_metrics:
                         used_metrics.record_success()
                     return result
-                last_error = ValueError("Resolver returned empty list")
+        # Re-raise trio.Cancelled; timeouts are handled via cancel_scope.
         except trio.Cancelled:
-            last_error = TimeoutError(
-                f"DNS resolution timed out after {timeout_seconds}s"
-            )
+            raise
+        # Catch all other exceptions during DNS resolution attempts.
         except Exception as e:
+            # Record the exception as the last error encountered.
             last_error = e
+            # Log this attempt's failure; retries continue.
             logger.debug(
                 "DNS resolution attempt %s/%s failed for %s: %s",
                 attempt + 1,
