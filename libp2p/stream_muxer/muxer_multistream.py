@@ -19,7 +19,11 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.protocol_muxer.exceptions import (
+    MultiselectClientError,
     MultiselectError,
+)
+from libp2p.protocol_muxer.generic_selector import (
+    GenericMultistreamSelector,
 )
 from libp2p.protocol_muxer.multiselect import (
     DEFAULT_NEGOTIATE_TIMEOUT,
@@ -27,9 +31,6 @@ from libp2p.protocol_muxer.multiselect import (
 )
 from libp2p.protocol_muxer.multiselect_client import (
     MultiselectClient,
-)
-from libp2p.protocol_muxer.multiselect_communicator import (
-    MultiselectCommunicator,
 )
 from libp2p.stream_muxer.yamux.yamux import (
     PROTOCOL_ID,
@@ -46,10 +47,7 @@ class MuxerMultistream:
     go implementation: github.com/libp2p/go-stream-muxer-multistream/multistream.go
     """
 
-    # NOTE: Can be changed to `typing.OrderedDict` since Python 3.7.2.
-    transports: "OrderedDict[TProtocol, TMuxerClass]"
-    multiselect: Multiselect
-    multiselect_client: MultiselectClient
+    _selector: "GenericMultistreamSelector[TMuxerClass]"
     negotiate_timeout: int
 
     def __init__(
@@ -57,12 +55,31 @@ class MuxerMultistream:
         muxer_transports_by_protocol: TMuxerOptions,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     ) -> None:
-        self.transports = OrderedDict()
-        self.multiselect = Multiselect()
-        self.multistream_client = MultiselectClient()
+        self._selector = GenericMultistreamSelector()
         self.negotiate_timeout = negotiate_timeout
         for protocol, transport in muxer_transports_by_protocol.items():
             self.add_transport(protocol, transport)
+
+    @property
+    def transports(self) -> "OrderedDict[TProtocol, TMuxerClass]":
+        return self._selector.handlers
+
+    @property
+    def multiselect(self) -> Multiselect:
+        return self._selector.multiselect
+
+    @property
+    def multiselect_client(self) -> MultiselectClient:
+        return self._selector.multiselect_client
+
+    @property
+    def multistream_client(self) -> MultiselectClient:
+        """
+        Backwards-compatible alias for ``multiselect_client``.
+
+        Deprecated: use ``multiselect_client`` instead.
+        """
+        return self.multiselect_client
 
     def add_transport(self, protocol: TProtocol, transport: TMuxerClass) -> None:
         """
@@ -73,10 +90,7 @@ class MuxerMultistream:
         :param protocol: the protocol name, which is negotiated in multiselect.
         :param transport: the corresponding transportation to the ``protocol``.
         """
-        # If protocol is already added before, remove it and add it again.
-        self.transports.pop(protocol, None)
-        self.transports[protocol] = transport
-        self.multiselect.add_handler(protocol, None)
+        self._selector.add_handler(protocol, transport)
 
     async def select_transport(self, conn: IRawConnection) -> TMuxerClass:
         """
@@ -86,48 +100,26 @@ class MuxerMultistream:
         :param conn: conn to choose a transport over
         :return: selected muxer transport
         """
-        protocol: TProtocol | None
-        communicator = MultiselectCommunicator(conn)
-        if conn.is_initiator:
-            protocol = await self.multiselect_client.select_one_of(
-                tuple(self.transports.keys()), communicator, self.negotiate_timeout
+        try:
+            _, transport = await self._selector.select(
+                conn, conn.is_initiator, self.negotiate_timeout
             )
-        else:
-            protocol, _ = await self.multiselect.negotiate(
-                communicator, self.negotiate_timeout
-            )
-        if protocol is None:
+        except (MultiselectError, MultiselectClientError) as error:
             raise MultiselectError(
-                "Fail to negotiate a stream muxer protocol: no protocol selected"
-            )
-        return self.transports[protocol]
+                "Failed to negotiate a stream muxer protocol: no protocol selected"
+            ) from error
+        return transport
 
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
-        communicator = MultiselectCommunicator(conn)
         logger.debug(
             "MuxerMultistream: muxer negotiation peer=%s initiator=%s",
             peer_id,
             conn.is_initiator,
         )
-
-        # Use appropriate multiselect based on role:
-        # - Initiator (client/dialer) uses multiselect_client to select a protocol
-        # - Non-initiator (server/listener) uses multiselect to negotiate with client
-        if conn.is_initiator:
-            protocol = await self.multistream_client.select_one_of(
-                tuple(self.transports.keys()), communicator, self.negotiate_timeout
-            )
-        else:
-            negotiated_protocol, _ = await self.multiselect.negotiate(
-                communicator, self.negotiate_timeout
-            )
-            if negotiated_protocol is None:
-                raise MultiselectError(
-                    "Fail to negotiate a stream muxer protocol: no protocol selected"
-                )
-            protocol = negotiated_protocol
+        protocol, transport_class = await self._selector.select(
+            conn, conn.is_initiator, self.negotiate_timeout
+        )
         logger.debug("MuxerMultistream new_conn: negotiated protocol %s", protocol)
-        transport_class = self.transports[protocol]
         if protocol == PROTOCOL_ID:
             async with trio.open_nursery():
 
