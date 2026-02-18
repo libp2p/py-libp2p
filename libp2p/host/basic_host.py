@@ -180,12 +180,12 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
+        metric_recv_channel: trio.MemoryReceiveChannel | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -257,6 +257,9 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: set[ID] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+
+        # Metrics
+        self.metric_recv_channel = metric_recv_channel
 
     def get_id(self) -> ID:
         """
@@ -790,6 +793,10 @@ class BasicHost(IHost):
 
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
+
+    async def next_event(self):
+        event = await self.metric_recv_channel.receive()
+        return event
 
     async def _run_identify(self, peer_id: ID) -> None:
         """

@@ -39,6 +39,7 @@ dependencies = [
     "py-multicodec>=1.0.0",
     "pynacl>=1.3.0",
     "rpcudp>=3.0.0",
+    "prometheus-client>=0.24.1",
     "trio-typing>=0.0.4",
     "trio>=0.26.0",
     "trio-websocket>=0.11.0",
@@ -73,6 +74,7 @@ mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
+metrics-demo = "examples.metrics.runner:cli"
 
 [dependency-groups]
 dev = [
