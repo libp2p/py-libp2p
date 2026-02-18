@@ -1,1 +1,0 @@
-Standardized logger names across core modules to use ``__name__`` pattern, enabling fine-grained logging control via ``LIBP2P_DEBUG`` environment variable.
