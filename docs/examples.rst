@@ -27,3 +27,5 @@ Examples
    examples.websocket
    examples.tls
    examples.autotls
+   examples.connection_health_monitoring
+   examples.health_monitoring
