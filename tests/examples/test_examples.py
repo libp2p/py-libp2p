@@ -222,7 +222,7 @@ async def pubsub_demo(host_a, host_b):
         nonlocal received_by_b
         message = await subscription.get()
         received_by_b = message.data.decode("utf-8")
-        print(f"Host B received: {received_by_b}")
+        logger.debug("Host B received message: %s", received_by_b)
         b_received.set()
 
     async with background_trio_service(pubsub_a):
@@ -236,9 +236,9 @@ async def pubsub_demo(host_a, host_b):
                     peer_info_b = info_from_p2p_addr(listen_addrs_b[0])
                     try:
                         await pubsub_a.host.connect(peer_info_b)
-                        print("Connection attempt completed")
+                        logger.debug("Connection attempt completed")
                     except Exception as e:
-                        print(f"Connection error: {e}")
+                        logger.debug("Connection error: %s", e)
                         raise
 
                     subscription_b = await pubsub_b.subscribe(PUBSUB_TEST_TOPIC)
@@ -321,7 +321,6 @@ async def identify_push_demo(host_a, host_b):
 )
 @pytest.mark.trio
 async def test_protocols(test, security_protocol):
-    print("!@# ", security_protocol)
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol
     ) as hosts:

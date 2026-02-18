@@ -233,7 +233,7 @@ async def run_py_server_test(
             "http_enabled": True,
             "libp2p_enabled": LIBP2P_AVAILABLE,
         }
-        print(f"SERVER_INFO:{json.dumps(server_info)}")
+        logger.info(f"SERVER_INFO:{json.dumps(server_info)}")
         logger.info(f"Server ready - waiting {duration}s for connections...")
         await trio.sleep(duration)
         if node.received_messages:
@@ -281,7 +281,7 @@ async def run_py_client_test(target_addr: str, message: str) -> dict[str, Any]:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python py_websocket_node.py <mode> [args...]")
+        logger.error("Usage: python py_websocket_node.py <mode> [args...]")
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -291,9 +291,9 @@ if __name__ == "__main__":
         secure = sys.argv[3].lower() == "true" if len(sys.argv) > 3 else False
         duration = int(sys.argv[4]) if len(sys.argv) > 4 else 30
         results = trio.run(run_py_server_test, port, secure, duration)
-        print("RESULTS:", json.dumps(results, indent=2))
+        logger.info("RESULTS:\n%s", json.dumps(results, indent=2))
     elif mode == "client":
         target_addr = sys.argv[2] if len(sys.argv) > 2 else "/ip4/127.0.0.1/tcp/8002"
         message = sys.argv[3] if len(sys.argv) > 3 else "Hello from Python client"
         results = trio.run(run_py_client_test, target_addr, message)
-        print("RESULTS:", json.dumps(results, indent=2))
+        logger.info("RESULTS:\n%s", json.dumps(results, indent=2))

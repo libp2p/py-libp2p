@@ -1,6 +1,7 @@
 from collections.abc import (
     Callable,
 )
+import logging
 
 import pytest
 import trio
@@ -11,6 +12,8 @@ from libp2p.tools.utils import (
 from tests.utils.pubsub.dummy_account_node import (
     DummyAccountNode,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def wait_for_convergence(
@@ -48,7 +51,7 @@ async def wait_for_convergence(
         if not failed_indices:
             elapsed = trio.current_time() - start_time
             if log_success:
-                print(f"✓ Converged in {elapsed:.3f}s with {len(nodes)} nodes")
+                logger.debug(f"✓ Converged in {elapsed:.3f}s with {len(nodes)} nodes")
             return
 
         elapsed = trio.current_time() - start_time

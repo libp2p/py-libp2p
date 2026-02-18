@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import trio
 
@@ -22,6 +24,8 @@ from tests.utils.factories import (
 initiator_key_pair = create_new_key_pair()
 
 noninitiator_key_pair = create_new_key_pair()
+
+logger = logging.getLogger(__name__)
 
 
 async def perform_simple_test(assertion_func, security_protocol):
@@ -64,7 +68,7 @@ async def perform_simple_test(assertion_func, security_protocol):
                 return muxed_conn._connection
             # Last resort - warn but return the muxed_conn itself for type checking
             else:
-                print(f"Warning: Cannot find secured connection in {type(muxed_conn)}")
+                logger.warning(f"Cannot find secured connection in {type(muxed_conn)}")
                 return muxed_conn
 
         # Get secured connections for both peers

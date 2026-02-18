@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 import subprocess
 
@@ -5,6 +6,8 @@ import pytest
 import trio
 
 from tests.interop.websocket.py_node.py_websocket_node import PyWebSocketNode
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.trio
@@ -18,7 +21,7 @@ async def test_bidirectional_communication():
         if not js_node_path.exists():
             pytest.fail(f"JS Node script not found at {js_node_path}")
 
-        print("Starting JavaScript server...")
+        logger.info("Starting JavaScript server...")
         js_process = subprocess.Popen(
             ["node", str(js_node_path), "server", "8005", "false", "30000"],
             stdout=subprocess.PIPE,
@@ -26,9 +29,9 @@ async def test_bidirectional_communication():
         )
 
         await trio.sleep(3)
-        print("JavaScript server started on port 8005")
+        logger.info("JavaScript server started on port 8005")
 
-        print("Setting up Python client...")
+        logger.info("Setting up Python client...")
         py_node = PyWebSocketNode()
         await py_node.setup_node()
 
@@ -42,7 +45,7 @@ async def test_bidirectional_communication():
 
         successful_exchanges = 0
 
-        print(f"\nSending {len(test_messages)} messages to JavaScript server...\n")
+        logger.info("Sending %d messages to JavaScript server...", len(test_messages))
 
         for i, message in enumerate(test_messages, 1):
             try:
@@ -51,12 +54,12 @@ async def test_bidirectional_communication():
                 if response and message in response:
                     successful_exchanges += 1
                 else:
-                    print(f"Exchange {i} failed: unexpected response")
+                    logger.warning("Exchange %d failed: unexpected response", i)
 
                 await trio.sleep(0.1)
 
             except Exception as e:
-                print(f"Exchange {i} failed: {e}")
+                logger.warning("Exchange %d failed: %s", i, e)
 
         await py_node.stop()
 

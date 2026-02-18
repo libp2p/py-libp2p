@@ -1,5 +1,6 @@
 """Integration tests for Bitswap file transfer between nodes."""
 
+import logging
 from pathlib import Path
 import tempfile
 
@@ -14,6 +15,8 @@ from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
+
+logger = logging.getLogger(__name__)
 
 
 class TestBitswapIntegration:
@@ -382,8 +385,8 @@ class TestBitswapIntegration:
 
                     # Step 4: Request a non-existent block and verify we
                     # get a DontHave response
-                    print(
-                        "\n--- Step 4: Request nonexistent block and "
+                    logger.debug(
+                        "--- Step 4: Request nonexistent block and "
                         "verify DontHave response ---"
                     )
 
@@ -410,7 +413,7 @@ class TestBitswapIntegration:
 
                         # The ACTUAL test: Did we receive a DontHave
                         # response?
-                        print(
+                        logger.info(
                             f"DontHave responses: {client_bitswap._dont_have_responses}"
                         )
                         assert nonexistent_cid in client_bitswap._dont_have_responses, (
@@ -421,7 +424,7 @@ class TestBitswapIntegration:
                             provider_host.get_id()
                             in client_bitswap._dont_have_responses[nonexistent_cid]
                         ), "Provider should have sent the DontHave response"
-                        print("✓ DontHave response received from provider!")
+                        logger.info("✓ DontHave response received from provider!")
 
                         # Cancel the background request
                         test_nursery.cancel_scope.cancel()

@@ -18,6 +18,8 @@ from libp2p.peer.peerinfo import PeerInfo
 # Enable logging for debugging
 logging.basicConfig(level=logging.DEBUG)
 
+logger = logging.getLogger(__name__)
+
 
 # Fixture to create hosts with a specified muxer preference
 @pytest.fixture
@@ -88,7 +90,7 @@ async def test_multiplexer_preference_parameter(muxer_preference):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.warning("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
@@ -165,7 +167,7 @@ async def test_explicit_muxer_options(muxer_option_func, expected_stream_class):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.warning("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
@@ -235,7 +237,7 @@ async def test_global_default_muxer(global_default):
                     await stream.write(data)
                     await stream.close()
                 except Exception as e:
-                    print(f"Error in echo handler: {e}")
+                    logger.warning("Error in echo handler: %s", e)
 
             host_a.set_stream_handler(ECHO_PROTOCOL, echo_handler)
 
