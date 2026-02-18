@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 import subprocess
 
@@ -9,6 +10,8 @@ import trio
 # We will use relative imports based on the package structure.
 from tests.interop.websocket.py_node.py_websocket_node import PyWebSocketNode
 from tests.interop.websocket.py_node.test_utils import TestResults
+
+logger = logging.getLogger()
 
 
 @pytest.mark.trio
@@ -25,7 +28,7 @@ async def test_py_client_js_server():
         if not js_node_path.exists():
             pytest.fail(f"JS Node script not found at {js_node_path}")
 
-        print("Starting JavaScript server...")
+        logger.info("Starting JavaScript server...")
         js_process = subprocess.Popen(
             ["node", str(js_node_path), "server", "8002", "false", "15000"],
             stdout=subprocess.PIPE,
@@ -35,14 +38,14 @@ async def test_py_client_js_server():
         # Give JS server time to start
         await trio.sleep(3)
 
-        print("Setting up Python client...")
+        logger.info("Setting up Python client...")
         node = PyWebSocketNode()
         await node.setup_node()
 
         target_addr = "/ip4/127.0.0.1/tcp/8002"
         test_message = "Hello from Python client"
 
-        print(f"Sending message to JS server: {test_message}")
+        logger.info(f"Sending message to JS server: {test_message}")
 
         try:
             response = await node.dial_and_send(target_addr, test_message)

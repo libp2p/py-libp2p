@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -23,6 +24,8 @@ from libp2p.stream_muxer.yamux.yamux import Yamux
 REQUIRED_NODE_MAJOR = (
     22  # Required for Promise.withResolvers in @chainsafe/libp2p-noise v17+
 )
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.trio
@@ -125,11 +128,15 @@ async def test_ping_with_js_node():
     maddr = Multiaddr(addr_line)
 
     # Debug: Print what we're trying to connect to
-    print(f"JS Node Peer ID: {peer_id_line}")
-    print(f"JS Node Address: {addr_line}")
+    logger.debug("JS Node Peer ID: %s", peer_id_line)
+    logger.debug("JS Node Address: %s", addr_line)
     # Optional: print captured logs for debugging
-    print("--- JS stdout (partial) ---\n" + "".join(captured_out)[-2000:])
-    print("--- JS stderr (partial) ---\n" + "".join(captured_err)[-2000:])
+    logger.debug(
+        "--- JS stdout (last 2000 chars) ---\n%s", "".join(captured_out)[-2000:]
+    )
+    logger.debug(
+        "--- JS stderr (last 2000 chars) ---\n%s", "".join(captured_err)[-2000:]
+    )
 
     # Set up Python host using new_host() factory - same approach as test-plans
     # This properly handles WebSocket transport for dialing
@@ -164,7 +171,7 @@ async def test_ping_with_js_node():
     # Add peer info to peerstore before connecting
     host.get_peerstore().add_addrs(peer_id, [maddr], 60)  # 60 second TTL
 
-    print(f"Python trying to connect to: {peer_info}")
+    logger.debug("Python trying to connect to: %s", peer_info)
 
     # Use the host as a context manager
     async with host.run(listen_addrs=[ws_listen_addr]):

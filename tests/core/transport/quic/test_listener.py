@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -19,6 +20,8 @@ from libp2p.transport.quic.transport import (
 from libp2p.transport.quic.utils import (
     create_quic_multiaddr,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TestQUICListener:
@@ -137,7 +140,7 @@ class TestQUICListener:
 
         # By the time we get here, the listener and its tasks have been fully
         # shut down, allowing the nursery to exit without hanging.
-        print("TEST COMPLETED SUCCESSFULLY.")
+        logger.info("TEST COMPLETED SUCCESSFULLY.")
 
     @pytest.mark.trio
     async def test_listener_stats_tracking(self, listener):
