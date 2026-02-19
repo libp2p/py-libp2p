@@ -11,8 +11,11 @@ from .client import BitswapClient
 from . import config
 from .cid import (
     compute_cid,
+    compute_cid_obj,
     compute_cid_v0,
+    compute_cid_v0_obj,
     compute_cid_v1,
+    compute_cid_v1_obj,
     parse_cid,
     cid_to_bytes,
     cid_to_text,
@@ -44,8 +47,11 @@ __all__ = [
     "config",
     # CID utilities
     "compute_cid",
+    "compute_cid_obj",
     "compute_cid_v0",
+    "compute_cid_v0_obj",
     "compute_cid_v1",
+    "compute_cid_v1_obj",
     "parse_cid",
     "cid_to_bytes",
     "cid_to_text",

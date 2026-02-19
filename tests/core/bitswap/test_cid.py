@@ -11,7 +11,11 @@ from libp2p.bitswap.cid import (
     analyze_cid_collection,
     cid_to_bytes,
     cid_to_text,
+    compute_cid_obj,
+    compute_cid_v0,
+    compute_cid_v0_obj,
     compute_cid_v1,
+    compute_cid_v1_obj,
     detect_cid_encoding_format,
     get_cid_prefix,
     parse_cid,
@@ -423,3 +427,29 @@ def test_cid_to_bytes_and_text_roundtrip():
 
     assert roundtrip_bytes == cid_bytes
     assert cid_text == str(make_cid(cid_bytes))
+
+
+def test_object_wrappers_for_v0_and_v1():
+    """Object-returning wrappers should match bytes-returning wrappers."""
+    data = b"object-wrapper-test"
+
+    cid_v0_obj = compute_cid_v0_obj(data)
+    cid_v1_obj = compute_cid_v1_obj(data, codec=CODEC_RAW)
+
+    assert cid_v0_obj.buffer == compute_cid_v0(data)
+    assert cid_v1_obj.buffer == compute_cid_v1(data, codec=CODEC_RAW)
+    assert cid_v0_obj.version == 0
+    assert cid_v1_obj.version == 1
+
+
+def test_compute_cid_obj_wrapper():
+    """compute_cid_obj should mirror compute_cid by version."""
+    data = b"generic-object-wrapper-test"
+
+    cid0_obj = compute_cid_obj(data, version=0)
+    cid1_obj = compute_cid_obj(data, version=1, codec=CODEC_DAG_PB)
+
+    assert cid0_obj.buffer == compute_cid_v0(data)
+    assert cid1_obj.buffer == compute_cid_v1(data, codec=CODEC_DAG_PB)
+    assert cid0_obj.version == 0
+    assert cid1_obj.version == 1
