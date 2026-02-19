@@ -82,10 +82,10 @@ async def resolve_multiaddr_with_retry(
             if timeout_seconds is not None and timeout_seconds > 0:
                 with trio.move_on_after(timeout_seconds) as cancel_scope:
                     result = await resolver.resolve(maddr)
-                # Use cancel scope to distinguish: timeout vs completed-with-no-addresses vs success.
-                # - Timeout: cancel_scope.cancelled_caught is True → treat as timeout.
-                # - Completed but no addresses: scope not cancelled, result is [] or None → no addresses.
-                # - Success: scope not cancelled and result is non-empty → return result.
+                # Distinguish: timeout vs no-addresses vs success via cancel scope.
+                # Timeout: cancel_scope.cancelled_caught is True.
+                # No addresses: scope not cancelled, result is [] or None.
+                # Success: scope not cancelled and result non-empty.
                 if cancel_scope.cancelled_caught:
                     last_error = TimeoutError(
                         f"DNS resolution timed out after {timeout_seconds}s"
