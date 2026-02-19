@@ -19,6 +19,11 @@ Subpackages
 
    libp2p.transport.websocket
 
+.. toctree::
+   :maxdepth: 4
+
+   libp2p.transport.webrtc
+
 Submodules
 ----------
 
