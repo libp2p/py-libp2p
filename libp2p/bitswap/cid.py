@@ -25,8 +25,8 @@ for dag-jose, dag-json, and experimental codecs.
 import hashlib
 from typing import Any
 
-from cid import CIDv0, CIDv1, from_string, make_cid
-from multicodec import Code, add_prefix, get_codec, is_codec
+from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
+from multicodec import Code, get_codec, is_codec
 from multicodec.code_table import DAG_PB, RAW, SHA2_256
 
 # Simplified CID version constants
@@ -49,10 +49,10 @@ def _compute_multihash_sha256(data: bytes) -> bytes:
 
 def compute_cid_v0(data: bytes) -> bytes:
     """
-    Compute a CIDv0 for data using py-multihash v3 API.
+    Compute a CIDv0 for data using py-cid builders.
 
-    CIDv0 is just a base58-encoded multihash (SHA-256).
-    For simplicity, we return the raw multihash bytes.
+    CIDv0 semantically wraps a SHA2-256 multihash. For compatibility with
+    existing Bitswap code, this helper returns the raw CID bytes.
 
     Args:
         data: The data to hash
@@ -61,8 +61,7 @@ def compute_cid_v0(data: bytes) -> bytes:
         CIDv0 as bytes (multihash format)
 
     """
-    # CIDv0 is just the multihash
-    return _compute_multihash_sha256(data)
+    return V0Builder().sum(data).buffer
 
 
 def _normalise_codec(codec: Code | str | int) -> Code:
@@ -112,7 +111,7 @@ def _parse_varint(data: bytes, offset: int = 0) -> tuple[int, int] | None:
 
 def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
     """
-    Compute a CIDv1 for data using multicodec varint-encoded prefixes.
+    Compute a CIDv1 for data using py-cid builders.
 
     CIDv1 format: <version><codec-varint><multihash>
 
@@ -140,16 +139,10 @@ def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
         ValueError: If codec is invalid or unknown
 
     """
-    # Normalise codec and compute multihash
+    # Normalise codec and build CIDv1 using py-cid.
     code_obj = _normalise_codec(codec)
-    multihash = _compute_multihash_sha256(data)
-
-    # Use multicodec to get the properly varint-encoded codec prefix.
-    # add_prefix returns <codec-varint><data>; we only need the prefix bytes.
-    codec_prefixed = add_prefix(str(code_obj), b"")
-
-    # CIDv1 format: <version><codec-varint><multihash>
-    return bytes([CID_V1]) + codec_prefixed + multihash
+    cid_obj = V1Builder(codec=str(code_obj), mh_type=str(HASH_SHA256)).sum(data)
+    return cid_obj.buffer
 
 
 def get_cid_prefix(cid: bytes) -> bytes:
