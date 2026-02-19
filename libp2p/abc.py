@@ -253,13 +253,12 @@ class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
         """
 
     @abstractmethod
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set a deadline for the stream.
 
         :param ttl: Time-to-live for the stream in seconds.
-        :return: True if the deadline was set successfully,
-            otherwise False.
+        :raises ValueError: if ttl is invalid (e.g. negative).
         """
 
     @abstractmethod
@@ -1360,7 +1359,7 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening on the specified multiaddress.
 
@@ -1371,10 +1370,10 @@ class IListener(ABC):
         nursery : trio.Nursery
             The nursery for spawning listening tasks.
 
-        Returns
-        -------
-        bool
-            True if the listener started successfully, otherwise False.
+        Raises
+        ------
+        OpenConnectionError
+            If listening fails (e.g. missing/invalid port or failed start).
 
         """
 

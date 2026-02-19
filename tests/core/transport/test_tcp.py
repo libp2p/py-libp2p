@@ -47,6 +47,19 @@ async def test_tcp_listener(nursery):
 
 
 @pytest.mark.trio
+async def test_tcp_listener_raises_on_missing_port(nursery):
+    """listen() raises OpenConnectionError when TCP port is missing in multiaddr."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+    with pytest.raises(OpenConnectionError, match="TCP port is missing"):
+        await listener.listen(Multiaddr("/ip4/127.0.0.1"), nursery)
+
+
+@pytest.mark.trio
 async def test_tcp_dial(nursery):
     transport = TCP()
     raw_conn_other_side: RawConnection | None = None
