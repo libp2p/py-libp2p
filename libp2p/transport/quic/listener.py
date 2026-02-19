@@ -1216,7 +1216,12 @@ class QUICListener(IListener):
             self._nursery = active_nursery
 
             # Get the actual bound address
-            bound_host, bound_port = self._socket.getsockname()
+            # Socket.getsockname() returns (host, port) for IPv4 or
+            # (host, port, flowinfo, scope_id) for IPv6
+            address_result = self._socket.getsockname()
+            bound_host = address_result[0]
+            bound_port = address_result[1]
+
             quic_version = multiaddr_to_quic_version(maddr)
             bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
             self._bound_addresses = [bound_maddr]
