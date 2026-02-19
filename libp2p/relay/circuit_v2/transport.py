@@ -1029,8 +1029,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         stream : INetStream
             The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
 
         Returns
         -------
