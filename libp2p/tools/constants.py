@@ -98,6 +98,8 @@ class GossipsubParams(NamedTuple):
     px_peers_count: int = 16
     prune_back_off: int = 60
     unsubscribe_back_off: int = 10
+    max_pending_messages_per_peer: int = 100
+    pending_messages_ttl: float = 30.0
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()
