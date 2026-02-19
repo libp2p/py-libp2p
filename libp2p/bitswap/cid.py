@@ -25,6 +25,7 @@ for dag-jose, dag-json, and experimental codecs.
 import hashlib
 from typing import Any
 
+from cid import CIDv0, CIDv1, from_string, make_cid
 from multicodec import Code, add_prefix, get_codec, is_codec
 from multicodec.code_table import DAG_PB, RAW, SHA2_256
 
@@ -36,6 +37,7 @@ CID_V1 = 1
 CODEC_DAG_PB: Code = DAG_PB
 CODEC_RAW: Code = RAW
 HASH_SHA256: Code = SHA2_256
+CIDInput = bytes | str | CIDv0 | CIDv1
 
 
 def _compute_multihash_sha256(data: bytes) -> bytes:
@@ -286,6 +288,46 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
 
     logger.debug("        No valid CID format detected")
     return False
+
+
+def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
+    """
+    Parse and validate CID input into a py-cid object.
+
+    Accepts CID bytes, canonical CID text/path strings, hex-encoded CID bytes,
+    or existing py-cid objects.
+    """
+    if isinstance(value, (CIDv0, CIDv1)):
+        return value
+
+    if isinstance(value, bytes):
+        return make_cid(value)
+
+    if isinstance(value, str):
+        cid_str = value.strip()
+        if not cid_str:
+            raise ValueError("CID string is empty")
+
+        try:
+            return from_string(cid_str)
+        except ValueError:
+            hex_value = cid_str[2:] if cid_str.lower().startswith("0x") else cid_str
+            try:
+                return make_cid(bytes.fromhex(hex_value))
+            except ValueError as exc:
+                raise ValueError(f"Invalid CID string: {cid_str}") from exc
+
+    raise TypeError(f"Unsupported CID input type: {type(value).__name__}")
+
+
+def cid_to_bytes(value: CIDInput) -> bytes:
+    """Convert CID input to raw CID bytes."""
+    return parse_cid(value).buffer
+
+
+def cid_to_text(value: CIDInput) -> str:
+    """Convert CID input to canonical CID string form."""
+    return str(parse_cid(value))
 
 
 def cid_to_string(cid: bytes) -> str:

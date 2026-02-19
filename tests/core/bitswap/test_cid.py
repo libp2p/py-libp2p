@@ -3,14 +3,18 @@
 import hashlib
 
 import pytest
+from cid import make_cid
 
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
     analyze_cid_collection,
+    cid_to_bytes,
+    cid_to_text,
     compute_cid_v1,
     detect_cid_encoding_format,
     get_cid_prefix,
+    parse_cid,
     recompute_cid_from_data,
     verify_cid,
 )
@@ -373,3 +377,49 @@ def test_complete_cid_workflow():
         # Recompute
         new_cid = recompute_cid_from_data(cid, test_data)
         assert new_cid == cid
+
+
+def test_parse_cid_accepts_bytes_and_objects():
+    """parse_cid should normalize bytes and py-cid objects."""
+    cid_bytes = compute_cid_v1(b"helper-bytes")
+
+    parsed_from_bytes = parse_cid(cid_bytes)
+    parsed_from_obj = parse_cid(parsed_from_bytes)
+
+    assert parsed_from_bytes.buffer == cid_bytes
+    assert parsed_from_obj.buffer == cid_bytes
+
+
+def test_parse_cid_accepts_canonical_and_hex_strings():
+    """parse_cid should accept both canonical CID text and legacy hex text."""
+    cid_bytes = compute_cid_v1(b"helper-strings")
+    canonical = str(make_cid(cid_bytes))
+    hex_text = cid_bytes.hex()
+
+    parsed_from_canonical = parse_cid(canonical)
+    parsed_from_hex = parse_cid(hex_text)
+
+    assert parsed_from_canonical.buffer == cid_bytes
+    assert parsed_from_hex.buffer == cid_bytes
+
+
+def test_parse_cid_invalid_inputs_raise():
+    """parse_cid should raise on unsupported or malformed input."""
+    with pytest.raises(TypeError):
+        parse_cid(123)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError):
+        parse_cid("")
+
+    with pytest.raises(ValueError):
+        parse_cid("not-a-valid-cid")
+
+
+def test_cid_to_bytes_and_text_roundtrip():
+    """Helper conversion functions should round-trip consistently."""
+    cid_bytes = compute_cid_v1(b"helper-roundtrip")
+    cid_text = cid_to_text(cid_bytes)
+    roundtrip_bytes = cid_to_bytes(cid_text)
+
+    assert roundtrip_bytes == cid_bytes
+    assert cid_text == str(make_cid(cid_bytes))
