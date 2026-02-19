@@ -1,1 +1,0 @@
-Fixed peer ID validation by checking the authenticated peer ID immediately after security handshake, failing fast on mismatches instead of later during mux negotiation with misleading errors.

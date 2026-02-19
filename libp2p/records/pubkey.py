@@ -38,8 +38,16 @@ class PublicKeyValidator(Validator):
             raise InvalidRecordType("namespace not 'pk'")
 
         keyhash = bytes.fromhex(key)
-        if not multihash.is_valid(keyhash):
-            raise InvalidRecordType("key did not contain valid multihash")
+        is_valid = getattr(multihash, "is_valid", None)
+        if is_valid is not None:
+            if not is_valid(keyhash):
+                raise InvalidRecordType("key did not contain valid multihash")
+        else:
+            # Fallback when py-multihash has no is_valid (e.g. older version)
+            try:
+                multihash.decode(keyhash)
+            except Exception:
+                raise InvalidRecordType("key did not contain valid multihash")
 
         try:
             pubkey = unmarshal_public_key(value)
