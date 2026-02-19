@@ -194,4 +194,6 @@ tests/interop/js_libp2p/js_node/src/package-lock.json
 _build/
 
 *node_modules/
+# Attack simulation test results
+tests/security/attack_simulation/results/
 libp2p-forge
