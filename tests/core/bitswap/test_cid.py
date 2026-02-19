@@ -8,7 +8,6 @@ from cid import make_cid
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
-    analyze_cid_collection,
     cid_to_bytes,
     cid_to_text,
     compute_cid_obj,
@@ -16,10 +15,8 @@ from libp2p.bitswap.cid import (
     compute_cid_v0_obj,
     compute_cid_v1,
     compute_cid_v1_obj,
-    detect_cid_encoding_format,
     get_cid_prefix,
     parse_cid,
-    recompute_cid_from_data,
     verify_cid,
 )
 
@@ -288,67 +285,6 @@ def test_cid_edge_cases():
     assert "Unknown codec" in str(excinfo.value)
 
 
-def test_detect_cid_encoding_format():
-    """Test format detection."""
-    # Test raw codec (backward compatible)
-    cid_raw = compute_cid_v1(b"test", codec=0x55)
-    info = detect_cid_encoding_format(cid_raw)
-    assert info["codec_value"] == 0x55
-    assert info["codec_name"] == "raw"
-    assert info["is_breaking"] is False
-
-    # Test dag-jose (breaking; code 0x85)
-    cid_json = compute_cid_v1(b"test", codec=0x85)
-    info = detect_cid_encoding_format(cid_json)
-    assert info["codec_value"] == 0x85
-    assert info["codec_name"] == "dag-jose"
-    assert info["is_breaking"] is True
-    assert info["codec_length"] == 2  # 2-byte varint
-
-    # Test dag-json (breaking; code 0x0129)
-    cid_json = compute_cid_v1(b"test", codec=0x0129)
-    info = detect_cid_encoding_format(cid_json)
-    assert info["codec_value"] == 0x0129
-    assert info["codec_name"] == "dag-json"
-    assert info["is_breaking"] is True
-    assert info["codec_length"] == 2  # 2-byte varint
-
-
-def test_recompute_cid_from_data():
-    """Test CID recomputation."""
-    data = b"test data"
-
-    # Create CID with dag-jose (breaking codec, 0x85)
-    old_cid = compute_cid_v1(data, codec=0x85)
-
-    # Recompute (should be identical in this case)
-    new_cid = recompute_cid_from_data(old_cid, data)
-
-    assert new_cid == old_cid  # Same when properly encoded
-    assert verify_cid(new_cid, data) is True
-
-    # Test with wrong data (should fail)
-    with pytest.raises(ValueError) as excinfo:
-        recompute_cid_from_data(old_cid, b"wrong data")
-    assert "does not verify" in str(excinfo.value)
-
-
-def test_analyze_cid_collection():
-    """Smoke test for analyze_cid_collection helper."""
-    data = b"analysis test"
-    cid_raw = compute_cid_v1(data, codec=0x55)  # backward compatible (raw)
-    cid_jose = compute_cid_v1(data, codec=0x85)  # breaking codec (dag-jose)
-
-    results = analyze_cid_collection([cid_raw, cid_jose])
-
-    assert results["total"] == 2
-    assert results["backward_compatible"] == 1
-    assert results["breaking_change"] == 1
-    by_codec = results["by_codec"]
-    assert by_codec["raw"] == 1
-    assert by_codec["dag-jose"] == 1
-
-
 def test_complete_cid_workflow():
     """End-to-end test of CID creation, parsing, and verification."""
     test_data = b"Integration test data"
@@ -359,15 +295,9 @@ def test_complete_cid_workflow():
         (0x129, "dag-json", True),  # Breaking (code 0x129)
     ]
 
-    for codec_value, codec_name, is_breaking in test_codecs:
+    for codec_value, _, is_breaking in test_codecs:
         # Create CID
         cid = compute_cid_v1(test_data, codec=codec_value)
-
-        # Detect format
-        info = detect_cid_encoding_format(cid)
-        assert info["codec_value"] == codec_value
-        assert info["codec_name"] == codec_name
-        assert info["is_breaking"] == is_breaking
 
         # Extract prefix
         prefix = get_cid_prefix(cid)
@@ -377,10 +307,6 @@ def test_complete_cid_workflow():
         # Verify CID
         assert verify_cid(cid, test_data) is True
         assert verify_cid(cid, b"wrong data") is False
-
-        # Recompute
-        new_cid = recompute_cid_from_data(cid, test_data)
-        assert new_cid == cid
 
 
 def test_parse_cid_accepts_bytes_and_objects():
