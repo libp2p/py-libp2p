@@ -7,6 +7,11 @@ This example demonstrates production-ready WSS functionality with:
 - Secure WebSocket connections (WSS)
 - Real-world certificate management
 - Browser-compatible WSS connections
+
+Usage:
+    python examples/websocket/wss_demo.py
+    python examples/websocket/wss_demo.py -p <port>
+    python examples/websocket/wss_demo.py -d <listener_multiaddr>
 """
 
 import argparse
@@ -331,9 +336,11 @@ def main():
 
     if args.destination:
         # Client mode
+        print("DEBUG: Client mode selected")
         trio.run(run_client, args.destination)
     else:
         # Server mode
+        print("DEBUG: Server mode selected")
         trio.run(run_server, args.port)
 
 
