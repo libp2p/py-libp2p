@@ -825,7 +825,12 @@ async def test_handle_iwant(monkeypatch):
 
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+
+        await pubsubs_gsub[index_bob].wait_until_ready()
+
+        with trio.fail_after(2.0):
+            while id_alice not in pubsubs_gsub[index_bob].peers:
+                await trio.sleep(0.01)
 
         # Mock mcache.get to return a message
         test_message = rpc_pb2.Message(data=b"test_data")
