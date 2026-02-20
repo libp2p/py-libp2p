@@ -7,15 +7,13 @@ This script demonstrates:
 2. How to create transports dynamically based on multiaddrs
 3. How to register custom transports
 4. How the new system automatically selects the right transport
+
+Usage:
+    python examples/transport/transport_integration_demo.py
 """
 
 import asyncio
 import logging
-from pathlib import Path
-import sys
-
-# Add the libp2p directory to the path so we can import it
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import multiaddr
 

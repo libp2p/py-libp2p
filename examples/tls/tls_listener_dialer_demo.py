@@ -3,9 +3,9 @@
 TLS Listener and Dialer Demo with "ping-pong" test.
 
 Usage:
-    python examples/tls_listener_dialer_demo.py listener [port]
-    python examples/tls_listener_dialer_demo.py dialer <listener_address>
-    python examples/tls_listener_dialer_demo.py
+    python examples/tls/tls_listener_dialer_demo.py listener [port]
+    python examples/tls/tls_listener_dialer_demo.py dialer <listener_address>
+    python examples/tls/tls_listener_dialer_demo.py
 """
 
 import sys
