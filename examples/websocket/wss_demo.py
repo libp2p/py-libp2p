@@ -7,6 +7,11 @@ This example demonstrates production-ready WSS functionality with:
 - Secure WebSocket connections (WSS)
 - Real-world certificate management
 - Browser-compatible WSS connections
+
+Usage:
+    python examples/websocket/wss_demo.py
+    python examples/websocket/wss_demo.py -p <port>
+    python examples/websocket/wss_demo.py -d <listener_multiaddr>
 """
 
 import argparse
@@ -195,18 +200,18 @@ async def run_server(port: int):
             server_addr = str(addrs[0])
             client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
 
-            logger.info("🌐 WSS Server Started Successfully!")
-            logger.info("=" * 50)
-            logger.info(f"📍 Server Address: {client_addr}")
-            logger.info("🔧 Protocol: /echo/1.0.0")
-            logger.info("🚀 Transport: WebSocket Secure (WSS)")
-            logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info("")
-            logger.info("📋 To test the connection, run this in another terminal:")
-            logger.info(f"   python wss_demo.py -d {client_addr}")
-            logger.info("")
-            logger.info("⏳ Waiting for incoming WSS connections...")
-            logger.info("─" * 50)
+            print("🌐 WSS Server Started Successfully!")
+            print("=" * 50)
+            print(f"📍 Server Address: {client_addr}")
+            print("🔧 Protocol: /echo/1.0.0")
+            print("🚀 Transport: WebSocket Secure (WSS)")
+            print("🔐 Security: TLS with self-signed certificate")
+            print("")
+            print("📋 To test the connection, run this in another terminal:")
+            print(f"   python examples/websocket/wss_demo.py -d {client_addr}")
+            print("")
+            print("⏳ Waiting for incoming WSS connections...")
+            print("─" * 50)
 
             # Wait indefinitely
             await trio.sleep_forever()
@@ -233,19 +238,19 @@ async def run_client(destination: str):
             maddr = Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
 
-            logger.info("🔌 WSS Client Starting...")
-            logger.info("=" * 40)
-            logger.info(f"🎯 Target Peer: {info.peer_id}")
-            logger.info(f"📍 Target Address: {destination}")
-            logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info("")
+            print("🔌 WSS Client Starting...")
+            print("=" * 40)
+            print(f"🎯 Target Peer: {info.peer_id}")
+            print(f"📍 Target Address: {destination}")
+            print("🔐 Security: TLS with self-signed certificate")
+            print("")
 
             try:
-                logger.info("🔗 Connecting to WSS server...")
+                print("🔗 Connecting to WSS server...")
                 await host.connect(info)
-                logger.info("✅ Successfully connected to WSS server!")
+                print("✅ Successfully connected to WSS server!")
             except Exception as e:
-                logger.error(f"❌ Connection Failed: {e}")
+                print(f"❌ Connection Failed: {e}")
                 return
 
             # Create a stream and send test data
@@ -256,31 +261,31 @@ async def run_client(destination: str):
                 return
 
             try:
-                logger.info("🚀 Starting Echo Protocol Test...")
-                logger.info("─" * 40)
+                print("🚀 Starting Echo Protocol Test...")
+                print("─" * 40)
 
                 # Send test data
                 test_message = b"Hello WSS Transport!"
-                logger.info(f"📤 Sending message: {test_message.decode('utf-8')}")
+                print(f"📤 Sending message: {test_message.decode('utf-8')}")
                 await stream.write(test_message)
 
                 # Read response
-                logger.info("⏳ Waiting for server response...")
+                print("⏳ Waiting for server response...")
                 response = await stream.read(1024)
-                logger.info(f"📥 Received response: {response.decode('utf-8')}")
+                print(f"📥 Received response: {response.decode('utf-8')}")
 
                 await stream.close()
 
-                logger.info("─" * 40)
+                print("─" * 40)
                 if response == test_message:
-                    logger.info("🎉 Echo test successful!")
-                    logger.info("✅ WSS transport is working perfectly!")
-                    logger.info("✅ Client completed successfully, exiting.")
+                    print("🎉 Echo test successful!")
+                    print("✅ WSS transport is working perfectly!")
+                    print("✅ Client completed successfully, exiting.")
                 else:
-                    logger.error("❌ Echo test failed!")
-                    logger.error("   Response doesn't match sent data.")
-                    logger.error(f"   Sent: {test_message}")
-                    logger.error(f"   Received: {response}")
+                    print("❌ Echo test failed!")
+                    print("   Response doesn't match sent data.")
+                    print(f"   Sent: {test_message}")
+                    print(f"   Received: {response}")
 
             except Exception as e:
                 logger.error(f"Echo protocol error: {e}")
@@ -330,9 +335,11 @@ def main():
 
     if args.destination:
         # Client mode
+        print("DEBUG: Client mode selected")
         trio.run(run_client, args.destination)
     else:
         # Server mode
+        print("DEBUG: Server mode selected")
         trio.run(run_server, args.port)
 
 

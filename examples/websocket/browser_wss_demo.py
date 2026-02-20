@@ -5,6 +5,10 @@ Browser WSS Demo
 This example demonstrates browser-to-Python WebSocket connectivity using WSS.
 It creates a simple web server that serves an HTML page with JavaScript
 that connects to a libp2p WSS server.
+
+Usage:
+    python examples/websocket/browser_wss_demo.py
+    python examples/websocket/browser_wss_demo.py -p 8443 -w 8080
 """
 
 import argparse
