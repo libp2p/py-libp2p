@@ -27,8 +27,7 @@ from .common import (
 )
 from .pb.kademlia_pb2 import Message, Record
 
-# logger = logging.getLogger("libp2p.kademlia.value_store")
-logger = logging.getLogger("kademlia-example.value_store")
+logger = logging.getLogger(__name__)
 
 
 class ValueStore:
