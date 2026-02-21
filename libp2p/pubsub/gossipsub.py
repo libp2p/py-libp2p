@@ -43,6 +43,11 @@ from libp2p.tools.async_service import (
 from .exceptions import (
     NoPubsubAttached,
 )
+from .extensions import (
+    ExtensionsState,
+    PeerExtensions,
+    TopicObservationState,
+)
 from .mcache import (
     MessageCache,
 )
@@ -64,6 +69,9 @@ from .utils import (
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 PROTOCOL_ID_V11 = TProtocol("/meshsub/1.1.0")
 PROTOCOL_ID_V12 = TProtocol("/meshsub/1.2.0")
+# GossipSub v1.3: Extensions Control Message
+# Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+PROTOCOL_ID_V13 = TProtocol("/meshsub/1.3.0")
 PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
 logger = logging.getLogger("libp2p.pubsub.gossipsub")
@@ -108,6 +116,11 @@ class GossipSub(IPubsubRouter, Service):
         int  # Maximum number of message IDs to track per peer in IDONTWANT lists
     )
 
+    # Gossipsub v1.3 – Extensions Control Message
+    # Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+    extensions_state: ExtensionsState
+    topic_observation: TopicObservationState
+
     # Gossipsub v2.0 adaptive features
     adaptive_gossip_enabled: bool
     network_health_score: float  # 0.0 (poor) to 1.0 (excellent)
@@ -151,6 +164,10 @@ class GossipSub(IPubsubRouter, Service):
         max_messages_per_topic_per_second: float = 10.0,
         eclipse_protection_enabled: bool = True,
         min_mesh_diversity_ips: int = 3,
+        # GossipSub v1.3 – Extensions Control Message
+        # Pass a PeerExtensions instance to advertise your supported extensions
+        # to remote peers in the first message on every new stream.
+        my_extensions: PeerExtensions | None = None,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -197,6 +214,23 @@ class GossipSub(IPubsubRouter, Service):
         self.dont_send_message_ids = dict()
         self.max_idontwant_messages = max_idontwant_messages
 
+        # Gossipsub v1.3 – Extensions Control Message
+        # ExtensionsState tracks:
+        #   - which extensions we advertise (my_extensions)
+        #   - which extensions each peer has advertised (_peer_extensions)
+        #   - whether we have already sent our extensions to a peer (_sent_extensions)
+        self.extensions_state = ExtensionsState(
+            my_extensions=my_extensions or PeerExtensions()
+        )
+        # Wire up the misbehaviour reporter after scorer is initialised.
+        self.extensions_state.set_report_misbehaviour(
+            self._report_extensions_misbehaviour
+        )
+
+        # Topic Observation extension state (per router).
+        # Tracks observers (inbound) and topics we are observing (outbound).
+        self.topic_observation = TopicObservationState()
+
         # Gossipsub v2.0 adaptive features
         self.adaptive_gossip_enabled = adaptive_gossip_enabled
         self.network_health_score = 1.0  # Start optimistic
@@ -223,6 +257,24 @@ class GossipSub(IPubsubRouter, Service):
         return self.peer_protocol.get(peer_id) in (
             PROTOCOL_ID_V11,
             PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V20,
+        )
+
+    def supports_v13_features(self, peer_id: ID) -> bool:
+        """
+        Check if *peer_id* negotiated the GossipSub v1.3 protocol.
+
+        v1.3 is required for the Extensions Control Message mechanism and the
+        Topic Observation extension.  A peer that negotiated v1.3 (or later)
+        MUST have received (and sent) the Extensions control message in the
+        first stream message.
+
+        :param peer_id: The peer to check.
+        :return: True if peer negotiated ``/meshsub/1.3.0`` or later.
+        """
+        return self.peer_protocol.get(peer_id) in (
+            PROTOCOL_ID_V13,
             PROTOCOL_ID_V20,
         )
 
@@ -282,6 +334,7 @@ class GossipSub(IPubsubRouter, Service):
             PROTOCOL_ID,
             PROTOCOL_ID_V11,
             PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
             PROTOCOL_ID_V20,
             floodsub.PROTOCOL_ID,
         ):
@@ -325,6 +378,12 @@ class GossipSub(IPubsubRouter, Service):
         # Clean up security state
         self._cleanup_security_state(peer_id)
 
+        # GossipSub v1.3: clean up extension exchange state for this peer
+        self.extensions_state.remove_peer(peer_id)
+
+        # Topic Observation: clean up observer / observing state for this peer
+        self.topic_observation.remove_peer(peer_id)
+
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
         Invoked to process control messages in the RPC envelope.
@@ -340,6 +399,12 @@ class GossipSub(IPubsubRouter, Service):
                 return
 
         control_message = rpc.control
+
+        # GossipSub v1.3: process Extensions control message BEFORE dispatching
+        # other control messages.  This must happen on every incoming RPC so
+        # that the "at most once" duplicate-detection logic runs correctly.
+        if self.supports_v13_features(sender_peer_id):
+            self.extensions_state.handle_rpc(rpc, sender_peer_id)
 
         # Relay each rpc control message to the appropriate handler
         if control_message.ihave:
@@ -357,6 +422,15 @@ class GossipSub(IPubsubRouter, Service):
         if control_message.idontwant:
             for idontwant in control_message.idontwant:
                 await self.handle_idontwant(idontwant, sender_peer_id)
+
+        # GossipSub v1.3 – Topic Observation extension
+        if self.supports_v13_features(sender_peer_id):
+            if control_message.observe:
+                for observe in control_message.observe:
+                    await self.handle_observe(observe, sender_peer_id)
+            if control_message.unobserve:
+                for unobserve in control_message.unobserve:
+                    await self.handle_unobserve(unobserve, sender_peer_id)
 
     async def publish(self, msg_forwarder: ID, pubsub_msg: rpc_pb2.Message) -> None:
         """Invoked to forward a new message that has been validated."""
@@ -400,6 +474,11 @@ class GossipSub(IPubsubRouter, Service):
 
         # Send IDONTWANT to mesh peers about this message
         await self._emit_idontwant_for_message(msg_id, pubsub_msg.topicIDs)
+
+        # GossipSub v1.3 – Topic Observation: immediately notify observers with IHAVE.
+        # Unlike the heartbeat gossip, notification is sent right after receiving
+        # a message so observers get near-real-time awareness of new messages.
+        await self._notify_observers(pubsub_msg.topicIDs, msg_id)
 
         for peer_id in peers_gen:
             if self.pubsub is None:
@@ -922,7 +1001,13 @@ class GossipSub(IPubsubRouter, Service):
             peer_id
             for peer_id in self.pubsub.peer_topics[topic]
             if self.peer_protocol.get(peer_id)
-            in (PROTOCOL_ID, PROTOCOL_ID_V11, PROTOCOL_ID_V12, PROTOCOL_ID_V20)
+            in (
+                PROTOCOL_ID,
+                PROTOCOL_ID_V11,
+                PROTOCOL_ID_V12,
+                PROTOCOL_ID_V13,
+                PROTOCOL_ID_V20,
+            )
         }
         if backoff_check:
             # filter out peers that are in back off for this topic
@@ -1414,6 +1499,227 @@ class GossipSub(IPubsubRouter, Service):
             sender_peer_id,
             len(self.dont_send_message_ids[sender_peer_id]),
             self.max_idontwant_messages,
+        )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Topic Observation extension handlers              #
+    # ------------------------------------------------------------------ #
+
+    async def handle_observe(
+        self, observe_msg: rpc_pb2.ControlObserve, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle an incoming OBSERVE control message.
+
+        An OBSERVE message is sent by an *observer* peer that wants to receive
+        IHAVE notifications for ``topicID`` without being a full subscriber.
+        After this call, every time a new message for ``topicID`` arrives we
+        will send an IHAVE to *sender_peer_id* immediately (not at the next
+        heartbeat).
+
+        Per the Topic Observation spec, only peers that:
+          1. Negotiated ``/meshsub/1.3.0`` (checked by the caller), AND
+          2. Advertised the ``topicObservation`` extension in their first message
+        should be permitted to send OBSERVE.
+
+        :param observe_msg:    The OBSERVE control message.
+        :param sender_peer_id: ID of the peer that sent the OBSERVE.
+        """
+        topic: str = observe_msg.topicID
+        if not topic:
+            logger.debug(
+                "Received OBSERVE with empty topicID from peer %s, ignoring.",
+                sender_peer_id,
+            )
+            return
+
+        # Only honour OBSERVE if the peer advertised topic_observation support.
+        if not self.extensions_state.peer_supports_topic_observation(sender_peer_id):
+            logger.debug(
+                "Peer %s sent OBSERVE but did not advertise topic_observation "
+                "extension – ignoring.",
+                sender_peer_id,
+            )
+            return
+
+        self.topic_observation.add_observer(topic, sender_peer_id)
+        logger.debug(
+            "OBSERVE: peer %s is now observing topic '%s'.", sender_peer_id, topic
+        )
+
+    async def handle_unobserve(
+        self, unobserve_msg: rpc_pb2.ControlUnobserve, sender_peer_id: ID
+    ) -> None:
+        """
+        Handle an incoming UNOBSERVE control message.
+
+        Stops sending IHAVE notifications to *sender_peer_id* for ``topicID``.
+
+        :param unobserve_msg:  The UNOBSERVE control message.
+        :param sender_peer_id: ID of the peer that sent the UNOBSERVE.
+        """
+        topic: str = unobserve_msg.topicID
+        if not topic:
+            logger.debug(
+                "Received UNOBSERVE with empty topicID from peer %s, ignoring.",
+                sender_peer_id,
+            )
+            return
+
+        self.topic_observation.remove_observer(topic, sender_peer_id)
+        logger.debug(
+            "UNOBSERVE: peer %s stopped observing topic '%s'.",
+            sender_peer_id,
+            topic,
+        )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Topic Observation extension emitters              #
+    # ------------------------------------------------------------------ #
+
+    async def emit_observe(self, topic: str, to_peer: ID) -> None:
+        """
+        Emit an OBSERVE control message to *to_peer* for *topic*.
+
+        Call this when this node wants to observe *topic* via a subscribing
+        peer.  After sending OBSERVE, *to_peer* should begin sending IHAVE
+        to us when new messages arrive in *topic*.
+
+        :param topic:   The topic to start observing.
+        :param to_peer: The subscribing peer to send OBSERVE to.
+        """
+        observe_msg = rpc_pb2.ControlObserve(topicID=topic)
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.observe.extend([observe_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+        self.topic_observation.add_observing(topic, to_peer)
+        logger.debug("OBSERVE sent: topic='%s' to peer %s.", topic, to_peer)
+
+    async def emit_unobserve(self, topic: str, to_peer: ID) -> None:
+        """
+        Emit an UNOBSERVE control message to *to_peer* for *topic*.
+
+        Call this to stop observing *topic* via *to_peer*.
+
+        :param topic:   The topic to stop observing.
+        :param to_peer: The subscribing peer to send UNOBSERVE to.
+        """
+        unobserve_msg = rpc_pb2.ControlUnobserve(topicID=topic)
+        control_msg = rpc_pb2.ControlMessage()
+        control_msg.unobserve.extend([unobserve_msg])
+
+        await self.emit_control_message(control_msg, to_peer)
+        self.topic_observation.remove_observing(topic, to_peer)
+        logger.debug("UNOBSERVE sent: topic='%s' to peer %s.", topic, to_peer)
+
+    async def _notify_observers(self, topic_ids: Iterable[str], msg_id: bytes) -> None:
+        """
+        Immediately send an IHAVE to every observer of each topic in
+        *topic_ids* when a new message arrives.
+
+        Unlike the gossip heartbeat, this notification is *immediate* so that
+        observers get near-real-time awareness (per the Topic Observation spec).
+        Observers are not expected to reply with IWANT in this flow; they use
+        the IHAVE purely as a presence notification.
+
+        :param topic_ids: Topics the new message belongs to.
+        :param msg_id:    The message ID to include in the IHAVE notifications.
+        """
+        if self.pubsub is None:
+            return
+        pubsub = self.pubsub  # narrow type for pyrefly / mypy
+
+        msg_id_str = str(msg_id)
+
+        for topic in topic_ids:
+            observers = self.topic_observation.get_observers(topic)
+            if not observers:
+                continue
+
+            for observer_peer in observers:
+                if observer_peer not in pubsub.peers:
+                    continue
+                await self.emit_ihave(topic, [msg_id_str], observer_peer)
+                logger.debug(
+                    "Topic Observation: sent IHAVE(topic='%s', msg_id=%s) "
+                    "to observer %s.",
+                    topic,
+                    msg_id_str,
+                    observer_peer,
+                )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – Extensions misbehaviour reporting                 #
+    # ------------------------------------------------------------------ #
+
+    def _report_extensions_misbehaviour(self, peer_id: ID) -> None:
+        """
+        Apply a peer-score penalty when a peer sends a duplicate Extensions
+        control message (violates GossipSub v1.3 spec rule 2).
+
+        Mirrors go-libp2p's ``reportMisbehavior`` callback.
+
+        :param peer_id: The misbehaving peer.
+        """
+        if self.scorer is not None:
+            self.scorer.penalize_behavior(peer_id, 1.0)
+            logger.warning(
+                "Applied score penalty to peer %s for sending duplicate "
+                "Extensions control message (GossipSub v1.3 violation).",
+                peer_id,
+            )
+
+    # ------------------------------------------------------------------ #
+    # GossipSub v1.3 – TODO for contributors
+    # ------------------------------------------------------------------ #
+
+    async def start_observing_topic(self, topic: str) -> None:
+        """
+        Start observing *topic* by sending OBSERVE to all in-topic v1.3 peers
+        that support the Topic Observation extension.
+
+        This is the high-level API for callers that want to become an observer.
+        Internally it picks suitable subscriber peers and calls
+        :meth:`emit_observe` for each of them.
+
+        Implementation hints:
+          1. Check ``self.pubsub`` is not None.
+          2. Get the peers subscribed to *topic* from
+             ``self.pubsub.peer_topics.get(topic, set())``.
+          3. For each peer: only send OBSERVE if
+             ``self.supports_v13_features(peer)`` is True AND
+             ``self.extensions_state.both_support_topic_observation(peer)``
+             is True.
+          4. Await ``self.emit_observe(topic, peer)`` for each qualifying peer.
+
+        :param topic: The topic to start observing.
+        """
+        # TODO (contributor): implement start_observing_topic.
+        # See implementation hints in the docstring above.
+        raise NotImplementedError(
+            "start_observing_topic() is left as an easy task for contributors. "
+            "See the docstring for step-by-step implementation hints."
+        )
+
+    async def stop_observing_topic(self, topic: str) -> None:
+        """
+        Stop observing *topic* by sending UNOBSERVE to all peers we previously
+        sent OBSERVE to for *topic*.
+
+        Implementation hints:
+          1. Get the set of peers we sent OBSERVE to via
+             ``self.topic_observation.get_subscriber_peers_for_topic(topic)``.
+             (Note: this calls the TODO method in TopicObservationState.)
+          2. Await ``self.emit_unobserve(topic, peer)`` for each of them.
+
+        :param topic: The topic to stop observing.
+        """
+        # TODO (contributor): implement stop_observing_topic.
+        # See implementation hints in the docstring above.
+        raise NotImplementedError(
+            "stop_observing_topic() is left as an easy task for contributors. "
+            "See the docstring for step-by-step implementation hints."
         )
 
     def _track_peer_ip(self, peer_id: ID) -> None:
