@@ -118,6 +118,8 @@ def get_content_addressed_msg_id(
         from :mod:`libp2p.encoding_config` is used.
     :return: Multibase-encoded message ID
     """
+    from libp2p.encoding_config import get_default_encoding
+
     if encoding is None:
         encoding = get_default_encoding()
     digest = hashlib.sha256(msg.data).digest()
