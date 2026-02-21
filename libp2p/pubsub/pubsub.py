@@ -2,7 +2,6 @@ from __future__ import (
     annotations,
 )
 
-import base64
 from collections.abc import (
     Callable,
     KeysView,
@@ -11,21 +10,13 @@ import functools
 import hashlib
 import logging
 import time
-import typing
 from typing import (
-    TYPE_CHECKING,
     NamedTuple,
+    Protocol,
     cast,
 )
 
-if TYPE_CHECKING:
-    from libp2p.pubsub.extensions import ExtensionsState as _ExtensionsState
-
-    class _RouterWithExtensions(typing.Protocol):
-        extensions_state: _ExtensionsState
-
-
-import base58
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -44,6 +35,7 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.encoding_config import get_default_encoding
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
@@ -67,6 +59,9 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.extensions import (
+    ExtensionsState,
+)
 from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
@@ -94,10 +89,17 @@ from .validators import (
     signature_validator,
 )
 
+
+class _RouterWithExtensions(Protocol):
+    """Protocol for a router that supports GossipSub v1.3 extensions."""
+
+    extensions_state: ExtensionsState
+
+
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
 
-logger = logging.getLogger("libp2p.pubsub")
+logger = logging.getLogger(__name__)
 
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
@@ -105,8 +107,21 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     return msg.seqno + msg.from_id
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
+    """
+    if encoding is None:
+        encoding = get_default_encoding()
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
 
 
 class TopicValidator(NamedTuple):
@@ -583,7 +598,7 @@ class Pubsub(Service, IPubsub):
             # "sent_extensions" per peer for the at-most-once rule.
             # cast() tells static type-checkers the narrowed type without
             # creating a runtime dependency on gossipsub.py from pubsub.py.
-            v13_router = cast("_RouterWithExtensions", router)
+            v13_router = cast(_RouterWithExtensions, router)
             hello = v13_router.extensions_state.build_hello_extensions(peer_id, hello)
 
         try:
@@ -999,7 +1014,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
@@ -1017,10 +1032,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,
