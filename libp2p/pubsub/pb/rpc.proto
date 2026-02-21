@@ -1,4 +1,7 @@
 // Modified from https://github.com/libp2p/go-libp2p-pubsub/blob/master/pb/rpc.proto
+// Updated with GossipSub v1.3 Extensions Control Message support.
+// Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+// extensions.proto: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/extensions/extensions.proto
 
 syntax = "proto2";
 
@@ -15,6 +18,12 @@ message RPC {
 
 	optional ControlMessage control = 3;
 	optional bytes senderRecord = 4;
+
+	// Canonical Extensions register their top-level RPC messages here.
+
+	// Experimental Extensions MUST use field numbers larger than 0x200000
+	// so they are encoded with at least 4 bytes (per GossipSub v1.3 spec).
+	optional TestExtension testExtension = 6492434;
 }
 
 message Message {
@@ -32,6 +41,27 @@ message ControlMessage {
 	repeated ControlGraft graft = 3;
 	repeated ControlPrune prune = 4;
 	repeated ControlIDontWant idontwant = 5;
+
+	// GossipSub v1.3: Extensions control message (MUST be in first message,
+	// MUST NOT be sent more than once per peer).
+	// Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
+	optional ControlExtensions extensions = 6;
+
+	// Topic Observation extension control messages.
+	repeated ControlObserve observe = 7;
+	repeated ControlUnobserve unobserve = 8;
+}
+
+// ControlExtensions advertises which v1.3 extensions the sending peer supports.
+// Peers MUST ignore unknown fields (forward-compatible per spec).
+// Field numbers for experimental extensions MUST be > 0x200000.
+message ControlExtensions {
+	// Set to true if the peer supports the Topic Observation extension.
+	optional bool topicObservation = 1;
+
+	// Experimental extensions use field numbers > 0x200000.
+	// testExtension: used for cross-implementation interop testing (go-libp2p compat).
+	optional bool testExtension = 6492434;
 }
 
 message ControlIHave {
@@ -56,6 +86,24 @@ message ControlPrune {
 message ControlIDontWant {
 	repeated bytes messageIDs = 1;
 }
+
+// ControlObserve: Topic Observation extension.
+// Sent by an observer to start receiving IHAVE notifications for a topic
+// without being a full subscriber. (GossipSub v1.3 Topic Observation extension)
+message ControlObserve {
+	optional string topicID = 1;
+}
+
+// ControlUnobserve: Topic Observation extension.
+// Sent by an observer to stop receiving IHAVE notifications for a topic.
+message ControlUnobserve {
+	optional string topicID = 1;
+}
+
+// TestExtension: used for interoperability testing of the v1.3 extension
+// mechanism between implementations (go-libp2p, rust-libp2p, py-libp2p).
+// An empty message — its presence on the wire is the signal.
+message TestExtension {}
 
 message PeerInfo {
 	optional bytes peerID = 1;

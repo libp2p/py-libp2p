@@ -12,6 +12,7 @@ import logging
 import time
 from typing import (
     NamedTuple,
+    Protocol,
     cast,
 )
 
@@ -34,6 +35,7 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.encoding_config import get_default_encoding
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
@@ -57,6 +59,9 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.extensions import (
+    ExtensionsState,
+)
 from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.async_service import (
     Service,
@@ -84,6 +89,13 @@ from .validators import (
     signature_validator,
 )
 
+
+class _RouterWithExtensions(Protocol):
+    """Protocol for a router that supports GossipSub v1.3 extensions."""
+
+    extensions_state: ExtensionsState
+
+
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
 
@@ -106,8 +118,6 @@ def get_content_addressed_msg_id(
         from :mod:`libp2p.encoding_config` is used.
     :return: Multibase-encoded message ID
     """
-    from libp2p.encoding_config import get_default_encoding
-
     if encoding is None:
         encoding = get_default_encoding()
     digest = hashlib.sha256(msg.data).digest()
@@ -569,15 +579,35 @@ class Pubsub(Service, IPubsub):
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
 
-        # Send hello packet
+        # Build hello packet.
         hello = self.get_hello_packet()
+
+        # GossipSub v1.3 – Extensions Control Message injection.
+        # Per spec: "If a peer supports any extension, the Extensions control
+        # message MUST be included in the first message on the stream."
+        # We ask the router (if it is a v1.3-capable GossipSub router) to
+        # attach ControlExtensions to the hello packet before we serialise it.
+        # This is done via duck-typing so pubsub.py stays decoupled from
+        # gossipsub.py (matching the existing architecture).
+        negotiated_protocol = stream.get_protocol()
+        router = self.router
+        if hasattr(router, "extensions_state") and hasattr(
+            router, "supports_v13_features"
+        ):
+            # We pass the peer_id because extensions_state needs to track
+            # "sent_extensions" per peer for the at-most-once rule.
+            # cast() tells static type-checkers the narrowed type without
+            # creating a runtime dependency on gossipsub.py from pubsub.py.
+            v13_router = cast(_RouterWithExtensions, router)
+            hello = v13_router.extensions_state.build_hello_extensions(peer_id, hello)
+
         try:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             return
         try:
-            self.router.add_peer(peer_id, stream.get_protocol())
+            self.router.add_peer(peer_id, negotiated_protocol)
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
