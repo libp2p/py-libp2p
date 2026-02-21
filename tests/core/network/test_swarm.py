@@ -290,6 +290,7 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_quic=True,
         enable_autotls=True,
     )
+    assert isinstance(swarm_direct, Swarm)
     assert isinstance(swarm_direct.transport, _FakeQUICTransport)
     assert swarm_direct.transport.enable_autotls is True
 
@@ -315,6 +316,7 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_autotls=True,
     )
     assert registry_calls[0]["enable_autotls"] is True
+    assert isinstance(swarm_registry, Swarm)
     assert isinstance(swarm_registry.transport, _FakeQUICTransport)
     assert swarm_registry.transport.enable_autotls is True
 
@@ -336,6 +338,7 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_quic=True,
         enable_autotls=True,
     )
+    assert isinstance(swarm_forced, Swarm)
     assert isinstance(swarm_forced.transport, _FakeQUICTransport)
     assert swarm_forced.transport.enable_autotls is True
 
