@@ -527,24 +527,33 @@ class BasicHost(IHost):
             for addr in all_addrs:
                 try:
                     ip = addr.value_for_protocol("ip4")
-                    if ip and not is_private_ip(ip):
-                        public_ip = ip
-                        port = addr.value_for_protocol("tcp")
-                        if port:
-                            break
                 except Exception:
                     continue
 
-            if not public_ip or not port:
+                if ip and not is_private_ip(ip):
+                    public_ip = ip
+                    break
+
+            if not public_ip:
                 raise RuntimeError(
                     "No public IP address found in listening addresses. "
                     "AutoTLS requires at least one publicly reachable IPv4 address."
                 )
-        port = self.get_addrs()[0].value_for_protocol("tcp")
+        # Detect transport type and construct appropriate multiaddr for broker
+        addr = self.get_addrs()[0]
+        is_quic = "quic" in str(addr) or "quic-v1" in str(addr)
+        try:
+            port = addr.value_for_protocol("tcp")
+            transport_part = f"/tcp/{port}"
+        except Exception:
+            port = addr.value_for_protocol("udp")
+            transport_part = f"/udp/{port}/quic-v1" if is_quic else f"/udp/{port}"
 
         broker = BrokerClient(
             self.get_private_key(),
-            multiaddr.Multiaddr(f"/ip4/{public_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            multiaddr.Multiaddr(
+                f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"
+            ),
             acme.key_auth,
             acme.b36_peerid,
         )
