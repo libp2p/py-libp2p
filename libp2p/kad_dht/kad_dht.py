@@ -35,6 +35,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.ipns import IPNSValidator
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
@@ -269,15 +270,20 @@ class KadDHT(Service):
         the default validator set hasn't been overridden.
         """
         if not self.validator_changed:
+            # Ensure validator is a NamespacedValidator (cannot be None at this point)
             if not isinstance(self.validator, NamespacedValidator):
                 raise ValueError(
                     "Default validator was changed without marking it True"
                 )
 
-            if "pk" not in self.validator._validators:
-                self.validator._validators["pk"] = PublicKeyValidator()
+            # Use a local variable to help type checker narrow the type
+            validator = self.validator
 
-            # TODO: Do the same thing for ipns, but need to implement first.
+            # Add missing default validators
+            if "pk" not in validator._validators:
+                validator._validators["pk"] = PublicKeyValidator()
+            if "ipns" not in validator._validators:
+                validator._validators["ipns"] = IPNSValidator()
 
     def validate_config(self) -> None:
         """
@@ -305,15 +311,18 @@ class KadDHT(Service):
 
         vmap = self.validator._validators
 
-        # TODO: Need to add ipns also in the check
-        if set(vmap.keys()) != {"pk"}:
+        # Check that both pk and ipns validators are present
+        required_validators = {"pk", "ipns"}
+        if not required_validators.issubset(set(vmap.keys())):
             raise ValueError(f"{PROTOCOL_PREFIX} must have 'pk' and 'ipns' validators")
 
         pk_validator = vmap.get("pk")
         if not isinstance(pk_validator, PublicKeyValidator):
-            raise TypeError("'pk' namesapce must use PublicKeyValidator")
+            raise TypeError("'pk' namespace must use PublicKeyValidator")
 
-        # TODO: ipns checks
+        ipns_validator = vmap.get("ipns")
+        if not isinstance(ipns_validator, IPNSValidator):
+            raise TypeError("'ipns' namespace must use IPNSValidator")
 
     def set_validator(self, val: NamespacedValidator) -> None:
         """
