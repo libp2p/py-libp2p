@@ -3,9 +3,10 @@ from unittest.mock import (
 )
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import ISecureConn
+from libp2p.abc import ConnectionType, ISecureConn
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -48,6 +49,14 @@ class DummySecuredConn(ISecureConn):
 
     def get_remote_public_key(self) -> PublicKey:
         return Mock(spec=PublicKey)  # Dummy key
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 @pytest.mark.trio
