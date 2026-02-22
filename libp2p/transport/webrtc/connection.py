@@ -15,7 +15,7 @@ from trio import (
     MemorySendChannel,
 )
 
-from libp2p.abc import IMuxedConn, INetStream, IRawConnection
+from libp2p.abc import ConnectionType, IMuxedConn, INetStream, IRawConnection
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 
@@ -241,6 +241,17 @@ class WebRTCRawConnection(IRawConnection):
     def channel(self) -> RTCDataChannel:
         """Backward compatibility property."""
         return self.data_channel
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        addrs: list[Multiaddr] = []
+        if self.remote_multiaddr is not None:
+            addrs.append(self.remote_multiaddr)
+        if self.local_multiaddr is not None and self.local_multiaddr not in addrs:
+            addrs.append(self.local_multiaddr)
+        return addrs
+
+    def get_connection_type(self) -> ConnectionType:
+        return ConnectionType.DIRECT
 
     def _schedule_sync(self, fn: Any, *args: Any) -> None:
         """

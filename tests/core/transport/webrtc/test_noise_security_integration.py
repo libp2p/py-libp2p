@@ -8,7 +8,7 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p import create_yamux_muxer_option, generate_peer_id_from
-from libp2p.abc import IMuxedConn, IMuxedStream, ISecureConn
+from libp2p.abc import ConnectionType, IMuxedConn, IMuxedStream, ISecureConn
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.crypto.secp256k1 import create_new_key_pair as create_secp256k1_key_pair
@@ -87,6 +87,12 @@ class MockMuxedConn(IMuxedConn):
 
     def get_streams(self) -> tuple[IMuxedStream, ...]:
         return tuple(self._streams)
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        return ConnectionType.DIRECT
 
 
 class StubChannel:
@@ -274,6 +280,12 @@ async def test_connect_uses_security_multistream(
         def get_remote_public_key(self) -> PublicKey:
             return create_new_key_pair().public_key
 
+        def get_transport_addresses(self) -> list[Multiaddr]:
+            return [self.remote_multiaddr] if self.remote_multiaddr else []
+
+        def get_connection_type(self) -> ConnectionType:
+            return ConnectionType.DIRECT
+
     secure_inbound_called = False
 
     async def mock_secure_inbound(conn: Any) -> ISecureConn:
@@ -400,6 +412,12 @@ async def test_transport_manager_skips_security_for_secure_conn() -> None:
 
         def get_remote_public_key(self) -> PublicKey:
             return create_new_key_pair().public_key
+
+        def get_transport_addresses(self) -> list[Multiaddr]:
+            return []
+
+        def get_connection_type(self) -> ConnectionType:
+            return ConnectionType.DIRECT
 
     secure_conn = MockSecureConn(local_peer, remote_peer)
     transport = StubTransport(secure_conn)
@@ -542,6 +560,12 @@ async def test_register_incoming_connection_accepts_presecured_conn() -> None:
 
         def get_remote_public_key(self) -> PublicKey:
             return create_new_key_pair().public_key
+
+        def get_transport_addresses(self) -> list[Multiaddr]:
+            return []
+
+        def get_connection_type(self) -> ConnectionType:
+            return ConnectionType.DIRECT
 
     secure_conn = MockSecureConn(local_peer, remote_peer)
     secure_conn.remote_peer_id = remote_peer
