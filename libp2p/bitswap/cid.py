@@ -22,6 +22,7 @@ for dag-jose, dag-json, and experimental codecs.
 """
 
 import hashlib
+from typing import TypeAlias
 
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
@@ -36,8 +37,8 @@ CID_V1 = 1
 CODEC_DAG_PB: Code = DAG_PB
 CODEC_RAW: Code = RAW
 HASH_SHA256: Code = SHA2_256
-CIDInput = bytes | str | CIDv0 | CIDv1
-CIDObject = CIDv0 | CIDv1
+CIDInput: TypeAlias = bytes | str | CIDv0 | CIDv1
+CIDObject: TypeAlias = CIDv0 | CIDv1
 
 
 def _normalise_codec(codec: Code | str | int) -> Code:
@@ -125,7 +126,7 @@ def get_cid_prefix(cid: bytes) -> bytes:
     # CIDv0 - no prefix needed for v1.0.0.
     try:
         cid_obj = parse_cid(cid)
-    except Exception:
+    except ValueError:
         return b""
 
     if cid_obj.version != CID_V1:
@@ -154,7 +155,7 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
 
     try:
         return Prefix.from_bytes(prefix).sum(data).buffer
-    except Exception:
+    except ValueError:
         # Preserve previous permissive behavior for malformed prefixes.
         digest = hashlib.sha256(data).digest()
         return prefix + digest
@@ -181,13 +182,13 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
     logger.debug(f"        Data size: {len(data)} bytes")
     try:
         cid_obj = parse_cid(cid)
-    except Exception:
+    except ValueError:
         logger.debug("        No valid CID format detected")
         return False
 
     try:
         recomputed = cid_obj.prefix().sum(data).buffer
-    except Exception:
+    except ValueError:
         logger.debug("        Failed to recompute CID from parsed prefix")
         return False
 
@@ -201,7 +202,8 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
     Parse and validate CID input into a py-cid object.
 
     Accepts CID bytes, canonical CID text/path strings, hex-encoded CID bytes,
-    or existing py-cid objects.
+    or existing py-cid objects. Hex-encoded strings (with or without a leading
+    ``0x``) are accepted when canonical CID string parsing fails.
     """
     if isinstance(value, (CIDv0, CIDv1)):
         return value
@@ -266,7 +268,7 @@ def parse_cid_version(cid: bytes) -> int:
 
     try:
         return parse_cid(cid).version
-    except Exception:
+    except ValueError:
         # Preserve previous behavior for malformed CIDs.
         if cid[0] == CID_V1:
             return CID_V1
@@ -311,7 +313,7 @@ def parse_cid_codec(cid: bytes) -> str:
     """
     try:
         cid_obj = parse_cid(cid)
-    except Exception:
+    except ValueError:
         # Preserve previous fallback behavior.
         return DAG_PB.name
 
