@@ -44,14 +44,24 @@ class MultiselectClient(IMultiselectClient):
         """
         try:
             logger.debug("MultiselectClient: writing handshake")
-            await communicator.write(MULTISELECT_PROTOCOL_ID)
+            await with_timeout(
+                communicator.write(MULTISELECT_PROTOCOL_ID),
+                negotiate_timeout,
+                f"handshake write timed out after {negotiate_timeout}s",
+                MultiselectClientError,
+            )
         except MultiselectCommunicatorError as error:
             logger.error("MultiselectClient handshake: write failed: %s", error)
             raise MultiselectClientError(f"handshake write failed: {error}") from error
 
         try:
             logger.debug("MultiselectClient handshake: reading response")
-            handshake_contents = await communicator.read()
+            handshake_contents = await with_timeout(
+                communicator.read(),
+                negotiate_timeout,
+                f"handshake read timed out after {negotiate_timeout}s",
+                MultiselectClientError,
+            )
             logger.debug("MultiselectClient handshake: received %r", handshake_contents)
 
         except MultiselectCommunicatorError as error:
@@ -130,38 +140,44 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
-        await self.handshake(communicator, response_timeout)
-
-        if command == "ls":
-            try:
-                await with_timeout(
-                    communicator.write("ls"),
-                    response_timeout,
-                    "response timed out",
-                    MultiselectClientError,
-                )
-            except MultiselectCommunicatorError as error:
-                raise MultiselectClientError(
-                    f"command write failed: {error}, command={command}"
-                ) from error
-        else:
-            raise ValueError("Command not supported")
-
         try:
-            response = await with_timeout(
-                communicator.read(),
-                response_timeout,
-                "response timed out",
-                MultiselectClientError,
-            )
-            response_list = response.strip().splitlines()
+            with trio.fail_after(response_timeout):
+                await self.handshake(communicator, response_timeout)
 
-        except MultiselectCommunicatorError as error:
+                if command == "ls":
+                    try:
+                        await with_timeout(
+                            communicator.write("ls"),
+                            response_timeout,
+                            "response timed out",
+                            MultiselectClientError,
+                        )
+                    except MultiselectCommunicatorError as error:
+                        raise MultiselectClientError(
+                            f"command write failed: {error}, command={command}"
+                        ) from error
+                else:
+                    raise ValueError("Command not supported")
+
+                try:
+                    response = await with_timeout(
+                        communicator.read(),
+                        response_timeout,
+                        "response timed out",
+                        MultiselectClientError,
+                    )
+                    response_list = response.strip().splitlines()
+
+                except MultiselectCommunicatorError as error:
+                    raise MultiselectClientError(
+                        f"command read failed: {error}, command={command}"
+                    ) from error
+
+                return response_list
+        except trio.TooSlowError as e:
             raise MultiselectClientError(
-                f"command read failed: {error}, command={command}"
-            ) from error
-
-        return response_list
+                f"response timed out after {response_timeout}s"
+            ) from e
 
     async def try_select(
         self,

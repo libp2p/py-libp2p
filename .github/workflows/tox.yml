@@ -14,7 +14,7 @@ defaults:
 jobs:
   tox:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # 1 hour timeout
+    timeout-minutes: 60 # 1 hour timeout
     strategy:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
@@ -73,7 +73,7 @@ jobs:
         if: matrix.toxenv == 'interop'
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - run: |
           uv venv venv
@@ -104,7 +104,7 @@ jobs:
   webrtc-serial:
     name: WebRTC Transport Tests (Serial)
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # 1 hour timeout
+    timeout-minutes: 60 # 1 hour timeout
     strategy:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13"]
@@ -123,8 +123,7 @@ jobs:
           uv venv venv
           source venv/bin/activate
           uv pip install --upgrade pip
-          uv pip install -e ".[dev,webrtc]"
-          uv pip install pytest pytest-trio pytest-timeout
+          uv pip install --group dev -e .
       - name: Run WebRTC tests serially
         run: |
           source venv/bin/activate
@@ -132,7 +131,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 60  # 1 hour timeout
+    timeout-minutes: 60 # 1 hour timeout
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
@@ -158,8 +157,9 @@ jobs:
         shell: bash
         run: |
           source venv/Scripts/activate
+          PYVER=$(echo "${{ matrix.python-version }}" | tr -d '.')
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
             python -m tox run -e windows-wheel
           else
-            python -m tox run -e py${{ matrix.python-version }}-${{ matrix.toxenv }}
+            python -m tox run -e "py${PYVER}-${{ matrix.toxenv }}"
           fi

@@ -15,13 +15,13 @@ from libp2p.abc import IHost, IListener, IRawConnection, ISecureConn, ITransport
 from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
 from libp2p.relay.circuit_v2.nat import ReachabilityChecker
-from libp2p.stream_muxer.yamux.yamux import Yamux
 from libp2p.transport.exceptions import OpenConnectionError
 
 from ..async_bridge import get_webrtc_bridge
 from ..constants import (
     DEFAULT_DIAL_TIMEOUT,
     DEFAULT_ICE_SERVERS,
+    MUXER_NEGOTIATE_TIMEOUT,
     WebRTCError,
 )
 from ..signal_service import SignalService
@@ -701,7 +701,9 @@ class WebRTCDirectTransport(ITransport):
                                     "Waiting for buffer consumer ready for %s", peer_id
                                 )
                                 # Wait with timeout to avoid infinite wait
-                                with trio.move_on_after(2.0) as timeout_scope:
+                                # Increased from 2.0s to 5.0s to give the data
+                                # pump system task more time to start under load
+                                with trio.move_on_after(5.0) as timeout_scope:
                                     await raw_conn_check._buffer_consumer_ready.wait()
 
                                 if timeout_scope.cancelled_caught:
@@ -752,14 +754,30 @@ class WebRTCDirectTransport(ITransport):
                     print(f"[DEBUG] Stack before upgrade_connection:\n{stack_str}")
 
                     try:
-                        muxed_conn = await swarm.upgrader.upgrade_connection(
-                            cast(ISecureConn, secure_conn), peer_id
-                        )
+                        with trio.fail_after(MUXER_NEGOTIATE_TIMEOUT):
+                            muxed_conn = await swarm.upgrader.upgrade_connection(
+                                cast(ISecureConn, secure_conn), peer_id
+                            )
                         print(f"[DEBUG] upgrade_connection() returned for {peer_id}")
                         logger.info(
                             f"✅ upgrade_connection() completed for {peer_id}, "
                             f"muxed_conn type: {type(muxed_conn).__name__}"
                         )
+                    except trio.TooSlowError as muxer_timeout_exc:
+                        logger.error(
+                            "Muxer negotiation timed out after %.1fs "
+                            "for peer=%s. This usually means the remote "
+                            "side did not start its muxer negotiation, "
+                            "or the data channel pipeline is stalled.",
+                            MUXER_NEGOTIATE_TIMEOUT,
+                            peer_id,
+                        )
+                        raise OpenConnectionError(
+                            f"Muxer negotiation timed out after "
+                            f"{MUXER_NEGOTIATE_TIMEOUT}s for {peer_id}. "
+                            f"Check that both peers are running compatible "
+                            f"muxer protocols and data channels are flowing."
+                        ) from muxer_timeout_exc
                     except Exception as upgrade_inner_exc:
                         print("[DEBUG] upgrade_connection() raised:", upgrade_inner_exc)
                         logger.error(
@@ -1035,7 +1053,7 @@ class WebRTCDirectTransport(ITransport):
                             f"🔵 Listener waiting for buffer consumer "
                             f"to be ready for {remote_peer_id}..."
                         )
-                        with trio.move_on_after(2.0) as timeout_scope:
+                        with trio.move_on_after(5.0) as timeout_scope:
                             await raw_conn_check._buffer_consumer_ready.wait()
 
                         if timeout_scope.cancelled_caught:
@@ -1055,9 +1073,10 @@ class WebRTCDirectTransport(ITransport):
                     "(responder path: will READ first, waiting for dialer)",
                     remote_peer_id,
                 )
-                muxed_conn = await swarm.upgrader.upgrade_connection(
-                    secured_conn, remote_peer_id
-                )
+                with trio.fail_after(MUXER_NEGOTIATE_TIMEOUT):
+                    muxed_conn = await swarm.upgrader.upgrade_connection(
+                        secured_conn, remote_peer_id
+                    )
 
                 # CRITICAL FIX: Set ownership event
                 # ONLY AFTER muxer negotiation completes
@@ -1080,23 +1099,28 @@ class WebRTCDirectTransport(ITransport):
                     type(muxed_conn).__name__,
                 )
 
-                if isinstance(muxed_conn, Yamux):
-                    logger.info(
-                        "🟢 Starting listener yamux read loop for %s",
-                        remote_peer_id,
-                    )
-                    try:
-                        await muxed_conn.start()
-                        logger.info(
-                            "✅ Listener yamux read loop started for %s", remote_peer_id
-                        )
-                    except Exception as start_exc:
-                        logger.error(
-                            "❌ Failed to start listener yamux for %s: %s",
-                            remote_peer_id,
-                            start_exc,
-                            exc_info=True,
-                        )
+                logger.info(
+                    "🟢 Listener registering muxed conn with swarm for %s",
+                    remote_peer_id,
+                )
+                await swarm.add_conn(muxed_conn)
+                logger.info(
+                    "✅ Listener swarm.add_conn() completed for %s - "
+                    "stream accept loop is now running",
+                    remote_peer_id,
+                )
+            except trio.TooSlowError:
+                logger.error(
+                    "Listener muxer negotiation timed out after %.1fs "
+                    "for %s. The dialer may not have started its "
+                    "muxer negotiation, or the data channel pipeline "
+                    "is stalled.",
+                    MUXER_NEGOTIATE_TIMEOUT,
+                    remote_peer_id,
+                )
+                pc = getattr(secured_conn, "_webrtc_peer_connection", None)
+                if pc is not None:
+                    unregister_upgrade(pc)
             except Exception as listener_upgrade_exc:
                 logger.error(
                     "Listener failed to upgrade connection for %s: %s",

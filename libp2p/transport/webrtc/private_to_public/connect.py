@@ -1777,28 +1777,10 @@ async def connect(
                     f"{role} Noise handshake completed, upgrade protection active"
                 )
 
-                # Validate secure_conn.write() uses real DataChannel
-                # (Noise wired to raw).
-                logger.debug(
-                    f"{role} Validating secure_conn.write() uses real DataChannel..."
+                logger.info(
+                    "%s Noise handshake completed - stream ready for muxer negotiation",
+                    role,
                 )
-                try:
-                    test_ping = b"PING\n"
-                    await secure_conn.write(test_ping)
-                    logger.info(
-                        "%s secure_conn.write() OK - transport validation passed",
-                        role,
-                    )
-                except Exception as write_test_exc:
-                    logger.error(
-                        f"❌ {role} secure_conn.write() FAILED: {write_test_exc}",
-                        exc_info=True,
-                    )
-                    # This indicates Noise is not properly wired to the DataChannel
-                    raise RuntimeError(
-                        "Transport validation failed: secure_conn.write() %s"
-                        % write_test_exc
-                    ) from write_test_exc
             except Exception as handshake_error:
                 # Mark handshake as no longer in progress
                 raw_connection._handshake_in_progress = False

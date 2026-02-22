@@ -20,6 +20,7 @@ from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
 
 from .async_bridge import WebRTCAsyncBridge
+from .constants import MUXER_READ_TIMEOUT
 
 logger = logging.getLogger("libp2p.transport.webrtc.connection")
 
@@ -640,15 +641,22 @@ class WebRTCRawConnection(IRawConnection):
                         f"🔵 FIRST MESSAGE CONSUMED from buffer for {self.peer_id}"
                     )
 
-                # Process via unified pipeline
+                # Deliver to send_channel for read() to consume.
+                # Note: dedup/JSON-muxing is handled in on_data_channel_message
+                # path; data pump just forwards raw bytes from the inbound channel.
                 try:
-                    if hasattr(self, "_process_inbound_payload"):
-                        self._process_inbound_payload(data)
-                    else:
-                        # Direct delivery if processor not initialized
-                        self.send_channel.send_nowait(data)
+                    self.send_channel.send_nowait(data)
+                except trio.WouldBlock:
+                    logger.warning(
+                        "send_channel full in data pump for %s - "
+                        "potential backpressure during muxer negotiation",
+                        self.peer_id,
+                    )
+                except trio.ClosedResourceError:
+                    logger.debug("send_channel closed in data pump")
+                    break
                 except Exception as proc_err:
-                    logger.error(f"Error processing buffered message: {proc_err}")
+                    logger.error(f"Error delivering buffered message: {proc_err}")
         except Exception as e:
             if not self._closed:
                 logger.error(
@@ -954,8 +962,32 @@ class WebRTCRawConnection(IRawConnection):
                 if not self._read_buffer:
                     try:
                         logger.debug("MUXER read wait (n=None) peer=%s", self.peer_id)
-                        data = await self.receive_channel.receive()
+                        with trio.move_on_after(MUXER_READ_TIMEOUT) as read_scope:
+                            data = await self.receive_channel.receive()
+                        if read_scope.cancelled_caught:
+                            ch_state = getattr(
+                                self.data_channel, "readyState", "unknown"
+                            )
+                            conn_state = getattr(
+                                self.peer_connection, "connectionState", "unknown"
+                            )
+                            logger.error(
+                                "read() timed out after %.1fs for %s "
+                                "(channel=%s, conn=%s) - "
+                                "data pipeline may be stalled",
+                                MUXER_READ_TIMEOUT,
+                                self.peer_id,
+                                ch_state,
+                                conn_state,
+                            )
+                            raise trio.TooSlowError(
+                                f"WebRTC read timed out after "
+                                f"{MUXER_READ_TIMEOUT}s "
+                                f"(channel={ch_state}, conn={conn_state})"
+                            )
                         self._read_buffer = data
+                    except trio.TooSlowError:
+                        raise
                     except trio.ClosedResourceError:
                         self._closed = True
                         return b""
@@ -982,8 +1014,28 @@ class WebRTCRawConnection(IRawConnection):
             if not self._read_buffer:
                 try:
                     logger.debug("MUXER read wait n=%s peer=%s", n, self.peer_id)
-                    data = await self.receive_channel.receive()
+                    with trio.move_on_after(MUXER_READ_TIMEOUT) as read_scope:
+                        data = await self.receive_channel.receive()
+                    if read_scope.cancelled_caught:
+                        ch_state = getattr(self.data_channel, "readyState", "unknown")
+                        conn_state = getattr(
+                            self.peer_connection, "connectionState", "unknown"
+                        )
+                        logger.error(
+                            "read(n=%s) timed out after %.1fs for %s "
+                            "(channel=%s, conn=%s)",
+                            n,
+                            MUXER_READ_TIMEOUT,
+                            self.peer_id,
+                            ch_state,
+                            conn_state,
+                        )
+                        raise trio.TooSlowError(
+                            f"WebRTC read timed out after {MUXER_READ_TIMEOUT}s"
+                        )
                     self._read_buffer = data
+                except trio.TooSlowError:
+                    raise
                 except trio.ClosedResourceError:
                     self._closed = True
                     return b""

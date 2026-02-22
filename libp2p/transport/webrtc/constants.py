@@ -114,6 +114,8 @@ DEFAULT_HANDSHAKE_TIMEOUT = 40.0  # seconds
 DEFAULT_ICE_GATHERING_TIMEOUT = 10.0  # seconds
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 1.0  # seconds
+MUXER_NEGOTIATE_TIMEOUT = 45.0  # seconds - dedicated muxer negotiation timeout
+MUXER_READ_TIMEOUT = 30.0  # seconds - per-read timeout during muxer negotiation
 
 # Buffer sizes
 DEFAULT_STREAM_BUFFER_SIZE = 64 * 1024  # 64KB
