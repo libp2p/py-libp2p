@@ -1,4 +1,3 @@
-import asyncio
 from asyncio import AbstractEventLoop
 import logging
 from typing import TYPE_CHECKING, Any, cast
@@ -6,7 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
 from multiaddr import Multiaddr
 import trio
-from trio_asyncio import aio_as_trio, open_loop
+from trio_asyncio import aio_as_trio
 
 from libp2p.abc import (
     IListener,
@@ -30,6 +29,7 @@ from libp2p.tools.async_service.abc import ManagerAPI
 from libp2p.tools.async_service.trio_service import TrioManager
 from libp2p.transport.exceptions import OpenConnectionError
 
+from ..async_bridge import get_webrtc_bridge, with_webrtc_context
 from ..constants import (
     DEFAULT_DIAL_TIMEOUT,
     DEFAULT_ICE_SERVERS,
@@ -78,6 +78,9 @@ class WebRTCTransport(ITransport):
         # Trio-asyncio integration
         self._asyncio_loop: AbstractEventLoop | None = None
         self._loop_future = None
+        self._loop_holder_stop = trio.Event()
+        self._loop_ready = trio.Event()
+        self._loop_holder_exited = trio.Event()
 
         # Metrics and monitoring
         self.metrics = None
@@ -110,18 +113,12 @@ class WebRTCTransport(ITransport):
             raise WebRTCError("Host must be set before starting transport")
 
         try:
-            # Ensure we have an asyncio event loop for aiortc
-            try:
-                self._asyncio_loop = asyncio.get_running_loop()
-                logger.debug("Using existing asyncio event loop")
-            except RuntimeError:
-                # open_loop() returns an AsyncContextManager, not an
-                #  AbstractEventLoop, hence
-                # use it in context managers when needed
-                logger.debug(
-                    "No asyncio event loop"
-                    "-using trio_asyncio context managers for aiortc operations"
-                )
+            self._loop_holder_stop = trio.Event()
+            self._loop_ready = trio.Event()
+            self._loop_holder_exited = trio.Event()
+            trio.lowlevel.spawn_system_task(self._hold_loop_open)
+            await self._loop_ready.wait()
+            logger.info("WebRTC asyncio loop held open for transport lifetime")
 
             # Register signaling protocol handler with the host
             # This follows the pattern used by other protocols like DHT and pubsub
@@ -143,6 +140,16 @@ class WebRTCTransport(ITransport):
         except Exception as e:
             logger.error(f"Failed to start WebRTC transport: {e}")
             raise WebRTCError(f"Transport start failed: {e}") from e
+
+    async def _hold_loop_open(self) -> None:
+        """Keep asyncio loop open so aiortc/aioice run in a stable context."""
+        bridge = get_webrtc_bridge()
+        async with bridge:
+            self._loop_ready.set()
+            try:
+                await self._loop_holder_stop.wait()
+            finally:
+                self._loop_holder_exited.set()
 
     async def stop(self) -> None:
         """Stop the WebRTC transport and clean up resources."""
@@ -175,6 +182,10 @@ class WebRTCTransport(ITransport):
             self._signaling_ready.clear()
             self._advertised_addrs = []
             self._reachability_checker = None
+
+            self._loop_holder_stop.set()
+            with trio.move_on_after(2.0):
+                await self._loop_holder_exited.wait()
 
         except Exception as e:
             logger.error(f"Error stopping WebRTC transport: {e}")
@@ -241,14 +252,13 @@ class WebRTCTransport(ITransport):
             ]
             rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
 
-            # Initiate connection through circuit relay with proper async context
-            async with open_loop():
-                connection = await initiate_connection(
-                    maddr=maddr,
-                    rtc_config=rtc_config,
-                    host=self.host,
-                    timeout=DEFAULT_DIAL_TIMEOUT,
-                )
+            connection = await with_webrtc_context(
+                initiate_connection,
+                maddr=maddr,
+                rtc_config=rtc_config,
+                host=self.host,
+                timeout=DEFAULT_DIAL_TIMEOUT,
+            )
 
             # Track connection
             remote_peer_id = getattr(connection, "remote_peer_id", None)
@@ -321,19 +331,19 @@ class WebRTCTransport(ITransport):
             ]
             rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
 
-            # Handle the signaling stream with proper async context
-            async with open_loop():
+            async def _handle_and_register() -> IRawConnection | None:
                 result = await handle_incoming_stream(
                     stream=stream,
                     rtc_config=rtc_config,
                     connection_info=connection_info,
                     host=self.host,
                 )
+                if result:
+                    await self.register_incoming_connection(result)
+                return result
 
-            # Track connection if successful
-            if result:
-                await self.register_incoming_connection(result)
-            else:
+            result = await with_webrtc_context(_handle_and_register)
+            if not result:
                 logger.warning("Signaling stream handling returned no connection")
 
         except Exception as e:
@@ -695,8 +705,7 @@ class WebRTCTransport(ITransport):
             if conn_id in self.pending_connections:
                 pc = self.pending_connections.pop(conn_id)
                 try:
-                    async with open_loop():
-                        await aio_as_trio(pc.close())
+                    await with_webrtc_context(lambda: aio_as_trio(pc.close()))
                     logger.debug(f"Closed pending peer connection {conn_id}")
                 except Exception as e:
                     logger.warning(f"Error closing peer connection {conn_id}: {e}")
@@ -733,7 +742,7 @@ class WebRTCTransport(ITransport):
             ]
             rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
 
-            async with open_loop():
+            async def _handle_and_register() -> IRawConnection | None:
                 result = await handle_incoming_stream(
                     stream=stream,
                     rtc_config=rtc_config,
@@ -741,11 +750,13 @@ class WebRTCTransport(ITransport):
                     host=self.host,
                     timeout=DEFAULT_DIAL_TIMEOUT,
                 )
-
                 if result:
                     await self.register_incoming_connection(result)
-                else:
-                    logger.warning("Signaling stream handling failed")
+                return result
+
+            result = await with_webrtc_context(_handle_and_register)
+            if not result:
+                logger.warning("Signaling stream handling failed")
 
         except Exception as e:
             logger.error(f"Error in _on_protocol: {e}")
@@ -959,6 +970,24 @@ class WebRTCTransport(ITransport):
                 if data_channel is not None
                 else "N/A"
             )
+
+            # CRITICAL: Wait for buffer consumer/pump to be ready before upgrade.
+            # The answerer's read() must receive dialer's Noise messages; the data
+            # pump must be running and ready to forward channel data to read().
+            if hasattr(connection, "_buffer_consumer_ready"):
+                with trio.move_on_after(2.0) as pump_scope:
+                    await connection._buffer_consumer_ready.wait()
+                if pump_scope.cancelled_caught:
+                    logger.warning(
+                        "Buffer consumer ready timeout for %s - proceeding anyway",
+                        remote_peer_id,
+                    )
+                else:
+                    logger.debug(
+                        "Buffer consumer ready for %s before security upgrade",
+                        remote_peer_id,
+                    )
+                await trio.sleep(0.05)
 
             # For incoming connections, swarm uses is_initiator=False (responder)
             # The connection listener waits for the dialer

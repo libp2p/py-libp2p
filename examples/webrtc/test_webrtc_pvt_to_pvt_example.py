@@ -30,8 +30,10 @@ import trio
 
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
 from libp2p.relay.circuit_v2.config import RelayLimits
 from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID as RELAY_HOP_PROTOCOL_ID,
@@ -42,7 +44,6 @@ from libp2p.stream_muxer.yamux.yamux import YamuxStream
 from libp2p.tools.async_service.trio_service import background_trio_service
 from libp2p.tools.utils import connect
 from libp2p.transport.webrtc import multiaddr_protocols  # noqa: F401
-from libp2p.transport.webrtc.connection import WebRTCRawConnection
 from libp2p.transport.webrtc.private_to_private.transport import WebRTCTransport
 from libp2p.transport.webrtc.private_to_private.util import split_addr
 
@@ -320,8 +321,10 @@ async def test_webrtc_private_to_private() -> None:
                     # Wait a bit for relay discovery to run
                     await trio.sleep(1.0)
 
-                    # Step 4: Start listener on Peer B
-                    # (equivalent to browser B listening)
+                    # Step 4: Set stream handler and start listener on Peer B
+                    nat_peer_b.set_stream_handler(
+                        TProtocol("/echo/1.0.0"), echo_stream_handler
+                    )
                     logger.info("🔧 Starting WebRTC listener on Peer B...")
                     listener_b = transport_b.create_listener(echo_stream_handler)
 
@@ -385,8 +388,7 @@ async def test_webrtc_private_to_private() -> None:
                             f"in Peer A's peerstore"
                         )
 
-                        # Step 8: Dial through relay
-                        # (equivalent to browser A dialing browser B)
+                        # Step 8: Dial through relay via host (ensures upgrade)
                         logger.info("")
                         logger.info(
                             f"🔌 Peer A dialing Peer B through relay: {webrtc_addr}"
@@ -395,21 +397,19 @@ async def test_webrtc_private_to_private() -> None:
                             "   (This mimics: browser A clicking 'Connect' button)"
                         )
 
-                        connection = await transport_a.dial(webrtc_addr)
-                        assert connection is not None, (
-                            "Failed to establish connection via relay"
-                        )
+                        peer_info = PeerInfo(target_peer, webrtc_addrs)
+                        await nat_peer_a.connect(peer_info)
                         logger.info("✅ WebRTC connection established through relay!")
                         logger.info("")
 
                         # Step 9: Test data exchange
-                        # (equivalent to browser sending messages)
                         logger.info(
                             "📤 Testing data exchange over WebRTC connection..."
                         )
 
-                        webrtc_conn = cast(WebRTCRawConnection, connection)
-                        stream = await webrtc_conn.open_stream()
+                        stream = await nat_peer_a.new_stream(
+                            target_peer, [TProtocol("/echo/1.0.0")]
+                        )
 
                         test_messages = [
                             b"Hello from Peer A!",
@@ -432,7 +432,7 @@ async def test_webrtc_private_to_private() -> None:
 
                         logger.info("🧹 Cleaning up...")
                         await stream.close()
-                        await connection.close()
+                        await nat_peer_a.get_network().close_peer(target_peer)
                         await listener_b.close()
 
                         logger.info("")

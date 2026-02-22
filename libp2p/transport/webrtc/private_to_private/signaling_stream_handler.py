@@ -506,11 +506,14 @@ async def handle_incoming_stream(
             f"conn_state: {peer_connection.connectionState})"
         )
 
-        # CRITICAL: Verify connection is still stable
-        #  after creating WebRTCRawConnection
-        # Sometimes the connection can close during setup
+        # CRITICAL: Ensure data pump is ready before returning connection.
+        # The answerer's upgrade_security will call read() for Noise handshake;
+        # messages must flow from data channel -> pump -> read(). Without this
+        # wait, upgrade can time out before first dialer messages are buffered.
+        await webrtc_connection.start_buffer_consumer_async()
         await trio.sleep(0.1)
 
+        # CRITICAL: Verify connection is still stable after creating WebRTCRawConnection
         if peer_connection.connectionState == "closed":
             raise WebRTCError(
                 "Peer connection closed immediately after creating WebRTCRawConnection"
