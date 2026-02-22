@@ -1683,44 +1683,41 @@ class GossipSub(IPubsubRouter, Service):
         Internally it picks suitable subscriber peers and calls
         :meth:`emit_observe` for each of them.
 
-        Implementation hints:
-          1. Check ``self.pubsub`` is not None.
-          2. Get the peers subscribed to *topic* from
-             ``self.pubsub.peer_topics.get(topic, set())``.
-          3. For each peer: only send OBSERVE if
-             ``self.supports_v13_features(peer)`` is True AND
-             ``self.extensions_state.both_support_topic_observation(peer)``
-             is True.
-          4. Await ``self.emit_observe(topic, peer)`` for each qualifying peer.
-
         :param topic: The topic to start observing.
         """
-        # TODO (contributor): implement start_observing_topic.
-        # See implementation hints in the docstring above.
-        raise NotImplementedError(
-            "start_observing_topic() is left as an easy task for contributors. "
-            "See the docstring for step-by-step implementation hints."
-        )
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        peers_subscribed = self.pubsub.peer_topics.get(topic, set())
+        for peer in peers_subscribed:
+            if self.supports_v13_features(
+                peer
+            ) and self.extensions_state.both_support_topic_observation(peer):
+                await self.emit_observe(topic, peer)
+                logger.debug(
+                    "Started observing topic '%s' via peer %s.",
+                    topic,
+                    peer,
+                )
 
     async def stop_observing_topic(self, topic: str) -> None:
         """
         Stop observing *topic* by sending UNOBSERVE to all peers we previously
         sent OBSERVE to for *topic*.
 
-        Implementation hints:
-          1. Get the set of peers we sent OBSERVE to via
-             ``self.topic_observation.get_subscriber_peers_for_topic(topic)``.
-             (Note: this calls the TODO method in TopicObservationState.)
-          2. Await ``self.emit_unobserve(topic, peer)`` for each of them.
-
         :param topic: The topic to stop observing.
         """
-        # TODO (contributor): implement stop_observing_topic.
-        # See implementation hints in the docstring above.
-        raise NotImplementedError(
-            "stop_observing_topic() is left as an easy task for contributors. "
-            "See the docstring for step-by-step implementation hints."
-        )
+        if self.pubsub is None:
+            raise NoPubsubAttached
+
+        subscriber_peers = self.topic_observation.get_subscriber_peers_for_topic(topic)
+        for peer in subscriber_peers:
+            await self.emit_unobserve(topic, peer)
+            logger.debug(
+                "Stopped observing topic '%s' via peer %s.",
+                topic,
+                peer,
+            )
 
     def _track_peer_ip(self, peer_id: ID) -> None:
         """

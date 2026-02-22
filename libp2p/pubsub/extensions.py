@@ -475,38 +475,19 @@ class TopicObservationState:
             if not self._observing[topic]:
                 del self._observing[topic]
 
-    # ------------------------------------------------------------------
-    # TODO for contributor:
-    # Implement the following methods to complete the outbound observer path.
-    # ------------------------------------------------------------------
-
     def get_observing_topics(self) -> set[str]:
         """
         Return the set of topics this node is currently observing (outbound).
 
-        Implementation hint:
-          Return ``set(self._observing.keys())``.
-
         :return: set of topic strings we sent OBSERVE for.
         """
-        # TODO: Return the set of topics from self._observing.
-        raise NotImplementedError(
-            "get_observing_topics() is left as an easy task for contributors. "
-            "Hint: return set(self._observing.keys())"
-        )
+        return set(self._observing.keys())
 
     def get_subscriber_peers_for_topic(self, topic: str) -> set[ID]:
         """
         Return the set of subscriber peers we sent OBSERVE to for *topic*.
 
-        Implementation hint:
-          Return a copy of ``self._observing.get(topic, set())``.
-
         :param topic: the topic to query.
         :return: set of subscriber peer IDs we are observing through.
         """
-        # TODO: Return a copy of self._observing.get(topic, set()).
-        raise NotImplementedError(
-            "get_subscriber_peers_for_topic() is left as an easy task for "
-            "contributors. Hint: return set(self._observing.get(topic, set()))"
-        )
+        return set(self._observing.get(topic, set()))
