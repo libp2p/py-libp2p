@@ -20,6 +20,9 @@ from libp2p.abc import (
     IRawConnection,
     ITransport,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     THandler,
 )
@@ -123,6 +126,23 @@ class TrackedRawConnection(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Get remote address from the wrapped connection."""
         return self._wrapped.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        For relayed connections, this should include /p2p-circuit in the path.
+        Delegates to wrapped connection but ensures relay context is preserved.
+        """
+        return self._wrapped.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection.
+
+        This is always RELAYED since TrackedRawConnection wraps relay connections.
+        """
+        return ConnectionType.RELAYED
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped connection."""
@@ -443,7 +463,16 @@ class CircuitV2Transport(ITransport):
             self._store_multiaddrs(dest_info, relay_peer_id)
 
             # Create raw connection from stream and wrap it to track closure
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{destination}
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_info.peer_id.to_base58()}"
+            )
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
@@ -590,8 +619,12 @@ class CircuitV2Transport(ITransport):
                     status_msg=status_msg,
                 )
 
-            # Wrap in TrackedRawConnection for tracking
-            raw_conn = RawConnection(stream=relay_stream, initiator=True)
+            raw_conn = RawConnection(
+                stream=relay_stream,
+                initiator=True,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
             return TrackedRawConnection(
                 wrapped=raw_conn,
                 relay_id=relay_peer_id,
@@ -1005,8 +1038,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         stream : INetStream
             The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
 
         Returns
         -------
@@ -1031,8 +1062,19 @@ class CircuitV2Listener(Service, IListener):
             if stop_msg.type != StopMessage.CONNECT:
                 raise ConnectionError("Invalid STOP message type")
 
-            # Create raw connection
-            return RawConnection(stream=stream, initiator=False)
+            # Create raw connection for relayed connection
+            # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{source}
+            peer_id = ID(stop_msg.peer)
+            relay_peer_id = self.host.get_id()
+            circuit_ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+            )
+            return RawConnection(
+                stream=stream,
+                initiator=False,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[circuit_ma],
+            )
 
         except Exception as e:
             await stream.close()
