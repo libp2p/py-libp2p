@@ -57,15 +57,15 @@ async def test_new_conn_passes_timeout_to_multistream_client():
 
     # Mock MultistreamClient and transports
     muxer = MuxerMultistream({}, negotiate_timeout=30)
-    muxer.multistream_client.select_one_of = AsyncMock(return_value="mock_protocol")
+    muxer.multiselect_client.select_one_of = AsyncMock(return_value="mock_protocol")
     muxer.transports[TProtocol("mock_protocol")] = MagicMock(return_value=MagicMock())
 
     # Call new_conn
     await muxer.new_conn(mock_conn, mock_peer_id)
 
     # Verify that select_one_of was called with the correct timeout
-    muxer.multistream_client.select_one_of.assert_called_once()
-    assert muxer.multistream_client.select_one_of.call_args[0][2] == 30
+    muxer.multiselect_client.select_one_of.assert_called_once()
+    assert muxer.multiselect_client.select_one_of.call_args[0][2] == 30
 
 
 @pytest.mark.trio
