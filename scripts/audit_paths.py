@@ -3,7 +3,8 @@
 Audit script to identify path handling issues in the py-libp2p codebase.
 
 This script scans for patterns that should be migrated to use the new
-cross-platform path utilities.
+cross-platform path utilities. The script excludes itself from the scan
+to avoid false positives from the migration suggestion strings it contains.
 """
 
 import argparse
@@ -52,6 +53,7 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
         r"env/",
         r"venv/",
         r"\.venv/",
+        r"scripts/audit_paths\.py",  # Contains suggestion strings that match patterns
     ]
 
     for py_file in directory.rglob("*.py"):
@@ -221,6 +223,11 @@ def main():
     parser.add_argument(
         "--summary-only", action="store_true", help="Only show summary report"
     )
+    parser.add_argument(
+        "--fail-on-p1",
+        action="store_true",
+        help="Exit 1 if P0/P1 issues (temp_hardcode, os_path_join, os_path_dirname)",
+    )
 
     args = parser.parse_args()
 
@@ -235,6 +242,13 @@ def main():
     # Generate and display summary
     summary = generate_summary_report(issues)
     print(summary)
+
+    if args.fail_on_p1:
+        p1_types = ("temp_hardcode", "os_path_join", "os_path_dirname")
+        p1_count = sum(len(issues[t]) for t in p1_types)
+        if p1_count > 0:
+            print(f"\n❌ Found {p1_count} P0/P1 path issue(s). Fix before committing.")
+            return 1
 
     if not args.summary_only:
         # Generate detailed suggestions
