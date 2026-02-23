@@ -114,7 +114,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (

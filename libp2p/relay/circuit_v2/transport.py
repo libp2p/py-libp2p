@@ -37,7 +37,7 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 

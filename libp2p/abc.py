@@ -61,9 +61,7 @@ if TYPE_CHECKING:
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
-from libp2p.tools.async_service import (
-    ServiceAPI,
-)
+from libp2p.tools.anyio_service.api import ServiceAPI
 
 # -------------------------- raw_connection interface.py --------------------------
 

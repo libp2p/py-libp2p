@@ -42,7 +42,7 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.tools.constants import (

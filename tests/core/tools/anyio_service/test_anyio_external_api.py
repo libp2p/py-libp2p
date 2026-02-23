@@ -2,7 +2,7 @@
 import sys
 
 import pytest
-import trio
+import anyio
 
 if sys.version_info >= (3, 11):
     from builtins import (
@@ -11,12 +11,10 @@ if sys.version_info >= (3, 11):
 else:
     from exceptiongroup import ExceptionGroup
 
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     LifecycleError,
     Service,
-    background_trio_service,
-)
-from libp2p.tools.async_service.trio_service import (
+    background_anyio_service,
     external_api,
 )
 
@@ -34,8 +32,8 @@ class ExternalAPIService(Service):
         return 7
 
 
-@pytest.mark.trio
-async def test_trio_service_external_api_fails_before_start():
+@pytest.mark.anyio
+async def test_anyio_service_external_api_fails_before_start():
     service = ExternalAPIService()
 
     # should raise if the service has not yet been started.
@@ -43,26 +41,26 @@ async def test_trio_service_external_api_fails_before_start():
         await service.get_7()
 
 
-@pytest.mark.trio
-async def test_trio_service_external_api_works_while_running():
+@pytest.mark.anyio
+async def test_anyio_service_external_api_works_while_running():
     service = ExternalAPIService()
 
-    async with background_trio_service(service):
+    async with background_anyio_service(service):
         assert await service.get_7() == 7
 
 
-@pytest.mark.trio
-async def test_trio_service_external_api_raises_when_cancelled():
+@pytest.mark.anyio
+async def test_anyio_service_external_api_raises_when_cancelled():
     service = ExternalAPIService()
 
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         with pytest.raises(ExceptionGroup):
-            async with trio.open_nursery() as nursery:
+            async with anyio.create_task_group() as tg:
                 # an event to ensure that we are indeed within the body of the
-                is_within_fn = trio.Event()
-                trigger_return = trio.Event()
+                is_within_fn = anyio.Event()
+                trigger_return = anyio.Event()
 
-                nursery.start_soon(service.get_7, trigger_return, is_within_fn)
+                tg.start_soon(service.get_7, trigger_return, is_within_fn)
 
                 # ensure we're within the body of the task.
                 await is_within_fn.wait()
@@ -79,11 +77,11 @@ async def test_trio_service_external_api_raises_when_cancelled():
             assert await service.get_7()
 
 
-@pytest.mark.trio
-async def test_trio_service_external_api_raises_when_finished():
+@pytest.mark.anyio
+async def test_anyio_service_external_api_raises_when_finished():
     service = ExternalAPIService()
 
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         pass
 
     assert manager.is_finished
@@ -93,9 +91,9 @@ async def test_trio_service_external_api_raises_when_finished():
         assert await service.get_7()
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_trio_external_api_call_that_schedules_task():
-    done = trio.Event()
+    done = anyio.Event()
 
     class MyService(Service):
         async def run(self):
@@ -109,7 +107,7 @@ async def test_trio_external_api_call_that_schedules_task():
             done.set()
 
     service = MyService()
-    async with background_trio_service(service):
+    async with background_anyio_service(service):
         await service.do_scheduling()
-        with trio.fail_after(1):
+        with anyio.fail_after(1):
             await done.wait()

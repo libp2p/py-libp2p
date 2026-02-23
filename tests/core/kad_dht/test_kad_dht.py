@@ -35,7 +35,7 @@ from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.utils import InvalidRecordType
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from tests.utils.factories import (

@@ -49,7 +49,7 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.transport.exceptions import (
