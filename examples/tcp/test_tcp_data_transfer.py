@@ -4,6 +4,9 @@ TCP P2P Data Transfer Test
 
 This test proves that TCP peer-to-peer data transfer works correctly in libp2p.
 This serves as a baseline to compare with WebSocket tests.
+Usage:
+    python examples/tcp/test_tcp_data_transfer.py
+    pytest examples/tcp/test_tcp_data_transfer.py -v
 """
 
 import pytest
