@@ -1,0 +1,1 @@
+Fixed PytestUnknownMarkWarning for the ``integration`` mark and RuntimeWarning from an unawaited coroutine in stream muxer tests, so CI runs without these warnings.

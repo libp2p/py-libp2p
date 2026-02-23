@@ -1,1 +1,0 @@
-Fixed pubsub service crashes when peers disconnect abruptly by properly handling StreamReset exceptions during message writes.
