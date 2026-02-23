@@ -24,6 +24,9 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
@@ -80,6 +83,23 @@ class IRawConnection(ReadWriteCloser):
     """
 
     is_initiator: bool
+
+    @abstractmethod
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
+        """
+        pass
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        pass
 
 
 # -------------------------- secure_conn interface.py --------------------------
@@ -227,6 +247,20 @@ class IMuxedConn(ABC):
         :return: A new instance of IMuxedStream.
         """
 
+    @abstractmethod
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        pass
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        pass
+
 
 class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
     """
@@ -360,10 +394,20 @@ class INetConn(Closer):
     @abstractmethod
     def get_transport_addresses(self) -> list[Multiaddr]:
         """
-        Retrieve the transport addresses used by this connection.
+        Retrieve the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
 
         :return: A list of multiaddresses used by the transport.
         """
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        pass
 
 
 # -------------------------- peermetadata interface.py --------------------------
