@@ -75,63 +75,9 @@ circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
 
-[project.optional-dependencies]
-docs = [
-    "sphinx>=6.0.0",
-    "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=25,<26",
-    "tomli; python_version < '3.11'",
-    "aiortc>=1.14.0",
-    "trio-asyncio>=0.15.0",
-]
-test = [
-    "factory-boy>=2.12.0,<3.0.0",
-    "p2pclient>=0.2.1",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-timeout>=2.4.0",
-    "pytest-trio>=0.5.2",
-    "pytest-xdist>=2.4.0",
-    "pytest-mock>=3.15.1",
-    "pytest-rerunfailures>=12.0",
-]
-release = [
-    "build>=0.9.0",
-    "bump_my_version>=0.19.0",
-    "setuptools>=42",
-    "twine",
-    "wheel",
-]
-webrtc = ["aiortc>=1.14.0", "trio-asyncio>=0.15.0", "redis>=5.0.0"]
-dev = [
-    "sphinx>=6.0.0",
-    "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=25,<26",
-    "tomli; python_version < '3.11'",
-    "aiortc>=1.14.0",
-    "trio-asyncio>=0.15.0",
-    "factory-boy>=2.12.0,<3.0.0",
-    "p2pclient>=0.2.1",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-timeout>=2.4.0",
-    "pytest-trio>=0.5.2",
-    "pytest-xdist>=2.4.0",
-    "pytest-mock>=3.15.1",
-    "pytest-rerunfailures>=12.0",
-    "build>=0.9.0",
-    "bump_my_version>=0.19.0",
-    "ipython",
-    "mypy>=1.15.0",
-    "pre-commit>=3.4.0",
-    "tox>=4.0.0",
-    "redis>=5.0.0",
-    "twine",
-    "wheel",
-    "setuptools>=42",
-    "ruff>=0.11.10",
-    "pyrefly (>=0.17.1,<0.18.0)",
-]
+# Dependencies are defined only in [dependency-groups] (PEP 735).
+# Use uv as the preferred installer: uv sync --group dev, uv pip install --group <name> -e ., etc.
+# See docs or README for installation instructions.
 
 [dependency-groups]
 test = [
