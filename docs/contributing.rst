@@ -355,7 +355,7 @@ This library uses type hints, which are enforced by the ``mypy`` tool (part of t
 exception of code within the ``tests`` directory.
 
 Path handling
-"""""""""""""
+^^^^^^^^^^^^^
 
 Use the cross-platform path utilities in ``libp2p.utils.paths`` instead of ``os.path``
 or hard-coded separators. Prefer ``join_paths()`` over ``os.path.join()``,
