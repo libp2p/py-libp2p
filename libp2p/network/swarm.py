@@ -7,6 +7,8 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any, cast
 
+from libp2p.rcmgr import Direction
+
 if TYPE_CHECKING:
     from libp2p.network.connection.swarm_connection import SwarmConn
 
@@ -1479,6 +1481,30 @@ class Swarm(Service, INetworkService):
             self,
             direction=direction,
         )
+
+        # Set actual transport addresses and connection type from the muxed connection.
+        # This captures the real transport info (IP/port, direct vs relayed)
+        # to ensure it's available via the SwarmConn interface without
+        # needing to access raw_conn properties.
+        try:
+            addresses = muxed_conn.get_transport_addresses()
+            conn_type = muxed_conn.get_connection_type()
+            swarm_conn.set_transport_info(addresses, conn_type)
+        except (AttributeError, TypeError, ValueError) as e:
+            # Log expected errors at debug level (e.g., missing methods, invalid data)
+            logger.debug(
+                "Failed to set transport info for peer %s: %s",
+                muxed_conn.peer_id,
+                e,
+            )
+        except Exception as e:
+            # Log unexpected errors at warning level for investigation
+            logger.warning(
+                "Unexpected error setting transport info for peer %s: %s",
+                muxed_conn.peer_id,
+                e,
+                exc_info=True,
+            )
 
         # For non-QUIC connections, set the resource scope on SwarmConn
         if conn_scope is not None and not hasattr(muxed_conn, "set_resource_scope"):

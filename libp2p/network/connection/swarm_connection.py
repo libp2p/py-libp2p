@@ -9,6 +9,7 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     INetConn,
@@ -285,7 +286,10 @@ class SwarmConn(INetConn):
 
     def get_transport_addresses(self) -> list[Multiaddr]:
         """
-        Retrieve the transport addresses used by this connection.
+        Retrieve the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
 
         Returns
         -------
@@ -293,13 +297,33 @@ class SwarmConn(INetConn):
             A list of multiaddresses used by the transport.
 
         """
-        # Return the addresses from the peerstore for this peer
+        if self._actual_transport_addresses is not None:
+            return self._actual_transport_addresses
+        # Fallback to peerstore addresses if not set
         try:
             peer_id = self.muxed_conn.peer_id
             return self.swarm.peerstore.addrs(peer_id)
         except Exception as e:
             logging.warning(f"Error getting transport addresses: {e}")
             return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        return self._connection_type
+
+    def set_transport_info(
+        self, addresses: list[Multiaddr], conn_type: ConnectionType
+    ) -> None:
+        """
+        Set the actual transport addresses and connection type.
+
+        This should be called during connection establishment with the real
+        transport information.
+        """
+        self._actual_transport_addresses = addresses
+        self._connection_type = conn_type
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:
