@@ -40,6 +40,8 @@ class SwarmConn(INetConn):
     event_closed: trio.Event
     _resource_scope: Any | None
     _direction: Direction
+    _actual_transport_addresses: list[Multiaddr] | None
+    _connection_type: ConnectionType
 
     def __init__(
         self,
@@ -61,6 +63,8 @@ class SwarmConn(INetConn):
             self._direction = direction
         else:
             self._direction = Direction.from_string(str(direction))
+        self._actual_transport_addresses = None
+        self._connection_type = ConnectionType.UNKNOWN
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
