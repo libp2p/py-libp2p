@@ -19,9 +19,6 @@ import trio
 
 from libp2p.abc import IHost
 from libp2p.tools.utils import connect
-from tests.core.transport.webrtc.relay_fixtures import (
-    store_relay_addrs,
-)
 from tests.utils.factories import HostFactory
 
 
@@ -42,6 +39,9 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 async def nat_peer_a(relay_host: IHost) -> AsyncIterator[IHost]:
     """Create a NAT peer A that connects to the relay."""
+    # Lazy import so relay_fixtures is not loaded before pytest's assertion rewriter.
+    from tests.core.transport.webrtc.relay_fixtures import store_relay_addrs
+
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
 
@@ -64,6 +64,9 @@ async def nat_peer_a(relay_host: IHost) -> AsyncIterator[IHost]:
 @pytest.fixture
 async def nat_peer_b(relay_host: IHost) -> AsyncIterator[IHost]:
     """Create a NAT peer B that connects to the relay."""
+    # Lazy import so relay_fixtures is not loaded before pytest's assertion rewriter.
+    from tests.core.transport.webrtc.relay_fixtures import store_relay_addrs
+
     async with HostFactory.create_batch_and_listen(1) as hosts:
         host = hosts[0]
 

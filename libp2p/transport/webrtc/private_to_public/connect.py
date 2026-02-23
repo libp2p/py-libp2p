@@ -1701,7 +1701,7 @@ async def connect(
                 # Watch for handshake failure in parallel and abort early if
                 # channel closes
                 async def watch_handshake_failure() -> None:
-                    if raw_connection._handshake_failure_event:
+                    if raw_connection._handshake_failure_event is not None:
                         await raw_connection._handshake_failure_event.wait()
                         raise Exception(
                             f"{role} Handshake aborted: data channel closed "
