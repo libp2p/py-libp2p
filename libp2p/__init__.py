@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import fields
 from pathlib import Path
 import ssl
 from libp2p.transport.quic.utils import is_quic_multiaddr
@@ -132,6 +133,7 @@ MUXER_MPLEX = "MPLEX"
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # seconds - increased for high-concurrency scenarios
 
 logger = logging.getLogger(__name__)
+
 
 def set_default_muxer(muxer_name: Literal["YAMUX", "MPLEX"]) -> None:
     """
@@ -279,6 +281,7 @@ def get_default_muxer_options() -> TMuxerOptions:
     else:  # YAMUX is default
         return create_yamux_muxer_option()
 
+
 def new_swarm(
     key_pair: KeyPair | None = None,
     muxer_opt: TMuxerOptions | None = None,
@@ -329,7 +332,11 @@ def new_swarm(
     id_opt = generate_peer_id_from(key_pair)
 
     transport: TCP | QUICTransport | ITransport
-    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
+    quic_transport_opt = (
+        connection_config
+        if isinstance(connection_config, QUICTransportConfig)
+        else None
+    )
 
     if listen_addrs is None:
         if enable_quic:
@@ -338,7 +345,6 @@ def new_swarm(
             transport = TCP()
     else:
         # Use transport registry to select the appropriate transport
-        from libp2p.transport.transport_registry import create_transport_for_multiaddr
 
         # Create a temporary upgrader for transport selection
         # We'll create the real upgrader later with the proper configuration
@@ -366,7 +372,10 @@ def new_swarm(
 
     # If enable_quic is True but we didn't get a QUIC transport, force QUIC
     if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
+        logger.debug(
+            "new_swarm: Forcing QUIC transport (enable_quic=True but got %s)",
+            type(transport),
+        )
         transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
@@ -416,7 +425,6 @@ def new_swarm(
         secure_transports_by_protocol=secure_transports_by_protocol,
         muxer_transports_by_protocol=muxer_transports_by_protocol,
     )
-
 
     peerstore = peerstore_opt or PeerStore()
     # Store our key pair in peerstore
@@ -481,7 +489,8 @@ def new_host(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
+    connection_config: ConnectionConfig | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -503,11 +512,44 @@ def new_host(
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
+    :param connection_config: optional configuration for connection management
+        and health monitoring. When both connection_config and quic_transport_opt
+        are provided, health monitoring settings from connection_config are merged
+        into the QUIC config (QUICTransportConfig inherits from ConnectionConfig)
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning(
+            "QUIC config provided but QUIC not enabled, ignoring QUIC config"
+        )
+
+    # Determine which connection config to use
+    effective_connection_config: ConnectionConfig | QUICTransportConfig | None = None
+    if enable_quic and quic_transport_opt is not None:
+        # QUICTransportConfig inherits from ConnectionConfig,
+        # so it can handle health monitoring
+        effective_connection_config = quic_transport_opt
+
+        # If both connection_config and quic_transport_opt are provided,
+        # merge ALL connection and health monitoring settings (including
+        # critical_health_threshold) so new ConnectionConfig fields are never missed.
+        if connection_config is not None:
+            # ConnectionConfig is a dataclass; pyrefly doesn't narrow it for fields()
+            connection_config_attrs = [
+                f.name for f in fields(ConnectionConfig)  # type: ignore[arg-type]
+            ]
+            for attr in connection_config_attrs:
+                if hasattr(connection_config, attr):
+                    setattr(quic_transport_opt, attr, getattr(connection_config, attr))
+
+            logger.info(
+                "Merged all connection and health monitoring settings from "
+                "connection_config into QUIC config"
+            )
+    elif connection_config is not None:
+        # Use the provided ConnectionConfig for health monitoring
+        effective_connection_config = connection_config
 
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
@@ -529,7 +571,7 @@ def new_host(
         enable_autotls=enable_autotls,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_connection_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,

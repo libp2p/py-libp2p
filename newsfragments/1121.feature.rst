@@ -1,0 +1,30 @@
+Add comprehensive connection health monitoring and intelligent load balancing to libp2p.
+
+**Connection Health Metrics:**
+- Implements ConnectionHealth dataclass with latency tracking, success rates, bandwidth monitoring, and error history
+- Provides weighted health scoring algorithm with configurable weights (latency, success rate, stability)
+- Tracks connection age, idle time, stream lifecycle, and performance trends
+- Monitors bandwidth usage with time-windowed tracking and peak/average calculations
+
+**Proactive Monitoring Service:**
+- Implements ConnectionHealthMonitor service with periodic health checks and automatic connection replacement
+- Performs non-intrusive ping-based health verification with configurable intervals
+- Supports warmup windows and grace periods to prevent premature connection replacement
+- Automatically maintains minimum connection count per peer while replacing unhealthy connections
+
+**Health-Aware Load Balancing:**
+- Adds four connection selection strategies: round_robin, least_loaded, health_based, and latency_based
+- Routes traffic to healthiest/lowest-latency connections for optimal performance
+- Provides fallback behavior when health data unavailable
+
+**API Consistency Fix:**
+- Extends new_host() to accept connection_config parameter, resolving previous API inconsistency
+- Maintains full backward compatibility with existing code
+- Supports health monitoring configuration through high-level host API
+- Properly merges health settings with QUIC transport configuration when both are provided
+
+**Configuration and Integration:**
+- Adds comprehensive ConnectionConfig options for health monitoring customization
+- Integrates health tracking throughout connection lifecycle (establishment, usage, closure)
+- Provides health summary and metrics export through host interface
+- Includes extensive test coverage with 80+ new tests covering all components
