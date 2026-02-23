@@ -482,10 +482,10 @@ def new_host(
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
     psk: str | None = None,
-    *,
     bootstrap_allow_ipv6: bool = False,
     bootstrap_dns_timeout: float = 10.0,
     bootstrap_dns_max_retries: int = 3,
+    connection_config: ConnectionConfig | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -510,6 +510,7 @@ def new_host(
     :param bootstrap_allow_ipv6: if True, bootstrap accepts IPv6+TCP addresses
     :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
+    :param connection_config: optional connection configuration for connection manager
     :return: return a host instance
     """
 
@@ -527,6 +528,14 @@ def new_host(
             # Fallback to leaving it None if creation fails for any reason.
             resource_manager = None
 
+    # Determine the connection config to use
+    # QUIC transport config takes precedence if QUIC is enabled
+    effective_config: ConnectionConfig | QUICTransportConfig | None
+    if enable_quic and quic_transport_opt is not None:
+        effective_config = quic_transport_opt
+    else:
+        effective_config = connection_config
+
     swarm = new_swarm(
         enable_quic=enable_quic,
         key_pair=key_pair,
@@ -536,7 +545,7 @@ def new_host(
         enable_autotls=enable_autotls,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
