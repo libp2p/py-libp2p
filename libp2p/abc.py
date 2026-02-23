@@ -373,6 +373,15 @@ class INetConn(Closer):
     muxed_conn: IMuxedConn
     event_started: trio.Event
 
+    @property
+    @abstractmethod
+    def is_closed(self) -> bool:
+        """
+        Check if the connection is fully closed.
+
+        :return: True if the connection is closed, otherwise False.
+        """
+
     @abstractmethod
     async def new_stream(self) -> INetStream:
         """
@@ -1677,7 +1686,136 @@ class INetwork(ABC):
 
 
 class INetworkService(INetwork, ServiceAPI):
-    pass
+    """
+    Interface for a network service with connection management capabilities.
+
+    Extends INetwork with go-libp2p style connection manager methods.
+    """
+
+    connection_gate: Any
+
+    @abstractmethod
+    def get_total_connections(self) -> int:
+        """
+        Get total number of connections (inbound + outbound).
+
+        Returns
+        -------
+        int
+            Total number of active connections.
+
+        """
+
+    @abstractmethod
+    def get_metrics(self) -> dict[str, int]:
+        """
+        Get connection metrics (go-libp2p style).
+
+        Returns
+        -------
+        dict[str, int]
+            Connection metrics including total, inbound, and outbound counts.
+
+        """
+
+    @abstractmethod
+    def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
+        """
+        Tag a peer with a string, associating a weight with the tag.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to tag.
+        tag : str
+            The tag name.
+        value : int
+            The weight/value associated with the tag.
+
+        """
+
+    @abstractmethod
+    def untag_peer(self, peer_id: ID, tag: str) -> None:
+        """
+        Remove the tagged value from the peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to untag.
+        tag : str
+            The tag name to remove.
+
+        """
+
+    @abstractmethod
+    def get_tag_info(self, peer_id: ID) -> Any:
+        """
+        Get the metadata associated with a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to get info for.
+
+        Returns
+        -------
+        Any
+            The tag info for the peer, or None if no tags recorded.
+
+        """
+
+    @abstractmethod
+    def protect(self, peer_id: ID, tag: str) -> None:
+        """
+        Protect a peer from having its connection(s) pruned.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to protect.
+        tag : str
+            Protection tag.
+
+        """
+
+    @abstractmethod
+    def unprotect(self, peer_id: ID, tag: str) -> bool:
+        """
+        Remove a protection that may have been placed on a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to unprotect.
+        tag : str
+            The protection tag to remove.
+
+        Returns
+        -------
+        bool
+            True if the peer is still protected by other tags.
+
+        """
+
+    @abstractmethod
+    def is_protected(self, peer_id: ID, tag: str = "") -> bool:
+        """
+        Check if a peer is protected.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to check.
+        tag : str
+            If provided, check if protected by this specific tag.
+
+        Returns
+        -------
+        bool
+            True if the peer is protected.
+
+        """
 
 
 # -------------------------- notifee interface.py --------------------------
