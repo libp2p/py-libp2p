@@ -2,6 +2,7 @@
 Integration tests for rendezvous discovery functionality.
 """
 
+import logging
 import secrets
 from unittest.mock import AsyncMock, Mock
 
@@ -18,6 +19,8 @@ from libp2p.discovery.rendezvous.discovery import RendezvousDiscovery
 from libp2p.discovery.rendezvous.service import RendezvousService
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
+
+logger = logging.getLogger(__name__)
 
 
 def create_test_host(port: int = 0):
@@ -140,13 +143,13 @@ async def test_full_rendezvous_workflow():
 
                     except Exception as e:
                         # Log the error for debugging
-                        print(f"Integration test error: {e}")
+                        logger.debug("Integration test error: %s", e)
                         # Don't fail the test for connection issues in unit tests
                         raise
 
     except Exception as e:
         # Handle any startup/shutdown errors gracefully
-        print(f"Host management error: {e}")
+        logger.debug("Host management error: %s", e)
         raise
 
 
@@ -267,7 +270,7 @@ async def test_rendezvous_registration_refresh():
 
         except Exception as e:
             # Handle mock-related issues gracefully
-            print(f"Refresh test error: {e}")
+            logger.warning("Refresh test error: %s", e)
 
         # Cancel nursery
         nursery.cancel_scope.cancel()
