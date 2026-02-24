@@ -38,10 +38,10 @@ from libp2p.io.abc import (
 )
 from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
-from libp2p.network.transport_manager import UnsupportedTransportError
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.tag_store import TagInfo, TagStore
+from libp2p.network.transport_manager import UnsupportedTransportError
 from libp2p.peer.id import (
     ID,
 )
