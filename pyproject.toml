@@ -20,7 +20,8 @@ maintainers = [
 dependencies = [
     "aioquic>=1.2.0",
     "base58>=1.0.3",
-    "coincurve==21.0.0",
+    #"coincurve==21.0.0",
+    "coincurve @ git+https://github.com/ofek/coincurve.git@7829b29c08ebb1cc80386a1cdaf8c2243c4ef5c5",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
     "grpcio>=1.41.0",
@@ -56,6 +57,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.urls]

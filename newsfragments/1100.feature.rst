@@ -1,0 +1,1 @@
+Added support for Python 3.14 in py-libp2p.
