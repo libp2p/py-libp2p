@@ -44,15 +44,25 @@ from libp2p.stream_muxer.yamux.yamux import (
 
 
 class TrioStreamAdapter(IRawConnection):
+    """
+    Adapter that wraps a trio memory stream pair for use as IRawConnection.
+
+    Uses a write lock so that the connection can be written from both the
+    muxer's background task and from tests (e.g. injecting raw frames)
+    without tripping trio.BusyResourceError (single-user stream).
+    """
+
     def __init__(self, send_stream, receive_stream, is_initiator: bool = False):
         self.send_stream = send_stream
         self.receive_stream = receive_stream
         self.is_initiator = is_initiator
+        self._write_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
         logging.debug(f"Writing {len(data)} bytes")
-        with trio.move_on_after(2):
-            await self.send_stream.send_all(data)
+        async with self._write_lock:
+            with trio.move_on_after(2):
+                await self.send_stream.send_all(data)
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
