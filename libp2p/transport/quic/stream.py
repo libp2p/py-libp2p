@@ -14,6 +14,7 @@ import trio
 from .exceptions import (
     QUICStreamBackpressureError,
     QUICStreamClosedError,
+    QUICStreamError,
     QUICStreamResetError,
     QUICStreamTimeoutError,
 )
@@ -240,6 +241,12 @@ class QUICStream(IMuxedStream):
                             self._timeline.record_first_data()
                             return data
 
+                        # Check if stream was reset (unblocking read loop)
+                        if self._state == StreamState.RESET:
+                            raise QUICStreamResetError(
+                                f"Stream {self.stream_id} was reset"
+                            )
+
                         # Check if stream was closed while waiting
                         if self._read_closed:
                             return b""
@@ -356,6 +363,19 @@ class QUICStream(IMuxedStream):
             logger.debug(f"Stream {self.stream_id} write side closed")
 
         except Exception as e:
+            msg = str(e).lower()
+            # These usually happen during shutdown races / late FIN handling.
+            if "after fin" in msg or "unknown peer-initiated stream" in msg:
+                self._write_closed = True
+                async with self._state_lock:
+                    if self._read_closed:
+                        self._state = StreamState.CLOSED
+                    else:
+                        self._state = StreamState.WRITE_CLOSED
+                logger.debug(
+                    f"Ignoring close_write error on stream {self.stream_id}: {e}"
+                )
+                return
             logger.error(f"Error closing write side of stream {self.stream_id}: {e}")
 
     async def close_read(self) -> None:
@@ -405,7 +425,11 @@ class QUICStream(IMuxedStream):
             await self._connection._transmit()
 
         except Exception as e:
-            logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
+            msg = str(e).lower()
+            if "unknown peer-initiated stream" in msg:
+                logger.debug(f"Ignoring reset error on stream {self.stream_id}: {e}")
+            else:
+                logger.error(f"Error sending reset for stream {self.stream_id}: {e}")
         finally:
             # Always cleanup resources
             await self._cleanup_resources()
@@ -433,6 +457,49 @@ class QUICStream(IMuxedStream):
             StreamState.CLOSED,
             StreamState.RESET,
         )
+
+    async def wait_ready_for_io(self, timeout: float = 1.0) -> None:
+        """
+        Wait for stream to be ready for I/O operations.
+
+        This ensures the stream and its parent connection are ready before
+        attempting to read/write. For outbound streams, this ensures the
+        connection is established and the stream can write.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Raises:
+            QUICStreamTimeoutError: If stream is not ready within timeout
+
+        """
+        # For outbound streams, ensure connection is established
+        if self._direction == StreamDirection.OUTBOUND:
+            if not self._connection.is_established:
+                # Wait for connection to be established using the connection's event
+                # This is event-driven, not polling
+                if hasattr(self._connection, "_connected_event"):
+                    with trio.move_on_after(timeout):
+                        await self._connection._connected_event.wait()
+                    if not self._connection.is_established:
+                        raise QUICStreamTimeoutError(
+                            f"Stream not ready: connection not established "
+                            f"within {timeout}s"
+                        )
+                else:
+                    # Fallback: poll if event not available
+                    with trio.move_on_after(timeout):
+                        while not self._connection.is_established:
+                            await trio.sleep(0.001)
+                    if not self._connection.is_established:
+                        raise QUICStreamTimeoutError(
+                            f"Stream not ready: connection not established "
+                            f"within {timeout}s"
+                        )
+
+        # Ensure stream can write (for negotiation)
+        if not self.can_write():
+            raise QUICStreamError("Stream cannot write - not ready for I/O")
 
     async def handle_data_received(self, data: bytes, end_stream: bool) -> None:
         """

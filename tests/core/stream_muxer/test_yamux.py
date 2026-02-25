@@ -3,12 +3,14 @@ import platform
 import struct
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 from trio.testing import (
     memory_stream_pair,
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IRawConnection,
 )
 from libp2p.crypto.ed25519 import (
@@ -24,10 +26,12 @@ from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    FLAG_ACK,
     FLAG_FIN,
     FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
+    TYPE_DATA,
     TYPE_PING,
     TYPE_WINDOW_UPDATE,
     YAMUX_HEADER_FORMAT,
@@ -40,15 +44,25 @@ from libp2p.stream_muxer.yamux.yamux import (
 
 
 class TrioStreamAdapter(IRawConnection):
+    """
+    Adapter that wraps a trio memory stream pair for use as IRawConnection.
+
+    Uses a write lock so that the connection can be written from both the
+    muxer's background task and from tests (e.g. injecting raw frames)
+    without tripping trio.BusyResourceError (single-user stream).
+    """
+
     def __init__(self, send_stream, receive_stream, is_initiator: bool = False):
         self.send_stream = send_stream
         self.receive_stream = receive_stream
         self.is_initiator = is_initiator
+        self._write_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
         logging.debug(f"Writing {len(data)} bytes")
-        with trio.move_on_after(2):
-            await self.send_stream.send_all(data)
+        async with self._write_lock:
+            with trio.move_on_after(2):
+                await self.send_stream.send_all(data)
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
@@ -69,6 +83,14 @@ class TrioStreamAdapter(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
         return None
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 @pytest.fixture
@@ -624,3 +646,192 @@ async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
         "accept_stream() should have raised MuxedConnUnavailable"
     )
     logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_data(yamux_pair):
+    """Test that data sent with SYN frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_syn_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with accompanying data
+    test_data = b"data with SYN frame"
+    stream_id = 1  # Client stream ID (odd number)
+
+    # Create SYN header with data length
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send SYN with data directly
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of data")
+
+    # Server should accept the stream and have data already buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify the data was buffered and is immediately available
+    received = await server_stream.read(len(test_data))
+    assert received == test_data, "Data sent with SYN should be immediately available"
+    logging.debug("test_yamux_syn_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_ack_with_data(yamux_pair):
+    """Test that data sent with ACK frame is properly received and buffered."""
+    logging.debug("Starting test_yamux_ack_with_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Client opens a stream (sends SYN)
+    client_stream = await client_yamux.open_stream()
+    stream_id = client_stream.stream_id
+
+    # Wait for server to receive SYN and respond with ACK
+    await trio.sleep(0.1)
+
+    # Now manually send data with an ACK flag from server to client
+    test_data = b"data with ACK frame"
+    ack_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_ACK,  # flags (ACK flag set)
+        stream_id,
+        len(test_data),  # length of accompanying data
+    )
+
+    # Send ACK with data from server to client
+    await server_yamux.secured_conn.write(ack_header + test_data)
+    logging.debug(f"Sent ACK with {len(test_data)} bytes of data")
+
+    # Wait for the data to be processed
+    await trio.sleep(0.1)
+
+    # Verify the data was buffered on the client side
+    # Since the stream is already open, the data should be in the buffer
+    async with client_yamux.streams_lock:
+        assert stream_id in client_yamux.stream_buffers
+        assert len(client_yamux.stream_buffers[stream_id]) >= len(test_data)
+        buffered_data = bytes(client_yamux.stream_buffers[stream_id][: len(test_data)])
+        # Remove the data we just checked
+        client_yamux.stream_buffers[stream_id] = client_yamux.stream_buffers[stream_id][
+            len(test_data) :
+        ]
+
+    assert buffered_data == test_data, "Data sent with ACK should be buffered"
+    logging.debug("test_yamux_ack_with_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_empty_data(yamux_pair):
+    """Test that SYN frame with zero-length data is handled correctly."""
+    logging.debug("Starting test_yamux_syn_with_empty_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a SYN frame with no data (length = 0)
+    stream_id = 3  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        0,  # length = 0, no accompanying data
+    )
+
+    # Send SYN with no data
+    await client_yamux.secured_conn.write(syn_header)
+    logging.debug("Sent SYN with no data")
+
+    # Server should accept the stream
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify no data is in the buffer
+    async with server_yamux.streams_lock:
+        assert len(server_yamux.stream_buffers[stream_id]) == 0
+
+    logging.debug("test_yamux_syn_with_empty_data complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_large_data(yamux_pair):
+    """Test that large data sent with SYN frame is properly handled."""
+    logging.debug("Starting test_yamux_syn_with_large_data")
+    client_yamux, server_yamux = yamux_pair
+
+    # Create large test data (but within window size)
+    test_data = b"X" * 1024  # 1KB of data
+    stream_id = 5  # Client stream ID (odd number)
+
+    syn_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_DATA,  # type
+        FLAG_SYN,  # flags
+        stream_id,
+        len(test_data),
+    )
+
+    # Send SYN with large data
+    await client_yamux.secured_conn.write(syn_header + test_data)
+    logging.debug(f"Sent SYN with {len(test_data)} bytes of large data")
+
+    # Server should accept the stream and have all data buffered
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Verify all data was buffered correctly
+    received = await server_stream.read(len(test_data))
+    assert received == test_data
+    assert len(received) == 1024
+    logging.debug("test_yamux_syn_with_large_data complete")
+
+
+@pytest.mark.trio
+async def test_incomplete_read_error_clean_close_detection():
+    """
+    Test that IncompleteReadError correctly identifies clean connection closures.
+
+    This verifies the fix for issue #1084 where yamux listener incorrectly
+    logged clean peer disconnections as errors. Clean closures (0 bytes received)
+    should be detected via the is_clean_close property.
+    """
+    from libp2p.io.exceptions import IncompleteReadError
+
+    # Test clean closure (0 bytes received)
+    clean_error = IncompleteReadError(
+        "Connection closed during read operation: expected 2 bytes but "
+        "received 0 bytes",
+        expected_bytes=2,
+        received_bytes=0,
+    )
+    assert clean_error.is_clean_close, "Should detect clean closure (0 bytes)"
+    assert clean_error.expected_bytes == 2
+    assert clean_error.received_bytes == 0
+
+    # Test partial read (not clean closure)
+    partial_error = IncompleteReadError(
+        "Connection closed during read operation: expected 12 bytes but "
+        "received 5 bytes",
+        expected_bytes=12,
+        received_bytes=5,
+    )
+    assert not partial_error.is_clean_close, "Partial read should not be clean closure"
+    assert partial_error.expected_bytes == 12
+    assert partial_error.received_bytes == 5
+
+    # Test default values (backward compatibility)
+    legacy_error = IncompleteReadError("Some error message")
+    assert legacy_error.is_clean_close, "Default 0 bytes should be clean closure"
+    assert legacy_error.expected_bytes == 0
+    assert legacy_error.received_bytes == 0
+
+    logging.debug("test_incomplete_read_error_clean_close_detection complete")

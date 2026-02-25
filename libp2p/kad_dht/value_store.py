@@ -28,8 +28,7 @@ from .common import (
 )
 from .pb.kademlia_pb2 import Message, Record
 
-# logger = logging.getLogger("libp2p.kademlia.value_store")
-logger = logging.getLogger("kademlia-example.value_store")
+logger = logging.getLogger(__name__)
 
 
 class ValueStore:
@@ -72,8 +71,8 @@ class ValueStore:
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex(), validity
         )
-        record = make_put_record(key.decode("utf-8"), value)
-        record.timeReceived = str(time.time)
+        record = make_put_record(key, value)
+        record.timeReceived = str(time.time())
 
         self.store[key] = (record, validity)
         logger.debug(f"Stored value for key {key.hex()}")
@@ -82,9 +81,14 @@ class ValueStore:
         """
         Store a value at a specific peer.
 
-        params: peer_id: The ID of the peer to store the value at
-        params: key: The key to store
-        params: value: The value to store
+        Parameters
+        ----------
+        peer_id : ID
+            The ID of the peer to store the value at
+        key : bytes
+            The key to store
+        value : bytes
+            The value to store
 
         Returns
         -------
@@ -186,7 +190,10 @@ class ValueStore:
         """
         Retrieve a value from the DHT.
 
-        params: key: The key to look up
+        Parameters
+        ----------
+        key : bytes
+            The key to look up
 
         Returns
         -------
@@ -215,17 +222,26 @@ class ValueStore:
 
         return record
 
-    async def _get_from_peer(self, peer_id: ID, key: bytes) -> bytes | None:
+    async def _get_from_peer(
+        self, peer_id: ID, key: bytes, return_record: bool = False
+    ) -> bytes | Record | None:
         """
         Retrieve a value from a specific peer.
 
-        params: peer_id: The ID of the peer to retrieve the value from
-        params: key: The key to retrieve
+        Parameters
+        ----------
+        peer_id : ID
+            The ID of the peer to retrieve the value from
+        key : bytes
+            The key to retrieve
+        return_record : bool
+            If True, return the full Record (for quorum),
+            else return just the value
 
         Returns
         -------
-        Optional[bytes]
-            The value if found, None otherwise
+        Optional[bytes] | Optional[Record]
+            The value if found (or full Record if return_record=True), None otherwise
 
         """
         stream = None
@@ -303,7 +319,7 @@ class ValueStore:
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )
-                    return response.record.value
+                    return response.record if return_record else response.record.value
 
                 # Handle case where value is not found but peer infos are returned
                 else:
@@ -330,8 +346,10 @@ class ValueStore:
         """
         Remove a value from the DHT.
 
-
-        params: key: The key to remove
+        Parameters
+        ----------
+        key : bytes
+            The key to remove
 
         Returns
         -------
@@ -349,7 +367,10 @@ class ValueStore:
         """
         Check if a key exists in the store and hasn't expired.
 
-        params: key: The key to check
+        Parameters
+        ----------
+        key : bytes
+            The key to check
 
         Returns
         -------

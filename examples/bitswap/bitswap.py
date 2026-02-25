@@ -30,7 +30,7 @@ logging.basicConfig(
 # Silence verbose loggers
 logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
 logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
-logging.getLogger("async_service.Manager").setLevel(logging.WARNING)
+logging.getLogger("libp2p.tools.async_service.base").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
