@@ -426,12 +426,12 @@ class PerfTest:
         is_ipv6 = "ip6" in names
         parts = [f"/ip6/{actual}" if is_ipv6 else f"/ip4/{actual}"]
         found = False
-        for p in addr.protocols():
-            if p.name in ["ip4", "ip6"]:
+        for proto, value in addr.items():
+            if proto.name in ["ip4", "ip6"]:
                 found = True
                 continue
             if found:
-                parts.append(f"/{p.name}/{p.value}" if p.value else f"/{p.name}")
+                parts.append(f"/{proto.name}/{value}" if value else f"/{proto.name}")
         return str(multiaddr.Multiaddr("".join(parts)))
 
     def _get_publishable_address(self, addresses: list[multiaddr.Multiaddr]) -> str:
