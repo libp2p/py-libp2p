@@ -5,6 +5,10 @@ Audit script to identify path handling issues in the py-libp2p codebase.
 This script scans for patterns that should be migrated to use the new
 cross-platform path utilities. The script excludes itself from the scan
 to avoid false positives from the migration suggestion strings it contains.
+
+When run with --fail-on-p1, only P0/P1 issues (temp_hardcode, os_path_join,
+os_path_dirname) cause exit code 1. P2 issues (e.g. direct_path_concat,
+hard_coded_slash) are reported but do not block the pre-commit hook.
 """
 
 import argparse
@@ -34,13 +38,18 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
     }
 
     # Patterns to search for
+    # direct_path_concat: only flag when at least one operand looks like a path
+    # (contains / or \), to avoid 1000s of false positives from generic string concat
     patterns = {
         "hard_coded_slash": r'["\'][^"\']*\/[^"\']*["\']',
         "os_path_join": r"os\.path\.join\(",
         "temp_hardcode": r'["\']\/tmp\/|["\']C:\\\\',
         "os_path_dirname": r"os\.path\.dirname\(",
         "os_path_abspath": r"os\.path\.abspath\(",
-        "direct_path_concat": r'["\'][^"\']*["\']\s*\+\s*["\'][^"\']*["\']',
+        "direct_path_concat": (
+            r'(?:["\'][^"\']*[/\\][^"\']*["\']\s*\+\s*["\'][^"\']*["\']'
+            r'|["\'][^"\']*["\']\s*\+\s*["\'][^"\']*[/\\][^"\']*["\'])'
+        ),
     }
 
     # Files to exclude
@@ -54,6 +63,7 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
         r"venv/",
         r"\.venv/",
         r"scripts/audit_paths\.py",  # Contains suggestion strings that match patterns
+        r"_pb2\.py$",  # Generated protobuf code
     ]
 
     for py_file in directory.rglob("*.py"):
@@ -249,6 +259,7 @@ def main():
         if p1_count > 0:
             print(f"\n❌ Found {p1_count} P0/P1 path issue(s). Fix before committing.")
             return 1
+        print("\n✅ Path audit passed (no P0/P1). P2 issues do not block the hook.")
 
     if not args.summary_only:
         # Generate detailed suggestions
