@@ -6,7 +6,6 @@ for AutoTLS functionality, including certificate generation,
 validation, and lifecycle management.
 """
 
-import asyncio
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
@@ -17,6 +16,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+import trio
 
 from libp2p.peer.id import ID
 
@@ -51,7 +51,18 @@ class CertificateManager:
         self.renewal_threshold_hours = renewal_threshold_hours
 
         self._certificates: dict[tuple[ID, str], dict[Any, Any]] = {}
-        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task[Any]] = {}
+        self._renewal_scopes: dict[tuple[ID, str], trio.CancelScope] = {}
+        self._nursery: trio.Nursery | None = None
+
+    async def start(self, nursery: trio.Nursery) -> None:
+        """Attach manager to a long-lived nursery."""
+        self._nursery = nursery
+
+    async def shutdown(self) -> None:
+        """Cancel all renewal jobs."""
+        for scope in self._renewal_scopes.values():
+            scope.cancel()
+        logger.info("Certificate manager shutdown complete")
 
     async def get_certificate(
         self,
@@ -183,13 +194,15 @@ class CertificateManager:
         peer_id: ID,
         domain: str,
         cert_data: dict[Any, Any],
+        _current_scope: trio.CancelScope | None = None,
     ) -> None:
         """Schedule certificate renewal."""
         key = (peer_id, domain)
 
         # Cancel existing renewal task
-        if key in self._renewal_tasks:
-            self._renewal_tasks[key].cancel()
+        existing_scope = self._renewal_scopes.get(key)
+        if existing_scope is not None and existing_scope is not _current_scope:
+            existing_scope.cancel()
 
         # Calculate renewal time
         expires_at = datetime.fromisoformat(cert_data["expires_at"])
@@ -204,24 +217,41 @@ class CertificateManager:
             f"Scheduling certificate renewal for {peer_id} in {delay:.0f} seconds"
         )
 
+        scope = trio.CancelScope()
+        self._renewal_scopes[key] = scope
+
         async def renew_certificate() -> None:
-            try:
-                await asyncio.sleep(delay)
+            with scope:
+                try:
+                    await trio.sleep(delay)
 
-                logger.info(f"Renewing certificate for {peer_id} on {domain}")
-                new_cert_data = await self.get_certificate(
-                    peer_id, domain, force_renew=True
-                )
+                    logger.info(f"Renewing certificate for {peer_id} on {domain}")
+                    new_cert_data = await self._generate_certificate(peer_id, domain)
+                    await self._store_certificate_to_storage(
+                        peer_id, domain, new_cert_data
+                    )
+                    self._certificates[key] = new_cert_data
 
-                # Update cached certificate
-                self._certificates[key] = new_cert_data  # type: ignore
+                    await self._schedule_renewal(
+                        peer_id,
+                        domain,
+                        new_cert_data,
+                        _current_scope=scope,
+                    )
 
-            except asyncio.CancelledError:
-                logger.debug(f"Certificate renewal cancelled for {peer_id}")
-            except Exception as e:
-                logger.error(f"Certificate renewal failed for {peer_id}: {e}")
+                except trio.Cancelled:
+                    logger.debug(f"Certificate renewal cancelled for {peer_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"Certificate renewal failed for {peer_id}: {e}")
+                finally:
+                    if self._renewal_scopes.get(key) is scope:
+                        self._renewal_scopes.pop(key, None)
 
-        self._renewal_tasks[key] = asyncio.create_task(renew_certificate())
+        if self._nursery is not None:
+            self._nursery.start_soon(renew_certificate)
+        else:
+            trio.lowlevel.spawn_system_task(renew_certificate)
 
     def _get_cert_path(self, peer_id: ID, domain: str) -> Path:
         """Get certificate file path."""
@@ -323,9 +353,9 @@ class CertificateManager:
             del self._certificates[key]
 
             # Cancel renewal task
-            if key in self._renewal_tasks:
-                self._renewal_tasks[key].cancel()
-                del self._renewal_tasks[key]
+            scope = self._renewal_scopes.pop(key, None)
+            if scope is not None:
+                scope.cancel()
 
         if expired_keys:
             logger.info(f"Cleaned up {len(expired_keys)} expired certificates")
@@ -375,9 +405,9 @@ class CertificateManager:
             del self._certificates[key]
 
         # Cancel renewal task
-        if key in self._renewal_tasks:
-            self._renewal_tasks[key].cancel()
-            del self._renewal_tasks[key]
+        scope = self._renewal_scopes.pop(key, None)
+        if scope is not None:
+            scope.cancel()
 
         # Remove from storage
         cert_path = self._get_cert_path(peer_id, domain)
@@ -385,16 +415,3 @@ class CertificateManager:
             cert_path.unlink()
 
         logger.info(f"Revoked certificate for {peer_id} on {domain}")
-
-    async def shutdown(self) -> None:
-        """Shutdown certificate manager."""
-        # Cancel all renewal tasks
-        for task in self._renewal_tasks.values():
-            if not task.done():
-                task.cancel()
-
-        # Wait for tasks to complete
-        if self._renewal_tasks:
-            await asyncio.gather(*self._renewal_tasks.values(), return_exceptions=True)
-
-        logger.info("Certificate manager shutdown complete")
