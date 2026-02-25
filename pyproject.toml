@@ -77,24 +77,11 @@ circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
 
+# Dependencies are defined only in [dependency-groups] (PEP 735).
+# Use uv as the preferred installer: uv sync --group dev, uv pip install --group <name> -e ., etc.
+# See docs or README for installation instructions.
+
 [dependency-groups]
-dev = [
-    { include-group = "docs" },
-    { include-group = "test" },
-    { include-group = "release" },
-    "ipython",
-    "mypy>=1.15.0",
-    "pre-commit>=3.4.0",
-    "tox>=4.0.0",
-    "ruff>=0.11.10",
-    "pyrefly (>=0.17.1,<0.18.0)",
-]
-docs = [
-    "sphinx>=6.0.0",
-    "sphinx_rtd_theme>=1.0.0",
-    "towncrier>=25,<26",
-    "tomli; python_version < '3.11'",
-]
 test = [
     "factory-boy>=2.12.0,<3.0.0",
     "p2pclient>=0.2.1",
@@ -105,12 +92,41 @@ test = [
     "pytest-mock>=3.15.1",
     "pytest-rerunfailures>=12.0",
 ]
+webrtc = [
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
+    "redis>=5.0.0",
+]
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx_rtd_theme>=1.0.0",
+    "towncrier>=25,<26",
+    "tomli; python_version < '3.11'",
+    "aiortc>=1.14.0",
+    "trio-asyncio>=0.15.0",
+]
 release = [
     "build>=0.9.0",
     "bump_my_version>=0.19.0",
     "setuptools>=42",
     "twine",
     "wheel",
+]
+dev = [
+    {include-group = "test"},
+    {include-group = "webrtc"},
+    {include-group = "docs"},
+    "build>=0.9.0",
+    "bump_my_version>=0.19.0",
+    "ipython",
+    "mypy>=1.15.0",
+    "pre-commit>=3.4.0",
+    "tox>=4.0.0",
+    "twine",
+    "wheel",
+    "setuptools>=42",
+    "ruff>=0.11.10",
+    "pyrefly (>=0.17.1,<0.18.0)",
 ]
 
 [tool.setuptools]
@@ -154,6 +170,7 @@ log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
 markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
+    "serial: mark test to run serially (not in parallel with pytest-xdist)",
     "benchmark: performance/sanity benchmarks (deselect with -m 'not benchmark')",
     "integration: mark test as integration (requires external service or proxy)",
 ]
@@ -307,4 +324,7 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "libp2p/transport/webrtc/**", # Optional WebRTC transport dependencies
+    "tests/interop/webrtc/**", # Optional WebRTC interop test dependencies
+    "tests/core/transport/webrtc/**", # Optional WebRTC test dependencies
 ]

@@ -1,0 +1,1091 @@
+from asyncio import AbstractEventLoop
+import logging
+from typing import TYPE_CHECKING, Any, cast
+
+from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection
+from multiaddr import Multiaddr
+import trio
+from trio_asyncio import aio_as_trio
+
+from libp2p.abc import (
+    IListener,
+    INetStream,
+    INetworkService,
+    IRawConnection,
+    ITransport,
+)
+from libp2p.custom_types import THandler, TProtocol
+from libp2p.host.basic_host import IHost
+from libp2p.network.transport_manager import TransportManager
+from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+from libp2p.relay.circuit_v2.config import RelayConfig, RelayLimits, RelayRole
+from libp2p.relay.circuit_v2.discovery import RelayDiscovery
+from libp2p.relay.circuit_v2.nat import ReachabilityChecker
+from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
+from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+from libp2p.stream_muxer.yamux.yamux import YamuxStream
+from libp2p.tools.async_service.abc import ManagerAPI
+from libp2p.tools.async_service.trio_service import TrioManager
+from libp2p.transport.exceptions import OpenConnectionError
+
+from ..async_bridge import get_webrtc_bridge, with_webrtc_context
+from ..constants import (
+    DEFAULT_DIAL_TIMEOUT,
+    DEFAULT_ICE_SERVERS,
+    SIGNALING_PROTOCOL,
+    WebRTCError,
+)
+from ..private_to_public.util import (
+    pick_random_ice_servers,
+)
+from .initiate_connection import initiate_connection
+from .listener import WebRTCPeerListener
+from .signaling_stream_handler import handle_incoming_stream
+from .util import extract_relay_base_addr, get_relay_peer, split_addr
+
+if TYPE_CHECKING:
+    from libp2p.network.swarm import Swarm
+
+logger = logging.getLogger("libp2p.transport.webrtc.private_to_private")
+
+
+class WebRTCTransport(ITransport):
+    """
+    Private-to-private WebRTC transport implementation.
+    Uses circuit relays for signaling and STUN/TURN servers for NAT traversal.
+    """
+
+    def __init__(self, config: dict[str, Any] | None = None):
+        """Initialize WebRTC transport."""
+        self.config = config or {}
+
+        # ICE servers configuration
+        self.ice_servers = self.config.get("ice_servers", DEFAULT_ICE_SERVERS)
+
+        # Connection tracking
+        self.active_connections: dict[str, IRawConnection] = {}
+        self.pending_connections: dict[str, RTCPeerConnection] = {}
+
+        # Protocol support
+        self.supported_protocols: set[str] = {"webrtc", "p2p-circuit", "p2p"}
+
+        # Transport state
+        self._started = False
+        self.host: IHost | None = None
+        self._network: INetworkService | None = None
+
+        # Trio-asyncio integration
+        self._asyncio_loop: AbstractEventLoop | None = None
+        self._loop_future = None
+        self._loop_holder_stop = trio.Event()
+        self._loop_ready = trio.Event()
+        self._loop_holder_exited = trio.Event()
+
+        # Metrics and monitoring
+        self.metrics = None
+
+        # Circuit relay discovery integration
+        self._relay_discovery: RelayDiscovery | None = None
+        self._relay_protocol: CircuitV2Protocol | None = None
+        self._relay_protocol_manager: TrioManager | None = None
+        self._relay_discovery_manager: ManagerAPI | None = None
+        self._relay_transport: CircuitV2Transport | None = None
+        self._relay_limits: RelayLimits | None = None
+        self._relay_config: RelayConfig | None = None
+
+        # Transport manager integration
+        self._transport_manager: TransportManager | None = None
+        self._signaling_ready: set[ID] = set()
+        self._advertised_addrs: list[Multiaddr] = []
+
+        # NAT traversal detection
+        self._reachability_checker: ReachabilityChecker | None = None
+
+        logger.info("WebRTC Transport initialized")
+
+    async def start(self) -> None:
+        """Start the WebRTC transport with proper asyncio event loop setup."""
+        if self._started:
+            return
+
+        if not self.host:
+            raise WebRTCError("Host must be set before starting transport")
+
+        try:
+            self._loop_holder_stop = trio.Event()
+            self._loop_ready = trio.Event()
+            self._loop_holder_exited = trio.Event()
+            trio.lowlevel.spawn_system_task(self._hold_loop_open)
+            await self._loop_ready.wait()
+            logger.info("WebRTC asyncio loop held open for transport lifetime")
+
+            # Register signaling protocol handler with the host
+            # This follows the pattern used by other protocols like DHT and pubsub
+            self.host.set_stream_handler(
+                TProtocol(SIGNALING_PROTOCOL), self._handle_signaling_stream
+            )
+            logger.info(f"Registered signaling protocol handler: {SIGNALING_PROTOCOL}")
+
+            await self._setup_circuit_relay_support()
+
+            # Initialize NAT traversal detection
+            if self.host:
+                self._reachability_checker = ReachabilityChecker(self.host)
+                logger.debug("NAT reachability checker initialized")
+
+            self._started = True
+            logger.info("WebRTC Transport started successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to start WebRTC transport: {e}")
+            raise WebRTCError(f"Transport start failed: {e}") from e
+
+    async def _hold_loop_open(self) -> None:
+        """Keep asyncio loop open so aiortc/aioice run in a stable context."""
+        bridge = get_webrtc_bridge()
+        async with bridge:
+            self._loop_ready.set()
+            try:
+                await self._loop_holder_stop.wait()
+            finally:
+                self._loop_holder_exited.set()
+
+    async def stop(self) -> None:
+        """Stop the WebRTC transport and clean up resources."""
+        if not self._started:
+            return
+
+        try:
+            connection_ids = list(self.active_connections.keys())
+            for conn_id in connection_ids:
+                await self._cleanup_connection(conn_id)
+
+            # Close all pending connections
+            pending_ids = list(self.pending_connections.keys())
+            for conn_id in pending_ids:
+                await self._cleanup_connection(conn_id)
+
+            self._started = False
+            logger.info("WebRTC Transport stopped successfully")
+
+            if self._relay_discovery_manager is not None:
+                await self._relay_discovery_manager.stop()
+                self._relay_discovery_manager = None
+
+            if self._relay_protocol_manager is not None:
+                await self._relay_protocol_manager.stop()
+                self._relay_protocol_manager = None
+
+            self._relay_transport = None
+            self._relay_discovery = None
+            self._signaling_ready.clear()
+            self._advertised_addrs = []
+            self._reachability_checker = None
+
+            self._loop_holder_stop.set()
+            with trio.move_on_after(2.0):
+                await self._loop_holder_exited.wait()
+
+        except Exception as e:
+            logger.error(f"Error stopping WebRTC transport: {e}")
+            raise
+
+    def can_handle(self, maddr: Multiaddr) -> bool:
+        """
+        Check if transport can handle the multiaddr.
+
+        WebRTC transport can handle multiaddrs that contain:
+        - webrtc protocol
+        - p2p-circuit protocol (for relay-based connections)
+        - p2p protocol (for peer addressing)
+        """
+        try:
+            protocols = {p.name for p in maddr.protocols()}
+
+            # Must contain webrtc or p2p-circuit for WebRTC signaling
+            has_webrtc = "webrtc" in protocols
+            has_circuit = "p2p-circuit" in protocols
+            has_p2p = "p2p" in protocols
+
+            # For WebRTC transport, we need either:
+            # 1. Direct webrtc protocol, OR
+            # 2. p2p-circuit for relay-based signaling
+            return has_webrtc or (has_circuit and has_p2p)
+
+        except Exception as e:
+            logger.warning(f"Error checking multiaddr compatibility: {e}")
+            return False
+
+    async def dial(self, maddr: Multiaddr) -> IRawConnection:
+        """
+        Dial a WebRTC peer using circuit relay for signaling.
+
+        Args:
+            maddr: Multiaddr containing circuit relay path and target peer
+
+        Returns:
+            IRawConnection: Established WebRTC connection
+
+        """
+        if not self.can_handle(maddr):
+            raise OpenConnectionError(f"Cannot handle multiaddr: {maddr}")
+
+        if not self._started:
+            raise WebRTCError("Transport not started")
+
+        if self.host is None:
+            raise WebRTCError("Host must be set before dialing connections")
+
+        logger.info(f"Dialing WebRTC connection to {maddr}")
+
+        try:
+            # Ensure signaling connection through Circuit Relay v2
+            # NAT detection is handled within ensure_signaling_connection()
+            await self.ensure_signaling_connection(maddr)
+
+            # Configure ICE servers (using configured servers)
+            ice_servers = pick_random_ice_servers(self.ice_servers)
+            rtc_ice_servers = [
+                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                for s in ice_servers
+            ]
+            rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
+
+            connection = await with_webrtc_context(
+                initiate_connection,
+                maddr=maddr,
+                rtc_config=rtc_config,
+                host=self.host,
+                timeout=DEFAULT_DIAL_TIMEOUT,
+            )
+
+            # Track connection
+            remote_peer_id = getattr(connection, "remote_peer_id", None)
+            conn_id = (
+                str(remote_peer_id)
+                if remote_peer_id is not None
+                else str(id(connection))
+            )
+            self.active_connections[conn_id] = connection
+            logger.info(
+                f"Successfully established WebRTC connection to {remote_peer_id}"
+            )
+
+            # Return raw connection - let swarm upgrade it naturally
+            # The swarm will detect this is an outbound connection
+            #  and use is_initiator=True
+            # (dialer initiates Noise handshake,
+            # following standard libp2p semantics)
+            return connection
+
+        except Exception as e:
+            logger.error(f"Failed to dial WebRTC connection to {maddr}: {e}")
+            raise OpenConnectionError(f"WebRTC dial failed: {e}") from e
+
+    def create_listener(self, handler_function: THandler) -> IListener:
+        """Create a WebRTC listener for incoming connections."""
+        if self.host is None:
+            raise WebRTCError("Host must be set before creating listener")
+
+        listener = WebRTCPeerListener(
+            transport=self, handler=handler_function, host=self.host
+        )
+        if self._transport_manager is not None:
+            self._transport_manager.register_listener(listener)
+        return listener
+
+    async def _handle_signaling_stream(self, stream: INetStream) -> None:
+        """
+        Handle incoming signaling stream from circuit relay with proper async context.
+
+        This follows the py-libp2p stream handler pattern where the handler
+        receives only the stream object.
+        """
+        if self.host is None:
+            logger.error("Cannot handle signaling stream: Host not set")
+            return
+
+        connection_info = None
+
+        try:
+            # Extract connection info from stream
+            stream_for_info = cast(YamuxStream, stream)
+            if hasattr(stream_for_info, "muxed_conn") and hasattr(
+                stream_for_info.muxed_conn, "peer_id"
+            ):
+                connection_info = {
+                    "peer_id": stream_for_info.muxed_conn.peer_id,
+                    "remote_addr": getattr(
+                        stream_for_info.muxed_conn, "remote_addr", None
+                    ),
+                }
+
+            logger.debug(f"Handling incoming signaling stream from {connection_info}")
+
+            # Configure peer connection
+            ice_servers = pick_random_ice_servers(self.ice_servers)
+            rtc_ice_servers = [
+                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                for s in ice_servers
+            ]
+            rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
+
+            async def _handle_and_register() -> IRawConnection | None:
+                result = await handle_incoming_stream(
+                    stream=stream,
+                    rtc_config=rtc_config,
+                    connection_info=connection_info,
+                    host=self.host,
+                )
+                if result:
+                    await self.register_incoming_connection(result)
+                return result
+
+            result = await with_webrtc_context(_handle_and_register)
+            if not result:
+                logger.warning("Signaling stream handling returned no connection")
+
+        except Exception as e:
+            logger.error(f"Error handling signaling stream: {e}")
+            # Ensure stream is closed on error
+            try:
+                if hasattr(stream, "close"):
+                    await stream.close()
+            except Exception as close_error:
+                logger.warning(f"Error closing signaling stream: {close_error}")
+
+    async def _setup_circuit_relay_support(self) -> None:
+        if not self.host:
+            raise WebRTCError("Host must be set before starting transport")
+
+        self._transport_manager = getattr(
+            self.host.get_network(), "transport_manager", None
+        )
+
+        if (
+            self._transport_manager is not None
+            and self._transport_manager.get_transport("webrtc") is None
+        ):
+            self._transport_manager.register_transport("webrtc", self)
+
+        if self._relay_transport:
+            return
+
+        # Prepare relay configuration (client role with auto reservation)
+        self._relay_limits = RelayLimits(
+            duration=60 * 60,
+            data=1024 * 1024 * 10,
+            max_circuit_conns=8,
+            max_reservations=4,
+        )
+        self._relay_config = RelayConfig(roles=RelayRole.CLIENT)
+
+        self._relay_protocol = CircuitV2Protocol(
+            self.host,
+            self._relay_limits,
+            allow_hop=False,
+        )
+        self._relay_protocol_manager = TrioManager(self._relay_protocol)
+        trio.lowlevel.spawn_system_task(
+            self._relay_protocol_manager.run, name="webrtc-relay-protocol"
+        )
+        await self._relay_protocol_manager.wait_started()
+
+        self._relay_transport = CircuitV2Transport(
+            self.host,
+            self._relay_protocol,
+            self._relay_config,
+        )
+
+        self._relay_discovery = self._relay_transport.discovery
+        if self._relay_discovery:
+            self._relay_discovery_manager = (
+                self._relay_protocol_manager.run_child_service(
+                    self._relay_discovery, daemon=True, name="webrtc-relay-discovery"
+                )
+            )
+            await self._relay_discovery_manager.wait_started()
+
+        if (
+            self._transport_manager is not None
+            and self._transport_manager.get_transport("circuit-relay") is None
+        ):
+            self._transport_manager.register_transport(
+                "circuit-relay", self._relay_transport
+            )
+
+    async def ensure_signaling_connection(self, maddr: Multiaddr) -> None:
+        """
+        Ensure signaling connection to target peer through Circuit Relay v2.
+
+        Uses NAT detection to optimize relay usage and provide better logging.
+        """
+        if self.host is None:
+            raise WebRTCError("Transport host not configured")
+
+        await self._setup_circuit_relay_support()
+
+        circuit_addr, target_peer_id = split_addr(maddr)
+        peerstore = self.host.get_peerstore()
+
+        # Check peer reachability for logging and optimization
+        if self._reachability_checker:
+            try:
+                is_reachable = await self._reachability_checker.check_peer_reachability(
+                    target_peer_id
+                )
+                if is_reachable:
+                    logger.debug(
+                        f"Peer {target_peer_id} appears reachable, "
+                        "but using relay for signaling (private-to-private design)"
+                    )
+                else:
+                    logger.debug(
+                        f"Peer {target_peer_id} behind NAT, using Circuit Relay v2"
+                    )
+            except Exception as nat_exc:
+                logger.debug(f"NAT detection check failed: {nat_exc}")
+
+        target_component = Multiaddr(f"/p2p/{target_peer_id.to_base58()}")
+        try:
+            relay_circuit_base = circuit_addr.decapsulate(target_component)
+        except ValueError:
+            relay_circuit_base = circuit_addr
+
+        try:
+            peerstore.add_addr(target_peer_id, relay_circuit_base, 3600)
+        except Exception:
+            logger.debug(
+                "Failed to cache relay base address for %s", target_peer_id.to_base58()
+            )
+
+        network_service = self.host.get_network()
+        swarm = cast("Swarm", network_service)
+        existing = swarm.get_connections(target_peer_id)
+        if existing:
+            self._signaling_ready.add(target_peer_id)
+            logger.debug(f"Signaling connection to {target_peer_id} already exists")
+            return
+
+        if self._relay_transport is None:
+            raise WebRTCError("Circuit relay transport not initialized")
+
+        relay_peer = get_relay_peer(circuit_addr)
+        base_addr = extract_relay_base_addr(circuit_addr)
+        if base_addr is not None:
+            peerstore.add_addr(relay_peer, base_addr, 3600)
+
+        try:
+            await swarm.dial_peer(relay_peer)
+            logger.debug(f"Connected to relay {relay_peer}")
+        except Exception as exc:
+            raise WebRTCError(f"Failed to dial relay {relay_peer}: {exc}") from exc
+
+        if self._relay_discovery:
+            try:
+                await self._relay_discovery.make_reservation(relay_peer)
+                logger.debug(f"Made reservation with relay {relay_peer}")
+            except Exception:
+                logger.debug(f"Reservation with relay {relay_peer} failed or skipped")
+
+        try:
+            peer_info = PeerInfo(target_peer_id, [circuit_addr])
+            raw_conn = await self._relay_transport.dial_peer_info(peer_info)
+            logger.debug(f"Established relay connection to {target_peer_id}")
+        except Exception as exc:
+            raise WebRTCError(f"Failed to dial target via relay: {exc}") from exc
+
+        try:
+            secured_conn = await swarm.upgrader.upgrade_security(
+                raw_conn, True, target_peer_id
+            )
+            muxed_conn = await swarm.upgrader.upgrade_connection(
+                secured_conn, target_peer_id
+            )
+            await swarm.add_conn(muxed_conn)
+            self._signaling_ready.add(target_peer_id)
+            logger.debug(f"Signaling connection to {target_peer_id} ready")
+        except Exception as exc:
+            await raw_conn.close()
+            raise WebRTCError(
+                f"Failed to upgrade relay connection for {target_peer_id}: {exc}"
+            ) from exc
+
+    def get_listener_addresses(self) -> list[Multiaddr]:
+        if not self.host or self._relay_transport is None:
+            return []
+
+        if not self._advertised_addrs:
+            self._refresh_listener_addresses()
+
+        return list(self._advertised_addrs)
+
+    async def ensure_listener_ready(self) -> None:
+        if not self.host:
+            raise WebRTCError("Transport host not configured")
+
+        await self._setup_circuit_relay_support()
+
+        if self._relay_discovery is None:
+            raise WebRTCError("Relay discovery not available")
+
+        relays = self._relay_discovery.get_relays()
+        relay_list = [str(r) for r in relays]
+        logger.info("Relay discovery initial relays: %s", relay_list)
+        print("relay discovery initial relays:", relay_list)
+        if not relays:
+            await self._relay_discovery.discover_relays()
+            relays = self._relay_discovery.get_relays()
+            relay_list = [str(r) for r in relays]
+            logger.info("Relay discovery after manual discover: %s", relay_list)
+            print("relay discovery after manual discover:", relay_list)
+
+        reservation_failed = False
+        for relay_id in relays:
+            try:
+                if self._relay_discovery.auto_reserve:
+                    await self._relay_discovery.make_reservation(relay_id)
+            except Exception:
+                reservation_failed = True
+                continue
+
+        relay_list = [str(r) for r in relays]
+        logger.info(
+            "Ensure listener ready using relays: %s (reservation_failed=%s)",
+            relay_list,
+            reservation_failed,
+        )
+        print(
+            "ensure_listener_ready relays:",
+            relay_list,
+            "reservation_failed=",
+            reservation_failed,
+        )
+        if reservation_failed:
+            logger.debug("Relay reservation failed for at least one relay")
+
+        self._refresh_listener_addresses()
+        advertised_list = [str(addr) for addr in self._advertised_addrs]
+        logger.info("Advertised listener addrs: %s", advertised_list)
+        print("advertised listener addrs:", advertised_list)
+
+    def _refresh_listener_addresses(self) -> None:
+        """
+        Refresh listener addresses with NAT-aware advertisement.
+
+        This method:
+        1. Checks self-reachability using NAT detection (synchronous check)
+        2. Advertises public addresses if available
+        3. Falls back to relay addresses when behind NAT
+
+        Note: NAT detection uses synchronous checks where possible to avoid
+        making this method async, which would require changes to callers.
+        """
+        if not self.host:
+            return
+
+        peerstore = self.host.get_peerstore()
+        local_peer = self.host.get_id()
+
+        advertised: list[Multiaddr] = []
+        seen: set[str] = set()
+
+        # Check self-reachability for smart address advertisement
+        # Use synchronous check via get_public_addrs() to avoid async complexity
+        has_public_addrs = False
+        if self._reachability_checker:
+            try:
+                # Get all host addresses and filter for public ones
+                all_addrs = list(self.host.get_addrs())
+                public_addrs = self._reachability_checker.get_public_addrs(all_addrs)
+
+                if public_addrs:
+                    # Advertise public addresses when available
+                    has_public_addrs = True
+                    for public_addr in public_addrs:
+                        try:
+                            webrtc_addr = public_addr.encapsulate(
+                                Multiaddr(f"/webrtc/p2p/{local_peer.to_base58()}")
+                            )
+                            addr_str = str(webrtc_addr)
+                            if addr_str not in seen:
+                                seen.add(addr_str)
+                                advertised.append(webrtc_addr)
+                                logger.debug(
+                                    f"Advertised public WebRTC address: {webrtc_addr}"
+                                )
+                        except Exception as exc:
+                            logger.debug(f"Failed to compose public WebRTC addr: {exc}")
+            except Exception as e:
+                logger.debug(f"Error checking self-reachability: {e}")
+
+        # Always include relay addresses as fallback (even if public addresses exist)
+        # This ensures connectivity when public addresses are not reachable
+        relay_ids: list[ID]
+        if self._relay_discovery:
+            relay_ids = self._relay_discovery.get_relays()
+        else:
+            relay_ids = []
+
+        if not relay_ids:
+            try:
+                peer_ids: list[ID] = list(getattr(peerstore, "peer_ids", lambda: [])())
+            except Exception:
+                peer_ids = []
+            relay_ids = [pid for pid in peer_ids if pid != local_peer]
+
+        for relay_id in relay_ids:
+            relay_addrs = peerstore.addrs(relay_id)
+            if not relay_addrs:
+                continue
+
+            for relay_addr in relay_addrs:
+                base_addr = self._build_relay_base_addr(relay_addr, relay_id)
+                if base_addr is None:
+                    continue
+
+                try:
+                    webrtc_addr = base_addr.encapsulate(
+                        Multiaddr(f"/webrtc/p2p/{local_peer.to_base58()}")
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to compose WebRTC listen addr: %s", exc)
+                    continue
+
+                addr_str = str(webrtc_addr)
+                if addr_str in seen:
+                    continue
+                seen.add(addr_str)
+                advertised.append(webrtc_addr)
+
+                try:
+                    peerstore.add_addr(local_peer, base_addr, 3600)
+                except Exception:
+                    pass
+
+        self._advertised_addrs = advertised
+
+        if has_public_addrs:
+            logger.info(
+                f"Advertised {len(advertised)} WebRTC addresses "
+                f"({len([a for a in advertised if '/p2p-circuit' not in str(a)])} "
+                f"public, "
+                f"{len([a for a in advertised if '/p2p-circuit' in str(a)])} relay)"
+            )
+        else:
+            logger.info(f"Advertised {len(advertised)} relay-based WebRTC addr")
+
+    @staticmethod
+    def _build_relay_base_addr(relay_addr: Multiaddr, relay_id: ID) -> Multiaddr | None:
+        """
+        Normalise relay address to include /p2p/<relay>/p2p-circuit.
+        """
+        try:
+            addr = relay_addr
+            relay_component = f"/p2p/{relay_id.to_base58()}"
+            addr_str = str(addr)
+
+            if relay_component not in addr_str:
+                addr = addr.encapsulate(Multiaddr(relay_component))
+                addr_str = str(addr)
+
+            if "/p2p-circuit" not in addr_str:
+                addr = addr.encapsulate(Multiaddr("/p2p-circuit"))
+
+            return addr
+        except Exception as exc:
+            logger.debug("Failed to normalise relay base addr: %s", exc)
+            return None
+
+    async def _cleanup_connection(self, conn_id: str) -> None:
+        """Clean up connection resources with proper async handling."""
+        try:
+            # Clean up pending peer connection
+            if conn_id in self.pending_connections:
+                pc = self.pending_connections.pop(conn_id)
+                try:
+                    await with_webrtc_context(lambda: aio_as_trio(pc.close()))
+                    logger.debug(f"Closed pending peer connection {conn_id}")
+                except Exception as e:
+                    logger.warning(f"Error closing peer connection {conn_id}: {e}")
+
+            # Clean up active raw connection
+            if conn_id in self.active_connections:
+                conn = self.active_connections.pop(conn_id)
+                try:
+                    await conn.close()
+                    logger.debug(f"Closed active connection {conn_id}")
+                except Exception as e:
+                    logger.warning(f"Error closing raw connection {conn_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in connection cleanup for {conn_id}: {e}")
+
+    async def _on_protocol(self, stream: INetStream) -> None:
+        """
+        Handle incoming signaling stream (following JS pattern).
+
+        Reference: _onProtocol method in transport.ts
+        """
+        if not self.host:
+            logger.error("Cannot handle signaling stream: Host not set")
+            return
+
+        logger.debug("Handling incoming signaling protocol stream")
+
+        try:
+            ice_servers = pick_random_ice_servers(self.ice_servers)
+            rtc_ice_servers = [
+                RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                for s in ice_servers
+            ]
+            rtc_config = RTCConfiguration(iceServers=rtc_ice_servers)
+
+            async def _handle_and_register() -> IRawConnection | None:
+                result = await handle_incoming_stream(
+                    stream=stream,
+                    rtc_config=rtc_config,
+                    connection_info=None,
+                    host=self.host,
+                    timeout=DEFAULT_DIAL_TIMEOUT,
+                )
+                if result:
+                    await self.register_incoming_connection(result)
+                return result
+
+            result = await with_webrtc_context(_handle_and_register)
+            if not result:
+                logger.warning("Signaling stream handling failed")
+
+        except Exception as e:
+            logger.error(f"Error in _on_protocol: {e}")
+            try:
+                if hasattr(stream, "close"):
+                    await stream.close()
+            except Exception:
+                pass
+
+    def set_host(self, host: IHost) -> None:
+        """Set the libp2p host for this transport."""
+        self.host = host
+
+        # Store reference to network for potential future use
+        if hasattr(host, "get_network"):
+            self._network = host.get_network()
+            logger.debug("Stored network reference from host")
+
+    async def register_incoming_connection(self, connection: IRawConnection) -> None:
+        """
+        Upgrade and register an incoming raw WebRTC connection with the swarm.
+        """
+        if self.host is None:
+            await connection.close()
+            raise WebRTCError("Host not set for incoming WebRTC connection")
+
+        remote_peer_id = getattr(connection, "remote_peer_id", None)
+        if remote_peer_id is None:
+            await connection.close()
+            raise WebRTCError("Incoming WebRTC connection missing remote peer ID")
+
+        network = self.host.get_network()
+        if not hasattr(network, "upgrader") or not hasattr(network, "add_conn"):
+            await connection.close()
+            raise WebRTCError(
+                "Host network must expose upgrader/add_conn for WebRTC connections"
+            )
+
+        swarm = cast("Swarm", network)
+
+        # CRITICAL: Verify DTLS and SCTP states before security upgrade
+        # This prevents "ConnectionError: Cannot send encrypted data, not connected"
+        peer_connection = getattr(connection, "peer_connection", None)
+        data_channel = getattr(connection, "data_channel", None)
+
+        if peer_connection is not None:
+            from ..aiortc_patch import (
+                get_dtls_state,
+                get_sctp_state,
+                is_dtls_connected,
+                is_sctp_connected,
+            )
+
+            # CRITICAL: Check DTLS state before security upgrade
+            # DTLS might have closed between connection return and security upgrade
+            dtls_state = get_dtls_state(peer_connection)
+            dtls_connected = is_dtls_connected(peer_connection)
+
+            # If DTLS is closed, check if connection states suggest
+            #  it should be connected
+            # This handles the case where DTLS closes due to transient issues
+            if not dtls_connected and dtls_state == "closed":
+                conn_state = getattr(peer_connection, "connectionState", "unknown")
+                ice_state = getattr(peer_connection, "iceConnectionState", "unknown")
+                sctp_state_check = get_sctp_state(peer_connection)
+
+                # If connection and ICE are still connected,
+                #  DTLS might have closed transiently
+                if conn_state == "connected" and ice_state == "completed":
+                    logger.warning(
+                        f"DTLS closed but connection/ICE still connected: "
+                        f"dtls={dtls_state}, sctp={sctp_state_check}, "
+                        f"waiting briefly to see if DTLS recovers..."
+                    )
+                    # Wait up to 2 seconds for DTLS to recover
+                    max_recovery_wait = 2.0
+                    start_recovery = trio.current_time()
+                    while trio.current_time() - start_recovery < max_recovery_wait:
+                        await trio.sleep(0.2)
+                        dtls_state = get_dtls_state(peer_connection)
+                        dtls_connected = is_dtls_connected(peer_connection)
+                        if dtls_connected:
+                            logger.info("DTLS recovered after brief wait")
+                            break
+                        # Check if connection states changed
+                        new_conn_state = getattr(
+                            peer_connection, "connectionState", "unknown"
+                        )
+                        new_ice_state = getattr(
+                            peer_connection, "iceConnectionState", "unknown"
+                        )
+                        if (
+                            new_conn_state != "connected"
+                            or new_ice_state != "completed"
+                        ):
+                            logger.error(
+                                f"Conn/ICE-states changed during DTLS recovery wait: "
+                                f"conn={new_conn_state}, ice={new_ice_state}"
+                            )
+                            break
+
+            if not dtls_connected:
+                # Final check - DTLS is not connected
+                final_dtls_state = get_dtls_state(peer_connection)
+                final_sctp_state = get_sctp_state(peer_connection)
+                conn_state = getattr(peer_connection, "connectionState", "unknown")
+                ice_state = getattr(peer_connection, "iceConnectionState", "unknown")
+
+                logger.error(
+                    f"DTLS not connected before security upgrade: "
+                    f"dtls_state={final_dtls_state}, sctp_state={final_sctp_state}, "
+                    f"connectionState={conn_state}, iceConnectionState={ice_state}"
+                )
+
+                # Provide more context about why DTLS might be closed
+                if final_dtls_state == "closed":
+                    if final_sctp_state == "closed":
+                        error_msg = (
+                            f"Both DTLS and SCTP are closed before security upgrade. "
+                            f"This suggests SCTP closed first, causing DTLS to close. "
+                            f"Connection states: conn={conn_state}, ice={ice_state}"
+                        )
+                    else:
+                        error_msg = (
+                            f"DTLS is closed but SCTP is {final_sctp_state}. "
+                            f"This may indicate DTLS closed independently. "
+                            f"Connection states: conn={conn_state}, ice={ice_state}"
+                        )
+                else:
+                    error_msg = (
+                        f"DTLS transport not connected (state: {final_dtls_state}) - "
+                        f"cannot proceed with security upgrade"
+                    )
+
+                await connection.close()
+                raise WebRTCError(error_msg)
+
+            # Check SCTP state - with retry if it was recently connected
+            sctp_state = get_sctp_state(peer_connection)
+            sctp_connected = is_sctp_connected(peer_connection)
+
+            # If SCTP is not connected, wait briefly and retry (might be transient)
+            if not sctp_connected:
+                logger.warning(
+                    f"SCTP not connected on first check: state={sctp_state}, "
+                    f"waiting briefly and retrying..."
+                )
+                await trio.sleep(0.5)  # Brief wait for SCTP to stabilize
+                sctp_state = get_sctp_state(peer_connection)
+                sctp_connected = is_sctp_connected(peer_connection)
+
+            if not sctp_connected:
+                # Check if SCTP is closed (terminal state)
+                if sctp_state == "closed":
+                    final_dtls_state_for_sctp = get_dtls_state(peer_connection)
+                    logger.error(
+                        f"SCTP closed before security upgrade: "
+                        f" state={sctp_state}, "
+                        f"connectionState= "
+                        f"{getattr(peer_connection, 'connectionState', 'unknown')}, "
+                        f"iceConnectionState= "
+                        f"{getattr(peer_connection, 'iceConnectionState', 'unknown')}, "
+                        f"dtls_state={final_dtls_state_for_sctp}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"SCTP transport closed (state: {sctp_state}) - "
+                        "cannot proceed with security upgrade. "
+                        "SCTP closure may have caused DTLS to close."
+                    )
+                else:
+                    logger.error(
+                        f"SCTP not connected before security upgrade: "
+                        f" state={sctp_state}, "
+                        f"connectionState= "
+                        f"{getattr(peer_connection, 'connectionState', 'unknown')}, "
+                        f"iceConnectionState= "
+                        f"{getattr(peer_connection, 'iceConnectionState', 'unknown')}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"SCTP transport not connected (state: {sctp_state}) - "
+                        "cannot proceed with security upgrade"
+                    )
+
+            logger.debug(
+                f"DTLS and SCTP verified before security upgrade: "
+                f"DTLS={dtls_state}, SCTP={sctp_state}"
+            )
+
+        # Verify data channel is open
+        if data_channel is not None:
+            channel_state = getattr(data_channel, "readyState", "unknown")
+            if channel_state != "open":
+                logger.error(
+                    f"Data channel not open before security upgrade: "
+                    f" state={channel_state}"
+                )
+                await connection.close()
+                raise WebRTCError(
+                    f"Data channel not open (state: {channel_state}) - "
+                    "cannot proceed with security upgrade"
+                )
+            logger.debug("Data channel verified open before security upgrade")
+
+        try:
+            # Monitor data channel during security upgrade
+            # Check channel state before and after upgrade
+            channel_state_before = (
+                getattr(data_channel, "readyState", "unknown")
+                if data_channel is not None
+                else "N/A"
+            )
+
+            # CRITICAL: Wait for buffer consumer/pump to be ready before upgrade.
+            # The answerer's read() must receive dialer's Noise messages; the data
+            # pump must be running and ready to forward channel data to read().
+            if hasattr(connection, "_buffer_consumer_ready"):
+                with trio.move_on_after(2.0) as pump_scope:
+                    await connection._buffer_consumer_ready.wait()
+                if pump_scope.cancelled_caught:
+                    logger.warning(
+                        "Buffer consumer ready timeout for %s - proceeding anyway",
+                        remote_peer_id,
+                    )
+                else:
+                    logger.debug(
+                        "Buffer consumer ready for %s before security upgrade",
+                        remote_peer_id,
+                    )
+                await trio.sleep(0.05)
+
+            # For incoming connections, swarm uses is_initiator=False (responder)
+            # The connection listener waits for the dialer
+            #  to send the first Noise message
+            # This follows standard libp2p semantics:
+            #  outbound=initiator, inbound=responder
+            secured_conn = await swarm.upgrader.upgrade_security(
+                connection,
+                False,
+                remote_peer_id,  # is_initiator=False: listener is responder
+            )
+
+            logger.debug(
+                f"Listener's WebRTC connection secured for {remote_peer_id} "
+                f"(waiting for dialer to initiate Noise handshake)"
+            )
+
+            # Verify data channel is still open after security upgrade
+            if data_channel is not None:
+                channel_state_after = getattr(data_channel, "readyState", "unknown")
+                if channel_state_after != "open":
+                    logger.error(
+                        f"Data channel closed during security upgrade: "
+                        f"before={channel_state_before}, after={channel_state_after}"
+                    )
+                    await connection.close()
+                    raise WebRTCError(
+                        f"Data channel closed during security upgrade "
+                        f"(state: {channel_state_after})"
+                    )
+                logger.debug(
+                    f"Data channel remained open during security upgrade: "
+                    f"state={channel_state_after}"
+                )
+
+            muxed_conn = await swarm.upgrader.upgrade_connection(
+                secured_conn, remote_peer_id
+            )
+            await swarm.add_conn(muxed_conn)
+            logger.info("Registered incoming WebRTC connection from %s", remote_peer_id)
+
+            # CRITICAL: Unregister handshake AFTER successful security upgrade
+            # The handshake is now complete, so DTLS/SCTP can close normally if needed
+            if peer_connection is not None:
+                from ..aiortc_patch import unregister_handshake
+
+                unregister_handshake(peer_connection)
+                logger.debug(
+                    f"Unregistered handshake for peer connection {id(peer_connection)} "
+                    f"after successful security upgrade"
+                )
+        except Exception as exc:
+            logger.error(
+                "Failed to upgrade incoming WebRTC connection from %s: %s",
+                remote_peer_id,
+                exc,
+            )
+
+            # Unregister handshake on failure
+            if peer_connection is not None:
+                from ..aiortc_patch import unregister_handshake
+
+                unregister_handshake(peer_connection)
+
+            try:
+                await connection.close()
+            except Exception:
+                pass
+            raise WebRTCError(
+                f"Failed to upgrade incoming WebRTC connection: {exc}"
+            ) from exc
+
+        conn_id = str(remote_peer_id)
+        self.active_connections[conn_id] = connection
+
+    def get_supported_protocols(self) -> set[str]:
+        """Get supported protocols."""
+        return self.supported_protocols.copy()
+
+    def get_connection_count(self) -> int:
+        """Get number of active connections."""
+        return len(self.active_connections)
+
+    def is_started(self) -> bool:
+        """Check if transport is started."""
+        return self._started
+
+    def get_addrs(self) -> list[Multiaddr]:
+        """
+        Get the multiaddresses this transport is listening on.
+
+        For WebRTC transport, we don't listen on specific addresses like TCP.
+        Instead, we listen for signaling via the circuit relay protocol.
+        """
+        if not self._started or not self.host:
+            return []
+
+        if not self._advertised_addrs:
+            self._refresh_listener_addresses()
+
+        return list(self._advertised_addrs)

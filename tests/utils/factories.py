@@ -26,6 +26,7 @@ from libp2p.abc import (
     IHost,
     INetStream,
     IPeerRouting,
+    IPeerStore,
     IPubsubRouter,
     IRawConnection,
     ISecureConn,
@@ -174,7 +175,9 @@ def noise_handshake_payload_factory() -> NoiseHandshakePayload:
     )
 
 
-def plaintext_transport_factory(key_pair: KeyPair, peerstore=None) -> ISecureTransport:
+def plaintext_transport_factory(
+    key_pair: KeyPair, peerstore: IPeerStore | None = None
+) -> ISecureTransport:
     return InsecureTransport(key_pair, peerstore=peerstore)
 
 
@@ -206,7 +209,7 @@ def security_options_factory_factory(
             transport_factory = noise_transport_factory
         elif protocol_id == TLS_PROTOCOL_ID:
 
-            def tls_transport_factory(key_pair):
+            def tls_transport_factory(key_pair: KeyPair) -> ISecureTransport:
                 return TLSTransport(key_pair)
 
             transport_factory = tls_transport_factory

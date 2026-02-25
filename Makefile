@@ -1,6 +1,6 @@
 CURRENT_SIGN_SETTING := $(shell git config commit.gpgSign)
 
-.PHONY: clean-pyc clean-build docs
+.PHONY: clean-pyc clean-build docs linux-docs
 
 help:
 	@echo "clean-build - remove build artifacts"
@@ -10,7 +10,8 @@ help:
 	@echo "fix - fix formatting & linting issues with ruff"
 	@echo "lint - fix linting issues with pre-commit"
 	@echo "test - run tests quickly with the default Python"
-	@echo "docs - generate docs and open in browser (linux-docs for version on linux)"
+	@echo "docs - generate docs and open in browser (tries xdg-open then open)"
+	@echo "linux-docs - same as docs (synonym)"
 	@echo "package-test - build package and install it in a venv for manual testing"
 	@echo "notes - consume towncrier newsfragments and update release notes in docs - requires bump to be set"
 	@echo "release - package and upload a release (does not run notes target) - requires bump to be set"
@@ -88,13 +89,17 @@ $(PY): FORCE
 
 FORCE:
 
-# docs commands
+# docs commands (docs and linux-docs are synonyms: build docs then open via xdg-open or open)
+DOCS_HTML = docs/_build/html/index.html
 
-docs: check-docs
-	open docs/_build/html/index.html
-
-linux-docs: check-docs
-	xdg-open docs/_build/html/index.html
+docs linux-docs: check-docs
+	@if command -v xdg-open > /dev/null 2>&1; then \
+		xdg-open $(DOCS_HTML); \
+	elif command -v open > /dev/null 2>&1; then \
+		open $(DOCS_HTML); \
+	else \
+		echo "Could not find xdg-open or open. Open $(DOCS_HTML) manually."; \
+	fi
 
 # docs helpers
 

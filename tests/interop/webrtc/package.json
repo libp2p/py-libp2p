@@ -1,0 +1,16 @@
+{
+  "name": "libp2p-webrtc-interop",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test:listener": "node js_peer.js listener",
+    "test:dialer": "node js_peer.js dialer"
+  },
+  "dependencies": {
+    "redis": "^4.6.0",
+    "libp2p": "^1.0.0",
+    "@libp2p/webrtc": "^4.0.0",
+    "@chainsafe/libp2p-noise": "^15.0.0",
+    "@chainsafe/libp2p-yamux": "^6.0.0"
+  }
+}

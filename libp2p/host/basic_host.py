@@ -31,6 +31,7 @@ from libp2p.abc import (
     INotifee,
     IPeerStore,
     IRawConnection,
+    ITransport,
 )
 from libp2p.crypto.keys import (
     PrivateKey,
@@ -55,13 +56,12 @@ from libp2p.host.ping import (
 from libp2p.identity.identify.identify import (
     ID as IdentifyID,
 )
-from libp2p.identity.identify.pb.identify_pb2 import (
-    Identify as IdentifyMsg,
-)
+from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
     _update_peerstore_from_identify,
 )
+from libp2p.network.transport_manager import TransportManager
 from libp2p.peer.id import (
     ID,
 )
@@ -245,6 +245,16 @@ class BasicHost(IHost):
         )
         self.get_peerstore().set_local_record(envelope)
 
+        # Install transport manager and expose it on the underlying network.
+        self.transport_manager = TransportManager(self, self._network)  # type: ignore[attr-defined]
+        setattr(self._network, "transport_manager", self.transport_manager)
+        base_transport = getattr(self._network, "transport", None)
+        if isinstance(base_transport, ITransport):
+            try:
+                self.transport_manager.register_transport("base", base_transport)
+            except Exception as exc:  # pragma: no cover - best effort logging
+                logger.debug("Failed to register base transport with manager: %s", exc)
+
         # Initialize UPnP manager if enabled
         # Note: UPnP integration follows the same pattern as mDNS for consistency.
         # The UpnpManager is a standalone component that can be used independently
@@ -405,6 +415,11 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """Remove the stream handler registered for `protocol_id`, if any."""
+        if hasattr(self.multiselect, "remove_handler"):
+            self.multiselect.remove_handler(protocol_id)
 
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
@@ -918,7 +933,7 @@ class BasicHost(IHost):
 
         try:
             data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
-            identify_msg = IdentifyMsg()
+            identify_msg = Identify()
             identify_msg.ParseFromString(data)
             await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
             self._identified_peers.add(peer_id)
