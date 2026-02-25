@@ -57,9 +57,9 @@ class MockMuxedStream(IMuxedStream):
         """Mock remote address."""
         return ("127.0.0.1", 8080)
 
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """Mock set_deadline."""
-        return True
+        pass
 
     async def __aenter__(self) -> "IMuxedStream":
         """Mock async context manager entry."""

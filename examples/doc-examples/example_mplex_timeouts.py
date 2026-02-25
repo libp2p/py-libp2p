@@ -67,8 +67,8 @@ async def timeout_demo_handler(stream: INetStream) -> None:
 
         # Demonstrate server-side timeout handling
         print("🕐 Server: Setting 3-second read deadline...")
-        success = mplex_stream.set_read_deadline(3)
-        print(f"   Deadline set: {'✅ Success' if success else '❌ Failed'}")
+        mplex_stream.set_read_deadline(3)
+        print("   Deadline set: ✅ Success")
 
         # Try to read with timeout
         try:
@@ -77,8 +77,8 @@ async def timeout_demo_handler(stream: INetStream) -> None:
 
             # Set write deadline and respond
             print("🕐 Server: Setting 2-second write deadline...")
-            success = mplex_stream.set_write_deadline(2)
-            print(f"   Deadline set: {'✅ Success' if success else '❌ Failed'}")
+            mplex_stream.set_write_deadline(2)
+            print("   Deadline set: ✅ Success")
 
             response = b"Server response: " + data
             await stream.write(response)
@@ -104,33 +104,34 @@ async def demonstrate_deadline_validation(stream: INetStream) -> None:
     net_stream: NetStream = stream  # type: ignore[assignment]
     mplex_stream: MplexStream = net_stream.muxed_stream  # type: ignore[assignment]
 
-    # Test negative TTL (should return False)
+    # Test negative TTL (should raise ValueError)
     print("   Testing negative TTL...")
-    result = mplex_stream.set_read_deadline(-1)
-    expected = "✅ False (expected)" if not result else "❌ True (unexpected)"
-    print(f"   set_read_deadline(-1): {expected}")
+    try:
+        mplex_stream.set_read_deadline(-1)
+        print("   set_read_deadline(-1): ❌ Expected ValueError")
+    except ValueError as e:
+        print(f"   set_read_deadline(-1): ✅ ValueError (expected): {e}")
 
-    result = mplex_stream.set_write_deadline(-5)
-    expected = "✅ False (expected)" if not result else "❌ True (unexpected)"
-    print(f"   set_write_deadline(-5): {expected}")
+    try:
+        mplex_stream.set_write_deadline(-5)
+        print("   set_write_deadline(-5): ❌ Expected ValueError")
+    except ValueError as e:
+        print(f"   set_write_deadline(-5): ✅ ValueError (expected): {e}")
 
-    # Test zero TTL (should return True)
+    # Test zero TTL (valid)
     print("   Testing zero TTL...")
-    result = mplex_stream.set_read_deadline(0)
-    expected = "✅ True (expected)" if result else "❌ False (unexpected)"
-    print(f"   set_read_deadline(0): {expected}")
+    mplex_stream.set_read_deadline(0)
+    print("   set_read_deadline(0): ✅ Success")
 
-    # Test positive TTL (should return True)
+    # Test positive TTL (valid)
     print("   Testing positive TTL...")
-    result = mplex_stream.set_read_deadline(5)
-    expected = "✅ True (expected)" if result else "❌ False (unexpected)"
-    print(f"   set_read_deadline(5): {expected}")
+    mplex_stream.set_read_deadline(5)
+    print("   set_read_deadline(5): ✅ Success")
 
     # Test set_deadline (both read and write)
     print("   Testing set_deadline...")
-    result = mplex_stream.set_deadline(10)
-    expected = "✅ True (expected)" if result else "❌ False (unexpected)"
-    print(f"   set_deadline(10): {expected}")
+    mplex_stream.set_deadline(10)
+    print("   set_deadline(10): ✅ Success")
 
 
 async def demonstrate_timeout_scenarios(stream: INetStream) -> None:
@@ -143,40 +144,37 @@ async def demonstrate_timeout_scenarios(stream: INetStream) -> None:
 
     # Scenario 1: Normal operation with timeout
     print("   Scenario 1: Normal operation with 5-second timeout...")
-    success = mplex_stream.set_read_deadline(5)
-    if success:
-        try:
-            await stream.write(TEST_MESSAGE)
-            print(f"   📤 Sent: {TEST_MESSAGE.decode('utf-8')}")
+    mplex_stream.set_read_deadline(5)
+    try:
+        await stream.write(TEST_MESSAGE)
+        print(f"   📤 Sent: {TEST_MESSAGE.decode('utf-8')}")
 
-            response = await stream.read(1024)
-            print(f"   📥 Received: {response.decode('utf-8')}")
-            print("   ✅ Normal operation completed successfully")
-        except TimeoutError as e:
-            print(f"   ⏰ Timeout occurred: {e}")
+        response = await stream.read(1024)
+        print(f"   📥 Received: {response.decode('utf-8')}")
+        print("   ✅ Normal operation completed successfully")
+    except TimeoutError as e:
+        print(f"   ⏰ Timeout occurred: {e}")
 
     # Scenario 2: Very short timeout (likely to timeout)
     print("   Scenario 2: Very short timeout (0 seconds)...")
-    success = mplex_stream.set_read_deadline(0)
-    if success:
-        try:
-            # Try to read with very short timeout
-            await stream.read(1024)
-            print("   ✅ Unexpected: Read completed within 0 seconds")
-        except TimeoutError as e:
-            print(f"   ⏰ Expected timeout: {e}")
+    mplex_stream.set_read_deadline(0)
+    try:
+        # Try to read with very short timeout
+        await stream.read(1024)
+        print("   ✅ Unexpected: Read completed within 0 seconds")
+    except TimeoutError as e:
+        print(f"   ⏰ Expected timeout: {e}")
 
     # Scenario 3: Write timeout
     print("   Scenario 3: Write timeout test...")
-    success = mplex_stream.set_write_deadline(0)
-    if success:
-        try:
-            # Try to write with very short timeout
-            large_data = b"X" * 10000  # Large data that might take time
-            await stream.write(large_data)
-            print("   ✅ Write completed within timeout")
-        except TimeoutError as e:
-            print(f"   ⏰ Write timeout: {e}")
+    mplex_stream.set_write_deadline(0)
+    try:
+        # Try to write with very short timeout
+        large_data = b"X" * 10000  # Large data that might take time
+        await stream.write(large_data)
+        print("   ✅ Write completed within timeout")
+    except TimeoutError as e:
+        print(f"   ⏰ Write timeout: {e}")
 
 
 async def run_server(port: int) -> None:
