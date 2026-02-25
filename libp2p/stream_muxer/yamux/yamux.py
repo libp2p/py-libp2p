@@ -18,6 +18,7 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 from trio import (
     MemoryReceiveChannel,
@@ -26,6 +27,7 @@ from trio import (
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -523,6 +525,18 @@ class Yamux(IMuxedConn):
     @property
     def is_closed(self) -> bool:
         return self.event_closed.is_set()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()
 
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot
