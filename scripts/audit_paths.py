@@ -59,9 +59,11 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
         r"\.pytest_cache",
         r"\.mypy_cache",
         r"\.ruff_cache",
+        r"\.tox/",
         r"env/",
         r"venv/",
         r"\.venv/",
+        r"site-packages/",
         r"scripts/audit_paths\.py",  # Contains suggestion strings that match patterns
         r"_pb2\.py$",  # Generated protobuf code
     ]
