@@ -308,3 +308,4 @@ project_excludes = [
     ".venv/**",
     "./tests/interop/nim_libp2p",
 ]
+search_path = ["stubs"]
