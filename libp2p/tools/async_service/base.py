@@ -3,7 +3,6 @@
 from abc import (
     abstractmethod,
 )
-import asyncio
 from collections import (
     Counter,
 )
@@ -21,6 +20,8 @@ from typing import (
     cast,
 )
 import uuid
+
+import trio
 
 from ._utils import (
     is_verbose_logging_enabled,
@@ -350,7 +351,7 @@ class BaseManager(InternalManagerAPI):
                             child,
                             new_parent or "root",
                         )
-        except asyncio.CancelledError:
+        except trio.Cancelled:
             logger.debug("%s: task %s raised CancelledError.", self, task)
             raise
         except Exception as err:

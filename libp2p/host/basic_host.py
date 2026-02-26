@@ -596,6 +596,17 @@ class BasicHost(IHost):
 
         net_stream = await self._network.new_stream(peer_id)
 
+        # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (outbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.outbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
         protocol_choices = list(protocol_ids)
         # Check if we already know the peer supports any of these protocols
         # from the identify exchange. If so, request that protocol directly
@@ -640,7 +651,7 @@ class BasicHost(IHost):
             selected_protocol = await self.multiselect_client.select_one_of(
                 protocol_choices,
                 communicator,
-                self.negotiate_timeout,
+                negotiate_timeout,
             )
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
@@ -1018,6 +1029,17 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (inbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.inbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
+
         # For QUIC connections, use connection-level semaphore to limit
         # concurrent negotiations and prevent server-side overload
         # This matches the client-side protection for symmetric behavior
@@ -1043,12 +1065,12 @@ class BasicHost(IHost):
                 semaphore_to_use = server_semaphore or negotiation_semaphore
                 async with semaphore_to_use:
                     protocol, handler = await self.multiselect.negotiate(
-                        MultiselectCommunicator(net_stream), self.negotiate_timeout
+                        MultiselectCommunicator(net_stream), negotiate_timeout
                     )
             else:
                 # For non-QUIC connections, negotiate directly (no semaphore needed)
                 protocol, handler = await self.multiselect.negotiate(
-                    MultiselectCommunicator(net_stream), self.negotiate_timeout
+                    MultiselectCommunicator(net_stream), negotiate_timeout
                 )
             if protocol is None:
                 await net_stream.reset()

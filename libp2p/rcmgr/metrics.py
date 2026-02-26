@@ -16,14 +16,57 @@ from typing import Any
 
 
 class Direction(IntEnum):
-    """Direction enum for resource tracking"""
+    """
+    Direction enum for connection and stream tracking.
 
+    Similar to go-libp2p's network.Direction type.
+
+    Attributes
+    ----------
+    UNKNOWN : int
+        Unknown direction (not yet determined).
+    INBOUND : int
+        Inbound connection/stream (we accepted it).
+    OUTBOUND : int
+        Outbound connection/stream (we initiated it).
+
+    """
+
+    UNKNOWN = -1
     INBOUND = 0
     OUTBOUND = 1
 
     def __str__(self) -> str:
-        """Return string representation as numeric value."""
-        return str(self.value)
+        """Return human-readable string representation."""
+        return self.name.lower()
+
+    def __repr__(self) -> str:
+        """Return repr string."""
+        return f"Direction.{self.name}"
+
+    @classmethod
+    def from_string(cls, s: str) -> Direction:
+        """
+        Create Direction from string.
+
+        Parameters
+        ----------
+        s : str
+            String representation ('inbound', 'outbound', 'unknown').
+
+        Returns
+        -------
+        Direction
+            The corresponding Direction enum value.
+
+        """
+        s = s.lower().strip()
+        if s == "inbound":
+            return cls.INBOUND
+        elif s == "outbound":
+            return cls.OUTBOUND
+        else:
+            return cls.UNKNOWN
 
 
 class MetricType(IntEnum):
