@@ -8,7 +8,7 @@ from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb.rpc_pb2 import RPC
 
-logger = logging.getLogger("pubsub-example.utils")
+logger = logging.getLogger(__name__)
 
 
 def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:

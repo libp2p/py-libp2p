@@ -262,7 +262,7 @@ class ResourceManager:
 
                 pid: ID | None
                 try:
-                    pid = ID.from_base58(peer_id) if peer_id else None
+                    pid = ID.from_string(peer_id) if peer_id else None
                 except Exception:
                     pid = None
                 if not self.connection_rate_limiter.try_allow(peer_id=pid):
@@ -296,7 +296,7 @@ class ResourceManager:
                         if isinstance(peer_id, ID):
                             pid = cast(ID, peer_id)
                         else:
-                            pid = ID.from_base58(peer_id)
+                            pid = ID.from_string(peer_id)
                         allowlisted = self.allowlist.allowed_peer(pid)
                 except Exception:
                     allowlisted = False
@@ -479,7 +479,7 @@ class ResourceManager:
                     if isinstance(peer_id, ID):
                         pid = cast(ID, peer_id)
                     else:
-                        pid = ID.from_base58(peer_id)
+                        pid = ID.from_string(peer_id)
                     allowlisted = self.allowlist.allowed_peer(pid)
             except Exception:
                 allowlisted = False

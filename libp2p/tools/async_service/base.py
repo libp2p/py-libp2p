@@ -3,7 +3,6 @@
 from abc import (
     abstractmethod,
 )
-import asyncio
 from collections import (
     Counter,
 )
@@ -21,6 +20,8 @@ from typing import (
     cast,
 )
 import uuid
+
+import trio
 
 from ._utils import (
     is_verbose_logging_enabled,
@@ -47,6 +48,8 @@ from .typing import (
 )
 
 MAX_CHILDREN_TASKS = 1000
+
+logger = logging.getLogger(__name__)
 
 
 class Service(ServiceAPI):
@@ -193,7 +196,6 @@ class BaseChildServiceTask(BaseTask):
 
 
 class BaseManager(InternalManagerAPI):
-    logger = logging.getLogger("async_service.Manager")
     _verbose = is_verbose_logging_enabled()
 
     _service: ServiceAPI
@@ -291,7 +293,7 @@ class BaseManager(InternalManagerAPI):
             )
 
         if self.is_running and self.is_cancelled:
-            self.logger.debug(
+            logger.debug(
                 "%s: service is being cancelled. Not running task %s", self, task
             )
             return
@@ -318,16 +320,16 @@ class BaseManager(InternalManagerAPI):
 
         if parent is None:
             if self._verbose:
-                self.logger.debug("%s: running root task %s", self, task)
+                logger.debug("%s: running root task %s", self, task)
             self._root_tasks.add(task)
         else:
             if self._verbose:
-                self.logger.debug("%s: %s running child task %s", self, parent, task)
+                logger.debug("%s: %s running child task %s", self, parent, task)
             parent.add_child(task)
 
     async def _run_and_manage_task(self, task: TaskAPI) -> None:
         if self._verbose:
-            self.logger.debug("%s: task %s running", self, task)
+            logger.debug("%s: task %s running", self, task)
 
         try:
             try:
@@ -343,17 +345,17 @@ class BaseManager(InternalManagerAPI):
                     for child in task.children:
                         child.parent = new_parent
                         self._add_child_task(new_parent, child)
-                        self.logger.debug(
+                        logger.debug(
                             "%s left a child task (%s) behind, reassigning it to %s",
                             task,
                             child,
                             new_parent or "root",
                         )
-        except asyncio.CancelledError:
-            self.logger.debug("%s: task %s raised CancelledError.", self, task)
+        except trio.Cancelled:
+            logger.debug("%s: task %s raised CancelledError.", self, task)
             raise
         except Exception as err:
-            self.logger.error(
+            logger.error(
                 "%s: task %s exited with error: %s",
                 self,
                 task,
@@ -367,6 +369,6 @@ class BaseManager(InternalManagerAPI):
             if task.parent is None:
                 self._root_tasks.remove(task)
             if self._verbose:
-                self.logger.debug("%s: task %s exited cleanly.", self, task)
+                logger.debug("%s: task %s exited cleanly.", self, task)
         finally:
             self._done_task_count += 1

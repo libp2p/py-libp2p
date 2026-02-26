@@ -15,11 +15,14 @@ from libp2p.abc import (
     IHost,
     INetConn,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.peer.id import (
     ID,
 )
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.nat")
+logger = logging.getLogger(__name__)
 
 # Timeout for reachability checks
 REACHABILITY_TIMEOUT = 10  # seconds
@@ -246,22 +249,35 @@ class ReachabilityChecker:
         # Check if any connection is direct (not relayed)
         if isinstance(connections, list):
             for conn in connections:
-                # Get the transport addresses
-                addrs = conn.get_transport_addresses()
-
-                # If any address doesn't start with /p2p-circuit,
-                # it's a direct connection
-                if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                if conn.get_connection_type() == ConnectionType.DIRECT:
                     self._peer_reachability[peer_id] = True
                     return True
         else:
             # Handle single connection case
-            addrs = connections.get_transport_addresses()
-            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+            if connections.get_connection_type() == ConnectionType.DIRECT:
                 self._peer_reachability[peer_id] = True
                 return True
 
-        # Get the peer's addresses from peerstore
+        # Default to not directly reachable
+        self._peer_reachability[peer_id] = False
+
+        # Try to use actual transport addresses from the connection if available
+        # logic: if we have a connection, check if its actual addresses are public
+        if isinstance(connections, list):
+            for conn in connections:
+                actual_addrs = conn.get_transport_addresses()
+                public_addrs = self.get_public_addrs(actual_addrs)
+                if public_addrs:
+                    self._peer_reachability[peer_id] = True
+                    return True
+        else:
+            actual_addrs = connections.get_transport_addresses()
+            public_addrs = self.get_public_addrs(actual_addrs)
+            if public_addrs:
+                self._peer_reachability[peer_id] = True
+                return True
+
+        # Fallback: Get the peer's addresses from peerstore
         try:
             addrs = self.host.get_peerstore().addrs(peer_id)
             # Check if peer has any public addresses
@@ -272,8 +288,6 @@ class ReachabilityChecker:
         except Exception as e:
             logger.debug("Error getting peer addresses: %s", str(e))
 
-        # Default to not directly reachable
-        self._peer_reachability[peer_id] = False
         return False
 
     async def check_self_reachability(self) -> tuple[bool, list[Multiaddr]]:

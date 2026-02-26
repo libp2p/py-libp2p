@@ -12,7 +12,7 @@ from libp2p.peer.id import (
 
 from .pb.circuit_pb2 import HopMessage, StopMessage
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.utils")
+logger = logging.getLogger(__name__)
 
 
 def maybe_consume_signed_record(

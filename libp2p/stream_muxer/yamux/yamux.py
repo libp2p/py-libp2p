@@ -18,6 +18,7 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 from trio import (
     MemoryReceiveChannel,
@@ -26,12 +27,15 @@ from trio import (
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IncompleteReadError,
+    IOException,
 )
 from libp2p.io.utils import (
     read_exactly,
@@ -51,7 +55,7 @@ from libp2p.stream_muxer.exceptions import (
 from libp2p.stream_muxer.rw_lock import ReadWriteLock
 
 # Configure logger for this module
-logger = logging.getLogger("libp2p.stream_muxer.yamux")
+logger = logging.getLogger(__name__)
 
 PROTOCOL_ID = "/yamux/1.0.0"
 TYPE_DATA = 0x0
@@ -161,6 +165,11 @@ class YamuxStream(IMuxedStream):
         param:skip_lock (bool): If True, skips acquiring window_lock.
         This should only be used when calling from a context
         that already holds the lock.
+
+        Note: This method gracefully handles connection closure errors.
+        If the connection is closed (e.g., peer closed WebSocket immediately
+        after sending data), the window update will fail silently, allowing
+        the read operation to complete successfully.
         """
         if increment <= 0:
             # If increment is zero or negative, skip sending update
@@ -182,7 +191,42 @@ class YamuxStream(IMuxedStream):
                 self.stream_id,
                 increment,
             )
-            await self.conn.secured_conn.write(header)
+            try:
+                await self.conn.secured_conn.write(header)
+            except ConnectionClosedError as e:
+                # Typed exception from transports (e.g., WebSocket) that
+                # properly signal connection closure — handle gracefully.
+                # Connection may be closed by peer (e.g., WebSocket closed
+                # immediately after sending data, as seen with Nim).
+                # This is acceptable — the data was already read successfully.
+                logger.debug(
+                    f"Stream {self.stream_id}: Window update failed due to "
+                    f"connection closure (data was already read): {e}"
+                )
+                return
+            except (RawConnError, IOException) as e:
+                # Fallback for transports that don't yet raise
+                # ConnectionClosedError (e.g., TCP RawConnError).
+                error_str = str(e).lower()
+                if any(
+                    keyword in error_str
+                    for keyword in [
+                        "connection closed",
+                        "closed by peer",
+                        "connection is closed",
+                    ]
+                ):
+                    logger.debug(
+                        f"Stream {self.stream_id}: Window update failed due to "
+                        f"connection closure (data was already read): {e}"
+                    )
+                    return
+                # Re-raise if it's a different error we don't expect
+                logger.warning(
+                    f"Stream {self.stream_id}: Unexpected error during "
+                    f"window update: {e}"
+                )
+                raise
 
         if skip_lock:
             await _do_window_update()
@@ -482,6 +526,18 @@ class Yamux(IMuxedConn):
     @property
     def is_closed(self) -> bool:
         return self.event_closed.is_set()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()
 
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot

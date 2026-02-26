@@ -65,8 +65,7 @@ from .value_store import (
     ValueStore,
 )
 
-logger = logging.getLogger("kademlia-example.kad_dht")
-# logger = logging.getLogger("libp2p.kademlia")
+logger = logging.getLogger(__name__)
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
@@ -144,7 +143,7 @@ class KadDHT(Service):
         """
         super().__init__()
 
-        self.host = host
+        self.host: IHost = host
         self.local_peer_id = host.get_id()
 
         # Validate that mode is a DHTMode enum
@@ -155,7 +154,7 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id, self.host)
+        self.routing_table = RoutingTable(self.local_peer_id, host)
 
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
