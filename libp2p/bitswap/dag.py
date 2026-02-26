@@ -297,7 +297,8 @@ class MerkleDag:
             await self.bitswap.add_block(dir_cid, dir_data)
 
             logger.info(
-                f"Created directory wrapper. Directory CID: {_format_cid_short(dir_cid)}"
+                "Created directory wrapper. Directory CID: "
+                f"{_format_cid_short(dir_cid)}"
             )
             return dir_cid
 
@@ -466,7 +467,8 @@ class MerkleDag:
 
                 if not verify_cid(actual_file_cid, actual_file_data):
                     raise ValueError(
-                        f"File block verification failed: {_format_cid(actual_file_cid)}"
+                        "File block verification failed: "
+                        f"{_format_cid(actual_file_cid)}"
                     )
 
         # Now process the actual file data
