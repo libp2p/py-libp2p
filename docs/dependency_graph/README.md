@@ -31,13 +31,13 @@ This directory contains automatically generated dependency graphs for the py-lib
 ### Direct Dependencies Only
 
 ```bash
-python3 scripts/generate_dependency_graph.py
+python3 scripts/oso/generate_dependency_graph.py
 ```
 
 ### Full Transitive Dependency Tree
 
 ```bash
-python3 scripts/generate_transitive_dependency_graph.py
+python3 scripts/oso/generate_transitive_dependency_graph.py
 ```
 
 The scripts analyze `pyproject.toml` and generate all formats automatically.
@@ -46,7 +46,7 @@ The scripts analyze `pyproject.toml` and generate all formats automatically.
 
 ### JSON Format
 
-The JSON format can be used with tools like Open Source Observer (OSO) or other dependency analysis tools:
+The JSON format can be used with dependency analysis tools and custom dashboards:
 
 ```json
 {
@@ -89,15 +89,7 @@ graph TD
 ```
 ````
 
-## Integration with Open Source Observer (OSO)
+## Related Observability Docs
 
-The JSON format is designed to be compatible with OSO's dependency analysis tools. You can:
-
-1. Use the JSON file directly with OSO's API
-1. Import the dependency graph into OSO for analysis
-1. Use the structured data for dependency tracking and metrics
-
-For more information about OSO, visit:
-
-- Website: https://www.oso.xyz/
-- GitHub: https://github.com/opensource-observer/oso
+OSO health reporting and maintainer operations are documented under
+`docs/observability/`.
