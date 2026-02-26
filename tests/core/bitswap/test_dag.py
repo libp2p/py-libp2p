@@ -254,11 +254,18 @@ class TestFetchFile:
     """Test fetch_file method."""
 
     @pytest.mark.trio
-    async def test_fetch_small_file(self):
-        """Test fetching small single-block file."""
+    @pytest.mark.parametrize("cid_input_kind", ["bytes", "canonical", "hex"])
+    async def test_fetch_small_file(self, cid_input_kind: str):
+        """Test fetching small single-block file with mixed CID input forms."""
         # Original data
         data = b"test data"
         cid = compute_cid_v1(data, codec=CODEC_RAW)
+        if cid_input_kind == "bytes":
+            cid_input = cid
+        elif cid_input_kind == "canonical":
+            cid_input = cid_to_text(cid)
+        else:
+            cid_input = cid.hex()
 
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
@@ -268,45 +275,11 @@ class TestFetchFile:
         dag = MerkleDag(mock_client)
 
         # Fetch
-        fetched_data, filename = await dag.fetch_file(cid, timeout=30.0)
+        fetched_data, filename = await dag.fetch_file(cid_input, timeout=30.0)
 
         # Verify
         assert fetched_data == data
         assert filename is None  # Single RAW block doesn't have filename
-        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
-
-    @pytest.mark.trio
-    async def test_fetch_small_file_with_canonical_cid_text(self):
-        """Test fetching small file with canonical CID string input."""
-        data = b"test data"
-        cid = compute_cid_v1(data, codec=CODEC_RAW)
-
-        mock_client = MagicMock(spec=BitswapClient)
-        mock_client.block_store = MemoryBlockStore()
-        mock_client.get_block = AsyncMock(return_value=data)
-
-        dag = MerkleDag(mock_client)
-        fetched_data, filename = await dag.fetch_file(cid_to_text(cid), timeout=30.0)
-
-        assert fetched_data == data
-        assert filename is None
-        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
-
-    @pytest.mark.trio
-    async def test_fetch_small_file_with_hex_cid_text(self):
-        """Test fetching small file with hex CID string input."""
-        data = b"test data"
-        cid = compute_cid_v1(data, codec=CODEC_RAW)
-
-        mock_client = MagicMock(spec=BitswapClient)
-        mock_client.block_store = MemoryBlockStore()
-        mock_client.get_block = AsyncMock(return_value=data)
-
-        dag = MerkleDag(mock_client)
-        fetched_data, filename = await dag.fetch_file(cid.hex(), timeout=30.0)
-
-        assert fetched_data == data
-        assert filename is None
         mock_client.get_block.assert_called_once_with(cid, None, 30.0)
 
     @pytest.mark.trio
@@ -407,10 +380,17 @@ class TestGetFileInfo:
     """Test get_file_info method."""
 
     @pytest.mark.trio
-    async def test_get_info_single_block(self):
-        """Test getting info for single block."""
+    @pytest.mark.parametrize("cid_input_kind", ["bytes", "canonical", "hex"])
+    async def test_get_info_single_block(self, cid_input_kind: str):
+        """Test getting info for single block with mixed CID input forms."""
         data = b"test"
         cid = compute_cid_v1(data, codec=CODEC_RAW)
+        if cid_input_kind == "bytes":
+            cid_input = cid
+        elif cid_input_kind == "canonical":
+            cid_input = cid_to_text(cid)
+        else:
+            cid_input = cid.hex()
 
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
@@ -418,24 +398,7 @@ class TestGetFileInfo:
 
         dag = MerkleDag(mock_client)
 
-        info = await dag.get_file_info(cid)
-
-        assert info["size"] == len(data)
-        assert info["chunks"] == 1
-        assert info["chunk_sizes"] == [len(data)]
-
-    @pytest.mark.trio
-    async def test_get_info_single_block_with_canonical_cid_text(self):
-        """Test get_file_info accepts canonical CID string input."""
-        data = b"test"
-        cid = compute_cid_v1(data, codec=CODEC_RAW)
-
-        mock_client = MagicMock(spec=BitswapClient)
-        mock_client.block_store = MemoryBlockStore()
-        mock_client.get_block = AsyncMock(return_value=data)
-
-        dag = MerkleDag(mock_client)
-        info = await dag.get_file_info(cid_to_text(cid))
+        info = await dag.get_file_info(cid_input)
 
         assert info["size"] == len(data)
         assert info["chunks"] == 1
