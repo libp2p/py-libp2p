@@ -8,11 +8,11 @@ synchronous ones.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterable, Sequence
-from typing import Any
 
 from multiaddr import Multiaddr
 
 from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
@@ -22,7 +22,7 @@ class IAsyncPeerMetadata(ABC):
     """Async interface for peer metadata operations."""
 
     @abstractmethod
-    async def get_async(self, peer_id: ID, key: str) -> Any:
+    async def get_async(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve the value associated with a key for a specified peer.
 
@@ -35,7 +35,7 @@ class IAsyncPeerMetadata(ABC):
 
         Returns
         -------
-        Any
+        MetadataValue
             The value corresponding to the specified key.
 
         Raises
@@ -46,7 +46,7 @@ class IAsyncPeerMetadata(ABC):
         """
 
     @abstractmethod
-    async def put_async(self, peer_id: ID, key: str, val: Any) -> None:
+    async def put_async(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store a key-value pair for the specified peer.
 
@@ -56,7 +56,7 @@ class IAsyncPeerMetadata(ABC):
             The identifier of the peer.
         key : str
             The key for the data.
-        val : Any
+        val : MetadataValue
             The value to store.
 
         """
