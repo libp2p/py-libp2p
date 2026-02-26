@@ -26,6 +26,10 @@ def collect_health_report(
 ) -> HealthReport:
     """Collect a full health report for py-libp2p."""
     notes: list[str] = []
+    notes.append(
+        "Security proxy is experimental: OSV lookups currently use package-name "
+        "queries and may over-report if fixed versions are installed."
+    )
     pyproject_path = repo_root / "pyproject.toml"
     dependency_graph = build_dependency_graph(
         pyproject_path, f"https://github.com/{repo_slug}"
