@@ -491,9 +491,9 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
 
         def window(topic):
             if topic == topic_mesh:
-                return [topic_mesh]
+                return [topic_mesh.encode()]
             elif topic == topic_fanout:
-                return [topic_fanout]
+                return [topic_fanout.encode()]
             else:
                 return []
 
@@ -791,10 +791,10 @@ async def test_handle_ihave(monkeypatch):
         mock_emit_iwant = AsyncMock()
         monkeypatch.setattr(gossipsubs[index_alice], "emit_iwant", mock_emit_iwant)
 
-        # Create a test message ID as a string representation of a (seqno, from) tuple
+        # Create a test message ID as hex-encoded bytes (from_id + seqno)
         test_seqno = b"1234"
         test_from = id_bob.to_bytes()
-        test_msg_id = f"(b'{test_seqno.hex()}', b'{test_from.hex()}')"
+        test_msg_id = (test_from + test_seqno).hex()
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=[test_msg_id])
 
         # Mock seen_messages.cache to avoid false positives
@@ -832,8 +832,8 @@ async def test_handle_iwant(monkeypatch):
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
 
-        # ✅ Correct: use raw tuple and str() to serialize, no hex()
-        test_msg_id = str((test_seqno, test_from))
+        # Use hex-encoded bytes (from_id + seqno) as message ID
+        test_msg_id = (test_from + test_seqno).hex()
 
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
@@ -853,11 +853,11 @@ async def test_handle_iwant(monkeypatch):
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
 
-        # Verify that mcache.get was called with the correct parsed message ID
+        # Verify that mcache.get was called with the correct bytes message ID
         mock_mcache_get.assert_called_once()
         called_msg_id = mock_mcache_get.call_args[0][0]
-        assert isinstance(called_msg_id, tuple)
-        assert called_msg_id == (test_seqno, test_from)
+        assert isinstance(called_msg_id, bytes)
+        assert called_msg_id == test_from + test_seqno
 
 
 @pytest.mark.trio
