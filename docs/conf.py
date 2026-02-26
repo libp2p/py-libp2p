@@ -17,12 +17,12 @@
 import doctest
 from pathlib import Path
 import sys
+from unittest.mock import MagicMock
 
 # Add project root to path (cross-platform)
 _docs_dir = Path(__file__).resolve().parent
 _project_root = _docs_dir.parent
 sys.path.insert(0, str(_project_root))
-from unittest.mock import MagicMock  # noqa: E402
 
 try:
     import tomllib
@@ -30,10 +30,8 @@ except ModuleNotFoundError:
     # For Python < 3.11
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
-# Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-from libp2p.utils.paths import get_script_dir, join_paths  # noqa: E402
-
-pyproject_path = join_paths(get_script_dir(__file__), "..", "pyproject.toml")
+# Path to pyproject.toml (conf.py is in 'docs', project root is parent)
+pyproject_path = _project_root / "pyproject.toml"
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)
