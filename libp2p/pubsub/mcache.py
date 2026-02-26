@@ -71,6 +71,8 @@ class MessageCache:
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
         mid: bytes = default_msg_id_fn(msg)
+        if mid in self.msgs:
+            return
         self.msgs[mid] = msg
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
