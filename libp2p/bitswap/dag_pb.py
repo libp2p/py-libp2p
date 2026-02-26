@@ -8,6 +8,7 @@ which is used by IPFS to represent files and directories as Merkle DAGs.
 from dataclasses import dataclass, field
 import logging
 
+from .cid import CIDInput, cid_to_bytes
 from .pb.dag_pb_pb2 import PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 
@@ -18,14 +19,21 @@ logger = logging.getLogger(__name__)
 class Link:
     """Represents a link to another block in the DAG."""
 
-    cid: bytes
+    cid: CIDInput
     name: str = ""
     size: int = 0
 
     def __post_init__(self) -> None:
         """Validate link data."""
         if not isinstance(self.cid, bytes):
-            raise TypeError(f"cid must be bytes, got {type(self.cid)}")
+            try:
+                self.cid = cid_to_bytes(self.cid)
+            except TypeError as exc:
+                raise TypeError(
+                    f"cid must be a valid CID input, got {type(self.cid)}"
+                ) from exc
+            except ValueError as exc:
+                raise ValueError("cid must be a valid CID input") from exc
         if not isinstance(self.name, str):
             raise TypeError(f"name must be str, got {type(self.name)}")
         if not isinstance(self.size, int) or self.size < 0:
@@ -177,7 +185,7 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
     return links, unixfs_data
 
 
-def create_file_node(chunks: list[tuple[bytes, int]]) -> bytes:
+def create_file_node(chunks: list[tuple[CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a file with multiple chunks.
 
@@ -206,7 +214,7 @@ def create_file_node(chunks: list[tuple[bytes, int]]) -> bytes:
     return encode_dag_pb(links, unixfs_data)
 
 
-def create_directory_node(entries: list[tuple[str, bytes, int]]) -> bytes:
+def create_directory_node(entries: list[tuple[str, CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a directory.
 

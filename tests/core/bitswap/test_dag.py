@@ -8,7 +8,13 @@ import pytest
 
 from libp2p.bitswap.block_store import MemoryBlockStore
 from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE
-from libp2p.bitswap.cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
+from libp2p.bitswap.cid import (
+    CODEC_DAG_PB,
+    CODEC_RAW,
+    cid_to_text,
+    compute_cid_v1,
+    verify_cid,
+)
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.bitswap.dag_pb import create_file_node, decode_dag_pb, is_file_node
@@ -270,6 +276,40 @@ class TestFetchFile:
         mock_client.get_block.assert_called_once_with(cid, None, 30.0)
 
     @pytest.mark.trio
+    async def test_fetch_small_file_with_canonical_cid_text(self):
+        """Test fetching small file with canonical CID string input."""
+        data = b"test data"
+        cid = compute_cid_v1(data, codec=CODEC_RAW)
+
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = MemoryBlockStore()
+        mock_client.get_block = AsyncMock(return_value=data)
+
+        dag = MerkleDag(mock_client)
+        fetched_data, filename = await dag.fetch_file(cid_to_text(cid), timeout=30.0)
+
+        assert fetched_data == data
+        assert filename is None
+        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
+
+    @pytest.mark.trio
+    async def test_fetch_small_file_with_hex_cid_text(self):
+        """Test fetching small file with hex CID string input."""
+        data = b"test data"
+        cid = compute_cid_v1(data, codec=CODEC_RAW)
+
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = MemoryBlockStore()
+        mock_client.get_block = AsyncMock(return_value=data)
+
+        dag = MerkleDag(mock_client)
+        fetched_data, filename = await dag.fetch_file(cid.hex(), timeout=30.0)
+
+        assert fetched_data == data
+        assert filename is None
+        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
+
+    @pytest.mark.trio
     async def test_fetch_chunked_file(self):
         """Test fetching multi-chunk file."""
         # Create chunks
@@ -383,6 +423,24 @@ class TestGetFileInfo:
         assert info["size"] == len(data)
         assert info["chunks"] == 1
         assert info["chunk_sizes"] == [len(data)]
+
+    @pytest.mark.trio
+    async def test_get_info_single_block_with_canonical_cid_text(self):
+        """Test get_file_info accepts canonical CID string input."""
+        data = b"test"
+        cid = compute_cid_v1(data, codec=CODEC_RAW)
+
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = MemoryBlockStore()
+        mock_client.get_block = AsyncMock(return_value=data)
+
+        dag = MerkleDag(mock_client)
+        info = await dag.get_file_info(cid_to_text(cid))
+
+        assert info["size"] == len(data)
+        assert info["chunks"] == 1
+        assert info["chunk_sizes"] == [len(data)]
+        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
 
     @pytest.mark.trio
     async def test_get_info_chunked_file(self):
