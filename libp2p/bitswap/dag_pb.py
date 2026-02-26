@@ -5,6 +5,7 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 import logging
 
@@ -15,22 +16,30 @@ from .pb.unixfs_pb2 import Data as PBUnixFSData
 logger = logging.getLogger(__name__)
 
 
+def _normalize_link_cid(cid: CIDInput) -> bytes:
+    """Normalize CID input for DAG links while preserving raw-bytes compatibility."""
+    if isinstance(cid, bytes):
+        return cid
+    return cid_to_bytes(cid)
+
+
 @dataclass
 class Link:
     """Represents a link to another block in the DAG."""
 
-    cid: CIDInput
+    cid: bytes
     name: str = ""
     size: int = 0
 
     def __post_init__(self) -> None:
         """Validate link data."""
-        if not isinstance(self.cid, bytes):
+        raw_cid: CIDInput = self.cid
+        if not isinstance(raw_cid, bytes):
             try:
-                self.cid = cid_to_bytes(self.cid)
+                self.cid = cid_to_bytes(raw_cid)
             except TypeError as exc:
                 raise TypeError(
-                    f"cid must be a valid CID input, got {type(self.cid)}"
+                    f"cid must be a valid CID input, got {type(raw_cid)}"
                 ) from exc
             except ValueError as exc:
                 raise ValueError("cid must be a valid CID input") from exc
@@ -185,7 +194,7 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
     return links, unixfs_data
 
 
-def create_file_node(chunks: list[tuple[CIDInput, int]]) -> bytes:
+def create_file_node(chunks: Sequence[tuple[CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a file with multiple chunks.
 
@@ -205,7 +214,7 @@ def create_file_node(chunks: list[tuple[CIDInput, int]]) -> bytes:
     blocksizes = []
 
     for i, (cid, size) in enumerate(chunks):
-        links.append(Link(cid=cid, name=f"chunk{i}", size=size))
+        links.append(Link(cid=_normalize_link_cid(cid), name=f"chunk{i}", size=size))
         blocksizes.append(size)
         total_size += size
 
@@ -214,7 +223,7 @@ def create_file_node(chunks: list[tuple[CIDInput, int]]) -> bytes:
     return encode_dag_pb(links, unixfs_data)
 
 
-def create_directory_node(entries: list[tuple[str, CIDInput, int]]) -> bytes:
+def create_directory_node(entries: Sequence[tuple[str, CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a directory.
 
@@ -235,7 +244,7 @@ def create_directory_node(entries: list[tuple[str, CIDInput, int]]) -> bytes:
     links = []
 
     for name, cid, size in entries:
-        links.append(Link(cid=cid, name=name, size=size))
+        links.append(Link(cid=_normalize_link_cid(cid), name=name, size=size))
 
     unixfs_data = UnixFSData(type="directory")
 

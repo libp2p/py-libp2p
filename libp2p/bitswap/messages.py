@@ -3,6 +3,8 @@ Message construction helpers for Bitswap protocol.
 Supports v1.0.0, v1.1.0, and v1.2.0 message formats.
 """
 
+from collections.abc import Sequence
+
 from .cid import CIDInput, cid_to_bytes
 from .pb.bitswap_pb2 import Message
 
@@ -97,7 +99,9 @@ def create_block_message_v110(blocks: list[tuple[bytes, bytes]]) -> Message:
     return msg
 
 
-def create_block_presence_message(presences: list[tuple[CIDInput, bool]]) -> Message:
+def create_block_presence_message(
+    presences: Sequence[tuple[CIDInput, bool]],
+) -> Message:
     """
     Create a message with block presence information (v1.2.0).
 
@@ -121,7 +125,7 @@ def create_message(
     wantlist_entries: list[Message.Wantlist.Entry] | None = None,
     blocks_v100: list[bytes] | None = None,
     blocks_v110: list[tuple[bytes, bytes]] | None = None,
-    block_presences: list[tuple[CIDInput, bool]] | None = None,
+    block_presences: Sequence[tuple[CIDInput, bool]] | None = None,
     pending_bytes: int = 0,
     full_wantlist: bool = False,
 ) -> Message:
