@@ -475,7 +475,8 @@ def new_host(
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
+    connection_config: ConnectionConfig | None = None
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -497,6 +498,7 @@ def new_host(
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
+    :param connection_config: optional connection configuration for connection manager
     :return: return a host instance
     """
 
@@ -514,6 +516,14 @@ def new_host(
             # Fallback to leaving it None if creation fails for any reason.
             resource_manager = None
 
+    # Determine the connection config to use
+    # QUIC transport config takes precedence if QUIC is enabled
+    effective_config: ConnectionConfig | QUICTransportConfig | None
+    if enable_quic and quic_transport_opt is not None:
+        effective_config = quic_transport_opt
+    else:
+        effective_config = connection_config
+
     swarm = new_swarm(
         enable_quic=enable_quic,
         key_pair=key_pair,
@@ -523,7 +533,7 @@ def new_host(
         enable_autotls=enable_autotls,
         muxer_preference=muxer_preference,
         listen_addrs=listen_addrs,
-        connection_config=quic_transport_opt if enable_quic else None,
+        connection_config=effective_config,
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
