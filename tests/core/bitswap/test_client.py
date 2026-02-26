@@ -1,11 +1,11 @@
 """Unit tests for Bitswap client."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.config import (
     BITSWAP_PROTOCOL_V100,
@@ -251,6 +251,53 @@ class TestBitswapClientPeerManagement:
 
         assert peer_id in client._peer_wantlists
         assert cid_bytes in client._peer_wantlists[peer_id]
+
+
+class TestBitswapClientMixedCIDInputs:
+    """Test public client APIs with mixed CID input types."""
+
+    @pytest.mark.trio
+    async def test_add_and_get_block_with_mixed_inputs(self):
+        """Test add/get block APIs accept text, hex, and CID object forms."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        data = b"mixed-client-add-get"
+        cid = compute_cid_v1(data)
+
+        await client.add_block(cid_to_text(cid), data)
+        assert await client.get_block(cid.hex()) == data
+        assert await client.get_block(parse_cid(cid)) == data
+
+    @pytest.mark.trio
+    async def test_want_and_cancel_with_mixed_inputs(self):
+        """Test want/cancel APIs normalize mixed input forms to one key."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"mixed-client-want-cancel")
+
+        await client.want_block(cid_to_text(cid), priority=9)
+        assert cid in client._wantlist
+        assert client._wantlist[cid]["priority"] == 9
+
+        await client.cancel_want(cid.hex())
+        assert cid not in client._wantlist
+
+    @pytest.mark.trio
+    async def test_have_block_with_canonical_text_input(self):
+        """Test have_block accepts canonical text and uses normalized CID bytes."""
+        mock_host = MagicMock()
+        client = BitswapClient(mock_host)
+        cid = compute_cid_v1(b"mixed-client-have")
+
+        # Avoid network behavior and validate normalized bytes are propagated.
+        client._broadcast_wantlist = AsyncMock()  # type: ignore[method-assign]
+        await client.block_store.put_block(cid, b"mixed-client-have")
+
+        has_block = await client.have_block(cid_to_text(cid))
+
+        assert has_block is True
+        assert cid not in client._wantlist
+        client._broadcast_wantlist.assert_awaited_once_with([cid])  # type: ignore[attr-defined]
 
 
 class TestBitswapClientMultipleBlocks:
