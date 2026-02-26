@@ -1,12 +1,13 @@
 import logging
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 from trio.testing import (
     memory_stream_pair,
 )
 
-from libp2p.abc import IRawConnection
+from libp2p.abc import ConnectionType, IRawConnection
 from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
@@ -53,6 +54,14 @@ class TrioStreamAdapter(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Return None since this is a test adapter without real network info."""
         return None
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 @pytest.fixture

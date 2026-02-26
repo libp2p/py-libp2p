@@ -9,10 +9,11 @@ This script demonstrates:
 4. How the new system automatically selects the right transport
 """
 
-import asyncio
 import logging
 from pathlib import Path
 import sys
+
+import trio
 
 # Add the libp2p directory to the path so we can import it
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -200,7 +201,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        trio.run(main)
     except KeyboardInterrupt:
         print("\n👋 Demo interrupted by user")
     except Exception as e:
