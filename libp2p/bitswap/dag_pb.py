@@ -23,7 +23,7 @@ def _normalize_link_cid(cid: CIDInput) -> bytes:
     return cid_to_bytes(cid)
 
 
-@dataclass
+@dataclass(init=False)
 class Link:
     """Represents a link to another block in the DAG."""
 
@@ -31,18 +31,17 @@ class Link:
     name: str = ""
     size: int = 0
 
+    def __init__(self, cid: CIDInput, name: str = "", size: int = 0) -> None:
+        """Initialize and normalize link CID input."""
+        self.cid = _normalize_link_cid(cid)
+        self.name = name
+        self.size = size
+        self.__post_init__()
+
     def __post_init__(self) -> None:
         """Validate link data."""
-        raw_cid: CIDInput = self.cid
-        if not isinstance(raw_cid, bytes):
-            try:
-                self.cid = cid_to_bytes(raw_cid)
-            except TypeError as exc:
-                raise TypeError(
-                    f"cid must be a valid CID input, got {type(raw_cid)}"
-                ) from exc
-            except ValueError as exc:
-                raise ValueError("cid must be a valid CID input") from exc
+        if not isinstance(self.cid, bytes):
+            raise TypeError(f"cid must be bytes, got {type(self.cid)}")
         if not isinstance(self.name, str):
             raise TypeError(f"name must be str, got {type(self.name)}")
         if not isinstance(self.size, int) or self.size < 0:
