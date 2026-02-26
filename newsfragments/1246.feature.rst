@@ -1,0 +1,1 @@
+Bitswap now accepts canonical CID text, ``/ipfs/...`` CID paths, hex CID strings, and CID objects across client/store/message/DAG boundaries while preserving byte-based wire and storage compatibility. The Bitswap example CLI now accepts canonical/path/hex CID input forms for ``--cid`` and displays canonical CID text in output.
