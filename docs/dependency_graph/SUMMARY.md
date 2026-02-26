@@ -2,15 +2,14 @@
 
 ## ✅ What We've Built
 
-A complete dependency graph generation and OSO integration system for py-libp2p.
+A complete dependency graph generation workflow for py-libp2p.
 
 ## 📁 Files Created
 
 ### Scripts
 
-- **`scripts/generate_dependency_graph.py`** - Generates direct dependency graphs
-- **`scripts/generate_transitive_dependency_graph.py`** - Generates full transitive dependency trees
-- **`scripts/integrate_oso.py`** - Integration script for OSO API
+- **`scripts/oso/generate_dependency_graph.py`** - Generates direct dependency graphs
+- **`scripts/oso/generate_transitive_dependency_graph.py`** - Generates full transitive dependency trees
 
 ### Generated Graphs (Direct Dependencies)
 
@@ -32,8 +31,6 @@ A complete dependency graph generation and OSO integration system for py-libp2p.
 ### Documentation
 
 - `README.md` - Main documentation
-- `OSO_INFO.md` - Information about Open Source Observer
-- `OSO_INTEGRATION.md` - Step-by-step OSO integration guide
 - `PREVIEW.md` - How to preview the graphs
 - `QUICK_PREVIEW.md` - Quick reference for previewing
 - `SUMMARY.md` - This file
@@ -60,10 +57,10 @@ A complete dependency graph generation and OSO integration system for py-libp2p.
 
 ```bash
 # Direct dependencies only
-python3 scripts/generate_dependency_graph.py
+python3 scripts/oso/generate_dependency_graph.py
 
 # Full transitive dependency tree
-python3 scripts/generate_transitive_dependency_graph.py
+python3 scripts/oso/generate_transitive_dependency_graph.py
 ```
 
 ### Preview Graphs
@@ -77,36 +74,28 @@ xdg-open docs/dependency_graph/dependencies_transitive.png
 cat docs/dependency_graph/dependencies.md
 ```
 
-### Integrate with OSO
+### OSO Health Reporting
 
-```bash
-# Set up API key first (see OSO_INTEGRATION.md)
-export OSO_API_KEY='your-key'
-
-# Run integration script
-python3 scripts/integrate_oso.py
-```
+See `docs/observability/` for OSO module docs and runbook.
 
 ## 🔗 Key Features
 
 1. **Multiple Formats**: JSON, DOT, Mermaid, Markdown, PNG, SVG
 1. **Two Graph Types**: Direct and transitive dependencies
-1. **OSO Integration**: Ready-to-use scripts for OSO API
+1. **OSO Integration**: Maintainer docs under `docs/observability/`
 1. **Visualization**: Pre-generated images for quick viewing
 1. **Documentation**: Comprehensive guides and examples
 
 ## 📚 Documentation Files
 
 - **README.md** - Overview and usage
-- **OSO_INFO.md** - What is OSO and why use it
-- **OSO_INTEGRATION.md** - Complete integration guide
 - **PREVIEW.md** - Detailed preview instructions
 - **QUICK_PREVIEW.md** - Quick reference
 
 ## 🎯 Next Steps
 
 1. **Review the graphs**: Check the generated visualizations
-1. **Set up OSO**: Get an API key and integrate (see OSO_INTEGRATION.md)
+1. **Set up OSO**: Use docs in `docs/observability/`
 1. **Customize**: Modify scripts if needed for your use case
 1. **Automate**: Add to CI/CD to regenerate graphs automatically
 
@@ -114,7 +103,7 @@ python3 scripts/integrate_oso.py
 
 - All graphs are generated from `pyproject.toml`
 - Transitive graphs require installed packages (uses `pip show`)
-- OSO integration requires an API key from https://www.opensource.observer/
+- OSO observability is documented in `docs/observability/`
 - Graphs can be regenerated anytime by running the scripts
 
 ## 🔄 Maintenance

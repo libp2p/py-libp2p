@@ -1,0 +1,52 @@
+name: OSO Health Report
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      - name: Generate report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OSO_API_KEY: ${{ secrets.OSO_API_KEY }}
+        run: |
+          python scripts/oso/collect_health_metrics.py \
+            --repo-root . \
+            --repo-slug libp2p/py-libp2p \
+            --json-output reports/health_metrics.json \
+            --md-output reports/health_report.md
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oso-health-report
+          path: |
+            reports/health_metrics.json
+            reports/health_report.md
+
+      - name: Job summary
+        run: |
+          echo "## OSO Health Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Generated files:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- reports/health_metrics.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "- reports/health_report.md" >> "$GITHUB_STEP_SUMMARY"

@@ -56,7 +56,7 @@ If you modify the dependencies and want to regenerate the images:
 
 ```bash
 # Regenerate all formats
-python3 scripts/generate_dependency_graph.py
+python3 scripts/oso/generate_dependency_graph.py
 
 # Regenerate PNG
 dot -Tpng docs/dependency_graph/dependencies.dot -o docs/dependency_graph/dependencies.png
