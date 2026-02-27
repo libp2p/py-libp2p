@@ -14,7 +14,6 @@ import time
 from typing import (
     Any,
     DefaultDict,
-    Optional,
 )
 
 import trio
@@ -90,10 +89,10 @@ class GossipsubEvent:
     topic: str
 
     # one of these should be set
-    message_size: Optional[int] = None
+    message_size: int | None = None
     delivered: bool = False
-    dropped_reason: Optional[str] = None
-    validation_error: Optional[Exception] = None
+    dropped_reason: str | None = None
+    validation_error: Exception | None = None
 
 
 class GossipSub(IPubsubRouter, Service):

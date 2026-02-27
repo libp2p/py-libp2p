@@ -1,11 +1,11 @@
-from typing import Optional
 from prometheus_client import Counter
+
 
 class DcutrEvent:
     peer_id: str
     success: bool
-    error: Optional[Exception] = None
-    
+    error: Exception | None = None
+
 
 class DcutrMetrics:
     events: Counter
