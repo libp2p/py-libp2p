@@ -23,7 +23,8 @@ from libp2p.abc import (
 from libp2p.crypto.keys import (
     PrivateKey,
 )
-from libp2p.custom_types import TProtocol, TQUICConnHandlerFn
+from libp2p.custom_types import TProtocol
+from libp2p.transport.quic.types import TQUICConnHandlerFn
 from libp2p.peer.id import (
     ID,
 )
@@ -111,6 +112,18 @@ class QUICTransport(ITransport):
         logger.debug(
             f"Initialized QUIC transport with security for peer {self._peer_id}"
         )
+
+    # -- Capability declarations (see libp2p/capabilities.py) ----------------
+
+    @property
+    def provides_security(self) -> bool:
+        """QUIC has built-in TLS 1.3 — no separate security upgrade needed."""
+        return True
+
+    @property
+    def provides_muxing(self) -> bool:
+        """QUIC has built-in stream multiplexing — no separate muxer needed."""
+        return True
 
     def set_background_nursery(self, nursery: trio.Nursery) -> None:
         """Set the nursery to use for background tasks (called by swarm)."""

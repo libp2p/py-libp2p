@@ -38,6 +38,7 @@ from libp2p.io.abc import (
 )
 from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
+from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.tag_store import TagInfo, TagStore
@@ -57,9 +58,6 @@ from libp2p.transport.exceptions import (
     OpenConnectionError,
     SecurityUpgradeFailure,
 )
-from libp2p.transport.quic.config import QUICTransportConfig
-from libp2p.transport.quic.connection import QUICConnection
-from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -200,13 +198,10 @@ class Swarm(Service, INetworkService):
 
             # Set background nursery BEFORE setting the event
             # This ensures transports have the nursery when they check
-            if isinstance(self.transport, QUICTransport):
-                self.transport.set_background_nursery(nursery)
-                self.transport.set_swarm(self)
-            elif hasattr(self.transport, "set_background_nursery"):
-                # WebSocket transport also needs background nursery
-                # for connection management
+            if hasattr(self.transport, "set_background_nursery"):
                 self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
+            if hasattr(self.transport, "set_swarm"):
+                self.transport.set_swarm(self)  # type: ignore[attr-defined]
 
             # Set event after background nursery is configured
             # This ensures transports have the nursery when they check the event
@@ -647,11 +642,11 @@ class Swarm(Service, INetworkService):
                 pass
             raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
 
-        if isinstance(self.transport, QUICTransport) and isinstance(
-            raw_conn, IMuxedConn
+        if getattr(self.transport, 'provides_muxing', False) and getattr(
+            raw_conn, 'is_muxed', False
         ):
             logger.info(
-                "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
+                "Skipping upgrade — transport already provides security + muxing"
             )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
@@ -886,7 +881,7 @@ class Swarm(Service, INetworkService):
                     f"Failed to get a valid connection for peer {peer_id}"
                 )
 
-        if isinstance(self.transport, QUICTransport) and connection is not None:
+        if getattr(self.transport, 'provides_muxing', False) and connection is not None:
             conn = cast("SwarmConn", connection)
             try:
                 stream = await conn.new_stream()
@@ -1115,14 +1110,16 @@ class Swarm(Service, INetworkService):
                             pass
                         return
 
-                # No need to upgrade QUIC Connection
-                if isinstance(self.transport, QUICTransport):
+                # No need to upgrade connections from transports with built-in muxing
+                if getattr(self.transport, 'provides_muxing', False):
                     try:
-                        quic_conn = cast(QUICConnection, read_write_closer)
-                        await self.add_conn(quic_conn, direction="inbound")
-                        peer_id = quic_conn.peer_id
+                        # The connection is already muxed; add it directly.
+                        muxed_conn = cast(IMuxedConn, read_write_closer)
+                        await self.add_conn(muxed_conn, direction="inbound")
+                        peer_id = muxed_conn.peer_id
                         logger.debug(
-                            f"successfully opened quic connection to peer {peer_id}"
+                            "successfully opened native-muxed connection "
+                            f"to peer {peer_id}"
                         )
                         # NOTE: This is a intentional barrier to prevent from the
                         # handler exiting and closing the connection.
@@ -1511,10 +1508,13 @@ class Swarm(Service, INetworkService):
         logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
-        # For QUIC connections, also verify connection is established
-        if isinstance(muxed_conn, QUICConnection):
-            if not muxed_conn.is_established:
-                await muxed_conn._connected_event.wait()
+        # For connections that need an explicit handshake-completion step,
+        # wait until the connection reports itself as established.
+        if hasattr(muxed_conn, 'is_established') and hasattr(
+            muxed_conn, '_connected_event'
+        ):
+            if not muxed_conn.is_established:  # type: ignore[attr-defined]
+                await muxed_conn._connected_event.wait()  # type: ignore[attr-defined]
         logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()

@@ -20,6 +20,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.requirements import after_connection
 from libp2p.exceptions import (
     ParseError,
 )
@@ -59,6 +60,7 @@ MPLEX_MESSAGE_CHANNEL_SIZE = 8
 logger = logging.getLogger(__name__)
 
 
+@after_connection(ISecureConn)
 class Mplex(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go

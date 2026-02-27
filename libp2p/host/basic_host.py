@@ -92,7 +92,6 @@ from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.async_service import (
     background_trio_service,
 )
-from libp2p.transport.quic.connection import QUICConnection
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -954,7 +953,7 @@ class BasicHost(IHost):
         if not is_initiator:
             # Only the dialer (initiator) needs to actively run identify.
             return
-        if not self._is_quic_muxer(muxed_conn):
+        if not self._is_native_muxer(muxed_conn):
             return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
@@ -976,15 +975,16 @@ class BasicHost(IHost):
             return connections[0]
         return None
 
-    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
+    def _is_native_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
+        """Return True if the muxed connection is natively muxed (e.g. QUIC)."""
+        return getattr(muxed_conn, 'is_muxed', False)
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         connection = self._get_first_connection(peer_id)
         if connection is None:
             return False
         muxed_conn = getattr(connection, "muxed_conn", None)
-        return self._is_quic_muxer(muxed_conn)
+        return self._is_native_muxer(muxed_conn)
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
@@ -1060,6 +1060,18 @@ class BasicHost(IHost):
             )
             await net_stream.reset()
             return
+
+        # Phase 2: Check handler connection requirements (if declared)
+        from libp2p.requirements import check_connection_requirements
+
+        underlying_conn = getattr(net_stream, "muxed_conn", None)
+        if not check_connection_requirements(handler, underlying_conn):
+            logger.warning(
+                "Handler for protocol %s has unmet connection requirements "
+                "on stream from peer %s — proceeding anyway",
+                protocol,
+                net_stream.muxed_conn.peer_id,
+            )
 
         await handler(net_stream)
 

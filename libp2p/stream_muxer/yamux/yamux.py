@@ -53,6 +53,7 @@ from libp2p.stream_muxer.exceptions import (
     MuxedStreamReset,
 )
 from libp2p.stream_muxer.rw_lock import ReadWriteLock
+from libp2p.requirements import after_connection
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -417,6 +418,7 @@ class YamuxStream(IMuxedStream):
             return None
 
 
+@after_connection(ISecureConn)
 class Yamux(IMuxedConn):
     def __init__(
         self,
