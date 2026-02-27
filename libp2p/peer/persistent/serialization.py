@@ -33,7 +33,12 @@ from .pb import (
 logger = logging.getLogger(__name__)
 
 
-class SerializationError(Exception):
+from libp2p.exceptions import (
+    PeerError,
+)
+
+
+class SerializationError(PeerError):
     """Raised when serialization or deserialization fails."""
 
 

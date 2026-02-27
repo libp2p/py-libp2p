@@ -1,9 +1,10 @@
 from libp2p.exceptions import (
-    BaseLibp2pError,
+    NetworkError,
 )
 
 
-class SwarmException(BaseLibp2pError):
+class SwarmException(NetworkError):
+    """Exception raised by swarm operations."""
     pass
 
 

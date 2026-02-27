@@ -24,6 +24,9 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.exceptions import (
+    PeerError,
+)
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.peer_record import PeerRecord
 
@@ -574,5 +577,11 @@ class PeerStore(IPeerStore):
         peer_data.clear_metrics()
 
 
-class PeerStoreError(KeyError):
-    """Raised when peer ID is not found in peer store."""
+class PeerStoreError(PeerError, KeyError):
+    """
+    Raised when peer ID is not found in peer store.
+    
+    This exception uses multiple inheritance to maintain compatibility
+    with code that catches KeyError while also being part of the
+    libp2p exception hierarchy.
+    """

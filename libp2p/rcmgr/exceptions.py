@@ -4,8 +4,12 @@ Resource manager exception classes.
 
 from __future__ import annotations
 
+from libp2p.exceptions import (
+    ResourceError,
+)
 
-class ResourceManagerException(Exception):
+
+class ResourceManagerException(ResourceError):
     """Base exception for all resource manager errors."""
 
     def __init__(self, message: str):

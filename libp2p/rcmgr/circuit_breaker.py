@@ -12,6 +12,10 @@ from enum import Enum
 import time
 from typing import Any
 
+from libp2p.exceptions import (
+    ResourceError,
+)
+
 
 class CircuitBreakerState(Enum):
     """Circuit breaker states."""
@@ -21,7 +25,7 @@ class CircuitBreakerState(Enum):
     HALF_OPEN = "half_open"
 
 
-class CircuitBreakerError(Exception):
+class CircuitBreakerError(ResourceError):
     """Exception raised when circuit breaker is open."""
 
     pass
