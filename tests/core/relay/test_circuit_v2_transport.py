@@ -924,6 +924,41 @@ class TestTrackedRawConnection:
     """Test suite for TrackedRawConnection wrapper."""
 
     @pytest.mark.trio
+    async def test_tracked_connection_handles_connection_reset_error(self):
+        """Test that RawConnection raises RawConnError on ConnectionResetError from stream."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+        from libp2p.network.connection.exceptions import RawConnError
+
+        # Simulate ConnectionResetError on write and read
+        mock_stream = AsyncMock()
+        mock_stream.write = AsyncMock(side_effect=ConnectionResetError("connection reset by peer"))
+        mock_stream.read = AsyncMock(side_effect=ConnectionResetError("connection reset by peer"))
+        mock_stream.get_remote_address = MagicMock(return_value=("127.0.0.1", 12345))
+
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Test write raises RawConnError
+        with pytest.raises(RawConnError):
+            await tracked_conn.write(b"test")
+
+        # Test read raises RawConnError
+        with pytest.raises(RawConnError):
+            await tracked_conn.read(10)
+
+    @pytest.mark.trio
     async def test_tracked_connection_calls_record_circuit_closed_on_close(self):
         """Test that closing a TrackedRawConnection calls record_circuit_closed."""
         from unittest.mock import AsyncMock
