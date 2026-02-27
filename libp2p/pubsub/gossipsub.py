@@ -14,6 +14,7 @@ import time
 from typing import (
     Any,
     DefaultDict,
+    Optional,
 )
 
 import trio
@@ -74,6 +75,16 @@ PROTOCOL_ID_V14 = TProtocol("/meshsub/1.4.0")
 PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
 logger = logging.getLogger(__name__)
+
+class GossipsubEvent:
+    peer_id: str
+    topic: str
+
+    # one of these should be set
+    message_size: Optional[int] = None
+    delivered: bool = False
+    dropped_reason: Optional[str] = None
+    validation_error: Optional[Exception] = None
 
 
 class GossipSub(IPubsubRouter, Service):
