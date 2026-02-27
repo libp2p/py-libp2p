@@ -13,6 +13,7 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.security.noise.early_data import BufferingEarlyDataHandler
 from libp2p.security.noise.rekey import TimeBasedRekeyPolicy
 from libp2p.security.noise.transport import Transport
+from tests.utils.factories import noise_static_key_factory
 
 
 class TestNoisePerformance:
@@ -22,7 +23,7 @@ class TestNoisePerformance:
     def key_pairs(self):
         """Create test key pairs."""
         libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        noise_keypair = noise_static_key_factory()
         return libp2p_keypair, noise_keypair
 
     def test_handshake_performance(self, key_pairs):
@@ -31,7 +32,7 @@ class TestNoisePerformance:
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
         )
 
         # Test pattern creation timing
@@ -74,7 +75,7 @@ class TestNoisePerformance:
         policy = TimeBasedRekeyPolicy(max_time_seconds=3600)
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
             rekey_policy=policy,
         )
 
@@ -112,7 +113,7 @@ class TestNoisePerformance:
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
         )
 
         wt_support = transport.webtransport_support
@@ -151,7 +152,7 @@ class TestNoisePerformance:
         handler = BufferingEarlyDataHandler()
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
             early_data_handler=handler,
         )
 
@@ -181,7 +182,7 @@ class TestNoisePerformance:
         # Test transport creation memory usage
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
         )
 
         # Test that transport doesn't leak memory
@@ -263,7 +264,7 @@ class TestNoisePerformance:
         for i in range(50):
             transport = Transport(
                 libp2p_keypair=libp2p_keypair,
-                noise_privkey=noise_keypair.private_key,
+                noise_privkey=noise_keypair,
                 early_data=f"stress_early_data_{i}".encode(),
             )
             transports.append(transport)
@@ -285,7 +286,7 @@ class TestNoisePerformance:
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
         )
 
         wt_support = transport.webtransport_support
@@ -326,7 +327,7 @@ class TestNoisePerformance:
         handler = BufferingEarlyDataHandler()
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
             early_data_handler=handler,
         )
 
@@ -355,7 +356,7 @@ class TestNoisePerformance:
 
         transport = Transport(
             libp2p_keypair=libp2p_keypair,
-            noise_privkey=noise_keypair.private_key,
+            noise_privkey=noise_keypair,
         )
 
         # Test concurrent pattern creation
