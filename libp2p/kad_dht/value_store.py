@@ -20,7 +20,6 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.records.record import make_put_record
 
 from .common import (
     DEFAULT_TTL,
@@ -66,6 +65,8 @@ class ValueStore:
         None
 
         """
+        from libp2p.records.record import make_put_record
+
         if validity == 0.0:
             validity = time.time() + DEFAULT_TTL
         logger.debug(

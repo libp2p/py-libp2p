@@ -65,7 +65,9 @@ def test_namespaced_validator_validate_and_select():
 
 
 def test_namespaced_validator_invalid_key():
-    validators = NamespacedValidator({"dummy": DummyValidator()})
+    validators = NamespacedValidator(
+        {"dummy": DummyValidator()}, strict_validation=True
+    )
 
     # Invalid namespace
     with pytest.raises(InvalidRecordType):
@@ -143,3 +145,101 @@ def test_validate_peer_id_mismatch():
     validator = PublicKeyValidator()
     with pytest.raises(InvalidRecordType, match="does not match storage key"):
         validator.validate(key, value)
+
+
+# Tests for strict_validation mode (GitHub Issue #1070)
+class TestStrictValidation:
+    """Tests for the strict_validation feature that validates all DHT records."""
+
+    def test_strict_validation_disabled_allows_non_namespaced_keys(self):
+        """With strict_validation=False (default), non-namespaced keys are accepted."""
+        validators = NamespacedValidator({"dummy": DummyValidator()})
+
+        # Non-namespaced key should be accepted (uses fallback BlankValidator)
+        validators.validate("plain-key", b"some-value")  # Should not raise
+
+    def test_strict_validation_enabled_rejects_non_namespaced_keys(self):
+        """With strict_validation=True, non-namespaced keys are rejected."""
+        validators = NamespacedValidator(
+            {"dummy": DummyValidator()},
+            strict_validation=True,
+        )
+
+        # Non-namespaced key should be rejected
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            validators.validate("plain-key", b"some-value")
+
+    def test_strict_validation_enabled_accepts_valid_namespaced_keys(self):
+        """With strict_validation=True, valid namespaced keys are accepted."""
+        validators = NamespacedValidator(
+            {"dummy": DummyValidator()},
+            strict_validation=True,
+        )
+
+        # Valid namespaced key should be accepted
+        validators.validate("/dummy/somekey", b"valid-data")  # Should not raise
+
+    def test_strict_validation_enabled_rejects_unknown_namespace(self):
+        """With strict_validation=True, unknown namespaces are rejected."""
+        validators = NamespacedValidator(
+            {"dummy": DummyValidator()},
+            strict_validation=True,
+        )
+
+        # Key with unregistered namespace should be rejected
+        with pytest.raises(InvalidRecordType, match="No validator registered"):
+            validators.validate("/unknown/somekey", b"some-value")
+
+    def test_strict_validation_select_with_non_namespaced_key(self):
+        """Test select() behavior with non-namespaced keys."""
+        # Without strict validation - should return first value
+        validators = NamespacedValidator({"dummy": DummyValidator()})
+        idx = validators.select("plain-key", [b"a", b"b", b"c"])
+        assert idx == 0
+
+        # With strict validation - should raise
+        validators_strict = NamespacedValidator(
+            {"dummy": DummyValidator()},
+            strict_validation=True,
+        )
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            validators_strict.select("plain-key", [b"a", b"b", b"c"])
+
+    def test_strict_validation_can_be_toggled(self):
+        """Test that strict_validation can be enabled/disabled dynamically."""
+        validators = NamespacedValidator({"dummy": DummyValidator()})
+
+        # Initially permissive
+        validators.validate("plain-key", b"value")  # Should not raise
+
+        # Enable strict mode
+        validators.strict_validation = True
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            validators.validate("plain-key", b"value")
+
+        # Disable strict mode
+        validators.strict_validation = False
+        validators.validate("plain-key", b"value")  # Should not raise again
+
+    def test_custom_fallback_validator(self):
+        """Test that custom fallback validators work correctly."""
+
+        class RejectAllValidator(Validator):
+            def validate(self, key: str, value: bytes) -> None:
+                raise ValueError("Rejected by fallback")
+
+            def select(self, key: str, values: list[bytes]) -> int:
+                return 0
+
+        validators = NamespacedValidator(
+            {"dummy": DummyValidator()},
+            strict_validation=False,
+            fallback_validator=RejectAllValidator(),
+        )
+
+        # Namespaced key uses dummy validator
+        validators.validate("/dummy/key", b"valid-data")  # Should not raise
+
+        # Non-namespaced key uses custom fallback that rejects
+        with pytest.raises(ValueError, match="Rejected by fallback"):
+            validators.validate("plain-key", b"value")

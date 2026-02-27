@@ -133,6 +133,7 @@ class KadDHT(Service):
         protocol_prefix: TProtocol = PROTOCOL_PREFIX,
         enable_providers: bool = True,
         enable_values: bool = True,
+        strict_validation: bool = False,
     ):
         """
         Initialize a new Kademlia DHT node.
@@ -140,6 +141,35 @@ class KadDHT(Service):
         :param host: The libp2p host.
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
         :param enable_random_walk: Whether to enable automatic random walk
+        :param validator: Custom validator for DHT records
+        :param validator_changed: If True, indicates the validator was explicitly set
+        :param protocol_prefix: Protocol prefix (default: /ipfs)
+        :param enable_providers: Enable provider record support
+        :param enable_values: Enable value record support
+        :param strict_validation: If True, enforce strict namespace validation for all
+            records. Only namespaced keys (e.g., /pk/, /ipns/, /myapp/) with registered
+            validators will be accepted. If False (default), non-namespaced keys will
+            be accepted without validation for backward compatibility.
+
+            Setting this to True aligns behavior with go-libp2p and rust-libp2p where:
+            - All DHT records MUST have a registered validator for their namespace
+            - Keys without a matching namespace validator are rejected
+            - This enforces permissioned keyspaces for security and correctness
+
+        Example with strict validation:
+            # Create validator with custom namespace
+            validator = NamespacedValidator({
+                "pk": PublicKeyValidator(),
+                "myapp": MyAppValidator(),
+            }, strict_validation=True)
+            dht = KadDHT(
+                host, DHTMode.SERVER, validator=validator, strict_validation=True
+            )
+
+            # Only namespaced keys are allowed:
+            await dht.put_value("/myapp/key", b"value")  # OK
+            await dht.put_value("/pk/...", pubkey)       # OK
+            await dht.put_value("plain-key", b"value")   # Raises InvalidRecordType
         """
         super().__init__()
 
@@ -159,10 +189,17 @@ class KadDHT(Service):
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
         self.enable_values = enable_values
+        self.strict_validation = strict_validation
         self.validator = validator
 
         if validator is None:
-            self.validator = NamespacedValidator({"pk": PublicKeyValidator()})
+            self.validator = NamespacedValidator(
+                {"pk": PublicKeyValidator()},
+                strict_validation=strict_validation,
+            )
+        elif strict_validation and isinstance(validator, NamespacedValidator):
+            # If strict_validation is requested, enable it on the validator
+            validator.strict_validation = strict_validation
 
         # If true implies that the validator has been changed and that
         # Defaults should not be used
