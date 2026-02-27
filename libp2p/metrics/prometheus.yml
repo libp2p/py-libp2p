@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "libp2p-python"
+    static_configs:
+      - targets:
+          - "host.docker.internal:8000"
