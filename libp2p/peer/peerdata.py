@@ -122,6 +122,9 @@ class PeerData(IPeerData):
         :param val: val to associate with key
         :raises TypeError: if val is not a valid MetadataValue type
         """
+        # Note: bool is a subclass of int in Python, so `isinstance(True, int)`
+        # is True.  We include bool explicitly in the tuple for clarity and to
+        # document that booleans are an accepted MetadataValue type.
         if not isinstance(val, (str, int, float, bool, type(None))):
             raise TypeError(
                 f"MetadataValue must be str, int, float, bool, or None, "
