@@ -19,6 +19,8 @@ class SwarmDialAllFailedError(SwarmException):
         super().__init__(message)
         self.peer_id = peer_id
         self.num_addrs_tried = num_addrs_tried
+
+
 class RateLimitError(Exception):
     """Raised when rate limit is exceeded."""
 
