@@ -1,3 +1,6 @@
+# Type stubs for the miniupnpc C extension API used by py-libp2p.
+# Validated against miniupnpc>=2.3,<3.0 for issue #1009.
+
 class UPnP:
     lanaddr: str | None
 
