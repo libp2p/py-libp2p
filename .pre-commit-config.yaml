@@ -49,3 +49,11 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
+  - repo: local
+    hooks:
+      - id: path-audit
+        name: Cross-platform path handling audit (P0/P1)
+        entry: python scripts/audit_paths.py --summary-only --fail-on-p1
+        language: system
+        always_run: true
+        pass_filenames: false
