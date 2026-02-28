@@ -96,8 +96,10 @@ async def test_reissue_when_listen_addrs_change():
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Wait for subscription to propagate
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
         # Check whether signed-records were transfered properly in the subscribe call
@@ -115,7 +117,14 @@ async def test_reissue_when_listen_addrs_change():
         with patch.object(pubsubs_fsub[0].host, "get_addrs", return_value=[new_addr]):
             # Unsubscribe from A's side so that a new_record is issued
             await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
-            await trio.sleep(1)
+            # Wait for unsubscription to propagate
+            with trio.fail_after(1.0):
+                while (
+                    TESTING_TOPIC in pubsubs_fsub[1].peer_topics
+                    and pubsubs_fsub[0].my_id
+                    in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+                ):
+                    await trio.sleep(0.01)
 
         # B should be holding A's new record with bumped seq
         envelope_b_unsub = (
@@ -135,8 +144,10 @@ async def test_peers_subscribe():
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Wait for subscription to propagate
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
         assert pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
         # Check whether signed-records were transfered properly in the subscribe call
@@ -148,8 +159,13 @@ async def test_peers_subscribe():
         assert isinstance(envelope_b_sub, Envelope)
 
         await pubsubs_fsub[0].unsubscribe(TESTING_TOPIC)
-        # Yield to let 0 notify 1
-        await trio.sleep(1)
+        # Wait for unsubscription to propagate
+        with trio.fail_after(1.0):
+            while (
+                TESTING_TOPIC in pubsubs_fsub[1].peer_topics
+                and pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
+            ):
+                await trio.sleep(0.01)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
         envelope_b_unsub = (
@@ -180,8 +196,9 @@ async def test_peer_subscribe_fail_upon_invald_record_transfer():
             pubsubs_fsub[0].host.get_peerstore().set_local_record(envelope)
 
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yeild to let 0 notify 1
-        await trio.sleep(1)
+        # Give time for message to propagate (it should be rejected due to
+        # invalid record)
+        await trio.sleep(0.1)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
             TESTING_TOPIC, set()
         )
@@ -197,8 +214,9 @@ async def test_peer_subscribe_fail_upon_invald_record_transfer():
         pubsubs_fsub[0].host.get_peerstore().set_local_record(false_envelope)
 
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
-        # Yeild to let 0 notify 1
-        await trio.sleep(1)
+        # Give time for message to propagate (it should be rejected due to
+        # invalid record)
+        await trio.sleep(0.1)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics.get(
             TESTING_TOPIC, set()
         )
@@ -806,12 +824,34 @@ async def test_strict_signing():
         2, strict_signing=True
     ) as pubsubs_fsub:
         await connect(pubsubs_fsub[0].host, pubsubs_fsub[1].host)
+        # Wait for pubsub peers to be connected
+        await pubsubs_fsub[0].wait_for_peer(pubsubs_fsub[1].my_id)
+        await pubsubs_fsub[1].wait_for_peer(pubsubs_fsub[0].my_id)
+
         await pubsubs_fsub[0].subscribe(TESTING_TOPIC)
         await pubsubs_fsub[1].subscribe(TESTING_TOPIC)
-        await trio.sleep(1)
+        # Wait for both subscriptions to propagate
+        await pubsubs_fsub[0].wait_for_subscription(
+            pubsubs_fsub[1].my_id, TESTING_TOPIC
+        )
+        await pubsubs_fsub[1].wait_for_subscription(
+            pubsubs_fsub[0].my_id, TESTING_TOPIC
+        )
+
+        # Wait for gossipsub mesh to form (heartbeat-driven)
+        with trio.fail_after(5.0):
+            while (
+                TESTING_TOPIC not in pubsubs_fsub[0].router.mesh
+                or pubsubs_fsub[1].my_id
+                not in pubsubs_fsub[0].router.mesh[TESTING_TOPIC]
+            ):
+                await trio.sleep(0.01)
 
         await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
-        await trio.sleep(1)
+        # Wait for message to be seen by both peers
+        with trio.fail_after(2.0):
+            while pubsubs_fsub[1].seen_messages.length() < 1:
+                await trio.sleep(0.01)
 
         assert pubsubs_fsub[0].seen_messages.length() == 1
         assert pubsubs_fsub[1].seen_messages.length() == 1
@@ -1211,11 +1251,8 @@ async def test_blacklist_tears_down_existing_connection():
 
         # 1) Connect peer1 to peer0
         await connect(pubsub0.host, pubsub1.host)
-        # Give handle_peer_queue some time to run
-        for _ in range(50):
-            if pubsub1.my_id in pubsub0.peers:
-                break
-            await trio.sleep(0.1)
+        # Wait for peer to be added to pubsub
+        await pubsub0.wait_for_peer(pubsub1.my_id)
 
         # After connect, pubsub0.peers should contain pubsub1.my_id
         assert pubsub1.my_id in pubsub0.peers
@@ -1231,11 +1268,10 @@ async def test_blacklist_tears_down_existing_connection():
         # 3) Now blacklist peer1
         pubsub0.add_to_blacklist(pubsub1.my_id)
 
-        # Allow the asynchronous teardown task (_teardown_if_connected) to run
-        for _ in range(50):
-            if pubsub1.my_id not in pubsub0.peers:
-                break
-            await trio.sleep(0.1)
+        # Wait for the asynchronous teardown task (_teardown_if_connected) to complete
+        with trio.fail_after(5.0):
+            while pubsub1.my_id in pubsub0.peers:
+                await trio.sleep(0.01)
 
         # 4a) pubsub0.peers should no longer contain peer1
         assert pubsub1.my_id not in pubsub0.peers
