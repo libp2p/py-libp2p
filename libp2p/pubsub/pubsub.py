@@ -91,8 +91,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
-    # NOTE: `string(from, seqno)` in Go
-    return msg.seqno + msg.from_id
+    # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/ab876fc71c34/pubsub.go#L1327-L1330  # noqa: E501
+    return msg.from_id + msg.seqno
 
 
 def get_content_addressed_msg_id(

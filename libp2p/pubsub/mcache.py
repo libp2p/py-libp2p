@@ -7,19 +7,31 @@ from .pb import (
 )
 
 
+def default_msg_id_fn(msg: rpc_pb2.Message) -> bytes:
+    """
+    Compute the default message ID matching go-libp2p's DefaultMsgIdFn.
+
+    Ref: go-libp2p-pubsub pubsub.go#L1327-L1330
+
+    :param msg: The protobuf message.
+    :return: ``from_id + seqno`` concatenated as bytes.
+    """
+    return msg.from_id + msg.seqno
+
+
 class CacheEntry:
-    mid: tuple[bytes, bytes]
+    mid: bytes
     topics: list[str]
 
     """
     A logical representation of an entry in the mcache's _history_.
     """
 
-    def __init__(self, mid: tuple[bytes, bytes], topics: Sequence[str]) -> None:
+    def __init__(self, mid: bytes, topics: Sequence[str]) -> None:
         """
         Constructor.
 
-        :param mid: (seqno, from_id) of the msg
+        :param mid: message ID as bytes (from_id + seqno)
         :param topics: list of topics this message was sent on
         """
         self.mid = mid
@@ -30,7 +42,7 @@ class MessageCache:
     window_size: int
     history_size: int
 
-    msgs: dict[tuple[bytes, bytes], rpc_pb2.Message]
+    msgs: dict[bytes, rpc_pb2.Message]
 
     history: list[list[CacheEntry]]
 
@@ -45,7 +57,7 @@ class MessageCache:
         self.window_size = window_size
         self.history_size = history_size
 
-        # (seqno, from_id) -> rpc message
+        # msg_id (from_id + seqno) -> rpc message
         self.msgs = dict()
 
         # max length of history_size. each item is a list of CacheEntry.
@@ -58,18 +70,18 @@ class MessageCache:
 
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
-        mid: tuple[bytes, bytes] = (msg.seqno, msg.from_id)
+        mid: bytes = default_msg_id_fn(msg)
         if mid in self.msgs:
             return
         self.msgs[mid] = msg
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
-    def get(self, mid: tuple[bytes, bytes]) -> rpc_pb2.Message | None:
+    def get(self, mid: bytes) -> rpc_pb2.Message | None:
         """
         Get a message from the mcache.
 
-        :param mid: (seqno, from_id) of the message to get.
+        :param mid: message ID as bytes (from_id + seqno).
         :return: The rpc message associated with this mid
         """
         if mid in self.msgs:
@@ -77,14 +89,14 @@ class MessageCache:
 
         return None
 
-    def window(self, topic: str) -> list[tuple[bytes, bytes]]:
+    def window(self, topic: str) -> list[bytes]:
         """
         Get the window for this topic.
 
         :param topic: Topic whose message ids we desire.
         :return: List of mids in the current window.
         """
-        mids: list[tuple[bytes, bytes]] = []
+        mids: list[bytes] = []
 
         for entries_list in self.history[: self.window_size]:
             for entry in entries_list:
