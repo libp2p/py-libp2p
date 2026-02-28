@@ -76,6 +76,7 @@ mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
+oso-health-report = "libp2p.observability.oso.cli:main"
 
 [dependency-groups]
 dev = [
