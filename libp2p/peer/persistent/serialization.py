@@ -5,13 +5,13 @@ This module provides safe serialization/deserialization functions using Protocol
 instead of pickle to avoid security vulnerabilities.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import logging
-from typing import Any
 
 from multiaddr import Multiaddr
 
 from libp2p.crypto.keys import KeyPair
+from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.pb.crypto_pb2 import (
     KeyType as PBKeyType,
@@ -101,7 +101,13 @@ def deserialize_protocols(data: bytes) -> list[str]:
         raise SerializationError(f"Failed to deserialize protocols: {e}") from e
 
 
-def serialize_metadata(metadata: dict[str, Any]) -> bytes:
+# Internal serializable value type: includes bytes for key serialization.
+_SerializableValue = MetadataValue | bytes
+
+
+def serialize_metadata(
+    metadata: Mapping[str, _SerializableValue],
+) -> bytes:
     """
     Serialize metadata dictionary to bytes.
 

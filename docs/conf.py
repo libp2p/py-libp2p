@@ -12,14 +12,17 @@
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
+# documentation root, use pathlib to resolve it cross-platform.
 
 import doctest
-import os
+from pathlib import Path
 import sys
-
-sys.path.insert(0, os.path.abspath(".."))
 from unittest.mock import MagicMock
+
+# Add project root to path (cross-platform)
+_docs_dir = Path(__file__).resolve().parent
+_project_root = _docs_dir.parent
+sys.path.insert(0, str(_project_root))
 
 try:
     import tomllib
@@ -27,8 +30,8 @@ except ModuleNotFoundError:
     # For Python < 3.11
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
-# Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+# Path to pyproject.toml (conf.py is in 'docs', project root is parent)
+pyproject_path = _project_root / "pyproject.toml"
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)

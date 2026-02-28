@@ -1,4 +1,3 @@
-import os
 import shutil
 import subprocess
 
@@ -19,6 +18,7 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.utils.paths import get_script_dir, join_paths
 
 REQUIRED_NODE_MAJOR = (
     22  # Required for Promise.withResolvers in @chainsafe/libp2p-noise v17+
@@ -41,10 +41,11 @@ async def test_ping_with_js_node():
             pytest.skip(f"Node.js >= {REQUIRED_NODE_MAJOR} required, found {out}")
     except Exception:
         pytest.skip("Unable to determine Node.js version")
-    js_node_dir = os.path.join(os.path.dirname(__file__), "js_libp2p", "js_node", "src")
+
+    js_node_dir = join_paths(get_script_dir(__file__), "js_libp2p", "js_node", "src")
     script_name = "./ws_ping_node.mjs"
 
-    if not os.path.isdir(js_node_dir):
+    if not js_node_dir.is_dir():
         pytest.skip(f"JS interop directory not found: {js_node_dir}")
     try:
         subprocess.run(

@@ -6,13 +6,14 @@ This script runs the attack simulation tests using trio.run() to properly
 handle the async context required by trio.sleep() and trio.current_time().
 """
 
-import os
 import sys
 
 import trio
 
-# Add the project root to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../"))
+from libp2p.utils.paths import get_script_dir, resolve_relative_path
+
+# Add the project root to the path (cross-platform)
+sys.path.insert(0, str(resolve_relative_path(get_script_dir(__file__), "../../../")))
 
 # Import test modules
 from .data_attack.invalid_block import BlockInvalidityType, MaliciousValidator
