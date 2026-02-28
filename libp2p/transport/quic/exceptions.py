@@ -2,7 +2,8 @@
 QUIC Transport exceptions
 """
 
-from typing import Any, Literal
+from types import TracebackType
+from typing import Literal
 
 
 class QUICError(Exception):
@@ -351,12 +352,11 @@ class QUICErrorContext:
     def __enter__(self) -> "QUICErrorContext":
         return self
 
-    # TODO: Fix types for exc_type
     def __exit__(
         self,
-        exc_type: type[BaseException] | None | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
-        exc_tb: Any,
+        exc_tb: TracebackType | None,
     ) -> Literal[False]:
         if exc_type is None:
             return False
