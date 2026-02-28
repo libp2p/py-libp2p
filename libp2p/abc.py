@@ -4,6 +4,7 @@ from abc import (
 )
 from collections.abc import (
     AsyncIterable,
+    AsyncIterator,
     Iterable,
     KeysView,
     Sequence,
@@ -3283,6 +3284,59 @@ class IPubsub(ServiceAPI):
             The identifier of the topic (str) or topics (list[str]).
         data : bytes
             The data to publish.
+
+        """
+        ...
+
+
+# -------------------------- perf interface.py --------------------------
+
+
+class IPerf(ABC):
+    """
+    Interface for the perf protocol service.
+
+    Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
+    """
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the perf service and register the protocol handler."""
+        ...
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the perf service and unregister the protocol handler."""
+        ...
+
+    @abstractmethod
+    def is_started(self) -> bool:
+        """Check if the service is currently running."""
+        ...
+
+    @abstractmethod
+    def measure_performance(
+        self,
+        multiaddr: Multiaddr,
+        send_bytes: int,
+        recv_bytes: int,
+    ) -> AsyncIterator[Any]:
+        """
+        Measure transfer performance to a remote peer.
+
+        Parameters
+        ----------
+        multiaddr : Multiaddr
+            The address of the remote peer to test against.
+        send_bytes : int
+            Number of bytes to upload to the remote peer.
+        recv_bytes : int
+            Number of bytes to request the remote peer to send back.
+
+        Yields
+        ------
+        PerfOutput
+            Progress reports during the transfer, with a final summary at the end.
 
         """
         ...
