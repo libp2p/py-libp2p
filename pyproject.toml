@@ -76,6 +76,7 @@ mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
+path-handling = "examples.path_handling_demo:main"
 
 [dependency-groups]
 dev = [
