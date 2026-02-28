@@ -613,10 +613,7 @@ class Pubsub(Service, IPubsub):
             await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
             # Now safe to assert subscription state
         """
-        if (
-            topic_id in self.peer_topics
-            and peer_id in self.peer_topics[topic_id]
-        ):
+        if topic_id in self.peer_topics and peer_id in self.peer_topics[topic_id]:
             return
         key = (peer_id, topic_id)
         event = self._subscription_events.setdefault(key, trio.Event())
