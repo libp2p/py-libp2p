@@ -3,7 +3,12 @@
 Audit script to identify path handling issues in the py-libp2p codebase.
 
 This script scans for patterns that should be migrated to use the new
-cross-platform path utilities.
+cross-platform path utilities. The script excludes itself from the scan
+to avoid false positives from the migration suggestion strings it contains.
+
+When run with --fail-on-p1, only P0/P1 issues (temp_hardcode, os_path_join,
+os_path_dirname) cause exit code 1. P2 issues (e.g. direct_path_concat,
+hard_coded_slash) are reported but do not block the pre-commit hook.
 """
 
 import argparse
@@ -33,13 +38,18 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
     }
 
     # Patterns to search for
+    # direct_path_concat: only flag when at least one operand looks like a path
+    # (contains / or \), to avoid 1000s of false positives from generic string concat
     patterns = {
         "hard_coded_slash": r'["\'][^"\']*\/[^"\']*["\']',
         "os_path_join": r"os\.path\.join\(",
         "temp_hardcode": r'["\']\/tmp\/|["\']C:\\\\',
         "os_path_dirname": r"os\.path\.dirname\(",
         "os_path_abspath": r"os\.path\.abspath\(",
-        "direct_path_concat": r'["\'][^"\']*["\']\s*\+\s*["\'][^"\']*["\']',
+        "direct_path_concat": (
+            r'(?:["\'][^"\']*[/\\][^"\']*["\']\s*\+\s*["\'][^"\']*["\']'
+            r'|["\'][^"\']*["\']\s*\+\s*["\'][^"\']*[/\\][^"\']*["\'])'
+        ),
     }
 
     # Files to exclude
@@ -49,9 +59,13 @@ def scan_for_path_issues(directory: Path) -> dict[str, list[dict[str, Any]]]:
         r"\.pytest_cache",
         r"\.mypy_cache",
         r"\.ruff_cache",
+        r"\.tox/",
         r"env/",
         r"venv/",
         r"\.venv/",
+        r"site-packages/",
+        r"scripts/audit_paths\.py",  # Contains suggestion strings that match patterns
+        r"_pb2\.py$",  # Generated protobuf code
     ]
 
     for py_file in directory.rglob("*.py"):
@@ -221,6 +235,11 @@ def main():
     parser.add_argument(
         "--summary-only", action="store_true", help="Only show summary report"
     )
+    parser.add_argument(
+        "--fail-on-p1",
+        action="store_true",
+        help="Exit 1 if P0/P1 issues (temp_hardcode, os_path_join, os_path_dirname)",
+    )
 
     args = parser.parse_args()
 
@@ -235,6 +254,14 @@ def main():
     # Generate and display summary
     summary = generate_summary_report(issues)
     print(summary)
+
+    if args.fail_on_p1:
+        p1_types = ("temp_hardcode", "os_path_join", "os_path_dirname")
+        p1_count = sum(len(issues[t]) for t in p1_types)
+        if p1_count > 0:
+            print(f"\n❌ Found {p1_count} P0/P1 path issue(s). Fix before committing.")
+            return 1
+        print("\n✅ Path audit passed (no P0/P1). P2 issues do not block the hook.")
 
     if not args.summary_only:
         # Generate detailed suggestions
