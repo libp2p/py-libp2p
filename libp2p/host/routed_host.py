@@ -36,6 +36,10 @@ class RoutedHost(BasicHost):
         enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
+        *,
+        bootstrap_allow_ipv6: bool = False,
+        bootstrap_dns_timeout: float = 10.0,
+        bootstrap_dns_max_retries: int = 3,
     ):
         """
         Initialize a RoutedHost instance.
@@ -48,6 +52,9 @@ class RoutedHost(BasicHost):
         :param bootstrap: Bootstrap peer addresses
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
+        :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
+        :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
         """
         super().__init__(
             network,
@@ -56,6 +63,9 @@ class RoutedHost(BasicHost):
             enable_autotls,
             bootstrap,
             resource_manager=resource_manager,
+            bootstrap_allow_ipv6=bootstrap_allow_ipv6,
+            bootstrap_dns_timeout=bootstrap_dns_timeout,
+            bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         )
         self._router = router
 
