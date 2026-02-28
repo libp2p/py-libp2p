@@ -4,11 +4,11 @@
 # source: libp2p/pubsub/pb/rpc.proto
 # Protobuf Python Version: 5.29.3
 """Generated protocol buffer code."""
-from google.protobuf.internal import builder as _builder
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
+from google.protobuf.internal import builder as _builder
 _runtime_version.ValidateProtobufRuntimeVersion(
     _runtime_version.Domain.PUBLIC,
     5,
@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1alibp2p/pubsub/pb/rpc.proto\x12\tpubsub.pb\"\xca\x01\n\x03RPC\x12-\n\rsubscriptions\x18\x01 \x03(\x0b\x32\x16.pubsub.pb.RPC.SubOpts\x12#\n\x07publish\x18\x02 \x03(\x0b\x32\x12.pubsub.pb.Message\x12*\n\x07\x63ontrol\x18\x03 \x01(\x0b\x32\x19.pubsub.pb.ControlMessage\x12\x14\n\x0csenderRecord\x18\x04 \x01(\x0c\x1a-\n\x07SubOpts\x12\x11\n\tsubscribe\x18\x01 \x01(\x08\x12\x0f\n\x07topicid\x18\x02 \x01(\t\"i\n\x07Message\x12\x0f\n\x07\x66rom_id\x18\x01 \x01(\x0c\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\r\n\x05seqno\x18\x03 \x01(\x0c\x12\x10\n\x08topicIDs\x18\x04 \x03(\t\x12\x11\n\tsignature\x18\x05 \x01(\x0c\x12\x0b\n\x03key\x18\x06 \x01(\x0c\"\xe0\x01\n\x0e\x43ontrolMessage\x12&\n\x05ihave\x18\x01 \x03(\x0b\x32\x17.pubsub.pb.ControlIHave\x12&\n\x05iwant\x18\x02 \x03(\x0b\x32\x17.pubsub.pb.ControlIWant\x12&\n\x05graft\x18\x03 \x03(\x0b\x32\x17.pubsub.pb.ControlGraft\x12&\n\x05prune\x18\x04 \x03(\x0b\x32\x17.pubsub.pb.ControlPrune\x12.\n\tidontwant\x18\x05 \x03(\x0b\x32\x1b.pubsub.pb.ControlIDontWant\"3\n\x0c\x43ontrolIHave\x12\x0f\n\x07topicID\x18\x01 \x01(\t\x12\x12\n\nmessageIDs\x18\x02 \x03(\t\"\"\n\x0c\x43ontrolIWant\x12\x12\n\nmessageIDs\x18\x01 \x03(\t\"\x1f\n\x0c\x43ontrolGraft\x12\x0f\n\x07topicID\x18\x01 \x01(\t\"T\n\x0c\x43ontrolPrune\x12\x0f\n\x07topicID\x18\x01 \x01(\t\x12\"\n\x05peers\x18\x02 \x03(\x0b\x32\x13.pubsub.pb.PeerInfo\x12\x0f\n\x07\x62\x61\x63koff\x18\x03 \x01(\x04\"&\n\x10\x43ontrolIDontWant\x12\x12\n\nmessageIDs\x18\x01 \x03(\x0c\"4\n\x08PeerInfo\x12\x0e\n\x06peerID\x18\x01 \x01(\x0c\x12\x18\n\x10signedPeerRecord\x18\x02 \x01(\x0c\"\x87\x03\n\x0fTopicDescriptor\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x31\n\x04\x61uth\x18\x02 \x01(\x0b\x32#.pubsub.pb.TopicDescriptor.AuthOpts\x12/\n\x03\x65nc\x18\x03 \x01(\x0b\x32\".pubsub.pb.TopicDescriptor.EncOpts\x1a|\n\x08\x41uthOpts\x12:\n\x04mode\x18\x01 \x01(\x0e\x32,.pubsub.pb.TopicDescriptor.AuthOpts.AuthMode\x12\x0c\n\x04keys\x18\x02 \x03(\x0c\"&\n\x08\x41uthMode\x12\x08\n\x04NONE\x10\x00\x12\x07\n\x03KEY\x10\x01\x12\x07\n\x03WOT\x10\x02\x1a\x83\x01\n\x07\x45ncOpts\x12\x38\n\x04mode\x18\x01 \x01(\x0e\x32*.pubsub.pb.TopicDescriptor.EncOpts.EncMode\x12\x11\n\tkeyHashes\x18\x02 \x03(\x0c\"+\n\x07\x45ncMode\x12\x08\n\x04NONE\x10\x00\x12\r\n\tSHAREDKEY\x10\x01\x12\x07\n\x03WOT\x10\x02')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1alibp2p/pubsub/pb/rpc.proto\x12\tpubsub.pb\"\xfe\x01\n\x03RPC\x12-\n\rsubscriptions\x18\x01 \x03(\x0b\x32\x16.pubsub.pb.RPC.SubOpts\x12#\n\x07publish\x18\x02 \x03(\x0b\x32\x12.pubsub.pb.Message\x12*\n\x07\x63ontrol\x18\x03 \x01(\x0b\x32\x19.pubsub.pb.ControlMessage\x12\x14\n\x0csenderRecord\x18\x04 \x01(\x0c\x12\x32\n\rtestExtension\x18\x92\xa2\x8c\x03 \x01(\x0b\x32\x18.pubsub.pb.TestExtension\x1a-\n\x07SubOpts\x12\x11\n\tsubscribe\x18\x01 \x01(\x08\x12\x0f\n\x07topicid\x18\x02 \x01(\t\"i\n\x07Message\x12\x0f\n\x07\x66rom_id\x18\x01 \x01(\x0c\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\r\n\x05seqno\x18\x03 \x01(\x0c\x12\x10\n\x08topicIDs\x18\x04 \x03(\t\x12\x11\n\tsignature\x18\x05 \x01(\x0c\x12\x0b\n\x03key\x18\x06 \x01(\x0c\"\xee\x02\n\x0e\x43ontrolMessage\x12&\n\x05ihave\x18\x01 \x03(\x0b\x32\x17.pubsub.pb.ControlIHave\x12&\n\x05iwant\x18\x02 \x03(\x0b\x32\x17.pubsub.pb.ControlIWant\x12&\n\x05graft\x18\x03 \x03(\x0b\x32\x17.pubsub.pb.ControlGraft\x12&\n\x05prune\x18\x04 \x03(\x0b\x32\x17.pubsub.pb.ControlPrune\x12.\n\tidontwant\x18\x05 \x03(\x0b\x32\x1b.pubsub.pb.ControlIDontWant\x12\x30\n\nextensions\x18\x06 \x01(\x0b\x32\x1c.pubsub.pb.ControlExtensions\x12*\n\x07observe\x18\x07 \x03(\x0b\x32\x19.pubsub.pb.ControlObserve\x12.\n\tunobserve\x18\x08 \x03(\x0b\x32\x1b.pubsub.pb.ControlUnobserve\"G\n\x11\x43ontrolExtensions\x12\x18\n\x10topicObservation\x18\x01 \x01(\x08\x12\x18\n\rtestExtension\x18\x92\xa2\x8c\x03 \x01(\x08\"3\n\x0c\x43ontrolIHave\x12\x0f\n\x07topicID\x18\x01 \x01(\t\x12\x12\n\nmessageIDs\x18\x02 \x03(\t\"\"\n\x0c\x43ontrolIWant\x12\x12\n\nmessageIDs\x18\x01 \x03(\t\"\x1f\n\x0c\x43ontrolGraft\x12\x0f\n\x07topicID\x18\x01 \x01(\t\"T\n\x0c\x43ontrolPrune\x12\x0f\n\x07topicID\x18\x01 \x01(\t\x12\"\n\x05peers\x18\x02 \x03(\x0b\x32\x13.pubsub.pb.PeerInfo\x12\x0f\n\x07\x62\x61\x63koff\x18\x03 \x01(\x04\"&\n\x10\x43ontrolIDontWant\x12\x12\n\nmessageIDs\x18\x01 \x03(\x0c\"!\n\x0e\x43ontrolObserve\x12\x0f\n\x07topicID\x18\x01 \x01(\t\"#\n\x10\x43ontrolUnobserve\x12\x0f\n\x07topicID\x18\x01 \x01(\t\"\x0f\n\rTestExtension\"4\n\x08PeerInfo\x12\x0e\n\x06peerID\x18\x01 \x01(\x0c\x12\x18\n\x10signedPeerRecord\x18\x02 \x01(\x0c\"\x87\x03\n\x0fTopicDescriptor\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x31\n\x04\x61uth\x18\x02 \x01(\x0b\x32#.pubsub.pb.TopicDescriptor.AuthOpts\x12/\n\x03\x65nc\x18\x03 \x01(\x0b\x32\".pubsub.pb.TopicDescriptor.EncOpts\x1a|\n\x08\x41uthOpts\x12:\n\x04mode\x18\x01 \x01(\x0e\x32,.pubsub.pb.TopicDescriptor.AuthOpts.AuthMode\x12\x0c\n\x04keys\x18\x02 \x03(\x0c\"&\n\x08\x41uthMode\x12\x08\n\x04NONE\x10\x00\x12\x07\n\x03KEY\x10\x01\x12\x07\n\x03WOT\x10\x02\x1a\x83\x01\n\x07\x45ncOpts\x12\x38\n\x04mode\x18\x01 \x01(\x0e\x32*.pubsub.pb.TopicDescriptor.EncOpts.EncMode\x12\x11\n\tkeyHashes\x18\x02 \x03(\x0c\"+\n\x07\x45ncMode\x12\x08\n\x04NONE\x10\x00\x12\r\n\tSHAREDKEY\x10\x01\x12\x07\n\x03WOT\x10\x02')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,33 +32,41 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'libp2p.pubsub.pb.rpc_pb2', 
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_RPC']._serialized_start=42
-  _globals['_RPC']._serialized_end=244
-  _globals['_RPC_SUBOPTS']._serialized_start=199
-  _globals['_RPC_SUBOPTS']._serialized_end=244
-  _globals['_MESSAGE']._serialized_start=246
-  _globals['_MESSAGE']._serialized_end=351
-  _globals['_CONTROLMESSAGE']._serialized_start=354
-  _globals['_CONTROLMESSAGE']._serialized_end=578
-  _globals['_CONTROLIHAVE']._serialized_start=580
-  _globals['_CONTROLIHAVE']._serialized_end=631
-  _globals['_CONTROLIWANT']._serialized_start=633
-  _globals['_CONTROLIWANT']._serialized_end=667
-  _globals['_CONTROLGRAFT']._serialized_start=669
-  _globals['_CONTROLGRAFT']._serialized_end=700
-  _globals['_CONTROLPRUNE']._serialized_start=702
-  _globals['_CONTROLPRUNE']._serialized_end=786
-  _globals['_CONTROLIDONTWANT']._serialized_start=788
-  _globals['_CONTROLIDONTWANT']._serialized_end=826
-  _globals['_PEERINFO']._serialized_start=828
-  _globals['_PEERINFO']._serialized_end=880
-  _globals['_TOPICDESCRIPTOR']._serialized_start=883
-  _globals['_TOPICDESCRIPTOR']._serialized_end=1274
-  _globals['_TOPICDESCRIPTOR_AUTHOPTS']._serialized_start=1016
-  _globals['_TOPICDESCRIPTOR_AUTHOPTS']._serialized_end=1140
-  _globals['_TOPICDESCRIPTOR_AUTHOPTS_AUTHMODE']._serialized_start=1102
-  _globals['_TOPICDESCRIPTOR_AUTHOPTS_AUTHMODE']._serialized_end=1140
-  _globals['_TOPICDESCRIPTOR_ENCOPTS']._serialized_start=1143
-  _globals['_TOPICDESCRIPTOR_ENCOPTS']._serialized_end=1274
-  _globals['_TOPICDESCRIPTOR_ENCOPTS_ENCMODE']._serialized_start=1231
-  _globals['_TOPICDESCRIPTOR_ENCOPTS_ENCMODE']._serialized_end=1274
+  _globals['_RPC']._serialized_end=296
+  _globals['_RPC_SUBOPTS']._serialized_start=251
+  _globals['_RPC_SUBOPTS']._serialized_end=296
+  _globals['_MESSAGE']._serialized_start=298
+  _globals['_MESSAGE']._serialized_end=403
+  _globals['_CONTROLMESSAGE']._serialized_start=406
+  _globals['_CONTROLMESSAGE']._serialized_end=772
+  _globals['_CONTROLEXTENSIONS']._serialized_start=774
+  _globals['_CONTROLEXTENSIONS']._serialized_end=845
+  _globals['_CONTROLIHAVE']._serialized_start=847
+  _globals['_CONTROLIHAVE']._serialized_end=898
+  _globals['_CONTROLIWANT']._serialized_start=900
+  _globals['_CONTROLIWANT']._serialized_end=934
+  _globals['_CONTROLGRAFT']._serialized_start=936
+  _globals['_CONTROLGRAFT']._serialized_end=967
+  _globals['_CONTROLPRUNE']._serialized_start=969
+  _globals['_CONTROLPRUNE']._serialized_end=1053
+  _globals['_CONTROLIDONTWANT']._serialized_start=1055
+  _globals['_CONTROLIDONTWANT']._serialized_end=1093
+  _globals['_CONTROLOBSERVE']._serialized_start=1095
+  _globals['_CONTROLOBSERVE']._serialized_end=1128
+  _globals['_CONTROLUNOBSERVE']._serialized_start=1130
+  _globals['_CONTROLUNOBSERVE']._serialized_end=1165
+  _globals['_TESTEXTENSION']._serialized_start=1167
+  _globals['_TESTEXTENSION']._serialized_end=1182
+  _globals['_PEERINFO']._serialized_start=1184
+  _globals['_PEERINFO']._serialized_end=1236
+  _globals['_TOPICDESCRIPTOR']._serialized_start=1239
+  _globals['_TOPICDESCRIPTOR']._serialized_end=1630
+  _globals['_TOPICDESCRIPTOR_AUTHOPTS']._serialized_start=1372
+  _globals['_TOPICDESCRIPTOR_AUTHOPTS']._serialized_end=1496
+  _globals['_TOPICDESCRIPTOR_AUTHOPTS_AUTHMODE']._serialized_start=1458
+  _globals['_TOPICDESCRIPTOR_AUTHOPTS_AUTHMODE']._serialized_end=1496
+  _globals['_TOPICDESCRIPTOR_ENCOPTS']._serialized_start=1499
+  _globals['_TOPICDESCRIPTOR_ENCOPTS']._serialized_end=1630
+  _globals['_TOPICDESCRIPTOR_ENCOPTS_ENCMODE']._serialized_start=1587
+  _globals['_TOPICDESCRIPTOR_ENCOPTS_ENCMODE']._serialized_end=1630
 # @@protoc_insertion_point(module_scope)
