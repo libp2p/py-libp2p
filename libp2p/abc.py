@@ -3297,6 +3297,9 @@ class IPubsub(ServiceAPI):
         peers map, indicating that a pubsub protocol stream exists.
         Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
 
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
         Parameters
         ----------
         peer_id : ID
@@ -3308,6 +3311,12 @@ class IPubsub(ServiceAPI):
         ------
         trio.TooSlowError
             If the peer stream is not established within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
 
         """
         ...
@@ -3324,6 +3333,9 @@ class IPubsub(ServiceAPI):
         message. Use this instead of arbitrary trio.sleep() calls to avoid
         race conditions.
 
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
         Parameters
         ----------
         peer_id : ID
@@ -3337,6 +3349,12 @@ class IPubsub(ServiceAPI):
         ------
         trio.TooSlowError
             If the peer does not subscribe within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
 
         """
         ...

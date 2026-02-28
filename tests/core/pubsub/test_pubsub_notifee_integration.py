@@ -29,7 +29,7 @@ async def test_disconnected_enqueues_and_removes_peer():
         # Wait for peer to be removed
         with trio.fail_after(1.0):
             while p1.my_id in p0.peers:
-                await trio.sleep(0)
+                await trio.sleep(0.01)
         assert p1.my_id not in p0.peers
 
 

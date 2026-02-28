@@ -124,7 +124,7 @@ async def test_reissue_when_listen_addrs_change():
                     and pubsubs_fsub[0].my_id
                     in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
                 ):
-                    await trio.sleep(0)
+                    await trio.sleep(0.01)
 
         # B should be holding A's new record with bumped seq
         envelope_b_unsub = (
@@ -165,7 +165,7 @@ async def test_peers_subscribe():
                 TESTING_TOPIC in pubsubs_fsub[1].peer_topics
                 and pubsubs_fsub[0].my_id in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
             ):
-                await trio.sleep(0)
+                await trio.sleep(0.01)
         assert pubsubs_fsub[0].my_id not in pubsubs_fsub[1].peer_topics[TESTING_TOPIC]
 
         envelope_b_unsub = (
@@ -845,13 +845,13 @@ async def test_strict_signing():
                 or pubsubs_fsub[1].my_id
                 not in pubsubs_fsub[0].router.mesh[TESTING_TOPIC]
             ):
-                await trio.sleep(0)
+                await trio.sleep(0.01)
 
         await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
         # Wait for message to be seen by both peers
         with trio.fail_after(2.0):
             while pubsubs_fsub[1].seen_messages.length() < 1:
-                await trio.sleep(0)
+                await trio.sleep(0.01)
 
         assert pubsubs_fsub[0].seen_messages.length() == 1
         assert pubsubs_fsub[1].seen_messages.length() == 1

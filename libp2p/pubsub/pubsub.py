@@ -318,6 +318,11 @@ class Pubsub(Service, IPubsub):
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
 
+        # Event-based waiting: maps for trio.Event instances
+        # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
+        self._peer_added_events: dict[ID, trio.Event] = {}
+        self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
+
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
 
@@ -561,14 +566,26 @@ class Pubsub(Service, IPubsub):
         peers map, indicating that a pubsub protocol stream exists.
         Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
 
+        Uses an event-based approach: the task blocks until
+        ``_handle_new_peer`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
         :param peer_id: the peer ID to wait for
         :param timeout: maximum time to wait in seconds (default: 5.0)
         :raises trio.TooSlowError: if the peer stream is not established within
             the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
         """
+        if peer_id in self.peers:
+            return
+        event = self._peer_added_events.setdefault(peer_id, trio.Event())
         with trio.fail_after(timeout):
-            while peer_id not in self.peers:
-                await trio.sleep(0)
+            await event.wait()
 
     async def wait_for_subscription(
         self, peer_id: ID, topic_id: str, timeout: float = 5.0
@@ -581,17 +598,30 @@ class Pubsub(Service, IPubsub):
         message. Use this instead of arbitrary trio.sleep() calls to avoid
         race conditions.
 
+        Uses an event-based approach: the task blocks until
+        ``handle_subscription`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
         :param peer_id: the peer ID to wait for
         :param topic_id: the topic to check subscription for
         :param timeout: maximum time to wait in seconds (default: 5.0)
         :raises trio.TooSlowError: if the peer does not subscribe within the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
         """
+        if (
+            topic_id in self.peer_topics
+            and peer_id in self.peer_topics[topic_id]
+        ):
+            return
+        key = (peer_id, topic_id)
+        event = self._subscription_events.setdefault(key, trio.Event())
         with trio.fail_after(timeout):
-            while (
-                topic_id not in self.peer_topics
-                or peer_id not in self.peer_topics[topic_id]
-            ):
-                await trio.sleep(0)
+            await event.wait()
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
         # Check if we already have a pubsub stream with this peer to avoid duplicates
@@ -623,6 +653,10 @@ class Pubsub(Service, IPubsub):
             return
 
         self.peers[peer_id] = stream
+
+        # Fire event for any task blocked in wait_for_peer()
+        if peer_id in self._peer_added_events:
+            self._peer_added_events.pop(peer_id).set()
 
         logger.debug("added new peer %s", peer_id)
 
@@ -707,6 +741,10 @@ class Pubsub(Service, IPubsub):
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
+            # Fire event for any task blocked in wait_for_subscription()
+            key = (origin_id, sub_message.topicid)
+            if key in self._subscription_events:
+                self._subscription_events.pop(key).set()
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
