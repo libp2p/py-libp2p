@@ -18,6 +18,7 @@ from libp2p.security.tls.certificate import (
     generate_certificate,
     verify_certificate_chain,
 )
+from libp2p.security.tls.exceptions import MissingLibp2pExtensionError
 from libp2p.security.tls.io import TLSReadWriter
 import libp2p.utils
 import libp2p.utils.paths
@@ -449,37 +450,33 @@ class TLSTransport(ISecureTransport):
                 "TLS outbound: peer verified from certificate, connection established"
             )
 
-        except ValueError as e:
-            if "expected certificate to contain the key extension" in str(e):
-                # Autotls certificate without libp2p extension
-                # Skip certificate-based peer verification - rely on identify protocol
-                logger.warning(
-                    "[TLS outbound]: certificate missing libp2p extension "
-                    "(likely autotls cert)."
+        except MissingLibp2pExtensionError:
+            # Autotls certificate without libp2p extension
+            # Skip certificate-based peer verification - rely on identify protocol
+            logger.warning(
+                "[TLS outbound]: certificate missing libp2p extension "
+                "(likely autotls cert)."
+            )
+
+            logger.warning("Skipping certificate-based peer verification. ")
+
+            # Extract remote identify from primitive exchange
+            # and verify it against expected peer-id
+            prim_remote_public_key = tls_reader_writer.remote_primitive_pk
+            prim_remote_peer_id = tls_reader_writer.remote_primitive_peerid
+
+            if prim_remote_peer_id != peer_id:
+                logger.error(
+                    "Primitive and expected peer-id mismatch.Dropping the connection"
                 )
-
-                logger.warning("Skipping certificate-based peer verification. ")
-
-                # Extract remote identify from primitive exchange
-                # and verify it against expected peer-id
-                prim_remote_public_key = tls_reader_writer.remote_primitive_pk
-                prim_remote_peer_id = tls_reader_writer.remote_primitive_peerid
-
-                if prim_remote_peer_id != peer_id:
-                    logger.error(
-                        "Primitive and expected peer-id mismatch."
-                        "Dropping the connection"
-                    )
-                    raise
-
-                remote_peer_id = prim_remote_peer_id
-                remote_public_key = prim_remote_public_key
-
-                logger.warning(
-                    "[TLS outbound]: using public key, from primitive exchange. "
-                )
-            else:
                 raise
+
+            remote_peer_id = prim_remote_peer_id
+            remote_public_key = prim_remote_public_key
+
+            logger.warning(
+                "[TLS outbound]: using public key, from primitive exchange. "
+            )
 
         if remote_public_key is None:
             raise ValueError(

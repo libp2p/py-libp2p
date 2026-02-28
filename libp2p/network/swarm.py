@@ -76,6 +76,7 @@ from .connection.raw_connection import (
 
 # SwarmConn is imported conditionally above
 from .exceptions import (
+    SwarmDialAllFailedError,
     SwarmException,
 )
 
@@ -532,9 +533,11 @@ class Swarm(Service, INetworkService):
 
         if not connections:
             # Tried all addresses, raising exception.
-            raise SwarmException(
+            raise SwarmDialAllFailedError(
                 f"unable to connect to {peer_id}, no addresses established a "
-                "successful connection (with exceptions)"
+                "successful connection (with exceptions)",
+                peer_id=peer_id,
+                num_addrs_tried=len(exceptions),
             ) from MultiError(exceptions)
 
         return connections

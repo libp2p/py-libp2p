@@ -7,7 +7,7 @@ import trio
 from libp2p.abc import ID, INetworkService, PeerInfo
 from libp2p.discovery.bootstrap.utils import validate_bootstrap_addresses
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
-from libp2p.network.exceptions import SwarmException
+from libp2p.network.exceptions import SwarmDialAllFailedError, SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
 
@@ -243,38 +243,39 @@ class BootstrapDiscovery:
             logger.warning(
                 f"❌ Connection to {peer_id} timed out after {self.connection_timeout}s"
             )
+        except SwarmDialAllFailedError as e:
+            # Catch the typed exception for all-addresses-failed case.
+            failed_connection_time = trio.current_time() - connection_start_time
+
+            logger.warning(
+                f"❌ Failed to connect to {peer_id} after trying all "
+                f"{len(available_addrs)} addresses "
+                f"(took {failed_connection_time:.2f}s)"
+            )
+            # Log individual address failures if this is a MultiError
+            if (
+                e.__cause__ is not None
+                and hasattr(e.__cause__, "exceptions")
+                and getattr(e.__cause__, "exceptions", None) is not None
+            ):
+                exceptions_list = getattr(e.__cause__, "exceptions")
+                logger.debug("📋 Individual address failure details:")
+                for i, addr_exception in enumerate(exceptions_list, 1):
+                    logger.debug(f"Address {i}: {addr_exception}")
+                    # Also log the actual address that failed
+                    if i <= len(available_addrs):
+                        logger.debug(f"Failed address: {available_addrs[i - 1]}")
+            else:
+                logger.warning("No detailed exception information available")
+
         except SwarmException as e:
             # Calculate failed connection time
             failed_connection_time = trio.current_time() - connection_start_time
 
-            # Enhanced error logging
-            error_msg = str(e)
-            if "no addresses established a successful connection" in error_msg:
-                logger.warning(
-                    f"❌ Failed to connect to {peer_id} after trying all "
-                    f"{len(available_addrs)} addresses "
-                    f"(took {failed_connection_time:.2f}s)"
-                )
-                # Log individual address failures if this is a MultiError
-                if (
-                    e.__cause__ is not None
-                    and hasattr(e.__cause__, "exceptions")
-                    and getattr(e.__cause__, "exceptions", None) is not None
-                ):
-                    exceptions_list = getattr(e.__cause__, "exceptions")
-                    logger.debug("📋 Individual address failure details:")
-                    for i, addr_exception in enumerate(exceptions_list, 1):
-                        logger.debug(f"Address {i}: {addr_exception}")
-                        # Also log the actual address that failed
-                        if i <= len(available_addrs):
-                            logger.debug(f"Failed address: {available_addrs[i - 1]}")
-                else:
-                    logger.warning("No detailed exception information available")
-            else:
-                logger.warning(
-                    f"❌ Failed to connect to {peer_id}: {e} "
-                    f"(took {failed_connection_time:.2f}s)"
-                )
+            logger.warning(
+                f"❌ Failed to connect to {peer_id}: {e} "
+                f"(took {failed_connection_time:.2f}s)"
+            )
 
         except Exception as e:
             # Handle unexpected errors that aren't swarm-specific
