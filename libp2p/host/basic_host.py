@@ -530,37 +530,110 @@ class BasicHost(IHost):
         await acme.initiate_order()
         await acme.get_dns01_challenge()
 
-        # Extract public IP from host's listening addresses
-        # According to spec, only publicly reachable IP addresses
-        # should be sent to broker.
-        # Use get_transport_addrs() to get addresses without /p2p/{peer_id} suffix
-
-        # For some reason this way of extracting pub-addr is working on Luca's end
-        # but not on mine
-
+        # Select one concrete transport address and derive both IP + transport
+        # tuple from that exact address to avoid mixed tuples.
         all_addrs = self.get_transport_addrs()
+
+        def extract_transport_part(addr: multiaddr.Multiaddr, ip: str) -> str | None:
+            addr_str = str(addr)
+            ip_prefix = f"/ip4/{ip}"
+            if not addr_str.startswith(ip_prefix):
+                return None
+
+            transport_part = addr_str[len(ip_prefix) :]
+            if not transport_part:
+                return None
+
+            if transport_part.startswith("/tcp/"):
+                return transport_part
+
+            if transport_part.startswith("/udp/"):
+                return transport_part
+
+            return None
+
+        selected_ip: str | None = None
+        transport_part: str | None = None
+
         if public_ip is None:
             for addr in all_addrs:
                 try:
                     ip = addr.value_for_protocol("ip4")
-                    if ip and not is_private_ip(ip):
-                        public_ip = ip
-                        port = addr.value_for_protocol("tcp")
-                        if port:
-                            break
                 except Exception:
                     continue
 
-            if not public_ip or not port:
+                if not isinstance(ip, str) or not ip or is_private_ip(ip):
+                    continue
+
+                parsed_transport = extract_transport_part(addr, ip)
+                if parsed_transport is None:
+                    continue
+
+                selected_ip = ip
+                transport_part = parsed_transport
+                break
+
+            if not selected_ip or not transport_part:
                 raise RuntimeError(
                     "No public IP address found in listening addresses. "
                     "AutoTLS requires at least one publicly reachable IPv4 address."
                 )
-        port = self.get_addrs()[0].value_for_protocol("tcp")
+
+            public_ip = selected_ip
+        else:
+            for addr in all_addrs:
+                try:
+                    ip = addr.value_for_protocol("ip4")
+                except Exception:
+                    continue
+
+                if not isinstance(ip, str) or ip != public_ip:
+                    continue
+
+                parsed_transport = extract_transport_part(addr, ip)
+                if parsed_transport is None:
+                    continue
+
+                selected_ip = ip
+                transport_part = parsed_transport
+                break
+
+            if not selected_ip or not transport_part:
+                for addr in all_addrs:
+                    try:
+                        ip = addr.value_for_protocol("ip4")
+                    except Exception:
+                        continue
+
+                    if not isinstance(ip, str) or not ip:
+                        continue
+
+                    parsed_transport = extract_transport_part(addr, ip)
+                    if parsed_transport is None:
+                        continue
+
+                    selected_ip = ip
+                    transport_part = parsed_transport
+                    logger.warning(
+                        "Provided public_ip %s did not match listen addresses; "
+                        "using transport tuple from %s (ip4=%s).",
+                        public_ip,
+                        addr,
+                        ip,
+                    )
+                    break
+
+            if not selected_ip or not transport_part:
+                raise RuntimeError(
+                    f"Provided public_ip {public_ip} did not match any supported "
+                    "listen address."
+                )
 
         broker = BrokerClient(
             self.get_private_key(),
-            multiaddr.Multiaddr(f"/ip4/{public_ip}/tcp/{port}/p2p/{self.get_id()}"),
+            multiaddr.Multiaddr(
+                f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"
+            ),
             acme.key_auth,
             acme.b36_peerid,
         )
