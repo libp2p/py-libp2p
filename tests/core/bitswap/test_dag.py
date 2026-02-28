@@ -8,7 +8,13 @@ import pytest
 
 from libp2p.bitswap.block_store import MemoryBlockStore
 from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE
-from libp2p.bitswap.cid import CODEC_DAG_PB, CODEC_RAW, compute_cid_v1, verify_cid
+from libp2p.bitswap.cid import (
+    CODEC_DAG_PB,
+    CODEC_RAW,
+    cid_to_text,
+    compute_cid_v1,
+    verify_cid,
+)
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.bitswap.dag_pb import create_file_node, decode_dag_pb, is_file_node
@@ -248,11 +254,18 @@ class TestFetchFile:
     """Test fetch_file method."""
 
     @pytest.mark.trio
-    async def test_fetch_small_file(self):
-        """Test fetching small single-block file."""
+    @pytest.mark.parametrize("cid_input_kind", ["bytes", "canonical", "hex"])
+    async def test_fetch_small_file(self, cid_input_kind: str):
+        """Test fetching small single-block file with mixed CID input forms."""
         # Original data
         data = b"test data"
         cid = compute_cid_v1(data, codec=CODEC_RAW)
+        if cid_input_kind == "bytes":
+            cid_input = cid
+        elif cid_input_kind == "canonical":
+            cid_input = cid_to_text(cid)
+        else:
+            cid_input = cid.hex()
 
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
@@ -262,7 +275,7 @@ class TestFetchFile:
         dag = MerkleDag(mock_client)
 
         # Fetch
-        fetched_data, filename = await dag.fetch_file(cid, timeout=30.0)
+        fetched_data, filename = await dag.fetch_file(cid_input, timeout=30.0)
 
         # Verify
         assert fetched_data == data
@@ -367,10 +380,17 @@ class TestGetFileInfo:
     """Test get_file_info method."""
 
     @pytest.mark.trio
-    async def test_get_info_single_block(self):
-        """Test getting info for single block."""
+    @pytest.mark.parametrize("cid_input_kind", ["bytes", "canonical", "hex"])
+    async def test_get_info_single_block(self, cid_input_kind: str):
+        """Test getting info for single block with mixed CID input forms."""
         data = b"test"
         cid = compute_cid_v1(data, codec=CODEC_RAW)
+        if cid_input_kind == "bytes":
+            cid_input = cid
+        elif cid_input_kind == "canonical":
+            cid_input = cid_to_text(cid)
+        else:
+            cid_input = cid.hex()
 
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
@@ -378,11 +398,12 @@ class TestGetFileInfo:
 
         dag = MerkleDag(mock_client)
 
-        info = await dag.get_file_info(cid)
+        info = await dag.get_file_info(cid_input)
 
         assert info["size"] == len(data)
         assert info["chunks"] == 1
         assert info["chunk_sizes"] == [len(data)]
+        mock_client.get_block.assert_called_once_with(cid, None, 30.0)
 
     @pytest.mark.trio
     async def test_get_info_chunked_file(self):

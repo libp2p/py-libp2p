@@ -3,11 +3,14 @@ Message construction helpers for Bitswap protocol.
 Supports v1.0.0, v1.1.0, and v1.2.0 message formats.
 """
 
+from collections.abc import Sequence
+
+from .cid import CIDInput, cid_to_bytes
 from .pb.bitswap_pb2 import Message
 
 
 def create_wantlist_entry(
-    block_cid: bytes,
+    block_cid: CIDInput,
     priority: int = 1,
     cancel: bool = False,
     want_type: int = 0,  # 0 = Block, 1 = Have (v1.2.0)
@@ -30,7 +33,7 @@ def create_wantlist_entry(
 
     """
     entry = Message.Wantlist.Entry()
-    entry.block = block_cid
+    entry.block = cid_to_bytes(block_cid)
     entry.priority = priority
     entry.cancel = cancel
     # Type checkers don't like int assignment to enum, but protobuf accepts it
@@ -96,7 +99,9 @@ def create_block_message_v110(blocks: list[tuple[bytes, bytes]]) -> Message:
     return msg
 
 
-def create_block_presence_message(presences: list[tuple[bytes, bool]]) -> Message:
+def create_block_presence_message(
+    presences: Sequence[tuple[CIDInput, bool]],
+) -> Message:
     """
     Create a message with block presence information (v1.2.0).
 
@@ -111,7 +116,7 @@ def create_block_presence_message(presences: list[tuple[bytes, bool]]) -> Messag
     msg = Message()
     for cid, has_block in presences:
         presence = msg.blockPresences.add()
-        presence.cid = cid
+        presence.cid = cid_to_bytes(cid)
         presence.type = Message.Have if has_block else Message.DontHave
     return msg
 
@@ -120,7 +125,7 @@ def create_message(
     wantlist_entries: list[Message.Wantlist.Entry] | None = None,
     blocks_v100: list[bytes] | None = None,
     blocks_v110: list[tuple[bytes, bytes]] | None = None,
-    block_presences: list[tuple[bytes, bool]] | None = None,
+    block_presences: Sequence[tuple[CIDInput, bool]] | None = None,
     pending_bytes: int = 0,
     full_wantlist: bool = False,
 ) -> Message:
@@ -157,7 +162,7 @@ def create_message(
     if block_presences:
         for cid, has_block in block_presences:
             presence = msg.blockPresences.add()
-            presence.cid = cid
+            presence.cid = cid_to_bytes(cid)
             presence.type = Message.Have if has_block else Message.DontHave
 
     if pending_bytes > 0:

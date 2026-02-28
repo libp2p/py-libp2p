@@ -2,7 +2,7 @@
 
 import pytest
 
-from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
+from libp2p.bitswap.cid import CODEC_RAW, cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.dag_pb import (
     Link,
     UnixFSData,
@@ -36,6 +36,18 @@ class TestLink:
         assert link.cid == cid
         assert link.name == ""
         assert link.size == 0
+
+    def test_link_accepts_text_hex_and_object_cid_inputs(self):
+        """Test Link normalizes CID text/hex/object to bytes."""
+        cid_bytes = compute_cid_v1(b"link-cid-normalization", codec=CODEC_RAW)
+
+        link_from_text = Link(cid=cid_to_text(cid_bytes))
+        link_from_hex = Link(cid=cid_bytes.hex())
+        link_from_obj = Link(cid=parse_cid(cid_bytes))
+
+        assert link_from_text.cid == cid_bytes
+        assert link_from_hex.cid == cid_bytes
+        assert link_from_obj.cid == cid_bytes
 
 
 class TestUnixFSData:
@@ -190,6 +202,22 @@ class TestFileNode:
         assert unixfs_data.filesize == total_size
         assert sum(unixfs_data.blocksizes) == total_size
 
+    def test_create_file_node_accepts_mixed_cid_inputs(self):
+        """Test create_file_node accepts canonical and hex CID strings."""
+        chunk1 = b"chunk-a" * 100
+        chunk2 = b"chunk-b" * 100
+        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
+        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
+
+        node_data = create_file_node(
+            [(cid_to_text(cid1), len(chunk1)), (cid2.hex(), len(chunk2))]
+        )
+        links, _ = decode_dag_pb(node_data)
+
+        assert len(links) == 2
+        assert links[0].cid == cid1
+        assert links[1].cid == cid2
+
     def test_is_file_node(self):
         """Test file node detection."""
         chunk = b"test"
@@ -252,6 +280,25 @@ class TestDirectoryNode:
         assert links[1].cid == cid2
         assert unixfs_data is not None
         assert unixfs_data.type == "directory"
+
+    def test_create_directory_node_accepts_mixed_cid_inputs(self):
+        """Test create_directory_node accepts canonical and hex CID strings."""
+        data1 = b"dir-entry-1"
+        data2 = b"dir-entry-2"
+        cid1 = compute_cid_v1(data1, codec=CODEC_RAW)
+        cid2 = compute_cid_v1(data2, codec=CODEC_RAW)
+
+        node_data = create_directory_node(
+            [
+                ("a.txt", cid_to_text(cid1), len(data1)),
+                ("b.txt", cid2.hex(), len(data2)),
+            ]
+        )
+        links, _ = decode_dag_pb(node_data)
+
+        assert len(links) == 2
+        assert links[0].cid == cid1
+        assert links[1].cid == cid2
 
     def test_is_directory_node(self):
         """Test directory node detection."""
