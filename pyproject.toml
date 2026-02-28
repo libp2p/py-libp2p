@@ -20,6 +20,7 @@ maintainers = [
 dependencies = [
     "aioquic>=1.2.0",
     "base58>=1.0.3",
+    "cbor2>=5.4.0",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
     "fastecdsa==2.3.2; sys_platform != 'win32'",
