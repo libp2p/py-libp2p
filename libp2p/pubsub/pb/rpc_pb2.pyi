@@ -106,6 +106,7 @@ class ControlMessage(google.protobuf.message.Message):
     GRAFT_FIELD_NUMBER: builtins.int
     PRUNE_FIELD_NUMBER: builtins.int
     IDONTWANT_FIELD_NUMBER: builtins.int
+    EXTENSIONS_FIELD_NUMBER: builtins.int
     @property
     def ihave(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlIHave]: ...
     @property
@@ -116,6 +117,8 @@ class ControlMessage(google.protobuf.message.Message):
     def prune(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlPrune]: ...
     @property
     def idontwant(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlIDontWant]: ...
+    @property
+    def extensions(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___ControlExtension]: ...
     def __init__(
         self,
         *,
@@ -124,10 +127,30 @@ class ControlMessage(google.protobuf.message.Message):
         graft: collections.abc.Iterable[global___ControlGraft] | None = ...,
         prune: collections.abc.Iterable[global___ControlPrune] | None = ...,
         idontwant: collections.abc.Iterable[global___ControlIDontWant] | None = ...,
+        extensions: collections.abc.Iterable[global___ControlExtension] | None = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["graft", b"graft", "idontwant", b"idontwant", "ihave", b"ihave", "iwant", b"iwant", "prune", b"prune"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["extensions", b"extensions", "graft", b"graft", "idontwant", b"idontwant", "ihave", b"ihave", "iwant", b"iwant", "prune", b"prune"]) -> None: ...
 
 global___ControlMessage = ControlMessage
+
+@typing.final
+class ControlExtension(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    NAME_FIELD_NUMBER: builtins.int
+    DATA_FIELD_NUMBER: builtins.int
+    name: builtins.str
+    data: builtins.bytes
+    def __init__(
+        self,
+        *,
+        name: builtins.str | None = ...,
+        data: builtins.bytes | None = ...,
+    ) -> None: ...
+    def HasField(self, field_name: typing.Literal["data", b"data", "name", b"name"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing.Literal["data", b"data", "name", b"name"]) -> None: ...
+
+global___ControlExtension = ControlExtension
 
 @typing.final
 class ControlIHave(google.protobuf.message.Message):
