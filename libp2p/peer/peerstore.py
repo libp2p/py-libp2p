@@ -5,9 +5,6 @@ from collections.abc import (
     AsyncIterable,
     Sequence,
 )
-from typing import (
-    Any,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -23,6 +20,9 @@ from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
     PublicKey,
+)
+from libp2p.custom_types import (
+    MetadataValue,
 )
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.peer_record import PeerRecord
@@ -275,7 +275,7 @@ class PeerStore(IPeerStore):
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -290,7 +290,7 @@ class PeerStore(IPeerStore):
             return val
         raise PeerStoreError("peer ID not found")
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
