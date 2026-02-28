@@ -180,6 +180,7 @@ class GossipSub(IPubsubRouter, Service):
         # Create heartbeat timer
         self.heartbeat_initial_delay = heartbeat_initial_delay
         self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_interval_base = heartbeat_interval  # For adaptive adjustment
 
         # Create direct peers
         self.direct_peers = dict()
@@ -261,6 +262,8 @@ class GossipSub(IPubsubRouter, Service):
         return self.peer_protocol.get(peer_id) in (
             PROTOCOL_ID_V11,
             PROTOCOL_ID_V12,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V14,
             PROTOCOL_ID_V20,
         )
 
@@ -501,8 +504,9 @@ class GossipSub(IPubsubRouter, Service):
         if self.scorer is not None and self.pubsub is not None:
             self._track_peer_ip(peer_id)
 
-        # Track connection for adaptive gossip metrics
-        self.recent_peer_connections.append(time.time())
+        # Track connection for adaptive gossip metrics (only when enabled)
+        if self.adaptive_gossip_enabled:
+            self.recent_peer_connections.append(time.time())
 
     def remove_peer(self, peer_id: ID) -> None:
         """
@@ -529,8 +533,9 @@ class GossipSub(IPubsubRouter, Service):
         # Clean up security state
         self._cleanup_security_state(peer_id)
 
-        # Track disconnection for adaptive gossip metrics
-        self.recent_peer_disconnections.append(time.time())
+        # Track disconnection for adaptive gossip metrics (only when enabled)
+        if self.adaptive_gossip_enabled:
+            self.recent_peer_disconnections.append(time.time())
 
     async def handle_rpc(self, rpc: rpc_pb2.RPC, sender_peer_id: ID) -> None:
         """
@@ -900,8 +905,8 @@ class GossipSub(IPubsubRouter, Service):
             self._periodic_security_cleanup()
 
             # Perform ongoing mesh quality maintenance (v2.0 feature)
-            for topic in self.mesh:
-                self._maintain_mesh_quality(topic)
+            for topic in list(self.mesh):
+                await self._maintain_mesh_quality(topic)
 
             # Prune old IDONTWANT entries to prevent memory leaks
             self._prune_idontwant_entries()
@@ -1695,8 +1700,7 @@ class GossipSub(IPubsubRouter, Service):
         # Check if peer supports extensions
         if not self.supports_protocol_feature(sender_peer_id, "extensions"):
             logger.warning(
-                "Received extension message from peer %s ",
-                "that doesn't support extensions (%s)",
+                "Received extension from peer %s that doesn't support extensions",
                 sender_peer_id,
             )
             return
@@ -2093,16 +2097,21 @@ class GossipSub(IPubsubRouter, Service):
         """
         Adapt heartbeat-related parameters based on network health.
 
+        Poor health: more frequent heartbeats for faster convergence.
+        Good health: standard interval to save bandwidth.
+
         :param health: Current network health score (0.0 to 1.0)
         """
-        # Note: In a full implementation, you might want to adjust heartbeat intervals
-        # For now, we'll just track that this could be done
-
-        # Poor health might benefit from more frequent heartbeats
-        # Good health might allow for less frequent heartbeats to save bandwidth
-
-        # This is a placeholder for potential future enhancements
-        pass
+        base = getattr(self, "heartbeat_interval_base", self.heartbeat_interval)
+        if health < 0.4:
+            # Critical: heartbeat every 30-60s for faster recovery
+            self.heartbeat_interval = max(30, min(60, base // 2))
+        elif health < 0.7:
+            # Moderate: slightly more frequent than baseline
+            self.heartbeat_interval = max(60, int(base * 0.75))
+        else:
+            # Good health: use baseline interval
+            self.heartbeat_interval = base
 
     def _check_spam_protection(self, peer_id: ID, msg: rpc_pb2.Message) -> bool:
         """
@@ -2361,23 +2370,20 @@ class GossipSub(IPubsubRouter, Service):
         """
         Calculate the score threshold for opportunistic grafting candidates.
 
+        Uses opportunistic_graft_threshold (adapted by
+        _adapt_opportunistic_grafting_parameters based on network health) to control
+        aggressiveness: lower = more aggressive, higher = more selective.
+
         :param median_score: Median score of current mesh peers
         :param avg_score: Average score of current mesh peers
         :param min_score: Minimum score of current mesh peers
         :param topic: The topic being considered
         :return: Score threshold for candidates
         """
-        # Base threshold is median score
-        threshold = median_score
-
-        # Adjust based on network health
-        if hasattr(self, "network_health_score"):
-            if self.network_health_score < 0.5:
-                # Poor network health: be more aggressive, lower threshold
-                threshold = min(median_score, avg_score * 0.8)
-            elif self.network_health_score > 0.8:
-                # Good network health: be more selective, higher threshold
-                threshold = max(median_score, avg_score * 1.2)
+        # Base threshold from median, scaled by opportunistic_graft_threshold
+        # Lower threshold (aggressive) = more peers qualify; higher (selective) = fewer
+        graft_threshold = getattr(self, "opportunistic_graft_threshold", 0.5)
+        threshold = median_score * graft_threshold
 
         # Ensure threshold is reasonable
         threshold = max(
@@ -2627,7 +2633,7 @@ class GossipSub(IPubsubRouter, Service):
 
         return selected
 
-    def _maintain_mesh_quality(self, topic: str) -> None:
+    async def _maintain_mesh_quality(self, topic: str) -> None:
         """
         Perform ongoing mesh quality maintenance beyond basic degree bounds.
 
@@ -2641,14 +2647,17 @@ class GossipSub(IPubsubRouter, Service):
             return
 
         # Check if we should replace low-scoring peers with better alternatives
-        self._consider_peer_replacement(topic)
+        await self._consider_peer_replacement(topic)
 
         # Ensure we maintain good connectivity patterns
         self._optimize_mesh_connectivity(topic)
 
-    def _consider_peer_replacement(self, topic: str) -> None:
+    async def _consider_peer_replacement(self, topic: str) -> None:
         """
-        Consider replacing the worst mesh peer with a better alternative.
+        Replace the worst mesh peer with a better alternative when beneficial.
+
+        Performs mesh mutation, sends PRUNE to the removed peer and GRAFT to the
+        new peer.
 
         :param topic: The topic to consider
         """
@@ -2689,36 +2698,76 @@ class GossipSub(IPubsubRouter, Service):
                 best_replacement = peer
                 best_score = peer_score
 
-        # Perform replacement if beneficial
-        if best_replacement is not None:
-            logger.debug(
-                "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) "
-                "in topic %s",
-                worst_peer,
-                worst_score,
-                best_replacement,
-                best_score,
-                topic,
-            )
+        if best_replacement is None:
+            return
 
-            # Note: In a full implementation, we'd send PRUNE to worst_peer
-            # and GRAFT to best_replacement. For now, we just log the decision
+        # Perform replacement: mutate mesh and emit PRUNE/GRAFT
+        self.mesh[topic].discard(worst_peer)
+        self.mesh[topic].add(best_replacement)
+
+        if self.scorer is not None:
+            self.scorer.on_leave_mesh(worst_peer, topic)
+            self.scorer.on_join_mesh(best_replacement, topic)
+
+        # Add back_off so we don't immediately re-graft the pruned peer
+        self._add_back_off(worst_peer, topic, False)
+
+        # Track PRUNE time for GRAFT flood protection
+        self.graft_flood_tracking[worst_peer][topic] = time.time()
+
+        logger.debug(
+            "Replacing mesh peer %s (score: %.2f) with %s (score: %.2f) in topic %s",
+            worst_peer,
+            worst_score,
+            best_replacement,
+            best_score,
+            topic,
+        )
+
+        try:
+            await self.emit_prune(topic, worst_peer, self.do_px, False)
+            await self.emit_graft(topic, best_replacement)
+        except Exception as e:
+            logger.warning("Failed to emit PRUNE/GRAFT during peer replacement: %s", e)
+            # Revert mesh and scorer on failure
+            self.mesh[topic].add(worst_peer)
+            self.mesh[topic].discard(best_replacement)
+            if self.scorer is not None:
+                self.scorer.on_join_mesh(worst_peer, topic)
+                self.scorer.on_leave_mesh(best_replacement, topic)
+            # Clear back_off we added (peer stays in back_off until expiry)
+            if topic in self.back_off and worst_peer in self.back_off[topic]:
+                del self.back_off[topic][worst_peer]
 
     def _optimize_mesh_connectivity(self, topic: str) -> None:
         """
         Optimize mesh connectivity patterns for better resilience.
 
+        Validates mesh invariants and applies lightweight optimizations.
+        IP diversity is handled by _ensure_mesh_diversity and _prune_for_ip_diversity.
+        Geographic/latency optimization would require additional metrics.
+
         :param topic: The topic to optimize
         """
-        # This could include:
-        # - Ensuring geographic diversity
-        # - Balancing inbound/outbound connections
-        # - Optimizing for network latency
-        # For now, we focus on IP diversity which is handled elsewhere
-        pass
+        if topic not in self.mesh or self.pubsub is None:
+            return
 
-        # Clean up equivocation detection (keep recent entries for a while)
-        # This is done periodically in heartbeat to avoid memory leaks
+        mesh_peers = self.mesh[topic]
+        effective_high = (
+            self.adaptive_degree_high
+            if self.adaptive_gossip_enabled
+            else self.degree_high
+        )
+
+        # Sanity check: mesh should not exceed degree_high (handled in mesh_heartbeat,
+        # but we verify here as a safeguard). No action needed if within bounds.
+        if len(mesh_peers) > effective_high + 2:
+            logger.debug(
+                "Mesh for topic %s exceeds expected bounds (%d > %d)",
+                topic,
+                len(mesh_peers),
+                effective_high,
+            )
 
     def _periodic_security_cleanup(self) -> None:
         """

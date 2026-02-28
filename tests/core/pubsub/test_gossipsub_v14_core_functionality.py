@@ -95,6 +95,34 @@ async def test_v13_protocol_feature_detection():
 
 
 @pytest.mark.trio
+async def test_supports_scoring_includes_v13_v14():
+    """Regression: supports_scoring() must include v1.3/v1.4 peers for scoring gates."""
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2, protocols=[PROTOCOL_ID_V13]
+    ) as pubsubs_gsub:
+        router = pubsubs_gsub[0].router
+        assert isinstance(router, GossipSub)
+
+        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
+        await trio.sleep(0.5)
+
+        peer_id = pubsubs_gsub[1].host.get_id()
+        assert router.supports_scoring(peer_id), "v1.3 peers must support scoring"
+
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2, protocols=[PROTOCOL_ID_V14]
+    ) as pubsubs_gsub:
+        router = pubsubs_gsub[0].router
+        assert isinstance(router, GossipSub)
+
+        await connect(pubsubs_gsub[0].host, pubsubs_gsub[1].host)
+        await trio.sleep(0.5)
+
+        peer_id = pubsubs_gsub[1].host.get_id()
+        assert router.supports_scoring(peer_id), "v1.4 peers must support scoring"
+
+
+@pytest.mark.trio
 async def test_message_propagation_with_v14_features():
     """Test message propagation with v1.4 features enabled."""
     # Create score parameters for v1.4
