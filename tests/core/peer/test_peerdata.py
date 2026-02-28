@@ -151,24 +151,18 @@ def test_put_metadata_rejects_invalid_types():
 
     with pytest.raises(TypeError) as exc_info:
         peer_data.put_metadata("dict_key", {"nested": "dict"})  # type: ignore[arg-type]
-    assert "MetadataValue must be str, int, float, bool, or None" in str(
-        exc_info.value
-    )
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
 
     with pytest.raises(TypeError) as exc_info:
         peer_data.put_metadata("list_key", [1, 2, 3])  # type: ignore[arg-type]
-    assert "MetadataValue must be str, int, float, bool, or None" in str(
-        exc_info.value
-    )
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
 
     class CustomObj:
         pass
 
     with pytest.raises(TypeError) as exc_info:
         peer_data.put_metadata("obj_key", CustomObj())  # type: ignore[arg-type]
-    assert "MetadataValue must be str, int, float, bool, or None" in str(
-        exc_info.value
-    )
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
 
 
 # Test case for key not found in metadata
