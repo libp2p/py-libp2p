@@ -10,7 +10,6 @@ from collections import defaultdict
 from collections.abc import AsyncIterable, Sequence
 import logging
 import time
-from typing import Any
 
 from multiaddr import Multiaddr
 import trio
@@ -18,6 +17,7 @@ from trio import MemoryReceiveChannel, MemorySendChannel
 
 from libp2p.abc_async import IAsyncPeerStore
 from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData, PeerDataError
@@ -555,7 +555,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
 
     # ------METADATA---------
 
-    async def get_async(self, peer_id: ID, key: str) -> Any:
+    async def get_async(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -568,7 +568,7 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         except PeerDataError as error:
             raise PeerStoreError() from error
 
-    async def put_async(self, peer_id: ID, key: str, val: Any) -> None:
+    async def put_async(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
