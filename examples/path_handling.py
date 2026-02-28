@@ -1,21 +1,22 @@
 """
 Robust Example: Cross-platform path handling with libp2p.utils.paths
 
-This script demonstrates production-ready best practices for file and directory operations using
-py-libp2p path utilities. These utilities ensure your code works on Windows, macOS, and Linux.
+This script demonstrates production-ready best practices for file and directory
+operations using py-libp2p path utilities. These utilities ensure your code works on
+Windows, macOS, and Linux.
 """
 
 import logging
-from typing import Optional
+from pathlib import Path
+
 from libp2p.utils.paths import (
-    join_paths,
-    get_temp_dir,
-    get_script_dir,
     create_temp_file,
     ensure_dir_exists,
+    get_script_dir,
+    get_temp_dir,
+    join_paths,
     resolve_relative_path,
 )
-from pathlib import Path
 
 
 def setup_logging(level: int = logging.INFO) -> None:
@@ -61,7 +62,7 @@ def main() -> None:
         return
 
     # Create a temporary file and demonstrate file I/O
-    temp_file: Optional[Path] = None
+    temp_file: Path | None = None
     try:
         temp_file = create_temp_file(prefix="demo_")
         logging.info(f"Created temp file: {temp_file}")
@@ -86,6 +87,7 @@ def main() -> None:
             logging.info(f"Cleaned up temp file: {temp_file}")
         except Exception as e:
             logging.warning(f"Could not remove temp file: {e}")
+
 
 if __name__ == "__main__":
     main()
