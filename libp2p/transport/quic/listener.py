@@ -1215,8 +1215,10 @@ class QUICListener(IListener):
             self._socket = await self._create_socket(host, port)
             self._nursery = active_nursery
 
-            # Get the actual bound address
-            bound_host, bound_port = self._socket.getsockname()
+            # Get the actual bound address (IPv4: 2-tuple, IPv6: 4-tuple)
+            sockname = self._socket.getsockname()
+            bound_host = sockname[0]
+            bound_port = sockname[1]
             quic_version = multiaddr_to_quic_version(maddr)
             bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
             self._bound_addresses = [bound_maddr]

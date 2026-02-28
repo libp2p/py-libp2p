@@ -70,8 +70,13 @@ logger = logging.getLogger(__name__)
 
 class QUICTransport(ITransport):
     """
-    QUIC Stream implementation following libp2p IMuxedStream interface.
+    QUIC transport. Produces connections that are already secure (TLS) and
+    muxed (native streams), so the upgrader skips security and muxer layers.
     """
+
+    # Capability flags: this transport produces secure+muxed connections
+    provides_secure: bool = True
+    provides_muxed: bool = True
 
     def __init__(
         self,
