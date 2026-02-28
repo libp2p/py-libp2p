@@ -2962,6 +2962,14 @@ class ITransport(ABC):
 
     Provides methods for dialing peers and creating listeners on a transport.
 
+    Optional capability attributes (see libp2p.capabilities):
+    - provides_secure: bool — if True, dial() returns connections that are
+      already secure; the upgrader should not add a security layer.
+    - provides_muxed: bool — if True, dial() returns connections that are
+      already multiplexed (implement IMuxedConn); the upgrader should not
+      add a muxer layer.
+    Default is False when absent. Transports like TCP do not set these;
+    transports like QUIC set both to True.
     """
 
     @abstractmethod

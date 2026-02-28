@@ -46,6 +46,11 @@ class TestQUICTransport:
         assert not transport._closed
         assert len(transport._quic_configs) >= 1
 
+    def test_quic_transport_capability_flags(self, transport: QUICTransport):
+        """QUIC sets provides_secure and provides_muxed for capability dispatch."""
+        assert getattr(transport, "provides_secure", False) is True
+        assert getattr(transport, "provides_muxed", False) is True
+
     def test_quic_transport_forwards_enable_autotls_to_security_factory(
         self, private_key
     ):

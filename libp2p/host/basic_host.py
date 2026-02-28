@@ -32,6 +32,7 @@ from libp2p.abc import (
     IPeerStore,
     IRawConnection,
 )
+from libp2p.capabilities import connection_provides_muxed
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -92,7 +93,6 @@ from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.async_service import (
     background_trio_service,
 )
-from libp2p.transport.quic.connection import QUICConnection
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -749,7 +749,7 @@ class BasicHost(IHost):
                 # Get registry stats if QUIC connection
                 # Try to get stats from server listener (for server-side connections)
                 # or from client transport's listeners (if available)
-                if connection_type == "QUICConnection" and hasattr(
+                if connection_provides_muxed(muxed_conn) and hasattr(
                     muxed_conn, "_transport"
                 ):
                     transport = getattr(muxed_conn, "_transport", None)
@@ -1050,7 +1050,8 @@ class BasicHost(IHost):
         return None
 
     def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
+        """True if connection is natively muxed (e.g. QUIC), not upgraded."""
+        return connection_provides_muxed(muxed_conn) if muxed_conn else False
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         connection = self._get_first_connection(peer_id)
