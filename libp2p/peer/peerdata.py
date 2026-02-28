@@ -2,9 +2,6 @@ from collections.abc import (
     Sequence,
 )
 import time
-from typing import (
-    Any,
-)
 
 from multiaddr import (
     Multiaddr,
@@ -16,6 +13,9 @@ from libp2p.abc import (
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
+)
+from libp2p.custom_types import (
+    MetadataValue,
 )
 
 """
@@ -29,7 +29,7 @@ LATENCY_EWMA_SMOOTHING = 0.1
 class PeerData(IPeerData):
     pubkey: PublicKey | None
     privkey: PrivateKey | None
-    metadata: dict[Any, Any]
+    metadata: dict[str, MetadataValue]
     protocols: list[str]
     addrs: list[Multiaddr]
     last_identified: int
@@ -116,14 +116,23 @@ class PeerData(IPeerData):
         self.addrs = []
 
     # -------METADATA-----------
-    def put_metadata(self, key: str, val: Any) -> None:
+    def put_metadata(self, key: str, val: MetadataValue) -> None:
         """
         :param key: key in KV pair
         :param val: val to associate with key
+        :raises TypeError: if val is not a valid MetadataValue type
         """
+        # Note: bool is a subclass of int in Python, so `isinstance(True, int)`
+        # is True.  We include bool explicitly in the tuple for clarity and to
+        # document that booleans are an accepted MetadataValue type.
+        if not isinstance(val, (str, int, float, bool, type(None))):
+            raise TypeError(
+                f"MetadataValue must be str, int, float, bool, or None, "
+                f"got {type(val).__name__}"
+            )
         self.metadata[key] = val
 
-    def get_metadata(self, key: str) -> Any:
+    def get_metadata(self, key: str) -> MetadataValue:
         """
         :param key: key in KV pair
         :return: val for key

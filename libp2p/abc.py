@@ -34,6 +34,7 @@ from libp2p.crypto.keys import (
     PublicKey,
 )
 from libp2p.custom_types import (
+    MetadataValue,
     StreamHandlerFn,
     THandler,
     TProtocol,
@@ -431,7 +432,7 @@ class IPeerMetadata(ABC):
     """
 
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve metadata for a specified peer.
 
@@ -442,7 +443,7 @@ class IPeerMetadata(ABC):
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store metadata for a specified peer.
 
@@ -897,7 +898,7 @@ class IPeerStore(
 
     # -------METADATA---------
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve the value associated with a key for a specified peer.
 
@@ -910,7 +911,7 @@ class IPeerStore(
 
         Returns
         -------
-        Any
+        MetadataValue
             The value corresponding to the specified key.
 
         Raises
@@ -921,7 +922,7 @@ class IPeerStore(
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store a key-value pair for the specified peer.
 
@@ -931,7 +932,7 @@ class IPeerStore(
             The identifier of the peer.
         key : str
             The key for the data.
-        val : Any
+        val : MetadataValue
             The value to store.
 
         """
@@ -2446,7 +2447,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def put_metadata(self, key: str, val: Any) -> None:
+    def put_metadata(self, key: str, val: MetadataValue) -> None:
         """
         Store a metadata key-value pair for the peer.
 
@@ -2454,13 +2455,13 @@ class IPeerData(ABC):
         ----------
         key : str
             The metadata key.
-        val : Any
+        val : MetadataValue
             The value to associate with the key.
 
         """
 
     @abstractmethod
-    def get_metadata(self, key: str) -> IPeerMetadata:
+    def get_metadata(self, key: str) -> MetadataValue:
         """
         Retrieve metadata for a given key.
 
@@ -2471,7 +2472,7 @@ class IPeerData(ABC):
 
         Returns
         -------
-        IPeerMetadata
+        MetadataValue
             The metadata value for the given key.
 
         Raises
@@ -3284,6 +3285,77 @@ class IPubsub(ServiceAPI):
             The identifier of the topic (str) or topics (list[str]).
         data : bytes
             The data to publish.
+
+        """
+        ...
+
+    @abstractmethod
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer stream is not established within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
+
+        """
+        ...
+
+    @abstractmethod
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        topic_id : str
+            The topic to check subscription for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer does not subscribe within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
 
         """
         ...
