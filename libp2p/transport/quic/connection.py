@@ -15,9 +15,10 @@ from aioquic.quic.connection import QuicConnection
 from aioquic.quic.events import QuicEvent
 from cryptography import x509
 import multiaddr
+from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import IMuxedConn, IRawConnection
+from libp2p.abc import ConnectionType, IMuxedConn, IRawConnection
 from libp2p.custom_types import TQUICStreamHandlerFn
 from libp2p.peer.id import ID
 from libp2p.rcmgr import Direction
@@ -1750,6 +1751,22 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         for stream_id in streams_to_cleanup:
             self._remove_stream(int(stream_id))
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
+        """
+        return [self._maddr]
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        # For QUIC connections, assume direct
+        return ConnectionType.DIRECT
 
     # String representation
 

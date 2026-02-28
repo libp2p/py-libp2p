@@ -13,6 +13,10 @@ from typing import Union
 
 PathLike = Union[str, Path]
 
+ED25519_PATH = Path("libp2p-forge/peer1/ed25519.pem")
+AUTOTLS_CERT_PATH = Path("libp2p-forge/peer1/autotls-cert.pem")
+AUTOTLS_KEY_PATH = Path("libp2p-forge/peer1/autotls-key.pem")
+
 
 def get_temp_dir() -> Path:
     """
@@ -215,8 +219,8 @@ def find_executable(name: str) -> Path | None:
         Path: Path to executable if found, None otherwise
 
     """
-    # Check if name already contains path
-    if os.path.dirname(name):
+    # Check if name already contains path (cross-platform: avoid os.path.dirname)
+    if Path(name).parent != Path("."):
         path = Path(name)
         if path.exists() and os.access(path, os.X_OK):
             return path

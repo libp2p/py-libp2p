@@ -4,7 +4,7 @@ import logging
 import miniupnpc  # type: ignore[import-untyped]
 import trio
 
-logger = logging.getLogger("libp2p.discovery.upnp")
+logger = logging.getLogger(__name__)
 
 
 class UpnpManager:
