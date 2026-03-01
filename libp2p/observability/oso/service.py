@@ -73,7 +73,7 @@ def collect_health_report(
                 vulnerable_packages.append(dep.name)
         except Exception as error:
             notes.append(f"OSV lookup failed for {dep.name}: {error}")
-            break
+            continue
 
     metrics = HealthMetrics(
         dependency_topology=calculate_dependency_topology(dependency_graph),

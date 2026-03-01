@@ -30,7 +30,7 @@ def collect_rcmgr_baseline() -> RcmgrSnapshot:
     """Collect current rcmgr baseline capability status."""
     from libp2p.rcmgr import manager
 
-    metrics_available = hasattr(manager, "Metrics") or True
+    metrics_available = hasattr(manager, "Metrics")
 
     prometheus_available = False
     exported_metric_names: list[str] = []

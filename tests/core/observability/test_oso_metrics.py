@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from libp2p.observability.oso.metrics import (
     calculate_contributor_trend,
     calculate_dependency_topology,
     calculate_issue_responsiveness,
     calculate_release_cadence,
     calculate_security_proxy,
+    collect_rcmgr_baseline,
 )
 from libp2p.observability.oso.models import (
     DependencyEntry,
@@ -97,3 +100,11 @@ def test_security_proxy_uses_vulnerable_and_duplicates() -> None:
     metric = calculate_security_proxy(_build_graph(), vulnerable_packages=["requests"])
     assert metric.duplicate_dependency_specs == ["requests"]
     assert metric.osv_vulnerable_packages == ["requests"]
+
+
+def test_collect_rcmgr_baseline_uses_real_metrics_probe(monkeypatch) -> None:
+    import libp2p.rcmgr as rcmgr_package
+
+    monkeypatch.setattr(rcmgr_package, "manager", SimpleNamespace(), raising=True)
+    snapshot = collect_rcmgr_baseline()
+    assert snapshot.metrics_available is False
