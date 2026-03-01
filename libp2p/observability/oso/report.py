@@ -102,8 +102,8 @@ def render_markdown_report(report: HealthReport) -> str:
             "### Security Proxy",
             "",
             (
-                "- note: `experimental` (OSV package-name lookups can over-report "
-                "without version matching)"
+                "- note: `version-aware` when installed versions are available; "
+                "falls back to package-name lookup otherwise"
             ),
             f"- duplicate_dependency_specs: `{duplicate_specs or 'none'}`",
             f"- osv_vulnerable_packages: `{vulnerable_packages or 'none'}`",

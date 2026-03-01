@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
+import subprocess
+import sys
 from typing import Any
 
 import requests
@@ -168,10 +171,48 @@ class OsoProvider:
 
 
 def query_osv_vulnerabilities(package_name: str, ecosystem: str = "PyPI") -> bool:
-    """Return whether OSV reports vulnerabilities for package."""
+    """Return whether OSV reports vulnerabilities for package/version."""
     response = requests.post(
         OSV_API_URL,
         json={"package": {"name": package_name, "ecosystem": ecosystem}},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    vulns = payload.get("vulns", [])
+    return bool(vulns)
+
+
+def get_installed_package_versions() -> dict[str, str]:
+    """Return installed package versions from current Python environment."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "list", "--format=json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    rows = json.loads(result.stdout)
+    return {
+        entry["name"].lower(): entry["version"]
+        for entry in rows
+        if isinstance(entry, dict)
+        and isinstance(entry.get("name"), str)
+        and isinstance(entry.get("version"), str)
+    }
+
+
+def query_osv_vulnerabilities_for_version(
+    package_name: str,
+    version: str,
+    ecosystem: str = "PyPI",
+) -> bool:
+    """Return whether OSV reports vulnerabilities for exact package version."""
+    response = requests.post(
+        OSV_API_URL,
+        json={
+            "package": {"name": package_name, "ecosystem": ecosystem},
+            "version": version,
+        },
         timeout=20,
     )
     response.raise_for_status()

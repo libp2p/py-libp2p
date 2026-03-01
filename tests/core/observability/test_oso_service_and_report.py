@@ -62,6 +62,7 @@ dependencies = ["requests>=2.30.0"]
         "fetch_popularity",
         lambda self: PopularityInfo(stars=1, forks=2, watchers=3),
     )
+    monkeypatch.setattr(service, "get_installed_package_versions", lambda: {})
     monkeypatch.setattr(
         service,
         "query_osv_vulnerabilities",
@@ -141,15 +142,24 @@ dependencies = ["alpha>=1.0.0", "beta>=2.0.0"]
         lambda self: PopularityInfo(stars=1, forks=2, watchers=3),
     )
 
-    calls: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "get_installed_package_versions",
+        lambda: {"alpha": "1.0.0", "beta": "2.0.0"},
+    )
+    calls: list[tuple[str, str]] = []
 
-    def fake_query_osv(package_name: str) -> bool:
-        calls.append(package_name)
+    def fake_query_osv_for_version(package_name: str, version: str) -> bool:
+        calls.append((package_name, version))
         if package_name == "alpha":
             raise RuntimeError("transient outage")
         return package_name == "beta"
 
-    monkeypatch.setattr(service, "query_osv_vulnerabilities", fake_query_osv)
+    monkeypatch.setattr(
+        service,
+        "query_osv_vulnerabilities_for_version",
+        fake_query_osv_for_version,
+    )
 
     report = service.collect_health_report(
         repo_root=tmp_path,
@@ -158,7 +168,7 @@ dependencies = ["alpha>=1.0.0", "beta>=2.0.0"]
         oso_token=None,
     )
 
-    assert calls == ["alpha", "beta"]
+    assert calls == [("alpha", "1.0.0"), ("beta", "2.0.0")]
     assert report.metrics.security_proxy.osv_vulnerable_packages == ["beta"]
     assert any(
         "OSV lookup failed for alpha" in note for note in report.source_status.notes
