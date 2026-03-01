@@ -78,7 +78,7 @@ def generate_direct_graph_artifacts(
     dot_lines = [
         "digraph dependencies {",
         "  rankdir=LR;",
-        '  "libp2p" [shape=box, style=filled, fillcolor=lightblue];',
+        (f'  "{graph.project.name}" [shape=box, style=filled, fillcolor=lightblue];'),
     ]
     for dep in graph.dependencies:
         dot_lines.append(f'  "{graph.project.name}" -> "{dep.name}";')

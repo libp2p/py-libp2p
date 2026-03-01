@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from libp2p.observability.oso.dependency_graph import build_dependency_graph
+from libp2p.observability.oso.generators import generate_direct_graph_artifacts
 
 
 def test_build_dependency_graph(tmp_path: Path) -> None:
@@ -38,3 +39,28 @@ dev = ["pytest>=8.0.0"]
     assert graph.dependencies[1].name == "zeroconf"
     assert graph.optional_dependencies["dev"][0].name == "pytest"
     assert ("libp2p", "requests") in graph.edges
+
+
+def test_generate_direct_graph_uses_project_name_for_dot_root(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[project]
+name = "custom_project"
+version = "0.0.1"
+requires-python = ">=3.10,<4.0"
+dependencies = ["requests>=2.30.0"]
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+    artifacts = generate_direct_graph_artifacts(
+        repo_root=tmp_path,
+        output_dir=output_dir,
+        repository="https://github.com/libp2p/py-libp2p",
+    )
+    dot_text = artifacts["dot"].read_text(encoding="utf-8")
+    assert (
+        '"custom_project" [shape=box, style=filled, fillcolor=lightblue];' in dot_text
+    )
