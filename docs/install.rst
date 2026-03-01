@@ -1,7 +1,7 @@
 Install
 ================
 
-Follow the steps below to install ``py-libp2p`` on your platform.
+Follow the steps below to install `py-libp2p` on your platform.
 
 Using uv (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -9,7 +9,7 @@ Using uv (recommended)
 `uv <https://docs.astral.sh/uv/>`_ is a fast Python package manager.
 It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
-1. Install ``uv`` if you haven't already:
+1. Install `uv` if you haven't already:
 
    .. code:: sh
 
@@ -39,7 +39,7 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
          .venv\Scripts\Activate.ps1
 
-3. Install ``py-libp2p``:
+3. Install `py-libp2p`:
 
    .. code:: sh
 
@@ -48,7 +48,7 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 Using pip
 ~~~~~~~~~
 
-If you prefer pip, you can install ``py-libp2p`` the traditional way:
+If you prefer pip, you can install `py-libp2p` the traditional way:
 
 1. Create a Python virtual environment:
 
@@ -76,7 +76,7 @@ If you prefer pip, you can install ``py-libp2p`` the traditional way:
 
          .venv\Scripts\Activate.ps1
 
-3. Install ``py-libp2p``:
+3. Install `py-libp2p`:
 
    .. code:: sh
 
@@ -96,22 +96,22 @@ To install for development with all dev dependencies:
     pip install --group dev -e .
 
 py-libp2p uses `dependency groups <https://peps.python.org/pep-0735/>`_ (PEP 735)
-for dev dependencies, so the ``--group dev`` flag is required.
+for dev dependencies, so the `--group dev` flag is required.
 
 Usage
 -----
 Configuration
-^^^^^^^^^^^^^^
-For all the information on how you can configure py-libp2p, TODO.
+~~~~~~~~~~~~~~
+For all the information on how you can configure `py-libp2p`, TODO.
 
 Limits
-^^^^^^
+~~~~~~~~~~~~~~
 For help configuring your node to resist malicious network peers, TODO.
 
 Getting started
-^^^^^^^^^^^^^^^
-If you are starting your journey with py-libp2p, read the :doc:`getting_started` guide.
+~~~~~~~~~~~~~~~~
+If you are starting your journey with `py-libp2p`, read the :doc:`getting_started` guide.
 
 Tutorials and Examples
-^^^^^^^^^^^^^^^^^^^^^
-You can find multiple examples in the :doc:`examples` guide that will help you understand how to use py-libp2p for various scenarios.
+~~~~~~~~~~~~~~~~~~~~~~~
+You can find multiple examples in the :doc:`examples` guide that will help you understand how to use `py-libp2p` for various scenarios.
