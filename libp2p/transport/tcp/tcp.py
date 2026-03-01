@@ -107,24 +107,17 @@ class TCPListener(IListener):
         # For trio.serve_tcp, host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        started_listeners = await nursery.start(
-            serve_tcp,
-            handler,
-            tcp_port,
-            host_str,
-        )
-
-        if started_listeners is None:
-            # This implies that task_status.started() was not called within serve_tcp,
-            # likely because trio.serve_tcp itself failed to start (e.g., port in use).
-            error_msg = (
-                f"Failed to start TCP listener for {maddr}: "
-                f"`nursery.start` returned None. "
-                "This might be due to issues like the port already "
-                "being in use or invalid host."
+        try:
+            started_listeners = await nursery.start(
+                serve_tcp,
+                handler,
+                tcp_port,
+                host_str,
             )
+        except Exception as error:
+            error_msg = f"Failed to start TCP listener for {maddr}: {error}"
             logger.error(error_msg)
-            raise OpenConnectionError(error_msg)
+            raise OpenConnectionError(error_msg) from error
 
         self.listeners.extend(started_listeners)
 

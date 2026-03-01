@@ -1427,8 +1427,10 @@ class IListener(ABC):
 
         Raises
         ------
-        OpenConnectionError
-            If listening fails (e.g. missing/invalid port or failed start).
+        Exception
+            Transport-specific listener exception, such as
+            ``OpenConnectionError`` (TCP/WebSocket) or ``QUICListenError`` (QUIC),
+            if listening fails (e.g. missing/invalid port or failed start).
 
         """
 

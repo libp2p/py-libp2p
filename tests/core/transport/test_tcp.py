@@ -60,6 +60,27 @@ async def test_tcp_listener_raises_on_missing_port(nursery):
 
 
 @pytest.mark.trio
+async def test_tcp_listener_raises_on_bind_failure(nursery):
+    """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+
+    # Bind to a specific port with the first listener
+    listener1 = transport.create_listener(noop_handler)
+    await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"), nursery)
+    bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+
+    # Attempting to bind the same port a second time should raise OpenConnectionError,
+    # not a raw OSError from trio.serve_tcp.
+    listener2 = transport.create_listener(noop_handler)
+    with pytest.raises(OpenConnectionError, match="Failed to start TCP listener"):
+        await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"), nursery)
+
+
+@pytest.mark.trio
 async def test_tcp_dial(nursery):
     transport = TCP()
     raw_conn_other_side: RawConnection | None = None
