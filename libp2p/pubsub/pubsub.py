@@ -651,6 +651,10 @@ class Pubsub(Service, IPubsub):
 
         self.peers[peer_id] = stream
 
+        # Notify anyone waiting in wait_for_peer()
+        if peer_id in self._peer_added_events:
+            self._peer_added_events[peer_id].set()
+
         # Flush any messages that were queued while this peer's protocol
         # identification was still in progress (identify-aware publishing).
         if hasattr(self.router, "flush_pending_messages"):
@@ -751,10 +755,16 @@ class Pubsub(Service, IPubsub):
                 self.peer_topics[sub_message.topicid].add(origin_id)
                 was_newly_added = True
 
+        if was_newly_added:
+            # Notify anyone waiting in wait_for_subscription()
+            key = (origin_id, sub_message.topicid)
+            if key in self._subscription_events:
+                self._subscription_events[key].set()
+
             # Flush any messages that were queued while waiting for this
             # peer's subscription (identify-aware publishing).
             # This handles messages that were queued explicitly for this peer.
-            if was_newly_added and hasattr(self.router, "flush_pending_messages"):
+            if hasattr(self.router, "flush_pending_messages"):
                 # Must use run_task since flush_pending_messages is async
                 # but handle_subscription is sync
                 if self.manager.is_running:
@@ -766,7 +776,7 @@ class Pubsub(Service, IPubsub):
             # Also send recent messages from mcache for this topic.
             # This handles the case where messages were published before this
             # peer was even in pubsub.peers (race during connection setup).
-            if was_newly_added and hasattr(self.router, "send_recent_messages"):
+            if hasattr(self.router, "send_recent_messages"):
                 if self.manager.is_running:
                     self.manager.run_task(
                         self.router.send_recent_messages,  # type: ignore[attr-defined]
