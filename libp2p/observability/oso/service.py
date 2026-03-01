@@ -15,7 +15,13 @@ from .metrics import (
     collect_rcmgr_baseline,
 )
 from .models import HealthMetrics, HealthReport, SourceStatus, utc_now_iso
-from .providers import GitHubProvider, OsoProvider, query_osv_vulnerabilities
+from .providers import (
+    GitHubProvider,
+    OsoProvider,
+    get_installed_package_versions,
+    query_osv_vulnerabilities,
+    query_osv_vulnerabilities_for_version,
+)
 
 
 def collect_health_report(
@@ -27,8 +33,8 @@ def collect_health_report(
     """Collect a full health report for py-libp2p."""
     notes: list[str] = []
     notes.append(
-        "Security proxy is experimental: OSV lookups currently use package-name "
-        "queries and may over-report if fixed versions are installed."
+        "Security proxy uses OSV version-aware checks when installed versions are "
+        "available, with package-name fallback when unavailable."
     )
     pyproject_path = repo_root / "pyproject.toml"
     dependency_graph = build_dependency_graph(
@@ -67,9 +73,21 @@ def collect_health_report(
             notes.append(f"OSO provider failed: {error}")
 
     vulnerable_packages: list[str] = []
+    installed_versions: dict[str, str] = {}
+    try:
+        installed_versions = get_installed_package_versions()
+    except Exception as error:
+        notes.append(f"Unable to read installed package versions: {error}")
+
     for dep in dependency_graph.dependencies:
         try:
-            if query_osv_vulnerabilities(dep.name):
+            dep_version = installed_versions.get(dep.name.lower())
+            has_vulnerability = (
+                query_osv_vulnerabilities_for_version(dep.name, dep_version)
+                if dep_version
+                else query_osv_vulnerabilities(dep.name)
+            )
+            if has_vulnerability:
                 vulnerable_packages.append(dep.name)
         except Exception as error:
             notes.append(f"OSV lookup failed for {dep.name}: {error}")
