@@ -18,6 +18,57 @@ EXPECTED_METRIC_FAMILIES = [
 ]
 
 
+def _parse_prometheus_sample(line: str) -> tuple[str, float] | None:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+
+    parts = line.split()
+    if len(parts) < 2:
+        return None
+
+    metric_with_labels, value_text = parts[0], parts[1]
+    metric_name = metric_with_labels.split("{", 1)[0]
+    try:
+        value = float(value_text)
+    except ValueError:
+        return None
+    return metric_name, value
+
+
+def _collect_family_samples(payload: str) -> dict[str, list[tuple[str, float]]]:
+    samples_by_family = {family: [] for family in EXPECTED_METRIC_FAMILIES}
+    for line in payload.splitlines():
+        parsed = _parse_prometheus_sample(line)
+        if parsed is None:
+            continue
+
+        metric_name, value = parsed
+        for family in EXPECTED_METRIC_FAMILIES:
+            if metric_name == family or metric_name.startswith(f"{family}_"):
+                samples_by_family[family].append((metric_name, value))
+                break
+    return samples_by_family
+
+
+def _print_family_samples(
+    samples_by_family: dict[str, list[tuple[str, float]]],
+) -> None:
+    print("[INFO] metric family samples from exporter text:")
+    for family in EXPECTED_METRIC_FAMILIES:
+        samples = samples_by_family.get(family, [])
+        if not samples:
+            print(f"[INFO]   {family}: no numeric samples found")
+            continue
+
+        preview = ", ".join(
+            f"{metric_name}={value:g}" for metric_name, value in samples[:3]
+        )
+        if len(samples) > 3:
+            preview += ", ..."
+        print(f"[INFO]   {family}: {preview}")
+
+
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(
         description="Validate rcmgr metric families before OSO report delivery",
@@ -88,6 +139,7 @@ def main() -> int:
                 )
             else:
                 print("[INFO] exporter text contains all expected metric families")
+                _print_family_samples(_collect_family_samples(payload))
         except Exception as error:  # pragma: no cover - defensive smoke-check handling
             errors.append(f"Failed exporter text validation: {error}")
     elif args.verify_exporter_text:
