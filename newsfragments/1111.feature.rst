@@ -1,5 +1,0 @@
-Added IPv6 support for default bind address configuration.
-
-- IPv6 bind address is configurable via the ``LIBP2P_BIND_V6`` environment variable (default ``::1``). Use ``::`` to listen on all IPv6 interfaces (e.g. for tests).
-- Invalid ``LIBP2P_BIND_V6`` values fall back to the secure default ``::1``.
-- Thin-waist address utilities and examples support both IPv4 and IPv6.

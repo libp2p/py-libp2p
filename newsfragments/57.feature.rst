@@ -1,1 +1,0 @@
-Implemented initial network attack simulation framework to support testing against common P2P attacks (e.g. Eclipse attacks).

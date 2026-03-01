@@ -14,6 +14,7 @@ Examples
    examples.interop
    examples.pubsub
    examples.bitswap
+   examples.cid
    examples.circuit_relay
    examples.kademlia
    examples.mDNS
@@ -26,3 +27,4 @@ Examples
    examples.websocket
    examples.tls
    examples.autotls
+   examples.perf

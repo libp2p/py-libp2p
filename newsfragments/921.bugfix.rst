@@ -1,1 +1,0 @@
-Fixed interoperability issue where generated Ed25519 keys were not always valid curve points, complying with strict ZIP-215 validation.

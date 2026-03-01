@@ -8,9 +8,11 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -393,3 +395,15 @@ class Mplex(IMuxedConn):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""
         return self.secured_conn.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()

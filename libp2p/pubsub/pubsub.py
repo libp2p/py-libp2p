@@ -2,7 +2,6 @@ from __future__ import (
     annotations,
 )
 
-import base64
 from collections.abc import (
     Callable,
     KeysView,
@@ -16,7 +15,7 @@ from typing import (
     cast,
 )
 
-import base58
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -96,8 +95,23 @@ def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
     return msg.seqno + msg.from_id
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
+    """
+    from libp2p.encoding_config import get_default_encoding
+
+    if encoding is None:
+        encoding = get_default_encoding()
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
 
 
 class TopicValidator(NamedTuple):
@@ -303,6 +317,11 @@ class Pubsub(Service, IPubsub):
 
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
+
+        # Event-based waiting: maps for trio.Event instances
+        # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
+        self._peer_added_events: dict[ID, trio.Event] = {}
+        self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -538,6 +557,68 @@ class Pubsub(Service, IPubsub):
     async def wait_until_ready(self) -> None:
         await self.event_handle_peer_queue_started.wait()
         await self.event_handle_dead_peer_queue_started.wait()
+
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``_handle_new_peer`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer stream is not established within
+            the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
+        """
+        if peer_id in self.peers:
+            return
+        event = self._peer_added_events.setdefault(peer_id, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``handle_subscription`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param topic_id: the topic to check subscription for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer does not subscribe within the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
+        """
+        if topic_id in self.peer_topics and peer_id in self.peer_topics[topic_id]:
+            return
+        key = (peer_id, topic_id)
+        event = self._subscription_events.setdefault(key, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
 
     async def _handle_new_peer(self, peer_id: ID) -> None:
         # Check if we already have a pubsub stream with this peer to avoid duplicates
@@ -1009,7 +1090,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
@@ -1027,10 +1108,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,

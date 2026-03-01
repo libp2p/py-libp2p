@@ -59,6 +59,8 @@ class MessageCache:
         :param msg: The rpc message to put in. Should contain seqno and from_id
         """
         mid: tuple[bytes, bytes] = (msg.seqno, msg.from_id)
+        if mid in self.msgs:
+            return
         self.msgs[mid] = msg
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
@@ -99,7 +101,7 @@ class MessageCache:
         last_entries: list[CacheEntry] = self.history[len(self.history) - 1]
 
         for entry in last_entries:
-            self.msgs.pop(entry.mid)
+            self.msgs.pop(entry.mid, None)
 
         i: int = len(self.history) - 2
 
