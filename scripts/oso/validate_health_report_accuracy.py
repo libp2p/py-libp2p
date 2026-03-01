@@ -211,7 +211,8 @@ def validate(args: Namespace) -> int:
         f"source_status.github={github_status}, source_status.oso={oso_status}"
     )
     _report_info(
-        "Expected dependency counts "(
+        "Expected dependency counts "
+        + (
             f"(runtime={runtime_expected}, optional={optional_expected}, "
             f"total={total_expected})"
         )
