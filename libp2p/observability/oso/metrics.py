@@ -89,6 +89,17 @@ def calculate_dependency_topology(graph: DependencyGraph) -> DependencyTopologyM
         key=lambda name: out_degree[name],
         reverse=True,
     )[:3]
+    runtime_package_versions = sorted(
+        {
+            (
+                f"{entry.name} ({entry.version_spec})"
+                if entry.version_spec
+                else entry.name
+            )
+            for entry in graph.dependencies
+        },
+        key=str.lower,
+    )
 
     return DependencyTopologyMetric(
         direct_dependencies=len(graph.dependencies),
@@ -98,6 +109,7 @@ def calculate_dependency_topology(graph: DependencyGraph) -> DependencyTopologyM
         duplicate_packages=duplicate_packages,
         max_out_degree=max_out_degree,
         most_connected_packages=most_connected_packages,
+        runtime_package_versions=runtime_package_versions,
     )
 
 
@@ -185,6 +197,7 @@ def calculate_contributor_trend(commits: list[CommitInfo]) -> ContributorTrendMe
         commits_considered=len(commits),
         unique_contributors=len(contributors),
         weekly_commit_counts=dict(sorted(weekly.items())),
+        contributor_logins=sorted(contributors),
     )
 
 

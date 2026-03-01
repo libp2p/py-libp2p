@@ -24,6 +24,16 @@ def render_markdown_report(report: HealthReport) -> str:
     )
     duplicate_specs = ", ".join(metrics.security_proxy.duplicate_dependency_specs)
     vulnerable_packages = ", ".join(metrics.security_proxy.osv_vulnerable_packages)
+    avg_days = metrics.release_cadence.average_days_between_releases
+    median_days = metrics.release_cadence.median_days_between_releases
+    median_first_response = metrics.issue_responsiveness.median_hours_to_first_response
+    median_close = metrics.issue_responsiveness.median_hours_to_close
+    avg_days_display = f"{avg_days:.2f}" if avg_days is not None else "n/a"
+    median_days_display = f"{median_days:.2f}" if median_days is not None else "n/a"
+    median_first_response_display = (
+        f"{median_first_response:.2f}" if median_first_response is not None else "n/a"
+    )
+    median_close_display = f"{median_close:.2f}" if median_close is not None else "n/a"
     lines: list[str] = [
         "# py-libp2p OSO Health Report",
         "",
@@ -51,6 +61,33 @@ def render_markdown_report(report: HealthReport) -> str:
             f"- monitoring_available: `{report.rcmgr_baseline.monitoring_available}`",
             f"- exported_metric_names: `{exported_names}`",
             "",
+            "### rcmgr Metric Family Guide",
+            "",
+            (
+                "- `libp2p_rcmgr_connections`: tracks connection counts/limits "
+                "managed by rcmgr."
+            ),
+            (
+                "- `libp2p_rcmgr_streams`: tracks stream counts/limits across "
+                "protocol traffic."
+            ),
+            (
+                "- `libp2p_rcmgr_memory`: tracks memory usage and memory-limit "
+                "enforcement signals."
+            ),
+            (
+                "- `libp2p_rcmgr_fds`: tracks file-descriptor usage and related "
+                "resource pressure."
+            ),
+            (
+                "- `libp2p_rcmgr_blocked_resources`: tracks operations denied by "
+                "rcmgr limits (throttling/block events)."
+            ),
+            (
+                "- note: this section reports capability/availability; use live "
+                "metrics endpoints for current runtime values."
+            ),
+            "",
             "## V1 Metrics",
             "",
             "### Dependency Topology",
@@ -65,33 +102,44 @@ def render_markdown_report(report: HealthReport) -> str:
             ),
             f"- unique_packages: `{metrics.dependency_topology.unique_packages}`",
             f"- duplicate_packages: `{duplicate_packages}`",
+            "- Runtime Packages (name + version constraint):",
+            "",
+            *[
+                f"  - `{item}`"
+                for item in metrics.dependency_topology.runtime_package_versions
+            ],
             "",
             "### Release Cadence",
             "",
             f"- releases_considered: `{metrics.release_cadence.releases_considered}`",
-            (
-                "- avg_days_between_releases: "
-                f"`{metrics.release_cadence.average_days_between_releases}`"
-            ),
-            (
-                "- median_days_between_releases: "
-                f"`{metrics.release_cadence.median_days_between_releases}`"
-            ),
+            (f"- avg_days_between_releases: `{avg_days_display}`"),
+            (f"- median_days_between_releases: `{median_days_display}`"),
+            f"- last_release_at: `{metrics.release_cadence.last_release_at or 'n/a'}`",
+            ("- interpretation: lower day values indicate more frequent releases."),
             "",
             "### Issue Responsiveness",
             "",
             f"- issues_considered: `{metrics.issue_responsiveness.issues_considered}`",
-            "- median_hours_to_first_response: "
-            f"`{metrics.issue_responsiveness.median_hours_to_first_response}`",
+            f"- median_hours_to_first_response: `{median_first_response_display}`",
+            (f"- median_hours_to_close: `{median_close_display}`"),
+            f"- open_issues: `{metrics.issue_responsiveness.open_issues}`",
+            f"- closed_issues: `{metrics.issue_responsiveness.closed_issues}`",
             (
-                "- median_hours_to_close: "
-                f"`{metrics.issue_responsiveness.median_hours_to_close}`"
+                "- interpretation: "
+                "lower first-response and close times indicate "
+                "faster maintenance throughput."
             ),
             "",
             "### Contributor Trend",
             "",
             f"- commits_considered: `{metrics.contributor_trend.commits_considered}`",
             f"- unique_contributors: `{metrics.contributor_trend.unique_contributors}`",
+            "- Contributors (GitHub logins):",
+            "",
+            *[
+                f"  - `{login}`"
+                for login in metrics.contributor_trend.contributor_logins
+            ],
             "",
             "### Popularity",
             "",

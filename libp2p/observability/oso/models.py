@@ -63,6 +63,7 @@ class DependencyTopologyMetric:
     duplicate_packages: list[str]
     max_out_degree: int
     most_connected_packages: list[str]
+    runtime_package_versions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,6 +94,7 @@ class ContributorTrendMetric:
     commits_considered: int
     unique_contributors: int
     weekly_commit_counts: dict[str, int]
+    contributor_logins: list[str] = field(default_factory=list)
 
 
 @dataclass

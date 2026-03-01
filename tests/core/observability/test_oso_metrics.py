@@ -50,6 +50,10 @@ def test_calculate_dependency_topology_detects_duplicates() -> None:
     assert metric.direct_dependencies == 2
     assert metric.unique_packages == 1
     assert metric.duplicate_packages == ["requests"]
+    assert metric.runtime_package_versions == [
+        "requests (>=2.25.0)",
+        "requests (>=2.28.0)",
+    ]
 
 
 def test_release_cadence_aggregates_deltas() -> None:
@@ -94,6 +98,7 @@ def test_contributor_trend_counts_unique_logins() -> None:
     assert metric.commits_considered == 3
     assert metric.unique_contributors == 2
     assert len(metric.weekly_commit_counts) >= 1
+    assert metric.contributor_logins == ["alice", "bob"]
 
 
 def test_security_proxy_uses_vulnerable_and_duplicates() -> None:
