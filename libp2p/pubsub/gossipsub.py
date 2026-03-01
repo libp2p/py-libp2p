@@ -1062,6 +1062,7 @@ class GossipSub(IPubsubRouter, Service):
         """Checks the seen set and requests unknown messages with an IWANT message."""
         if self.pubsub is None:
             raise NoPubsubAttached
+        pubsub = self.pubsub
 
         # Add all unknown message ids (ids that appear in ihave_msg but not
         # already seen) to list of messages we want to request
@@ -1075,7 +1076,7 @@ class GossipSub(IPubsubRouter, Service):
                     msg_id,
                 )
                 continue
-            if not self.pubsub.seen_messages.has(mid_bytes):
+            if not pubsub.seen_messages.has(mid_bytes):
                 msg_ids_wanted.append(parse_message_id_safe(msg_id))
 
         # Request messages with IWANT message
