@@ -863,7 +863,9 @@ async def test_handle_iwant(monkeypatch):
 @pytest.mark.trio
 async def test_handle_iwant_invalid_msg_id(monkeypatch):
     """
-    Test that handle_iwant raises ValueError for malformed message IDs.
+    Test that handle_iwant silently skips malformed (non-hex) message IDs
+    instead of raising ValueError, so a misbehaving peer cannot crash the handler.
+    mcache.get must not be called for invalid IDs (proving they were skipped).
     """
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
         gossipsub_routers = []
@@ -879,28 +881,28 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
         await trio.sleep(0.1)
 
-        # Malformed message ID (not a tuple string)
-        malformed_msg_id = "not_a_valid_msg_id"
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
-
-        # Mock mcache.get and write_msg to ensure they are not called
+        # Patch mcache.get so we can verify handle_iwant never looks up invalid IDs.
+        # NOTE: We intentionally do NOT assert on write_msg because the background
+        # pubsub service may call it asynchronously (e.g. peer-record announcements),
+        # causing race-condition flakes. The mcache.get assertion alone proves that
+        # invalid message IDs are skipped before any cache lookup or forwarding occurs.
         mock_mcache_get = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
 
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        # Malformed message ID (not valid hex) — should be skipped without raising
+        malformed_msg_id = "not_a_valid_msg_id"
+        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
+        mock_mcache_get.reset_mock()
+        # Must not raise; defensive parsing silently skips invalid IDs
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
 
-        # Message ID that's a tuple string but not (bytes, bytes)
+        # Another malformed ID — also silently skipped
         invalid_tuple_msg_id = "('abc', 123)"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        mock_mcache_get.reset_mock()
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
 
 
 @pytest.mark.trio

@@ -58,6 +58,7 @@ from .score import (
 )
 from .utils import (
     parse_message_id_safe,
+    safe_bytes_from_hex,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -1064,11 +1065,18 @@ class GossipSub(IPubsubRouter, Service):
 
         # Add all unknown message ids (ids that appear in ihave_msg but not
         # already seen) to list of messages we want to request
-        msg_ids_wanted: list[MessageID] = [
-            parse_message_id_safe(msg_id)
-            for msg_id in ihave_msg.messageIDs
-            if not self.pubsub.seen_messages.has(bytes.fromhex(msg_id))
-        ]
+        msg_ids_wanted: list[MessageID] = []
+        for msg_id in ihave_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid hex message ID in IHAVE from %s: %r",
+                    sender_peer_id,
+                    msg_id,
+                )
+                continue
+            if not self.pubsub.seen_messages.has(mid_bytes):
+                msg_ids_wanted.append(parse_message_id_safe(msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1081,9 +1089,17 @@ class GossipSub(IPubsubRouter, Service):
         Forwards all request messages that are present in mcache to the
         requesting peer.
         """
-        msg_ids: list[bytes] = [
-            bytes.fromhex(msg_id_str) for msg_id_str in iwant_msg.messageIDs
-        ]
+        msg_ids: list[bytes] = []
+        for msg_id_str in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_str)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid hex message ID in IWANT from %s: %r",
+                    sender_peer_id,
+                    msg_id_str,
+                )
+                continue
+            msg_ids.append(mid_bytes)
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
