@@ -120,8 +120,17 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
 
     if transport == "tcp":
         listen_addrs = get_available_interfaces(port)
-    if transport == "ws":
+    elif transport == "ws":
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")]
+    elif transport == "quic":
+        # QUIC uses UDP addresses with /quic-v1 suffix
+        quic_addrs = []
+        for addr in get_available_interfaces(port):
+            addr_str = str(addr).replace("/tcp/", "/udp/") + "/quic-v1"
+            quic_addrs.append(multiaddr.Multiaddr(addr_str))
+        listen_addrs = quic_addrs
+    else:
+        raise ValueError(f"Unknown transport: {transport}. Use tcp, ws, or quic.")
 
     if new == 1:
         libp2p.utils.paths.ED25519_PATH = Path("libp2p-forge/peer2/ed25519.pem")
@@ -148,11 +157,15 @@ async def run(port: int, destination: str, new: int, transport: str, tls: int) -
         NOISE_PROTOCOL_ID: noise_transport,
     }
 
+    # Create host with QUIC support if transport is quic
+    enable_quic = transport == "quic"
+
     host = new_host(
         key_pair=key_pair,
         listen_addrs=listen_addrs,
         sec_opt=security_options,
         enable_autotls=enable_autotls,
+        enable_quic=enable_quic,
     )
 
     base_identify_handler = identify_handler_for(host, use_varint_format=False)
@@ -242,7 +255,7 @@ def main() -> None:
         "--transport",
         default="tcp",
         type=str,
-        help="Choose the transport layer for ping TCP/WS",
+        help="Choose the transport layer: tcp, ws, or quic",
     )
 
     args = parser.parse_args()

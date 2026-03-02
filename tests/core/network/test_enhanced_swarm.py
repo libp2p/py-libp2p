@@ -6,7 +6,7 @@ import pytest
 from multiaddr import Multiaddr
 import trio
 
-from libp2p.abc import INetConn, INetStream
+from libp2p.abc import ConnectionType, INetConn, INetStream
 from libp2p.network.exceptions import SwarmException
 from libp2p.network.swarm import (
     ConnectionConfig,
@@ -49,6 +49,10 @@ class MockConnection(INetConn):
     def get_transport_addresses(self) -> list[Multiaddr]:
         """Mock implementation of get_transport_addresses."""
         return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 class MockNetStream(INetStream):
