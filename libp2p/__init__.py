@@ -434,7 +434,7 @@ def new_swarm(
                     "QUIC transport is not available. "
                     "Install the 'quic' extra: pip install libp2p[quic]"
                 )
-            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt, enable_autotls=enable_autotls)
         else:
             transport = TCP()
     else:
@@ -473,7 +473,7 @@ def new_swarm(
                 f"new_swarm: Forcing QUIC transport (enable_quic=True "
                 f"but got {type(transport)})"
             )
-            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt, enable_autotls=enable_autotls)
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
 
