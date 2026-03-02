@@ -14,7 +14,7 @@ from multiaddr import Multiaddr
 
 from libp2p import new_host
 from libp2p.bitswap import BitswapClient
-from libp2p.bitswap.cid import cid_to_bytes, cid_to_text
+from libp2p.bitswap.cid import cid_to_bytes, format_cid_for_display
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.utils.address_validation import (
@@ -34,14 +34,6 @@ logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
 logging.getLogger("libp2p.tools.async_service.base").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
-
-
-def format_cid(cid: bytes) -> str:
-    """Format CID bytes as canonical text, with hex fallback."""
-    try:
-        return cid_to_text(cid)
-    except (TypeError, ValueError):
-        return cid.hex()
 
 
 def format_size(size_bytes: int) -> str:
@@ -130,7 +122,9 @@ async def run_provider(file_path: str, port: int = 0):
         for i, cid in enumerate(all_cids, 1):
             block_data = await bitswap.block_store.get_block(cid)
             block_size = len(block_data) if block_data else 0
-            logger.info(f"  {i}. {format_cid(cid)} ({format_size(block_size)})")
+            logger.info(
+                f"  {i}. {format_cid_for_display(cid)} ({format_size(block_size)})"
+            )
 
         logger.info("")
         logger.info("=" * 70)
@@ -139,7 +133,7 @@ async def run_provider(file_path: str, port: int = 0):
 
         # Get the first address (clean multiaddr without duplicate /p2p/)
         provider_addr = host.get_addrs()[0]
-        root_cid_text = format_cid(root_cid)
+        root_cid_text = format_cid_for_display(root_cid)
         logger.info(f"Root CID:  {root_cid_text}")
         logger.info("")
         logger.info("=" * 70)
@@ -184,7 +178,7 @@ async def run_client(
     try:
         provider_multiaddr = Multiaddr(provider_multiaddr_str)
         root_cid = cid_to_bytes(root_cid_input)
-        root_cid_text = format_cid(root_cid)
+        root_cid_text = format_cid_for_display(root_cid)
     except Exception as e:
         logger.error(f"Invalid input: {e}")
         return
@@ -252,7 +246,8 @@ async def run_client(
                     block_data = await bitswap.block_store.get_block(cid)
                     block_size = len(block_data) if block_data else 0
                     logger.info(
-                        f"  ✓ {i}. {format_cid(cid)} ({format_size(block_size)})"
+                        f"  ✓ {i}. {format_cid_for_display(cid)} "
+                        f"({format_size(block_size)})"
                     )
 
             except Exception as fetch_error:
@@ -271,7 +266,8 @@ async def run_client(
                         block_data = await bitswap.block_store.get_block(cid)
                         block_size = len(block_data) if block_data else 0
                         logger.error(
-                            f"  ✓ {i}. {format_cid(cid)} ({format_size(block_size)})"
+                            f"  ✓ {i}. {format_cid_for_display(cid)} "
+                            f"({format_size(block_size)})"
                         )
                 else:
                     logger.error("No blocks were successfully fetched")
