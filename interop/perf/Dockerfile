@@ -29,9 +29,8 @@ RUN uv venv /app/venv
 
 # Interop/perf project: depends on libp2p from copied clone
 COPY interop/perf/pyproject.toml .
-COPY interop/perf/constraints.txt .
 RUN uv pip install --python /app/venv/bin/python --upgrade pip && \
-    uv pip install --python /app/venv/bin/python --no-cache-dir -c constraints.txt -e .
+    uv pip install --python /app/venv/bin/python --no-cache-dir -e .
 
 COPY interop/perf/perf_test.py .
 
