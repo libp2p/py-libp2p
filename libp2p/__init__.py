@@ -455,6 +455,7 @@ def new_swarm(
             temp_upgrader,
             private_key=key_pair.private_key,
             config=quic_transport_opt,
+            enable_autotls=enable_autotls,
             tls_client_config=tls_client_config,
             tls_server_config=tls_server_config
         )
@@ -542,21 +543,6 @@ def new_swarm(
         connection_config=connection_config,
         psk=psk
     )
-
-    # Set resource manager if provided
-    # Auto-create a default ResourceManager if one was not provided
-    if resource_manager is None:
-        try:
-            from libp2p.rcmgr import new_resource_manager as _new_rm
-
-            resource_manager = _new_rm()
-        except Exception:
-            resource_manager = None
-
-    if resource_manager is not None:
-        swarm.set_resource_manager(resource_manager)
-
-    return swarm
 
     # Set resource manager if provided
     # Auto-create a default ResourceManager if one was not provided

@@ -2,10 +2,13 @@
 Tests for the transport registry functionality.
 """
 
+from unittest.mock import Mock, patch
+
 from multiaddr import Multiaddr
 
 from libp2p.abc import IListener, IRawConnection, ITransport
 from libp2p.custom_types import THandler
+from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.tcp.tcp import TCP
 from libp2p.transport.transport_registry import (
     TransportRegistry,
@@ -99,6 +102,35 @@ class TestTransportRegistry:
         # This should fail gracefully and return None
         transport = registry.create_transport("ws", None)
         assert transport is None
+
+    def test_transport_registry_forwards_enable_autotls_for_quic(self):
+        """Test that QUIC transport creation forwards enable_autotls flag."""
+        mock_transport = Mock()
+        mock_quic_class = Mock(return_value=mock_transport)
+        mock_quic_class.__name__ = "MockQUICTransport"
+        private_key = object()
+
+        with patch(
+            "libp2p.transport.transport_registry._get_quic_transport",
+            return_value=mock_quic_class,
+        ):
+            registry = TransportRegistry()
+            upgrader = TransportUpgrader({}, {})
+
+            for protocol in ("quic", "quic-v1"):
+                result = registry.create_transport(
+                    protocol,
+                    upgrader,
+                    private_key=private_key,
+                    enable_autotls=True,
+                )
+                assert result is mock_transport
+
+            assert mock_quic_class.call_count == 2
+            for call in mock_quic_class.call_args_list:
+                assert call.args[0] is private_key
+                assert call.kwargs["enable_autotls"] is True
+                assert isinstance(call.kwargs["config"], QUICTransportConfig)
 
 
 class TestGlobalRegistry:
