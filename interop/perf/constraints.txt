@@ -1,0 +1,7 @@
+aioquic==1.2.0
+cryptography==44.0.2
+grpcio==1.70.0
+redis==5.2.1
+trio==0.29.0
+trio-websocket==0.12.2
+typing-extensions==4.12.2
