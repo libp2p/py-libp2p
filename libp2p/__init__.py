@@ -5,13 +5,23 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 import ssl
-from libp2p.transport.quic.utils import is_quic_multiaddr
 from typing import Any
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 
-from libp2p.transport.quic.transport import QUICTransport
-from libp2p.transport.quic.config import QUICTransportConfig
+try:
+    from libp2p.transport.quic.utils import is_quic_multiaddr
+    from libp2p.transport.quic.transport import QUICTransport
+    from libp2p.transport.quic.config import QUICTransportConfig
+
+    _HAS_QUIC = True
+except ImportError:
+    _HAS_QUIC = False
+    QUICTransport = None
+    QUICTransportConfig = None
+
+    def is_quic_multiaddr(maddr: Any) -> bool:
+        return False
 from collections.abc import (
     Mapping,
     Sequence,
@@ -86,24 +96,58 @@ from libp2p.security.insecure.transport import (
     PLAINTEXT_PROTOCOL_ID,
     InsecureTransport,
 )
-from libp2p.security.noise.transport import (
-    PROTOCOL_ID as NOISE_PROTOCOL_ID,
-    Transport as NoiseTransport,
-)
-from libp2p.security.tls.transport import (
-    PROTOCOL_ID as TLS_PROTOCOL_ID,
-    TLSTransport
-)
 
-import libp2p.security.secio.transport as secio
-from libp2p.stream_muxer.mplex.mplex import (
-    MPLEX_PROTOCOL_ID,
-    Mplex,
-)
-from libp2p.stream_muxer.yamux.yamux import (
-    PROTOCOL_ID as YAMUX_PROTOCOL_ID,
-    Yamux,
-)
+try:
+    from libp2p.security.noise.transport import (
+        PROTOCOL_ID as NOISE_PROTOCOL_ID,
+        Transport as NoiseTransport,
+    )
+    _HAS_NOISE = True
+except ImportError:
+    _HAS_NOISE = False
+    NOISE_PROTOCOL_ID = None
+    NoiseTransport = None
+
+try:
+    from libp2p.security.tls.transport import (
+        PROTOCOL_ID as TLS_PROTOCOL_ID,
+        TLSTransport,
+    )
+    _HAS_TLS = True
+except ImportError:
+    _HAS_TLS = False
+    TLS_PROTOCOL_ID = None
+    TLSTransport = None
+
+try:
+    import libp2p.security.secio.transport as secio
+    _HAS_SECIO = True
+except ImportError:
+    _HAS_SECIO = False
+    secio = None
+
+try:
+    from libp2p.stream_muxer.mplex.mplex import (
+        MPLEX_PROTOCOL_ID,
+        Mplex,
+    )
+    _HAS_MPLEX = True
+except ImportError:
+    _HAS_MPLEX = False
+    MPLEX_PROTOCOL_ID = None
+    Mplex = None
+
+try:
+    from libp2p.stream_muxer.yamux.yamux import (
+        PROTOCOL_ID as YAMUX_PROTOCOL_ID,
+        Yamux,
+    )
+    _HAS_YAMUX = True
+except ImportError:
+    _HAS_YAMUX = False
+    YAMUX_PROTOCOL_ID = None
+    Yamux = None
+
 from libp2p.transport.tcp.tcp import (
     TCP,
 )
@@ -113,6 +157,45 @@ from libp2p.transport.upgrader import (
 from libp2p.transport.transport_registry import (
     create_transport_for_multiaddr,
     get_supported_transport_protocols,
+    transport_needs_muxer,
+    transport_needs_security,
+)
+from libp2p.capabilities import (
+    ConnectionCapabilities,
+    NeedsSetup,
+    TransportCapabilities,
+)
+from libp2p.requirements import (
+    ConnectionRequirementError,
+    after_connection,
+    check_connection_requirements,
+    get_after_connections,
+    get_required_connections,
+    requires_connection,
+)
+from libp2p.providers import (
+    MuxerProvider,
+    ProvidesConnection,
+    ProvidesTransport,
+    ProviderRegistry,
+    SecurityProvider,
+    TransportProvider,
+)
+from libp2p.network.resolver import (
+    AllPathsFailedError,
+    ConnectionResolver,
+    NoTransportError,
+    ResolutionError,
+    ResolvedStack,
+)
+from libp2p.entrypoints import (
+    EP_GROUP_MUXERS,
+    EP_GROUP_SECURITY,
+    EP_GROUP_TRANSPORTS,
+    discover_and_register,
+    discover_muxers,
+    discover_security,
+    discover_transports,
 )
 import libp2p.utils
 from libp2p.utils.logging import (
@@ -229,24 +312,32 @@ def create_yamux_muxer_option() -> TMuxerOptions:
     """
     Returns muxer options with Yamux as the primary choice.
 
+    Only includes muxers whose extras are installed.
+
     :return: Muxer options with Yamux first
     """
-    return {
-        TProtocol(YAMUX_PROTOCOL_ID): Yamux,  # Primary choice
-        TProtocol(MPLEX_PROTOCOL_ID): Mplex,  # Fallback for compatibility
-    }
+    opts: dict[TProtocol, Any] = {}
+    if _HAS_YAMUX and Yamux is not None and YAMUX_PROTOCOL_ID is not None:
+        opts[TProtocol(YAMUX_PROTOCOL_ID)] = Yamux
+    if _HAS_MPLEX and Mplex is not None and MPLEX_PROTOCOL_ID is not None:
+        opts[TProtocol(MPLEX_PROTOCOL_ID)] = Mplex
+    return opts
 
 
 def create_mplex_muxer_option() -> TMuxerOptions:
     """
     Returns muxer options with Mplex as the primary choice.
 
+    Only includes muxers whose extras are installed.
+
     :return: Muxer options with Mplex first
     """
-    return {
-        TProtocol(MPLEX_PROTOCOL_ID): Mplex,  # Primary choice
-        TProtocol(YAMUX_PROTOCOL_ID): Yamux,  # Fallback
-    }
+    opts: dict[TProtocol, Any] = {}
+    if _HAS_MPLEX and Mplex is not None and MPLEX_PROTOCOL_ID is not None:
+        opts[TProtocol(MPLEX_PROTOCOL_ID)] = Mplex
+    if _HAS_YAMUX and Yamux is not None and YAMUX_PROTOCOL_ID is not None:
+        opts[TProtocol(YAMUX_PROTOCOL_ID)] = Yamux
+    return opts
 
 
 def generate_new_rsa_identity() -> KeyPair:
@@ -289,7 +380,7 @@ def new_swarm(
     enable_quic: bool = False,
     enable_autotls: bool = False,
     retry_config: RetryConfig | None = None,
-    connection_config: ConnectionConfig | QUICTransportConfig | None = None,
+    connection_config: ConnectionConfig | Any | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
@@ -328,11 +419,21 @@ def new_swarm(
 
     id_opt = generate_peer_id_from(key_pair)
 
-    transport: TCP | QUICTransport | ITransport
-    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
+    transport: TCP | ITransport
+    quic_transport_opt = (
+        connection_config
+        if _HAS_QUIC and QUICTransportConfig is not None
+        and isinstance(connection_config, QUICTransportConfig)
+        else None
+    )
 
     if listen_addrs is None:
         if enable_quic:
+            if not _HAS_QUIC or QUICTransport is None:
+                raise ImportError(
+                    "QUIC transport is not available. "
+                    "Install the 'quic' extra: pip install libp2p[quic]"
+                )
             transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
         else:
             transport = TCP()
@@ -365,9 +466,13 @@ def new_swarm(
         logger.debug(f"new_swarm: Created transport: {type(transport)}")
 
     # If enable_quic is True but we didn't get a QUIC transport, force QUIC
-    if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
-        transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+    if enable_quic and _HAS_QUIC and QUICTransport is not None:
+        if not isinstance(transport, QUICTransport):
+            logger.debug(
+                f"new_swarm: Forcing QUIC transport (enable_quic=True "
+                f"but got {type(transport)})"
+            )
+            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
 
@@ -378,19 +483,25 @@ def new_swarm(
     # NOTE: Using Noise as primary for now because Python's ssl module has limitations
     # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
     # TLS is still offered as a fallback option.
-    secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
-        # TLS_PROTOCOL_ID: TLSTransport(key_pair),
-        NOISE_PROTOCOL_ID: NoiseTransport(
-            key_pair, noise_privkey=noise_key_pair.private_key
-        ),
-        TLS_PROTOCOL_ID: TLSTransport (
-            key_pair, enable_autotls= enable_autotls
-        ),
-        TProtocol(secio.ID): secio.Transport(key_pair),
-        TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
+    # Only include transports whose optional extras are installed.
+    if sec_opt is not None:
+        secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt
+    else:
+        _sec_map: dict[TProtocol, ISecureTransport] = {}
+        if _HAS_NOISE and NoiseTransport is not None:
+            _sec_map[NOISE_PROTOCOL_ID] = NoiseTransport(
+                key_pair, noise_privkey=noise_key_pair.private_key
+            )
+        if _HAS_TLS and TLSTransport is not None:
+            _sec_map[TLS_PROTOCOL_ID] = TLSTransport(
+                key_pair, enable_autotls=enable_autotls
+            )
+        if _HAS_SECIO and secio is not None:
+            _sec_map[TProtocol(secio.ID)] = secio.Transport(key_pair)
+        _sec_map[TProtocol(PLAINTEXT_PROTOCOL_ID)] = InsecureTransport(
             key_pair, peerstore=peerstore_opt
-        ),
-    }
+        )
+        secure_transports_by_protocol = _sec_map
 
     # Use given muxer preference if provided, otherwise use global default
     if muxer_preference is not None:
@@ -477,7 +588,7 @@ def new_host(
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
-    quic_transport_opt: QUICTransportConfig | None = None,
+    quic_transport_opt: Any | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
@@ -524,7 +635,7 @@ def new_host(
 
     # Determine the connection config to use
     # QUIC transport config takes precedence if QUIC is enabled
-    effective_config: ConnectionConfig | QUICTransportConfig | None
+    effective_config: ConnectionConfig | Any | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
     else:

@@ -27,6 +27,7 @@ from libp2p.io.trio import (
 from libp2p.network.connection.raw_connection import (
     RawConnection,
 )
+from libp2p.providers import TransportProvider
 from libp2p.transport.exceptions import (
     OpenConnectionError,
 )
@@ -199,3 +200,13 @@ class TCP(ITransport):
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
     return multiaddr_from_socket(socket)
+
+
+def _create_tcp_provider() -> "TransportProvider":
+    """
+    Entry-point factory for TCP transport discovery.
+
+    Returns a :class:`~libp2p.providers.TransportProvider` wrapping a
+    default :class:`TCP` instance.
+    """
+    return TransportProvider("tcp", TCP())

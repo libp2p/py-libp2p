@@ -86,13 +86,13 @@ class TransportUpgrader:
             ) from error
 
     async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
-        """Upgrade secured connection to a muxed connection.
+        """
+        Upgrade secured connection to a muxed connection.
 
         Before negotiating the muxer, this method verifies that the
         connection satisfies any ordering requirements declared by the
         registered muxer classes (via ``@after_connection``).
         """
-        # Phase 3: verify muxer ordering requirements
         self._verify_muxer_ordering(conn)
 
         try:
@@ -102,14 +102,9 @@ class TransportUpgrader:
                 "failed to negotiate the multiplexer protocol"
             ) from error
 
-    # ------------------------------------------------------------------
-    # Phase 3 — muxer ordering verification
-    # ------------------------------------------------------------------
-
-    def _verify_muxer_ordering(
-        self, conn: ISecureConn
-    ) -> None:
-        """Check that *conn* satisfies the ``@after_connection`` requirements
+    def _verify_muxer_ordering(self, conn: ISecureConn) -> None:
+        """
+        Check that *conn* satisfies the ``@after_connection`` requirements
         declared on every registered muxer class.
 
         If a muxer declares ``@after_connection(ISecureConn)`` the

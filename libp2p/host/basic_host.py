@@ -62,6 +62,7 @@ from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
     _update_peerstore_from_identify,
 )
+from libp2p.network.resolver import ConnectionResolver
 from libp2p.peer.id import (
     ID,
 )
@@ -173,6 +174,7 @@ class BasicHost(IHost):
     mDNS: MDNSDiscovery | None
     upnp: UpnpManager | None
     bootstrap: BootstrapDiscovery | None
+    _resolver: ConnectionResolver | None
 
     def __init__(
         self,
@@ -185,6 +187,7 @@ class BasicHost(IHost):
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
+        resolver: ConnectionResolver | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -197,10 +200,17 @@ class BasicHost(IHost):
         :param negotiate_timeout: Protocol negotiation timeout
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        :param resolver: Optional pull-based connection resolver.
+            When set, :meth:`connect` can use the resolver to build the
+            connection stack dynamically instead of the fixed
+            ``TransportUpgrader`` pipeline.
+        :type resolver: :class:`libp2p.network.resolver.ConnectionResolver`
+            or None
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
+        self._resolver = resolver
 
         # Coordinate negotiate_timeout with transport config if available
         # For QUIC transports, use the config value to ensure consistency
@@ -256,6 +266,11 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: set[ID] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+
+    @property
+    def resolver(self) -> ConnectionResolver | None:
+        """Return the pull-based connection resolver, if configured."""
+        return self._resolver
 
     def get_id(self) -> ID:
         """
@@ -977,7 +992,7 @@ class BasicHost(IHost):
 
     def _is_native_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
         """Return True if the muxed connection is natively muxed (e.g. QUIC)."""
-        return getattr(muxed_conn, 'is_muxed', False)
+        return getattr(muxed_conn, "is_muxed", False)
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         connection = self._get_first_connection(peer_id)
@@ -1061,7 +1076,7 @@ class BasicHost(IHost):
             await net_stream.reset()
             return
 
-        # Phase 2: Check handler connection requirements (if declared)
+        # Check handler connection requirements (if declared)
         from libp2p.requirements import check_connection_requirements
 
         underlying_conn = getattr(net_stream, "muxed_conn", None)

@@ -20,15 +20,17 @@ import trio
 from libp2p.abc import (
     ITransport,
 )
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import (
     PrivateKey,
 )
 from libp2p.custom_types import TProtocol
-from libp2p.transport.quic.types import TQUICConnHandlerFn
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.providers import TransportProvider
 from libp2p.transport.quic.security import QUICTLSSecurityConfig
+from libp2p.transport.quic.types import TQUICConnHandlerFn
 from libp2p.transport.quic.utils import (
     create_client_config_from_base,
     create_server_config_from_base,
@@ -504,3 +506,21 @@ class QUICTransport(ITransport):
             if listener.is_listening() and listener._socket:
                 return listener._socket
         return None
+
+
+def _create_quic_provider() -> "TransportProvider":
+    """
+    Entry-point factory for QUIC transport discovery.
+
+    Returns a :class:`~libp2p.providers.TransportProvider` wrapping a
+    default :class:`QUICTransport` instance.
+
+    .. note::
+
+       QUIC requires a private key at construction time.  This factory
+       generates a fresh Ed25519 identity; callers that need a specific
+       identity should construct the provider manually.
+    """
+    key_pair = create_new_key_pair()
+    transport = QUICTransport(key_pair.private_key)
+    return TransportProvider("quic", transport)

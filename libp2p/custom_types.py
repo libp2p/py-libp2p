@@ -5,28 +5,6 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, NewType, Union, cast
 
-from libp2p.transport.quic.stream import QUICStream
-
-if TYPE_CHECKING:
-    from libp2p.abc import IMuxedConn, IMuxedStream, INetStream, ISecureTransport
-    from libp2p.transport.quic.connection import QUICConnection
-else:
-    IMuxedConn = cast(type, object)
-    INetStream = cast(type, object)
-    ISecureTransport = cast(type, object)
-    IMuxedStream = cast(type, object)
-    QUICConnection = cast(type, object)
-
-from libp2p.io.abc import (
-    ReadWriteCloser,
-)
-from collections.abc import (
-    Awaitable,
-    Callable,
-    Mapping,
-)
-from typing import TYPE_CHECKING, NewType, Union, cast
-
 if TYPE_CHECKING:
     from libp2p.abc import IMuxedConn, IMuxedStream, INetStream, ISecureTransport
 else:

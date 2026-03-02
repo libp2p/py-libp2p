@@ -322,3 +322,97 @@ class TestIntegration:
 
         # Should be available in the other
         assert registry2.get_transport("persistent") == PersistentTransport
+
+
+class TestTransportRegistryCapabilities:
+    """Tests for capability-aware query methods."""
+
+    def test_quic_provides_security(self):
+        """QUIC transport declares provides_security = True."""
+        registry = TransportRegistry()
+        assert registry.transport_provides_security("quic") is True
+        assert registry.transport_provides_security("quic-v1") is True
+
+    def test_quic_provides_muxing(self):
+        """QUIC transport declares provides_muxing = True."""
+        registry = TransportRegistry()
+        assert registry.transport_provides_muxing("quic") is True
+        assert registry.transport_provides_muxing("quic-v1") is True
+
+    def test_tcp_does_not_provide_security(self):
+        """TCP transport has no capability declarations."""
+        registry = TransportRegistry()
+        assert registry.transport_provides_security("tcp") is False
+
+    def test_tcp_does_not_provide_muxing(self):
+        registry = TransportRegistry()
+        assert registry.transport_provides_muxing("tcp") is False
+
+    def test_unknown_protocol_returns_false(self):
+        registry = TransportRegistry()
+        assert registry.transport_provides_security("nonexistent") is False
+        assert registry.transport_provides_muxing("nonexistent") is False
+
+    def test_needs_security_upgrade(self):
+        registry = TransportRegistry()
+        assert registry.needs_security_upgrade("tcp") is True
+        assert registry.needs_security_upgrade("quic") is False
+
+    def test_needs_muxer_upgrade(self):
+        registry = TransportRegistry()
+        assert registry.needs_muxer_upgrade("tcp") is True
+        assert registry.needs_muxer_upgrade("quic") is False
+
+    def test_get_self_upgrading_protocols(self):
+        registry = TransportRegistry()
+        self_upgrading = registry.get_self_upgrading_protocols()
+        assert "quic" in self_upgrading
+        assert "quic-v1" in self_upgrading
+        assert "tcp" not in self_upgrading
+
+    def test_needs_upgrade_unknown_protocol(self):
+        registry = TransportRegistry()
+        assert registry.needs_security_upgrade("unknown") is True
+        assert registry.needs_muxer_upgrade("unknown") is True
+
+    def test_custom_capable_transport(self):
+        """Registering a custom transport with capabilities should be detected."""
+        registry = TransportRegistry()
+
+        class CapableTransport(ITransport):
+            @property
+            def provides_security(self) -> bool:
+                return True
+
+            @property
+            def provides_muxing(self) -> bool:
+                return False
+
+            async def dial(self, maddr: Multiaddr) -> IRawConnection:
+                raise NotImplementedError
+
+            def create_listener(self, handler_function: THandler) -> IListener:
+                raise NotImplementedError
+
+        registry.register_transport("custom-secure", CapableTransport)
+        assert registry.transport_provides_security("custom-secure") is True
+        assert registry.transport_provides_muxing("custom-secure") is False
+        assert registry.needs_security_upgrade("custom-secure") is False
+        assert registry.needs_muxer_upgrade("custom-secure") is True
+        assert "custom-secure" not in registry.get_self_upgrading_protocols()
+
+
+class TestModuleLevelCapabilityHelpers:
+    """Tests for the module-level convenience functions."""
+
+    def test_transport_needs_security(self):
+        from libp2p.transport.transport_registry import transport_needs_security
+
+        assert transport_needs_security("tcp") is True
+        assert transport_needs_security("quic") is False
+
+    def test_transport_needs_muxer(self):
+        from libp2p.transport.transport_registry import transport_needs_muxer
+
+        assert transport_needs_muxer("tcp") is True
+        assert transport_needs_muxer("quic") is False
