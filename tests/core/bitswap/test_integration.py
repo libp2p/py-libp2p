@@ -9,7 +9,7 @@ import trio
 
 from libp2p import new_host
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid, compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.crypto.secp256k1 import create_new_key_pair
@@ -83,8 +83,9 @@ class TestBitswapIntegration:
 
                     # Get the file
                     host_id = provider_host.get_id()
+                    root_cid_path = f"/ipfs/{cid_to_text(root_cid)}"
                     retrieved_data, filename = await client_dag.fetch_file(
-                        root_cid, host_id
+                        root_cid_path, host_id
                     )
 
                     # Verify the data matches
@@ -161,6 +162,68 @@ class TestBitswapIntegration:
                     client_cids = client_store.get_all_cids()
                     assert len(client_cids) == len(blocks)
 
+                finally:
+                    await provider_bitswap.stop()
+                    await client_bitswap.stop()
+                    await provider_host.close()
+                    await client_host.close()
+
+    @pytest.mark.trio
+    async def test_mixed_cid_inputs_for_block_requests(self):
+        """Test block requests with bytes/canonical/hex/path CID inputs."""
+        provider_key = create_new_key_pair()
+        client_key = create_new_key_pair()
+
+        provider_host = new_host(key_pair=provider_key)
+        client_host = new_host(key_pair=client_key)
+
+        async with provider_host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
+            async with client_host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
+                await trio.sleep(0.1)
+
+                provider_store = MemoryBlockStore()
+                client_store = MemoryBlockStore()
+                provider_bitswap = BitswapClient(
+                    provider_host, block_store=provider_store
+                )
+                client_bitswap = BitswapClient(client_host, block_store=client_store)
+
+                await provider_bitswap.start()
+                await client_bitswap.start()
+
+                try:
+                    block_data = b"mixed cid input integration block"
+                    block_cid = compute_cid_v1(block_data)
+                    await provider_bitswap.add_block(block_cid, block_data)
+
+                    provider_addrs = provider_host.get_addrs()
+                    provider_info = info_from_p2p_addr(
+                        Multiaddr(f"{provider_addrs[0]}/p2p/{provider_host.get_id()}")
+                    )
+                    await client_host.connect(provider_info)
+                    await trio.sleep(0.2)
+
+                    cid_canonical = cid_to_text(block_cid)
+                    cid_hex = block_cid.hex()
+                    cid_path = f"/ipfs/{cid_canonical}"
+
+                    retrieved_from_canonical = await client_bitswap.get_block(
+                        cid_canonical, peer_id=provider_host.get_id(), timeout=2.0
+                    )
+                    assert retrieved_from_canonical == block_data
+
+                    await client_store.delete_block(block_cid)
+                    retrieved_from_hex = await client_bitswap.get_block(
+                        cid_hex, peer_id=provider_host.get_id(), timeout=2.0
+                    )
+                    assert retrieved_from_hex == block_data
+
+                    await client_store.delete_block(block_cid)
+                    retrieved_from_path = await client_bitswap.get_block(
+                        cid_path, peer_id=provider_host.get_id(), timeout=2.0
+                    )
+                    assert retrieved_from_path == block_data
+                    assert await client_store.has_block(block_cid)
                 finally:
                     await provider_bitswap.stop()
                     await client_bitswap.stop()
@@ -356,13 +419,15 @@ class TestBitswapIntegration:
                     # Add two blocks to provider
                     block_a = b"Block A - Provider has this"
                     block_b = b"Block B - Provider has this too"
-                    cid_a = compute_cid(block_a)
-                    cid_b = compute_cid(block_b)
+                    cid_a = compute_cid_v1(block_a)
+                    cid_b = compute_cid_v1(block_b)
                     await provider_bitswap.add_block(cid_a, block_a)
                     await provider_bitswap.add_block(cid_b, block_b)
 
                     # Create CID for a block that doesn't exist
-                    nonexistent_cid = b"block_that_does_not_exist_anywhere"
+                    nonexistent_cid = compute_cid_v1(
+                        b"block_that_does_not_exist_anywhere"
+                    )
 
                     # Client requests existing blocks - these should succeed
                     retrieved_a = await client_bitswap.get_block(
