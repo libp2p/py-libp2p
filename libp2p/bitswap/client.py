@@ -18,6 +18,9 @@ from libp2p.peer.id import ID as PeerID
 
 from .block_store import BlockStore, MemoryBlockStore
 from .cid import (
+    CIDInput,
+    cid_to_bytes,
+    format_cid_for_display,
     get_cid_prefix,
     reconstruct_cid_from_prefix_and_data,
     verify_cid,
@@ -117,7 +120,7 @@ class BitswapClient:
         """Set the nursery for background tasks."""
         self._nursery = nursery
 
-    async def add_block(self, cid: bytes, data: bytes) -> None:
+    async def add_block(self, cid: CIDInput, data: bytes) -> None:
         """
         Add a block to the local store.
 
@@ -134,15 +137,19 @@ class BitswapClient:
                 f"Block size {len(data)} exceeds maximum {MAX_BLOCK_SIZE}"
             )
 
-        await self.block_store.put_block(cid, data)
-        logger.debug(f"Added block {cid.hex()[:16]}... to store")
+        cid_bytes = cid_to_bytes(cid)
+
+        await self.block_store.put_block(cid_bytes, data)
+        logger.debug(
+            f"Added block {format_cid_for_display(cid_bytes, max_len=16)} to store"
+        )
 
         # Notify peers who wanted this block
-        await self._notify_peers_about_block(cid, data)
+        await self._notify_peers_about_block(cid_bytes, data)
 
     async def get_block(
         self,
-        cid: bytes,
+        cid: CIDInput,
         peer_id: PeerID | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> bytes:
@@ -162,17 +169,19 @@ class BitswapClient:
             BitswapTimeoutError: If the request times out
 
         """
+        cid_bytes = cid_to_bytes(cid)
+
         # Check local store first
-        data = await self.block_store.get_block(cid)
+        data = await self.block_store.get_block(cid_bytes)
         if data is not None:
             return data
 
         # Request from network
-        return await self._request_block(cid, peer_id, timeout)
+        return await self._request_block(cid_bytes, peer_id, timeout)
 
     async def want_block(
         self,
-        cid: bytes,
+        cid: CIDInput,
         priority: int = DEFAULT_PRIORITY,
         want_type: int = 0,  # 0 = Block, 1 = Have (v1.2.0)
         send_dont_have: bool = False,  # v1.2.0
@@ -187,17 +196,19 @@ class BitswapClient:
             send_dont_have: Whether to request DontHave response if not found - v1.2.0
 
         """
-        self._wantlist[cid] = {
+        cid_bytes = cid_to_bytes(cid)
+
+        self._wantlist[cid_bytes] = {
             "priority": priority,
             "want_type": want_type,
             "send_dont_have": send_dont_have,
         }
         logger.debug(
-            f"Added {cid.hex()[:16]}... to wantlist "
+            f"Added {format_cid_for_display(cid_bytes, max_len=16)} to wantlist "
             f"(priority={priority}, type={'Have' if want_type else 'Block'})"
         )
 
-    async def have_block(self, cid: bytes, peer_id: PeerID | None = None) -> bool:
+    async def have_block(self, cid: CIDInput, peer_id: PeerID | None = None) -> bool:
         """
         Check if a peer has a block (v1.2.0 feature).
 
@@ -209,31 +220,33 @@ class BitswapClient:
             True if peer has the block, False otherwise
 
         """
+        cid_bytes = cid_to_bytes(cid)
+
         # Add to wantlist with Have type
-        await self.want_block(cid, want_type=1, send_dont_have=True)
+        await self.want_block(cid_bytes, want_type=1, send_dont_have=True)
 
         # Send wantlist to peer(s)
         if peer_id:
-            await self._send_wantlist_to_peer(peer_id, [cid])
+            await self._send_wantlist_to_peer(peer_id, [cid_bytes])
         else:
-            await self._broadcast_wantlist([cid])
+            await self._broadcast_wantlist([cid_bytes])
 
         # Wait for response (simplified - in production, track Have/DontHave responses)
         # For now, check if block appeared in store
         result = False
         try:
             with trio.fail_after(5.0):
-                while not await self.block_store.has_block(cid):
+                while not await self.block_store.has_block(cid_bytes):
                     await trio.sleep(0.1)
             result = True
         except trio.TooSlowError:
             result = False
         finally:
-            await self.cancel_want(cid)
+            await self.cancel_want(cid_bytes)
 
         return result
 
-    async def cancel_want(self, cid: bytes) -> None:
+    async def cancel_want(self, cid: CIDInput) -> None:
         """
         Cancel a previous want for a block.
 
@@ -241,18 +254,22 @@ class BitswapClient:
             cid: The CID to cancel
 
         """
-        if cid in self._wantlist:
-            del self._wantlist[cid]
-            logger.debug(f"Removed {cid.hex()[:16]}... from wantlist")
+        cid_bytes = cid_to_bytes(cid)
+
+        if cid_bytes in self._wantlist:
+            del self._wantlist[cid_bytes]
+            logger.debug(
+                f"Removed {format_cid_for_display(cid_bytes, max_len=16)} from wantlist"
+            )
 
             # Send cancel message to all peers
-            await self._broadcast_cancel(cid)
+            await self._broadcast_cancel(cid_bytes)
 
     async def _request_block(
         self, cid: bytes, peer_id: PeerID | None, timeout: float
     ) -> bytes:
         """Request a block from the network."""
-        logger.info(f"📤 Requesting block: {cid.hex()}")
+        logger.info(f"📤 Requesting block: {format_cid_for_display(cid)}")
 
         # Add to wantlist with sendDontHave=True for v1.2.0
         await self.want_block(cid, send_dont_have=True)
@@ -281,14 +298,16 @@ class BitswapClient:
             # Get the block from store
             data = await self.block_store.get_block(cid)
             if data is None:
-                error = BlockNotFoundError(f"Block {cid.hex()[:16]}... not found")
+                error = BlockNotFoundError(
+                    f"Block {format_cid_for_display(cid, max_len=16)} not found"
+                )
             else:
                 result = data
                 logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
         except trio.TooSlowError as e:
-            logger.error(f"  ✗ TIMEOUT waiting for block {cid.hex()}")
+            logger.error(f"  ✗ TIMEOUT waiting for block {format_cid_for_display(cid)}")
             error = BitswapTimeoutError(
-                f"Timeout waiting for block {cid.hex()[:16]}..."
+                f"Timeout waiting for block {format_cid_for_display(cid, max_len=16)}"
             )
             error.__cause__ = e
         finally:
@@ -315,7 +334,7 @@ class BitswapClient:
             f"Adding {len(cids)} CIDs to expected_blocks for peer {peer_id_str}"
         )
         for cid in cids:
-            logger.info(f"  + {cid.hex()}")
+            logger.info(f"  + {format_cid_for_display(cid)}")
 
         self._expected_blocks[peer_id].update(cids)
 
@@ -442,7 +461,10 @@ class BitswapClient:
                     [TProtocol(peer_protocol)],
                 )
                 await self._write_message(stream, msg)
-                logger.debug(f"Sent block {cid.hex()[:16]}... to peer {peer_id}")
+                logger.debug(
+                    f"Sent block {format_cid_for_display(cid, max_len=16)} "
+                    f"to peer {peer_id}"
+                )
             except Exception as e:
                 logger.error(f"Failed to send block to peer {peer_id}: {e}")
 
@@ -508,7 +530,7 @@ class BitswapClient:
                     logger.error(f"Peer: {peer_id_str}")
                     logger.error(f"Missing {remaining} blocks:")
                     for i, cid in enumerate(self._expected_blocks[peer_id]):
-                        logger.error(f"  {i + 1}. {cid.hex()}")
+                        logger.error(f"  {i + 1}. {format_cid_for_display(cid)}")
                     logger.error("=" * 70)
                     logger.error("")
                 del self._expected_blocks[peer_id]
@@ -655,7 +677,7 @@ class BitswapClient:
         logger.info(f"Expected {len(expected_cids)} blocks from this peer")
         logger.info("Expected CIDs:")
         for i, cid in enumerate(expected_cids):
-            logger.info(f"  {i + 1}. {cid.hex()}")
+            logger.info(f"  {i + 1}. {format_cid_for_display(cid)}")
         logger.info("=" * 70)
 
         for idx, block_data in enumerate(blocks):
@@ -670,10 +692,14 @@ class BitswapClient:
             matched_cid = None
             logger.info(f"  Checking against {len(expected_cids)} expected CIDs...")
             for i, cid in enumerate(expected_cids):
-                logger.info(f"    Attempt {i + 1}: Checking CID {cid.hex()}")
+                logger.info(
+                    f"    Attempt {i + 1}: Checking CID {format_cid_for_display(cid)}"
+                )
                 if verify_cid(cid, block_data):
                     matched_cid = cid
-                    logger.info(f"  ✓ MATCHED CID: {matched_cid.hex()}")
+                    logger.info(
+                        f"  ✓ MATCHED CID: {format_cid_for_display(matched_cid)}"
+                    )
                     break
                 else:
                     logger.info("    -> No match")
@@ -703,7 +729,7 @@ class BitswapClient:
                 logger.error("  Block doesn't match any expected CID")
                 logger.error(f"  Expected CIDs ({len(expected_cids)}):")
                 for i, cid in enumerate(list(expected_cids)[:5]):
-                    logger.error(f"    {i + 1}. {cid.hex()}")
+                    logger.error(f"    {i + 1}. {format_cid_for_display(cid)}")
                 if len(expected_cids) > 5:
                     logger.error(f"    ... and {len(expected_cids) - 5} more")
 
@@ -714,7 +740,7 @@ class BitswapClient:
         if remaining:
             logger.warning(f"  Still waiting for {len(remaining)} blocks:")
             for i, cid in enumerate(remaining):
-                logger.warning(f"    {i + 1}. {cid.hex()}")
+                logger.warning(f"    {i + 1}. {format_cid_for_display(cid)}")
         else:
             logger.info("  ✓ All blocks received from this peer!")
         logger.info("=" * 70)
@@ -731,7 +757,10 @@ class BitswapClient:
 
             # Store the block
             await self.block_store.put_block(cid, data)
-            logger.debug(f"Received and stored block {cid.hex()[:16]}... (v1.1.0+)")
+            logger.debug(
+                f"Received and stored block {format_cid_for_display(cid, max_len=16)} "
+                f"(v1.1.0+)"
+            )
 
             # Remove from expected blocks for all peers
             for peer_id in self._expected_blocks:
@@ -739,10 +768,16 @@ class BitswapClient:
 
             # Notify pending requests
             if cid in self._pending_requests:
-                logger.debug(f"Notifying pending request for {cid.hex()[:16]}...")
+                logger.debug(
+                    f"Notifying pending request for "
+                    f"{format_cid_for_display(cid, max_len=16)}..."
+                )
                 self._pending_requests[cid].set()
             else:
-                logger.debug(f"No pending request for {cid.hex()[:16]}...")
+                logger.debug(
+                    f"No pending request for "
+                    f"{format_cid_for_display(cid, max_len=16)}..."
+                )
 
     async def _process_block_presences(
         self, presences: Sequence[Any], peer_id: PeerID
@@ -760,7 +795,8 @@ class BitswapClient:
             has_block = presence.type == Message.Have
 
             logger.debug(
-                f"Received presence from {peer_id} for {cid.hex()[:16]}...: "
+                f"Received presence from {peer_id} for "
+                f"{format_cid_for_display(cid, max_len=16)}: "
                 f"{'Have' if has_block else 'DontHave'}"
             )
 
@@ -778,7 +814,8 @@ class BitswapClient:
                 self._dont_have_responses[cid].add(peer_id)
 
                 logger.info(
-                    f"  ℹ️  Peer {peer_id} doesn't have block {cid.hex()[:16]}... "
+                    f"  ℹ️  Peer {peer_id} doesn't have block "
+                    f"{format_cid_for_display(cid, max_len=16)} "
                     f"(DontHave response) - will try other peers or timeout"
                 )
 
