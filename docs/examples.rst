@@ -28,3 +28,4 @@ Examples
    examples.webrtc
    examples.tls
    examples.autotls
+   examples.perf
