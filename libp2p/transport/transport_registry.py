@@ -250,7 +250,10 @@ class TransportRegistry:
                 if "negotiate_timeout" in kwargs:
                     config.NEGOTIATE_TIMEOUT = kwargs["negotiate_timeout"]
 
-                return QUICTransport(private_key, config)
+                enable_autotls = kwargs.get("enable_autotls", False)
+                return QUICTransport(
+                    private_key, config=config, enable_autotls=enable_autotls
+                )
             elif protocol == "webrtc":
                 # WebRTC transport can be created with optional config
                 config = kwargs.get("config", {})

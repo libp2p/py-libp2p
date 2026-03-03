@@ -1,7 +1,7 @@
 import ipaddress
 import logging
 
-import miniupnpc  # type: ignore[import-untyped]
+import miniupnpc
 import trio
 
 logger = logging.getLogger(__name__)
