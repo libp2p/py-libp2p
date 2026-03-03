@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
     from libp2p.transport.webrtc.signal_service import SignalService
 
-logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
+logger = logging.getLogger("libp2p.transport.webrtc.private_to_public.listener")
 
 
 @dataclass
@@ -849,38 +849,18 @@ class WebRTCDirectListener(IListener):
                             session.remote_peer_id,
                         )
 
-                print(
+                logger.info(
                     f"[LISTENER] About to call register_incoming_connection() "
                     f"for {session.remote_peer_id}"
                 )
-                print(
-                    f"[LISTENER] connection type: {type(connection).__name__}, "
-                    f"is_initiator={getattr(connection, 'is_initiator', None)}"
-                )
-                print(
-                    f"[LISTENER] connection has conn attr: "
-                    f"{hasattr(connection, 'conn')}"
-                )
-                if hasattr(connection, "conn"):
-                    conn_wrapper = connection.conn
-                    print(f"[LISTENER] conn.conn  type: {type(conn_wrapper).__name__}")
-                    if hasattr(conn_wrapper, "read_writer"):
-                        read_writer = conn_wrapper.read_writer
-                        print(
-                            f"[LISTENER] conn.conn.read_writer "
-                            f" type: {type(read_writer).__name__}"
-                        )
 
                 try:
                     await self.transport.register_incoming_connection(connection)
-                    print(
+                    logger.info(
                         f"[LISTENER] register_incoming_connection() completed "
                         f"for {session.remote_peer_id}"
                     )
                 except Exception as reg_exc:
-                    print(
-                        "[LISTENER] register_incoming_connection() FAILED: %s", reg_exc
-                    )
                     logger.error(
                         "Listener failed to register incoming connection: %s",
                         reg_exc,

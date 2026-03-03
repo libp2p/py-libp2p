@@ -169,7 +169,7 @@ class RelayDiscovery(Service):
             logger.debug(
                 "Checking %d connected peers for relay support", len(connected_peers)
             )
-            print(
+            logger.info(
                 "relay discovery connected peers:",
                 [str(pid) for pid in connected_peers],
             )
@@ -189,7 +189,9 @@ class RelayDiscovery(Service):
                     if await self._supports_relay_protocol(peer_id):
                         await self._add_relay(peer_id)
                     else:
-                        print("peer does not support relay protocol:", str(peer_id))
+                        logger.info(
+                            "peer does not support relay protocol:", str(peer_id)
+                        )
 
             # Limit number of relays we track
             if len(self._discovered_relays) > self.max_relays:
@@ -272,7 +274,7 @@ class RelayDiscovery(Service):
                 if protocols_list is not None:
                     protocols = set(protocols_list)
                     self._protocol_cache[peer_id] = protocols
-                    print(
+                    logger.info(
                         "relay discovery: peerstore protocols for",
                         str(peer_id),
                         "=",
@@ -294,13 +296,13 @@ class RelayDiscovery(Service):
             with trio.fail_after(self.stream_timeout):
                 stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
                 if stream:
-                    print("relay discovery: opened stream to", str(peer_id))
+                    logger.info("relay discovery: opened stream to", str(peer_id))
                     await stream.close()
                     self._protocol_cache[peer_id] = {PROTOCOL_ID}
                     return True
                 return False
         except Exception as e:
-            print(
+            logger.info(
                 "relay discovery: direct connection failed for",
                 str(peer_id),
                 "->",

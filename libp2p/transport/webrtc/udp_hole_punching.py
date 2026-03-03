@@ -5,7 +5,7 @@ from typing import Any
 
 import trio
 
-logger = logging.getLogger("libp2p.transport.webrtc.direct")
+logger = logging.getLogger("libp2p.transport.webrtc.direct.udp_hole_punching")
 
 
 class UDPHolePuncher:
@@ -64,12 +64,12 @@ class UDPHolePuncher:
                     await trio.to_thread.run_sync(
                         sock.sendto, punch_data, (target_ip, target_port)
                     )
-                    print(
+                    logger.info(
                         f"sent punch to {target_ip}:{target_port} metadata={metadata}"
                     )
                     await trio.sleep(0.1)
                 except Exception as exc:
-                    print(f"[puncher] send failed: {exc}")
+                    logger.error(f"[puncher] send failed: {exc}")
 
             endpoint_key = f"{target_ip}:{target_port}"
             self.punch_sockets[endpoint_key] = sock

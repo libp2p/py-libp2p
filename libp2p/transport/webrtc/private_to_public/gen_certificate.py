@@ -407,7 +407,6 @@ def generate_local_certhash(cert_pem: bytes) -> str:
     der_bytes = cert.public_bytes(encoding=serialization.Encoding.DER)
     digest = hashlib.sha256(der_bytes).digest()
     certhash = base58.b58encode(digest).decode()
-    print(f"local_certhash= {certhash}")
     return f"uEi{certhash}"
 
 

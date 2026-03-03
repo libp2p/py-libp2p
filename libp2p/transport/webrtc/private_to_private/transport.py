@@ -533,13 +533,11 @@ class WebRTCTransport(ITransport):
         relays = self._relay_discovery.get_relays()
         relay_list = [str(r) for r in relays]
         logger.info("Relay discovery initial relays: %s", relay_list)
-        print("relay discovery initial relays:", relay_list)
         if not relays:
             await self._relay_discovery.discover_relays()
             relays = self._relay_discovery.get_relays()
             relay_list = [str(r) for r in relays]
             logger.info("Relay discovery after manual discover: %s", relay_list)
-            print("relay discovery after manual discover:", relay_list)
 
         reservation_failed = False
         for relay_id in relays:
@@ -556,19 +554,12 @@ class WebRTCTransport(ITransport):
             relay_list,
             reservation_failed,
         )
-        print(
-            "ensure_listener_ready relays:",
-            relay_list,
-            "reservation_failed=",
-            reservation_failed,
-        )
         if reservation_failed:
             logger.debug("Relay reservation failed for at least one relay")
 
         self._refresh_listener_addresses()
         advertised_list = [str(addr) for addr in self._advertised_addrs]
         logger.info("Advertised listener addrs: %s", advertised_list)
-        print("advertised listener addrs:", advertised_list)
 
     def _refresh_listener_addresses(self) -> None:
         """

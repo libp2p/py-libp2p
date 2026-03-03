@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
@@ -62,13 +63,18 @@ logger = logging.getLogger("libp2p.transport.webrtc.private_to_public")
 
 
 # Import ICE configuration fixes
+create_ice_config_for_address: Callable[[str], RTCConfiguration] | None = None
+enhanced_aioice_localhost_patch: Callable[[], None] | None = None
+
 try:
-    from ..ice_config_fix import (
-        create_ice_config_for_address,
-        enhanced_aioice_localhost_patch,
+    from .ice_config_fix import (
+        create_ice_config_for_address as _create_ice_config,
+        enhanced_aioice_localhost_patch as _enhanced_patch,
     )
 
-    # Apply aioice localhost patch at module import
+    create_ice_config_for_address = _create_ice_config
+    enhanced_aioice_localhost_patch = _enhanced_patch
+
     if enhanced_aioice_localhost_patch is not None:
         try:
             enhanced_aioice_localhost_patch()
@@ -76,7 +82,6 @@ try:
         except Exception as e:
             logger.warning(f"Failed to apply aioice localhost patch: {e}")
 except ImportError:
-    # Fallback if module not available
     create_ice_config_for_address = None
     enhanced_aioice_localhost_patch = None
     logger.warning("ICE config fixes not available - using default configuration")
@@ -287,6 +292,16 @@ class WebRTCDirectTransport(ITransport):
             logger.info(f"Dialing WebRTC-Direct to {peer_id} at {ip}:{port}")
 
             ufrag, ice_pwd = generate_ice_credentials()
+            if create_ice_config_for_address is not None:
+                rtc_config = create_ice_config_for_address(ip)
+            else:
+                ice_servers = [] if is_localhost_address(ip) else DEFAULT_ICE_SERVERS
+                rtc_config = RTCConfiguration(
+                    iceServers=[
+                        RTCIceServer(**s) if not isinstance(s, RTCIceServer) else s
+                        for s in ice_servers
+                    ]
+                )
 
             if self.cert_mgr is None:
                 raise WebRTCError(
@@ -402,7 +417,6 @@ class WebRTCDirectTransport(ITransport):
                     f"Attempting UDP punching (peer reachable: {is_peer_reachable}, "
                     f"self reachable: {is_self_reachable})"
                 )
-                print(f"UDP punch toward {ip}:{port} with metadata {punch_metadata}")
                 try:
                     await self.udp_puncher.punch_hole(ip, port, punch_metadata)
                     hole_punch_success = True
@@ -726,7 +740,7 @@ class WebRTCDirectTransport(ITransport):
                                     peer_id,
                                 )
 
-                    print(
+                    logger.info(
                         f"[webrtc-direct] dialer muxer negotiation: peer={peer_id} "
                         f"is_initiator={secure_is_initiator}"
                     )
@@ -738,8 +752,6 @@ class WebRTCDirectTransport(ITransport):
                         f"🟢 Calling upgrade_connection() for peer={peer_id} - "
                         f"muxer negotiation will start now (read loop should be active)"
                     )
-                    print(f"[DEBUG] About to call upgrade_connection() for {peer_id}")
-
                     # CRITICAL: Register upgrade protection before muxer negotiation
                     if pc is not None:
                         register_upgrade(pc)
@@ -751,14 +763,15 @@ class WebRTCDirectTransport(ITransport):
                     import traceback
 
                     stack_str = "".join(traceback.format_stack()[-5:])
-                    print(f"[DEBUG] Stack before upgrade_connection:\n{stack_str}")
+                    logger.debug(
+                        f"[DEBUG] Stack before upgrade_connection:\n{stack_str}"
+                    )
 
                     try:
                         with trio.fail_after(MUXER_NEGOTIATE_TIMEOUT):
                             muxed_conn = await swarm.upgrader.upgrade_connection(
                                 cast(ISecureConn, secure_conn), peer_id
                             )
-                        print(f"[DEBUG] upgrade_connection() returned for {peer_id}")
                         logger.info(
                             f"✅ upgrade_connection() completed for {peer_id}, "
                             f"muxed_conn type: {type(muxed_conn).__name__}"
@@ -779,7 +792,6 @@ class WebRTCDirectTransport(ITransport):
                             f"muxer protocols and data channels are flowing."
                         ) from muxer_timeout_exc
                     except Exception as upgrade_inner_exc:
-                        print("[DEBUG] upgrade_connection() raised:", upgrade_inner_exc)
                         logger.error(
                             "upgrade_connection() failed for %s: %s",
                             peer_id,
@@ -937,13 +949,11 @@ class WebRTCDirectTransport(ITransport):
         for multistream negotiation. The listener reads first (is_initiator=False),
         while the dialer writes first (is_initiator=True).
         """
-        print("[LISTENER] register_incoming_connection() called")
         if self.host is None:
             await connection.close()
             return
 
         remote_peer_id = getattr(connection, "remote_peer_id", None)
-        print(f"[LISTENER] remote_peer_id={remote_peer_id}")
         if remote_peer_id is None:
             await connection.close()
             raise WebRTCError("Incoming WebRTC-Direct conn: missing remote peer ID")
