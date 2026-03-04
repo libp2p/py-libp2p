@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 import cbor2
+import multibase
+import varint
 
 from libp2p.crypto.ed25519 import (
     Ed25519PrivateKey,
@@ -13,11 +15,95 @@ from libp2p.peer.id import ID
 from libp2p.records.ipns import (
     MAX_RECORD_SIZE,
     SIGNATURE_PREFIX,
-    VALIDITY_TYPE_EOL,
     IPNSValidator,
+    ValidityType,
 )
 from libp2p.records.pb.ipns_pb2 import IpnsEntry
 from libp2p.records.utils import InvalidRecordType
+
+
+def create_ipns_name(private_key: Ed25519PrivateKey) -> str:
+    """Create an IPNS name from a private key (identity multihash of public key)."""
+    peer_id = ID.from_pubkey(private_key.get_public_key())
+    return peer_id.to_bytes().hex()
+
+
+def create_valid_ipns_record(
+    private_key: Ed25519PrivateKey,
+    value: bytes = b"/ipfs/QmTest123",
+    sequence: int = 1,
+    ttl: int = 300_000_000_000,
+    validity_delta: timedelta = timedelta(hours=1),
+) -> bytes:
+    """
+    Create a valid IPNS record for testing.
+
+    Args:
+        private_key: The Ed25519 private key to sign the record
+        value: The content path (default: /ipfs/QmTest123)
+        sequence: The sequence number
+        ttl: Time-to-live in nanoseconds
+        validity_delta: How far in the future the record expires
+
+    Returns:
+        Serialized IpnsEntry protobuf bytes
+
+    """
+    expiry = datetime.now(timezone.utc) + validity_delta
+    validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    validity_bytes = validity.encode("ascii")
+
+    # Create DAG-CBOR data (keys must be sorted per spec)
+    cbor_data = {
+        "Sequence": sequence,
+        "TTL": ttl,
+        "Validity": validity_bytes,
+        "ValidityType": ValidityType.EOL,
+        "Value": value,
+    }
+    # Encode with sorted keys (DAG-CBOR requirement)
+    data_bytes = cbor2.dumps(cbor_data, canonical=True)
+
+    # Create signature over "ipns-signature:" + CBOR data
+    signature_payload = SIGNATURE_PREFIX + data_bytes
+    signature = private_key.sign(signature_payload)
+
+    # Create the IpnsEntry protobuf
+    entry = IpnsEntry()
+    entry.value = value
+    entry.validityType = IpnsEntry.ValidityType.EOL
+    entry.validity = validity_bytes
+    entry.sequence = sequence
+    entry.ttl = ttl
+    entry.signatureV2 = signature
+    entry.data = data_bytes
+
+    # For Ed25519, public key is inlined in name, so pubKey is optional
+    # but we can include it for completeness
+    # entry.pubKey = marshal_public_key(private_key.get_public_key())
+
+    return entry.SerializeToString()
+
+
+def ipns_name_to_key(name: str) -> str:
+    """
+    Convert CIDv1 IPNS name to the /ipns/<multihash> key format.
+
+    IPNS names are CIDv1 with libp2p-key multicodec (0x72).
+    We need to extract the multihash and convert to hex for our key format.
+    """
+    cid_bytes = multibase.decode(name)
+
+    version = varint.decode_bytes(cid_bytes)
+    assert version == 1, f"Expected CIDv1, got version {version}"
+    version_len = len(varint.encode(version))
+
+    codec = varint.decode_bytes(cid_bytes[version_len:])
+    assert codec == 0x72, f"Expected libp2p-key codec (0x72), got 0x{codec:x}"
+    codec_len = len(varint.encode(codec))
+
+    multihash_bytes = cid_bytes[version_len + codec_len:]
+    return "/ipns/" + multihash_bytes.hex()
 
 
 class TestIPNSValidator:
@@ -34,69 +120,6 @@ class TestIPNSValidator:
         keypair = create_ed25519_keypair()
         return keypair.private_key, keypair.public_key
 
-    def _create_ipns_name(self, private_key: Ed25519PrivateKey) -> str:
-        """Create an IPNS name from a private key (identity multihash of public key)."""
-        peer_id = ID.from_pubkey(private_key.get_public_key())
-        return peer_id.to_bytes().hex()
-
-    def _create_valid_ipns_record(
-        self,
-        private_key: Ed25519PrivateKey,
-        value: bytes = b"/ipfs/QmTest123",
-        sequence: int = 1,
-        ttl: int = 300_000_000_000,  # 5 minutes in nanoseconds
-        validity_delta: timedelta = timedelta(hours=1),
-    ) -> bytes:
-        """
-        Create a valid IPNS record for testing.
-
-        Args:
-            private_key: The Ed25519 private key to sign the record
-            value: The content path (default: /ipfs/QmTest123)
-            sequence: The sequence number
-            ttl: Time-to-live in nanoseconds
-            validity_delta: How far in the future the record expires
-
-        Returns:
-            Serialized IpnsEntry protobuf bytes
-
-        """
-        # Calculate validity timestamp (RFC3339 format)
-        expiry = datetime.now(timezone.utc) + validity_delta
-        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-        validity_bytes = validity.encode("ascii")
-
-        # Create DAG-CBOR data (keys must be sorted per spec)
-        cbor_data = {
-            "Sequence": sequence,
-            "TTL": ttl,
-            "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
-            "Value": value,
-        }
-        # Encode with sorted keys (DAG-CBOR requirement)
-        data_bytes = cbor2.dumps(cbor_data, canonical=True)
-
-        # Create signature over "ipns-signature:" + CBOR data
-        signature_payload = SIGNATURE_PREFIX + data_bytes
-        signature = private_key.sign(signature_payload)
-
-        # Create the IpnsEntry protobuf
-        entry = IpnsEntry()
-        entry.value = value
-        entry.validityType = IpnsEntry.ValidityType.EOL
-        entry.validity = validity_bytes
-        entry.sequence = sequence
-        entry.ttl = ttl
-        entry.signatureV2 = signature
-        entry.data = data_bytes
-
-        # For Ed25519, public key is inlined in name, so pubKey is optional
-        # but we can include it for completeness
-        # entry.pubKey = marshal_public_key(private_key.get_public_key())
-
-        return entry.SerializeToString()
-
     def _marshal_public_key(self, public_key) -> bytes:
         """Marshal a public key to protobuf format."""
         proto_key = crypto_pb2.PublicKey()
@@ -109,9 +132,9 @@ class TestIPNSValidator:
     def test_validate_valid_record(self, validator, ed25519_keypair):
         """Test that a valid IPNS record passes validation."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
-        value = self._create_valid_ipns_record(private_key)
+        value = create_valid_ipns_record(private_key)
 
         # Should not raise any exception
         validator.validate(key, value)
@@ -119,9 +142,9 @@ class TestIPNSValidator:
     def test_validate_wrong_namespace(self, validator, ed25519_keypair):
         """Test that records with wrong namespace are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/pk/{name_hash}"  # Wrong namespace
-        value = self._create_valid_ipns_record(private_key)
+        value = create_valid_ipns_record(private_key)
 
         with pytest.raises(InvalidRecordType, match="Invalid namespace.*'ipns'"):
             validator.validate(key, value)
@@ -129,7 +152,7 @@ class TestIPNSValidator:
     def test_validate_record_too_large(self, validator, ed25519_keypair):
         """Test that records exceeding size limit are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create an oversized record
@@ -141,7 +164,7 @@ class TestIPNSValidator:
     def test_validate_invalid_protobuf(self, validator, ed25519_keypair):
         """Test that invalid protobuf data is rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
         invalid_data = b"not a valid protobuf"
 
@@ -151,7 +174,7 @@ class TestIPNSValidator:
     def test_validate_missing_signature_v2(self, validator, ed25519_keypair):
         """Test that records without signatureV2 are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create entry without signatureV2
@@ -165,7 +188,7 @@ class TestIPNSValidator:
     def test_validate_missing_data(self, validator, ed25519_keypair):
         """Test that records without data field are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create entry without data
@@ -181,11 +204,11 @@ class TestIPNSValidator:
     def test_validate_invalid_signature(self, validator, ed25519_keypair):
         """Test that records with invalid signatures are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create a valid record first
-        valid_record = self._create_valid_ipns_record(private_key)
+        valid_record = create_valid_ipns_record(private_key)
 
         # Parse and corrupt the signature
         entry = IpnsEntry()
@@ -211,11 +234,11 @@ class TestIPNSValidator:
             )
 
         # Use name from first key but sign with second key
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create record signed with different key
-        value = self._create_valid_ipns_record(other_private_key)
+        value = create_valid_ipns_record(other_private_key)
 
         with pytest.raises(InvalidRecordType):
             validator.validate(key, value)
@@ -225,11 +248,11 @@ class TestIPNSValidator:
     def test_validate_expired_record(self, validator, ed25519_keypair):
         """Test that expired records are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create a record that expired 1 hour ago
-        value = self._create_valid_ipns_record(
+        value = create_valid_ipns_record(
             private_key,
             validity_delta=timedelta(hours=-1),  # Expired
         )
@@ -240,11 +263,11 @@ class TestIPNSValidator:
     def test_validate_future_valid_record(self, validator, ed25519_keypair):
         """Test that records valid far in the future are accepted."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create a record valid for 100 years (like test vectors)
-        value = self._create_valid_ipns_record(
+        value = create_valid_ipns_record(
             private_key,
             validity_delta=timedelta(days=365 * 100),
         )
@@ -257,11 +280,11 @@ class TestIPNSValidator:
     def test_validate_v1_v2_value_mismatch(self, validator, ed25519_keypair):
         """Test that mismatched V1/V2 values are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create a valid record
-        valid_record = self._create_valid_ipns_record(
+        valid_record = create_valid_ipns_record(
             private_key, value=b"/ipfs/correct"
         )
 
@@ -276,11 +299,11 @@ class TestIPNSValidator:
     def test_validate_v1_v2_sequence_mismatch(self, validator, ed25519_keypair):
         """Test that mismatched V1/V2 sequence numbers are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create a valid record with sequence=1
-        valid_record = self._create_valid_ipns_record(private_key, sequence=1)
+        valid_record = create_valid_ipns_record(private_key, sequence=1)
 
         # Parse and modify V1 sequence
         entry = IpnsEntry()
@@ -297,9 +320,9 @@ class TestIPNSValidator:
         private_key, _ = ed25519_keypair
 
         # Create records with different sequence numbers
-        record1 = self._create_valid_ipns_record(private_key, sequence=1)
-        record2 = self._create_valid_ipns_record(private_key, sequence=5)
-        record3 = self._create_valid_ipns_record(private_key, sequence=3)
+        record1 = create_valid_ipns_record(private_key, sequence=1)
+        record2 = create_valid_ipns_record(private_key, sequence=5)
+        record3 = create_valid_ipns_record(private_key, sequence=3)
 
         values = [record1, record2, record3]
         best_idx = validator.select("/ipns/test", values)
@@ -313,10 +336,10 @@ class TestIPNSValidator:
         private_key, _ = ed25519_keypair
 
         # Create records with same sequence but different validity
-        record1 = self._create_valid_ipns_record(
+        record1 = create_valid_ipns_record(
             private_key, sequence=1, validity_delta=timedelta(hours=1)
         )
-        record2 = self._create_valid_ipns_record(
+        record2 = create_valid_ipns_record(
             private_key, sequence=1, validity_delta=timedelta(hours=24)
         )
 
@@ -334,7 +357,7 @@ class TestIPNSValidator:
         """Test that invalid records are skipped during selection."""
         private_key, _ = ed25519_keypair
 
-        valid_record = self._create_valid_ipns_record(private_key, sequence=1)
+        valid_record = create_valid_ipns_record(private_key, sequence=1)
         invalid_record = b"invalid protobuf data"
 
         values = [invalid_record, valid_record]
@@ -443,18 +466,15 @@ class TestIPNSValidatorIntegration:
     async def test_ipns_validator_registered_in_dht(self):
         """Test that IPNSValidator is properly registered in DHT by default."""
         from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
-        from libp2p.records.ipns import IPNSValidator
         from tests.utils.factories import host_pair_factory
 
         async with host_pair_factory() as (host_a, host_b):
             dht = KadDHT(host_a, mode=DHTMode.SERVER)
             dht.apply_fallbacks()
 
-            # Check that IPNS validator is registered
-            if dht.validator is not None and hasattr(dht.validator, "_validators"):
-                assert "ipns" in dht.validator._validators
-                assert isinstance(dht.validator._validators["ipns"], IPNSValidator)
-                assert "pk" in dht.validator._validators
+            # Verify via validate_config() — tests public behaviour
+            # without poking at the private _validators dict.
+            dht.validate_config()  # Should not raise
 
 
 class TestIPNSSpecTestVectors:
@@ -523,43 +543,6 @@ class TestIPNSSpecTestVectors:
     def validator(self) -> IPNSValidator:
         return IPNSValidator()
 
-    def _ipns_name_to_key(self, name: str) -> str:
-        """
-        Convert CIDv1 IPNS name to the /ipns/<multihash> key format.
-
-        IPNS names are CIDv1 with libp2p-key multicodec (0x72).
-        We need to extract the multihash and convert to hex for our key format.
-        """
-        # Decode base36 CID (k prefix indicates base36)
-        alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-        name_lower = name.lower()
-
-        # Remove 'k' prefix if present (base36 indicator)
-        if name_lower.startswith("k"):
-            name_lower = name_lower[1:]
-
-        # Decode base36
-        num = 0
-        for char in name_lower:
-            num = num * 36 + alphabet.index(char)
-
-        # Convert to bytes
-        cid_bytes = []
-        while num > 0:
-            cid_bytes.append(num & 0xFF)
-            num >>= 8
-        cid_bytes = bytes(reversed(cid_bytes))
-
-        # CIDv1 format: <version><codec><multihash>
-        # version = 0x01, codec = 0x72 (libp2p-key)
-        # Skip version (varint) and codec (varint) to get multihash
-        # For these test vectors, version=1 and codec=0x72 are single bytes
-        if len(cid_bytes) > 2:
-            multihash_bytes = cid_bytes[2:]  # Skip version and codec
-            return "/ipns/" + multihash_bytes.hex()
-
-        return "/ipns/" + cid_bytes.hex()
-
     def _load_fixture(self, filename: str) -> bytes:
         """Load a test fixture file."""
         path = self.FIXTURES_DIR / filename
@@ -569,7 +552,7 @@ class TestIPNSSpecTestVectors:
         """V1-only record should be rejected (missing signatureV2)."""
         vector = self.TEST_VECTORS["v1_only"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         with pytest.raises(InvalidRecordType, match=vector["error"]):
             validator.validate(key, record_bytes)
@@ -578,7 +561,7 @@ class TestIPNSSpecTestVectors:
         """V1+V2 record with both signatures valid should pass."""
         vector = self.TEST_VECTORS["v1_v2_valid"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         # Should not raise
         validator.validate(key, record_bytes)
@@ -596,7 +579,7 @@ class TestIPNSSpecTestVectors:
         """V1+V2 record with mismatched V1 value should be rejected."""
         vector = self.TEST_VECTORS["v1_v2_broken_v1_value"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         with pytest.raises(InvalidRecordType, match=vector["error"]):
             validator.validate(key, record_bytes)
@@ -605,7 +588,7 @@ class TestIPNSSpecTestVectors:
         """V1+V2 record with only signatureV1 valid should be rejected."""
         vector = self.TEST_VECTORS["v1_v2_broken_sig_v2"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         with pytest.raises(InvalidRecordType, match=vector["error"]):
             validator.validate(key, record_bytes)
@@ -614,7 +597,7 @@ class TestIPNSSpecTestVectors:
         """V1+V2 record with only signatureV2 valid should pass (V1 ignored)."""
         vector = self.TEST_VECTORS["v1_v2_broken_sig_v1"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         # Should not raise - signatureV1 is ignored per spec
         validator.validate(key, record_bytes)
@@ -623,7 +606,7 @@ class TestIPNSSpecTestVectors:
         """V2-only record (no V1 fields) should pass."""
         vector = self.TEST_VECTORS["v2_only"]
         record_bytes = self._load_fixture(vector["file"])
-        key = self._ipns_name_to_key(vector["name"])
+        key = ipns_name_to_key(vector["name"])
 
         # Should not raise
         validator.validate(key, record_bytes)
@@ -648,56 +631,16 @@ class TestIPNSValidatorErrorHandling:
         keypair = create_ed25519_keypair()
         return keypair.private_key, keypair.public_key
 
-    def _create_ipns_name(self, private_key: Ed25519PrivateKey) -> str:
-        """Create an IPNS name from a private key."""
-        peer_id = ID.from_pubkey(private_key.get_public_key())
-        return peer_id.to_bytes().hex()
-
-    def _create_ipns_record(
-        self,
-        private_key: Ed25519PrivateKey,
-        value: bytes = b"/ipfs/QmTest123",
-        sequence: int = 1,
-        ttl: int = 300_000_000_000,
-        validity_delta: timedelta = timedelta(hours=1),
-    ) -> bytes:
-        """Create a valid IPNS record for testing."""
-        expiry = datetime.now(timezone.utc) + validity_delta
-        validity = expiry.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-        validity_bytes = validity.encode("ascii")
-
-        cbor_data = {
-            "Sequence": sequence,
-            "TTL": ttl,
-            "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
-            "Value": value,
-        }
-        data_bytes = cbor2.dumps(cbor_data, canonical=True)
-        signature_payload = SIGNATURE_PREFIX + data_bytes
-        signature = private_key.sign(signature_payload)
-
-        entry = IpnsEntry()
-        entry.value = value
-        entry.validityType = IpnsEntry.ValidityType.EOL
-        entry.validity = validity_bytes
-        entry.sequence = sequence
-        entry.ttl = ttl
-        entry.signatureV2 = signature
-        entry.data = data_bytes
-
-        return entry.SerializeToString()
-
     def test_validator_check_expiration_disabled(
         self, validator_no_expiry_check, ed25519_keypair
     ):
         """Test that expired records pass when expiration check is disabled."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create an expired record
-        value = self._create_ipns_record(
+        value = create_valid_ipns_record(
             private_key,
             validity_delta=timedelta(hours=-1),  # Already expired
         )
@@ -708,7 +651,7 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_empty_record(self, validator, ed25519_keypair):
         """Test that empty records are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         with pytest.raises(InvalidRecordType, match="empty"):
@@ -717,7 +660,7 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_missing_cbor_field(self, validator, ed25519_keypair):
         """Test that records missing required CBOR fields are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         # Create record with missing Sequence field
@@ -728,7 +671,7 @@ class TestIPNSValidatorErrorHandling:
         cbor_data = {
             "TTL": 300_000_000_000,
             "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
+            "ValidityType": ValidityType.EOL,
             "Value": b"/ipfs/QmTest123",
             # Missing "Sequence" field
         }
@@ -746,7 +689,7 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_invalid_sequence_type(self, validator, ed25519_keypair):
         """Test that records with wrong Sequence type are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         expiry = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -757,7 +700,7 @@ class TestIPNSValidatorErrorHandling:
             "Sequence": "not_an_int",  # Wrong type
             "TTL": 300_000_000_000,
             "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
+            "ValidityType": ValidityType.EOL,
             "Value": b"/ipfs/QmTest123",
         }
         data_bytes = cbor2.dumps(cbor_data, canonical=True)
@@ -774,7 +717,7 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_negative_sequence(self, validator, ed25519_keypair):
         """Test that records with negative sequence are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         expiry = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -785,7 +728,7 @@ class TestIPNSValidatorErrorHandling:
             "Sequence": -1,  # Negative
             "TTL": 300_000_000_000,
             "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
+            "ValidityType": ValidityType.EOL,
             "Value": b"/ipfs/QmTest123",
         }
         data_bytes = cbor2.dumps(cbor_data, canonical=True)
@@ -802,7 +745,7 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_empty_value(self, validator, ed25519_keypair):
         """Test that records with empty Value are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         expiry = datetime.now(timezone.utc) + timedelta(hours=1)
@@ -813,7 +756,7 @@ class TestIPNSValidatorErrorHandling:
             "Sequence": 1,
             "TTL": 300_000_000_000,
             "Validity": validity_bytes,
-            "ValidityType": VALIDITY_TYPE_EOL,
+            "ValidityType": ValidityType.EOL,
             "Value": b"",  # Empty
         }
         data_bytes = cbor2.dumps(cbor_data, canonical=True)
@@ -830,14 +773,14 @@ class TestIPNSValidatorErrorHandling:
     def test_validate_invalid_validity_format(self, validator, ed25519_keypair):
         """Test that records with invalid validity timestamp are rejected."""
         private_key, _ = ed25519_keypair
-        name_hash = self._create_ipns_name(private_key)
+        name_hash = create_ipns_name(private_key)
         key = f"/ipns/{name_hash}"
 
         cbor_data = {
             "Sequence": 1,
             "TTL": 300_000_000_000,
             "Validity": b"not-a-valid-timestamp",  # Invalid
-            "ValidityType": VALIDITY_TYPE_EOL,
+            "ValidityType": ValidityType.EOL,
             "Value": b"/ipfs/QmTest123",
         }
         data_bytes = cbor2.dumps(cbor_data, canonical=True)

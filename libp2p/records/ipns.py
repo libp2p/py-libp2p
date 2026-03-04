@@ -7,6 +7,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+import cbor2
 import multihash
 
 from libp2p.records.pb.ipns_pb2 import IpnsEntry
@@ -29,7 +30,6 @@ MAX_RECORD_SIZE = 10 * 1024  # 10 KiB
 SIGNATURE_PREFIX = b"ipns-signature:"
 
 # Validity types per spec section 4.2.1
-VALIDITY_TYPE_EOL = 0  # End of Life - the only supported validity type
 
 # Multihash codes for key extraction
 IDENTITY_MULTIHASH_CODE = 0x00  # For Ed25519 keys inlined in IPNS name
@@ -83,12 +83,21 @@ class ParsedIPNSRecord:
     useful for debugging and inspection.
     """
 
+    #: The content path (e.g. ``b"/ipfs/Qm..."``).
     value: bytes
+    #: Parsed expiration timestamp (timezone-aware UTC).
     validity: datetime
+    #: The validity type (currently only ``ValidityType.EOL``).
     validity_type: ValidityType
+    #: Monotonically increasing sequence number (uint64).
     sequence: int
+    #: Time-to-live hint in nanoseconds, or ``None`` if absent.
     ttl: int | None
+    #: ``True`` when the public key was inlined in the IPNS name
+    #: via an identity multihash (typical for Ed25519 keys).
     public_key_inlined: bool
+    #: ``True`` when legacy V1 protobuf fields (``value``, ``validity``,
+    #: ``signatureV1``) are present in the record.
     has_v1_fields: bool
 
 
@@ -101,12 +110,27 @@ class IPNSValidator(Validator):
     signature format with DAG-CBOR encoded data.
 
     Features:
+
     - Full V2 record validation with DAG-CBOR
     - Backward compatibility with V1 fields
     - Public key extraction from name or record
     - RFC3339 timestamp validation with nanosecond support
     - Sequence-based record selection
     - Comprehensive error messages for debugging
+
+    Example::
+
+        from libp2p.records.ipns import IPNSValidator
+        from libp2p.records.validator import NamespacedValidator
+
+        # Register with a DHT's namespaced validator
+        validator = NamespacedValidator({"ipns": IPNSValidator()})
+
+        # Validate an IPNS record
+        validator.validate("/ipns/<multihash-hex>", record_bytes)
+
+        # Select the best record from multiple candidates
+        best = IPNSValidator().select(key, [record1, record2])
     """
 
     def __init__(self, *, check_expiration: bool = True) -> None:
@@ -125,6 +149,7 @@ class IPNSValidator(Validator):
         Validate an IPNS record per spec section 5.3 (Record Verification).
 
         Validation steps:
+
         1. Verify namespace is 'ipns'
         2. Check record size <= 10 KiB
         3. Parse protobuf and verify required V2 fields (signatureV2, data)
@@ -143,53 +168,17 @@ class IPNSValidator(Validator):
             InvalidRecordType: If any validation step fails
 
         """
-        ns, name_hash = split_key(key)
-        if ns != "ipns":
-            raise InvalidRecordType(f"Invalid namespace: expected 'ipns', got '{ns}'")
+        self._validate_internal(key, value)
 
-        if len(value) > MAX_RECORD_SIZE:
-            raise InvalidRecordType(
-                f"IPNS record exceeds size limit: {len(value)} > "
-                f"{MAX_RECORD_SIZE} bytes"
-            )
-
-        if len(value) == 0:
-            raise InvalidRecordType("IPNS record is empty")
-
-        try:
-            entry = IpnsEntry()
-            entry.ParseFromString(value)
-        except Exception as e:
-            raise InvalidRecordType(f"Failed to parse IPNS record protobuf: {e}")
-
-        # Verify required V2 fields
-        if not entry.signatureV2:
-            raise InvalidRecordType(
-                "Missing signatureV2 field (required for V2 records)"
-            )
-        if not entry.data:
-            raise InvalidRecordType("Missing data field (required for V2 records)")
-
-        pubkey = self._extract_public_key(entry, name_hash)
-
-        cbor_data = self._decode_cbor_data(entry.data)
-
-        self._validate_cbor_structure(cbor_data)
-
-        self._verify_signature(pubkey, entry.data, entry.signatureV2)
-
-        self._validate_v1_v2_consistency(entry, cbor_data)
-
-        self._check_validity(cbor_data)
-
-        logger.debug("IPNS record validated successfully: %s", key)
-
-    def validate_with_details(self, key: str, value: bytes) -> ParsedIPNSRecord:
+    def validate_with_details(
+        self, key: str, value: bytes
+    ) -> ParsedIPNSRecord:
         """
         Validate an IPNS record and return parsed details.
 
-        This is useful for debugging or when you need information about
-        the validated record.
+        This is useful for callers that need structured access to the
+        validated record fields (e.g. inspecting sequence, expiry, or
+        content path).
 
         Args:
             key: The IPNS key in format "/ipns/<multihash>"
@@ -202,39 +191,113 @@ class IPNSValidator(Validator):
             InvalidRecordType: If validation fails
 
         """
-        self.validate(key, value)
+        entry, cbor_data, name_hash = self._validate_internal(key, value)
 
-        entry = IpnsEntry()
-        entry.ParseFromString(value)
-        cbor_data = self._decode_cbor_data(entry.data)
-
+        # Parse validity timestamp
         validity_bytes = cbor_data.get(CBOR_FIELD_VALIDITY, b"")
         if isinstance(validity_bytes, bytes):
             validity_str = validity_bytes.decode("ascii")
         else:
             validity_str = validity_bytes
-        validity_dt = self._parse_rfc3339(validity_str)
 
-        _, name_hash = split_key(key)
+        try:
+            validity_dt = self._parse_rfc3339(validity_str)
+        except ValueError as e:
+            raise InvalidRecordType(
+                f"Invalid validity timestamp: {e}"
+            )
+
+        # Check if public key was inlined in the IPNS name
         name_bytes = bytes.fromhex(name_hash)
         mh = multihash.decode(name_bytes)
         public_key_inlined = mh.func == IDENTITY_MULTIHASH_CODE
 
+        # V1 presence: check fields that reliably indicate V1 presence.
+        # sequence and ttl have 0 as both a valid value and the proto default,
+        # so they cannot signal V1 presence; use value, validity, signatureV1.
         has_v1_fields = bool(
-            entry.value or entry.validity or entry.sequence or entry.ttl
+            entry.value or entry.validity or entry.signatureV1
         )
 
         return ParsedIPNSRecord(
             value=cbor_data.get(CBOR_FIELD_VALUE, b""),
             validity=validity_dt,
             validity_type=ValidityType(
-                cbor_data.get(CBOR_FIELD_VALIDITY_TYPE, VALIDITY_TYPE_EOL)
+                cbor_data.get(CBOR_FIELD_VALIDITY_TYPE, ValidityType.EOL)
             ),
             sequence=cbor_data.get(CBOR_FIELD_SEQUENCE, 0),
             ttl=cbor_data.get(CBOR_FIELD_TTL),
             public_key_inlined=public_key_inlined,
             has_v1_fields=has_v1_fields,
         )
+
+    def _validate_internal(
+        self, key: str, value: bytes
+    ) -> tuple[IpnsEntry, dict[str, Any], str]:
+        """
+        Core validation logic shared by validate() and validate_with_details().
+
+        Returns:
+            Tuple of (parsed IpnsEntry, decoded CBOR data dict, name_hash hex)
+
+        Raises:
+            InvalidRecordType: If any validation step fails
+
+        """
+        # Step 1: Verify namespace
+        ns, name_hash = split_key(key)
+        if ns != "ipns":
+            raise InvalidRecordType(
+                f"Invalid namespace: expected 'ipns', got '{ns}'"
+            )
+
+        # Step 2: Check record size
+        if len(value) > MAX_RECORD_SIZE:
+            raise InvalidRecordType(
+                f"IPNS record exceeds size limit: {len(value)} > "
+                f"{MAX_RECORD_SIZE} bytes"
+            )
+
+        if len(value) == 0:
+            raise InvalidRecordType("IPNS record is empty")
+
+        # Step 3: Parse protobuf
+        try:
+            entry = IpnsEntry()
+            entry.ParseFromString(value)
+        except Exception as e:
+            raise InvalidRecordType(
+                f"Failed to parse IPNS record protobuf: {e}"
+            )
+
+        # Verify required V2 fields
+        if not entry.signatureV2:
+            raise InvalidRecordType(
+                "Missing signatureV2 field (required for V2 records)"
+            )
+        if not entry.data:
+            raise InvalidRecordType(
+                "Missing data field (required for V2 records)"
+            )
+
+        # Step 4: Extract public key
+        pubkey = self._extract_public_key(entry, name_hash)
+
+        # Step 5: Decode and validate CBOR
+        cbor_data = self._decode_cbor_data(entry.data)
+        self._validate_cbor_structure(cbor_data)
+
+        # Step 6: Verify signature
+        self._verify_signature(pubkey, entry.data, entry.signatureV2)
+
+        # Step 7: V1/V2 consistency
+        self._validate_v1_v2_consistency(entry, cbor_data)
+
+        # Step 8: Check expiration
+        self._check_validity(cbor_data)
+
+        logger.debug("IPNS record validated successfully: %s", key)
+        return entry, cbor_data, name_hash
 
     def _extract_public_key(self, entry: IpnsEntry, name_hash: str) -> PublicKey:
         """
@@ -283,16 +346,12 @@ class IPNSValidator(Validator):
             raise InvalidRecordType("CBOR data field is empty")
 
         try:
-            import cbor2
-
             decoded = cbor2.loads(data)
             if not isinstance(decoded, dict):
                 raise InvalidRecordType(
                     f"CBOR data must be a map, got {type(decoded).__name__}"
                 )
             return decoded
-        except ImportError:
-            raise InvalidRecordType("cbor2 package required for IPNS validation")
         except InvalidRecordType:
             raise
         except Exception as e:
@@ -354,7 +413,7 @@ class IPNSValidator(Validator):
                 f"CBOR '{CBOR_FIELD_VALIDITY_TYPE}' must be int, "
                 f"got {type(validity_type).__name__}"
             )
-        if validity_type != VALIDITY_TYPE_EOL:
+        if validity_type != ValidityType.EOL:
             raise InvalidRecordType(
                 f"Unsupported ValidityType: {validity_type} (only EOL=0 is supported)"
             )
@@ -448,9 +507,11 @@ class IPNSValidator(Validator):
         if not self._check_expiration:
             return
 
-        validity_type = cbor_data.get(CBOR_FIELD_VALIDITY_TYPE, VALIDITY_TYPE_EOL)
+        validity_type = cbor_data.get(
+            CBOR_FIELD_VALIDITY_TYPE, ValidityType.EOL
+        )
 
-        if validity_type == VALIDITY_TYPE_EOL:
+        if validity_type == ValidityType.EOL:
             validity = cbor_data.get(CBOR_FIELD_VALIDITY)
             if not validity:
                 raise InvalidRecordType(
@@ -532,9 +593,18 @@ class IPNSValidator(Validator):
         Select the best IPNS record from candidates per spec.
 
         Selection algorithm (per IPNS spec section 5.4):
+
         1. Higher sequence number wins
         2. If sequences are equal, later validity timestamp wins
-        3. Invalid records are skipped
+        3. Invalid (unparseable) records are skipped
+
+        .. note::
+
+            This method does **not** perform full cryptographic validation
+            (signature verification, expiry checks, V1/V2 consistency).
+            It only parses the record to extract sequence and validity for
+            comparison. Callers must call :meth:`validate` on the winning
+            record before trusting it.
 
         Args:
             key: The IPNS key (used for context, not validation here)
