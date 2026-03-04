@@ -102,7 +102,7 @@ def ipns_name_to_key(name: str) -> str:
     assert codec == 0x72, f"Expected libp2p-key codec (0x72), got 0x{codec:x}"
     codec_len = len(varint.encode(codec))
 
-    multihash_bytes = cid_bytes[version_len + codec_len:]
+    multihash_bytes = cid_bytes[version_len + codec_len :]
     return "/ipns/" + multihash_bytes.hex()
 
 
@@ -284,9 +284,7 @@ class TestIPNSValidator:
         key = f"/ipns/{name_hash}"
 
         # Create a valid record
-        valid_record = create_valid_ipns_record(
-            private_key, value=b"/ipfs/correct"
-        )
+        valid_record = create_valid_ipns_record(private_key, value=b"/ipfs/correct")
 
         # Parse and modify V1 value to be different
         entry = IpnsEntry()

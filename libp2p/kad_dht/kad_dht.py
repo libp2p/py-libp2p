@@ -315,9 +315,7 @@ class KadDHT(Service):
         required_validators = {"pk", "ipns"}
         if not required_validators.issubset(set(vmap.keys())):
             missing = required_validators - set(vmap.keys())
-            raise ValueError(
-                f"{PROTOCOL_PREFIX} must include validators for {missing}"
-            )
+            raise ValueError(f"{PROTOCOL_PREFIX} must include validators for {missing}")
 
         pk_validator = vmap.get("pk")
         if not isinstance(pk_validator, PublicKeyValidator):
