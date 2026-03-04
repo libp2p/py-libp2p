@@ -14,7 +14,8 @@ import sys
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 _RUNNER_MODULE = "tests.core.tools.anyio_service._anyio_manager_stats_runner"
-_SUBPROCESS_TIMEOUT = 60
+# CI can be slow; allow enough time for the subprocess to finish
+_SUBPROCESS_TIMEOUT = 120
 
 
 def _run_standalone(test_name: str) -> subprocess.CompletedProcess:
