@@ -12,8 +12,10 @@ async def checkpoint():
     await anyio.sleep(0)
 
 
+# Run with trio backend: asyncio backend can hang in CI when the same worker
+# has Trio loaded (Trio's I/O blocks in epoll.poll and pytest-timeout hits).
 @pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+@pytest.mark.parametrize("anyio_backend", ["trio"])
 async def test_anyio_manager_stats():
     ready = anyio.Event()
 
@@ -72,7 +74,7 @@ async def test_anyio_manager_stats():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ["asyncio"])
+@pytest.mark.parametrize("anyio_backend", ["trio"])
 async def test_anyio_manager_stats_does_not_count_main_run_method():
     ready = anyio.Event()
 
