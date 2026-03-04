@@ -3,15 +3,20 @@
 import hashlib
 
 import pytest
+from cid import make_cid
 
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
-    analyze_cid_collection,
+    cid_to_bytes,
+    cid_to_text,
+    compute_cid_obj,
+    compute_cid_v0,
+    compute_cid_v0_obj,
     compute_cid_v1,
-    detect_cid_encoding_format,
+    compute_cid_v1_obj,
     get_cid_prefix,
-    recompute_cid_from_data,
+    parse_cid,
     verify_cid,
 )
 
@@ -280,67 +285,6 @@ def test_cid_edge_cases():
     assert "Unknown codec" in str(excinfo.value)
 
 
-def test_detect_cid_encoding_format():
-    """Test format detection."""
-    # Test raw codec (backward compatible)
-    cid_raw = compute_cid_v1(b"test", codec=0x55)
-    info = detect_cid_encoding_format(cid_raw)
-    assert info["codec_value"] == 0x55
-    assert info["codec_name"] == "raw"
-    assert info["is_breaking"] is False
-
-    # Test dag-jose (breaking; code 0x85)
-    cid_json = compute_cid_v1(b"test", codec=0x85)
-    info = detect_cid_encoding_format(cid_json)
-    assert info["codec_value"] == 0x85
-    assert info["codec_name"] == "dag-jose"
-    assert info["is_breaking"] is True
-    assert info["codec_length"] == 2  # 2-byte varint
-
-    # Test dag-json (breaking; code 0x0129)
-    cid_json = compute_cid_v1(b"test", codec=0x0129)
-    info = detect_cid_encoding_format(cid_json)
-    assert info["codec_value"] == 0x0129
-    assert info["codec_name"] == "dag-json"
-    assert info["is_breaking"] is True
-    assert info["codec_length"] == 2  # 2-byte varint
-
-
-def test_recompute_cid_from_data():
-    """Test CID recomputation."""
-    data = b"test data"
-
-    # Create CID with dag-jose (breaking codec, 0x85)
-    old_cid = compute_cid_v1(data, codec=0x85)
-
-    # Recompute (should be identical in this case)
-    new_cid = recompute_cid_from_data(old_cid, data)
-
-    assert new_cid == old_cid  # Same when properly encoded
-    assert verify_cid(new_cid, data) is True
-
-    # Test with wrong data (should fail)
-    with pytest.raises(ValueError) as excinfo:
-        recompute_cid_from_data(old_cid, b"wrong data")
-    assert "does not verify" in str(excinfo.value)
-
-
-def test_analyze_cid_collection():
-    """Smoke test for analyze_cid_collection helper."""
-    data = b"analysis test"
-    cid_raw = compute_cid_v1(data, codec=0x55)  # backward compatible (raw)
-    cid_jose = compute_cid_v1(data, codec=0x85)  # breaking codec (dag-jose)
-
-    results = analyze_cid_collection([cid_raw, cid_jose])
-
-    assert results["total"] == 2
-    assert results["backward_compatible"] == 1
-    assert results["breaking_change"] == 1
-    by_codec = results["by_codec"]
-    assert by_codec["raw"] == 1
-    assert by_codec["dag-jose"] == 1
-
-
 def test_complete_cid_workflow():
     """End-to-end test of CID creation, parsing, and verification."""
     test_data = b"Integration test data"
@@ -351,15 +295,9 @@ def test_complete_cid_workflow():
         (0x129, "dag-json", True),  # Breaking (code 0x129)
     ]
 
-    for codec_value, codec_name, is_breaking in test_codecs:
+    for codec_value, _, is_breaking in test_codecs:
         # Create CID
         cid = compute_cid_v1(test_data, codec=codec_value)
-
-        # Detect format
-        info = detect_cid_encoding_format(cid)
-        assert info["codec_value"] == codec_value
-        assert info["codec_name"] == codec_name
-        assert info["is_breaking"] == is_breaking
 
         # Extract prefix
         prefix = get_cid_prefix(cid)
@@ -370,6 +308,74 @@ def test_complete_cid_workflow():
         assert verify_cid(cid, test_data) is True
         assert verify_cid(cid, b"wrong data") is False
 
-        # Recompute
-        new_cid = recompute_cid_from_data(cid, test_data)
-        assert new_cid == cid
+
+def test_parse_cid_accepts_bytes_and_objects():
+    """parse_cid should normalize bytes and py-cid objects."""
+    cid_bytes = compute_cid_v1(b"helper-bytes")
+
+    parsed_from_bytes = parse_cid(cid_bytes)
+    parsed_from_obj = parse_cid(parsed_from_bytes)
+
+    assert parsed_from_bytes.buffer == cid_bytes
+    assert parsed_from_obj.buffer == cid_bytes
+
+
+def test_parse_cid_accepts_canonical_and_hex_strings():
+    """parse_cid should accept both canonical CID text and legacy hex text."""
+    cid_bytes = compute_cid_v1(b"helper-strings")
+    canonical = str(make_cid(cid_bytes))
+    hex_text = cid_bytes.hex()
+
+    parsed_from_canonical = parse_cid(canonical)
+    parsed_from_hex = parse_cid(hex_text)
+
+    assert parsed_from_canonical.buffer == cid_bytes
+    assert parsed_from_hex.buffer == cid_bytes
+
+
+def test_parse_cid_invalid_inputs_raise():
+    """parse_cid should raise on unsupported or malformed input."""
+    with pytest.raises(TypeError):
+        parse_cid(123)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError):
+        parse_cid("")
+
+    with pytest.raises(ValueError):
+        parse_cid("not-a-valid-cid")
+
+
+def test_cid_to_bytes_and_text_roundtrip():
+    """Helper conversion functions should round-trip consistently."""
+    cid_bytes = compute_cid_v1(b"helper-roundtrip")
+    cid_text = cid_to_text(cid_bytes)
+    roundtrip_bytes = cid_to_bytes(cid_text)
+
+    assert roundtrip_bytes == cid_bytes
+    assert cid_text == str(make_cid(cid_bytes))
+
+
+def test_object_wrappers_for_v0_and_v1():
+    """Object-returning wrappers should match bytes-returning wrappers."""
+    data = b"object-wrapper-test"
+
+    cid_v0_obj = compute_cid_v0_obj(data)
+    cid_v1_obj = compute_cid_v1_obj(data, codec=CODEC_RAW)
+
+    assert cid_v0_obj.buffer == compute_cid_v0(data)
+    assert cid_v1_obj.buffer == compute_cid_v1(data, codec=CODEC_RAW)
+    assert cid_v0_obj.version == 0
+    assert cid_v1_obj.version == 1
+
+
+def test_compute_cid_obj_wrapper():
+    """compute_cid_obj should mirror compute_cid by version."""
+    data = b"generic-object-wrapper-test"
+
+    cid0_obj = compute_cid_obj(data, version=0)
+    cid1_obj = compute_cid_obj(data, version=1, codec=CODEC_DAG_PB)
+
+    assert cid0_obj.buffer == compute_cid_v0(data)
+    assert cid1_obj.buffer == compute_cid_v1(data, codec=CODEC_DAG_PB)
+    assert cid0_obj.version == 0
+    assert cid1_obj.version == 1
