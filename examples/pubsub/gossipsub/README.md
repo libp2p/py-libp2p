@@ -22,6 +22,7 @@ Basic mesh-based pubsub demo using Gossipsub 1.0 (`/meshsub/1.0.0`).
 - Basic mesh-based pubsub
 - Simple flooding for message dissemination
 - Mesh topology maintenance
+- **Fanout behaviour**: one node (node_0) is a fanout-only publisher: it publishes without subscribing, so messages are sent via *fanout* (a random set of topic subscribers) instead of mesh peers
 
 **Usage:**
 
@@ -38,6 +39,9 @@ Demonstrates Gossipsub 1.1 (`/meshsub/1.1.0`) with peer scoring and behavioral p
 - All Gossipsub 1.0 features
 - Peer scoring with P1–P4 topic-scoped parameters
 - Behavioral penalties (P5)
+- **P6 (application-specific score)** and **P7 (IP colocation factor / Behavioural Penalty)**
+- **Prune backoff** and **peer exchange (PX)** enabled
+- Optional **application score function** (in real applications: staking, reputation, or role e.g. validator, full node)
 - Honest vs. malicious publisher behaviour
 
 **Usage:**
@@ -102,6 +106,7 @@ python gossipsub_v2.0.py --nodes 5 --duration 60
 
 - Basic mesh-based pubsub protocol
 - Simple flooding for message dissemination
+- **Fanout**: publishers that are not in the mesh for a topic send to a random set of topic subscribers (fanout peers)
 - No peer scoring or advanced security features
 - Suitable for trusted networks with low adversarial activity
 
@@ -113,6 +118,9 @@ python gossipsub_v2.0.py --nodes 5 --duration 60
   - P3: Mesh message deliveries
   - P4: Invalid messages penalty
 - **Behavioral Penalties**: P5 global behavior penalty
+- **P6 (Application-specific score)** and **P7 (IP colocation factor)**
+- **Prune backoff** and **peer exchange (PX)** enabled
+- Optional **application score function** (e.g. staking/reputation, validator/full node role)
 - **Signed Peer Records**: Enhanced peer exchange with signed records
 - Better resilience against basic attacks
 

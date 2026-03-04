@@ -12,6 +12,8 @@ Features demonstrated:
 - Simple message flooding
 - Mesh topology maintenance
 - Message publishing and subscription
+- Fanout behaviour: a publisher that is not in the mesh (e.g. does not subscribe)
+  sends to a random set of topic subscribers (fanout peers) instead of mesh peers
 
 Usage:
     python gossipsub_v1.0.py --nodes 5 --duration 30
@@ -49,9 +51,10 @@ TOPIC = "gossipsub-v1.0-demo"
 class GossipsubV10Node:
     """A node running Gossipsub 1.0"""
 
-    def __init__(self, node_id: str, port: int):
+    def __init__(self, node_id: str, port: int, fanout_only: bool = False):
         self.node_id = node_id
         self.port = port
+        self.fanout_only = fanout_only  # If True, node only publishes (no subscribe)
         self.host: IHost | None = None
         self.pubsub: Pubsub | None = None
         self.gossipsub: GossipSub | None = None
@@ -93,10 +96,12 @@ class GossipsubV10Node:
             async with background_trio_service(self.pubsub):
                 async with background_trio_service(self.gossipsub):
                     await self.pubsub.wait_until_ready()
-                    self.subscription = await self.pubsub.subscribe(TOPIC)
+                    if not self.fanout_only:
+                        self.subscription = await self.pubsub.subscribe(TOPIC)
                     logger.info(
-                        f"Node {self.node_id} (Gossipsub 1.0) started on port "
-                        f"{self.port}"
+                        f"Node {self.node_id} (Gossipsub 1.0"
+                        + (", fanout-only publisher" if self.fanout_only else "")
+                        + f") started on port {self.port}"
                     )
 
                     # Keep running
@@ -150,13 +155,21 @@ class GossipsubV10Demo:
         self.nodes: list[GossipsubV10Node] = []
 
     async def setup_network(self, node_count: int = 5):
-        """Set up a network of nodes"""
+        """
+        Set up a network of nodes. Node 0 is a
+        fanout-only publisher (no subscribe).
+        """
         for i in range(node_count):
             port = find_free_port()
-            node = GossipsubV10Node(f"node_{i}", port)
+            fanout_only = i == 0
+            node = GossipsubV10Node(f"node_{i}", port, fanout_only=fanout_only)
             self.nodes.append(node)
 
-        logger.info(f"Created network with {node_count} nodes running Gossipsub 1.0")
+        logger.info(
+            f"Created network with {node_count} nodes running Gossipsub 1.0 "
+            f"(node_0 is fanout-only: publishes without subscribing, "
+            f"using fanout peers)"
+        )
 
     async def start_network(self, duration: int = 30):
         """Start all nodes and run the demo"""
@@ -186,11 +199,12 @@ class GossipsubV10Demo:
                 print(f"{'=' * 60}")
                 print(f"Running for {duration} seconds...")
                 print("Protocol: /meshsub/1.0.0")
-                print("Features: Basic mesh-based pubsub, simple flooding")
+                print("Features: Basic mesh-based pubsub, simple flooding, fanout demo")
+                print("  (node_0 is fanout-only: publishes via fanout, not in mesh)")
                 print(f"{'=' * 60}\n")
 
                 while time.time() < end_time:
-                    # Random node publishes a message
+                    # Random node publishes (node_0 uses fanout when it publishes)
                     node = random.choice(self.nodes)
                     message = f"msg_{message_counter}_{int(time.time())}"
                     await node.publish_message(message)
@@ -256,6 +270,8 @@ class GossipsubV10Demo:
         print("  ✓ Basic mesh-based pubsub")
         print("  ✓ Simple message flooding")
         print("  ✓ Mesh topology maintenance")
+        print("  ✓ Fanout behaviour: node_0 publishes without subscribing;")
+        print("    messages are sent to a random set of topic peers (fanout peers)")
         print("  ✗ No peer scoring")
         print("  ✗ No IDONTWANT support")
         print("  ✗ No adaptive gossip")

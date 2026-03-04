@@ -10,6 +10,9 @@ Features demonstrated:
 - Basic mesh-based pubsub (from v1.0)
 - Peer scoring with P1-P4 topic-scoped parameters
 - Behavioral penalties (P5)
+- P6 (application-specific score) and P7 (IP colocation factor)
+- Prune backoff and peer exchange (PX) enabled
+- Optional application score function (e.g. staking/reputation, validator role)
 - Signed peer records
 - Better resilience against attacks
 
@@ -28,6 +31,7 @@ from libp2p import new_host
 from libp2p.abc import IHost, ISubscriptionAPI
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.peer.id import ID
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.score import ScoreParams, TopicScoreParams
@@ -53,7 +57,7 @@ class GossipsubV11Node:
     def __init__(self, node_id: str, port: int, role: str = "honest"):
         self.node_id = node_id
         self.port = port
-        self.role = role  # "honest" or "malicious"
+        self.role = role  # "honest", "malicious", or "validator"
         self.host: IHost | None = None
         self.pubsub: Pubsub | None = None
         self.gossipsub: GossipSub | None = None
@@ -70,7 +74,7 @@ class GossipsubV11Node:
             muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
         )
 
-        # Configure Gossipsub 1.1 - adds peer scoring
+        # Configure Gossipsub 1.1 - adds peer scoring, P6/P7, prune backoff, PX
         score_params = ScoreParams(
             # Topic-scoped parameters (P1-P4)
             p1_time_in_mesh=TopicScoreParams(weight=0.1, cap=10.0, decay=0.99),
@@ -84,6 +88,17 @@ class GossipsubV11Node:
             # Global behavioral penalty (P5)
             p5_behavior_penalty_weight=1.0,
             p5_behavior_penalty_decay=0.99,
+            # P6: application-specific score (optional;
+            # in production: staking/reputation)
+            p6_appl_slack_weight=0.1,
+            p6_appl_slack_decay=0.99,
+            # P7: IP colocation factor - penalise many peers from same IP
+            p7_ip_colocation_weight=0.5,
+            p7_ip_colocation_threshold=3,
+            # Optional application score:
+            # e.g. validator/full node role,
+            # stake, reputation
+            app_specific_score_fn=self._application_score_function,
         )
 
         self.gossipsub = GossipSub(
@@ -94,6 +109,10 @@ class GossipsubV11Node:
             heartbeat_interval=5,
             heartbeat_initial_delay=1.0,
             score_params=score_params,
+            do_px=True,
+            px_peers_count=16,
+            prune_back_off=60,
+            unsubscribe_back_off=10,
             # No max_idontwant_messages - v1.1 doesn't support IDONTWANT
             # No adaptive features - v1.1 doesn't have adaptive gossip
             # No advanced security features - v1.1 has basic security
@@ -118,6 +137,13 @@ class GossipsubV11Node:
 
                     # Keep running
                     await trio.sleep_forever()
+
+    def _application_score_function(self, peer_id: ID) -> float:
+        """
+        Optional application-specific score (P6). In real applications this could
+        be based on staking, reputation, or role in the network (validator, full node).
+        """
+        return 0.0
 
     async def publish_message(self, message: str):
         """Publish a message to the topic"""
@@ -206,7 +232,10 @@ class GossipsubV11Demo:
                 print(f"{'=' * 60}")
                 print(f"Running for {duration} seconds...")
                 print("Protocol: /meshsub/1.1.0")
-                print("Features: Peer scoring (P1-P5), behavioral penalties")
+                print(
+                    "Features: Peer scoring (P1-P7), prune backoff, peer exchange (PX),"
+                    "optional app score"
+                )
                 print(f"{'=' * 60}\n")
 
                 while time.time() < end_time:
@@ -298,6 +327,9 @@ class GossipsubV11Demo:
         print("    - P3: Mesh message deliveries")
         print("    - P4: Invalid messages penalty")
         print("  ✓ Behavioral penalties (P5)")
+        print("  ✓ P6: Application-specific score (optional; e.g. staking/role)")
+        print("  ✓ P7: IP colocation factor (Behavioural Penalty)")
+        print("  ✓ Prune backoff and peer exchange (PX) enabled")
         print("  ✓ Signed peer records")
         print("  ✗ No IDONTWANT support")
         print("  ✗ No adaptive gossip")
