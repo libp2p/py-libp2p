@@ -92,7 +92,7 @@ def ipns_name_to_key(name: str) -> str:
     IPNS names are CIDv1 with libp2p-key multicodec (0x72).
     We need to extract the multihash and convert to hex for our key format.
     """
-    cid_bytes = multibase.decode(name)
+    cid_bytes: bytes = multibase.decode(name)
 
     version = varint.decode_bytes(cid_bytes)
     assert version == 1, f"Expected CIDv1, got version {version}"

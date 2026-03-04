@@ -365,8 +365,9 @@ class IPNSValidator(Validator):
 
         value = cbor_data[CBOR_FIELD_VALUE]
         if not isinstance(value, (bytes, str)):
+            vtype = type(value).__name__
             raise InvalidRecordType(
-                f"CBOR '{CBOR_FIELD_VALUE}' must be bytes or str, got {type(value).__name__}"
+                f"CBOR '{CBOR_FIELD_VALUE}' must be bytes or str, got {vtype}"
             )
         value_bytes = value if isinstance(value, bytes) else value.encode("utf-8")
         if len(value_bytes) == 0:
