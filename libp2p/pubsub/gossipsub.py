@@ -1305,6 +1305,7 @@ class GossipSub(IPubsubRouter, Service):
             raise NoPubsubAttached
         pubsub = self.pubsub
 
+<<<<<<< HEAD
         # Add all unknown message ids (ids that appear in ihave_msg but not
         # already seen) to list of messages we want to request
         msg_ids_wanted: list[MessageID] = []
@@ -1319,6 +1320,24 @@ class GossipSub(IPubsubRouter, Service):
                 continue
             if not pubsub.seen_messages.has(mid_bytes):
                 msg_ids_wanted.append(parse_message_id_safe(msg_id))
+=======
+        # Add all unknown message ids (ids that appear in ihave_msg but not in
+        # seen_seqnos) to list of messages we want to request. Skip malformed
+        # IDs instead of crashing.
+        msg_ids_wanted: list[MessageID] = []
+        for raw_msg_id in ihave_msg.messageIDs:
+            try:
+                msg_id = parse_message_id_safe(raw_msg_id)
+            except ValueError:
+                logger.debug(
+                    "skipping non-decodable IHAVE message ID from peer %s",
+                    sender_peer_id,
+                )
+                continue
+
+            if msg_id not in seen_seqnos_and_peers:
+                msg_ids_wanted.append(msg_id)
+>>>>>>> 1e154207 (Add Filecoin DX toolkit, docs, examples)
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1341,6 +1360,7 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
+<<<<<<< HEAD
         msg_ids: list[bytes] = []
         for msg_id_str in iwant_msg.messageIDs:
             mid_bytes = safe_bytes_from_hex(msg_id_str)
@@ -1352,6 +1372,17 @@ class GossipSub(IPubsubRouter, Service):
                 )
                 continue
             msg_ids.append(mid_bytes)
+=======
+        msg_ids: list[tuple[bytes, bytes]] = []
+        for raw_msg_id in iwant_msg.messageIDs:
+            try:
+                msg_ids.append(safe_parse_message_id(raw_msg_id))
+            except ValueError:
+                logger.debug(
+                    "skipping malformed IWANT message ID from peer %s",
+                    sender_peer_id,
+                )
+>>>>>>> 1e154207 (Add Filecoin DX toolkit, docs, examples)
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
