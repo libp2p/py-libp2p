@@ -16,6 +16,10 @@ from libp2p.transport.websocket.multiaddr_utils import (
     ParsedWebSocketMultiaddr,
     parse_websocket_multiaddr,
 )
+from libp2p.utils.multiaddr_utils import (
+    extract_host_from_multiaddr,
+    format_host_for_url,
+)
 
 from .autotls import AutoTLSConfig, AutoTLSManager, initialize_autotls
 from .connection import P2PWebSocketConnection
@@ -585,17 +589,10 @@ class WebsocketTransport(ITransport):
 
         """
         # Extract host and port from the rest_multiaddr
-        host = (
-            proto_info.rest_multiaddr.value_for_protocol("ip4")
-            or proto_info.rest_multiaddr.value_for_protocol("ip6")
-            or proto_info.rest_multiaddr.value_for_protocol("dns")
-            or proto_info.rest_multiaddr.value_for_protocol("dns4")
-            or proto_info.rest_multiaddr.value_for_protocol("dns6")
-            or "localhost"
-        )
+        host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
-        ws_url = f"{protocol}://{host}:{port}/"
+        ws_url = f"{protocol}://{format_host_for_url(host)}:{port}/"
 
         # ✅ NEW: Determine proxy configuration with precedence:
         # 1. Explicit proxy_url parameter (highest priority)
@@ -678,21 +675,14 @@ class WebsocketTransport(ITransport):
         """Create a direct WebSocket connection."""
         # Extract host and port from the rest_multiaddr
         # Support IP addresses and DNS-based multiaddrs
-        host = (
-            proto_info.rest_multiaddr.value_for_protocol("ip4")
-            or proto_info.rest_multiaddr.value_for_protocol("ip6")
-            or proto_info.rest_multiaddr.value_for_protocol("dns")
-            or proto_info.rest_multiaddr.value_for_protocol("dns4")
-            or proto_info.rest_multiaddr.value_for_protocol("dns6")
-            or "localhost"
-        )
+        host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
         # Ensure host is a string, not a tuple or other type
         if isinstance(host, tuple):
             host = host[0]
 
         port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
         protocol = "wss" if proto_info.is_wss else "ws"
-        ws_url = f"{protocol}://{host}:{port}/"
+        ws_url = f"{protocol}://{format_host_for_url(host)}:{port}/"
 
         logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
@@ -760,14 +750,7 @@ class WebsocketTransport(ITransport):
             )
 
             # Extract host and port from multiaddr
-            host = (
-                proto_info.rest_multiaddr.value_for_protocol("ip4")
-                or proto_info.rest_multiaddr.value_for_protocol("ip6")
-                or proto_info.rest_multiaddr.value_for_protocol("dns")
-                or proto_info.rest_multiaddr.value_for_protocol("dns4")
-                or proto_info.rest_multiaddr.value_for_protocol("dns6")
-                or "localhost"
-            )
+            host = extract_host_from_multiaddr(proto_info.rest_multiaddr) or "localhost"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             logger.debug(f"Connecting through SOCKS proxy to {host}:{port}")

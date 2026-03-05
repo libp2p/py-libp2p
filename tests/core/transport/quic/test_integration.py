@@ -84,7 +84,7 @@ class TestBasicQUICFlow:
         self, server_key, client_key, server_config, client_config
     ):
         """Test basic client-server echo flow with detailed logging."""
-        print("\n=== BASIC QUIC ECHO TEST ===")
+        logger.debug("Starting basic QUIC echo test")
 
         # Create server components
         server_transport = QUICTransport(server_key.private_key, server_config)
@@ -98,50 +98,47 @@ class TestBasicQUICFlow:
             """Simple echo server handler with detailed logging."""
             nonlocal server_received_data, server_connection_established, echo_sent
 
-            print("🔗 SERVER: Connection handler called")
+            logger.debug("SERVER: Connection handler called")
             server_connection_established = True
 
             try:
-                print("📡 SERVER: Waiting for incoming stream...")
+                logger.debug("SERVER: Waiting for incoming stream")
 
                 # Accept stream with timeout and detailed logging
-                print("📡 SERVER: Calling accept_stream...")
+                logger.debug("SERVER: Calling accept_stream")
                 stream = await connection.accept_stream(timeout=5.0)
 
                 if stream is None:
-                    print("❌ SERVER: accept_stream returned None")
+                    logger.warning("SERVER: accept_stream returned None")
                     return
 
-                print(f"✅ SERVER: Stream accepted! Stream ID: {stream.stream_id}")
+                logger.debug(f"SERVER: Stream accepted, Stream ID: {stream.stream_id}")
 
                 # Read data from the stream
-                print("📖 SERVER: Reading data from stream...")
+                logger.debug("SERVER: Reading data from stream")
                 server_data = await stream.read(1024)
 
                 if not server_data:
-                    print("❌ SERVER: No data received from stream")
+                    logger.warning("SERVER: No data received from stream")
                     return
 
                 server_received_data = server_data.decode("utf-8", errors="ignore")
-                print(f"📨 SERVER: Received data: '{server_received_data}'")
+                logger.debug(f"SERVER: Received data: '{server_received_data}'")
 
                 # Echo the data back
                 echo_message = f"ECHO: {server_received_data}"
-                print(f"📤 SERVER: Sending echo: '{echo_message}'")
+                logger.debug(f"SERVER: Sending echo: '{echo_message}'")
 
                 await stream.write(echo_message.encode())
                 echo_sent = True
-                print("✅ SERVER: Echo sent successfully")
+                logger.debug("SERVER: Echo sent successfully")
 
                 # Close the stream
                 await stream.close()
-                print("🔒 SERVER: Stream closed")
+                logger.debug("SERVER: Stream closed")
 
             except Exception as e:
-                print(f"❌ SERVER: Error in handler: {e}")
-                import traceback
-
-                traceback.print_exc()
+                logger.error(f"SERVER: Error in handler: {e}", exc_info=True)
 
         # Create listener
         listener = server_transport.create_listener(echo_server_handler)
@@ -153,7 +150,7 @@ class TestBasicQUICFlow:
         client_received_echo = None
 
         try:
-            print("🚀 Starting server...")
+            logger.debug("Starting server")
 
             async with trio.open_nursery() as nursery:
                 # Start server listener
@@ -165,12 +162,12 @@ class TestBasicQUICFlow:
                 server_addr = multiaddr.Multiaddr(
                     f"{server_addrs[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
                 )
-                print(f"🔧 SERVER: Listening on {server_addr}")
+                logger.debug(f"SERVER: Listening on {server_addr}")
 
                 # Give server a moment to be ready
                 await trio.sleep(0.1)
 
-                print("🚀 Starting client...")
+                logger.debug("Starting client")
 
                 # Create client transport
                 client_transport = QUICTransport(client_key.private_key, client_config)
@@ -178,52 +175,49 @@ class TestBasicQUICFlow:
 
                 try:
                     # Connect to server
-                    print(f"📞 CLIENT: Connecting to {server_addr}")
+                    logger.debug(f"CLIENT: Connecting to {server_addr}")
                     connection = await client_transport.dial(server_addr)
                     client_connected = True
-                    print("✅ CLIENT: Connected to server")
+                    logger.debug("CLIENT: Connected to server")
 
                     # Open a stream
-                    print("📤 CLIENT: Opening stream...")
+                    logger.debug("CLIENT: Opening stream")
                     stream = await connection.open_stream()
-                    print(f"✅ CLIENT: Stream opened with ID: {stream.stream_id}")
+                    logger.debug(f"CLIENT: Stream opened with ID: {stream.stream_id}")
 
                     # Send test data
                     test_message = "Hello QUIC Server!"
-                    print(f"📨 CLIENT: Sending message: '{test_message}'")
+                    logger.debug(f"CLIENT: Sending message: '{test_message}'")
                     await stream.write(test_message.encode())
                     client_sent_data = True
-                    print("✅ CLIENT: Message sent")
+                    logger.debug("CLIENT: Message sent")
 
                     # Read echo response
-                    print("📖 CLIENT: Waiting for echo response...")
+                    logger.debug("CLIENT: Waiting for echo response")
                     response_data = await stream.read(1024)
 
                     if response_data:
                         client_received_echo = response_data.decode(
                             "utf-8", errors="ignore"
                         )
-                        print(f"📬 CLIENT: Received echo: '{client_received_echo}'")
+                        logger.debug(f"CLIENT: Received echo: '{client_received_echo}'")
                     else:
-                        print("❌ CLIENT: No echo response received")
+                        logger.warning("CLIENT: No echo response received")
 
-                    print("🔒 CLIENT: Closing connection")
+                    logger.debug("CLIENT: Closing connection")
                     await connection.close()
-                    print("🔒 CLIENT: Connection closed")
+                    logger.debug("CLIENT: Connection closed")
 
-                    print("🔒 CLIENT: Closing transport")
+                    logger.debug("CLIENT: Closing transport")
                     await client_transport.close()
-                    print("🔒 CLIENT: Transport closed")
+                    logger.debug("CLIENT: Transport closed")
 
                 except Exception as e:
-                    print(f"❌ CLIENT: Error: {e}")
-                    import traceback
-
-                    traceback.print_exc()
+                    logger.error(f"CLIENT: Error: {e}", exc_info=True)
 
                 finally:
                     await client_transport.close()
-                    print("🔒 CLIENT: Transport closed")
+                    logger.debug("CLIENT: Transport closed")
 
                 # Give everything time to complete
                 await trio.sleep(0.5)
@@ -238,13 +232,15 @@ class TestBasicQUICFlow:
             await server_transport.close()
 
         # Verify the flow worked
-        print("\n📊 TEST RESULTS:")
-        print(f"   Server connection established: {server_connection_established}")
-        print(f"   Client connected: {client_connected}")
-        print(f"   Client sent data: {client_sent_data}")
-        print(f"   Server received data: '{server_received_data}'")
-        print(f"   Echo sent by server: {echo_sent}")
-        print(f"   Client received echo: '{client_received_echo}'")
+        logger.debug("Test results:")
+        logger.debug(
+            f"  Server connection established: {server_connection_established}"
+        )
+        logger.debug(f"  Client connected: {client_connected}")
+        logger.debug(f"  Client sent data: {client_sent_data}")
+        logger.debug(f"  Server received data: '{server_received_data}'")
+        logger.debug(f"  Echo sent by server: {echo_sent}")
+        logger.debug(f"  Client received echo: '{client_received_echo}'")
 
         # Test assertions
         assert server_connection_established, "Server connection handler was not called"
@@ -258,14 +254,14 @@ class TestBasicQUICFlow:
             f"Client received wrong echo: '{client_received_echo}'"
         )
 
-        print("✅ BASIC ECHO TEST PASSED!")
+        logger.debug("Basic echo test passed")
 
     @pytest.mark.trio
     async def test_server_accept_stream_timeout(
         self, server_key, client_key, server_config, client_config
     ):
         """Test what happens when server accept_stream times out."""
-        print("\n=== TESTING SERVER ACCEPT_STREAM TIMEOUT ===")
+        logger.debug("Testing server accept_stream timeout")
 
         server_transport = QUICTransport(server_key.private_key, server_config)
 
@@ -276,16 +272,18 @@ class TestBasicQUICFlow:
             """Handler that tests accept_stream timeout."""
             nonlocal accept_stream_called, accept_stream_timeout
 
-            print("🔗 SERVER: Connection established, testing accept_stream timeout")
+            logger.debug(
+                "SERVER: Connection established, testing accept_stream timeout"
+            )
             accept_stream_called = True
 
             try:
-                print("📡 SERVER: Calling accept_stream with 2 second timeout...")
+                logger.debug("SERVER: Calling accept_stream with 2 second timeout")
                 stream = await connection.accept_stream(timeout=2.0)
-                print(f"✅ SERVER: accept_stream returned: {stream}")
+                logger.debug(f"SERVER: accept_stream returned: {stream}")
 
             except Exception as e:
-                print(f"⏰ SERVER: accept_stream timed out or failed: {e}")
+                logger.debug(f"SERVER: accept_stream timed out or failed: {e}")
                 accept_stream_timeout = True
 
         listener = server_transport.create_listener(timeout_test_handler)
@@ -302,7 +300,7 @@ class TestBasicQUICFlow:
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
                 )
-                print(f"🔧 SERVER: Listening on {server_addr}")
+                logger.debug(f"SERVER: Listening on {server_addr}")
 
                 # Start client in the same nursery
                 client_transport = QUICTransport(client_key.private_key, client_config)
@@ -310,9 +308,9 @@ class TestBasicQUICFlow:
 
                 connection = None
                 try:
-                    print("📞 CLIENT: Connecting (but NOT opening stream)...")
+                    logger.debug("CLIENT: Connecting (but NOT opening stream)")
                     connection = await client_transport.dial(server_addr)
-                    print("✅ CLIENT: Connected (no stream opened)")
+                    logger.debug("CLIENT: Connected (no stream opened)")
 
                     # Wait for server timeout
                     await trio.sleep(3.0)
@@ -321,7 +319,7 @@ class TestBasicQUICFlow:
                     await client_transport.close()
                     if connection:
                         await connection.close()
-                        print("🔒 CLIENT: Connection closed")
+                        logger.debug("CLIENT: Connection closed")
 
                 nursery.cancel_scope.cancel()
 
@@ -333,16 +331,16 @@ class TestBasicQUICFlow:
             if not server_transport._closed:
                 await server_transport.close()
 
-        print("\n📊 TIMEOUT TEST RESULTS:")
-        print(f"   accept_stream called: {accept_stream_called}")
-        print(f"   accept_stream timeout: {accept_stream_timeout}")
+        logger.debug("Timeout test results:")
+        logger.debug(f"  accept_stream called: {accept_stream_called}")
+        logger.debug(f"  accept_stream timeout: {accept_stream_timeout}")
 
         assert accept_stream_called, "accept_stream should have been called"
         assert accept_stream_timeout, (
             "accept_stream should have timed out when no stream was opened"
         )
 
-        print("✅ TIMEOUT TEST PASSED!")
+        logger.debug("Timeout test passed")
 
 
 @pytest.mark.trio
@@ -361,8 +359,8 @@ async def test_yamux_stress_ping():
         ]
         for logger_name in debug_loggers:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
-        print("\n🔍 CI/CD DEBUG MODE ENABLED for test_yamux_stress_ping")
-        print(f"   Debug loggers enabled: {', '.join(debug_loggers)}")
+        logger.debug("CI/CD DEBUG MODE ENABLED for test_yamux_stress_ping")
+        logger.debug(f"Debug loggers enabled: {', '.join(debug_loggers)}")
 
     STREAM_COUNT = 100
     listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
@@ -431,15 +429,15 @@ async def test_yamux_stress_ping():
                         negotiation_limit = sem_limit
 
             if debug_enabled:
-                print(f"🔗 Connection established in {connect_time:.2f}ms")
+                logger.debug(f"Connection established in {connect_time:.2f}ms")
                 if isinstance(muxed_conn, QUICConnection):
                     established = muxed_conn.is_established
-                    print(f"   QUIC Connection state: established={established}")
+                    logger.debug(f"  QUIC Connection state: established={established}")
                     outbound = muxed_conn._outbound_stream_count
-                    print(f"   Outbound streams: {outbound}")
+                    logger.debug(f"  Outbound streams: {outbound}")
                     inbound = muxed_conn._inbound_stream_count
-                    print(f"   Inbound streams: {inbound}")
-                    print(f"   Negotiation semaphore limit: {negotiation_limit}")
+                    logger.debug(f"  Inbound streams: {inbound}")
+                    logger.debug(f"  Negotiation semaphore limit: {negotiation_limit}")
 
             # Automatic identify should populate the peerstore with cached protocols.
             identify_cached = False
@@ -458,9 +456,9 @@ async def test_yamux_stress_ping():
 
             if debug_enabled:
                 if identify_cached:
-                    print("   ✅ Automatic identify cached ping protocol")
+                    logger.debug("  Automatic identify cached ping protocol")
                 else:
-                    print("   ⚠️  Automatic identify did not cache ping within 5s")
+                    logger.warning("  Automatic identify did not cache ping within 5s")
 
             assert identify_cached, (
                 "Automatic identify should cache ping before running stress test"
@@ -483,7 +481,7 @@ async def test_yamux_stress_ping():
                 stream_start_times[i] = stream_start
                 try:
                     if debug_enabled and i % 10 == 0:  # Log every 10th stream start
-                        print(f"🚀 Starting stream #{i} at {stream_start:.3f}s")
+                        logger.debug(f"Starting stream #{i} at {stream_start:.3f}s")
 
                     new_stream_start = trio.current_time()
                     async with stream_gate:
@@ -493,14 +491,16 @@ async def test_yamux_stress_ping():
                     new_stream_time = (trio.current_time() - new_stream_start) * 1000
 
                     if debug_enabled and i % 10 == 0:
-                        print(f"   Stream #{i} opened in {new_stream_time:.2f}ms")
+                        logger.debug(f"  Stream #{i} opened in {new_stream_time:.2f}ms")
 
                     write_start = trio.current_time()
                     await stream.write(b"\x01" * PING_LENGTH)
                     write_time = (trio.current_time() - write_start) * 1000
 
                     if debug_enabled and i % 10 == 0:
-                        print(f"   Stream #{i} write completed in {write_time:.2f}ms")
+                        logger.debug(
+                            f"  Stream #{i} write completed in {write_time:.2f}ms"
+                        )
 
                     # Wait for response with timeout as safety net
                     read_start = trio.current_time()
@@ -513,12 +513,12 @@ async def test_yamux_stress_ping():
                         latency_ms = int(total_time)
                         latencies.append(latency_ms)
                         if debug_enabled and i % 10 == 0:
-                            print(
-                                f"   Stream #{i} completed: "
+                            logger.debug(
+                                f"  Stream #{i} completed: "
                                 f"total={total_time:.2f}ms, read={read_time:.2f}ms"
                             )
                         elif not debug_enabled:
-                            print(f"[Ping #{i}] Latency: {latency_ms} ms")
+                            logger.debug(f"[Ping #{i}] Latency: {latency_ms} ms")
                     await stream.close()
                 except Exception as e:
                     total_time = (trio.current_time() - stream_start) * 1000
@@ -527,7 +527,7 @@ async def test_yamux_stress_ping():
                         f"[Ping #{i}] Failed after {total_time:.2f}ms: "
                         f"{error_type}: {e}"
                     )
-                    print(error_msg)
+                    logger.warning(error_msg)
                     failures.append(i)
 
                     # Store detailed failure info when debug logging is enabled
@@ -552,19 +552,19 @@ async def test_yamux_stress_ping():
                                 if hasattr(swarm_conn, "muxed_conn"):
                                     muxed_conn = swarm_conn.muxed_conn
                                     if isinstance(muxed_conn, QUICConnection):
-                                        print(f"   ❌ Stream #{i} failure context:")
+                                        logger.debug(f"  Stream #{i} failure context:")
                                         established = muxed_conn.is_established
-                                        msg = (
-                                            f"      Connection established: "
-                                            f"{established}"
+                                        logger.debug(
+                                            f"    Connection established: {established}"
                                         )
-                                        print(msg)
                                         outbound = muxed_conn._outbound_stream_count
-                                        print(f"      Outbound streams: {outbound}")
+                                        logger.debug(
+                                            f"    Outbound streams: {outbound}"
+                                        )
                                         inbound = muxed_conn._inbound_stream_count
-                                        print(f"      Inbound streams: {inbound}")
+                                        logger.debug(f"    Inbound streams: {inbound}")
                                         active = len(muxed_conn._streams)
-                                        print(f"      Active streams: {active}")
+                                        logger.debug(f"    Active streams: {active}")
                         except Exception:
                             pass
 
@@ -590,20 +590,24 @@ async def test_yamux_stress_ping():
                     await completion_event.wait()
 
         # === Result Summary ===
-        print("\n📊 Ping Stress Test Summary")
-        print(f"Total Streams Launched: {STREAM_COUNT}")
-        print(f"Successful Pings: {len(latencies)}")
-        print(f"Failed Pings: {len(failures)}")
+        logger.info("Ping Stress Test Summary")
+        logger.info(f"Total Streams Launched: {STREAM_COUNT}")
+        logger.info(f"Successful Pings: {len(latencies)}")
+        logger.info(f"Failed Pings: {len(failures)}")
         if failures:
-            print(f"❌ Failed stream indices: {failures}")
+            logger.warning(f"Failed stream indices: {failures}")
             if debug_enabled and failure_details:
-                print("\n🔍 Detailed Failure Information (CI/CD):")
+                logger.debug("Detailed Failure Information (CI/CD):")
                 for detail in failure_details[:10]:  # Show first 10 failures
-                    print(f"\n  Stream #{detail['stream_id']}:")
-                    print(f"    Error: {detail['error_type']}: {detail['error_msg']}")
-                    print(f"    Time elapsed: {detail['time_elapsed_ms']:.2f}ms")
+                    logger.debug(f"  Stream #{detail['stream_id']}:")
+                    logger.debug(
+                        f"    Error: {detail['error_type']}: {detail['error_msg']}"
+                    )
+                    logger.debug(f"    Time elapsed: {detail['time_elapsed_ms']:.2f}ms")
                     if len(failure_details) > 10:
-                        print(f"\n  ... and {len(failure_details) - 10} more failures")
+                        logger.debug(
+                            f"  ... and {len(failure_details) - 10} more failures"
+                        )
 
         # === Registry Performance Stats ===
         # Collect registry stats from server listener
@@ -619,24 +623,30 @@ async def test_yamux_stress_ping():
             registry_stats = server_listener._registry.get_stats()
             lock_stats = registry_stats.get("lock_stats", {})
 
-            print("\n📈 Registry Performance Stats:")
-            print(f"  Lock Acquisitions: {lock_stats.get('acquisitions', 0)}")
-            print(f"  Max Wait Time: {lock_stats.get('max_wait_time', 0) * 1000:.2f}ms")
-            print(f"  Max Hold Time: {lock_stats.get('max_hold_time', 0) * 1000:.2f}ms")
-            print(
+            logger.debug("Registry Performance Stats:")
+            logger.debug(f"  Lock Acquisitions: {lock_stats.get('acquisitions', 0)}")
+            logger.debug(
+                f"  Max Wait Time: {lock_stats.get('max_wait_time', 0) * 1000:.2f}ms"
+            )
+            logger.debug(
+                f"  Max Hold Time: {lock_stats.get('max_hold_time', 0) * 1000:.2f}ms"
+            )
+            logger.debug(
                 f"  Max Concurrent Holds: {lock_stats.get('max_concurrent_holds', 0)}"
             )
-            print(
+            logger.debug(
                 f"  Fallback Routing Count: "
                 f"{registry_stats.get('fallback_routing_count', 0)}"
             )
-            print(f"  Packets Processed: {listener_stats.get('packets_processed', 0)}")
+            logger.debug(
+                f"  Packets Processed: {listener_stats.get('packets_processed', 0)}"
+            )
 
             # Log stats on failure for debugging
             if len(failures) > 0:
-                print("\n⚠️  Registry Stats on Failure:")
-                print(f"  {lock_stats}")
-                print(f"  Registry Stats: {registry_stats}")
+                logger.warning("Registry Stats on Failure:")
+                logger.warning(f"  {lock_stats}")
+                logger.warning(f"  Registry Stats: {registry_stats}")
 
         # === Assertions ===
         success_rate = len(latencies) / STREAM_COUNT if STREAM_COUNT > 0 else 0.0
@@ -650,7 +660,7 @@ async def test_yamux_stress_ping():
         )
 
         avg_latency = sum(latencies) / len(latencies)
-        print(f"✅ Average Latency: {avg_latency:.2f} ms")
+        logger.info(f"Average Latency: {avg_latency:.2f} ms")
         assert avg_latency < 1000
 
 

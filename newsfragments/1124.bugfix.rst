@@ -1,1 +1,0 @@
-Fixed Pubsub._get_in_topic_gossipsub_peers_from_minus to use self.peer_protocol.get(peer_id) instead of direct dictionary access via self.peer_protocol[peer_id]. This safely ignores peers that are partially disconnected during the heartbeat cycle.
