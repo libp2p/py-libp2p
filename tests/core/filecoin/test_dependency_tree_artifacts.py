@@ -120,13 +120,20 @@ def test_required_symbols_have_upstream_lineage_path() -> None:
 
 def test_parity_matrix_rows_have_upstream_references() -> None:
     content = MATRIX_DOC_PATH.read_text(encoding="utf-8")
+
+    def is_markdown_separator(row: str) -> bool:
+        # Accept mdformat table separators like:
+        # "| --- | --- |" or "|---|---|"
+        normalized = row.strip().replace("|", "").replace(" ", "")
+        return bool(normalized) and set(normalized).issubset({"-", ":"})
+
     rows = [
         line
         for line in content.splitlines()
-        if line.startswith("| ") and not line.startswith("|---")
+        if line.startswith("|") and not is_markdown_separator(line)
     ]
-    # header + separator + at least one data row
-    assert len(rows) >= 3
+    # header + at least one data row
+    assert len(rows) >= 2
 
     data_rows = rows[1:]
     for row in data_rows:
