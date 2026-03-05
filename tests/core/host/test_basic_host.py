@@ -53,10 +53,13 @@ async def test_swarm_stream_handler_no_protocol_selected(monkeypatch):
     monkeypatch.setattr(host.multiselect, "negotiate", fake_negotiate)
 
     # Now run the handler and expect StreamFailure
-    with pytest.raises(
-        StreamFailure, match="Failed to negotiate protocol: no protocol selected"
-    ):
-        await host._swarm_stream_handler(net_stream)
+    try:
+        with pytest.raises(
+            StreamFailure, match="Failed to negotiate protocol: no protocol selected"
+        ):
+            await host._swarm_stream_handler(net_stream)
+    finally:
+        await host.close()
 
     # Ensure reset was called since negotiation failed
     net_stream.reset.assert_awaited()
