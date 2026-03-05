@@ -33,8 +33,8 @@ def test_put_rejects_duplicates():
 
     # Should have exactly 1 history entry per unique message
     history_mids = [e.mid for entries in mcache.history for e in entries]
-    assert history_mids.count((msg1.seqno, msg1.from_id)) == 1
-    assert history_mids.count((msg2.seqno, msg2.from_id)) == 1
+    assert history_mids.count(msg1.from_id + msg1.seqno) == 1
+    assert history_mids.count(msg2.from_id + msg2.seqno) == 1
 
 
 def test_shift_handles_duplicates():
@@ -66,7 +66,7 @@ def test_duplicate_put_keeps_first_topics():
     mcache.put(msg_first)
     mcache.put(msg_second)  # This will be ignored due to duplicate mid
 
-    mid = (b"\x01", b"peer1")
+    mid = b"peer1" + b"\x01"
 
     # First message's topics are preserved
     window_a = mcache.window("topic-A")
