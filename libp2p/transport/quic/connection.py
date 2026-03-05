@@ -52,6 +52,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
     QUIC natively provides stream multiplexing, so this connection acts as both
     a raw connection (for transport layer) and muxed connection (for upper layers).
 
+    Capability flags (see libp2p.capabilities): provides_secure and provides_muxed
+    are True so the core treats this as a top-of-stack connection without
+    adding security/muxer layers.
+
     Features:
     - Native QUIC stream multiplexing
     - Integrated libp2p TLS security with peer identity verification
@@ -62,6 +66,10 @@ class QUICConnection(IRawConnection, IMuxedConn):
     - Performance monitoring
     - COMPLETE connection ID management (fixes the original issue)
     """
+
+    # Capability flags for capability-based dispatch (libp2p.capabilities)
+    provides_secure: bool = True
+    provides_muxed: bool = True
 
     def __init__(
         self,
