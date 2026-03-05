@@ -53,11 +53,25 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     return True
 
 
-def parse_message_id_safe(msg_id_str: str) -> MessageID:
-    """Safely handle message ID as string."""
-    return MessageID(msg_id_str)
+def parse_message_id_safe(msg_id: str | bytes) -> MessageID:
+    """
+    Safely handle message ID as string.
+
+    Some peers may send non-text binary message IDs over string-typed protobuf
+    fields. In that case we only accept UTF-8 decodable payloads and reject
+    the rest so callers can skip invalid IDs without crashing.
+    """
+    if isinstance(msg_id, str):
+        return MessageID(msg_id)
+    if isinstance(msg_id, bytes):
+        try:
+            return MessageID(msg_id.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise ValueError("message ID is not UTF-8 decodable") from exc
+    raise ValueError(f"unsupported message ID type: {type(msg_id)!r}")
 
 
+<<<<<<< HEAD
 def safe_bytes_from_hex(hex_str: str) -> bytes | None:
     """
     Decode a hex-encoded string to bytes, returning None on failure.
@@ -69,3 +83,28 @@ def safe_bytes_from_hex(hex_str: str) -> bytes | None:
         return bytes.fromhex(hex_str)
     except ValueError:
         return None
+=======
+def safe_parse_message_id(msg_id: str | bytes) -> tuple[bytes, bytes]:
+    """
+    Safely parse message ID using ast.literal_eval with validation.
+    :param msg_id: String representation of message ID
+    :return: Tuple of (seqno, from_id) as bytes
+    :raises ValueError: If parsing fails
+    """
+    try:
+        msg_id_str = msg_id.decode("utf-8") if isinstance(msg_id, bytes) else msg_id
+        if not isinstance(msg_id_str, str):
+            raise ValueError("Message ID must be str or UTF-8 bytes")
+
+        parsed = ast.literal_eval(msg_id_str)
+        if not isinstance(parsed, tuple) or len(parsed) != 2:
+            raise ValueError("Invalid message ID format")
+
+        seqno, from_id = parsed
+        if not isinstance(seqno, bytes) or not isinstance(from_id, bytes):
+            raise ValueError("Message ID components must be bytes")
+
+        return (seqno, from_id)
+    except (ValueError, SyntaxError, UnicodeDecodeError, TypeError) as e:
+        raise ValueError(f"Invalid message ID format: {e}")
+>>>>>>> 1e154207 (Add Filecoin DX toolkit, docs, examples)
