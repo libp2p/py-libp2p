@@ -60,7 +60,7 @@ from .score import (
 )
 from .utils import (
     parse_message_id_safe,
-    safe_parse_message_id,
+    safe_bytes_from_hex,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -128,8 +128,8 @@ class GossipSub(IPubsubRouter, Service):
     message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
     max_messages_per_topic_per_second: float
     equivocation_detection: dict[
-        tuple[bytes, bytes], rpc_pb2.Message
-    ]  # (seqno, from) -> first_msg
+        bytes, rpc_pb2.Message
+    ]  # msg_id (from_id + seqno) -> first_msg
     eclipse_protection_enabled: bool
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
@@ -812,7 +812,7 @@ class GossipSub(IPubsubRouter, Service):
             msg_id = self.pubsub.get_message_id(pubsub_msg)
         else:
             # Fallback to default ID construction
-            msg_id = pubsub_msg.seqno + pubsub_msg.from_id
+            msg_id = pubsub_msg.from_id + pubsub_msg.seqno
 
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
@@ -1326,7 +1326,7 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, gossip_count, current_peers, True
                 )
-                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
+                msg_id_strs = [msg_id.hex() for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
                     peers_to_gossip[peer][topic] = msg_id_strs
 
@@ -1571,20 +1571,22 @@ class GossipSub(IPubsubRouter, Service):
             return
         if self.pubsub is None:
             raise NoPubsubAttached
-        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
-        # seen_messages cache
-        seen_seqnos_and_peers = [
-            str(seqno_and_from)
-            for seqno_and_from in self.pubsub.seen_messages.cache.keys()
-        ]
+        pubsub = self.pubsub
 
-        # Add all unknown message ids (ids that appear in ihave_msg but not in
-        # seen_seqnos) to list of messages we want to request
-        msg_ids_wanted: list[MessageID] = [
-            parse_message_id_safe(msg_id)
-            for msg_id in ihave_msg.messageIDs
-            if msg_id not in seen_seqnos_and_peers
-        ]
+        # Add all unknown message ids (ids that appear in ihave_msg but not
+        # already seen) to list of messages we want to request
+        msg_ids_wanted: list[MessageID] = []
+        for msg_id in ihave_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid hex message ID in IHAVE from %s: %r",
+                    sender_peer_id,
+                    msg_id,
+                )
+                continue
+            if not pubsub.seen_messages.has(mid_bytes):
+                msg_ids_wanted.append(parse_message_id_safe(msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1599,16 +1601,25 @@ class GossipSub(IPubsubRouter, Service):
 
         Enhanced with rate limiting for GossipSub v1.4.
         """
-        # Rate limiting check for IWANT requests
+        # Rate limiting check for IWANT messages
         if not self._check_iwant_rate_limit(sender_peer_id):
             logger.warning(
                 "IWANT rate limit exceeded for peer %s, ignoring request",
                 sender_peer_id,
             )
             return
-        msg_ids: list[tuple[bytes, bytes]] = [
-            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
-        ]
+
+        msg_ids: list[bytes] = []
+        for msg_id_str in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_str)
+            if mid_bytes is None:
+                logger.warning(
+                    "Received invalid hex message ID in IWANT from %s: %r",
+                    sender_peer_id,
+                    msg_id_str,
+                )
+                continue
+            msg_ids.append(mid_bytes)
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
@@ -2428,7 +2439,7 @@ class GossipSub(IPubsubRouter, Service):
         :param msg: The message to check
         :return: True if message is valid, False if equivocation detected
         """
-        msg_key = (msg.seqno, msg.from_id)
+        msg_key = msg.from_id + msg.seqno
 
         if msg_key in self.equivocation_detection:
             existing_msg = self.equivocation_detection[msg_key]
