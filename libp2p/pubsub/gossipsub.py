@@ -1345,15 +1345,9 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
-        msg_ids: list[tuple[bytes, bytes]] = []
-        for raw_msg_id in iwant_msg.messageIDs:
-            try:
-                msg_ids.append(safe_parse_message_id(raw_msg_id))
-            except ValueError:
-                logger.debug(
-                    "skipping malformed IWANT message ID from peer %s",
-                    sender_peer_id,
-                )
+        msg_ids: list[tuple[bytes, bytes]] = [
+            safe_parse_message_id(raw_msg_id) for raw_msg_id in iwant_msg.messageIDs
+        ]
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
