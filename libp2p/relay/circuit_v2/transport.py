@@ -176,10 +176,6 @@ class CircuitV2Transport(ITransport):
         # Performance tracker for intelligent relay selection
         self.performance_tracker = RelayPerformanceTracker()
 
-        # Stored addresses and DHT (from origin/main)
-        self._last_relay_index = -1
-        self._relay_list: list[ID] = []
-        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
         self._refreshing = False
         self.dht: KadDHT | None = None
@@ -732,36 +728,6 @@ class CircuitV2Transport(ITransport):
             return True
         except Exception:
             return False
-
-    async def _measure_relay(
-        self, relay_id: ID, scored_relays: list[tuple[ID, float]]
-    ) -> None:
-        metrics = self._relay_metrics.setdefault(
-            relay_id, {"latency": 0, "failures": 0, "last_seen": 0}
-        )
-        start = time.monotonic()
-        available = await self._is_relay_available(relay_id)
-        latency = time.monotonic() - start
-
-        if not available:
-            metrics["failures"] += 1
-            return
-
-        metrics.update(
-            {
-                "latency": latency,
-                "failures": max(0.0, metrics["failures"] - 1),
-                "last_seen": time.time(),
-            }
-        )
-
-        score = (
-            1000
-            - (metrics["failures"] * 10)
-            - (latency * 100)
-            - ((time.time() - metrics["last_seen"]) * 0.1)
-        )
-        scored_relays.append((relay_id, score))
 
     async def reserve(
         self, stream: INetStream, relay_peer_id: ID, nursery: trio.Nursery

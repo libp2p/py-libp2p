@@ -1099,32 +1099,11 @@ def circuit_v2_transport():
     return transport
 
 
-def _metrics_for(transport, relay):
-    """
-    Find metric dict for a relay by comparing
-    to_string() to avoid identity issues.
-    """
-    for k, v in transport._relay_metrics.items():
-        # some tests set relay.to_string.return_value
-        try:
-            if k.to_string() == relay.to_string():
-                return v
-        except Exception:
-            # fallback if to_string is not a callable on the mock
-            try:
-                if k.to_string.return_value == relay.to_string.return_value:
-                    return v
-            except Exception:
-                continue
-    raise AssertionError("Metrics for relay not found")
-
-
 @pytest.mark.trio
 async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
     """Test _select_relay when no relays are available."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
 
     result = await circuit_v2_transport._select_relay(peer_info)
@@ -1134,7 +1113,6 @@ async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
         circuit_v2_transport.discovery.get_relays.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
     )
-    assert circuit_v2_transport._relay_list == []
     assert (
         mock_sleep.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
@@ -1390,7 +1368,6 @@ async def test_select_relay_backoff_timing(circuit_v2_transport, peer_info, mock
     """Test _select_relay exponential backoff on empty scored_relays."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
     circuit_v2_transport.client_config.max_auto_relay_attempts = 3
 
