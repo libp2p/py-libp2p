@@ -24,8 +24,19 @@ for dag-jose, dag-json, and experimental codecs.
 import hashlib
 from typing import TypeAlias
 
-from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
-from cid.prefix import Prefix
+try:
+    from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
+    from cid.prefix import Prefix
+    _HAS_CID_BUILDERS = True
+except Exception:
+    # Older/newer py-cid variations may not expose builder/prefix helpers.
+    from cid import CIDv0, CIDv1, from_string, make_cid
+    Prefix = None  # type: ignore
+    V0Builder = None  # type: ignore
+    V1Builder = None  # type: ignore
+    _HAS_CID_BUILDERS = False
+
+import multihash as _multihash
 from multicodec import Code, is_codec
 from multicodec.code_table import DAG_PB, RAW, SHA2_256
 
@@ -61,7 +72,12 @@ def _normalise_codec(codec: Code | str | int) -> Code:
 
 def compute_cid_v0_obj(data: bytes) -> CIDv0:
     """Compute a CIDv0 object for data."""
-    return V0Builder().sum(data)
+    if _HAS_CID_BUILDERS and V0Builder is not None:
+        return V0Builder().sum(data)
+
+    # Fallback: compute sha2-256 multihash and construct CIDv0
+    mh = _multihash.digest(data, "sha2-256")
+    return CIDv0(mh.encode())
 
 
 def compute_cid_v0(data: bytes) -> bytes:
@@ -84,7 +100,13 @@ def compute_cid_v0(data: bytes) -> bytes:
 def compute_cid_v1_obj(data: bytes, codec: Code | str | int = CODEC_RAW) -> CIDv1:
     """Compute a CIDv1 object for data and codec."""
     code_obj = _normalise_codec(codec)
-    return V1Builder(codec=str(code_obj), mh_type=str(HASH_SHA256)).sum(data)
+    if _HAS_CID_BUILDERS and V1Builder is not None:
+        return V1Builder(codec=str(code_obj), mh_type=str(HASH_SHA256)).sum(data)
+
+    # Fallback: compute multihash and construct CIDv1 using codec name
+    codec_name = getattr(code_obj, "name", str(code_obj))
+    mh = _multihash.digest(data, "sha2-256")
+    return CIDv1(codec_name, mh.encode())
 
 
 def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
@@ -132,7 +154,26 @@ def get_cid_prefix(cid: bytes) -> bytes:
     if cid_obj.version != CID_V1:
         return b""
 
-    return cid_obj.prefix().to_bytes()
+    # Prefer high-level Prefix helper when available
+    if Prefix is not None and hasattr(cid_obj, "prefix"):
+        try:
+            return cid_obj.prefix().to_bytes()
+        except Exception:
+            pass
+
+    # Fallback: reconstruct prefix by removing the digest bytes from the
+    # raw CID buffer using py-multihash to determine digest length.
+    try:
+        mh_bytes = getattr(cid_obj, "multihash", None)
+        if mh_bytes is None:
+            # Some CID implementations expose different attributes
+            # Fall back to parsing the tail of the buffer.
+            return b""
+        mh = _multihash.decode(mh_bytes)
+        digest_len = mh.length
+        return cid_obj.buffer[:-digest_len]
+    except Exception:
+        return b""
 
 
 def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
@@ -153,12 +194,16 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
         # No prefix means CIDv0
         return compute_cid_v0(data)
 
-    try:
-        return Prefix.from_bytes(prefix).sum(data).buffer
-    except ValueError:
-        # Preserve previous permissive behavior for malformed prefixes.
-        digest = hashlib.sha256(data).digest()
-        return prefix + digest
+    if Prefix is not None:
+        try:
+            return Prefix.from_bytes(prefix).sum(data).buffer
+        except ValueError:
+            pass
+
+    # Fallback: when Prefix helper isn't available, try to conservatively
+    # append the raw digest to the prefix (preserves prior permissive behavior).
+    digest = hashlib.sha256(data).digest()
+    return prefix + digest
 
 
 def verify_cid(cid: bytes, data: bytes) -> bool:
@@ -187,7 +232,11 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
         return False
 
     try:
-        recomputed = cid_obj.prefix().sum(data).buffer
+        # Prefer using compute helpers which work across py-cid variants.
+        if cid_obj.version == CID_V1:
+            recomputed = compute_cid_v1(data, codec=getattr(cid_obj, "codec", None))
+        else:
+            recomputed = compute_cid_v0(data)
     except ValueError:
         logger.debug("        Failed to recompute CID from parsed prefix")
         return False

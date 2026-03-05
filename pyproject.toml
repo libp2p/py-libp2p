@@ -59,6 +59,47 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/libp2p/py-libp2p"
 
+# Optional dependency groups for modular packaging.
+# Users can install only the transports / security / muxers they need:
+#   pip install libp2p[quic]
+#   pip install libp2p[noise]
+#   pip install libp2p[defaults]   (everything)
+[project.optional-dependencies]
+quic = [
+    "aioquic>=1.2.0",
+]
+noise = [
+    "noiseprotocol>=0.3.0",
+]
+tls = []
+secio = [
+    "pycryptodome>=3.9.2",
+]
+yamux = []
+mplex = []
+defaults = [
+    "libp2p[quic,noise,tls,secio,yamux,mplex]",
+]
+
+# Entry-point groups for plugin discovery.
+# Third-party transport/security/muxer packages declare entry points in
+# these groups so that libp2p.entrypoints.discover_and_register() can
+# find and register them automatically.
+#
+# Built-in transports/security/muxers are listed here so they are
+# discoverable through the same mechanism.
+[project.entry-points."libp2p.transports"]
+tcp = "libp2p.transport.tcp.tcp:_create_tcp_provider"
+quic = "libp2p.transport.quic.transport:_create_quic_provider"
+
+[project.entry-points."libp2p.security"]
+noise = "libp2p.security.noise.transport:_create_noise_provider"
+tls = "libp2p.security.tls.transport:_create_tls_provider"
+
+[project.entry-points."libp2p.muxers"]
+yamux = "libp2p.stream_muxer.yamux.yamux:_create_yamux_provider"
+mplex = "libp2p.stream_muxer.mplex.mplex:_create_mplex_provider"
+
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"

@@ -32,6 +32,7 @@ from libp2p.abc import (
     IMuxedStream,
     ISecureConn,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.io.exceptions import (
     ConnectionClosedError,
     IncompleteReadError,
@@ -46,6 +47,8 @@ from libp2p.network.connection.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.providers import MuxerProvider
+from libp2p.requirements import after_connection
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
     MuxedStreamEOF,
@@ -417,6 +420,7 @@ class YamuxStream(IMuxedStream):
             return None
 
 
+@after_connection(ISecureConn)
 class Yamux(IMuxedConn):
     def __init__(
         self,
@@ -1097,3 +1101,13 @@ class Yamux(IMuxedConn):
                     self.on_close()
             except Exception as callback_error:
                 logger.error(f"Error in on_close callback: {callback_error}")
+
+
+def _create_yamux_provider() -> "MuxerProvider":
+    """
+    Entry-point factory for Yamux muxer discovery.
+
+    Returns a :class:`~libp2p.providers.MuxerProvider` wrapping the
+    :class:`Yamux` class.
+    """
+    return MuxerProvider(TProtocol(PROTOCOL_ID), Yamux)
