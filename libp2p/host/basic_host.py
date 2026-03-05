@@ -929,14 +929,17 @@ class BasicHost(IHost):
     async def close(self) -> None:
         """
         Close the host and its underlying network service.
+
+        Cleanup order is intentional: stop background services, remove UPnP port
+        mappings, cancel inflight identify tasks, then close the network.
         """
         # Stop background services
         if self.mDNS is not None:
             self.mDNS.stop()
-        
+
         if self.bootstrap is not None:
             self.bootstrap.stop()
-            
+
         # Cleanup UPnP mappings if active
         if self.upnp and self.upnp.get_external_ip():
             try:
@@ -950,7 +953,7 @@ class BasicHost(IHost):
         # Cancel inflight identify tasks
         for scope in list(self._identify_scopes.values()):
             scope.cancel()
-        
+
         # Close network
         await self._network.close()
 
@@ -967,9 +970,9 @@ class BasicHost(IHost):
             return
         if not self._should_identify_peer(peer_id):
             return
-        
+
         self._identify_inflight.add(peer_id)
-        
+
         # Create a new cancel scope for this identify task
         cancel_scope = trio.CancelScope()
         self._identify_scopes[peer_id] = cancel_scope
