@@ -92,8 +92,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
-    # NOTE: `string(from, seqno)` in Go
-    return msg.seqno + msg.from_id
+    # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/ab876fc71c34e89a7f0c8f4e361720ca9fa8588a/pubsub.go#L1327-L1330  # noqa: E501
+    return msg.from_id + msg.seqno
 
 
 def get_content_addressed_msg_id(
@@ -182,7 +182,7 @@ class PeerAndSeqnoMessageIDGenerator(MessageIDGenerator):
     """Standard peer+seqno message ID generator."""
 
     def generate_id(self, msg: rpc_pb2.Message) -> bytes:
-        return msg.seqno + msg.from_id
+        return msg.from_id + msg.seqno
 
 
 class ContentAddressedMessageIDGenerator(MessageIDGenerator):
