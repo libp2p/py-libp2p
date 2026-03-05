@@ -2,7 +2,7 @@ import logging
 
 from libp2p.records.utils import InvalidRecordType, split_key
 
-logger = logging.getLogger("records-validator")
+logger = logging.getLogger(__name__)
 
 
 class ErrBetterRecord(Exception):

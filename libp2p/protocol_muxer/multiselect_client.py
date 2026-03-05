@@ -12,7 +12,7 @@ from .exceptions import (
     ProtocolNotSupportedError,
 )
 
-logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"

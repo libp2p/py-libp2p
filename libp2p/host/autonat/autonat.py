@@ -25,7 +25,7 @@ from libp2p.peer.peerstore import (
 
 AUTONAT_PROTOCOL_ID = TProtocol("/ipfs/autonat/1.0.0")
 
-logger = logging.getLogger("libp2p.host.autonat")
+logger = logging.getLogger(__name__)
 
 
 class AutoNATStatus:

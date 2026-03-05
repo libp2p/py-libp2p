@@ -270,7 +270,7 @@ async def setup_destination_node(
                             relay_info = info_from_p2p_addr(relay_maddr)
                         else:
                             # Assume it's just a peer ID
-                            relay_peer_id = ID.from_base58(relay_addr)
+                            relay_peer_id = ID.from_string(relay_addr)
                             relay_info = PeerInfo(
                                 relay_peer_id,
                                 [
@@ -402,7 +402,7 @@ async def setup_source_node(
                         relay_info = info_from_p2p_addr(relay_maddr)
                     else:
                         # Assume it's just a peer ID
-                        relay_peer_id = ID.from_base58(relay_addr)
+                        relay_peer_id = ID.from_string(relay_addr)
                         relay_info = PeerInfo(
                             relay_peer_id,
                             [
@@ -433,7 +433,7 @@ async def setup_source_node(
                         pass
 
                     # Convert destination ID string to peer ID
-                    dest_peer_id = ID.from_base58(dest_id)
+                    dest_peer_id = ID.from_string(dest_id)
 
                     # Try to connect to the destination through the relay
                     logger.info(

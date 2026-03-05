@@ -100,6 +100,7 @@ class Multiselect(IMultiselectMuxer):
                             return protocol_to_check, self.handlers[protocol_to_check]
                         try:
                             await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+
                         except MultiselectCommunicatorError as error:
                             raise MultiselectError() from error
 

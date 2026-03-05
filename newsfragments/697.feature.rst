@@ -1,1 +1,0 @@
-Enhanced Circuit Relay v2 security by implementing multi-hop prevention, elegantly blocking relay chaining attempts while preserving legitimate client connections.

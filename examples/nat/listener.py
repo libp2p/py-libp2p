@@ -266,7 +266,7 @@ async def setup_listener_node(
                                 relay_info = info_from_p2p_addr(relay_maddr)
                             else:
                                 # Assume it's just a peer ID
-                                relay_peer_id = ID.from_base58(relay_addr)
+                                relay_peer_id = ID.from_string(relay_addr)
                                 relay_info = PeerInfo(
                                     relay_peer_id,
                                     [

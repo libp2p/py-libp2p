@@ -11,7 +11,7 @@ from libp2p.network.exceptions import SwarmException
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.peer.peerstore import PERMANENT_ADDR_TTL
 
-logger = logging.getLogger("libp2p.discovery.bootstrap")
+logger = logging.getLogger(__name__)
 resolver = DNSResolver()
 
 DEFAULT_CONNECTION_TIMEOUT = 10

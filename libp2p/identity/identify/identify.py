@@ -26,8 +26,6 @@ from .pb.identify_pb2 import (
     Identify,
 )
 
-# Not sure I can do this or I break a pattern
-# logger = logging.getLogger("libp2p.identity.identify")
 logger = logging.getLogger(__name__)
 
 ID = TProtocol("/ipfs/id/1.0.0")

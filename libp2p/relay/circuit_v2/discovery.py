@@ -50,7 +50,7 @@ from .utils import (
     maybe_consume_signed_record,
 )
 
-logger = logging.getLogger("libp2p.relay.circuit_v2.discovery")
+logger = logging.getLogger(__name__)
 
 # Discovery constants
 MAX_RELAYS_TO_TRACK = 10

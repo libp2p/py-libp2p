@@ -39,8 +39,7 @@ from .utils import (
     sort_peer_ids_by_distance,
 )
 
-# logger = logging.getLogger("libp2p.kademlia.peer_routing")
-logger = logging.getLogger("kademlia-example.peer_routing")
+logger = logging.getLogger(__name__)
 
 MAX_PEER_LOOKUP_ROUNDS = 20  # Maximum number of rounds in peer lookup
 MIN_PEERS_THRESHOLD = 5  # Minimum peers threshold for fallback to connected peers

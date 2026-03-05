@@ -103,32 +103,27 @@ async def test_write_msg_stream_reset():
                                 break
 
                         assert tcp_addr, f"No TCP address found in {listen_addrs}"
-                        print(f"🔗 Host A listening on: {tcp_addr}")
 
                         # Create peer info for host A
                         peer_info = info_from_p2p_addr(tcp_addr)
 
                         # Host B connects to host A
                         await host_b.connect(peer_info)
-                        print("✅ TCP connection established")
 
                         await pubsub_a.subscribe("test")
                         await pubsub_b.subscribe("test")
 
                         # Allow some time for subscriptions to propagate
                         await trio.sleep(1.0)
-                        print("✅ Peers subscribed to topic 'test'")
 
                         # Get the stream
                         peer_a_id = host_b.get_id()
                         stream = pubsub_a.peers[peer_a_id]
 
-                        print("Closing muxed stream to simulate disconnect...")
                         await stream.reset()
 
                         # Wait a moment to ensure stream is reset
                         await trio.sleep(1.0)
-                        print("✅ Peer reset the stream")
 
                         # Without StreamReset handling in Pubsub.write_msg, this will
                         # raise an exception
