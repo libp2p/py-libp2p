@@ -26,13 +26,13 @@
 ## Divergence register
 
 1. **DHT textual spec vs pinned implementation helper**
+
    - Text spec often cited as `fil/<network-name>/kad/1.0.0`.
    - Pinned Lotus helper in provided corpus uses `/fil/kad/<network-name>`.
+   - Implementation decision: keep pinned implementation parity unless maintainer overrides.
 
-- Implementation decision: keep pinned implementation parity unless maintainer overrides.
+1. **Score model depth**
 
-2. **Score model depth**
    - Upstream clients have richer per-topic scoring machinery.
-
-- Implementation decision: keep runtime threshold gating and preserve richer values as
-  references in `FILECOIN_TOPIC_SCORE_REFERENCE`.
+   - Implementation decision: keep runtime threshold gating and preserve richer values as
+     references in `FILECOIN_TOPIC_SCORE_REFERENCE`.
