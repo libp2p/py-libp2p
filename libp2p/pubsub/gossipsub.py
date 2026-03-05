@@ -1308,12 +1308,21 @@ class GossipSub(IPubsubRouter, Service):
         ]
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
-        # seen_seqnos) to list of messages we want to request
-        msg_ids_wanted: list[MessageID] = [
-            parse_message_id_safe(msg_id)
-            for msg_id in ihave_msg.messageIDs
-            if msg_id not in seen_seqnos_and_peers
-        ]
+        # seen_seqnos) to list of messages we want to request. Skip malformed
+        # IDs instead of crashing.
+        msg_ids_wanted: list[MessageID] = []
+        for raw_msg_id in ihave_msg.messageIDs:
+            try:
+                msg_id = parse_message_id_safe(raw_msg_id)
+            except ValueError:
+                logger.debug(
+                    "skipping non-decodable IHAVE message ID from peer %s",
+                    sender_peer_id,
+                )
+                continue
+
+            if msg_id not in seen_seqnos_and_peers:
+                msg_ids_wanted.append(msg_id)
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1335,9 +1344,16 @@ class GossipSub(IPubsubRouter, Service):
                 sender_peer_id,
             )
             return
-        msg_ids: list[tuple[bytes, bytes]] = [
-            safe_parse_message_id(msg) for msg in iwant_msg.messageIDs
-        ]
+
+        msg_ids: list[tuple[bytes, bytes]] = []
+        for raw_msg_id in iwant_msg.messageIDs:
+            try:
+                msg_ids.append(safe_parse_message_id(raw_msg_id))
+            except ValueError:
+                logger.debug(
+                    "skipping malformed IWANT message ID from peer %s",
+                    sender_peer_id,
+                )
         msgs_to_forward: list[rpc_pb2.Message] = []
         for msg_id_iwant in msg_ids:
             # Check if the wanted message ID is present in mcache
