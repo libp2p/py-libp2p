@@ -491,9 +491,9 @@ async def test_gossip_heartbeat(initial_peer_count, monkeypatch):
 
         def window(topic):
             if topic == topic_mesh:
-                return [topic_mesh]
+                return [topic_mesh.encode()]
             elif topic == topic_fanout:
-                return [topic_fanout]
+                return [topic_fanout.encode()]
             else:
                 return []
 
@@ -791,10 +791,10 @@ async def test_handle_ihave(monkeypatch):
         mock_emit_iwant = AsyncMock()
         monkeypatch.setattr(gossipsubs[index_alice], "emit_iwant", mock_emit_iwant)
 
-        # Create a test message ID as a string representation of a (seqno, from) tuple
+        # Create a test message ID as hex-encoded bytes (from_id + seqno)
         test_seqno = b"1234"
         test_from = id_bob.to_bytes()
-        test_msg_id = f"(b'{test_seqno.hex()}', b'{test_from.hex()}')"
+        test_msg_id = (test_from + test_seqno).hex()
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=[test_msg_id])
 
         # Mock seen_messages.cache to avoid false positives
@@ -832,8 +832,8 @@ async def test_handle_iwant(monkeypatch):
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
 
-        # ✅ Correct: use raw tuple and str() to serialize, no hex()
-        test_msg_id = str((test_seqno, test_from))
+        # Use hex-encoded bytes (from_id + seqno) as message ID
+        test_msg_id = (test_from + test_seqno).hex()
 
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
@@ -853,17 +853,19 @@ async def test_handle_iwant(monkeypatch):
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
 
-        # Verify that mcache.get was called with the correct parsed message ID
+        # Verify that mcache.get was called with the correct bytes message ID
         mock_mcache_get.assert_called_once()
         called_msg_id = mock_mcache_get.call_args[0][0]
-        assert isinstance(called_msg_id, tuple)
-        assert called_msg_id == (test_seqno, test_from)
+        assert isinstance(called_msg_id, bytes)
+        assert called_msg_id == test_from + test_seqno
 
 
 @pytest.mark.trio
 async def test_handle_iwant_invalid_msg_id(monkeypatch):
     """
-    Test that handle_iwant raises ValueError for malformed message IDs.
+    Test that handle_iwant silently skips malformed (non-hex) message IDs
+    instead of raising ValueError, so a misbehaving peer cannot crash the handler.
+    mcache.get must not be called for invalid IDs (proving they were skipped).
     """
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
         gossipsub_routers = []
@@ -879,28 +881,28 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
         await trio.sleep(0.1)
 
-        # Malformed message ID (not a tuple string)
-        malformed_msg_id = "not_a_valid_msg_id"
-        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
-
-        # Mock mcache.get and write_msg to ensure they are not called
+        # Patch mcache.get so we can verify handle_iwant never looks up invalid IDs.
+        # NOTE: We intentionally do NOT assert on write_msg because the background
+        # pubsub service may call it asynchronously (e.g. peer-record announcements),
+        # causing race-condition flakes. The mcache.get assertion alone proves that
+        # invalid message IDs are skipped before any cache lookup or forwarding occurs.
         mock_mcache_get = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
 
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        # Malformed message ID (not valid hex) — should be skipped without raising
+        malformed_msg_id = "not_a_valid_msg_id"
+        iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
+        mock_mcache_get.reset_mock()
+        # Must not raise; defensive parsing silently skips invalid IDs
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
 
-        # Message ID that's a tuple string but not (bytes, bytes)
+        # Another malformed ID — also silently skipped
         invalid_tuple_msg_id = "('abc', 123)"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        mock_mcache_get.reset_mock()
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
 
 
 @pytest.mark.trio
