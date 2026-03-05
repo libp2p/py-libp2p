@@ -48,7 +48,7 @@ async def test_peer_and_seqno_generator():
     msg = create_test_message()
 
     msg_id = generator.generate_id(msg)
-    expected_id = msg.seqno + msg.from_id
+    expected_id = msg.from_id + msg.seqno
 
     assert msg_id == expected_id
 
