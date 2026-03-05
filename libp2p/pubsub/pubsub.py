@@ -182,7 +182,7 @@ class PeerAndSeqnoMessageIDGenerator(MessageIDGenerator):
     """Standard peer+seqno message ID generator."""
 
     def generate_id(self, msg: rpc_pb2.Message) -> bytes:
-        return msg.seqno + msg.from_id
+        return msg.from_id + msg.seqno
 
 
 class ContentAddressedMessageIDGenerator(MessageIDGenerator):

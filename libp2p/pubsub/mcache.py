@@ -11,7 +11,7 @@ def default_msg_id_fn(msg: rpc_pb2.Message) -> bytes:
     """
     Compute the default message ID matching go-libp2p's DefaultMsgIdFn.
 
-    Ref: go-libp2p-pubsub pubsub.go#L1327-L1330
+    Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go#L1327-L1330
 
     :param msg: The protobuf message.
     :return: ``from_id + seqno`` concatenated as bytes.
