@@ -20,6 +20,9 @@ from libp2p.abc import (
     IRawConnection,
     ITransport,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.custom_types import (
     THandler,
 )
@@ -122,6 +125,14 @@ class TrackedRawConnection(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Get remote address from the wrapped connection."""
         return self._wrapped.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """Delegate to wrapped connection."""
+        return self._wrapped.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """Always RELAYED since this wraps relay connections."""
+        return ConnectionType.RELAYED
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to wrapped connection."""
