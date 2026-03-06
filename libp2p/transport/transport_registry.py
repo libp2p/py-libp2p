@@ -37,7 +37,7 @@ def _get_websocket_transport() -> Any:
     return WebsocketTransport
 
 
-logger = logging.getLogger("libp2p.transport.registry")
+logger = logging.getLogger(__name__)
 
 
 def _is_valid_tcp_multiaddr(maddr: Multiaddr) -> bool:
@@ -188,7 +188,10 @@ class TransportRegistry:
                 if "negotiate_timeout" in kwargs:
                     config.NEGOTIATE_TIMEOUT = kwargs["negotiate_timeout"]
 
-                return QUICTransport(private_key, config)
+                enable_autotls = kwargs.get("enable_autotls", False)
+                return QUICTransport(
+                    private_key, config=config, enable_autotls=enable_autotls
+                )
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()

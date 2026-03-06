@@ -12,7 +12,7 @@ from .exceptions import (
     ProtocolNotSupportedError,
 )
 
-logger = logging.getLogger("libp2p.protocol_muxer.multiselect_client")
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
@@ -37,17 +37,23 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when handshake failed
         """
         try:
+            logger.debug("MultiselectClient: writing handshake")
             await communicator.write(MULTISELECT_PROTOCOL_ID)
         except MultiselectCommunicatorError as error:
+            logger.error("MultiselectClient handshake: write failed: %s", error)
             raise MultiselectClientError(f"handshake write failed: {error}") from error
 
         try:
+            logger.debug("MultiselectClient handshake: reading response")
             handshake_contents = await communicator.read()
+            logger.debug("MultiselectClient handshake: received %r", handshake_contents)
 
         except MultiselectCommunicatorError as error:
+            logger.error("MultiselectClient handshake: read failed: %s", error)
             raise MultiselectClientError(f"handshake read failed: {error}") from error
 
         if not is_valid_handshake(handshake_contents):
+            logger.error("MultiselectClient: invalid handshake %r", handshake_contents)
             raise MultiselectClientError(
                 f"multiselect protocol ID mismatch: "
                 f"expected {MULTISELECT_PROTOCOL_ID}, "
@@ -71,15 +77,18 @@ class MultiselectClient(IMultiselectClient):
         :return: selected protocol
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
+        logger.debug("MultiselectClient select_one_of: protocols=%s", list(protocols))
         try:
             with trio.fail_after(negotiate_timeout):
                 await self.handshake(communicator)
+                logger.debug("MultiselectClient select_one_of: handshake completed")
 
                 protocol_list = [str(p) for p in protocols]
                 logger.debug(f"Attempting to negotiate one of: {protocol_list}")
 
                 unsupported_errors: list[str] = []
                 for protocol in protocols:
+                    logger.debug("MultiselectClient: trying %s", protocol)
                     try:
                         selected_protocol = await self.try_select(
                             communicator, protocol

@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds (increased)
 STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
-SLEEP_TIME = 1.0  # seconds (increased)
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 
 
 @pytest.fixture
@@ -350,7 +350,7 @@ async def test_circuit_v2_protocol_initialization():
 
         async with background_trio_service(protocol):
             await protocol.event_started.wait()
-            await trio.sleep(SLEEP_TIME)  # Give time for handlers to be registered
+            # Handlers are registered when event_started is set, no sleep needed
 
             # Verify protocol handlers are registered by trying to use them
             test_stream = None

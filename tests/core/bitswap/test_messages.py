@@ -1,6 +1,6 @@
 """Unit tests for Bitswap messages."""
 
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.messages import (
     create_block_message_v100,
     create_block_message_v110,
@@ -45,6 +45,18 @@ class TestWantlistEntry:
 
         assert entry.wantType == 1
         assert entry.sendDontHave is True
+
+    def test_create_entry_accepts_mixed_cid_inputs(self):
+        """Test wantlist entry accepts CID bytes/text/hex/object forms."""
+        cid = compute_cid_v1(b"mixed-input-wantlist")
+
+        entry_from_text = create_wantlist_entry(cid_to_text(cid))
+        entry_from_hex = create_wantlist_entry(cid.hex())
+        entry_from_obj = create_wantlist_entry(parse_cid(cid))
+
+        assert entry_from_text.block == cid
+        assert entry_from_hex.block == cid
+        assert entry_from_obj.block == cid
 
 
 class TestWantlistMessage:
@@ -126,6 +138,22 @@ class TestBlockMessages:
 
         assert len(msg.blockPresences) == 2
 
+    def test_create_block_presence_message_accepts_mixed_cid_inputs(self):
+        """Test block presence message normalizes mixed CID input forms."""
+        cid = compute_cid_v1(b"mixed-input-presence")
+        presences = [
+            (cid_to_text(cid), True),
+            (cid.hex(), False),
+            (parse_cid(cid), True),
+        ]
+
+        msg = create_block_presence_message(presences)
+
+        assert len(msg.blockPresences) == 3
+        assert msg.blockPresences[0].cid == cid
+        assert msg.blockPresences[1].cid == cid
+        assert msg.blockPresences[2].cid == cid
+
 
 class TestCreateMessage:
     """Test combined message creation."""
@@ -173,3 +201,19 @@ class TestCreateMessage:
         assert len(new_msg.wantlist.entries) == 1
         assert new_msg.wantlist.entries[0].block == cid
         assert new_msg.wantlist.entries[0].priority == 7
+
+    def test_create_message_block_presences_accepts_mixed_cid_inputs(self):
+        """Test create_message block presence path normalizes mixed CID inputs."""
+        cid = compute_cid_v1(b"mixed-input-create-message")
+        msg = create_message(
+            block_presences=[
+                (cid_to_text(cid), True),
+                (cid.hex(), False),
+                (parse_cid(cid), True),
+            ]
+        )
+
+        assert len(msg.blockPresences) == 3
+        assert msg.blockPresences[0].cid == cid
+        assert msg.blockPresences[1].cid == cid
+        assert msg.blockPresences[2].cid == cid

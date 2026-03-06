@@ -8,9 +8,11 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -54,7 +56,7 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 # Ref: https://github.com/libp2p/go-mplex/blob/414db61813d9ad3e6f4a7db5c1b1612de343ace9/multiplex.go#L115  # noqa: E501
 MPLEX_MESSAGE_CHANNEL_SIZE = 8
 
-logger = logging.getLogger("libp2p.stream_muxer.mplex.mplex")
+logger = logging.getLogger(__name__)
 
 
 class Mplex(IMuxedConn):
@@ -393,3 +395,15 @@ class Mplex(IMuxedConn):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying Mplex connection's secured_conn."""
         return self.secured_conn.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()
