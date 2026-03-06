@@ -6,8 +6,9 @@ in a version-agnostic way, supporting both IPv4 and IPv6.
 Uses py-multiaddr utilities (e.g. get_multiaddr_options) when available.
 """
 
+from collections.abc import Callable
 import socket
-from typing import Any
+from typing import Any, cast
 
 from multiaddr import Multiaddr
 from multiaddr.utils import get_multiaddr_options
@@ -29,7 +30,8 @@ def join_multiaddrs(*addrs: str | bytes | Multiaddr) -> Multiaddr:
     normalized = [a if isinstance(a, Multiaddr) else Multiaddr(a) for a in addrs]
     join_method = getattr(Multiaddr, "join", None)
     if callable(join_method):
-        return Multiaddr.join(*addrs)
+        join_fn = cast(Callable[..., Multiaddr], join_method)
+        return join_fn(*normalized)
     result = normalized[0]
     for a in normalized[1:]:
         result = result.encapsulate(a)
