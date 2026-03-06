@@ -4,18 +4,14 @@ ARG UV_VERSION=0.5.31
 
 WORKDIR /app
 
-# Install system dependencies (contributing.rst + transport Dockerfile)
+# Install only required build/runtime dependencies for local libp2p install.
 RUN apt-get update && apt-get install -y \
-    redis-tools \
     build-essential \
     cmake \
     pkg-config \
     libgmp-dev \
     libssl-dev \
     libffi-dev \
-    ca-certificates \
-    git \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (docs/contributing.rst Option 2: same as CI)
@@ -29,10 +25,9 @@ RUN uv venv /app/venv
 
 # Interop/perf project: depends on libp2p from copied clone
 COPY interop/perf/pyproject.toml .
+COPY interop/perf/perf_test.py .
 RUN uv pip install --python /app/venv/bin/python --upgrade pip && \
     uv pip install --python /app/venv/bin/python --no-cache-dir -e .
-
-COPY interop/perf/perf_test.py .
 
 ENV PYTHONUNBUFFERED=1
 ENV CI=true

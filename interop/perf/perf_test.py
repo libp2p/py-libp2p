@@ -124,7 +124,18 @@ def _percentile(sorted_values: list[float], p: float) -> float:
 def _is_connection_closed_error(exc: BaseException) -> bool:
     """True if this is the expected 'Connection closed' from swarm/mplex on shutdown."""
     msg = str(exc).lower()
-    if "connection closed" in msg:
+    if any(
+        token in msg
+        for token in (
+            "connection closed",
+            "connection is closed",
+            "cannot read: tls connection is closed",
+            "closed resource",
+            "broken resource",
+            "end of file",
+            "eof",
+        )
+    ):
         return True
     if isinstance(exc, ExceptionGroup):
         return all(_is_connection_closed_error(e) for e in exc.exceptions)
@@ -568,9 +579,9 @@ class PerfTest:
             listen_addrs=listen_addrs,
             negotiate_timeout=self.negotiate_timeout_seconds,
             enable_quic=(self.transport == "quic-v1"),
-            quic_transport_opt=(
-                quic_transport_opt if self.transport == "quic-v1" else None
-            ),
+            quic_transport_opt=quic_transport_opt
+            if self.transport == "quic-v1"
+            else None,
             tls_client_config=tls_client,
             tls_server_config=tls_server,
             connection_config=connection_config,
