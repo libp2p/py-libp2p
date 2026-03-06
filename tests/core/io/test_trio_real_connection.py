@@ -16,31 +16,33 @@ Related: issue #376
 import logging
 import socket
 import struct
+from typing import Any
 
 import pytest
 import trio
 
+from libp2p.abc import IRawConnection
 from libp2p.io.exceptions import ConnectionClosedError
 from libp2p.network.connection.exceptions import RawConnError
 from libp2p.network.connection.raw_connection import RawConnection
-from libp2p.transport.tcp.tcp import TCP
 from libp2p.tools.constants import LISTEN_MADDR
-
+from libp2p.transport.tcp.tcp import TCP
 
 logger = logging.getLogger(__name__)
 
 
-def _force_reset(raw_conn: RawConnection) -> None:
+def _force_reset(conn: IRawConnection) -> None:
     """
     Set SO_LINGER(on, timeout=0) on the underlying socket so that close()
     sends a TCP RST instead of a graceful FIN.
 
     This simulates an abrupt connection abort (e.g. remote process crash).
     """
-    # Navigate: RawConnection -> TrioTCPStream -> trio.SocketStream -> socket
-    trio_stream = raw_conn.stream            # TrioTCPStream
-    socket_stream = trio_stream.stream       # trio.SocketStream
-    sock = socket_stream.socket              # stdlib socket
+    # Navigate: IRawConnection -> TrioTCPStream -> trio.SocketStream -> socket
+    # Use Any to bypass the abstract ReadWriteCloser typing — at runtime these
+    # are concrete TrioTCPStream / trio.SocketStream objects with .stream / .socket.
+    stream: Any = conn.stream  # type: ignore[attr-defined]  # TrioTCPStream
+    sock = stream.stream.socket  # trio.SocketStream -> stdlib socket
 
     # struct.pack("ii", on, timeout) — on=1 enables linger, timeout=0 means RST
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
@@ -54,11 +56,11 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
     ``ConnectionClosedError``, NOT silently return b"".
     """
     async with trio.open_nursery() as nursery:
-        local_conn: RawConnection | None = None
-        remote_conn: RawConnection | None = None
+        local_conn: IRawConnection | None = None
+        remote_conn: IRawConnection | None = None
         ready = trio.Event()
 
-        async def on_accept(stream) -> None:
+        async def on_accept(stream: Any) -> None:
             nonlocal remote_conn
             remote_conn = RawConnection(stream, initiator=False)
             ready.set()
@@ -100,11 +102,11 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
     side must raise ``RawConnError`` wrapping ``ConnectionClosedError``.
     """
     async with trio.open_nursery() as nursery:
-        local_conn: RawConnection | None = None
-        remote_conn: RawConnection | None = None
+        local_conn: IRawConnection | None = None
+        remote_conn: IRawConnection | None = None
         ready = trio.Event()
 
-        async def on_accept(stream) -> None:
+        async def on_accept(stream: Any) -> None:
             nonlocal remote_conn
             remote_conn = RawConnection(stream, initiator=False)
             ready.set()
@@ -150,11 +152,11 @@ async def test_graceful_close_read_returns_eof() -> None:
     This confirms the distinction between RST (error) and FIN (clean EOF).
     """
     async with trio.open_nursery() as nursery:
-        local_conn: RawConnection | None = None
-        remote_conn: RawConnection | None = None
+        local_conn: IRawConnection | None = None
+        remote_conn: IRawConnection | None = None
         ready = trio.Event()
 
-        async def on_accept(stream) -> None:
+        async def on_accept(stream: Any) -> None:
             nonlocal remote_conn
             remote_conn = RawConnection(stream, initiator=False)
             ready.set()
@@ -187,11 +189,11 @@ async def test_normal_data_transfer_works() -> None:
     before any reset occurs.
     """
     async with trio.open_nursery() as nursery:
-        local_conn: RawConnection | None = None
-        remote_conn: RawConnection | None = None
+        local_conn: IRawConnection | None = None
+        remote_conn: IRawConnection | None = None
         ready = trio.Event()
 
-        async def on_accept(stream) -> None:
+        async def on_accept(stream: Any) -> None:
             nonlocal remote_conn
             remote_conn = RawConnection(stream, initiator=False)
             ready.set()
