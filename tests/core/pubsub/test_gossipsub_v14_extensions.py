@@ -168,13 +168,8 @@ async def test_unregistered_extension_handling():
 
 @pytest.mark.trio
 async def test_extension_message_from_unsupported_peer():
-    """Test receiving extension message from peer that doesn't support extensions."""
+    """Extension data from a v1.1 peer is not processed; only v1.3+ are handled."""
     from libp2p.pubsub.gossipsub import PROTOCOL_ID_V11
-
-    received_count = [0]  # Use list to make it mutable
-
-    async def handler(data: bytes, sender_peer_id: ID):
-        received_count[0] += 1
 
     # Create one v1.4 peer and one v1.1 peer
     async with PubsubFactory.create_batch_with_gossipsub(
@@ -184,35 +179,30 @@ async def test_extension_message_from_unsupported_peer():
             1, protocols=[PROTOCOL_ID_V11]
         ) as v11_pubsubs:
             v14_router = v14_pubsubs[0].router
-            v11_router = v11_pubsubs[0].router
             assert isinstance(v14_router, GossipSub)
-            assert isinstance(v11_router, GossipSub)
 
-            # Register handler on v1.4 peer
-            v14_router.register_extension_handler("test-ext", handler)
-
-            # Connect peers
             await connect(v14_pubsubs[0].host, v11_pubsubs[0].host)
             await trio.sleep(0.5)
 
-            # Manually set the peer protocol mapping to simulate v1.1 peer
+            # Simulate v1.1 peer: router thinks this peer speaks v1.1 only
             v11_peer_id = v11_pubsubs[0].host.get_id()
             v14_router.peer_protocol[v11_peer_id] = PROTOCOL_ID_V11
 
-            # Verify the peer is recognized as not supporting extensions
             assert not v14_router.supports_protocol_feature(v11_peer_id, "extensions")
 
-            # Create extension message from v1.1 peer
-            extension_msg = rpc_pb2.ControlExtension()
-            extension_msg.name = "test-ext"
-            extension_msg.data = b"test data"
+            # Build an RPC that would carry control.extensions (as a v1.3 peer would)
+            rpc = rpc_pb2.RPC()
+            rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+            rpc.control.extensions.CopyFrom(
+                rpc_pb2.ControlExtensions(topicObservation=True)
+            )
 
-            # This should be ignored due to protocol version check
-            await v14_router.handle_extension(extension_msg, v11_peer_id)
-            await trio.sleep(0.5)
+            # handle_rpc must not process extensions for v1.1 peers
+            await v14_router.handle_rpc(rpc, v11_peer_id)
 
-            # Handler should not have been called
-            assert received_count[0] == 0
+            # v1.1 peer's extensions must not be recorded (we skip extensions_state
+            # when sender does not support v1.3+)
+            assert v14_router.extensions_state.get_peer_extensions(v11_peer_id) is None
 
 
 @pytest.mark.trio

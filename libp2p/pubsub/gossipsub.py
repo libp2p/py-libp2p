@@ -630,7 +630,8 @@ class GossipSub(IPubsubRouter, Service):
         if control_message.idontwant:
             for idontwant in control_message.idontwant:
                 await self.handle_idontwant(idontwant, sender_peer_id)
-        # v1.3 Extensions control message is processed above via extensions_state.handle_rpc()
+        # v1.3 Extensions control message is processed above via
+        # extensions_state.handle_rpc()
 
         # GossipSub v1.3 – Topic Observation extension
         if self.supports_v13_features(sender_peer_id):

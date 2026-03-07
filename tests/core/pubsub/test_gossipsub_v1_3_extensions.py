@@ -14,6 +14,7 @@ from libp2p.pubsub.gossipsub import (
 )
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.score import ScoreParams
+from libp2p.tools.constants import GOSSIPSUB_PARAMS
 from tests.utils.factories import (
     GossipsubFactory,
     IDFactory,
@@ -165,7 +166,8 @@ def test_both_support_topic_observation_query() -> None:
     """both_support_topic_observation returns True only when both sides advertise it."""
     state = ExtensionsState(my_extensions=PeerExtensions(topic_observation=True))
 
-    # Peer that did not advertise topicObservation (we only accept first Extensions per peer).
+    # Peer that did not advertise topicObservation (we only accept first
+    # Extensions per peer).
     peer_no = IDFactory()
     rpc_no = _make_rpc_with_extensions(topic_observation=False)
     state.handle_rpc(rpc_no, peer_no)
@@ -185,24 +187,23 @@ def test_gossipsub_report_extensions_misbehaviour_penalizes_behavior() -> None:
         p5_behavior_penalty_threshold=0.0,
         p5_behavior_penalty_decay=1.0,
     )
-    router = GossipsubFactory(score_params=score_params)
+    router = GossipSub(
+        protocols=[PROTOCOL_ID_V13],
+        degree=GOSSIPSUB_PARAMS.degree,
+        degree_low=GOSSIPSUB_PARAMS.degree_low,
+        degree_high=GOSSIPSUB_PARAMS.degree_high,
+        score_params=score_params,
+    )
     assert isinstance(router, GossipSub)
     assert router.scorer is not None
 
     peer_id = IDFactory()
-
-    penalize_calls: list[tuple[ID, float]] = []
-    original_penalize = router.scorer.penalize_behavior
-
-    def wrapped_penalize(p: ID, amount: float = 1.0) -> None:
-        penalize_calls.append((p, amount))
-        original_penalize(p, amount)
-
-    router.scorer.penalize_behavior = wrapped_penalize  # type: ignore[assignment]
+    assert peer_id not in router.scorer.behavior_penalty
 
     router._report_extensions_misbehaviour(peer_id)
 
-    assert penalize_calls == [(peer_id, 1.0)]
+    # _report_extensions_misbehaviour must call scorer.penalize_behavior(peer_id, 1.0)
+    assert router.scorer.behavior_penalty[peer_id] == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +390,7 @@ async def test_notify_observers_sends_ihave_to_each_observer() -> None:
 
 @pytest.mark.trio
 async def test_start_and_stop_observing_topic_high_level_api() -> None:
-    """start_observing_topic / stop_observing_topic should delegate to OBSERVE/UNOBSERVE."""
+    """start_observing_topic / stop_observing_topic delegate to OBSERVE/UNOBSERVE."""
     router = GossipsubFactory()
     assert isinstance(router, GossipSub)
 
