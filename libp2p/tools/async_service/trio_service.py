@@ -30,6 +30,8 @@ if sys.version_info >= (3, 11):
 else:
     from exceptiongroup import ExceptionGroup
 
+import logging
+
 import trio
 import trio_typing
 
@@ -55,6 +57,8 @@ from .typing import (
     EXC_INFO,
     AsyncFn,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FunctionTask(BaseFunctionTask):
@@ -178,9 +182,9 @@ class TrioManager(BaseManager):
     # System Tasks
     #
     async def _handle_cancelled(self) -> None:
-        self.logger.debug("%s: _handle_cancelled waiting for cancellation", self)
+        logger.debug("%s: _handle_cancelled waiting for cancellation", self)
         await self._cancelled.wait()
-        self.logger.debug("%s: _handle_cancelled triggering task cancellation", self)
+        logger.debug("%s: _handle_cancelled triggering task cancellation", self)
 
         # The `_root_tasks` changes size as each task completes itself
         # and removes itself from the set.  For this reason we iterate over a
@@ -240,7 +244,7 @@ class TrioManager(BaseManager):
             # We need this inside a finally because a trio.Cancelled exception may be
             # raised here and it wouldn't be swalled by the 'except Exception' above.
             self._finished.set()
-            self.logger.debug("%s: finished", self)
+            logger.debug("%s: finished", self)
 
         # This is outside of the finally block above because we don't want to suppress
         # trio.Cancelled or ExceptionGroup exceptions coming directly from trio.

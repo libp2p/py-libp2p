@@ -1,1 +1,0 @@
-Refactored QUIC Connection ID management into a dedicated ConnectionIDRegistry class, improving code organization and maintainability of the QUIC listener.

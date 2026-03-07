@@ -30,7 +30,7 @@ class RoutingTableProtocol(Protocol):
         ...
 
 
-logger = logging.getLogger("libp2p.discovery.random_walk.rt_refresh_manager")
+logger = logging.getLogger(__name__)
 
 
 class RTRefreshManager:

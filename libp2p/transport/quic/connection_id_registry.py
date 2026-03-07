@@ -63,9 +63,19 @@ class ConnectionIDRegistry:
         # Address -> Connection ID mapping
         self._addr_to_connection_id: dict[tuple[str, int], bytes] = {}
 
+        # Address -> established connections mapping.
+        # Supports multiple connections per address (e.g. tests that reuse addr tuples).
+        self._addr_to_connections: defaultdict[
+            tuple[str, int], set["QUICConnection"]
+        ] = defaultdict(set)
+
         # Reverse mapping: Connection -> address (for O(1) fallback routing,
         # inspired by quinn)
         self._connection_addresses: dict["QUICConnection", tuple[str, int]] = {}
+
+        # Primary CID and CID counts per connection (avoid scans on cleanup/routing).
+        self._connection_primary_cid: dict["QUICConnection", bytes] = {}
+        self._connection_cid_counts: dict["QUICConnection", int] = {}
 
         # Sequence number tracking (inspired by quinn's architecture)
         # Connection ID -> sequence number mapping
@@ -290,84 +300,42 @@ class ConnectionIDRegistry:
 
                         return (None, None)
 
-                # Strategy 2: Try reverse mapping connection -> address (O(1))
-                # This is more efficient than linear search and handles cases where
-                # address-to-Connection ID mapping might be stale but connection exists
-                for connection, connection_addr in self._connection_addresses.items():
-                    if connection_addr == addr:
-                        # Find a Connection ID for this connection
-                        for connection_id, conn in self._connections.items():
-                            if conn is connection:
-                                # Fallback routing was used
-                                self._fallback_routing_count += 1
-                                hold_duration = time.time() - hold_start
-                                total_duration = time.time() - call_start
+                # Strategy 2: Try established connection lookup by
+                #  address (O(1) average).
+                # This avoids scanning all connections on fallback routing.
+                connections_at_addr = self._addr_to_connections.get(addr)
+                if connections_at_addr:
+                    connection = next(iter(connections_at_addr))
+                    original_connection_id = self._connection_primary_cid.get(
+                        connection
+                    )
+                    self._fallback_routing_count += 1
 
-                                # Track max hold time
-                                if hold_duration > self._lock_stats["max_hold_time"]:
-                                    self._lock_stats["max_hold_time"] = hold_duration
+                    hold_duration = time.time() - hold_start
+                    total_duration = time.time() - call_start
 
-                                # Track total wait time (approximate -
-                                # time when lock was contended)
-                                if was_contended:
-                                    self._lock_stats["total_wait_time"] += (
-                                        total_duration
-                                    )
-                                    if (
-                                        total_duration
-                                        > self._lock_stats["max_wait_time"]
-                                    ):
-                                        self._lock_stats["max_wait_time"] = (
-                                            total_duration
-                                        )
+                    # Track max hold time
+                    if hold_duration > self._lock_stats["max_hold_time"]:
+                        self._lock_stats["max_hold_time"] = hold_duration
 
-                                # Log slow operations (>5ms)
-                                if total_duration > 0.005:
-                                    logger.debug(
-                                        f"Slow find_by_address (strategy 2): "
-                                        f"{total_duration * 1000:.2f}ms "
-                                        f"(hold: {hold_duration * 1000:.2f}ms, "
-                                        f"contended: {was_contended}) for {addr}"
-                                    )
+                    # Track total wait time (approximate - time when lock was contended)
+                    if was_contended:
+                        self._lock_stats["total_wait_time"] += total_duration
+                        if total_duration > self._lock_stats["max_wait_time"]:
+                            self._lock_stats["max_wait_time"] = total_duration
 
-                                # Track operation timing
-                                self._operation_timings["find_by_address"].append(
-                                    total_duration
-                                )
-
-                                return (connection, connection_id)
-                        # If no Connection ID found, still return connection
-                        # (Connection ID will be set later)
-                        self._fallback_routing_count += 1
-                        hold_duration = time.time() - hold_start
-                        total_duration = time.time() - call_start
-
-                        # Track max hold time
-                        if hold_duration > self._lock_stats["max_hold_time"]:
-                            self._lock_stats["max_hold_time"] = hold_duration
-
-                        # Track total wait time (approximate -
-                        # time when lock was contended)
-                        if was_contended:
-                            self._lock_stats["total_wait_time"] += total_duration
-                            if total_duration > self._lock_stats["max_wait_time"]:
-                                self._lock_stats["max_wait_time"] = total_duration
-
-                        # Log slow operations (>5ms)
-                        if total_duration > 0.005:
-                            logger.debug(
-                                f"Slow find_by_address (strategy 2, no Connection ID): "
-                                f"{total_duration * 1000:.2f}ms "
-                                f"(hold: {hold_duration * 1000:.2f}ms, "
-                                f"contended: {was_contended}) for {addr}"
-                            )
-
-                        # Track operation timing
-                        self._operation_timings["find_by_address"].append(
-                            total_duration
+                    # Log slow operations (>5ms)
+                    if total_duration > 0.005:
+                        logger.debug(
+                            f"Slow find_by_address (strategy 2): "
+                            f"{total_duration * 1000:.2f}ms "
+                            f"(hold: {hold_duration * 1000:.2f}ms, "
+                            f"contended: {was_contended}) for {addr}"
                         )
 
-                        return (connection, None)
+                    # Track operation timing
+                    self._operation_timings["find_by_address"].append(total_duration)
+                    return (connection, original_connection_id)
 
                 # Not found
                 hold_duration = time.time() - hold_start
@@ -431,12 +399,19 @@ class ConnectionIDRegistry:
             hold_start = time.time()
 
             try:
+                previous = self._connections.get(connection_id)
                 self._connections[connection_id] = connection
                 self._connection_id_to_addr[connection_id] = addr
                 self._addr_to_connection_id[addr] = connection_id
 
                 # Maintain reverse mapping for O(1) fallback routing
                 self._connection_addresses[connection] = addr
+                self._addr_to_connections[addr].add(connection)
+                self._connection_primary_cid.setdefault(connection, connection_id)
+                if previous is not connection:
+                    self._connection_cid_counts[connection] = (
+                        self._connection_cid_counts.get(connection, 0) + 1
+                    )
 
                 # Track sequence number
                 self._connection_id_sequences[connection_id] = sequence
@@ -587,7 +562,12 @@ class ConnectionIDRegistry:
                 # to the connection
                 if existing_connection_id in self._connections:
                     connection = self._connections[existing_connection_id]
+                    previous = self._connections.get(new_connection_id)
                     self._connections[new_connection_id] = connection
+                    if previous is not connection:
+                        self._connection_cid_counts[connection] = (
+                            self._connection_cid_counts.get(connection, 0) + 1
+                        )
 
                     # Track sequence for this connection
                     if connection not in self._connection_sequences:
@@ -650,6 +630,9 @@ class ConnectionIDRegistry:
                 # Get connection and sequence before removal
                 connection = self._connections.get(connection_id)
                 sequence = self._connection_id_sequences.get(connection_id)
+                primary_before = (
+                    self._connection_primary_cid.get(connection) if connection else None
+                )
 
                 # Remove from initial, established, and pending
                 self._initial_connection_ids.pop(connection_id, None)
@@ -659,9 +642,25 @@ class ConnectionIDRegistry:
                 # Get and remove address mapping
                 addr = self._connection_id_to_addr.pop(connection_id, None)
                 if addr:
-                    # Only remove addr mapping if this was the active Connection ID
+                    # If this was the active CID for the address, repoint to another
+                    # CID for the same connection if possible.
                     if self._addr_to_connection_id.get(addr) == connection_id:
-                        del self._addr_to_connection_id[addr]
+                        replacement: bytes | None = None
+                        if connection and connection in self._connection_sequences:
+                            # Prefer lowest remaining sequence for determinism
+                            seq_map = self._connection_sequences[connection]
+                            if seq_map:
+                                candidate_seqs = [
+                                    s
+                                    for s, cid in seq_map.items()
+                                    if cid != connection_id
+                                ]
+                                if candidate_seqs:
+                                    replacement = seq_map[min(candidate_seqs)]
+                        if replacement is not None:
+                            self._addr_to_connection_id[addr] = replacement
+                        else:
+                            self._addr_to_connection_id.pop(addr, None)
 
                 # Clean up sequence mappings
                 if sequence is not None:
@@ -672,18 +671,46 @@ class ConnectionIDRegistry:
                         if not self._connection_sequences[connection]:
                             del self._connection_sequences[connection]
 
-                # Clean up sequence counter if this was the last Connection ID
-                # for the connection
                 if connection:
-                    # Check if connection has any other Connection IDs
-                    has_other_connection_ids = any(
-                        c != connection_id and conn is connection
-                        for c, conn in self._connections.items()
-                    )
-                    if not has_other_connection_ids:
-                        self._connection_addresses.pop(connection, None)
-                        # Clean up sequence counter for this Connection ID
-                        self._connection_sequence_counters.pop(connection_id, None)
+                    # If we removed the primary CID, repoint it if other CIDs remain.
+                    if primary_before == connection_id:
+                        replacement_primary: bytes | None = None
+                        if connection in self._connection_sequences:
+                            seq_map = self._connection_sequences[connection]
+                            if seq_map:
+                                candidate_seqs = [
+                                    s
+                                    for s, cid in seq_map.items()
+                                    if cid != connection_id
+                                ]
+                                if candidate_seqs:
+                                    replacement_primary = seq_map[min(candidate_seqs)]
+                        if replacement_primary is not None:
+                            self._connection_primary_cid[connection] = (
+                                replacement_primary
+                            )
+                        else:
+                            self._connection_primary_cid.pop(connection, None)
+
+                    # Decrement CID count and cleanup per-connection mappings if this
+                    # was the last tracked CID.
+                    current = self._connection_cid_counts.get(connection, 0)
+                    if current > 0:
+                        new_count = current - 1
+                        if new_count <= 0:
+                            self._connection_cid_counts.pop(connection, None)
+                            self._connection_primary_cid.pop(connection, None)
+                            conn_addr = self._connection_addresses.pop(connection, None)
+                            if conn_addr:
+                                conns = self._addr_to_connections.get(conn_addr)
+                                if conns:
+                                    conns.discard(connection)
+                                    if not conns:
+                                        self._addr_to_connections.pop(conn_addr, None)
+                        else:
+                            self._connection_cid_counts[connection] = new_count
+                    # Clean up sequence counter for this Connection ID
+                    self._connection_sequence_counters.pop(connection_id, None)
 
                 hold_duration = time.time() - hold_start
                 total_duration = time.time() - call_start
@@ -746,15 +773,22 @@ class ConnectionIDRegistry:
                 self._connections.pop(connection_id, None)
                 self._pending.pop(connection_id, None)
                 self._connection_id_to_addr.pop(connection_id, None)
+                self._connection_id_sequences.pop(connection_id, None)
+                self._connection_sequence_counters.pop(connection_id, None)
                 # Clean up reverse mapping
                 if connection:
-                    # Check if connection has any other Connection IDs
-                    has_other_connection_ids = any(
-                        c != connection_id and conn is connection
-                        for c, conn in self._connections.items()
-                    )
-                    if not has_other_connection_ids:
-                        self._connection_addresses.pop(connection, None)
+                    # Remove from address->connections set
+                    conns = self._addr_to_connections.get(addr)
+                    if conns:
+                        conns.discard(connection)
+                        if not conns:
+                            self._addr_to_connections.pop(addr, None)
+
+                    # Remove per-connection mappings.
+                    self._connection_addresses.pop(connection, None)
+                    self._connection_primary_cid.pop(connection, None)
+                    self._connection_cid_counts.pop(connection, None)
+                    self._connection_sequences.pop(connection, None)
             return connection_id
 
     async def promote_pending(
@@ -789,6 +823,10 @@ class ConnectionIDRegistry:
                 )
             else:
                 self._connections[connection_id] = connection
+                self._connection_cid_counts[connection] = (
+                    self._connection_cid_counts.get(connection, 0) + 1
+                )
+                self._connection_primary_cid.setdefault(connection, connection_id)
 
             # Ensure address mappings are up to date
             # (they should already exist from when pending was registered)
@@ -797,6 +835,7 @@ class ConnectionIDRegistry:
                 self._addr_to_connection_id[addr] = connection_id
                 # Maintain reverse mapping for O(1) fallback routing
                 self._connection_addresses[connection] = addr
+                self._addr_to_connections[addr].add(connection)
 
             # Move sequence tracking to connection sequences
             if sequence is not None:
@@ -804,7 +843,7 @@ class ConnectionIDRegistry:
                     self._connection_sequences[connection] = {}
                 self._connection_sequences[connection][sequence] = connection_id
 
-    async def register_new_connection_id_for_existing_connection(
+    async def register_new_connection_id_for_existing_conn(
         self,
         new_connection_id: bytes,
         connection: "QUICConnection",
@@ -826,6 +865,7 @@ class ConnectionIDRegistry:
 
         """
         async with self._lock:
+            previous = self._connections.get(new_connection_id)
             self._connections[new_connection_id] = connection
             self._connection_id_to_addr[new_connection_id] = addr
             # Update addr mapping to use new Connection ID
@@ -833,6 +873,12 @@ class ConnectionIDRegistry:
 
             # Maintain reverse mapping for O(1) fallback routing
             self._connection_addresses[connection] = addr
+            self._addr_to_connections[addr].add(connection)
+            self._connection_primary_cid.setdefault(connection, new_connection_id)
+            if previous is not connection:
+                self._connection_cid_counts[connection] = (
+                    self._connection_cid_counts.get(connection, 0) + 1
+                )
 
             # Track sequence if provided
             if sequence is not None:

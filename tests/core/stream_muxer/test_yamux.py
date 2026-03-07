@@ -3,12 +3,14 @@ import platform
 import struct
 
 import pytest
+from multiaddr import Multiaddr
 import trio
 from trio.testing import (
     memory_stream_pair,
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IRawConnection,
 )
 from libp2p.crypto.ed25519 import (
@@ -42,15 +44,25 @@ from libp2p.stream_muxer.yamux.yamux import (
 
 
 class TrioStreamAdapter(IRawConnection):
+    """
+    Adapter that wraps a trio memory stream pair for use as IRawConnection.
+
+    Uses a write lock so that the connection can be written from both the
+    muxer's background task and from tests (e.g. injecting raw frames)
+    without tripping trio.BusyResourceError (single-user stream).
+    """
+
     def __init__(self, send_stream, receive_stream, is_initiator: bool = False):
         self.send_stream = send_stream
         self.receive_stream = receive_stream
         self.is_initiator = is_initiator
+        self._write_lock = trio.Lock()
 
     async def write(self, data: bytes) -> None:
         logging.debug(f"Writing {len(data)} bytes")
-        with trio.move_on_after(2):
-            await self.send_stream.send_all(data)
+        async with self._write_lock:
+            with trio.move_on_after(2):
+                await self.send_stream.send_all(data)
 
     async def read(self, n: int | None = None) -> bytes:
         if n is None or n == -1:
@@ -71,6 +83,14 @@ class TrioStreamAdapter(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         # Return None since this is a test adapter without real network info
         return None
+
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """Mock implementation of get_transport_addresses."""
+        return []
+
+    def get_connection_type(self) -> ConnectionType:
+        """Mock implementation of get_connection_type."""
+        return ConnectionType.DIRECT
 
 
 @pytest.fixture
@@ -773,3 +793,45 @@ async def test_yamux_syn_with_large_data(yamux_pair):
     assert received == test_data
     assert len(received) == 1024
     logging.debug("test_yamux_syn_with_large_data complete")
+
+
+@pytest.mark.trio
+async def test_incomplete_read_error_clean_close_detection():
+    """
+    Test that IncompleteReadError correctly identifies clean connection closures.
+
+    This verifies the fix for issue #1084 where yamux listener incorrectly
+    logged clean peer disconnections as errors. Clean closures (0 bytes received)
+    should be detected via the is_clean_close property.
+    """
+    from libp2p.io.exceptions import IncompleteReadError
+
+    # Test clean closure (0 bytes received)
+    clean_error = IncompleteReadError(
+        "Connection closed during read operation: expected 2 bytes but "
+        "received 0 bytes",
+        expected_bytes=2,
+        received_bytes=0,
+    )
+    assert clean_error.is_clean_close, "Should detect clean closure (0 bytes)"
+    assert clean_error.expected_bytes == 2
+    assert clean_error.received_bytes == 0
+
+    # Test partial read (not clean closure)
+    partial_error = IncompleteReadError(
+        "Connection closed during read operation: expected 12 bytes but "
+        "received 5 bytes",
+        expected_bytes=12,
+        received_bytes=5,
+    )
+    assert not partial_error.is_clean_close, "Partial read should not be clean closure"
+    assert partial_error.expected_bytes == 12
+    assert partial_error.received_bytes == 5
+
+    # Test default values (backward compatibility)
+    legacy_error = IncompleteReadError("Some error message")
+    assert legacy_error.is_clean_close, "Default 0 bytes should be clean closure"
+    assert legacy_error.expected_bytes == 0
+    assert legacy_error.received_bytes == 0
+
+    logging.debug("test_incomplete_read_error_clean_close_detection complete")

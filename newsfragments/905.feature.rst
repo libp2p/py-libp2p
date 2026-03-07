@@ -1,1 +1,0 @@
-Added fallback mechanism in Kademlia DHT to use connected peers and peerstore when routing table has insufficient peers.

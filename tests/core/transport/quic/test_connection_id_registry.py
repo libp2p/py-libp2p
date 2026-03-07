@@ -216,7 +216,7 @@ async def test_register_new_cid_for_existing_connection(registry, mock_connectio
     await registry.register_connection(original_cid, mock_connection, addr)
 
     # Register new Connection ID using fallback mechanism
-    await registry.register_new_connection_id_for_existing_connection(
+    await registry.register_new_connection_id_for_existing_conn(
         new_cid, mock_connection, addr
     )
 

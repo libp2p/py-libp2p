@@ -13,13 +13,17 @@ class TestEnumStringConversion:
     """Test enum string conversion functionality."""
 
     def test_direction_enum_string_conversion(self):
-        """Test that Direction enum returns numeric string values."""
+        """Test that Direction enum returns human-readable string values."""
+        # Test UNKNOWN direction
+        assert str(Direction.UNKNOWN) == "unknown"
+        assert Direction.UNKNOWN.value == -1
+
         # Test INBOUND direction
-        assert str(Direction.INBOUND) == "0"
+        assert str(Direction.INBOUND) == "inbound"
         assert Direction.INBOUND.value == 0
 
         # Test OUTBOUND direction
-        assert str(Direction.OUTBOUND) == "1"
+        assert str(Direction.OUTBOUND) == "outbound"
         assert Direction.OUTBOUND.value == 1
 
     def test_metric_type_enum_string_conversion(self):
@@ -40,6 +44,7 @@ class TestEnumStringConversion:
     def test_enum_values_unchanged(self):
         """Test that enum values remain unchanged after string conversion fix."""
         # Verify Direction enum values
+        assert Direction.UNKNOWN == -1
         assert Direction.INBOUND == 0
         assert Direction.OUTBOUND == 1
 

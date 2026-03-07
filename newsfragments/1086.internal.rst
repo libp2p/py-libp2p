@@ -1,1 +1,0 @@
-Upgraded py-libp2p transport ping test to the latest standard.

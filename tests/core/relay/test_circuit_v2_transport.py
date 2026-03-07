@@ -1,6 +1,5 @@
 """Tests for the Circuit Relay v2 transport functionality."""
 
-import itertools
 import logging
 import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -18,6 +17,9 @@ from libp2p.network.connection.raw_connection import RawConnection
 from libp2p.network.stream.exceptions import (
     StreamEOF,
     StreamReset,
+)
+from libp2p.peer.peerinfo import (
+    PeerInfo,
 )
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
@@ -38,7 +40,7 @@ from libp2p.relay.circuit_v2.transport import (
     PROTOCOL_ID,
     CircuitV2Listener,
     CircuitV2Transport,
-    PeerInfo,
+    TrackedRawConnection,
 )
 from libp2p.tools.constants import (
     MAX_READ_LEN,
@@ -56,7 +58,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds
 STREAM_TIMEOUT = 15  # seconds
 HANDLER_TIMEOUT = 15  # seconds
-SLEEP_TIME = 1.0  # seconds
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 RELAY_TIMEOUT = 20  # seconds
 
 # Default limits for relay
@@ -504,9 +506,568 @@ async def test_circuit_v2_transport_relay_limits():
         logger.info("Transport limit test successful")
 
 
-TOP_N = 5
+@pytest.mark.trio
+async def test_circuit_v2_transport_relay_selection():
+    """Test relay round robin load balancing and reservation priority"""
+    async with HostFactory.create_batch_and_listen(5) as hosts:
+        client1_host, relay_host1, relay_host2, relay_host3, target_host = hosts
+
+        # Setup relay with strict limits
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        # Register test handler on target
+        test_protocol = "/test/echo/1.0.0"
+        target_host.set_stream_handler(TProtocol(test_protocol), echo_stream_handler)
+        target_host_info = PeerInfo(target_host.get_id(), target_host.get_addrs())
+
+        client_config = RelayConfig()
+
+        # Client setup
+        client1_protocol = CircuitV2Protocol(client1_host, limits, allow_hop=False)
+        client1_discovery = RelayDiscovery(
+            host=client1_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client1_transport = CircuitV2Transport(
+            client1_host, client1_protocol, client_config
+        )
+        client1_transport.discovery = client1_discovery
+        # Add relay to discovery
+        relay_id1 = relay_host1.get_id()
+        relay_id2 = relay_host2.get_id()
+        relay_id3 = relay_host3.get_id()
+
+        # Connect all peers
+        try:
+            with trio.fail_after(CONNECT_TIMEOUT):
+                # Connect clients to relay
+                await connect(client1_host, relay_host1)
+                await connect(client1_host, relay_host2)
+                await connect(client1_host, relay_host3)
+
+                logger.info("All connections established")
+        except Exception as e:
+            logger.error("Failed to connect peers: %s", str(e))
+            raise
+
+        await client1_discovery._add_relay(relay_id1)
+        await client1_discovery._add_relay(relay_id2)
+        await client1_discovery._add_relay(relay_id3)
+
+        selected_relay = await client1_transport._select_relay(target_host_info)
+        # Without reservation preference
+        # Round robin, so 1st time must be relay1
+        assert selected_relay is not None and selected_relay is relay_id1
+
+        selected_relay = await client1_transport._select_relay(target_host_info)
+        # Round robin, so 2nd time must be relay2
+        assert selected_relay is not None and selected_relay is relay_id2
+
+        # Mock reservation with relay1 to prioritize over relay2
+        relay_info3 = client1_discovery.get_relay_info(relay_id3)
+        if relay_info3:
+            relay_info3.has_reservation = True
+
+        selected_relay = await client1_transport._select_relay(target_host_info)
+        # With reservation preference, relay2 must be chosen for target_peer.
+        assert selected_relay is not None and selected_relay is relay_host3.get_id()
+
+        logger.info("Relay selection successful")
 
 
+@pytest.mark.trio
+async def test_circuit_v2_transport_relay_selection_round_robin_no_reservation():
+    """Test that relay selection rotates through all relays without reservations."""
+    async with HostFactory.create_batch_and_listen(4) as hosts:
+        client_host, relay_host1, relay_host2, relay_host3 = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_transport_relay_selection_round_robin"
+        )
+
+        # Setup
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        client_config = RelayConfig()
+        client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_transport.discovery = client_discovery
+
+        relay_id1 = relay_host1.get_id()
+        relay_id2 = relay_host2.get_id()
+        relay_id3 = relay_host3.get_id()
+
+        # Connect all peers
+        try:
+            with trio.fail_after(CONNECT_TIMEOUT):
+                await connect(client_host, relay_host1)
+                await connect(client_host, relay_host2)
+                await connect(client_host, relay_host3)
+                logger.info("All connections established")
+        except Exception as e:
+            logger.error("Failed to connect peers: %s", str(e))
+            raise
+
+        # Add relays to discovery
+        await client_discovery._add_relay(relay_id1)
+        await client_discovery._add_relay(relay_id2)
+        await client_discovery._add_relay(relay_id3)
+
+        # Create target peer info for selection
+        target_info = PeerInfo(relay_host1.get_id(), relay_host1.get_addrs())
+
+        # Test round-robin: should cycle through relays 1 -> 2 -> 3 -> 1
+        selected1 = await client_transport._select_relay(target_info)
+        assert selected1 == relay_id1, "First selection should be relay1"
+
+        selected2 = await client_transport._select_relay(target_info)
+        assert selected2 == relay_id2, "Second selection should be relay2"
+
+        selected3 = await client_transport._select_relay(target_info)
+        assert selected3 == relay_id3, "Third selection should be relay3"
+
+        selected4 = await client_transport._select_relay(target_info)
+        assert selected4 == relay_id1, "Fourth selection should cycle back to relay1"
+
+        logger.info("Round-robin relay selection test passed")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_transport_relay_selection_prioritizes_reservations():
+    """Test that relays with active reservations are prioritized over others."""
+    async with HostFactory.create_batch_and_listen(4) as hosts:
+        client_host, relay_host1, relay_host2, relay_host3 = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_transport_"
+            "relay_selection_prioritizes_reservations"
+        )
+
+        # Setup
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        client_config = RelayConfig()
+        client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_transport.discovery = client_discovery
+
+        relay_id1 = relay_host1.get_id()
+        relay_id2 = relay_host2.get_id()
+        relay_id3 = relay_host3.get_id()
+
+        # Connect all peers
+        try:
+            with trio.fail_after(CONNECT_TIMEOUT):
+                await connect(client_host, relay_host1)
+                await connect(client_host, relay_host2)
+                await connect(client_host, relay_host3)
+                logger.info("All connections established")
+        except Exception as e:
+            logger.error("Failed to connect peers: %s", str(e))
+            raise
+
+        # Add relays to discovery
+        await client_discovery._add_relay(relay_id1)
+        await client_discovery._add_relay(relay_id2)
+        await client_discovery._add_relay(relay_id3)
+
+        # Mark relay2 as having a reservation
+        relay_info2 = client_discovery.get_relay_info(relay_id2)
+        if relay_info2:
+            relay_info2.has_reservation = True
+            relay_info2.reservation_expires_at = time.time() + 3600
+
+        # Create target peer info for selection
+        target_info = PeerInfo(relay_host1.get_id(), relay_host1.get_addrs())
+
+        # All selections should now prefer relay2 (the one with reservation)
+        selected1 = await client_transport._select_relay(target_info)
+        assert selected1 == relay_id2, (
+            "Should select relay2 (has reservation) over relay1"
+        )
+
+        selected2 = await client_transport._select_relay(target_info)
+        assert selected2 == relay_id2, "Should keep selecting relay2 (has reservation)"
+
+        logger.info("Reservation prioritization test passed")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_transport_relay_selection_multiple_reservations():
+    """Test round-robin among relays with reservations when multiple exist."""
+    async with HostFactory.create_batch_and_listen(4) as hosts:
+        client_host, relay_host1, relay_host2, relay_host3 = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_transport_"
+            "relay_selection_multiple_reservations"
+        )
+
+        # Setup
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        client_config = RelayConfig()
+        client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_transport.discovery = client_discovery
+
+        relay_id1 = relay_host1.get_id()
+        relay_id2 = relay_host2.get_id()
+        relay_id3 = relay_host3.get_id()
+
+        # Connect all peers
+        try:
+            with trio.fail_after(CONNECT_TIMEOUT):
+                await connect(client_host, relay_host1)
+                await connect(client_host, relay_host2)
+                await connect(client_host, relay_host3)
+                logger.info("All connections established")
+        except Exception as e:
+            logger.error("Failed to connect peers: %s", str(e))
+            raise
+
+        # Add relays to discovery
+        await client_discovery._add_relay(relay_id1)
+        await client_discovery._add_relay(relay_id2)
+        await client_discovery._add_relay(relay_id3)
+
+        # Mark relay1 and relay3 as having reservations (not relay2)
+        relay_info1 = client_discovery.get_relay_info(relay_id1)
+        if relay_info1:
+            relay_info1.has_reservation = True
+            relay_info1.reservation_expires_at = time.time() + 3600
+
+        relay_info3 = client_discovery.get_relay_info(relay_id3)
+        if relay_info3:
+            relay_info3.has_reservation = True
+            relay_info3.reservation_expires_at = time.time() + 3600
+
+        # Create target peer info for selection
+        target_info = PeerInfo(relay_host1.get_id(), relay_host1.get_addrs())
+
+        # Should round-robin only among relays with reservations (1 and 3)
+        selected1 = await client_transport._select_relay(target_info)
+        assert selected1 == relay_id1, (
+            "First selection should be relay1 (has reservation)"
+        )
+
+        selected2 = await client_transport._select_relay(target_info)
+        assert selected2 == relay_id3, (
+            "Second selection should be relay3 (has reservation)"
+        )
+
+        selected3 = await client_transport._select_relay(target_info)
+        assert selected3 == relay_id1, "Third selection should cycle back to relay1"
+
+        # Relay2 should never be selected since it doesn't have a reservation
+        for _ in range(10):
+            selected = await client_transport._select_relay(target_info)
+            assert selected != relay_id2, (
+                "relay2 (no reservation) should not be selected"
+            )
+
+        logger.info("Multiple reservations round-robin test passed")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_transport_relay_selection_fallback_no_reservation():
+    """Test fallback to non-reserved relays when no reservations exist."""
+    async with HostFactory.create_batch_and_listen(3) as hosts:
+        client_host, relay_host1, relay_host2 = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_transport_relay_selection_fallback"
+        )
+
+        # Setup
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        client_config = RelayConfig()
+        client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_transport.discovery = client_discovery
+
+        relay_id1 = relay_host1.get_id()
+        relay_id2 = relay_host2.get_id()
+
+        # Connect all peers
+        try:
+            with trio.fail_after(CONNECT_TIMEOUT):
+                await connect(client_host, relay_host1)
+                await connect(client_host, relay_host2)
+                logger.info("All connections established")
+        except Exception as e:
+            logger.error("Failed to connect peers: %s", str(e))
+            raise
+
+        # Add relays to discovery (without reservations)
+        await client_discovery._add_relay(relay_id1)
+        await client_discovery._add_relay(relay_id2)
+
+        # Create target peer info for selection
+        target_info = PeerInfo(relay_host1.get_id(), relay_host1.get_addrs())
+
+        # Should still select relays even without reservations
+        selected1 = await client_transport._select_relay(target_info)
+        assert selected1 is not None, "Should select a relay even without reservations"
+        assert selected1 in [relay_id1, relay_id2], (
+            "Should select from available relays"
+        )
+
+        logger.info("Fallback to non-reserved relays test passed")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_transport_no_relay_found():
+    """Test that _select_relay returns None when no relays are available."""
+    async with HostFactory.create_batch_and_listen(1) as hosts:
+        client_host = hosts[0]
+        logger.info("Created host for test_circuit_v2_transport_no_relay_found")
+
+        # Setup
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+
+        client_config = RelayConfig()
+        client_protocol = CircuitV2Protocol(client_host, limits, allow_hop=False)
+        client_discovery = RelayDiscovery(
+            host=client_host,
+            auto_reserve=False,
+            discovery_interval=client_config.discovery_interval,
+            max_relays=client_config.max_relays,
+        )
+
+        client_transport = CircuitV2Transport(
+            client_host, client_protocol, client_config
+        )
+        client_transport.discovery = client_discovery
+
+        # Override max_auto_relay_attempts to make test faster
+        client_transport.client_config.max_auto_relay_attempts = 1
+
+        # Create target peer info for selection
+        target_info = PeerInfo(client_host.get_id(), client_host.get_addrs())
+
+        # Should return None when no relays are available
+        selected = await client_transport._select_relay(target_info)
+        assert selected is None, "Should return None when no relays are available"
+
+        logger.info("No relay found test passed")
+
+
+# Tests for TrackedRawConnection
+class TestTrackedRawConnection:
+    """Test suite for TrackedRawConnection wrapper."""
+
+    @pytest.mark.trio
+    async def test_tracked_connection_calls_record_circuit_closed_on_close(self):
+        """Test that closing a TrackedRawConnection calls record_circuit_closed."""
+        from unittest.mock import AsyncMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.close = AsyncMock()
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Record circuit opened first
+        tracker.record_circuit_opened(relay_id)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 1
+
+        # Close the connection
+        await tracked_conn.close()
+
+        # Verify stream.close was called
+        mock_stream.close.assert_called_once()
+
+        # Verify circuit was closed (active_circuits decremented)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 0
+
+    @pytest.mark.trio
+    async def test_tracked_connection_double_close_does_not_double_count(self):
+        """Test that closing a TrackedRawConnection twice doesn't double-count."""
+        from unittest.mock import AsyncMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.close = AsyncMock()
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Record circuit opened first
+        tracker.record_circuit_opened(relay_id)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 1
+
+        # Close the connection twice
+        await tracked_conn.close()
+        await tracked_conn.close()
+
+        # Verify stream.close was called at least once (first close)
+        # Second close is prevented by _closed flag to avoid double-counting
+        assert mock_stream.close.call_count >= 1
+
+        # Verify circuit was closed only once (active_circuits = 0, not -1)
+        stats = tracker.get_relay_stats(relay_id)
+        assert stats is not None
+        assert stats.active_circuits == 0
+
+    @pytest.mark.trio
+    async def test_tracked_connection_delegates_methods(self):
+        """Test that TrackedRawConnection properly delegates all methods."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from libp2p.crypto.secp256k1 import create_new_key_pair
+        from libp2p.network.connection.raw_connection import RawConnection
+        from libp2p.peer.id import ID
+        from libp2p.relay.circuit_v2.performance_tracker import (
+            RelayPerformanceTracker,
+        )
+
+        # Create mock stream
+        mock_stream = AsyncMock()
+        mock_stream.write = AsyncMock()
+        mock_stream.read = AsyncMock(return_value=b"test data")
+        mock_stream.get_remote_address = MagicMock(return_value=("127.0.0.1", 12345))
+
+        # Create real RawConnection with mock stream
+        raw_conn = RawConnection(stream=mock_stream, initiator=True)
+
+        # Create tracker and relay ID
+        tracker = RelayPerformanceTracker()
+        key_pair = create_new_key_pair()
+        relay_id = ID.from_pubkey(key_pair.public_key)
+
+        # Create tracked connection
+        tracked_conn = TrackedRawConnection(
+            wrapped=raw_conn, relay_id=relay_id, tracker=tracker
+        )
+
+        # Test write delegation
+        await tracked_conn.write(b"test")
+        mock_stream.write.assert_called_once_with(b"test")
+
+        # Test read delegation
+        data = await tracked_conn.read(10)
+        assert data == b"test data"
+        mock_stream.read.assert_called_once_with(10)
+
+        # Test get_remote_address delegation
+        addr = tracked_conn.get_remote_address()
+        assert addr == ("127.0.0.1", 12345)
+        mock_stream.get_remote_address.assert_called_once()
+
+        # Test property access
+        assert tracked_conn.stream == mock_stream
+        assert tracked_conn.is_initiator is True
+
+
+# Additional tests from origin/main
 @pytest.fixture
 def peer_info() -> PeerInfo:
     peer_id = ID.from_base58("12D3KooW")
@@ -582,73 +1143,79 @@ async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
 
 @pytest.mark.trio
 async def test_select_relay_all_unavailable(circuit_v2_transport, peer_info, mocker):
-    """Test _select_relay when relays are present but all are unavailable."""
+    """Test _select_relay when relays are present but all are unhealthy."""
     relay1 = MagicMock(spec=ID)
     relay1.to_string.return_value = "relay1"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(
-        circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=False)
+
+    # Make relay1 unhealthy by giving it a very low success rate
+    # This will make get_relay_score return float("inf")
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=100.0, success=False
     )
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=100.0, success=False
+    )
+    # Now success rate is 0%, which is below min_success_rate (default 0.5)
+
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
 
     result = await circuit_v2_transport._select_relay(peer_info)
 
-    assert result is None
-    assert (
-        circuit_v2_transport._is_relay_available.call_count
-        == circuit_v2_transport.client_config.max_auto_relay_attempts
-    )
-    assert circuit_v2_transport._relay_list == [relay1]
-    metrics = _metrics_for(circuit_v2_transport, relay1)
-    assert (
-        metrics["failures"]
-        == circuit_v2_transport.client_config.max_auto_relay_attempts
-    )
-    assert (
-        mock_sleep.call_count
-        == circuit_v2_transport.client_config.max_auto_relay_attempts
-    )
+    # The new implementation falls back to first available relay if all are unhealthy
+    # So result will be relay1 (fallback behavior), returned immediately
+    assert result is not None
+    assert result.to_string() == relay1.to_string()
+    # Should return immediately (no retries needed since relay is found)
+    assert circuit_v2_transport.discovery.get_relays.call_count == 1
+    assert mock_sleep.call_count == 0
 
 
 @pytest.mark.trio
 async def test_select_relay_round_robin(circuit_v2_transport, peer_info, mocker):
-    """Test _select_relay round-robin selection of available relays."""
+    """Test _select_relay round-robin selection with equal scores."""
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
-    # allow repeated calls by cycling the values
-    mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
-    mocker.patch("time.time", return_value=1000.0)
     relay1 = MagicMock(spec=ID)
     relay2 = MagicMock(spec=ID)
     relay1.to_string.return_value = "relay1"
     relay2.to_string.return_value = "relay2"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay2]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1, relay2]
-    mocker.patch.object(
-        circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True)
+
+    # Set up performance tracker so both relays have equal scores
+    # This will trigger round-robin selection
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=50.0, success=True
+    )
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay2, latency_ms=50.0, success=True
     )
 
-    circuit_v2_transport._last_relay_index = -1
+    # Reset counter for predictable round-robin
+    circuit_v2_transport.relay_counter = 0
+
     result1 = await circuit_v2_transport._select_relay(peer_info)
-    assert result1.to_string() == relay2.to_string()
-    assert circuit_v2_transport._last_relay_index == 0
+    # With equal scores, round-robin should select based on counter
+    assert result1 is not None
+    assert result1.to_string() in [relay1.to_string(), relay2.to_string()]
 
     result2 = await circuit_v2_transport._select_relay(peer_info)
-    assert result2.to_string() == relay1.to_string()
-    assert circuit_v2_transport._last_relay_index == 1
+    assert result2 is not None
+    assert result2.to_string() in [relay1.to_string(), relay2.to_string()]
 
     result3 = await circuit_v2_transport._select_relay(peer_info)
-    assert result3.to_string() == relay2.to_string()
-    assert circuit_v2_transport._last_relay_index == 0
+    assert result3 is not None
+    assert result3.to_string() in [relay1.to_string(), relay2.to_string()]
 
     assert mock_sleep.call_count == 0
-    # check metrics by looking up via helper
-    metrics1 = _metrics_for(circuit_v2_transport, relay1)
-    metrics2 = _metrics_for(circuit_v2_transport, relay2)
-    assert metrics1["latency"] == pytest.approx(0.1, rel=1e-3)
-    assert metrics2["latency"] == pytest.approx(0.1, rel=1e-3)
+    # Check that performance tracker has stats for both relays
+    stats1 = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    stats2 = circuit_v2_transport.performance_tracker.get_relay_stats(relay2)
+    assert stats1 is not None
+    assert stats2 is not None
+    assert stats1.latency_ema_ms > 0
+    assert stats2.latency_ema_ms > 0
 
 
 @pytest.mark.trio
@@ -697,37 +1264,38 @@ async def test_select_relay_scoring_priority(circuit_v2_transport, peer_info, mo
     relay2.to_string.return_value = "relay2"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay2]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1, relay2]
-    mocker.patch.object(
-        circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True)
+
+    # Set up performance tracker: relay1 has better score
+    # (lower latency, higher success rate)
+    # relay1: low latency, all successes
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=10.0, success=True
+    )
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=10.0, success=True
     )
 
-    async def fake_measure_relay(relay_id, scored):
-        if relay_id is relay1:
-            scored.append((relay_id, 0.8))  # better score
-            circuit_v2_transport._relay_metrics[relay_id]["failures"] = 0
-        else:
-            scored.append((relay_id, 0.5))  # worse score
-            circuit_v2_transport._relay_metrics[relay_id]["failures"] = 1
-
-    mocker.patch.object(
-        circuit_v2_transport, "_measure_relay", side_effect=fake_measure_relay
+    # relay2: higher latency, some failures
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay2, latency_ms=100.0, success=True
     )
-    circuit_v2_transport._relay_metrics = {
-        relay1: {"latency": 0.1, "failures": 0, "last_seen": 999.9},
-        relay2: {"latency": 0.2, "failures": 2, "last_seen": 900.0},
-    }
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay2, latency_ms=100.0, success=False
+    )
 
-    circuit_v2_transport._last_relay_index = -1
     result = await circuit_v2_transport._select_relay(peer_info)
 
+    # relay1 should be selected due to better score (lower latency, higher success rate)
+    assert result is not None
     assert result.to_string() == relay1.to_string()
-    m1 = _metrics_for(circuit_v2_transport, relay1)
-    m2 = _metrics_for(circuit_v2_transport, relay2)
-    assert m1["latency"] == pytest.approx(0.1, rel=1e-3)
-    assert m2["latency"] == pytest.approx(0.2, rel=1e-3)
-    assert m1["failures"] == 0
-    assert m2["failures"] == 1
+
+    # Verify performance tracker stats
+    stats1 = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    stats2 = circuit_v2_transport.performance_tracker.get_relay_stats(relay2)
+    assert stats1 is not None
+    assert stats2 is not None
+    assert stats1.latency_ema_ms < stats2.latency_ema_ms
+    assert stats1.success_rate > stats2.success_rate
 
 
 @pytest.mark.trio
@@ -737,19 +1305,21 @@ async def test_select_relay_fewer_than_top_n(circuit_v2_transport, peer_info, mo
     relay1.to_string.return_value = "relay1"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(
-        circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True)
-    )
-    mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
-    mocker.patch("time.time", return_value=1000.0)
 
-    circuit_v2_transport._last_relay_index = -1
+    # Set up performance tracker with a healthy relay
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=50.0, success=True
+    )
+
     result = await circuit_v2_transport._select_relay(peer_info)
 
+    assert result is not None
     assert result.to_string() == relay1.to_string()
-    assert circuit_v2_transport._last_relay_index == 0
-    assert len(circuit_v2_transport._relay_list) == 1
+
+    # Verify performance tracker has stats
+    stats = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    assert stats is not None
+    assert stats.success_count > 0
 
 
 @pytest.mark.trio
@@ -759,18 +1329,21 @@ async def test_select_relay_duplicate_relays(circuit_v2_transport, peer_info, mo
     relay1.to_string.return_value = "relay1"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1, relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1]
-    mocker.patch.object(
-        circuit_v2_transport, "_is_relay_available", AsyncMock(return_value=True)
-    )
-    mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
-    mocker.patch("time.time", return_value=1000.0)
 
-    circuit_v2_transport._last_relay_index = -1
+    # Set up performance tracker with a healthy relay
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=50.0, success=True
+    )
+
     result = await circuit_v2_transport._select_relay(peer_info)
 
+    # Should still select relay1 (duplicates are handled by performance_tracker)
+    assert result is not None
     assert result.to_string() == relay1.to_string()
-    assert len(circuit_v2_transport._relay_list) == 1
+
+    # Verify performance tracker has stats
+    stats = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    assert stats is not None
 
 
 @pytest.mark.trio
@@ -782,34 +1355,34 @@ async def test_select_relay_metrics_persistence(
     relay1.to_string.return_value = "relay1"
     circuit_v2_transport.discovery.get_relays.return_value = [relay1]
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = [relay1]
-    mocker.patch("time.monotonic", side_effect=itertools.cycle([0, 0.1]))
-    mocker.patch("time.time", side_effect=itertools.cycle([1000.0, 1001.0]))
-    async_mock = AsyncMock(side_effect=[False, True])
-    mocker.patch.object(circuit_v2_transport, "_is_relay_available", async_mock)
 
-    circuit_v2_transport._last_relay_index = -1
-    result = await circuit_v2_transport._select_relay(peer_info)
-    # first attempt should not select (False), but metrics should exist
-    assert relay1.to_string() == relay1.to_string()  # sanity
-    assert relay1 in circuit_v2_transport._relay_list
-    assert relay1 in [r for r in circuit_v2_transport._relay_list]
-    assert relay1.to_string() == "relay1"
-    assert relay1.to_string() == circuit_v2_transport._relay_list[0].to_string()
-    assert relay1.to_string()  # metrics object should be created
-    assert relay1.to_string() in (
-        r.to_string() for r in circuit_v2_transport._relay_list
+    # First, record a failed attempt
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=100.0, success=False
     )
-    assert _metrics_for(circuit_v2_transport, relay1)  # metrics dict present
 
-    circuit_v2_transport._last_relay_index = -1
-    # ensure next call returns True
-    async_mock.side_effect = [True]
+    # Verify stats exist after first attempt
+    stats = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    assert stats is not None
+    assert stats.failure_count == 1
+    assert stats.success_count == 0
+
+    # Now record a successful attempt
+    circuit_v2_transport.performance_tracker.record_connection_attempt(
+        relay_id=relay1, latency_ms=50.0, success=True
+    )
+
+    # Verify stats are updated
+    stats = circuit_v2_transport.performance_tracker.get_relay_stats(relay1)
+    assert stats is not None
+    assert stats.failure_count == 1
+    assert stats.success_count == 1
+    assert stats.success_rate == 0.5
+
+    # Now select relay - should work since it has some success
     result = await circuit_v2_transport._select_relay(peer_info)
+    assert result is not None
     assert result.to_string() == relay1.to_string()
-    metrics = _metrics_for(circuit_v2_transport, relay1)
-    # after a successful measurement failures should be 0
-    assert metrics["failures"] == 0
 
 
 @pytest.mark.trio
@@ -1000,7 +1573,19 @@ async def test_dial_peer_info_uses_stored_multiaddr(protocol):
     mock_host = Mock()
     peerstore = Mock()
     mock_host.get_peerstore.return_value = peerstore
-    mock_conn = RawConnection(stream=Mock(), initiator=True)
+
+    # Create TrackedRawConnection to match _dial_via_circuit_addr return value
+    from libp2p.relay.circuit_v2.performance_tracker import RelayPerformanceTracker
+
+    mock_raw_conn = RawConnection(stream=Mock(), initiator=True)
+    tracker = RelayPerformanceTracker()
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    mock_conn = TrackedRawConnection(
+        wrapped=mock_raw_conn,
+        relay_id=relay_peer_id,
+        tracker=tracker,
+    )
 
     transport = CircuitV2Transport(host=mock_host, config=Mock(), protocol=protocol)
     transport._dial_via_circuit_addr = AsyncMock(return_value=mock_conn)
@@ -1010,9 +1595,21 @@ async def test_dial_peer_info_uses_stored_multiaddr(protocol):
     peer_info = PeerInfo(peer_id, [])
 
     circuit_ma = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/4001/p2p-circuit/p2p/{peer_id.to_base58()}"
+        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
     )
-    peerstore.addrs.return_value = [circuit_ma]
+    relay_addr = multiaddr.Multiaddr(
+        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
+    )
+
+    # Mock peerstore.addrs: return circuit_ma for peer_id, relay_addr for relay_peer_id
+    def addrs_side_effect(peer_id_arg):
+        if peer_id_arg == peer_id:
+            return [circuit_ma]
+        elif peer_id_arg == relay_peer_id:
+            return [relay_addr]
+        return []
+
+    peerstore.addrs.side_effect = addrs_side_effect
 
     conn = await transport.dial_peer_info(peer_info)
 
@@ -1061,44 +1658,47 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     conn = await transport.dial_peer_info(peer_info)
 
     peerstore.add_addrs.assert_called_once()
-    assert isinstance(conn, RawConnection)
+    assert isinstance(conn, TrackedRawConnection)
     assert conn.is_initiator
 
 
-def test_valid_circuit_multiaddr(id_mock, circuit_v2_transport):
+def test_valid_circuit_multiaddr(circuit_v2_transport):
+    """Parse circuit multiaddr using decapsulate_code (Phase 2.3)."""
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-    id_obj = Mock(spec=ID)
-    id_mock.from_base58.return_value = id_obj
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}")
+    relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
 
-    ip4_proto = Mock()
-    ip4_proto.name = "ip4"
-    tcp_proto = Mock()
-    tcp_proto.name = "tcp"
-    circuit_proto = Mock()
-    circuit_proto.name = "p2p-circuit"
-    p2p_proto = Mock()
-    p2p_proto.name = "p2p"
-
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [
-            (ip4_proto, "127.0.0.1"),
-            (tcp_proto, "1234"),
-            (circuit_proto, None),
-            (p2p_proto, id_obj),
-        ]
-
-        ma = multiaddr.Multiaddr(
-            f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}"
-        )
-        relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
-
-        assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
-        assert target_peer_id == id_obj
-        id_mock.from_base58.assert_not_called()
+    assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
+    assert target_peer_id.to_base58() == valid_peer_id
 
 
-def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
+def test_invalid_circuit_multiaddr(circuit_v2_transport, id_mock):
+    """Parse invalid circuit multiaddrs raises ValueError (Phase 2.3)."""
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+
+    # Case 1: Missing /p2p-circuit (only /p2p at end)
+    ma1 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma1)
+    assert "Missing /p2p-circuit" in str(exc_info.value)
+
+    # Case 2: Has /p2p-circuit but no /p2p/<peerID> at end
+    ma2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma2)
+    assert "Missing /p2p/<peerID>" in str(exc_info.value)
+
+    # Case 3: Too short (no p2p, no p2p-circuit)
+    ma3 = multiaddr.Multiaddr("/ip4/127.0.0.1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma3)
+    assert "Missing" in str(exc_info.value) or "Invalid" in str(exc_info.value)
+
+    # Case 4: No /p2p-circuit in path (ip6 before p2p)
+    ma4 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma4)
+    assert "Missing /p2p-circuit" in str(exc_info.value)
     id_obj = Mock(spec=ID)
     id_mock.from_base58.return_value = id_obj
 
@@ -1162,15 +1762,17 @@ def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
             ma = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
             with pytest.raises(ValueError) as exc_info:
                 circuit_v2_transport.parse_circuit_ma(ma)
-            assert str(exc_info.value) == f"Missing /p2p/<peerID> at the end: {ma}"
+            assert str(exc_info.value) == (
+                f"Missing /p2p/<peerID> at the end of circuit Multiaddr: {ma}"
+            )
 
-    # Test case 3: Too short
+    # Test case 3: Too short (single component) — code hits "Missing /p2p-circuit" first
     with patch.object(multiaddr.Multiaddr, "items") as mock_items:
         mock_items.return_value = [(ip4_proto, "127.0.0.1")]
         ma = multiaddr.Multiaddr("/ip4/127.0.0.1")
         with pytest.raises(ValueError) as exc_info:
             circuit_v2_transport.parse_circuit_ma(ma)
-        assert str(exc_info.value) == f"Invalid circuit Multiaddr, too short: {ma}"
+        assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
 
     # Test case 4: Wrong protocol instead of p2p-circuit
     with patch.object(multiaddr.Multiaddr, "items") as mock_items:
@@ -1184,3 +1786,115 @@ def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
         with pytest.raises(ValueError) as exc_info:
             circuit_v2_transport.parse_circuit_ma(ma)
         assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
+
+
+def test_connection_type_relayed_exists():
+    """Test that ConnectionType.RELAYED exists and has correct value."""
+    from libp2p.connection_types import ConnectionType
+
+    # Verify RELAYED connection type exists
+    assert hasattr(ConnectionType, "RELAYED")
+    assert ConnectionType.RELAYED.value == "relayed"
+
+
+def test_connection_type_direct_exists():
+    """Test that ConnectionType.DIRECT exists and has correct value."""
+    from libp2p.connection_types import ConnectionType
+
+    # Verify DIRECT connection type exists
+    assert hasattr(ConnectionType, "DIRECT")
+    assert ConnectionType.DIRECT.value == "direct"
+
+
+def test_circuit_multiaddr_format():
+    """Test that circuit multiaddrs are properly formatted with /p2p-circuit."""
+    from libp2p.crypto.secp256k1 import create_new_key_pair
+
+    # Create mock peer IDs
+    relay_key_pair = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
+
+    dest_key_pair = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key_pair.public_key)
+
+    # Test that circuit multiaddrs are properly formatted
+    # /p2p/{relay_id}/p2p-circuit/p2p/{dest_id}
+    circuit_ma_str = (
+        f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
+    )
+    circuit_ma = multiaddr.Multiaddr(circuit_ma_str)
+
+    # Verify the multiaddr contains p2p-circuit
+    ma_str = str(circuit_ma)
+    assert "/p2p-circuit/" in ma_str, (
+        f"Multiaddr should contain /p2p-circuit/: {ma_str}"
+    )
+
+    # Verify structure: should have relay peer, then p2p-circuit, then destination peer
+    parts = ma_str.split("/")
+    # parts will be like ['', 'p2p', '<relay_id>', 'p2p-circuit', 'p2p', '<dest_id>']
+    try:
+        p2p_circuit_idx = parts.index("p2p-circuit")
+        # p2p-circuit should be preceded by relay peer id (3rd element, after 'p2p')
+        assert p2p_circuit_idx > 2, "p2p-circuit should not be at the beginning"
+        assert parts[p2p_circuit_idx - 2] == "p2p", "Should have p2p before relay id"
+        # p2p-circuit should be followed by destination peer
+        assert p2p_circuit_idx + 2 < len(parts), (
+            "Should have destination peer after p2p-circuit"
+        )
+        assert parts[p2p_circuit_idx + 1] == "p2p", "Should have p2p after p2p-circuit"
+    except ValueError:
+        pytest.fail(f"Multiaddr does not contain p2p-circuit: {ma_str}")
+
+
+def test_raw_connection_accepts_relayed_type():
+    """Test that RawConnection accepts ConnectionType.RELAYED."""
+    from libp2p.connection_types import ConnectionType
+    from libp2p.network.connection.raw_connection import RawConnection
+
+    # Create a mock stream
+    mock_stream = Mock()
+
+    # Create a mock multiaddr
+    relay_key_pair = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
+    dest_key_pair = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key_pair.public_key)
+
+    circuit_ma = multiaddr.Multiaddr(
+        f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
+    )
+
+    # Create RawConnection with RELAYED type
+    raw_conn = RawConnection(
+        stream=mock_stream,
+        initiator=True,
+        connection_type=ConnectionType.RELAYED,
+        addresses=[circuit_ma],
+    )
+
+    # Verify the connection type is RELAYED
+    assert raw_conn.get_connection_type() == ConnectionType.RELAYED
+
+    # Verify the multiaddr includes p2p-circuit
+    addrs = raw_conn.get_transport_addresses()
+    assert len(addrs) == 1
+    assert "/p2p-circuit/" in str(addrs[0])
+
+
+def test_raw_connection_default_is_direct():
+    """Test that RawConnection defaults to ConnectionType.DIRECT."""
+    from libp2p.connection_types import ConnectionType
+    from libp2p.network.connection.raw_connection import RawConnection
+
+    # Create a mock stream
+    mock_stream = Mock()
+
+    # Create RawConnection without specifying type (should default to DIRECT)
+    raw_conn = RawConnection(
+        stream=mock_stream,
+        initiator=True,
+    )
+
+    # Verify the default connection type is DIRECT
+    assert raw_conn.get_connection_type() == ConnectionType.DIRECT

@@ -2,7 +2,7 @@ import logging
 
 from libp2p.records.utils import InvalidRecordType, split_key
 
-logger = logging.getLogger("records-validator")
+logger = logging.getLogger(__name__)
 
 
 class ErrBetterRecord(Exception):
@@ -87,3 +87,15 @@ class NamespacedValidator:
         if validator is None:
             raise InvalidRecordType("Invalid record keytype")
         return validator.select(key, values)
+
+    def add_validator(self, namespace: str, validator: Validator) -> None:
+        """
+        Add or update a validator for a specific namespace.
+
+        Args:
+            namespace (str): The namespace string (e.g., "pk", "myapp").
+            validator (Validator): A Validator instance to handle validation
+            for this namespace.
+
+        """
+        self._validators[namespace] = validator

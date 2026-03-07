@@ -1,3 +1,5 @@
+import logging
+
 import trio
 
 from libp2p.abc import (
@@ -13,6 +15,8 @@ from .exceptions import (
     MultiselectCommunicatorError,
     MultiselectError,
 )
+
+logger = logging.getLogger(__name__)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
@@ -61,9 +65,12 @@ class Multiselect(IMultiselectMuxer):
         :return: selected protocol name, handler function
         :raise MultiselectError: raised when negotiation failed
         """
+        logger.debug("Multiselect.negotiate: starting (timeout=%d)", negotiate_timeout)
         try:
             with trio.fail_after(negotiate_timeout):
+                logger.debug("Multiselect.negotiate: performing handshake")
                 await self.handshake(communicator)
+                logger.debug("Multiselect.negotiate: handshake done, waiting for cmds")
 
                 while True:
                     try:
@@ -93,6 +100,7 @@ class Multiselect(IMultiselectMuxer):
                             return protocol_to_check, self.handlers[protocol_to_check]
                         try:
                             await communicator.write(PROTOCOL_NOT_FOUND_MSG)
+
                         except MultiselectCommunicatorError as error:
                             raise MultiselectError() from error
 
