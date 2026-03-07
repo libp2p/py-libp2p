@@ -36,6 +36,7 @@ from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_hos
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.network.config import ConnectionConfig
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.perf import PROTOCOL_NAME, PerfService
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
@@ -47,10 +48,39 @@ from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
 )
+from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.utils.address_validation import get_available_interfaces
 
 MAX_TEST_TIMEOUT = 300
 logger = logging.getLogger("libp2p.perf_test")
+
+
+def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    return value
+
+
+def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+    raw = os.getenv(name)
+    if not raw:
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    return value
 
 
 def configure_logging() -> None:
@@ -94,7 +124,18 @@ def _percentile(sorted_values: list[float], p: float) -> float:
 def _is_connection_closed_error(exc: BaseException) -> bool:
     """True if this is the expected 'Connection closed' from swarm/mplex on shutdown."""
     msg = str(exc).lower()
-    if "connection closed" in msg:
+    if any(
+        token in msg
+        for token in (
+            "connection closed",
+            "connection is closed",
+            "cannot read: tls connection is closed",
+            "closed resource",
+            "broken resource",
+            "end of file",
+            "eof",
+        )
+    ):
         return True
     if isinstance(exc, ExceptionGroup):
         return all(_is_connection_closed_error(e) for e in exc.exceptions)
@@ -185,6 +226,26 @@ class PerfTest:
 
         timeout_val = os.getenv("TEST_TIMEOUT_SECS") or "180"
         self.test_timeout_seconds = min(int(timeout_val), MAX_TEST_TIMEOUT)
+        # Keep write blocks below Noise's 65535-byte message limit.
+        self.write_block_size = _env_int("PERF_WRITE_BLOCK_SIZE", 65500, minimum=1024)
+
+        # Tunable connection/upgrade timeouts for slower interop permutations.
+        self.dial_timeout_seconds = _env_float("DIAL_TIMEOUT_SECS", 30.0, minimum=1.0)
+        self.upgrade_timeout_seconds = _env_float(
+            "UPGRADE_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.stream_negotiate_timeout_seconds = _env_float(
+            "STREAM_NEGOTIATE_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.negotiate_timeout_seconds = _env_int(
+            "NEGOTIATE_TIMEOUT_SECS", 30, minimum=1
+        )
+        self.quic_connection_timeout_seconds = _env_float(
+            "QUIC_CONNECTION_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.quic_idle_timeout_seconds = _env_float(
+            "QUIC_IDLE_TIMEOUT_SECS", 60.0, minimum=1.0
+        )
 
         self.host: Any = None
         self.redis_client: redis.Redis[str] | None = None
@@ -304,7 +365,22 @@ class PerfTest:
         return None
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
-        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+        for protocol in ("ip4", "ip6"):
+            try:
+                value = addr.value_for_protocol(protocol)
+            except Exception:
+                value = None
+            if value:
+                return value
+        return None
+
+    def _safe_value_for_protocol(
+        self, addr: multiaddr.Multiaddr, protocol: str
+    ) -> str | None:
+        try:
+            return addr.value_for_protocol(protocol)
+        except Exception:
+            return None
 
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         return [p.name for p in addr.protocols()]
@@ -338,13 +414,19 @@ class PerfTest:
         if self.transport == "quic-v1":
             out = []
             for addr in base_addrs:
-                ip_value = self._get_ip_value(addr)
-                tcp_port = addr.value_for_protocol("tcp") or port
-                if ip_value:
-                    qa = self._build_quic_addr(ip_value, tcp_port)
+                try:
+                    ip_value = self._get_ip_value(addr)
+                    tcp_port = self._safe_value_for_protocol(addr, "tcp")
+                    if not ip_value:
+                        continue
+                    qa = self._build_quic_addr(
+                        ip_value, int(tcp_port) if tcp_port else port
+                    )
                     _, p2p = self._extract_and_preserve_p2p(addr)
                     qa = self._encapsulate_with_p2p(qa, p2p)
                     out.append(qa)
+                except Exception:
+                    continue
             return out if out else [self._build_quic_addr("0.0.0.0", port)]
         if self.transport == "ws":
             out = []
@@ -422,8 +504,7 @@ class PerfTest:
         if ip_value not in ["127.0.0.1", "0.0.0.0", "::1", "::"]:
             return str(addr)
         actual = self.get_container_ip()
-        names = self._get_protocol_names(addr)
-        is_ipv6 = "ip6" in names
+        is_ipv6 = ":" in actual
         parts = [f"/ip6/{actual}" if is_ipv6 else f"/ip4/{actual}"]
         found = False
         for proto, value in addr.items():
@@ -473,17 +554,41 @@ class PerfTest:
         listen_addrs = self.create_listen_addresses(0)
         tls_client = self.create_tls_client_config()
         tls_server = self.create_tls_server_config()
+        connection_config = ConnectionConfig(
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            inbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+        )
+        quic_transport_opt = QUICTransportConfig(
+            connection_timeout=self.quic_connection_timeout_seconds,
+            idle_timeout=self.quic_idle_timeout_seconds,
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            inbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            NEGOTIATE_TIMEOUT=self.stream_negotiate_timeout_seconds,
+        )
 
         self.host = new_host(
             key_pair=key_pair,
             sec_opt=sec_opt,
             muxer_opt=muxer_opt,
             listen_addrs=listen_addrs,
+            negotiate_timeout=self.negotiate_timeout_seconds,
             enable_quic=(self.transport == "quic-v1"),
+            quic_transport_opt=quic_transport_opt
+            if self.transport == "quic-v1"
+            else None,
             tls_client_config=tls_client,
             tls_server_config=tls_server,
+            connection_config=connection_config,
         )
-        self.perf_service = PerfService(self.host)
+        self.perf_service = PerfService(
+            self.host, {"write_block_size": self.write_block_size}
+        )
         await self.perf_service.start()
         print(f"Perf service started (protocol {PROTOCOL_NAME})", file=sys.stderr)
 
@@ -545,19 +650,43 @@ class PerfTest:
         )
         tls_client = self.create_tls_client_config()
         tls_server = None
+        connection_config = ConnectionConfig(
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            inbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+        )
+        quic_transport_opt = QUICTransportConfig(
+            connection_timeout=self.quic_connection_timeout_seconds,
+            idle_timeout=self.quic_idle_timeout_seconds,
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            inbound_stream_protocol_negotiation_timeout=self.stream_negotiate_timeout_seconds,
+            NEGOTIATE_TIMEOUT=self.stream_negotiate_timeout_seconds,
+        )
 
         kw: dict[str, Any] = {
             "key_pair": key_pair,
             "sec_opt": sec_opt,
             "muxer_opt": muxer_opt,
+            "negotiate_timeout": self.negotiate_timeout_seconds,
             "enable_quic": (self.transport == "quic-v1"),
+            "quic_transport_opt": quic_transport_opt
+            if self.transport == "quic-v1"
+            else None,
             "tls_client_config": tls_client,
             "tls_server_config": tls_server,
+            "connection_config": connection_config,
         }
         if dialer_listen_addrs:
             kw["listen_addrs"] = dialer_listen_addrs
         self.host = new_host(**kw)
-        self.perf_service = PerfService(self.host)
+        self.perf_service = PerfService(
+            self.host, {"write_block_size": self.write_block_size}
+        )
         await self.perf_service.start()
 
         # Must run host inside host.run() so swarm/nursery are active

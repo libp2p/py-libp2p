@@ -1,3 +1,4 @@
+import builtins
 from collections.abc import (
     Awaitable,
     Callable,
@@ -57,6 +58,29 @@ MPLEX_PROTOCOL_ID = TProtocol("/mplex/6.7.0")
 MPLEX_MESSAGE_CHANNEL_SIZE = 8
 
 logger = logging.getLogger(__name__)
+
+BUILTIN_EXCEPTION_GROUP = getattr(builtins, "ExceptionGroup", None)
+
+
+def _is_connection_closed_error(exc: BaseException) -> bool:
+    """True for expected close-path read errors from transport/TLS layers."""
+    msg = str(exc).lower()
+    if any(
+        token in msg
+        for token in (
+            "connection closed",
+            "connection is closed",
+            "cannot read: tls connection is closed",
+            "closed resource",
+            "broken resource",
+            "end of file",
+            "eof",
+        )
+    ):
+        return True
+    if BUILTIN_EXCEPTION_GROUP is not None and isinstance(exc, BUILTIN_EXCEPTION_GROUP):
+        return all(_is_connection_closed_error(e) for e in exc.exceptions)
+    return isinstance(exc, (trio.ClosedResourceError, trio.BrokenResourceError))
 
 
 class Mplex(IMuxedConn):
@@ -244,6 +268,12 @@ class Mplex(IMuxedConn):
                 "failed to read the header correctly from the underlying connection: "
                 f"{error}"
             )
+        except Exception as error:
+            if _is_connection_closed_error(error):
+                raise MplexUnavailable(
+                    "underlying connection closed while reading mplex header"
+                ) from error
+            raise
         try:
             message = await read_varint_prefixed_bytes(self.secured_conn)
         except (ParseError, RawConnError, IncompleteReadError) as error:
@@ -251,6 +281,12 @@ class Mplex(IMuxedConn):
                 "failed to read the message body correctly from the underlying "
                 f"connection: {error}"
             )
+        except Exception as error:
+            if _is_connection_closed_error(error):
+                raise MplexUnavailable(
+                    "underlying connection closed while reading mplex message body"
+                ) from error
+            raise
 
         flag = header & 0x07
         channel_id = header >> 3

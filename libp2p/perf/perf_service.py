@@ -57,7 +57,9 @@ class PerfService(IPerf):
         self._host = host
         self._started = False
         self._protocol = TProtocol(init_opts.get("protocol_name", PROTOCOL_NAME))
-        self._write_block_size = init_opts.get("write_block_size", WRITE_BLOCK_SIZE)
+        configured_block_size = init_opts.get("write_block_size", WRITE_BLOCK_SIZE)
+        # Keep block size under 65535 to avoid Noise frame-size violations.
+        self._write_block_size = min(int(configured_block_size), WRITE_BLOCK_SIZE)
 
         # Pre-allocate buffer for sending data
         self._buf = bytes(self._write_block_size)
