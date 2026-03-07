@@ -838,17 +838,17 @@ async def test_handle_iwant(monkeypatch):
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
 
-        # Mock write_msg to capture the sent packet
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+        # Mock send_rpc to capture the enqueued packet
+        mock_send_rpc = MagicMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         # Simulate Alice sending IWANT to Bob
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[test_msg_id])
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
-        # Check if write_msg was called with the correct packet
-        mock_write_msg.assert_called_once()
-        packet = mock_write_msg.call_args[0][1]
+        # Check if send_rpc was called with the correct packet
+        mock_send_rpc.assert_called_once()
+        packet = mock_send_rpc.call_args[0][1]
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
@@ -883,16 +883,16 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         malformed_msg_id = "not_a_valid_msg_id"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
 
-        # Mock mcache.get and write_msg to ensure they are not called
+        # Mock mcache.get and send_rpc to ensure they are not called
         mock_mcache_get = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+        mock_send_rpc = MagicMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         with pytest.raises(ValueError):
             await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
+        mock_send_rpc.assert_not_called()
 
         # Message ID that's a tuple string but not (bytes, bytes)
         invalid_tuple_msg_id = "('abc', 123)"
@@ -900,7 +900,7 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         with pytest.raises(ValueError):
             await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
-        mock_write_msg.assert_not_called()
+        mock_send_rpc.assert_not_called()
 
 
 @pytest.mark.trio

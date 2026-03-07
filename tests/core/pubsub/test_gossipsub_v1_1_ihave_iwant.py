@@ -99,13 +99,9 @@ async def test_iwant_retrieves_missing_messages():
         # Mock gsub1's message cache to return our test message
         gsub1.mcache.get = MagicMock(return_value=msg)
 
-        # Mock gsub1's write_msg to capture sent messages
-        # Create a mock for pubsub if it doesn't exist
-        if not hasattr(gsub1, "pubsub") or gsub1.pubsub is None:
-            gsub1.pubsub = MagicMock()
-
-        write_msg_mock = AsyncMock()
-        gsub1.pubsub.write_msg = write_msg_mock
+        # Mock gsub1's send_rpc to capture sent messages
+        send_rpc_mock = MagicMock()
+        gsub1.send_rpc = send_rpc_mock
 
         # Create IWANT control message
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[msg_id_str])
@@ -119,11 +115,11 @@ async def test_iwant_retrieves_missing_messages():
         # Verify that gsub1's message cache was queried
         gsub1.mcache.get.assert_called_once()
 
-        # Verify that write_msg was called to send the message
-        write_msg_mock.assert_called_once()
+        # Verify that send_rpc was called to send the message
+        send_rpc_mock.assert_called_once()
 
         # Verify that the sent message contains our test message
-        call_args = write_msg_mock.call_args[0]
+        call_args = send_rpc_mock.call_args[0]
         rpc_msg = call_args[1]
         assert len(rpc_msg.publish) == 1
         assert rpc_msg.publish[0].data == msg_data
