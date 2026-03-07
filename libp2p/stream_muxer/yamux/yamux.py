@@ -152,7 +152,7 @@ class YamuxStream(IMuxedStream):
                     header = struct.pack(
                         YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(chunk)
                     )
-                    await self.conn.secured_conn.write(header + chunk)
+                    await self.conn._write_frame(header + chunk)
                     sent += to_send
 
     async def send_window_update(self, increment: int, skip_lock: bool = False) -> None:
@@ -192,7 +192,7 @@ class YamuxStream(IMuxedStream):
                 increment,
             )
             try:
-                await self.conn.secured_conn.write(header)
+                await self.conn._write_frame(header)
             except ConnectionClosedError as e:
                 # Typed exception from transports (e.g., WebSocket) that
                 # properly signal connection closure — handle gracefully.
@@ -352,9 +352,14 @@ class YamuxStream(IMuxedStream):
                 logger.debug(f"Half-closing stream {self.stream_id} (local end)")
                 try:
                     header = struct.pack(
-                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
+                        YAMUX_HEADER_FORMAT,
+                        0,
+                        TYPE_WINDOW_UPDATE,
+                        FLAG_FIN,
+                        self.stream_id,
+                        0,
                     )
-                    await self.conn.secured_conn.write(header)
+                    await self.conn._write_frame(header)
                 except RawConnError as e:
                     logger.debug(f"Error sending FIN, connection likely closed: {e}")
                 finally:
@@ -373,9 +378,14 @@ class YamuxStream(IMuxedStream):
                 logger.debug(f"Resetting stream {self.stream_id}")
                 try:
                     header = struct.pack(
-                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
+                        YAMUX_HEADER_FORMAT,
+                        0,
+                        TYPE_WINDOW_UPDATE,
+                        FLAG_RST,
+                        self.stream_id,
+                        0,
                     )
-                    await self.conn.secured_conn.write(header)
+                    await self.conn._write_frame(header)
                 except RawConnError as e:
                     logger.debug(f"Error sending RST, connection likely closed: {e}")
                 finally:
@@ -451,6 +461,7 @@ class Yamux(IMuxedConn):
         self.event_started = trio.Event()
         self.stream_buffers: dict[int, bytearray] = {}
         self.stream_events: dict[int, trio.Event] = {}
+        self._write_lock = trio.Lock()
         self._nursery: Nursery | None = None
 
     async def start(self) -> None:
@@ -492,7 +503,7 @@ class Yamux(IMuxedConn):
                     header = struct.pack(
                         YAMUX_HEADER_FORMAT, 0, TYPE_GO_AWAY, 0, 0, error_code
                     )
-                    await self.secured_conn.write(header)
+                    await self._write_frame(header)
                 except Exception as e:
                     logger.debug(f"Failed to send GO_AWAY: {e}")
                 self.event_shutting_down.set()
@@ -539,6 +550,32 @@ class Yamux(IMuxedConn):
         """
         return self.secured_conn.get_connection_type()
 
+    async def _write_frame(self, data: bytes) -> None:
+        """Write a frame to the connection, serializing all writes."""
+        if len(data) >= HEADER_SIZE:
+            _, typ, flags, sid, length = struct.unpack(
+                YAMUX_HEADER_FORMAT, data[:HEADER_SIZE]
+            )
+            flag_names = []
+            if flags & FLAG_SYN:
+                flag_names.append("SYN")
+            if flags & FLAG_ACK:
+                flag_names.append("ACK")
+            if flags & FLAG_FIN:
+                flag_names.append("FIN")
+            if flags & FLAG_RST:
+                flag_names.append("RST")
+            type_names = {0: "DATA", 1: "WINDOW_UPDATE", 2: "PING", 3: "GO_AWAY"}
+            logger.info(
+                f"YAMUX TX: type={type_names.get(typ, typ)} "
+                f"flags={'+'.join(flag_names) or '0'} "
+                f"stream={sid} length={length} "
+                f"is_initiator={self.is_initiator_value} "
+                f"payload_bytes={len(data) - HEADER_SIZE}"
+            )
+        async with self._write_lock:
+            await self.secured_conn.write(data)
+
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot
         await self.stream_backlog_semaphore.acquire()
@@ -556,10 +593,15 @@ class Yamux(IMuxedConn):
         # If stream is rejected or errors, release the semaphore
         try:
             header = struct.pack(
-                YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_SYN, stream_id, 0
+                YAMUX_HEADER_FORMAT,
+                0,
+                TYPE_WINDOW_UPDATE,
+                FLAG_SYN,
+                stream_id,
+                DEFAULT_WINDOW_SIZE,
             )
             logger.debug(f"Sending SYN header for stream {stream_id}")
-            await self.secured_conn.write(header)
+            await self._write_frame(header)
             return stream
         except Exception as e:
             self.stream_backlog_semaphore.release()
@@ -758,10 +800,21 @@ class Yamux(IMuxedConn):
                 version, typ, flags, stream_id, length = struct.unpack(
                     YAMUX_HEADER_FORMAT, header
                 )
-                logger.debug(
-                    f"Received header for peer {self.peer_id}:"
-                    f"type={typ}, flags={flags}, stream_id={stream_id},"
-                    f"length={length}"
+                type_names = {0: "DATA", 1: "WINDOW_UPDATE", 2: "PING", 3: "GO_AWAY"}
+                flag_names = []
+                if flags & FLAG_SYN:
+                    flag_names.append("SYN")
+                if flags & FLAG_ACK:
+                    flag_names.append("ACK")
+                if flags & FLAG_FIN:
+                    flag_names.append("FIN")
+                if flags & FLAG_RST:
+                    flag_names.append("RST")
+                logger.info(
+                    f"YAMUX RX: type={type_names.get(typ, typ)} "
+                    f"flags={'+'.join(flag_names) or '0'} "
+                    f"stream={stream_id} length={length} "
+                    f"is_initiator={self.is_initiator_value}"
                 )
                 if (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_SYN:
                     async with self.streams_lock:
@@ -771,11 +824,24 @@ class Yamux(IMuxedConn):
                             self.stream_buffers[stream_id] = bytearray()
                             self.stream_events[stream_id] = trio.Event()
 
-                            # Read any data that came with the SYN frame
-                            if length > 0:
+                            if typ == TYPE_WINDOW_UPDATE and length > 0:
+                                # Window update SYN: length is initial
+                                # window size, not data
+                                async with stream.window_lock:
+                                    stream.send_window = length
+                                logger.debug(
+                                    f"SYN window update for stream "
+                                    f"{stream_id}: window={length}"
+                                )
+                            elif typ == TYPE_DATA and length > 0:
+                                # Data SYN: length is payload bytes
                                 try:
-                                    data = await read_exactly(self.secured_conn, length)
-                                    self.stream_buffers[stream_id].extend(data)
+                                    data = await read_exactly(
+                                        self.secured_conn, length
+                                    )
+                                    self.stream_buffers[stream_id].extend(
+                                        data
+                                    )
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Read {length} bytes with SYN "
@@ -783,10 +849,9 @@ class Yamux(IMuxedConn):
                                     )
                                 except IncompleteReadError as e:
                                     logger.error(
-                                        "Incomplete read for SYN data on stream "
-                                        f"{stream_id}: {e}"
+                                        "Incomplete read for SYN data on "
+                                        f"stream {stream_id}: {e}"
                                     )
-                                    # Mark stream as closed
                                     stream.recv_closed = True
                                     stream.closed = True
                                     if stream_id in self.stream_events:
@@ -795,12 +860,12 @@ class Yamux(IMuxedConn):
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
                                 0,
-                                TYPE_DATA,
+                                TYPE_WINDOW_UPDATE,
                                 FLAG_ACK,
                                 stream_id,
-                                0,
+                                DEFAULT_WINDOW_SIZE,
                             )
-                            await self.secured_conn.write(ack_header)
+                            await self._write_frame(ack_header)
                             logger.debug(
                                 f"Sending stream {stream_id}"
                                 f"to channel for peer {self.peer_id}"
@@ -810,40 +875,52 @@ class Yamux(IMuxedConn):
                             rst_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
                                 0,
-                                TYPE_DATA,
+                                TYPE_WINDOW_UPDATE,
                                 FLAG_RST,
                                 stream_id,
                                 0,
                             )
-                            await self.secured_conn.write(rst_header)
-                elif typ == TYPE_DATA and flags & FLAG_ACK:
+                            await self._write_frame(rst_header)
+                elif (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_ACK:
                     async with self.streams_lock:
                         if stream_id in self.streams:
-                            # Read any data that came with the ACK
-                            if length > 0:
+                            stream = self.streams[stream_id]
+                            if typ == TYPE_WINDOW_UPDATE:
+                                # Window update ACK: length is window delta
+                                if length > 0:
+                                    async with stream.window_lock:
+                                        stream.send_window += length
+                                logger.debug(
+                                    f"Received WINDOW_UPDATE ACK for stream "
+                                    f"{stream_id}, window_delta={length} "
+                                    f"for peer {self.peer_id}"
+                                )
+                            elif typ == TYPE_DATA and length > 0:
+                                # Data ACK: length is payload bytes
                                 try:
-                                    data = await read_exactly(self.secured_conn, length)
+                                    data = await read_exactly(
+                                        self.secured_conn, length
+                                    )
                                     self.stream_buffers[stream_id].extend(data)
                                     self.stream_events[stream_id].set()
                                     logger.debug(
-                                        f"Received ACK with {length} bytes for stream "
-                                        f"{stream_id} for peer {self.peer_id}"
+                                        f"Received ACK with {length} bytes "
+                                        f"for stream {stream_id} "
+                                        f"for peer {self.peer_id}"
                                     )
                                 except IncompleteReadError as e:
                                     logger.error(
-                                        "Incomplete read for ACK data on stream "
-                                        f"{stream_id}: {e}"
+                                        "Incomplete read for ACK data on "
+                                        f"stream {stream_id}: {e}"
                                     )
-                                    # Mark stream as closed
-                                    stream = self.streams[stream_id]
                                     stream.recv_closed = True
                                     stream.closed = True
                                     if stream_id in self.stream_events:
                                         self.stream_events[stream_id].set()
                             else:
                                 logger.debug(
-                                    f"Received ACK (no data) for stream {stream_id} "
-                                    f"for peer {self.peer_id}"
+                                    f"Received ACK (no data) for stream "
+                                    f"{stream_id} for peer {self.peer_id}"
                                 )
                 elif typ == TYPE_GO_AWAY:
                     error_code = length
@@ -877,7 +954,7 @@ class Yamux(IMuxedConn):
                         ping_header = struct.pack(
                             YAMUX_HEADER_FORMAT, 0, TYPE_PING, FLAG_ACK, 0, length
                         )
-                        await self.secured_conn.write(ping_header)
+                        await self._write_frame(ping_header)
                     elif flags & FLAG_ACK:
                         logger.debug(
                             f"Received ping response with value"
