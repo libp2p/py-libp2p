@@ -35,3 +35,11 @@ libp2p.utils.version module
    :members:
    :undoc-members:
    :show-inheritance:
+
+libp2p.utils.paths module
+-------------------------
+
+.. automodule:: libp2p.utils.paths
+   :members:
+   :undoc-members:
+   :show-inheritance:

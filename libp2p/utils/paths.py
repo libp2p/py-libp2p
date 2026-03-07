@@ -46,7 +46,7 @@ def join_paths(*parts: PathLike) -> Path:
     Cross-platform path joining.
 
     Args:
-        *parts: Path components to join
+        parts: Path components to join
 
     Returns:
         Path: Joined path using platform-appropriate separator
