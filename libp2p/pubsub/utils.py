@@ -1,3 +1,4 @@
+import ast
 import logging
 
 from libp2p.abc import IHost
@@ -94,6 +95,8 @@ def safe_parse_message_id(msg_id: str | bytes) -> tuple[bytes, bytes]:
         return (seqno, from_id)
     except (ValueError, SyntaxError, UnicodeDecodeError, TypeError) as e:
         raise ValueError(f"Invalid message ID format: {e}")
+
+
 def safe_bytes_from_hex(hex_str: str) -> bytes | None:
     """
     Decode a hex-encoded string to bytes, returning None on failure.
