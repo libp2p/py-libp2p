@@ -4,6 +4,13 @@ Block storage interface for Bitswap.
 
 from abc import ABC, abstractmethod
 
+from .cid import CIDInput, cid_to_bytes
+
+
+def _normalize_cid(cid: CIDInput) -> bytes:
+    """Normalize accepted CID input forms to canonical CID bytes."""
+    return cid_to_bytes(cid)
+
 
 class BlockStore(ABC):
     """
@@ -14,7 +21,7 @@ class BlockStore(ABC):
     """
 
     @abstractmethod
-    async def get_block(self, cid: bytes) -> bytes | None:
+    async def get_block(self, cid: CIDInput) -> bytes | None:
         """
         Get a block by its CID.
 
@@ -28,7 +35,7 @@ class BlockStore(ABC):
         pass
 
     @abstractmethod
-    async def put_block(self, cid: bytes, data: bytes) -> None:
+    async def put_block(self, cid: CIDInput, data: bytes) -> None:
         """
         Store a block.
 
@@ -40,7 +47,7 @@ class BlockStore(ABC):
         pass
 
     @abstractmethod
-    async def has_block(self, cid: bytes) -> bool:
+    async def has_block(self, cid: CIDInput) -> bool:
         """
         Check if a block exists.
 
@@ -54,7 +61,7 @@ class BlockStore(ABC):
         pass
 
     @abstractmethod
-    async def delete_block(self, cid: bytes) -> None:
+    async def delete_block(self, cid: CIDInput) -> None:
         """
         Delete a block.
 
@@ -83,22 +90,26 @@ class MemoryBlockStore(BlockStore):
         """Initialize the memory block store."""
         self._blocks: dict[bytes, bytes] = {}
 
-    async def get_block(self, cid: bytes) -> bytes | None:
+    async def get_block(self, cid: CIDInput) -> bytes | None:
         """Get a block by its CID."""
-        return self._blocks.get(cid)
+        cid_bytes = _normalize_cid(cid)
+        return self._blocks.get(cid_bytes)
 
-    async def put_block(self, cid: bytes, data: bytes) -> None:
+    async def put_block(self, cid: CIDInput, data: bytes) -> None:
         """Store a block."""
-        self._blocks[cid] = data
+        cid_bytes = _normalize_cid(cid)
+        self._blocks[cid_bytes] = data
 
-    async def has_block(self, cid: bytes) -> bool:
+    async def has_block(self, cid: CIDInput) -> bool:
         """Check if a block exists."""
-        return cid in self._blocks
+        cid_bytes = _normalize_cid(cid)
+        return cid_bytes in self._blocks
 
-    async def delete_block(self, cid: bytes) -> None:
+    async def delete_block(self, cid: CIDInput) -> None:
         """Delete a block."""
-        if cid in self._blocks:
-            del self._blocks[cid]
+        cid_bytes = _normalize_cid(cid)
+        if cid_bytes in self._blocks:
+            del self._blocks[cid_bytes]
 
     def get_all_cids(self) -> list[bytes]:
         """Get all CIDs in the store."""
