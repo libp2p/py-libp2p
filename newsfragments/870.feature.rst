@@ -1,8 +1,0 @@
-Added a comprehensive NAT traversal example demonstrating Circuit Relay v2, DCUtR (Direct Connection Upgrade through Relay), and AutoNAT protocols.
-
-The example includes three scripts in ``examples/nat/``:
-- ``relay.py``: A publicly reachable relay node that facilitates connections between NATed peers
-- ``listener.py``: A NATed peer that advertises via relay and accepts incoming connections
-- ``dialer.py``: A NATed peer that connects through relay and attempts DCUtR hole punching to establish direct connections
-
-This example demonstrates how two NATed peers can establish communication through a relay and automatically upgrade to a direct connection when possible, while using AutoNAT to detect and report network reachability status.

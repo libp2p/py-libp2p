@@ -136,7 +136,7 @@ async def test_handle_dial():
 
         # Create a mock message with a peer to dial
         message = Message()
-        message.type = Type.Value("DIAL")
+        message.type = Type.DIAL
         peer_info = PeerInfo()
         peer_info.id = peer_id.to_bytes()
         peer_info.addrs.extend([b"/ip4/127.0.0.1/tcp/4001"])
@@ -150,7 +150,7 @@ async def test_handle_dial():
 
             response = await service._handle_dial(message)
 
-            assert response.type == Type.Value("DIAL_RESPONSE")
+            assert response.type == Type.DIAL_RESPONSE
             assert response.dial_response.status == Status.OK
             assert len(response.dial_response.peers) == 1
             assert response.dial_response.peers[0].id == peer_id.to_bytes()

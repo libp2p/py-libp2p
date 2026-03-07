@@ -8,6 +8,9 @@ from Crypto.PublicKey.RSA import (
 from Crypto.Signature import (
     pkcs1_15,
 )
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 from libp2p.crypto.exceptions import (
     CryptographyError,
@@ -59,7 +62,20 @@ class RSAPublicKey(PublicKey):
 
     @classmethod
     def from_bytes(cls, key_bytes: bytes) -> "RSAPublicKey":
-        rsakey = RSA.import_key(key_bytes)
+        try:
+            rsakey = RSA.import_key(key_bytes)
+        except ValueError:
+            # PyCryptodome might fail on some PKIX formats, try using cryptography lib
+            try:
+                crypto_key = load_der_public_key(key_bytes, backend=default_backend())
+                # Re-export in PKCS1 format that PyCryptodome understands
+                pkcs1_bytes = crypto_key.public_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PublicFormat.PKCS1,
+                )
+                rsakey = RSA.import_key(pkcs1_bytes)
+            except Exception:
+                raise
         validate_rsa_key_size(rsakey)
         return cls(rsakey)
 
