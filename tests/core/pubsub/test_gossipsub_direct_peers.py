@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import trio
 
@@ -13,6 +15,8 @@ from libp2p.tools.utils import (
 from tests.utils.factories import (
     PubsubFactory,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.trio
@@ -41,15 +45,15 @@ async def test_attach_peer_records():
                 peer_ids_0 = peer_store_0.peer_ids()
                 peer_ids_1 = peer_store_1.peer_ids()
 
-                print(f"Peer store 0 IDs: {peer_ids_0}")
-                print(f"Peer store 1 IDs: {peer_ids_1}")
-                print(f"Host 0 ID: {host_0.get_id()}")
-                print(f"Host 1 ID: {host_1.get_id()}")
+                logger.debug("Peer store 0 IDs: %s", peer_ids_0)
+                logger.debug("Peer store 1 IDs: %s", peer_ids_1)
+                logger.debug("Host 0 ID: %s", host_0.get_id())
+                logger.debug("Host 1 ID: %s", host_1.get_id())
 
                 assert host_0.get_id() in peer_ids_1, "Peer 0 not found in peer store 1"
 
             except Exception as e:
-                print(f"Test failed with error: {e}")
+                logger.error("Test failed with error: %s", e)
                 raise
 
 
@@ -114,7 +118,7 @@ async def test_reject_graft():
                 )
 
             except Exception as e:
-                print(f"Test failed with error: {e}")
+                logger.error("Test failed with error: %s", e)
                 raise
 
 
@@ -171,5 +175,5 @@ async def test_heartbeat_reconnect():
                 )
 
             except Exception as e:
-                print(f"Test failed with error: {e}")
+                logger.error("Test failed with error: %s", e)
                 raise
