@@ -74,6 +74,10 @@ mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
+filecoin-dx = "libp2p.filecoin.cli:main"
+filecoin-connect-demo = "examples.filecoin.filecoin_connect_demo:main"
+filecoin-ping-identify-demo = "examples.filecoin.filecoin_ping_identify_demo:main"
+filecoin-pubsub-demo = "examples.filecoin.filecoin_pubsub_demo:main"
 
 [dependency-groups]
 dev = [

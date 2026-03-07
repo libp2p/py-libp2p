@@ -37,7 +37,10 @@ from libp2p.peer.peerstore import (
 from libp2p.pubsub import (
     floodsub,
 )
-from libp2p.pubsub.utils import maybe_consume_signed_record
+from libp2p.pubsub.utils import (
+    maybe_consume_signed_record,
+    safe_bytes_from_hex,
+)
 from libp2p.tools.async_service import (
     Service,
 )
@@ -60,10 +63,6 @@ from .pubsub import (
 from .score import (
     PeerScorer,
     ScoreParams,
-)
-from .utils import (
-    parse_message_id_safe,
-    safe_bytes_from_hex,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -1303,22 +1302,43 @@ class GossipSub(IPubsubRouter, Service):
             return
         if self.pubsub is None:
             raise NoPubsubAttached
-        pubsub = self.pubsub
 
-        # Add all unknown message ids (ids that appear in ihave_msg but not
-        # already seen) to list of messages we want to request
+        # Type guard: assert that pubsub is not None for type checkers
+        assert self.pubsub is not None
+
+        # Add all unknown message ids (ids that appear in ihave_msg but not in
+        # seen_messages) to list of messages we want to request. Skip malformed
+        # IDs instead of crashing.
         msg_ids_wanted: list[MessageID] = []
-        for msg_id in ihave_msg.messageIDs:
-            mid_bytes = safe_bytes_from_hex(msg_id)
-            if mid_bytes is None:
-                logger.warning(
-                    "Received invalid hex message ID in IHAVE from %s: %r",
+        seen_messages = self.pubsub.seen_messages
+
+        for raw_msg_id in ihave_msg.messageIDs:
+            # Message IDs from IHAVE are hex-encoded strings
+            # Convert to bytes for comparison with cache
+            msg_id_bytes = safe_bytes_from_hex(raw_msg_id)
+            if msg_id_bytes is None:
+                logger.debug(
+                    "skipping non-decodable IHAVE message ID from peer %s: %s",
                     sender_peer_id,
-                    msg_id,
+                    raw_msg_id,
                 )
                 continue
-            if not pubsub.seen_messages.has(mid_bytes):
-                msg_ids_wanted.append(parse_message_id_safe(msg_id))
+
+            # Check if this message was already seen
+            # Use .has() method if available (for test mocks), otherwise check cache
+            is_seen = False
+            has_method = getattr(seen_messages, "has", None)
+            if has_method is not None:
+                is_seen = has_method(msg_id_bytes)
+            else:
+                cache = getattr(seen_messages, "cache", None)
+                if cache is not None:
+                    is_seen = msg_id_bytes in cache
+
+            # Only request if message ID is not in our seen cache
+            if not is_seen:
+                # Convert hex string to MessageID for emit_iwant
+                msg_ids_wanted.append(MessageID(raw_msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1341,21 +1361,19 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
-        msg_ids: list[bytes] = []
-        for msg_id_str in iwant_msg.messageIDs:
-            mid_bytes = safe_bytes_from_hex(msg_id_str)
-            if mid_bytes is None:
-                logger.warning(
-                    "Received invalid hex message ID in IWANT from %s: %r",
+        msgs_to_forward: list[rpc_pb2.Message] = []
+        for raw_msg_id in iwant_msg.messageIDs:
+            # Check if the wanted message ID is present in mcache
+            # Message IDs are hex-encoded strings in the protobuf, convert them to bytes
+            msg_id_bytes = safe_bytes_from_hex(raw_msg_id)
+            if msg_id_bytes is None:
+                logger.debug(
+                    "skipping malformed IWANT message ID from peer %s: %s",
                     sender_peer_id,
-                    msg_id_str,
+                    raw_msg_id,
                 )
                 continue
-            msg_ids.append(mid_bytes)
-        msgs_to_forward: list[rpc_pb2.Message] = []
-        for msg_id_iwant in msg_ids:
-            # Check if the wanted message ID is present in mcache
-            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_bytes)
 
             # Cache hit
             if msg:
