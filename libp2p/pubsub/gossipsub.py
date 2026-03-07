@@ -37,9 +37,15 @@ from libp2p.peer.peerstore import (
 from libp2p.pubsub import (
     floodsub,
 )
-from libp2p.pubsub.utils import maybe_consume_signed_record
+from libp2p.pubsub.utils import (
+    maybe_consume_signed_record,
+    safe_bytes_from_hex,
+)
 from libp2p.tools.async_service import (
     Service,
+)
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr as extract_ip_from_multiaddr_util,
 )
 
 from .exceptions import (
@@ -57,10 +63,6 @@ from .pubsub import (
 from .score import (
     PeerScorer,
     ScoreParams,
-)
-from .utils import (
-    parse_message_id_safe,
-    safe_parse_message_id,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -125,8 +127,8 @@ class GossipSub(IPubsubRouter, Service):
     message_rate_limits: dict[ID, dict[str, list[float]]]  # peer -> topic -> timestamps
     max_messages_per_topic_per_second: float
     equivocation_detection: dict[
-        tuple[bytes, bytes], rpc_pb2.Message
-    ]  # (seqno, from) -> first_msg
+        bytes, rpc_pb2.Message
+    ]  # msg_id (from_id + seqno) -> first_msg
     eclipse_protection_enabled: bool
     min_mesh_diversity_ips: int  # Minimum number of different IPs in mesh
 
@@ -596,7 +598,7 @@ class GossipSub(IPubsubRouter, Service):
             msg_id = self.pubsub.get_message_id(pubsub_msg)
         else:
             # Fallback to default ID construction
-            msg_id = pubsub_msg.seqno + pubsub_msg.from_id
+            msg_id = pubsub_msg.from_id + pubsub_msg.seqno
 
         peers_gen = self._get_peers_to_send(
             pubsub_msg.topicIDs,
@@ -1055,7 +1057,7 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, gossip_count, current_peers, True
                 )
-                msg_id_strs = [str(msg_id) for msg_id in msg_ids]
+                msg_id_strs = [msg_id.hex() for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
                     peers_to_gossip[peer][topic] = msg_id_strs
 
@@ -1300,29 +1302,43 @@ class GossipSub(IPubsubRouter, Service):
             return
         if self.pubsub is None:
             raise NoPubsubAttached
-        # Get list of all seen (seqnos, from) from the (seqno, from) tuples in
-        # seen_messages cache
-        seen_seqnos_and_peers = [
-            str(seqno_and_from)
-            for seqno_and_from in self.pubsub.seen_messages.cache.keys()
-        ]
+
+        # Type guard: assert that pubsub is not None for type checkers
+        assert self.pubsub is not None
 
         # Add all unknown message ids (ids that appear in ihave_msg but not in
-        # seen_seqnos) to list of messages we want to request. Skip malformed
+        # seen_messages) to list of messages we want to request. Skip malformed
         # IDs instead of crashing.
         msg_ids_wanted: list[MessageID] = []
+        seen_messages = self.pubsub.seen_messages
+
         for raw_msg_id in ihave_msg.messageIDs:
-            try:
-                msg_id = parse_message_id_safe(raw_msg_id)
-            except ValueError:
+            # Message IDs from IHAVE are hex-encoded strings
+            # Convert to bytes for comparison with cache
+            msg_id_bytes = safe_bytes_from_hex(raw_msg_id)
+            if msg_id_bytes is None:
                 logger.debug(
-                    "skipping non-decodable IHAVE message ID from peer %s",
+                    "skipping non-decodable IHAVE message ID from peer %s: %s",
                     sender_peer_id,
+                    raw_msg_id,
                 )
                 continue
 
-            if msg_id not in seen_seqnos_and_peers:
-                msg_ids_wanted.append(msg_id)
+            # Check if this message was already seen
+            # Use .has() method if available (for test mocks), otherwise check cache
+            is_seen = False
+            has_method = getattr(seen_messages, "has", None)
+            if has_method is not None:
+                is_seen = has_method(msg_id_bytes)
+            else:
+                cache = getattr(seen_messages, "cache", None)
+                if cache is not None:
+                    is_seen = msg_id_bytes in cache
+
+            # Only request if message ID is not in our seen cache
+            if not is_seen:
+                # Convert hex string to MessageID for emit_iwant
+                msg_ids_wanted.append(MessageID(raw_msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1337,7 +1353,7 @@ class GossipSub(IPubsubRouter, Service):
 
         Enhanced with rate limiting for GossipSub v1.4.
         """
-        # Rate limiting check for IWANT requests
+        # Rate limiting check for IWANT messages
         if not self._check_iwant_rate_limit(sender_peer_id):
             logger.warning(
                 "IWANT rate limit exceeded for peer %s, ignoring request",
@@ -1345,13 +1361,19 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
-        msg_ids: list[tuple[bytes, bytes]] = [
-            safe_parse_message_id(raw_msg_id) for raw_msg_id in iwant_msg.messageIDs
-        ]
         msgs_to_forward: list[rpc_pb2.Message] = []
-        for msg_id_iwant in msg_ids:
+        for raw_msg_id in iwant_msg.messageIDs:
             # Check if the wanted message ID is present in mcache
-            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
+            # Message IDs are hex-encoded strings in the protobuf, convert them to bytes
+            msg_id_bytes = safe_bytes_from_hex(raw_msg_id)
+            if msg_id_bytes is None:
+                logger.debug(
+                    "skipping malformed IWANT message ID from peer %s: %s",
+                    sender_peer_id,
+                    raw_msg_id,
+                )
+                continue
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_bytes)
 
             # Cache hit
             if msg:
@@ -1763,23 +1785,44 @@ class GossipSub(IPubsubRouter, Service):
                 if conn is not None and hasattr(conn, "remote_addr"):
                     remote_addr = getattr(conn, "remote_addr", None)
                     if remote_addr:
-                        # Extract IP from multiaddr
-                        ip_str = self._extract_ip_from_multiaddr(str(remote_addr))
+                        ip_str = self._extract_ip_from_remote_addr(remote_addr)
                         if ip_str:
                             self.scorer.add_peer_ip(peer_id, ip_str)
         except Exception as e:
             logger.debug("Failed to track IP for peer %s: %s", peer_id, e)
 
-    def _extract_ip_from_multiaddr(self, multiaddr_str: str) -> str | None:
+    def _extract_ip_from_remote_addr(self, remote_addr: Any) -> str | None:
         """
-        Extract IP address from a multiaddr string.
+        Extract IP address from a remote address (Multiaddr, (host, port), or string).
+
+        Uses libp2p.utils.multiaddr_utils when possible for consistency.
+        """
+        try:
+            from multiaddr import Multiaddr
+
+            if isinstance(remote_addr, Multiaddr):
+                return extract_ip_from_multiaddr_util(remote_addr)
+            if isinstance(remote_addr, (tuple, list)) and len(remote_addr) >= 1:
+                return str(remote_addr[0])
+            addr_str = str(remote_addr)
+            # Try parsing as multiaddr and use shared util
+            try:
+                maddr = Multiaddr(addr_str)
+                return extract_ip_from_multiaddr_util(maddr)
+            except Exception:
+                pass
+            return self._extract_ip_from_multiaddr_str(addr_str)
+        except Exception:
+            return None
+
+    def _extract_ip_from_multiaddr_str(self, multiaddr_str: str) -> str | None:
+        """
+        Extract IP from multiaddr string (fallback when Multiaddr parse fails).
 
         :param multiaddr_str: The multiaddr string
         :return: The IP address or None if extraction fails
         """
         try:
-            # Simple extraction for common cases like /ip4/127.0.0.1/tcp/4001
-            # or /ip6/::1/tcp/4001
             parts = multiaddr_str.split("/")
             for i, part in enumerate(parts):
                 if part in ("ip4", "ip6") and i + 1 < len(parts):
@@ -2166,7 +2209,7 @@ class GossipSub(IPubsubRouter, Service):
         :param msg: The message to check
         :return: True if message is valid, False if equivocation detected
         """
-        msg_key = (msg.seqno, msg.from_id)
+        msg_key = msg.from_id + msg.seqno
 
         if msg_key in self.equivocation_detection:
             existing_msg = self.equivocation_detection[msg_key]

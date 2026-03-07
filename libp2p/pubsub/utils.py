@@ -1,3 +1,4 @@
+import ast
 import logging
 
 from libp2p.abc import IHost
@@ -71,19 +72,6 @@ def parse_message_id_safe(msg_id: str | bytes) -> MessageID:
     raise ValueError(f"unsupported message ID type: {type(msg_id)!r}")
 
 
-<<<<<<< HEAD
-def safe_bytes_from_hex(hex_str: str) -> bytes | None:
-    """
-    Decode a hex-encoded string to bytes, returning None on failure.
-
-    Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
-    so that malformed hex from peers does not crash the gossip handler task.
-    """
-    try:
-        return bytes.fromhex(hex_str)
-    except ValueError:
-        return None
-=======
 def safe_parse_message_id(msg_id: str | bytes) -> tuple[bytes, bytes]:
     """
     Safely parse message ID using ast.literal_eval with validation.
@@ -107,4 +95,16 @@ def safe_parse_message_id(msg_id: str | bytes) -> tuple[bytes, bytes]:
         return (seqno, from_id)
     except (ValueError, SyntaxError, UnicodeDecodeError, TypeError) as e:
         raise ValueError(f"Invalid message ID format: {e}")
->>>>>>> 1e154207 (Add Filecoin DX toolkit, docs, examples)
+
+
+def safe_bytes_from_hex(hex_str: str) -> bytes | None:
+    """
+    Decode a hex-encoded string to bytes, returning None on failure.
+
+    Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
+    so that malformed hex from peers does not crash the gossip handler task.
+    """
+    try:
+        return bytes.fromhex(hex_str)
+    except ValueError:
+        return None
