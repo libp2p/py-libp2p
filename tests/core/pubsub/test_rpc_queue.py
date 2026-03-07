@@ -6,6 +6,7 @@ from collections import deque
 
 import pytest
 import trio
+import trio.testing
 
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.rpc_queue import (
@@ -16,6 +17,7 @@ from libp2p.pubsub.rpc_queue import (
     _rpc_has_data,
     _varint_size,
 )
+
 
 def _make_rpc(payload_size: int = 0) -> rpc_pb2.RPC:
     """Create an RPC with a publish message of approximately *payload_size* bytes."""
@@ -91,6 +93,7 @@ class TestPriorityQueue:
         pq = PriorityQueue()
         assert pq.max_size == OutBoundQueueSize
 
+
 class TestRpcQueue:
     def test_close_sets_flag(self) -> None:
         q = RpcQueue()
@@ -162,6 +165,7 @@ class TestRpcQueue:
         for r in rpcs:
             assert await q.pop() is r
 
+
 class TestSplitRpc:
     def test_empty_rpc_returns_single_empty(self) -> None:
         q = RpcQueue()
@@ -217,7 +221,7 @@ class TestSplitRpc:
         ihave = rpc.control.ihave.add()
         ihave.topicID = "test"
         for i in range(20):
-            ihave.messageIDs.append(b"msg-%d" % i)
+            ihave.messageIDs.append("msg-%d" % i)
         q = RpcQueue(max_message_size=80)
         parts = q.split_rpc(rpc)
         assert len(parts) >= 1
@@ -234,7 +238,7 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "t"
-        ihave.messageIDs.append(b"only-one")
+        ihave.messageIDs.append("only-one")
         q = RpcQueue(max_message_size=10000)
         parts = q.split_rpc(rpc)
         all_ids = []
@@ -250,7 +254,7 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
         for i in range(5):
-            iwant.messageIDs.append(b"id-%d" % i)
+            iwant.messageIDs.append("id-%d" % i)
         q = RpcQueue(max_message_size=10000)
         parts = q.split_rpc(rpc)
         all_ids = []
@@ -264,7 +268,7 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
         for i in range(20):
-            iwant.messageIDs.append(b"x" * 50)
+            iwant.messageIDs.append("x" * 50)
         q = RpcQueue(max_message_size=100)
         parts = q.split_rpc(rpc)
         all_ids = []
@@ -281,9 +285,7 @@ class TestSplitRpc:
             g.topicID = f"topic-{i}"
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        total_grafts = sum(
-            len(p.control.graft) for p in parts if p.HasField("control")
-        )
+        total_grafts = sum(len(p.control.graft) for p in parts if p.HasField("control"))
         assert total_grafts == 10
 
     def test_prune_split(self) -> None:
@@ -293,9 +295,7 @@ class TestSplitRpc:
             p.topicID = f"topic-{i}"
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        total_prunes = sum(
-            len(p.control.prune) for p in parts if p.HasField("control")
-        )
+        total_prunes = sum(len(p.control.prune) for p in parts if p.HasField("control"))
         assert total_prunes == 10
 
     def test_mixed_content_preserved(self) -> None:
@@ -314,9 +314,7 @@ class TestSplitRpc:
         # Verify all content is preserved across parts.
         total_publish = sum(len(p.publish) for p in parts)
         total_subs = sum(len(p.subscriptions) for p in parts)
-        total_grafts = sum(
-            len(p.control.graft) for p in parts if p.HasField("control")
-        )
+        total_grafts = sum(len(p.control.graft) for p in parts if p.HasField("control"))
         assert total_publish == 1
         assert total_subs == 1
         assert total_grafts == 1
@@ -347,13 +345,15 @@ class TestSplitRpc:
     # ── edge-case: oversized single items ──
 
     def test_ihave_oversized_topic(self) -> None:
-        """When the topicID alone exceeds the limit, each mid is emitted
-        as an oversized solo and no empty RPCs are produced."""
+        """
+        When the topicID alone exceeds the limit, each mid is emitted
+        as an oversized solo and no empty RPCs are produced.
+        """
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "t" * 200
-        ihave.messageIDs.append(b"a")
-        ihave.messageIDs.append(b"b")
+        ihave.messageIDs.append("a")
+        ihave.messageIDs.append("b")
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
         all_ids: list[str] = []
@@ -366,12 +366,14 @@ class TestSplitRpc:
         assert all(_rpc_has_data(p) for p in parts)
 
     def test_ihave_oversized_single_mid(self) -> None:
-        """A single messageID that, combined with the topicID, exceeds the
-        limit is emitted as an oversized solo."""
+        """
+        A single messageID that, combined with the topicID, exceeds the
+        limit is emitted as an oversized solo.
+        """
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "topic"
-        ihave.messageIDs.append(b"x" * 200)
+        ihave.messageIDs.append("x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
         all_ids: list[str] = []
@@ -386,7 +388,7 @@ class TestSplitRpc:
         """A single oversized IWant messageID is emitted as a solo RPC."""
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
-        iwant.messageIDs.append(b"x" * 200)
+        iwant.messageIDs.append("x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
         all_ids: list[str] = []
@@ -398,8 +400,10 @@ class TestSplitRpc:
         assert all(_rpc_has_data(p) for p in parts)
 
     def test_idontwant_oversized_coalesced(self) -> None:
-        """Oversized IDontWant messageIDs are coalesced into shared
-        ControlIDontWant entries rather than one entry per messageID."""
+        """
+        Oversized IDontWant messageIDs are coalesced into shared
+        ControlIDontWant entries rather than one entry per messageID.
+        """
         rpc = rpc_pb2.RPC()
         idw = rpc.control.idontwant.add()
         for i in range(10):
@@ -408,7 +412,7 @@ class TestSplitRpc:
         # path but allows several mids per chunk → proves coalescing.
         q = RpcQueue(max_message_size=200)
         parts = q.split_rpc(rpc)
-        all_ids: list[str] = []
+        all_ids: list[bytes] = []
         for p in parts:
             if p.HasField("control"):
                 for entry in p.control.idontwant:
@@ -431,7 +435,7 @@ class TestSplitRpc:
         idw.messageIDs.append(b"x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
-        all_ids: list[str] = []
+        all_ids: list[bytes] = []
         for p in parts:
             if p.HasField("control"):
                 for entry in p.control.idontwant:
@@ -444,13 +448,14 @@ class TestSplitRpc:
         rpc = rpc_pb2.RPC()
         ihave = rpc.control.ihave.add()
         ihave.topicID = "t" * 200
-        ihave.messageIDs.append(b"mid")
+        ihave.messageIDs.append("mid")
         iwant = rpc.control.iwant.add()
-        iwant.messageIDs.append(b"x" * 200)
+        iwant.messageIDs.append("x" * 200)
         q = RpcQueue(max_message_size=50)
         parts = q.split_rpc(rpc)
         for p in parts:
             assert _rpc_has_data(p), f"Empty RPC emitted: {p}"
+
 
 class TestSizeOfEmbeddedMsg:
     def test_small_message(self) -> None:
@@ -482,6 +487,7 @@ class TestVarintSize:
 
     def test_three_bytes(self) -> None:
         assert _varint_size(16384) == 3
+
 
 class TestConstants:
     def test_default_max_message_size(self) -> None:

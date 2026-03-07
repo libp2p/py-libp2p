@@ -74,11 +74,11 @@ from libp2p.utils.varint import encode_uvarint
 from .pb import (
     rpc_pb2,
 )
-from .rpc_queue import (
-    RpcQueue,
-)
 from .pubsub_notifee import (
     PubsubNotifee,
+)
+from .rpc_queue import (
+    RpcQueue,
 )
 from .subscription import (
     TrioSubscriptionAPI,

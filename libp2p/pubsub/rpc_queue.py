@@ -261,7 +261,7 @@ class RpcQueue:
             if not current.HasField("control"):
                 current.control.SetInParent()
                 if current.ByteSize() > limit:
-                    current.control.ClearField("control")
+                    current.ClearField("control")
                     out.append(current)
                     current = rpc_pb2.RPC()
                     current.control.SetInParent()
@@ -296,9 +296,7 @@ class RpcQueue:
                         out.append(current)
                         current = rpc_pb2.RPC()
                         current.control.SetInParent()
-                        current.control.iwant.append(
-                            rpc_pb2.ControlIWant()
-                        )
+                        current.control.iwant.append(rpc_pb2.ControlIWant())
 
                 for mid in iwant.messageIDs:
                     current.control.iwant[0].messageIDs.append(mid)
@@ -316,13 +314,8 @@ class RpcQueue:
             # IHAVE — coalesce by topicID
             for ihave in ctrl.ihave:
                 ihave_list = current.control.ihave
-                if (
-                    not ihave_list
-                    or ihave_list[-1].topicID != ihave.topicID
-                ):
-                    new_ihave = rpc_pb2.ControlIHave(
-                        topicID=ihave.topicID
-                    )
+                if not ihave_list or ihave_list[-1].topicID != ihave.topicID:
+                    new_ihave = rpc_pb2.ControlIHave(topicID=ihave.topicID)
                     ihave_list.append(new_ihave)
                     if current.ByteSize() > limit:
                         del ihave_list[-1]
@@ -358,12 +351,10 @@ class RpcQueue:
                         out.append(current)
                         current = rpc_pb2.RPC()
                         current.control.SetInParent()
-                        current.control.idontwant.append(
-                            rpc_pb2.ControlIDontWant()
-                        )
+                        current.control.idontwant.append(rpc_pb2.ControlIDontWant())
 
-                for mid in idontwant.messageIDs:
-                    current.control.idontwant[0].messageIDs.append(mid)
+                for mid_bytes in idontwant.messageIDs:
+                    current.control.idontwant[0].messageIDs.append(mid_bytes)
                     if current.ByteSize() > limit:
                         del current.control.idontwant[0].messageIDs[-1]
                         out.append(current)
@@ -371,7 +362,7 @@ class RpcQueue:
                         current.control.SetInParent()
                         current.control.idontwant.append(
                             rpc_pb2.ControlIDontWant(
-                                messageIDs=[mid],
+                                messageIDs=[mid_bytes],
                             )
                         )
 
@@ -409,7 +400,8 @@ def _varint_size(value: int) -> int:
 
 
 def _rpc_has_data(rpc: rpc_pb2.RPC) -> bool:
-    """Return ``True`` if *rpc* carries any meaningful content.
+    """
+    Return ``True`` if *rpc* carries any meaningful content.
 
     Used by tests and callers to verify that :func:`split_rpc` never
     emits completely empty RPCs.

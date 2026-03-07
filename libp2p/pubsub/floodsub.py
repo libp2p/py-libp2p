@@ -155,8 +155,7 @@ class FloodSub(IPubsubRouter):
                     #   if rpc.Size() > gs.p.maxMessageSize { doDropRPC }
                     if part.ByteSize() > queue.max_message_size:
                         logger.debug(
-                            "floodsub: dropping oversized RPC chunk for"
-                            " peer %s",
+                            "floodsub: dropping oversized RPC chunk for peer %s",
                             peer_id,
                         )
                         continue
