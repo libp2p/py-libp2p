@@ -125,10 +125,6 @@ class RpcQueue:
     def __len__(self) -> int:
         return len(self._queue)
 
-    # ------------------------------------------------------------------
-    # Producer API
-    # ------------------------------------------------------------------
-
     def push(self, rpc: rpc_pb2.RPC, priority: bool = False) -> bool:
         """
         Enqueue *rpc* and wake the consumer.
@@ -146,10 +142,6 @@ class RpcQueue:
             self._notify = trio.Event()
         return ok
 
-    # ------------------------------------------------------------------
-    # Consumer API
-    # ------------------------------------------------------------------
-
     async def pop(self) -> rpc_pb2.RPC | None:
         """
         Wait for and return the next RPC.
@@ -164,18 +156,10 @@ class RpcQueue:
                 return None
             await self._notify.wait()
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
     def close(self) -> None:
         """Signal the consumer to stop."""
         self._closed = True
         self._notify.set()
-
-    # ------------------------------------------------------------------
-    # RPC splitting
-    # ------------------------------------------------------------------
 
     def split_rpc(self, rpc: rpc_pb2.RPC) -> list[rpc_pb2.RPC]:
         """

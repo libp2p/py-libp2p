@@ -17,12 +17,6 @@ from libp2p.pubsub.rpc_queue import (
     _varint_size,
 )
 
-
-# ────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ────────────────────────────────────────────────────────────────────────────
-
-
 def _make_rpc(payload_size: int = 0) -> rpc_pb2.RPC:
     """Create an RPC with a publish message of approximately *payload_size* bytes."""
     rpc = rpc_pb2.RPC()
@@ -37,11 +31,6 @@ def _make_msg(data: bytes = b"hello") -> rpc_pb2.Message:
     msg.data = data
     msg.topicIDs.append("test-topic")
     return msg
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# PriorityQueue unit tests
-# ════════════════════════════════════════════════════════════════════════════
 
 
 class TestPriorityQueue:
@@ -101,12 +90,6 @@ class TestPriorityQueue:
     def test_default_max_size(self) -> None:
         pq = PriorityQueue()
         assert pq.max_size == OutBoundQueueSize
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# RpcQueue unit tests
-# ════════════════════════════════════════════════════════════════════════════
-
 
 class TestRpcQueue:
     def test_close_sets_flag(self) -> None:
@@ -178,12 +161,6 @@ class TestRpcQueue:
             q.push(r)
         for r in rpcs:
             assert await q.pop() is r
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# split_rpc tests
-# ════════════════════════════════════════════════════════════════════════════
-
 
 class TestSplitRpc:
     def test_empty_rpc_returns_single_empty(self) -> None:
@@ -367,7 +344,7 @@ class TestSplitRpc:
         assert len(parts) == 1
         assert len(parts[0].control.idontwant) == 1
 
-    # ── edge-case: oversized single items ────────────────────────────
+    # ── edge-case: oversized single items ──
 
     def test_ihave_oversized_topic(self) -> None:
         """When the topicID alone exceeds the limit, each mid is emitted
@@ -475,12 +452,6 @@ class TestSplitRpc:
         for p in parts:
             assert _rpc_has_data(p), f"Empty RPC emitted: {p}"
 
-
-# ════════════════════════════════════════════════════════════════════════════
-# size_of_embedded_msg tests
-# ════════════════════════════════════════════════════════════════════════════
-
-
 class TestSizeOfEmbeddedMsg:
     def test_small_message(self) -> None:
         msg = rpc_pb2.Message()
@@ -497,11 +468,6 @@ class TestSizeOfEmbeddedMsg:
         assert size == 1 + 1 + 0  # tag + varint(0) + 0 bytes
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# _varint_size tests
-# ════════════════════════════════════════════════════════════════════════════
-
-
 class TestVarintSize:
     def test_zero(self) -> None:
         assert _varint_size(0) == 1
@@ -516,12 +482,6 @@ class TestVarintSize:
 
     def test_three_bytes(self) -> None:
         assert _varint_size(16384) == 3
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# Constants tests
-# ════════════════════════════════════════════════════════════════════════════
-
 
 class TestConstants:
     def test_default_max_message_size(self) -> None:
