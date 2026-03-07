@@ -148,8 +148,9 @@ class FloodSub(IPubsubRouter):
         for peer_id in peers_gen:
             if peer_id not in pubsub.peers:
                 continue
-            stream = pubsub.peers[peer_id]
-            await pubsub.write_msg(stream, rpc_msg)
+            queue = pubsub.peer_queues.get(peer_id)
+            if queue is not None:
+                queue.push(rpc_msg)
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
