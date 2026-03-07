@@ -4,7 +4,6 @@ import { ping }                  from '@libp2p/ping'
 import { noise }                 from '@chainsafe/libp2p-noise'
 import { plaintext }             from '@libp2p/plaintext'
 import { yamux }                 from '@chainsafe/libp2p-yamux'
-// import { identify }              from '@libp2p/identify' // Commented out for compatibility
 
 // Configuration from environment (with defaults for compatibility)
 const TRANSPORT = process.env.transport || 'ws'
@@ -48,13 +47,13 @@ async function main() {
       throw new Error(`Unknown transport: ${TRANSPORT}`)
   }
 
-  // Security configuration
+  // Security configuration - use connectionEncrypters (plural) for libp2p v3.x
   switch (SECURITY) {
     case 'noise':
-      options.connectionEncryption = [noise()]
+      options.connectionEncrypters = [noise()]
       break
     case 'plaintext':
-      options.connectionEncryption = [plaintext()]
+      options.connectionEncrypters = [plaintext()]
       break
     default:
       throw new Error(`Unknown security: ${SECURITY}`)
@@ -81,35 +80,13 @@ async function main() {
 
   // Debug: Print supported protocols
   console.log('DEBUG: Supported protocols:')
-  if (node.services && node.services.registrar) {
-    const protocols = node.services.registrar.getProtocols()
+  try {
+    const protocols = node.getProtocols()
     for (const protocol of protocols) {
       console.log('DEBUG: Protocol:', protocol)
     }
-  }
-
-  // Debug: Print connection encryption protocols
-  console.log('DEBUG: Connection encryption protocols:')
-  try {
-    if (node.components && node.components.connectionEncryption) {
-      for (const encrypter of node.components.connectionEncryption) {
-        console.log('DEBUG: Encrypter:', encrypter.protocol)
-      }
-    }
   } catch (e) {
-    console.log('DEBUG: Could not access connectionEncryption:', e.message)
-  }
-
-  // Debug: Print stream muxer protocols
-  console.log('DEBUG: Stream muxer protocols:')
-  try {
-    if (node.components && node.components.streamMuxers) {
-      for (const muxer of node.components.streamMuxers) {
-        console.log('DEBUG: Muxer:', muxer.protocol)
-      }
-    }
-  } catch (e) {
-    console.log('DEBUG: Could not access streamMuxers:', e.message)
+    console.log('DEBUG: Could not get protocols:', e.message)
   }
 
   // Keep the process alive

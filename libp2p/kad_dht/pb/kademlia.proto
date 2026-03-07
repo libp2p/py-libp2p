@@ -39,3 +39,4 @@ message Message {
 
     optional bytes senderRecord = 11;   // Envelope(PeerRecord) encoded
 }
+`

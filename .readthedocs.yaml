@@ -4,6 +4,10 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.10"
+  jobs:
+    post_install:
+      - python -m pip install --upgrade pip
+      - python -m pip install --group docs --group test -e .
 
 sphinx:
   configuration: docs/conf.py
@@ -13,9 +17,6 @@ python:
   install:
     - method: pip
       path: .
-      extra_requirements:
-        - docs
-        - test
 
 formats:
   - epub

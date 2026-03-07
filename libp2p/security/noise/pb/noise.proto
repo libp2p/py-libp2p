@@ -1,8 +1,22 @@
 syntax = "proto3";
 package pb;
 
+// NoiseExtensions contains optional extensions for the Noise handshake
+message NoiseExtensions {
+	// WebTransport certificate hashes for WebTransport support
+	repeated bytes webtransport_certhashes = 1;
+	// Stream multiplexers supported by this peer
+	repeated string stream_muxers = 2;
+	// Early data payload for 0-RTT support (Python extension)
+	optional bytes early_data = 3;
+}
+
+// NoiseHandshakePayload is the payload sent during Noise handshake
 message NoiseHandshakePayload {
+	// The libp2p public key of the peer
 	bytes identity_key = 1;
+	// Signature of the noise static key by the libp2p private key
 	bytes identity_sig = 2;
-	bytes data = 3;
+	// Optional extensions for advanced features
+	NoiseExtensions extensions = 4;
 }

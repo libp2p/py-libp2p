@@ -46,7 +46,7 @@ typecheck:
 	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
 
 test:
-	python -m pytest tests -n auto --timeout=1200
+	python -m pytest tests -n auto
 
 pr: clean fix lint typecheck test
 
@@ -62,7 +62,10 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/relay/circuit_v2/pb/circuit.proto \
 	libp2p/relay/circuit_v2/pb/dcutr.proto \
 	libp2p/kad_dht/pb/kademlia.proto \
-	libp2p/discovery/rendezvous/pb/rendezvous.proto
+	libp2p/discovery/rendezvous/pb/rendezvous.proto \
+	libp2p/bitswap/pb/bitswap.proto \
+	libp2p/bitswap/pb/dag_pb.proto \
+	libp2p/bitswap/pb/unixfs.proto
 
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)

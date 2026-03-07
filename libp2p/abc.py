@@ -4,6 +4,7 @@ from abc import (
 )
 from collections.abc import (
     AsyncIterable,
+    AsyncIterator,
     Iterable,
     KeysView,
     Sequence,
@@ -24,12 +25,16 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
     PublicKey,
 )
 from libp2p.custom_types import (
+    MetadataValue,
     StreamHandlerFn,
     THandler,
     TProtocol,
@@ -80,6 +85,23 @@ class IRawConnection(ReadWriteCloser):
     """
 
     is_initiator: bool
+
+    @abstractmethod
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Get the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
+        """
+        pass
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        pass
 
 
 # -------------------------- secure_conn interface.py --------------------------
@@ -227,6 +249,20 @@ class IMuxedConn(ABC):
         :return: A new instance of IMuxedStream.
         """
 
+    @abstractmethod
+    def get_transport_addresses(self) -> list[Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        pass
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        pass
+
 
 class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
     """
@@ -341,6 +377,15 @@ class INetConn(Closer):
     muxed_conn: IMuxedConn
     event_started: trio.Event
 
+    @property
+    @abstractmethod
+    def is_closed(self) -> bool:
+        """
+        Check if the connection is fully closed.
+
+        :return: True if the connection is closed, otherwise False.
+        """
+
     @abstractmethod
     async def new_stream(self) -> INetStream:
         """
@@ -360,10 +405,20 @@ class INetConn(Closer):
     @abstractmethod
     def get_transport_addresses(self) -> list[Multiaddr]:
         """
-        Retrieve the transport addresses used by this connection.
+        Retrieve the actual transport addresses used by this connection.
+
+        Returns the real IP/port addresses, not peerstore addresses.
+        For relayed connections, should include /p2p-circuit in the path.
 
         :return: A list of multiaddresses used by the transport.
         """
+
+    @abstractmethod
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get the type of connection (direct, relayed, etc.)
+        """
+        pass
 
 
 # -------------------------- peermetadata interface.py --------------------------
@@ -377,7 +432,7 @@ class IPeerMetadata(ABC):
     """
 
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve metadata for a specified peer.
 
@@ -388,7 +443,7 @@ class IPeerMetadata(ABC):
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store metadata for a specified peer.
 
@@ -843,7 +898,7 @@ class IPeerStore(
 
     # -------METADATA---------
     @abstractmethod
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         Retrieve the value associated with a key for a specified peer.
 
@@ -856,7 +911,7 @@ class IPeerStore(
 
         Returns
         -------
-        Any
+        MetadataValue
             The value corresponding to the specified key.
 
         Raises
@@ -867,7 +922,7 @@ class IPeerStore(
         """
 
     @abstractmethod
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         Store a key-value pair for the specified peer.
 
@@ -877,7 +932,7 @@ class IPeerStore(
             The identifier of the peer.
         key : str
             The key for the data.
-        val : Any
+        val : MetadataValue
             The value to store.
 
         """
@@ -1523,6 +1578,58 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    async def upgrade_outbound_raw_conn(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Secure and upgrade a raw outbound connection to a multiplexed network connection
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The raw connection to upgrade.
+        peer_id : ID
+            The peer to which this connection is established.
+
+        Returns
+        -------
+        INetConn
+            The upgraded, secure, and multiplexed network connection.
+
+        Raises
+        ------
+        SwarmException
+            If upgrading security or multiplexing the connection fails.
+
+        """
+
+    @abstractmethod
+    async def upgrade_inbound_raw_conn(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Secure and upgrade a raw inbound connection to a multiplexed network connection
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The incoming raw connection to upgrade.
+        maddr : Multiaddr
+            The multiaddress on which the connection was received.
+
+        Returns
+        -------
+        IMuxedConn
+            The upgraded, secure, and multiplexed network connection.
+
+        Raises
+        ------
+        SwarmException
+            If upgrading security or multiplexing the connection fails.
+
+        """
+
+    @abstractmethod
     def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
         """
         Set the stream handler for incoming streams.
@@ -1583,7 +1690,136 @@ class INetwork(ABC):
 
 
 class INetworkService(INetwork, ServiceAPI):
-    pass
+    """
+    Interface for a network service with connection management capabilities.
+
+    Extends INetwork with go-libp2p style connection manager methods.
+    """
+
+    connection_gate: Any
+
+    @abstractmethod
+    def get_total_connections(self) -> int:
+        """
+        Get total number of connections (inbound + outbound).
+
+        Returns
+        -------
+        int
+            Total number of active connections.
+
+        """
+
+    @abstractmethod
+    def get_metrics(self) -> dict[str, int]:
+        """
+        Get connection metrics (go-libp2p style).
+
+        Returns
+        -------
+        dict[str, int]
+            Connection metrics including total, inbound, and outbound counts.
+
+        """
+
+    @abstractmethod
+    def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
+        """
+        Tag a peer with a string, associating a weight with the tag.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to tag.
+        tag : str
+            The tag name.
+        value : int
+            The weight/value associated with the tag.
+
+        """
+
+    @abstractmethod
+    def untag_peer(self, peer_id: ID, tag: str) -> None:
+        """
+        Remove the tagged value from the peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to untag.
+        tag : str
+            The tag name to remove.
+
+        """
+
+    @abstractmethod
+    def get_tag_info(self, peer_id: ID) -> Any:
+        """
+        Get the metadata associated with a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to get info for.
+
+        Returns
+        -------
+        Any
+            The tag info for the peer, or None if no tags recorded.
+
+        """
+
+    @abstractmethod
+    def protect(self, peer_id: ID, tag: str) -> None:
+        """
+        Protect a peer from having its connection(s) pruned.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to protect.
+        tag : str
+            Protection tag.
+
+        """
+
+    @abstractmethod
+    def unprotect(self, peer_id: ID, tag: str) -> bool:
+        """
+        Remove a protection that may have been placed on a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to unprotect.
+        tag : str
+            The protection tag to remove.
+
+        Returns
+        -------
+        bool
+            True if the peer is still protected by other tags.
+
+        """
+
+    @abstractmethod
+    def is_protected(self, peer_id: ID, tag: str = "") -> bool:
+        """
+        Check if a peer is protected.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to check.
+        tag : str
+            If provided, check if protected by this specific tag.
+
+        Returns
+        -------
+        bool
+            True if the peer is protected.
+
+        """
 
 
 # -------------------------- notifee interface.py --------------------------
@@ -1768,6 +2004,19 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_transport_addrs(self) -> list[Multiaddr]:
+        """
+        Retrieve the raw multiaddr addresses this host is listening to,
+        without the /p2p/{peer_id} suffix.
+
+        Returns
+        -------
+        list[Multiaddr]
+            A list of raw multiaddresses.
+
+        """
+
+    @abstractmethod
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host
@@ -1793,7 +2042,10 @@ class IHost(ABC):
 
     @abstractmethod
     def run(
-        self, listen_addrs: Sequence[Multiaddr]
+        self,
+        listen_addrs: Sequence[Multiaddr],
+        *,
+        task_status: Any = trio.TASK_STATUS_IGNORED,
     ) -> AbstractAsyncContextManager[None]:
         """
         Run the host and start listening on the specified multiaddresses.
@@ -1802,6 +2054,8 @@ class IHost(ABC):
         ----------
         listen_addrs : Sequence[Multiaddr]
             A sequence of multiaddresses on which the host should listen.
+        task_status : Any
+            Task status for trio nursery compatibility (ignored).
 
         """
 
@@ -1819,6 +2073,12 @@ class IHost(ABC):
         stream_handler : StreamHandlerFn
             The stream handler function to be set.
 
+        """
+
+    @abstractmethod
+    async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
+        """
+        Initiate the ACME-AUTO-TLS-BROKER negotiation for TLS certificate
         """
 
     # protocol_id can be a list of protocol_ids
@@ -1878,6 +2138,61 @@ class IHost(ABC):
     async def close(self) -> None:
         """
         Close the host and all underlying connections and services.
+
+        """
+
+    @abstractmethod
+    async def upgrade_outbound_connection(
+        self, raw_conn: IRawConnection, peer_id: ID
+    ) -> INetConn:
+        """
+        Upgrade a raw outbound connection to a fully secure and
+        multiplexed network connection for the specified peer.
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The raw (unencrypted/unmultiplexed) connection to upgrade.
+        peer_id : ID
+            The ID of the peer this connection is being established to.
+
+        Returns
+        -------
+        INetConn
+            The upgraded and authenticated network connection
+            with security and multiplexing.
+
+        Raises
+        ------
+        SwarmException
+            If the upgrade process (security handshake or multiplexer negotiation) fails
+
+        """
+
+    @abstractmethod
+    async def upgrade_inbound_connection(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Upgrade a raw inbound connection to a fully secure and
+        multiplexed network connection for the given multiaddress.
+
+        Parameters
+        ----------
+        raw_conn : IRawConnection
+            The inbound raw connection to upgrade.
+        maddr : Multiaddr
+            The multiaddress this connection arrived on.
+
+        Returns
+        -------
+        IMuxedConn
+            The upgraded and authenticated inbound muxed connection.
+
+        Raises
+        ------
+        SwarmException
+            If the upgrade process (security handshake or multiplexer negotiation) fails
 
         """
 
@@ -2132,7 +2447,7 @@ class IPeerData(ABC):
         """
 
     @abstractmethod
-    def put_metadata(self, key: str, val: Any) -> None:
+    def put_metadata(self, key: str, val: MetadataValue) -> None:
         """
         Store a metadata key-value pair for the peer.
 
@@ -2140,13 +2455,13 @@ class IPeerData(ABC):
         ----------
         key : str
             The metadata key.
-        val : Any
+        val : MetadataValue
             The value to associate with the key.
 
         """
 
     @abstractmethod
-    def get_metadata(self, key: str) -> IPeerMetadata:
+    def get_metadata(self, key: str) -> MetadataValue:
         """
         Retrieve metadata for a given key.
 
@@ -2157,7 +2472,7 @@ class IPeerData(ABC):
 
         Returns
         -------
-        IPeerMetadata
+        MetadataValue
             The metadata value for the given key.
 
         Raises
@@ -2970,6 +3285,130 @@ class IPubsub(ServiceAPI):
             The identifier of the topic (str) or topics (list[str]).
         data : bytes
             The data to publish.
+
+        """
+        ...
+
+    @abstractmethod
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer stream is not established within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
+
+        """
+        ...
+
+    @abstractmethod
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        The implementation uses an event-based approach with :class:`trio.Event`
+        so the task consumes zero CPU while waiting.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The identifier of the peer to wait for.
+        topic_id : str
+            The topic to check subscription for.
+        timeout : float
+            Maximum time to wait in seconds. Defaults to 5.0.
+
+        Raises
+        ------
+        trio.TooSlowError
+            If the peer does not subscribe within the timeout period.
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
+
+        """
+        ...
+
+
+# -------------------------- perf interface.py --------------------------
+
+
+class IPerf(ABC):
+    """
+    Interface for the perf protocol service.
+
+    Spec: https://github.com/libp2p/specs/blob/master/perf/perf.md
+    """
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Start the perf service and register the protocol handler."""
+        ...
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop the perf service and unregister the protocol handler."""
+        ...
+
+    @abstractmethod
+    def is_started(self) -> bool:
+        """Check if the service is currently running."""
+        ...
+
+    @abstractmethod
+    def measure_performance(
+        self,
+        multiaddr: Multiaddr,
+        send_bytes: int,
+        recv_bytes: int,
+    ) -> AsyncIterator[Any]:
+        """
+        Measure transfer performance to a remote peer.
+
+        Parameters
+        ----------
+        multiaddr : Multiaddr
+            The address of the remote peer to test against.
+        send_bytes : int
+            Number of bytes to upload to the remote peer.
+        recv_bytes : int
+            Number of bytes to request the remote peer to send back.
+
+        Yields
+        ------
+        PerfOutput
+            Progress reports during the transfer, with a final summary at the end.
 
         """
         ...

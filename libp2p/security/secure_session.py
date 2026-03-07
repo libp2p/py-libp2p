@@ -1,5 +1,10 @@
 import io
 
+import multiaddr
+
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -45,6 +50,18 @@ class SecureSession(BaseSession):
         """Delegate to the underlying connection's get_remote_address method."""
         return self.conn.get_remote_address()
 
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to underlying connection.
+        """
+        return self.conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to underlying connection.
+        """
+        return self.conn.get_connection_type()
+
     def _reset_internal_buffer(self) -> None:
         self.buf = io.BytesIO()
         self.low_watermark = 0
@@ -81,6 +98,11 @@ class SecureSession(BaseSession):
             return data_from_buffer
 
         msg = await self.conn.read_msg()
+
+        # If underlying connection returned empty bytes, treat as closed
+        # and raise to signal that reads after close are invalid.
+        if msg == b"":
+            raise Exception("Connection closed")
 
         if n is None:
             return msg

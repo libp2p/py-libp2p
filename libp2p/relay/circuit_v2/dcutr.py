@@ -456,14 +456,29 @@ class DCUtRProtocol(Service):
             return False
 
         # Start dialing attempts in parallel
+        logger.debug(
+            "Starting parallel dial attempts to %s using %d addresses",
+            peer_id,
+            len(direct_addrs[:5]),
+        )
         async with trio.open_nursery() as nursery:
             for addr in direct_addrs[
                 :5
             ]:  # Limit to 5 addresses to avoid too many connections
                 nursery.start_soon(self._dial_peer, peer_id, addr)
 
-        # Check if we established a direct connection
-        return await self._have_direct_connection(peer_id)
+        # Wait a bit for connections to establish and settle
+        await trio.sleep(0.5)
+
+        # Check if we established a direct connection (verify, don't trust cache)
+        is_direct = await self._verify_direct_connection(peer_id)
+        if is_direct:
+            logger.debug("Verified direct connection to %s after hole punch", peer_id)
+        else:
+            logger.debug(
+                "No direct connection verified to %s after hole punch", peer_id
+            )
+        return is_direct
 
     async def _dial_peer(self, peer_id: ID, addr: Multiaddr) -> None:
         """
@@ -487,15 +502,100 @@ class DCUtRProtocol(Service):
             with trio.fail_after(self.dial_timeout):
                 await self.host.connect(peer_info)
 
-            logger.info("Successfully connected to %s at %s", peer_id, addr)
+            logger.debug("Connection established to %s at %s", peer_id, addr)
 
-            # Add to direct connections set
-            self._direct_connections.add(peer_id)
+            # Wait a bit for the connection to be fully established
+            await trio.sleep(0.1)
+
+            # Verify the connection is actually direct before adding to cache
+            if await self._verify_direct_connection(peer_id):
+                logger.info(
+                    "Successfully established direct connection to %s at %s",
+                    peer_id,
+                    addr,
+                )
+                # Only add to direct connections set if verified
+                self._direct_connections.add(peer_id)
+            else:
+                logger.debug(
+                    "Connection to %s is not direct (likely still relayed)", peer_id
+                )
 
         except trio.TooSlowError:
             logger.debug("Timeout dialing %s at %s", peer_id, addr)
         except Exception as e:
             logger.debug("Error dialing %s at %s: %s", peer_id, addr, str(e))
+
+    async def _verify_direct_connection(self, peer_id: ID) -> bool:
+        """
+        Verify that we have a direct (non-relayed) connection to a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to check
+
+        Returns
+        -------
+        bool
+            True if we have a verified direct connection, False otherwise
+
+        """
+        # Check if the peer is connected
+        network = self.host.get_network()
+        conn_or_conns = network.connections.get(peer_id)
+        if not conn_or_conns:
+            return False
+
+        # Handle both single connection and list of connections
+        if isinstance(conn_or_conns, list):
+            connections: list[INetConn] = conn_or_conns
+        else:
+            connections = [conn_or_conns]
+
+        # Check if any connection is direct (not relayed)
+        for conn in connections:
+            try:
+                # Get the transport addresses
+                addrs = conn.get_transport_addresses()
+
+                # If we got addresses, check if any is direct
+                if addrs:
+                    # If any address doesn't start with /p2p-circuit,
+                    # it's a direct connection
+                    if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                        return True
+                else:
+                    # If no addresses returned, check the connection type another way
+                    # Check if this is a SwarmConn and inspect its properties
+                    conn_str = str(conn)
+                    if "SwarmConn" in conn_str:
+                        # For SwarmConn, we need to check the underlying connection
+                        # If it's a circuit connection, it will have circuit in the path
+                        try:
+                            # Try to get the raw connection
+                            # raw_conn is implementation-specific, not in IMuxedConn
+                            if hasattr(conn, "muxed_conn") and hasattr(
+                                conn.muxed_conn, "raw_conn"
+                            ):
+                                raw_conn = conn.muxed_conn.raw_conn  # type: ignore[attr-defined]
+                                raw_addrs = raw_conn.get_transport_addresses()
+                                if raw_addrs:
+                                    if any(
+                                        not str(addr).startswith("/p2p-circuit")
+                                        for addr in raw_addrs
+                                    ):
+                                        return True
+                        except Exception:
+                            pass
+            except Exception as e:
+                logger.debug(
+                    "Error verifying connection type for %s: %s", peer_id, str(e)
+                )
+                # If we can't verify, assume it's not direct
+                continue
+
+        return False
 
     async def _have_direct_connection(self, peer_id: ID) -> bool:
         """
@@ -513,32 +613,14 @@ class DCUtRProtocol(Service):
 
         """
         # Check our direct connections cache first
+        # Trust the cache for fast path - this allows early return when we know
+        # we have a direct connection. Verification happens when connections are
+        # established (in _dial_peer) to ensure cache accuracy.
         if peer_id in self._direct_connections:
             return True
 
-        # Check if the peer is connected
-        network = self.host.get_network()
-        conn_or_conns = network.connections.get(peer_id)
-        if not conn_or_conns:
-            return False
-
-        # Handle both single connection and list of connections
-        connections: list[INetConn] = (
-            [conn_or_conns] if not isinstance(conn_or_conns, list) else conn_or_conns
-        )
-
-        # Check if any connection is direct (not relayed)
-        for conn in connections:
-            # Get the transport addresses
-            addrs = conn.get_transport_addresses()
-
-            # If any address doesn't start with /p2p-circuit, it's a direct connection
-            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
-                # Cache this result
-                self._direct_connections.add(peer_id)
-                return True
-
-        return False
+        # Check if the peer is connected and verify it's direct
+        return await self._verify_direct_connection(peer_id)
 
     async def _get_observed_addrs(self) -> list[bytes]:
         """

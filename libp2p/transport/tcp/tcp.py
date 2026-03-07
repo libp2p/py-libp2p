@@ -5,9 +5,8 @@ from collections.abc import (
 )
 import logging
 
-from multiaddr import (
-    Multiaddr,
-)
+from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 from trio_typing import (
     TaskStatus,
@@ -30,8 +29,13 @@ from libp2p.network.connection.raw_connection import (
 from libp2p.transport.exceptions import (
     OpenConnectionError,
 )
+from libp2p.utils.dns_utils import resolve_multiaddr_with_retry
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+    multiaddr_from_socket,
+)
 
-logger = logging.getLogger("libp2p.transport.tcp")
+logger = logging.getLogger(__name__)
 
 
 class TCPListener(IListener):
@@ -88,15 +92,15 @@ class TCPListener(IListener):
             )
             return False
 
-        ip4_host_str = maddr.value_for_protocol("ip4")
-        # For trio.serve_tcp, ip4_host_str (as host argument) can be None,
+        host_str = extract_ip_from_multiaddr(maddr)
+        # For trio.serve_tcp, host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
         started_listeners = await nursery.start(
             serve_tcp,
             handler,
             tcp_port,
-            ip4_host_str,
+            host_str,
         )
 
         if started_listeners is None:
@@ -130,15 +134,64 @@ class TCPListener(IListener):
 
 
 class TCP(ITransport):
+    def __init__(
+        self,
+        *,
+        dns_resolution_timeout: float = 5.0,
+        dns_max_retries: int = 3,
+    ) -> None:
+        """
+        :param dns_resolution_timeout: Per-attempt timeout in seconds for DNS.
+        :param dns_max_retries: Max DNS resolution attempts (with backoff).
+        """
+        self._dns_resolution_timeout = dns_resolution_timeout
+        self._dns_max_retries = dns_max_retries
+
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """
         Dial a transport to peer listening on multiaddr.
+
+        Resolves DNS (dns, dns4, dns6, dnsaddr) before dialing (Phase 3.1).
 
         :param maddr: multiaddr of peer
         :return: `RawConnection` if successful
         :raise OpenConnectionError: raised when failed to open connection
         """
-        host_str = maddr.value_for_protocol("ip4")
+        protocols = list(maddr.protocols())
+        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
+        if protocols and protocols[0].name in dns_protocols:
+            resolved = await resolve_multiaddr_with_retry(
+                maddr,
+                resolver=DNSResolver(),
+                max_retries=self._dns_max_retries,
+                timeout_seconds=self._dns_resolution_timeout,
+            )
+            if not resolved:
+                raise OpenConnectionError(
+                    f"Failed to resolve DNS for {maddr} (retries exhausted)"
+                )
+            last_error: Exception | None = None
+            for resolved_addr in resolved:
+                try:
+                    return await self._dial_resolved(resolved_addr)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        "Dial to resolved address %s failed: %s", resolved_addr, e
+                    )
+                    continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
+            raise OpenConnectionError(
+                f"Failed to connect to any resolved address for {maddr}"
+            )
+        return await self._dial_resolved(maddr)
+
+    async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
+        """Dial using a multiaddr that has an IP (no DNS)."""
+        host_str = extract_ip_from_multiaddr(maddr)
         port_str = maddr.value_for_protocol("tcp")
 
         if host_str is None:
@@ -159,16 +212,18 @@ class TCP(ITransport):
             )
 
         try:
-            # trio.open_tcp_stream requires host to be str or bytes, not None.
+            logger.debug("=== OPENING TCP STREAM ===")
+            logger.debug("Host: %s", host_str)
+            logger.debug("Port: %d", port_int)
             stream = await trio.open_tcp_stream(host_str, port_int)
+            logger.debug("Successfully opened TCP stream")
         except OSError as error:
-            # OSError is common for network issues like "Connection refused"
-            # or "Host unreachable".
+            logger.error("Failed to open TCP stream: %s", error)
             raise OpenConnectionError(
                 f"Failed to open TCP stream to {maddr}: {error}"
             ) from error
         except Exception as error:
-            # Catch other potential errors from trio.open_tcp_stream and wrap them.
+            logger.error("Unexpected error opening TCP stream: %s", error)
             raise OpenConnectionError(
                 f"An unexpected error occurred when dialing {maddr}: {error}"
             ) from error
@@ -188,5 +243,4 @@ class TCP(ITransport):
 
 
 def _multiaddr_from_socket(socket: trio.socket.SocketType) -> Multiaddr:
-    ip, port = socket.getsockname()
-    return Multiaddr(f"/ip4/{ip}/tcp/{port}")
+    return multiaddr_from_socket(socket)

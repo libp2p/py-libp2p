@@ -4,6 +4,8 @@ import time
 from typing import Any
 
 from multiaddr import Multiaddr
+from multicodec import Code, get_prefix
+from multicodec.code_table import LIBP2P_PEER_RECORD
 
 from libp2p.abc import IPeerRecord
 from libp2p.peer.id import ID
@@ -11,7 +13,8 @@ import libp2p.peer.pb.peer_record_pb2 as pb
 from libp2p.peer.peerinfo import PeerInfo
 
 PEER_RECORD_ENVELOPE_DOMAIN = "libp2p-peer-record"
-PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = b"\x03\x01"
+PEER_RECORD_ENVELOPE_CODE: Code = LIBP2P_PEER_RECORD
+PEER_RECORD_ENVELOPE_PAYLOAD_TYPE = get_prefix(str(PEER_RECORD_ENVELOPE_CODE))
 
 _last_timestamp_lock = threading.Lock()
 _last_timestamp: int = 0
@@ -25,7 +28,7 @@ class PeerRecord(IPeerRecord):
     - `peer_id`: The peer's globally unique indentifier.
     - `addrs`: A list of the peer's publicly reachable multiaddrs.
     - `seq`: A strictly monotonically increasing timestamp used
-            to order records over time.
+    to order records over time.
 
     PeerRecords are designed to be signed and transmitted in libp2p routing Envelopes.
     """

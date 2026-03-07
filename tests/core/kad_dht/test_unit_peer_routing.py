@@ -30,6 +30,7 @@ from libp2p.kad_dht.pb.kademlia_pb2 import (
 from libp2p.kad_dht.peer_routing import (
     ALPHA,
     MAX_PEER_LOOKUP_ROUNDS,
+    MIN_PEERS_THRESHOLD,
     PROTOCOL_ID,
     PeerRouting,
 )
@@ -145,17 +146,133 @@ class TestPeerRouting:
             assert result is None
 
     @pytest.mark.trio
-    async def test_find_closest_peers_network_empty_start(self, peer_routing):
-        """Test network search with no local peers."""
+    async def test_find_closest_peers_network_empty_start(
+        self, peer_routing, mock_host
+    ):
+        """Test network search with no local peers and no fallback peers."""
         target_key = b"target_key"
 
         # Mock routing table to return empty list
         with patch.object(
             peer_routing.routing_table, "find_local_closest_peers", return_value=[]
         ):
+            # Mock no connected peers and empty peerstore
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             result = await peer_routing.find_closest_peers_network(target_key)
 
             assert result == []
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_fallback_to_connected_peers(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that network search falls back to connected peers when routing
+        table has insufficient peers.
+        """
+        target_key = b"target_key"
+
+        # Create few local peers (less than MIN_PEERS_THRESHOLD)
+        local_peers = [create_valid_peer_id(f"local{i}") for i in range(2)]
+
+        # Create connected peers
+        connected_peers = [create_valid_peer_id(f"connected{i}") for i in range(3)]
+
+        # Mock routing table to return insufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock host to return connected peers
+            mock_host.get_connected_peers.return_value = connected_peers
+            # Mock peerstore to return empty (connected peers should be enough)
+            mock_host.get_peerstore().peer_ids.return_value = []
+
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=10
+                )
+
+                # Should include both local and connected peers
+                assert len(result) > 0
+                # Verify host.get_connected_peers was called
+                mock_host.get_connected_peers.assert_called()
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_fallback_to_peerstore(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that network search falls back to peerstore when connected peers
+        are insufficient.
+        """
+        target_key = b"target_key"
+
+        # Create few local peers (less than MIN_PEERS_THRESHOLD)
+        local_peers = [create_valid_peer_id(f"local{i}") for i in range(2)]
+
+        # Create few connected peers (not enough to reach count)
+        connected_peers = [create_valid_peer_id(f"connected{i}") for i in range(2)]
+
+        # Create peerstore peers
+        peerstore_peers = [create_valid_peer_id(f"peerstore{i}") for i in range(5)]
+
+        # Mock routing table to return insufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock host to return connected peers
+            mock_host.get_connected_peers.return_value = connected_peers
+            # Mock peerstore to return additional peers
+            mock_host.get_peerstore().peer_ids.return_value = peerstore_peers
+
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=20
+                )
+
+                # Should include peers from all sources
+                assert len(result) > 0
+                # Verify peerstore.peer_ids was called
+                mock_host.get_peerstore().peer_ids.assert_called()
+
+    @pytest.mark.trio
+    async def test_find_closest_peers_network_no_fallback_when_sufficient_peers(
+        self, peer_routing, mock_host
+    ):
+        """
+        Test that fallback is not triggered when routing table has
+        sufficient peers.
+        """
+        target_key = b"target_key"
+
+        # Create enough local peers (>= MIN_PEERS_THRESHOLD)
+        local_peers = [
+            create_valid_peer_id(f"local{i}") for i in range(MIN_PEERS_THRESHOLD + 1)
+        ]
+
+        # Mock routing table to return sufficient peers
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=local_peers,
+        ):
+            # Mock _query_peer_for_closest to return empty results
+            with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
+                result = await peer_routing.find_closest_peers_network(
+                    target_key, count=10
+                )
+
+                # Should have peers from routing table
+                assert len(result) > 0
+                # Verify host.get_connected_peers was NOT called
+                mock_host.get_connected_peers.assert_not_called()
 
     @pytest.mark.trio
     async def test_find_closest_peers_network_with_peers(self, peer_routing, mock_host):
@@ -171,7 +288,10 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
-            # Mock _query_peer_for_closest to return empty results (no new peers found)
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            # Mock _query_peer_for_closest to return empty results
             with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
                 result = await peer_routing.find_closest_peers_network(
                     target_key, count=5
@@ -182,7 +302,7 @@ class TestPeerRouting:
                 assert all(peer in initial_peers for peer in result)
 
     @pytest.mark.trio
-    async def test_find_closest_peers_convergence(self, peer_routing):
+    async def test_find_closest_peers_convergence(self, peer_routing, mock_host):
         """Test that network search converges properly."""
         target_key = b"target_key"
 
@@ -195,6 +315,9 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(peer_routing, "_query_peer_for_closest", return_value=[]):
                 with patch(
                     "libp2p.kad_dht.peer_routing.sort_peer_ids_by_distance",
@@ -430,7 +553,7 @@ class TestPeerRouting:
         assert PROTOCOL_ID == "/ipfs/kad/1.0.0"
 
     @pytest.mark.trio
-    async def test_edge_case_max_rounds_reached(self, peer_routing):
+    async def test_edge_case_max_rounds_reached(self, peer_routing, mock_host):
         """Test that lookup stops after maximum rounds."""
         target_key = b"target_key"
         initial_peers = [create_valid_peer_id("peer1")]
@@ -444,6 +567,9 @@ class TestPeerRouting:
             "find_local_closest_peers",
             return_value=initial_peers,
         ):
+            # Mock get_connected_peers and peerstore to return empty
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
             with patch.object(
                 peer_routing,
                 "_query_peer_for_closest",

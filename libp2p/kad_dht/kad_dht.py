@@ -21,6 +21,7 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
@@ -34,17 +35,22 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.pubkey import PublicKeyValidator
+from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.async_service import (
     Service,
 )
 
 from .common import (
     ALPHA,
+    BUCKET_SIZE,
     PROTOCOL_ID,
+    PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
 )
 from .pb.kademlia_pb2 import (
     Message,
+    Record,
 )
 from .peer_routing import (
     PeerRouting,
@@ -59,8 +65,7 @@ from .value_store import (
     ValueStore,
 )
 
-logger = logging.getLogger("kademlia-example.kad_dht")
-# logger = logging.getLogger("libp2p.kademlia")
+logger = logging.getLogger(__name__)
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
@@ -70,6 +75,32 @@ class DHTMode(Enum):
 
     CLIENT = "CLIENT"
     SERVER = "SERVER"
+
+
+# Timestamp validation constants
+MAX_TIMESTAMP_AGE = 24 * 60 * 60  # 24 hours in seconds
+MAX_TIMESTAMP_FUTURE = 5 * 60  # 5 minutes in the future in seconds
+
+
+def is_valid_timestamp(ts: float) -> bool:
+    """
+    Validate if a timestamp is within acceptable bounds.
+
+    Args:
+        ts: The timestamp to validate (Unix timestamp in seconds)
+
+    Returns:
+        bool: True if timestamp is valid (not too old and not too far in future)
+
+    """
+    current_time = time.time()
+    # Check if timestamp is not in the future by more than MAX_TIMESTAMP_FUTURE
+    if ts > current_time + MAX_TIMESTAMP_FUTURE:
+        return False
+    # Check if timestamp is not too far in the past
+    if current_time - ts > MAX_TIMESTAMP_AGE:
+        return False
+    return True
 
 
 class KadDHT(Service):
@@ -92,7 +123,17 @@ class KadDHT(Service):
 
     """
 
-    def __init__(self, host: IHost, mode: DHTMode, enable_random_walk: bool = False):
+    def __init__(
+        self,
+        host: IHost,
+        mode: DHTMode,
+        enable_random_walk: bool = False,
+        validator: NamespacedValidator | None = None,
+        validator_changed: bool = False,
+        protocol_prefix: TProtocol = PROTOCOL_PREFIX,
+        enable_providers: bool = True,
+        enable_values: bool = True,
+    ):
         """
         Initialize a new Kademlia DHT node.
 
@@ -102,7 +143,7 @@ class KadDHT(Service):
         """
         super().__init__()
 
-        self.host = host
+        self.host: IHost = host
         self.local_peer_id = host.get_id()
 
         # Validate that mode is a DHTMode enum
@@ -113,7 +154,19 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id, self.host)
+        self.routing_table = RoutingTable(self.local_peer_id, host)
+
+        self.protocol_prefix = protocol_prefix
+        self.enable_providers = enable_providers
+        self.enable_values = enable_values
+        self.validator = validator
+
+        if validator is None:
+            self.validator = NamespacedValidator({"pk": PublicKeyValidator()})
+
+        # If true implies that the validator has been changed and that
+        # Defaults should not be used
+        self.validator_changed = validator_changed
 
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)
@@ -207,6 +260,84 @@ class KadDHT(Service):
             logger.info("RT Refresh Manager stopped")
         else:
             logger.info("RT Refresh Manager was not running (Random Walk disabled)")
+
+    def apply_fallbacks(self) -> None:
+        """
+        Apply fallback validators if not explicitely changed by the user
+
+        This sets default validators like 'pk' and 'ipns' if they are missing and
+        the default validator set hasn't been overridden.
+        """
+        if not self.validator_changed:
+            if not isinstance(self.validator, NamespacedValidator):
+                raise ValueError(
+                    "Default validator was changed without marking it True"
+                )
+
+            if "pk" not in self.validator._validators:
+                self.validator._validators["pk"] = PublicKeyValidator()
+
+            # TODO: Do the same thing for ipns, but need to implement first.
+
+    def validate_config(self) -> None:
+        """
+        Validate the DHT config.
+        """
+        if self.protocol_prefix != PROTOCOL_PREFIX:
+            return  # Skip validation for non-standart prefixes
+
+        for bucket in self.routing_table.buckets:
+            if bucket.bucket_size != BUCKET_SIZE:
+                raise ValueError(
+                    f"{PROTOCOL_PREFIX} prefix must use bucket size {BUCKET_SIZE}"
+                )
+
+        if not self.enable_providers:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have providers enabled")
+
+        if not self.enable_values:
+            raise ValueError(f"{PROTOCOL_PREFIX} prefix must have values enabled")
+
+        if not isinstance(self.validator, NamespacedValidator):
+            raise ValueError(
+                f"{PROTOCOL_PREFIX} prefix must use a namespace type validator"
+            )
+
+        vmap = self.validator._validators
+
+        # TODO: Need to add ipns also in the check
+        if set(vmap.keys()) != {"pk"}:
+            raise ValueError(f"{PROTOCOL_PREFIX} must have 'pk' and 'ipns' validators")
+
+        pk_validator = vmap.get("pk")
+        if not isinstance(pk_validator, PublicKeyValidator):
+            raise TypeError("'pk' namesapce must use PublicKeyValidator")
+
+        # TODO: ipns checks
+
+    def set_validator(self, val: NamespacedValidator) -> None:
+        """
+        Set a custom validator for the DHT config.
+
+        This marks the validator as explicitly changed, so the default
+        validators (pk and ipns) will not be automatically applied later.
+        """
+        self.validator = val
+        self.validator_changed = True
+        return
+
+    def set_namespace_validator(self, ns: str, val: Validator) -> None:
+        """
+        Adds a validator under a specofic namespace to the current DHT config.
+
+        Raises an error if the current validator is not a NamespacedValidator
+        """
+        if not isinstance(self.validator, NamespacedValidator):
+            raise TypeError(
+                "Can only add namespaced validators to a NamespacedValidator"
+            )
+
+        self.validator._validators["ns"] = val
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
@@ -511,8 +642,8 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
-                    value = self.value_store.get(key)
-                    if value:
+                    value_record = self.value_store.get(key)
+                    if value_record:
                         logger.debug(f"Found value for key {key.hex()}")
 
                         # Create response using protobuf
@@ -521,9 +652,7 @@ class KadDHT(Service):
 
                         # Create record
                         response.key = key
-                        response.record.key = key
-                        response.record.value = value
-                        response.record.timeReceived = str(time.time())
+                        response.record.CopyFrom(value_record)
 
                         # Create sender_signed_peer_record
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -611,6 +740,13 @@ class KadDHT(Service):
                                 "Missing key or value in PUT_VALUE message"
                             )
 
+                        # Always validate the key-value pair before storing
+                        # Reject keys without registered namespace validators
+                        key_str = key.decode("utf-8")
+                        if self.validator is None:
+                            raise ValueError("Validator is required for DHT operations")
+                        self.validator.validate(key_str, value)
+
                         self.value_store.put(key, value)
                         logger.debug(f"Stored value {value.hex()} for key {key.hex()}")
                         success = True
@@ -660,26 +796,49 @@ class KadDHT(Service):
 
     # Value storage and retrieval methods
 
-    async def put_value(self, key: bytes, value: bytes) -> None:
+    async def put_value(self, key: str, value: bytes) -> None:
         """
         Store a value in the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for storage)
+            value: Binary value to store
+
+        Raises:
+            InvalidRecordType: If no validator is registered for the key's namespace
+            ValueError: If trying to replace a newer value with an older one
+
         """
-        logger.debug(f"Storing value for key {key.hex()}")
+        logger.debug(f"Storing value for key {key}")
+
+        # Always validate the key-value pair using the namespaced validator
+        # This will raise InvalidRecordType if:
+        # - The key is not namespaced (doesn't start with / or has no second /)
+        # - No validator is registered for the key's namespace
+        # Following Go libp2p behavior where only namespaced keys are allowed
+        if self.validator is None:
+            raise ValueError("Validator is required for DHT operations")
+        self.validator.validate(key, value)
+
+        key_bytes = key.encode("utf-8")
+        old_value_record = self.value_store.get(key_bytes)
+        if old_value_record is not None and old_value_record.value != value:
+            index = self.validator.select(key, [value, old_value_record.value])
+            if index != 0:
+                raise ValueError("Refusing to replace newer value with the older one")
 
         # 1. Store locally first
-        self.value_store.put(key, value)
+        self.value_store.put(key_bytes, value)
         try:
             decoded_value = value.decode("utf-8")
         except UnicodeDecodeError:
             decoded_value = value.hex()
-        logger.debug(
-            f"Stored value locally for key {key.hex()} with value {decoded_value}"
-        )
+        logger.debug(f"Stored value locally for key {key} with value {decoded_value}")
 
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
@@ -694,7 +853,7 @@ class KadDHT(Service):
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self.value_store._store_at_peer(
-                            peer, key, value
+                            peer, key_bytes, value
                         )
                         batch_results[idx] = success
                         if success:
@@ -712,36 +871,74 @@ class KadDHT(Service):
 
         logger.info(f"Successfully stored value at {stored_count} peers")
 
-    async def get_value(self, key: bytes) -> bytes | None:
-        logger.debug(f"Getting value for key: {key.hex()}")
+    async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
+        """
+        Retrieve a value from the DHT.
+
+        Args:
+            key: String key (will be converted to bytes for lookup)
+            quorum: Minimum number of valid peer responses required for confidence.
+            If quorum > 0 and not met, the function still returns the best value
+            found (if any) but logs a warning. Set to 0 to disable quorum checking.
+
+        Returns:
+            The value if found (best value even if quorum not met), None otherwise.
+            Note: When quorum is not met, a warning is logged but the best available
+            value is still returned. This allows graceful degradation when the network
+            has insufficient peers.
+
+        """
+        logger.debug(f"Getting value for key: {key}")
+
+        # Convert string key to bytes for lookup
+        key_bytes = key.encode("utf-8")
 
         # 1. Check local store first
-        value = self.value_store.get(key)
-        if value:
+        value_record = self.value_store.get(key_bytes)
+        if value_record:
             logger.debug("Found value locally")
-            return value
+            return value_record.value
 
         # 2. Get closest peers, excluding self
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key)
+            for peer in self.routing_table.find_local_closest_peers(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Searching {len(closest_peers)} peers for value")
 
+        # Collect valid records from peers: mapping peer -> Record
+        valid_records: list[tuple[ID, Record]] = []
+
         # 3. Query ALPHA peers at a time in parallel
+        # Use list to track mutable state (pyrefly requirement)
+        total_responses_list: list[int] = [0]
         for i in range(0, len(closest_peers), ALPHA):
             batch = closest_peers[i : i + ALPHA]
-            found_value = None
 
             async def query_one(peer: ID) -> None:
-                nonlocal found_value
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        value = await self.value_store._get_from_peer(peer, key)
-                        if value is not None and found_value is None:
-                            found_value = value
-                            logger.debug(f"Found value at peer {peer}")
+                        # Fetch the record directly to get timeReceived
+                        rec = await self.value_store._get_from_peer(
+                            peer, key_bytes, return_record=True
+                        )
+                        if rec is not None:
+                            total_responses_list[0] += 1
+                            # Validate the record's value
+                            try:
+                                if self.validator is None:
+                                    raise ValueError("Validator is required")
+                                if not isinstance(rec, Record):
+                                    raise TypeError("Expected Record type")
+                                self.validator.validate(key, rec.value)
+                                valid_records.append((peer, rec))
+                                logger.debug(f"Found valid record at peer {peer}")
+                            except Exception as e:
+                                logger.debug(
+                                    f"Received invalid record from {peer}, "
+                                    f"discarding: {e}"
+                                )
                 except Exception as e:
                     logger.debug(f"Error querying peer {peer}: {e}")
 
@@ -749,13 +946,72 @@ class KadDHT(Service):
                 for peer in batch:
                     nursery.start_soon(query_one, peer)
 
-            if found_value is not None:
-                self.value_store.put(key, found_value)
-                logger.info("Successfully retrieved value from network")
-                return found_value
+            # If quorum is set and we have enough valid records, we can stop early
+            # Note: quorum counts valid records, not all responses.
+            if quorum and len(valid_records) >= quorum:
+                logger.debug(f"Quorum reached ({len(valid_records)} valid records)")
+                break
 
-        # 4. Not found
-        logger.warning(f"Value not found for key {key.hex()}")
+        # 4. Select the best record if any valid records were found
+        if valid_records:
+            # Check if quorum was met
+            if quorum > 0 and len(valid_records) < quorum:
+                logger.warning(
+                    f"Quorum not met: found {len(valid_records)} valid records, "
+                    f"required {quorum}. Returning best value found."
+                )
+
+            # Select the best record using the validator
+            # Note: Following Go libp2p's approach, we use validator.select() to choose
+            # the best value, not timestamps. The timeReceived field is for local
+            # bookkeeping only, not for distributed consensus on the "best" record.
+            if self.validator is None:
+                raise ValueError("Validator is required for record selection")
+
+            values = [rec.value for _p, rec in valid_records]
+            best_idx = self.validator.select(key, values)
+            logger.debug(
+                f"Selected best value at index {best_idx}using validator.select()"
+            )
+
+            best_peer, best_rec = valid_records[best_idx]
+            best_value = best_rec.value
+
+            # Propagate the best record to peers that have different values
+            # This ensures network consistency, following Go libp2p's approach
+            outdated_peers: list[ID] = []
+            for peer, rec in valid_records:
+                # Propagate if the peer has a different value than the best
+                if rec.value != best_value:
+                    outdated_peers.append(peer)
+
+            if outdated_peers:
+                logger.debug(
+                    f"Propagating best value to {len(outdated_peers)}"
+                    "peers with outdated values"
+                )
+
+                async def propagate(peer: ID) -> None:
+                    try:
+                        with trio.move_on_after(QUERY_TIMEOUT):
+                            await self.value_store._store_at_peer(
+                                peer, key_bytes, best_value
+                            )
+                            logger.debug(f"Propagated updated record to peer {peer}")
+                    except Exception as e:
+                        logger.debug(f"Failed to propagate to peer {peer}: {e}")
+
+                async with trio.open_nursery() as nursery:
+                    for p in outdated_peers:
+                        nursery.start_soon(propagate, p)
+
+            # Store the best value locally
+            self.value_store.put(key_bytes, best_value)
+            logger.info("Successfully retrieved value from network")
+            return best_value
+
+        # 5. Not found
+        logger.warning(f"Value not found for key {key}")
         return None
 
     # Add these methods in the Utility methods section
@@ -776,17 +1032,19 @@ class KadDHT(Service):
         """
         return await self.routing_table.add_peer(peer_id)
 
-    async def provide(self, key: bytes) -> bool:
+    async def provide(self, key: str) -> bool:
         """
         Reference to provider_store.provide for convenience.
         """
-        return await self.provider_store.provide(key)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.provide(key_bytes)
 
-    async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
+    async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
         """
-        return await self.provider_store.find_providers(key, count)
+        key_bytes = key.encode("utf-8")
+        return await self.provider_store.find_providers(key_bytes, count)
 
     def get_routing_table_size(self) -> int:
         """
@@ -811,6 +1069,36 @@ class KadDHT(Service):
 
         """
         return self.value_store.size()
+
+    def register_validator(self, namespace: str, validator: Validator) -> None:
+        """
+        Register a custom validator for a specific namespace.
+
+        This allows storing and retrieving values with custom namespaced keys
+        (e.g., /myapp/key). The validator will be used to validate values
+        before storing and after retrieval.
+
+        Args:
+            namespace: The namespace string (e.g., "myapp" for keys like /myapp/key)
+            validator: A Validator instance with validate() and select() methods
+
+        Example:
+            class MyValidator(Validator):
+                def validate(self, key: str, value: bytes) -> None:
+                    # Custom validation logic
+                    pass
+
+                def select(self, key: str, values: list[bytes]) -> int:
+                    return 0  # Return index of best value
+
+            dht.register_validator("myapp", MyValidator())
+            await dht.put_value("/myapp/my-key", b"my-value")
+
+        """
+        if self.validator is None:
+            self.validator = NamespacedValidator({namespace: validator})
+        else:
+            self.validator.add_validator(namespace, validator)
 
     def is_random_walk_enabled(self) -> bool:
         """

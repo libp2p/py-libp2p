@@ -33,8 +33,8 @@ ______________________________________________________________________
 | **Transport**                          | **Status** |                                     **Source**                                      |
 | -------------------------------------- | :--------: | :---------------------------------------------------------------------------------: |
 | **`libp2p-tcp`**                       |     ✅     | [source](https://github.com/libp2p/py-libp2p/blob/main/libp2p/transport/tcp/tcp.py) |
-| **`libp2p-quic`**                      |     🌱     |                                                                                     |
-| **`libp2p-websocket`**                 |     🌱     |                                                                                     |
+| **`libp2p-quic`**                      |     ✅     |    [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/quic)    |
+| **`libp2p-websocket`**                 |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/transport/websocket)  |
 | **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
 | **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
 
@@ -55,7 +55,7 @@ ______________________________________________________________________
 | **Secure Communication** | **Status** |                                  **Source**                                   |
 | ------------------------ | :--------: | :---------------------------------------------------------------------------: |
 | **`libp2p-noise`**       |     ✅     | [source](https://github.com/libp2p/py-libp2p/tree/main/libp2p/security/noise) |
-| **`libp2p-tls`**         |     🌱     |                                                                               |
+| **`libp2p-tls`**         |     ✅     |                                                                               |
 
 ______________________________________________________________________
 
@@ -100,7 +100,7 @@ ______________________________________________________________________
 
 | **Storage**         | **Status** |
 | ------------------- | :--------: |
-| **`libp2p-record`** |     🌱     |
+| **`libp2p-record`** |     ✅     |
 
 ______________________________________________________________________
 
@@ -139,3 +139,7 @@ _(non-normative, useful for team notes, not a reference)_
 **Communication over one connection with multiple protocols**: X and Y can communicate over the same connection using different protocols and the multiplexer will appropriately route messages for a given protocol to a particular handler function for that protocol, which allows for each host to handle different protocols with separate functions. Furthermore, we can use multiple streams for a given protocol that allow for the same protocol and same underlying connection to be used for communication about separate topics between nodes X and Y.
 
 **Why use multiple streams?**: The purpose of using the same connection for multiple streams to communicate over is to avoid the overhead of having multiple connections between X and Y. In order for X and Y to differentiate between messages on different streams and different protocols, a multiplexer is used to encode the messages when a message will be sent and decode a message when a message is received. The multiplexer encodes the message by adding a header to the beginning of any message to be sent that contains the stream id (along with some other info). Then, the message is sent across the raw connection and the receiving host will use its multiplexer to decode the message, i.e. determine which stream id the message should be routed to.
+
+### Support
+
+<a href="https://filecoin.drips.network/app/projects/github/libp2p/py-libp2p" target="_blank"><img src="https://filecoin.drips.network/api/embed/project/https%3A%2F%2Fgithub.com%2Flibp2p%2Fpy-libp2p/support.png?background=light&style=drips&text=project&stat=support" alt="Support py-libp2p on drips.network" height="32"></a>

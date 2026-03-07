@@ -1,6 +1,8 @@
 from typing import Any, cast
 
 import multiaddr
+from multicodec import Code, get_codec, get_prefix
+from multicodec.code_table import LIBP2P_PEER_RECORD
 
 from libp2p.crypto.ed25519 import Ed25519PublicKey
 from libp2p.crypto.keys import PrivateKey, PublicKey
@@ -17,7 +19,9 @@ from libp2p.peer.peer_record import (
 from libp2p.utils.varint import encode_uvarint
 
 ENVELOPE_DOMAIN = "libp2p-peer-record"
-PEER_RECORD_CODEC = b"\x03\x01"
+# Multicodec-based codec for peer records
+PEER_RECORD_CODE: Code = LIBP2P_PEER_RECORD
+PEER_RECORD_CODEC: bytes = get_prefix(str(PEER_RECORD_CODE))
 
 
 class Envelope:
@@ -36,7 +40,7 @@ class Envelope:
     """
 
     public_key: PublicKey
-    payload_type: bytes
+    payload_type_code: Code
     raw_payload: bytes
     signature: bytes
 
@@ -46,14 +50,34 @@ class Envelope:
     def __init__(
         self,
         public_key: PublicKey,
-        payload_type: bytes,
+        payload_type: Code | str | bytes,
         raw_payload: bytes,
         signature: bytes,
     ):
         self.public_key = public_key
-        self.payload_type = payload_type
+
+        # Normalise payload_type to a Code instance
+        if isinstance(payload_type, bytes):
+            try:
+                codec_name = get_codec(payload_type)
+                self.payload_type_code = Code.from_string(codec_name)
+            except Exception as e:
+                raise ValueError(f"Invalid codec: {e}")
+        elif isinstance(payload_type, str):
+            try:
+                self.payload_type_code = Code.from_string(payload_type)
+            except Exception as e:
+                raise ValueError(f"Invalid codec: {e}")
+        else:
+            self.payload_type_code = payload_type
+
         self.raw_payload = raw_payload
         self.signature = signature
+
+    @property
+    def payload_type(self) -> bytes:
+        """Return the multicodec-prefixed payload type."""
+        return get_prefix(str(self.payload_type_code))
 
     def marshal_envelope(self) -> bytes:
         """
@@ -101,8 +125,11 @@ class Envelope:
             return self._cached_record
 
         try:
-            if self.payload_type != PEER_RECORD_CODEC:
-                raise ValueError("Unsuported payload type in envelope")
+            if self.payload_type_code != PEER_RECORD_CODE:
+                raise ValueError(
+                    f"Unsupported payload type in envelope: "
+                    f"{self.payload_type_code.name}"
+                )
             msg = record_pb.PeerRecord()
             msg.ParseFromString(self.raw_payload)
 
@@ -127,7 +154,7 @@ class Envelope:
         if isinstance(other, Envelope):
             return (
                 self.public_key.__eq__(other.public_key)
-                and self.payload_type == other.payload_type
+                and self.payload_type_code == other.payload_type_code
                 and self.signature == other.signature
                 and self.raw_payload == other.raw_payload
             )
@@ -190,7 +217,7 @@ def seal_record(record: PeerRecord, private_key: PrivateKey) -> Envelope:
 
     return Envelope(
         public_key=private_key.get_public_key(),
-        payload_type=record.codec(),
+        payload_type=PEER_RECORD_CODE,
         raw_payload=payload,
         signature=signature,
     )

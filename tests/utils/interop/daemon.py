@@ -5,9 +5,10 @@ from contextlib import (
     asynccontextmanager,
 )
 
-import multiaddr
 from multiaddr import (
     Multiaddr,
+    exceptions,
+    protocols,
 )
 from p2pclient import (
     Client,
@@ -134,10 +135,10 @@ async def make_p2pd(
         listen_maddr: Multiaddr | None = None
         for maddr in maddrs:
             try:
-                ip = maddr.value_for_protocol(multiaddr.multiaddr.protocols.P_IP4)
+                ip = maddr.value_for_protocol(protocols.P_IP4)
                 # NOTE: Check if this `maddr` uses `tcp`.
-                maddr.value_for_protocol(multiaddr.multiaddr.protocols.P_TCP)
-            except multiaddr.multiaddr.exceptions.ProtocolLookupError:
+                maddr.value_for_protocol(protocols.P_TCP)
+            except exceptions.ProtocolLookupError:
                 continue
             if ip == LOCALHOST_IP:
                 listen_maddr = maddr

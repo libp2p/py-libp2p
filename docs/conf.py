@@ -12,13 +12,17 @@
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-# sys.path.insert(0, os.path.abspath('.'))
+# documentation root, use pathlib to resolve it cross-platform.
 
 import doctest
-import os
+from pathlib import Path
 import sys
 from unittest.mock import MagicMock
+
+# Add project root to path (cross-platform)
+_docs_dir = Path(__file__).resolve().parent
+_project_root = _docs_dir.parent
+sys.path.insert(0, str(_project_root))
 
 try:
     import tomllib
@@ -26,8 +30,8 @@ except ModuleNotFoundError:
     # For Python < 3.11
     import tomli as tomllib  # type: ignore (In case of >3.11 Pyrefly doesnt find tomli , which is right but a false flag)
 
-# Path to pyproject.toml (assuming conf.py is in a 'docs' subdirectory)
-pyproject_path = os.path.join(os.path.dirname(__file__), "..", "pyproject.toml")
+# Path to pyproject.toml (conf.py is in 'docs', project root is parent)
+pyproject_path = _project_root / "pyproject.toml"
 
 with open(pyproject_path, "rb") as f:
     pyproject_data = tomllib.load(f)
@@ -47,6 +51,21 @@ extensions = [
     "sphinx.ext.doctest",
     "sphinx.ext.intersphinx",
     "sphinx_rtd_theme",
+]
+
+# Configure Python domain to prefer canonical imports
+# This helps resolve ambiguous references like ResourceManager
+python_use_unqualified_type_names = False
+
+# Configure autodoc to prefer specific imports for ambiguous references
+autodoc_type_aliases = {
+    "ResourceManager": "libp2p.rcmgr.ResourceManager",
+}
+
+# Suppress specific warnings about ambiguous cross-references
+# Since ResourceManager is intentionally re-exported, both locations are valid
+suppress_warnings = [
+    "ref.python",  # Suppress ambiguous cross-reference warnings
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -290,7 +309,12 @@ texinfo_documents = [
 ]
 
 # Prevent autodoc from trying to import module from tests.factories
-autodoc_mock_imports = ["tests.factories"]
+autodoc_mock_imports = [
+    "tests.factories",
+    # Mocked ONLY for Sphinx/autodoc: this module does not exist in the codebase
+    # but some doc tools may try to import it. No real code references this import.
+    "libp2p.relay.circuit_v2.lib",
+]
 
 # Documents to append as an appendix to all manuals.
 # texinfo_appendices = []
