@@ -54,6 +54,19 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     return True
 
 
+def safe_bytes_from_hex(s: str | bytes) -> bytes | None:
+    """
+    Safely decode a hex string to bytes. Returns None if invalid.
+    If input is already bytes, returns it as-is.
+    """
+    if isinstance(s, bytes):
+        return s
+    try:
+        return bytes.fromhex(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def parse_message_id_safe(msg_id_str: str) -> MessageID:
     """Safely handle message ID as string."""
     return MessageID(msg_id_str)

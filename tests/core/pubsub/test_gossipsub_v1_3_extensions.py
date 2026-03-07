@@ -1,7 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock
 
-import trio
+import pytest
 
 from libp2p.peer.id import ID
 from libp2p.pubsub.extensions import (
@@ -19,7 +18,6 @@ from tests.utils.factories import (
     GossipsubFactory,
     IDFactory,
 )
-
 
 # ---------------------------------------------------------------------------
 # PeerExtensions tests
@@ -165,18 +163,19 @@ def test_extensions_state_remove_peer_clears_state() -> None:
 
 def test_both_support_topic_observation_query() -> None:
     """both_support_topic_observation returns True only when both sides advertise it."""
-    peer_id = IDFactory()
     state = ExtensionsState(my_extensions=PeerExtensions(topic_observation=True))
 
-    # Peer without topicObservation support.
+    # Peer that did not advertise topicObservation (we only accept first Extensions per peer).
+    peer_no = IDFactory()
     rpc_no = _make_rpc_with_extensions(topic_observation=False)
-    state.handle_rpc(rpc_no, peer_id)
-    assert not state.both_support_topic_observation(peer_id)
+    state.handle_rpc(rpc_no, peer_no)
+    assert not state.both_support_topic_observation(peer_no)
 
-    # Overwrite with a peer that does support topicObservation.
+    # Different peer that does advertise topicObservation.
+    peer_yes = IDFactory()
     rpc_yes = _make_rpc_with_extensions(topic_observation=True)
-    state.handle_rpc(rpc_yes, peer_id)
-    assert state.both_support_topic_observation(peer_id)
+    state.handle_rpc(rpc_yes, peer_yes)
+    assert state.both_support_topic_observation(peer_yes)
 
 
 def test_gossipsub_report_extensions_misbehaviour_penalizes_behavior() -> None:
@@ -426,4 +425,3 @@ async def test_start_and_stop_observing_topic_high_level_api() -> None:
     await router.stop_observing_topic(topic)
     assert not router.topic_observation.is_observing(topic)
     assert router.topic_observation.get_subscriber_peers_for_topic(topic) == set()
-
