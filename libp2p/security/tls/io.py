@@ -21,6 +21,9 @@ from libp2p.peer.id import ID
 
 logger = logging.getLogger(__name__)
 
+# TLS_IO_CHUNK_SIZE = 4096 # Original value
+TLS_IO_CHUNK_SIZE = 64 * 1024  # Optimized value for perf test
+
 
 class TLSStreamReadWriter(ReadWriteCloser):
     """
@@ -142,7 +145,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
                         await self.raw_connection.write(data)
                     try:
                         with trio.move_on_after(5):
-                            incoming = await self.raw_connection.read(4096)
+                            incoming = await self.raw_connection.read(TLS_IO_CHUNK_SIZE)
                             if incoming:
                                 logger.debug("TLS: read %d bytes", len(incoming))
                                 in_bio.write(incoming)
@@ -233,6 +236,8 @@ class TLSStreamReadWriter(ReadWriteCloser):
         logger.debug("TLS write: writing %d bytes to SSL socket", len(data))
         remaining = data
         bytes_written = 0
+        encrypted_out = bytearray()
+
         while remaining:
             try:
                 n = self._ssl_socket.write(remaining)
@@ -240,23 +245,37 @@ class TLSStreamReadWriter(ReadWriteCloser):
                 bytes_written += n
                 logger.debug("TLS write: %d bytes (%d left)", n, len(remaining))
             except ssl.SSLWantWriteError:
-                # Need to flush output before continuing
+                # Need to flush encrypted bytes before continuing plaintext writes.
                 pass
-            # Flush all encrypted output
+
+            # Drain encrypted bytes produced by SSL and coalesce them.
             while True:
                 out_data = self._out_bio.read()
                 if not out_data:
                     break
-                await self.raw_connection.write(out_data)
-                logger.debug("TLS write: flushed %d bytes", len(out_data))
+                encrypted_out.extend(out_data)
 
-        # Ensure all encrypted data is flushed
+            # If SSL asked for write, flush now so it can progress.
+            if encrypted_out and remaining:
+                await self.raw_connection.write(bytes(encrypted_out))
+                logger.debug(
+                    "TLS write: flushed %d encrypted bytes (intermediate)",
+                    len(encrypted_out),
+                )
+                encrypted_out.clear()
+
+        # Final flush of any pending encrypted payload.
         while True:
             out_data = self._out_bio.read()
             if not out_data:
                 break
-            await self.raw_connection.write(out_data)
-            logger.debug("TLS write: flushed %d more bytes", len(out_data))
+            encrypted_out.extend(out_data)
+        if encrypted_out:
+            await self.raw_connection.write(bytes(encrypted_out))
+            logger.debug(
+                "TLS write: flushed %d encrypted bytes (final)",
+                len(encrypted_out),
+            )
 
         logger.debug("TLS write: completed - %d plaintext bytes written", bytes_written)
 
@@ -304,7 +323,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
             # If _in_bio is empty, read from raw connection first
             if self._in_bio.pending == 0:
                 try:
-                    incoming = await self.raw_connection.read(4096)
+                    incoming = await self.raw_connection.read(TLS_IO_CHUNK_SIZE)
                     if incoming:
                         self._in_bio.write(incoming)
                         logger.debug("TLS read: %d encrypted bytes", len(incoming))
