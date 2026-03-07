@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go#L55
 DefaultMaxMessageSize = 1 * 1024 * 1024
 
-# Default outbound peer queue size (5000 messages), matching go-libp2p-pubsub.
-# Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go#L58
-OutBoundQueueSize = 5000
+# Default outbound peer queue size, matching go-libp2p-pubsub.
+# Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go
+OutBoundQueueSize = 32
 
 
 class PriorityQueue:
@@ -35,11 +35,12 @@ class PriorityQueue:
     A bounded priority queue with two tiers: non-priority and priority.
 
     Uses ``collections.deque`` for O(1) popleft.  When the combined length
-    reaches *max_size*, the oldest **non-priority** item is dropped first;
-    if the non-priority deque is empty the oldest priority item is dropped.
+    reaches *max_size*, pushes are **rejected** (the new item is not added).
+    This matches go-libp2p-pubsub where a full queue returns ``ErrQueueFull``
+    and the *caller* decides how to handle the rejected RPC (e.g. log it,
+    save GRAFT/PRUNE for retry).
 
-    This mirrors the Go ``dropRPC`` behavior:
-    https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go
+    Reference: https://github.com/libp2p/go-libp2p-pubsub/blob/master/rpc_queue.go
     """
 
     def __init__(self, max_size: int = OutBoundQueueSize) -> None:
@@ -50,40 +51,38 @@ class PriorityQueue:
     def __len__(self) -> int:
         return len(self._non_priority) + len(self._priority)
 
-    def push(self, rpc: rpc_pb2.RPC, priority: bool = False) -> rpc_pb2.RPC | None:
+    def push(self, rpc: rpc_pb2.RPC, priority: bool = False) -> bool:
         """
         Push an RPC onto the queue.
 
-        Returns the dropped RPC if the queue was full, otherwise ``None``.
+        Returns ``True`` if the item was enqueued, ``False`` if the queue
+        is full (matching Go's ``ErrQueueFull``).
         """
-        dropped: rpc_pb2.RPC | None = None
         if len(self) >= self.max_size:
-            dropped = self._drop_one()
+            return False
 
         if priority:
             self._priority.append(rpc)
         else:
             self._non_priority.append(rpc)
 
-        return dropped
+        return True
 
     def pop(self) -> rpc_pb2.RPC | None:
         """
-        Pop the oldest RPC, preferring non-priority items first.
+        Pop the oldest RPC, preferring **priority** items first.
+
+        This matches go-libp2p-pubsub's ``priorityQueue.Pop`` which drains
+        the priority (control) deque before the normal deque so that
+        control messages are sent ahead of bulk data.
 
         Returns ``None`` when both deques are empty.
         """
-        if self._non_priority:
-            return self._non_priority.popleft()
         if self._priority:
             return self._priority.popleft()
-        return None
-
-    def _drop_one(self) -> rpc_pb2.RPC:
-        """Drop the oldest item to make room.  Prefer dropping non-priority."""
         if self._non_priority:
             return self._non_priority.popleft()
-        return self._priority.popleft()
+        return None
 
 
 class RpcQueue:
@@ -126,19 +125,22 @@ class RpcQueue:
     # Producer API
     # ------------------------------------------------------------------
 
-    def push(self, rpc: rpc_pb2.RPC, priority: bool = False) -> rpc_pb2.RPC | None:
+    def push(self, rpc: rpc_pb2.RPC, priority: bool = False) -> bool:
         """
         Enqueue *rpc* and wake the consumer.
 
-        Returns any RPC that was dropped to make room, or ``None``.
+        Returns ``True`` if the item was enqueued, ``False`` if the queue
+        is full or closed.  When ``False`` is returned the caller should
+        handle the rejected RPC (matching Go's ``doDropRPC``).
         """
         if self._closed:
-            return None
-        dropped = self._queue.push(rpc, priority)
-        # Wake up a blocked pop()
-        self._notify.set()
-        self._notify = trio.Event()
-        return dropped
+            return False
+        ok = self._queue.push(rpc, priority)
+        if ok:
+            # Wake up a blocked pop()
+            self._notify.set()
+            self._notify = trio.Event()
+        return ok
 
     # ------------------------------------------------------------------
     # Consumer API
@@ -231,50 +233,81 @@ class RpcQueue:
             ctrl = rpc.control
 
             # -- IHAVE --
+            # Go coalesces IHave messageIDs by topicID: a new ControlIHave
+            # is only started when the topicID changes.
             for ihave in ctrl.ihave:
-                if current.ByteSize() + ihave.ByteSize() > limit:
-                    if current.ByteSize() > 0:
-                        out.append(current)
-                        current = rpc_pb2.RPC()
-                    if ihave.ByteSize() > limit:
-                        # Split individual IHAVE's messageIDs across RPCs
-                        for mid in ihave.messageIDs:
-                            item = rpc_pb2.ControlIHave(topicID=ihave.topicID)
-                            item.messageIDs.append(mid)
-                            if current.ByteSize() + item.ByteSize() > limit:
-                                if current.ByteSize() > 0:
-                                    out.append(current)
-                                    current = rpc_pb2.RPC()
-                            if not current.HasField("control"):
-                                current.control.SetInParent()
-                            current.control.ihave.append(item)
-                        continue
+                # Ensure current RPC has a control field
                 if not current.HasField("control"):
                     current.control.SetInParent()
-                current.control.ihave.append(ihave)
+
+                # Check if we need a new ControlIHave entry or can reuse the
+                # last one (same topicID).
+                ihave_list = current.control.ihave
+                if (
+                    len(ihave_list) == 0
+                    or ihave_list[-1].topicID != ihave.topicID
+                ):
+                    new_ihave = rpc_pb2.ControlIHave(topicID=ihave.topicID)
+                    ihave_list.append(new_ihave)
+                    if current.ByteSize() > limit:
+                        # The header alone pushed us over; flush and restart
+                        del ihave_list[-1]
+                        if current.ByteSize() > 0:
+                            out.append(current)
+                        current = rpc_pb2.RPC()
+                        current.control.SetInParent()
+                        new_ihave = rpc_pb2.ControlIHave(
+                            topicID=ihave.topicID
+                        )
+                        current.control.ihave.append(new_ihave)
+
+                for mid in ihave.messageIDs:
+                    last_ihave = current.control.ihave[-1]
+                    last_ihave.messageIDs.append(mid)
+                    if current.ByteSize() > limit:
+                        # Undo, flush, start fresh
+                        del last_ihave.messageIDs[-1]
+                        if current.ByteSize() > 0:
+                            out.append(current)
+                        current = rpc_pb2.RPC()
+                        current.control.SetInParent()
+                        fresh = rpc_pb2.ControlIHave(
+                            topicID=ihave.topicID
+                        )
+                        fresh.messageIDs.append(mid)
+                        current.control.ihave.append(fresh)
 
             # -- IWANT --
+            # Go coalesces all IWant messageIDs into a single ControlIWant.
             for iwant in ctrl.iwant:
-                if current.ByteSize() + iwant.ByteSize() > limit:
-                    if current.ByteSize() > 0:
-                        out.append(current)
-                        current = rpc_pb2.RPC()
-                    if iwant.ByteSize() > limit:
-                        # Split individual IWANT's messageIDs across RPCs
-                        for mid in iwant.messageIDs:
-                            item = rpc_pb2.ControlIWant()
-                            item.messageIDs.append(mid)
-                            if current.ByteSize() + item.ByteSize() > limit:
-                                if current.ByteSize() > 0:
-                                    out.append(current)
-                                    current = rpc_pb2.RPC()
-                            if not current.HasField("control"):
-                                current.control.SetInParent()
-                            current.control.iwant.append(item)
-                        continue
                 if not current.HasField("control"):
                     current.control.SetInParent()
-                current.control.iwant.append(iwant)
+
+                if len(current.control.iwant) == 0:
+                    new_iwant = rpc_pb2.ControlIWant()
+                    current.control.iwant.append(new_iwant)
+                    if current.ByteSize() > limit:
+                        del current.control.iwant[-1]
+                        if current.ByteSize() > 0:
+                            out.append(current)
+                        current = rpc_pb2.RPC()
+                        current.control.SetInParent()
+                        current.control.iwant.append(
+                            rpc_pb2.ControlIWant()
+                        )
+
+                for mid in iwant.messageIDs:
+                    current.control.iwant[0].messageIDs.append(mid)
+                    if current.ByteSize() > limit:
+                        # Undo, flush, start fresh with this mid
+                        del current.control.iwant[0].messageIDs[-1]
+                        if current.ByteSize() > 0:
+                            out.append(current)
+                        current = rpc_pb2.RPC()
+                        current.control.SetInParent()
+                        fresh = rpc_pb2.ControlIWant()
+                        fresh.messageIDs.append(mid)
+                        current.control.iwant.append(fresh)
 
             # -- GRAFT --
             for graft in ctrl.graft:

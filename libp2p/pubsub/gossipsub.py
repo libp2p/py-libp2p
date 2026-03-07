@@ -1559,6 +1559,9 @@ class GossipSub(IPubsubRouter, Service):
 
         Control-only messages should pass ``priority=True`` so they are less
         likely to be dropped under back-pressure.
+
+        If the queue is full the **new** RPC is dropped (matching Go's
+        ``doSendRPC`` / ``ErrQueueFull`` behaviour).
         """
         if self.pubsub is None:
             logger.debug("send_rpc: no pubsub attached, dropping message")
@@ -1567,9 +1570,9 @@ class GossipSub(IPubsubRouter, Service):
         if queue is None:
             logger.debug("send_rpc: no queue for peer %s", peer_id)
             return
-        dropped = queue.push(rpc, priority=priority)
-        if dropped is not None:
-            self.drop_rpc(peer_id, dropped)
+        ok = queue.push(rpc, priority=priority)
+        if not ok:
+            self.drop_rpc(peer_id, rpc)
 
     def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
         """Log (and in the future, meter) a dropped outbound RPC."""

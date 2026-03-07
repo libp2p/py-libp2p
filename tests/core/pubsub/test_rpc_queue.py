@@ -68,39 +68,34 @@ class TestPriorityQueue:
         pq.push(r1, priority=True)
         assert pq.pop() is r1
 
-    def test_non_priority_popped_before_priority(self) -> None:
-        """Non-priority pops first (FIFO per-tier, non-priority tier first)."""
+    def test_priority_popped_before_non_priority(self) -> None:
+        """Priority (control) items drain first, matching Go's priorityQueue.Pop."""
         pq = PriorityQueue()
         p = _make_rpc()
         np = _make_rpc()
         pq.push(p, priority=True)
         pq.push(np, priority=False)
-        assert pq.pop() is np
         assert pq.pop() is p
+        assert pq.pop() is np
 
-    def test_drop_non_priority_first_when_full(self) -> None:
+    def test_push_rejected_when_full(self) -> None:
+        """When the queue is full, push returns False (matching Go's ErrQueueFull)."""
         pq = PriorityQueue(max_size=2)
-        r1 = _make_rpc()  # non-priority
-        r2 = _make_rpc()  # priority
-        pq.push(r1, priority=False)
-        pq.push(r2, priority=True)
-        # Queue is full (2). Pushing another should drop oldest non-priority (r1).
-        r3 = _make_rpc()
-        dropped = pq.push(r3, priority=False)
-        assert dropped is r1
+        assert pq.push(_make_rpc(), priority=False) is True
+        assert pq.push(_make_rpc(), priority=True) is True
+        # Queue full — new item rejected
+        assert pq.push(_make_rpc(), priority=False) is False
         assert len(pq) == 2
 
-    def test_drop_priority_when_no_non_priority(self) -> None:
+    def test_push_rejected_priority_when_full(self) -> None:
         pq = PriorityQueue(max_size=1)
-        r1 = _make_rpc()
-        pq.push(r1, priority=True)
-        r2 = _make_rpc()
-        dropped = pq.push(r2, priority=True)
-        assert dropped is r1
+        assert pq.push(_make_rpc(), priority=True) is True
+        assert pq.push(_make_rpc(), priority=True) is False
+        assert len(pq) == 1
 
-    def test_no_drop_when_under_limit(self) -> None:
+    def test_push_returns_true_when_under_limit(self) -> None:
         pq = PriorityQueue(max_size=10)
-        assert pq.push(_make_rpc()) is None
+        assert pq.push(_make_rpc()) is True
 
     def test_default_max_size(self) -> None:
         pq = PriorityQueue()
@@ -119,14 +114,14 @@ class TestRpcQueue:
         q.close()
         assert q.closed
 
-    def test_push_returns_none_when_not_full(self) -> None:
+    def test_push_returns_true_when_not_full(self) -> None:
         q = RpcQueue()
-        assert q.push(_make_rpc()) is None
+        assert q.push(_make_rpc()) is True
 
-    def test_push_on_closed_returns_none(self) -> None:
+    def test_push_on_closed_returns_false(self) -> None:
         q = RpcQueue()
         q.close()
-        assert q.push(_make_rpc()) is None
+        assert q.push(_make_rpc()) is False
 
     def test_len(self) -> None:
         q = RpcQueue()
@@ -418,4 +413,4 @@ class TestConstants:
         assert DefaultMaxMessageSize == 1024 * 1024
 
     def test_outbound_queue_size(self) -> None:
-        assert OutBoundQueueSize == 5000
+        assert OutBoundQueueSize == 32
