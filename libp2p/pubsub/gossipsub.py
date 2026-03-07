@@ -626,10 +626,7 @@ class GossipSub(IPubsubRouter, Service):
                 peer_id, list(pubsub_msg.topicIDs)
             ):
                 continue
-            stream = self.pubsub.peers[peer_id]
-
-            # TODO: Go use `sendRPC`, which possibly piggybacks gossip/control messages.
-            await self.pubsub.write_msg(stream, rpc_msg)
+            self.send_rpc(peer_id, rpc_msg)
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())
@@ -1367,17 +1364,8 @@ class GossipSub(IPubsubRouter, Service):
         if self.pubsub is None:
             raise NoPubsubAttached
 
-        # 3) Get the stream to this peer
-        if sender_peer_id not in self.pubsub.peers:
-            logger.debug(
-                "Fail to responed to iwant request from %s: peer record not exist",
-                sender_peer_id,
-            )
-            return
-        peer_stream = self.pubsub.peers[sender_peer_id]
-
-        # 4) And write the packet to the stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        # 3) Send the packet via the peer's outbound queue
+        self.send_rpc(sender_peer_id, packet)
 
     async def handle_graft(
         self, graft_msg: rpc_pb2.ControlGraft, sender_peer_id: ID
@@ -1565,6 +1553,33 @@ class GossipSub(IPubsubRouter, Service):
 
         await self.emit_control_message(control_msg, to_peer)
 
+    def send_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC, priority: bool = False) -> None:
+        """
+        Enqueue an RPC for *peer_id* via its outbound :class:`RpcQueue`.
+
+        Control-only messages should pass ``priority=True`` so they are less
+        likely to be dropped under back-pressure.
+        """
+        if self.pubsub is None:
+            logger.debug("send_rpc: no pubsub attached, dropping message")
+            return
+        queue = self.pubsub.peer_queues.get(peer_id)
+        if queue is None:
+            logger.debug("send_rpc: no queue for peer %s", peer_id)
+            return
+        dropped = queue.push(rpc, priority=priority)
+        if dropped is not None:
+            self.drop_rpc(peer_id, dropped)
+
+    def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+        """Log (and in the future, meter) a dropped outbound RPC."""
+        logger.debug(
+            "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
+            peer_id,
+            len(rpc.publish),
+            rpc.HasField("control"),
+        )
+
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID
     ) -> None:
@@ -1580,16 +1595,8 @@ class GossipSub(IPubsubRouter, Service):
 
         packet.control.CopyFrom(control_msg)
 
-        # Get stream for peer from pubsub
-        if to_peer not in self.pubsub.peers:
-            logger.debug(
-                "Fail to emit control message to %s: peer record not exist", to_peer
-            )
-            return
-        peer_stream = self.pubsub.peers[to_peer]
-
-        # Write rpc to stream
-        await self.pubsub.write_msg(peer_stream, packet)
+        # Send via outbound queue (control messages are priority)
+        self.send_rpc(to_peer, packet, priority=True)
 
     async def _emit_idontwant_for_message(
         self, msg_id: bytes, topic_ids: Iterable[str]
