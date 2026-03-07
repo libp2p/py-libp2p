@@ -150,12 +150,14 @@ class FloodSub(IPubsubRouter):
                 continue
             queue = pubsub.peer_queues.get(peer_id)
             if queue is not None:
-                ok = queue.push(rpc_msg)
-                if not ok:
-                    logger.debug(
-                        "floodsub: queue full for peer %s, dropping RPC",
-                        peer_id,
-                    )
+                for part in queue.split_rpc(rpc_msg):
+                    ok = queue.push(part)
+                    if not ok:
+                        logger.debug(
+                            "floodsub: queue full for peer %s, dropping RPC",
+                            peer_id,
+                        )
+                        break
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())

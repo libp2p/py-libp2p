@@ -836,10 +836,9 @@ class Pubsub(Service, IPubsub):
                 if rpc is None:
                     # Queue was closed
                     return
-                for part in queue.split_rpc(rpc):
-                    ok = await self.write_msg(stream, part)
-                    if not ok:
-                        return
+                ok = await self.write_msg(stream, rpc)
+                if not ok:
+                    return
         except Exception:
             logger.debug("sending loop for %s terminated with error", peer_id)
             self._handle_dead_peer(peer_id)

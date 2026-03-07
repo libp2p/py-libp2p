@@ -1555,13 +1555,18 @@ class GossipSub(IPubsubRouter, Service):
 
     def send_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC, priority: bool = False) -> None:
         """
-        Enqueue an RPC for *peer_id* via its outbound :class:`RpcQueue`.
+        Split *rpc* and enqueue each chunk for *peer_id* via its outbound
+        :class:`RpcQueue`.
 
-        Control-only messages should pass ``priority=True`` so they are less
-        likely to be dropped under back-pressure.
+        This matches Go's ``sendRPC`` which calls ``split`` and then
+        ``doSendRPC`` for each resulting chunk.  Control-only messages
+        should pass ``priority=True`` so they are less likely to be
+        dropped under back-pressure.
 
-        If the queue is full the **new** RPC is dropped (matching Go's
-        ``doSendRPC`` / ``ErrQueueFull`` behaviour).
+        If the queue is full the chunk is dropped (matching Go's
+        ``doSendRPC`` / ``ErrQueueFull`` behaviour).  Each chunk is
+        attempted independently — a single drop does not abort the
+        remaining chunks.
         """
         if self.pubsub is None:
             logger.debug("send_rpc: no pubsub attached, dropping message")
@@ -1570,9 +1575,10 @@ class GossipSub(IPubsubRouter, Service):
         if queue is None:
             logger.debug("send_rpc: no queue for peer %s", peer_id)
             return
-        ok = queue.push(rpc, priority=priority)
-        if not ok:
-            self.drop_rpc(peer_id, rpc)
+        for part in queue.split_rpc(rpc):
+            ok = queue.push(part, priority=priority)
+            if not ok:
+                self.drop_rpc(peer_id, part)
 
     def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
         """Log (and in the future, meter) a dropped outbound RPC."""
