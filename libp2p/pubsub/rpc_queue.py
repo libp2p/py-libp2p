@@ -306,6 +306,29 @@ class RpcQueue:
                     current.control.SetInParent()
                 current.control.prune.append(prune)
 
+            # -- IDONTWANT --
+            for idontwant in ctrl.idontwant:
+                if current.ByteSize() + idontwant.ByteSize() > limit:
+                    if current.ByteSize() > 0:
+                        out.append(current)
+                        current = rpc_pb2.RPC()
+                    if idontwant.ByteSize() > limit:
+                        # Split individual IDONTWANT's messageIDs across RPCs
+                        for mid in idontwant.messageIDs:
+                            item = rpc_pb2.ControlIDontWant()
+                            item.messageIDs.append(mid)
+                            if current.ByteSize() + item.ByteSize() > limit:
+                                if current.ByteSize() > 0:
+                                    out.append(current)
+                                    current = rpc_pb2.RPC()
+                            if not current.HasField("control"):
+                                current.control.SetInParent()
+                            current.control.idontwant.append(item)
+                        continue
+                if not current.HasField("control"):
+                    current.control.SetInParent()
+                current.control.idontwant.append(idontwant)
+
         # ---- flush remaining ----
         if current.ByteSize() > 0:
             out.append(current)

@@ -342,6 +342,29 @@ class TestSplitRpc:
         assert len(parts[0].subscriptions) == 1
         assert len(parts[0].control.graft) == 1
 
+    def test_idontwant_split(self) -> None:
+        rpc = rpc_pb2.RPC()
+        idw = rpc.control.idontwant.add()
+        for i in range(20):
+            idw.messageIDs.append(b"x" * 50)
+        q = RpcQueue(max_message_size=100)
+        parts = q.split_rpc(rpc)
+        all_ids = []
+        for p in parts:
+            if p.HasField("control"):
+                for iw in p.control.idontwant:
+                    all_ids.extend(iw.messageIDs)
+        assert len(all_ids) == 20
+
+    def test_idontwant_not_split_when_small(self) -> None:
+        rpc = rpc_pb2.RPC()
+        idw = rpc.control.idontwant.add()
+        idw.messageIDs.append(b"small")
+        q = RpcQueue(max_message_size=10000)
+        parts = q.split_rpc(rpc)
+        assert len(parts) == 1
+        assert len(parts[0].control.idontwant) == 1
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # size_of_embedded_msg tests
