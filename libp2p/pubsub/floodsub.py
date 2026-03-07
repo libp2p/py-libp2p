@@ -151,6 +151,15 @@ class FloodSub(IPubsubRouter):
             queue = pubsub.peer_queues.get(peer_id)
             if queue is not None:
                 for part in queue.split_rpc(rpc_msg):
+                    # Caller-side size check matching Go's sendRPC:
+                    #   if rpc.Size() > gs.p.maxMessageSize { doDropRPC }
+                    if part.ByteSize() > queue.max_message_size:
+                        logger.debug(
+                            "floodsub: dropping oversized RPC chunk for"
+                            " peer %s",
+                            peer_id,
+                        )
+                        continue
                     ok = queue.push(part)
                     if not ok:
                         logger.debug(

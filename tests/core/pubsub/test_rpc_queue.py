@@ -13,6 +13,7 @@ from libp2p.pubsub.rpc_queue import (
     OutBoundQueueSize,
     PriorityQueue,
     RpcQueue,
+    _rpc_has_data,
     _varint_size,
 )
 
@@ -332,10 +333,16 @@ class TestSplitRpc:
         g.topicID = "t"
         q = RpcQueue(max_message_size=10000)
         parts = q.split_rpc(rpc)
-        assert len(parts) == 1
-        assert len(parts[0].publish) == 1
-        assert len(parts[0].subscriptions) == 1
-        assert len(parts[0].control.graft) == 1
+        # Publish goes in its own chunk; subs + control via the fast path.
+        # Verify all content is preserved across parts.
+        total_publish = sum(len(p.publish) for p in parts)
+        total_subs = sum(len(p.subscriptions) for p in parts)
+        total_grafts = sum(
+            len(p.control.graft) for p in parts if p.HasField("control")
+        )
+        assert total_publish == 1
+        assert total_subs == 1
+        assert total_grafts == 1
 
     def test_idontwant_split(self) -> None:
         rpc = rpc_pb2.RPC()
@@ -359,6 +366,114 @@ class TestSplitRpc:
         parts = q.split_rpc(rpc)
         assert len(parts) == 1
         assert len(parts[0].control.idontwant) == 1
+
+    # ── edge-case: oversized single items ────────────────────────────
+
+    def test_ihave_oversized_topic(self) -> None:
+        """When the topicID alone exceeds the limit, each mid is emitted
+        as an oversized solo and no empty RPCs are produced."""
+        rpc = rpc_pb2.RPC()
+        ihave = rpc.control.ihave.add()
+        ihave.topicID = "t" * 200
+        ihave.messageIDs.append(b"a")
+        ihave.messageIDs.append(b"b")
+        q = RpcQueue(max_message_size=50)
+        parts = q.split_rpc(rpc)
+        all_ids: list[str] = []
+        for p in parts:
+            if p.HasField("control"):
+                for ih in p.control.ihave:
+                    all_ids.extend(ih.messageIDs)
+        assert len(all_ids) == 2
+        # No empty / content-free RPCs
+        assert all(_rpc_has_data(p) for p in parts)
+
+    def test_ihave_oversized_single_mid(self) -> None:
+        """A single messageID that, combined with the topicID, exceeds the
+        limit is emitted as an oversized solo."""
+        rpc = rpc_pb2.RPC()
+        ihave = rpc.control.ihave.add()
+        ihave.topicID = "topic"
+        ihave.messageIDs.append(b"x" * 200)
+        q = RpcQueue(max_message_size=50)
+        parts = q.split_rpc(rpc)
+        all_ids: list[str] = []
+        for p in parts:
+            if p.HasField("control"):
+                for ih in p.control.ihave:
+                    all_ids.extend(ih.messageIDs)
+        assert len(all_ids) == 1
+        assert all(_rpc_has_data(p) for p in parts)
+
+    def test_iwant_oversized_single_mid(self) -> None:
+        """A single oversized IWant messageID is emitted as a solo RPC."""
+        rpc = rpc_pb2.RPC()
+        iwant = rpc.control.iwant.add()
+        iwant.messageIDs.append(b"x" * 200)
+        q = RpcQueue(max_message_size=50)
+        parts = q.split_rpc(rpc)
+        all_ids: list[str] = []
+        for p in parts:
+            if p.HasField("control"):
+                for iw in p.control.iwant:
+                    all_ids.extend(iw.messageIDs)
+        assert len(all_ids) == 1
+        assert all(_rpc_has_data(p) for p in parts)
+
+    def test_idontwant_oversized_coalesced(self) -> None:
+        """Oversized IDontWant messageIDs are coalesced into shared
+        ControlIDontWant entries rather than one entry per messageID."""
+        rpc = rpc_pb2.RPC()
+        idw = rpc.control.idontwant.add()
+        for i in range(10):
+            idw.messageIDs.append(b"x" * 20)
+        # Each mid ≈22 bytes on wire.  Limit of 200 triggers the oversized
+        # path but allows several mids per chunk → proves coalescing.
+        q = RpcQueue(max_message_size=200)
+        parts = q.split_rpc(rpc)
+        all_ids: list[str] = []
+        for p in parts:
+            if p.HasField("control"):
+                for entry in p.control.idontwant:
+                    assert len(entry.messageIDs) >= 1
+                    all_ids.extend(entry.messageIDs)
+        assert len(all_ids) == 10
+        # At least one entry should hold >1 mid (proves coalescing)
+        max_per_entry = max(
+            len(entry.messageIDs)
+            for p in parts
+            if p.HasField("control")
+            for entry in p.control.idontwant
+        )
+        assert max_per_entry > 1, "mids should be coalesced, not one per entry"
+
+    def test_idontwant_oversized_single_mid(self) -> None:
+        """A single oversized IDontWant messageID is emitted as a solo."""
+        rpc = rpc_pb2.RPC()
+        idw = rpc.control.idontwant.add()
+        idw.messageIDs.append(b"x" * 200)
+        q = RpcQueue(max_message_size=50)
+        parts = q.split_rpc(rpc)
+        all_ids: list[str] = []
+        for p in parts:
+            if p.HasField("control"):
+                for entry in p.control.idontwant:
+                    all_ids.extend(entry.messageIDs)
+        assert len(all_ids) == 1
+        assert all(_rpc_has_data(p) for p in parts)
+
+    def test_no_empty_rpcs_in_split(self) -> None:
+        """split_rpc never produces RPCs with no meaningful content."""
+        rpc = rpc_pb2.RPC()
+        ihave = rpc.control.ihave.add()
+        ihave.topicID = "t" * 200
+        ihave.messageIDs.append(b"mid")
+        iwant = rpc.control.iwant.add()
+        iwant.messageIDs.append(b"x" * 200)
+        q = RpcQueue(max_message_size=50)
+        parts = q.split_rpc(rpc)
+        for p in parts:
+            assert _rpc_has_data(p), f"Empty RPC emitted: {p}"
 
 
 # ════════════════════════════════════════════════════════════════════════════

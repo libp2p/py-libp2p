@@ -35,20 +35,26 @@ Producer (gossipsub / floodsub)
         │
         ▼
   ┌────────────────────┐
+  │  split_rpc()       │  break large RPCs into ≤ max_message_size chunks
+  └────────┬───────────┘
+           │  for each chunk:
+           │  1. if chunk.ByteSize() > limit → drop (caller-side guard)
+           │  2. push onto queue
+           ▼
+  ┌────────────────────┐
   │    RPC Queue        │  bounded, two-tier priority
   │  (per peer)         │
   └────────┬───────────┘
            │  async pop
            ▼
   ┌────────────────────┐
-  │  split_rpc()       │  break large RPCs into ≤ max_message_size chunks
-  └────────┬───────────┘
-           │
-           ▼
-  ┌────────────────────┐
   │  write_msg()       │  varint-prefixed write to the libp2p stream
   └────────────────────┘
 ```
+
+Splitting happens **at enqueue time** (before pushing), matching Go's
+`sendRPC` → `split` → `doSendRPC`-per-chunk pipeline.  The sending loop
+just pops and writes.
 
 | Concept | Go file | Python file |
 |---------|---------|-------------|
@@ -228,7 +234,7 @@ func (gs *GossipSubRouter) doSendRPC(rpc *RPC, p peer.ID, q *rpcQueue) {
 - Control-only RPCs use `UrgentPush` (priority).
 - If the queue is full, `doDropRPC` logs the drop and saves GRAFT/PRUNE for retry.
 
-### Python — `gossipsub.py:1556-1580` → `send_rpc`
+### Python — `gossipsub.py:1556-1590` → `send_rpc`
 
 ```python
 def send_rpc(self, peer_id, rpc, priority=False):
@@ -236,13 +242,16 @@ def send_rpc(self, peer_id, rpc, priority=False):
     if queue is None:
         return
     for part in queue.split_rpc(rpc):
+        if part.ByteSize() > queue.max_message_size:
+            self.drop_rpc(peer_id, part)   # caller-side oversized guard
+            continue
         ok = queue.push(part, priority=priority)
         if not ok:
             self.drop_rpc(peer_id, part)
 ```
 
-`send_rpc` splits the RPC first, then pushes each chunk individually — matching
-Go's `sendRPC` → `split` → `doSendRPC`-per-chunk pattern.  Each chunk is
+`send_rpc` splits the RPC first, drops any oversized chunks (matching Go's
+`sendRPC` loop), then pushes each remaining chunk individually.  Each chunk is
 attempted independently; a single drop does not abort the remaining chunks.
 
 Three call sites in GossipSub were converted from direct `write_msg` to `send_rpc`:
@@ -257,22 +266,25 @@ Three call sites in GossipSub were converted from direct `write_msg` to `send_rp
 
 ## 8. Enqueue Path — FloodSub
 
-### Python — `floodsub.py:149-158` → `publish`
+### Python — `floodsub.py:149-168` → `publish`
 
 ```python
 for peer_id in peers_gen:
     queue = pubsub.peer_queues.get(peer_id)
     if queue is not None:
         for part in queue.split_rpc(rpc_msg):
+            if part.ByteSize() > queue.max_message_size:
+                logger.debug("floodsub: dropping oversized RPC chunk for peer %s", peer_id)
+                continue
             ok = queue.push(part)
             if not ok:
                 logger.debug("floodsub: queue full for peer %s, dropping RPC", peer_id)
                 break
 ```
 
-FloodSub splits at enqueue time (matching the Go pattern), then pushes each
-chunk.  If the queue fills up mid-split, remaining chunks are dropped and the
-loop moves to the next peer.
+FloodSub splits at enqueue time (matching the Go pattern), drops any oversized
+chunks, then pushes each remaining chunk.  If the queue fills up mid-split,
+remaining chunks are dropped and the loop moves to the next peer.
 
 ---
 
@@ -315,48 +327,130 @@ Python does it in `RpcQueue.split_rpc()`, called from `send_rpc()` /
 ```go
 func (gs *GossipSubRouter) split(rpc *RPC) iter.Seq[RPC] {
     return func(yield func(RPC)bool) {
-        // 1. Publish messages
-        // 2. Subscriptions
-        // 3. Control: IHave (coalesced by topicID)
-        // 4. Control: IWant (coalesced into single ControlIWant)
-        // 5. Control: Graft
-        // 6. Control: Prune
-        // 7. Control: IDontWant
-        // Flush remaining
+        // 1. Publish (optimised incremental size)
+        // 2. Fast path: strip publish, yield remainder if it fits
+        // 3. Subscriptions (append→check→undo)
+        // 4. Control init (explicit ControlMessage{})
+        // 5. Graft (append→check→undo)
+        // 6. Prune (append→check→undo)
+        // 7. IWant coalesced into single (per-mid append→check→undo)
+        // 8. IHave coalesced by topicID (per-mid append→check→undo)
+        //    (NO IDontWant section)
+        // 9. Flush if Size() > 0
     }
 }
 ```
 
-### Python — `rpc_queue.py:180-366` → `RpcQueue.split_rpc`
+### Python — `rpc_queue.py` → `RpcQueue.split_rpc`
 
 ```python
 def split_rpc(self, rpc: rpc_pb2.RPC) -> list[rpc_pb2.RPC]:
-    # 1. Publish messages
-    # 2. Subscriptions
-    # 3. Control: IHave (coalesced by topicID)
-    # 4. Control: IWant (coalesced into single ControlIWant)
-    # 5. Control: Graft
-    # 6. Control: Prune
-    # 7. Control: IDontWant
-    # Flush remaining
+    # 1. Publish (optimised incremental size via size_of_embedded_msg)
+    # 2. Fast path: copy subs + control, yield if ByteSize() <= limit
+    # 3. Subscriptions (append→check→undo)
+    # 4. Control init (SetInParent + ByteSize check)
+    # 5. Graft (append→check→undo)
+    # 6. Prune (append→check→undo)
+    # 7. IWant coalesced into single (per-mid append→check→undo)
+    # 8. IHave coalesced by topicID (per-mid append→check→undo)
+    # 9. IDontWant coalesced into single (per-mid append→check→undo)  ← Python extension
+    # 10. Flush + filter empty RPCs via _rpc_has_data()
 ```
+
+### Why append→check→undo instead of pre-check?
+
+Earlier Python code estimated sizes *before* appending:
+
+```python
+# Old (pre-check): estimate BEFORE adding
+if current.ByteSize() + item.ByteSize() > limit:
+    flush(current)
+current.control.graft.append(item)
+```
+
+This is **inaccurate for protobuf** because the sum of individual
+`ByteSize()` values doesn't account for the container overhead — field
+tags, length prefixes, and the control wrapper itself.  A pre-check can
+undercount by several bytes, letting chunks slip past the limit.
+
+Go avoids this by appending to the real message first, measuring the
+*actual* assembled size with `.Size()`, and undoing the append if it's
+over:
+
+```go
+// Go (append→check→undo):
+nextRPC.Control.Graft = append(nextRPC.Control.Graft, graft)
+if nextRPC.Size() > limit {
+    nextRPC.Control.Graft = nextRPC.Control.Graft[:len(nextRPC.Control.Graft)-1]
+    yield(nextRPC)
+    // start fresh with the item
+}
+```
+
+Python now faithfully replicates this pattern:
+
+```python
+# New (append→check→undo):
+current.control.graft.append(graft)
+if current.ByteSize() > limit:
+    del current.control.graft[-1]
+    out.append(current)
+    current = rpc_pb2.RPC()
+    current.control.SetInParent()
+    current.control.graft.append(graft)
+```
+
+### Caller-side oversized drop
+
+`split_rpc` intentionally has **no solo guards** — if a single atomic item
+(e.g. one enormous Publish message or a Graft with a huge topicID) exceeds
+the limit, it's yielded as-is.  The **caller** is responsible for detecting
+and dropping these oversized chunks before pushing them onto the queue.
+
+This matches Go's `sendRPC` loop:
+
+```go
+// Go — gossipsub.go sendRPC:
+for rpc := range out.split(gs.p.maxMessageSize) {
+    if rpc.Size() > gs.p.maxMessageSize {
+        gs.doDropRPC(out, p, "Dropping oversized RPC...")
+        continue
+    }
+    gs.doSendRPC(&rpc, p, q, urgent)
+}
+```
+
+Python equivalent in `gossipsub.py` → `send_rpc`:
+
+```python
+for part in queue.split_rpc(rpc):
+    if part.ByteSize() > queue.max_message_size:
+        self.drop_rpc(peer_id, part)
+        continue
+    ok = queue.push(part, priority=priority)
+    if not ok:
+        self.drop_rpc(peer_id, part)
+```
+
+FloodSub's `publish` has the same guard.
 
 ### Splitting strategy per section
 
-Every section follows the same pattern: iterate items, append to the *current*
-output RPC, and when `current.ByteSize()` would exceed `max_message_size`,
-flush `current` to the output list and start a new RPC.
+Every section follows the append→check→undo pattern described above.
 
 | Section | Go behaviour | Python behaviour | Alignment |
 |---------|-------------|-----------------|-----------|
-| **Publish** | Iterate `rpc.Publish`, append `Message` until over limit, flush. Oversized single message emitted alone. | Same. `rpc_queue.py:213-226` | ✅ Identical |
-| **Subscriptions** | Iterate `rpc.Subscriptions`, same flush logic. | Same. `rpc_queue.py:228-238` | ✅ Identical |
-| **IHave** | Coalesced by `topicID` — reuses last `ControlIHave` if topicID matches, else starts new entry. Message IDs added one at a time; when over limit, flush + start fresh IHave with same topicID. | Same. `rpc_queue.py:244-289` | ✅ Identical |
-| **IWant** | All `ControlIWant` entries merged into a **single** `ControlIWant`. Message IDs added one at a time; when over limit, flush + start fresh IWant. | Same. `rpc_queue.py:291-318` | ✅ Identical |
-| **Graft** | Each `ControlGraft` appended; when over limit, flush. | Same. `rpc_queue.py:320-331` | ✅ Identical |
-| **Prune** | Each `ControlPrune` appended; when over limit, flush. | Same. `rpc_queue.py:333-344` | ✅ Identical |
-| **IDontWant** | Each `ControlIDontWant` appended; oversized single entry has its `messageIDs` split across RPCs. | Same. `rpc_queue.py:346-364` | ✅ Identical |
-| **Flush** | `yield` remaining buffer if non-empty. | Append remaining to output list. Return `[RPC()]` if nothing was produced. | ✅ Equivalent |
+| **Publish** | Optimised incremental size tracking; yield batch when over limit. No solo guard — oversized single message emitted as-is. | Same. Uses `size_of_embedded_msg()` for incremental tracking. | ✅ Identical |
+| **Fast path** | After publish, strip publish from RPC copy; if remainder fits → yield it and return. | Same. Copies subs + control, checks `ByteSize() <= limit`. | ✅ Identical |
+| **Subscriptions** | Append→check→undo per subscription. | Same. | ✅ Identical |
+| **Control init** | Explicit `Control = &pb.ControlMessage{}`; check if wrapper alone exceeds limit. | `current.control.SetInParent()` + `ByteSize()` check. | ✅ Identical |
+| **Graft** | Append→check→undo per `ControlGraft`. | Same. | ✅ Identical |
+| **Prune** | Append→check→undo per `ControlPrune`. | Same. | ✅ Identical |
+| **IWant** | Coalesced into a **single** `ControlIWant`. Per-mid append→check→undo. | Same. | ✅ Identical |
+| **IHave** | Coalesced by `topicID`. Per-mid append→check→undo. | Same. | ✅ Identical |
+| **IDontWant** | *Not in Go's `split`* — only survives via the fast path. | Explicit section with coalesced append→check→undo (kept so oversized IDontWant payloads aren't silently dropped). | ⚡ Python extension |
+| **Empty-RPC filter** | N/A (Go's undo pattern + `Size() > 0` flush guard prevent empties) | Post-filter: `out = [r for r in out if _rpc_has_data(r)]`. | ✅ Equivalent |
+| **Flush** | `yield` remaining buffer if `Size() > 0`. | Append if `ByteSize() > 0`. Return `[RPC()]` if nothing produced. | ✅ Equivalent |
 
 ---
 
@@ -414,7 +508,7 @@ for mid in iwant.messageIDs:
 
 ## 12. Test Coverage
 
-All tests live in `tests/core/pubsub/test_rpc_queue.py` (39 tests) plus
+All tests live in `tests/core/pubsub/test_rpc_queue.py` (**45 tests**) plus
 integration test updates across 3 files.
 
 ### Unit tests — `test_rpc_queue.py`
@@ -423,7 +517,7 @@ integration test updates across 3 files.
 |-------|---|----------------|
 | **TestPriorityQueue** | 8 | Deque types, `len`, push/pop non-priority, push/pop priority, priority-first pop order, reject when full (both tiers), default max_size |
 | **TestRpcQueue** | 7 | Close flag, push return values, `len`, async pop, pop blocks until push (trio), pop returns `None` on close, FIFO ordering |
-| **TestSplitRpc** | 14 | Empty RPC, small (no split), publish split, oversized single publish, subscriptions split, IHave split, IHave final batch not lost, IWant no double-append, IWant split oversized, Graft split, Prune split, mixed content preserved, IDontWant split, IDontWant small |
+| **TestSplitRpc** | 20 | Empty RPC, small (no split), publish split, oversized single publish, subscriptions split, IHave split, IHave final batch, IWant no double-append, IWant split oversized, Graft split, Prune split, mixed content preserved, IDontWant split, IDontWant small, IHave oversized topic, IHave oversized single mid, IWant oversized single mid, IDontWant oversized coalesced, IDontWant oversized single mid, no empty RPCs in split |
 | **TestSizeOfEmbeddedMsg** | 2 | Small message, empty message |
 | **TestVarintSize** | 3 | Zero, small (1-byte), two-byte, three-byte |
 | **TestConstants** | 2 | `DefaultMaxMessageSize == 1 MiB`, `OutBoundQueueSize == 32` |
@@ -437,6 +531,17 @@ integration test updates across 3 files.
 | `test_iwant_no_double_append` | IWant IDs duplicated when both break-path and post-loop path fire |
 | `test_push_rejected_when_full` | Old code dropped the *oldest* item; now correctly rejects the *new* item |
 | `test_priority_popped_before_non_priority` | Old code popped non-priority first; now priority drains first |
+
+### Edge-case tests (append→check→undo pattern)
+
+| Test | What it verifies |
+|------|------------------|
+| `test_ihave_oversized_topic` | When topicID alone exceeds limit, each mid is emitted as an oversized solo; no empty RPCs produced |
+| `test_ihave_oversized_single_mid` | Single oversized IHave messageID with normal topic → emitted as solo |
+| `test_iwant_oversized_single_mid` | Single oversized IWant messageID → emitted as solo |
+| `test_idontwant_oversized_coalesced` | Multiple IDontWant mids coalesced into shared entries (not one per mid) |
+| `test_idontwant_oversized_single_mid` | Single oversized IDontWant messageID → emitted as solo, no empties |
+| `test_no_empty_rpcs_in_split` | Mixed oversized IHave + IWant → every output RPC carries meaningful data |
 
 ### Integration test updates
 
@@ -453,7 +558,11 @@ integration test updates across 3 files.
 | Topic | Go | Python | Rationale |
 |-------|-----|--------|-----------|
 | **Split timing** | At enqueue (`sendRPC` → `split` → `doSendRPC` per chunk) | At enqueue (`send_rpc` / `publish` → `split_rpc` → `push` per chunk) | Identical — both split before pushing onto the per-peer queue. |
+| **Splitting pattern** | Append→check(`.Size()`)→undo for accurate protobuf sizing | Append→check(`.ByteSize()`)→undo (faithful port) | Both avoid the inaccurate pre-check pattern — see §10 "Why append→check→undo". |
+| **Caller-side oversized drop** | `sendRPC` loop: `if rpc.Size() > limit { doDropRPC }` | `send_rpc` / `publish`: `if part.ByteSize() > limit: drop_rpc / continue` | Identical — split has no solo guards; caller drops oversized chunks. |
+| **IDontWant in split** | *Not handled* — only survives via fast path | Explicit section with coalesced append→check→undo | Python extension — prevents silent loss of large IDontWant payloads when the fast path doesn't apply. |
 | **Iterator vs list** | `split` returns `iter.Seq[RPC]` (lazy generator) | `split_rpc` returns `list[rpc_pb2.RPC]` (eager) | Python protobuf objects aren't zero-copy; materialising the list is simpler and safe since each chunk is small. |
+| **Empty-RPC filter** | Implicit (undo pattern + `Size() > 0` flush guard) | Explicit post-filter via `_rpc_has_data()` | Python's protobuf `SetInParent()` can leave a bare `control {}` wrapper; the filter removes these. |
 | **GRAFT/PRUNE retry** | `doDropRPC` calls `pushControl` to save control messages for the next heartbeat | `drop_rpc` only logs | Future enhancement — no data-path correctness impact since control messages are priority and rarely dropped. |
 | **Sync primitives** | `sync.Cond` + `sync.Mutex` | `trio.Event` (re-created per push) | trio's structured concurrency model doesn't support `Cond`; `Event` provides equivalent wake semantics. |
 | **Protobuf field types** | `[]byte` for message IDs | Protobuf auto-converts `bytes` → `str` | Test assertions use string comparisons (`"only-one"` not `b"only-one"`) to match protobuf behaviour. |
@@ -464,11 +573,11 @@ integration test updates across 3 files.
 
 | File | Lines changed | Purpose |
 |------|---------------|---------|
-| `libp2p/pubsub/rpc_queue.py` | **NEW** (390 lines) | Priority queue, RPC queue, split_rpc, constants |
+| `libp2p/pubsub/rpc_queue.py` | **NEW** (~440 lines) | Priority queue, RPC queue, split_rpc (append→check→undo), `_rpc_has_data`, constants |
 | `libp2p/pubsub/pubsub.py` | +40 lines | Queue lifecycle + sending loop |
-| `libp2p/pubsub/gossipsub.py` | +32/−25 lines | `send_rpc` / `drop_rpc` + 3 call-site conversions |
-| `libp2p/pubsub/floodsub.py` | +5/−2 lines | Publish via `peer_queues` |
-| `tests/core/pubsub/test_rpc_queue.py` | **NEW** (~435 lines) | 39 unit tests |
+| `libp2p/pubsub/gossipsub.py` | +37/−25 lines | `send_rpc` / `drop_rpc` + caller-side oversized guard + 3 call-site conversions |
+| `libp2p/pubsub/floodsub.py` | +14/−2 lines | Publish via `peer_queues` + caller-side oversized guard |
+| `tests/core/pubsub/test_rpc_queue.py` | **NEW** (~530 lines) | 45 unit tests (incl. 6 edge-case tests) |
 | `tests/core/pubsub/test_gossipsub.py` | mock updates | `send_rpc` mock |
 | `tests/core/pubsub/test_gossipsub_v1_1_ihave_iwant.py` | mock updates | `send_rpc` mock |
 | `tests/core/pubsub/test_gossipsub_v1_1_score_gates.py` | mock + import | `MagicMock` for sync `send_rpc` |

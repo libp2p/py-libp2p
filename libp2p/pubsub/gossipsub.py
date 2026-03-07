@@ -1576,6 +1576,11 @@ class GossipSub(IPubsubRouter, Service):
             logger.debug("send_rpc: no queue for peer %s", peer_id)
             return
         for part in queue.split_rpc(rpc):
+            # Caller-side size check matching Go's sendRPC:
+            #   if rpc.Size() > gs.p.maxMessageSize { gs.doDropRPC(...) }
+            if part.ByteSize() > queue.max_message_size:
+                self.drop_rpc(peer_id, part)
+                continue
             ok = queue.push(part, priority=priority)
             if not ok:
                 self.drop_rpc(peer_id, part)

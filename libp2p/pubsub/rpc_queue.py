@@ -29,6 +29,10 @@ DefaultMaxMessageSize = 1 * 1024 * 1024
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/master/pubsub.go
 OutBoundQueueSize = 32
 
+# Protobuf field tag size for field numbers < 15 (1 byte: fieldNumber<<3|wireType).
+# Ref: https://protobuf.dev/programming-guides/encoding/#structure
+_PB_FIELD_LT15_SIZE = 1
+
 
 class PriorityQueue:
     """
@@ -178,118 +182,134 @@ class RpcQueue:
         Split a single RPC into a list of RPCs that each fit within
         :attr:`max_message_size`.
 
-        The splitting strategy mirrors go-libp2p-pubsub's ``appendOrMergeRPC``
-        logic — each section (publish, subscriptions, control sub-fields) is
-        iterated independently and items are appended to the *current* output
-        RPC until adding the next item would exceed the limit.
+        The strategy is a **faithful port** of go-libp2p-pubsub's
+        ``RPC.split`` method (``pubsub.go``).  The pattern for every
+        section is:
 
-        **Bug-fix notes** (from issue #891):
+        1. Append item to the current accumulator RPC.
+        2. If ``current.ByteSize() > limit``, **undo** the append,
+           yield ``current``, start a fresh accumulator with that item.
+        3. No "solo guard" — if a single atomic item exceeds the limit
+           it stays in the accumulator and gets yielded as-is.
+           The **caller** is responsible for detecting and dropping
+           oversized chunks (matching Go's ``sendRPC`` loop).
 
-        * Oversized single items (larger than *max_message_size* on their own)
-          are emitted alone in their own RPC instead of looping infinitely.
-        * IWant batches no longer double-append (the ``break`` path and the
-          post-loop path were both appending the same batch).
-        * The final IHave batch is no longer silently lost.
-        * Size tracking uses ``ByteSize()`` on the accumulating output RPC
-          directly, avoiding double-counting errors.
+        Sections handled (in order): Publish, Subscriptions,
+        Graft, Prune, IWant, IHave, IDontWant.
+
+        **Note:** Go's ``split`` does *not* handle IDontWant — it only
+        survives via the fast path.  We add an explicit IDontWant section
+        (using the same append→check→undo→yield pattern) so that large
+        IDontWant payloads are preserved even when the RPC is too big
+        for the fast path.
 
         :param rpc: the RPC to split.
-        :return: a list of RPCs, each within *max_message_size*.
+        :return: a list of RPCs, each ideally within *max_message_size*
+                 (oversized single items are yielded for the caller to
+                 drop).
         """
         limit = self.max_message_size
 
         out: list[rpc_pb2.RPC] = []
         current = rpc_pb2.RPC()
 
-        # ---- publish messages ----
-        for msg in rpc.publish:
-            if current.ByteSize() + msg.ByteSize() > limit:
-                if current.ByteSize() > 0:
+        # ── Publish messages (optimised incremental size tracking) ──
+        # Mirrors Go's optimised publish path that avoids calling
+        # .Size() repeatedly on accumulated messages.
+        current_size = 0
+        messages_in_current = 0
+        publish_list = list(rpc.publish)  # snapshot for slicing
+
+        for i, msg in enumerate(publish_list):
+            incremental = _PB_FIELD_LT15_SIZE + self.size_of_embedded_msg(msg)
+            if current_size + incremental > limit:
+                # Yield what we have so far
+                current.publish.extend(publish_list[i - messages_in_current : i])
+                if messages_in_current > 0:
                     out.append(current)
                     current = rpc_pb2.RPC()
-                # Oversized single message → emit it alone
-                if msg.ByteSize() > limit:
-                    solo = rpc_pb2.RPC()
-                    solo.publish.append(msg)
-                    out.append(solo)
-                    continue
-            current.publish.append(msg)
+                current_size = 0
+                messages_in_current = 0
+            messages_in_current += 1
+            current_size += incremental
 
-        # ---- subscriptions ----
+        if current_size > 0:
+            # Yield the remaining publish messages
+            start = len(publish_list) - messages_in_current
+            current.publish.extend(publish_list[start:])
+            out.append(current)
+            current = rpc_pb2.RPC()
+
+        # ── Fast path ──
+        # After publish messages are handled, check whether the rest
+        # of the original RPC (subs + control) fits in one chunk.
+        # This mirrors Go's ``nextRPC = *rpc; nextRPC.Publish = nil``
+        # optimisation.
+        rest = rpc_pb2.RPC()
+        rest.subscriptions.extend(rpc.subscriptions)
+        if rpc.HasField("control"):
+            rest.control.CopyFrom(rpc.control)
+        rest_size = rest.ByteSize()
+        if rest_size > 0 and rest_size <= limit:
+            out.append(rest)
+            return out if out else [rpc_pb2.RPC()]
+
+        # The rest doesn't fit — split it section by section.
+        if rest_size == 0:
+            return out if out else [rpc_pb2.RPC()]
+
+        current = rpc_pb2.RPC()
+
+        # ── Subscriptions ──
         for sub in rpc.subscriptions:
-            if current.ByteSize() + sub.ByteSize() > limit:
-                if current.ByteSize() > 0:
-                    out.append(current)
-                    current = rpc_pb2.RPC()
-                if sub.ByteSize() > limit:
-                    solo = rpc_pb2.RPC()
-                    solo.subscriptions.append(sub)
-                    out.append(solo)
-                    continue
             current.subscriptions.append(sub)
+            if current.ByteSize() > limit:
+                del current.subscriptions[-1]
+                out.append(current)
+                current = rpc_pb2.RPC()
+                current.subscriptions.append(sub)
 
-        # ---- control messages ----
+        # ── Control messages ──
         if rpc.HasField("control"):
             ctrl = rpc.control
 
-            # -- IHAVE --
-            # Go coalesces IHave messageIDs by topicID: a new ControlIHave
-            # is only started when the topicID changes.
-            for ihave in ctrl.ihave:
-                # Ensure current RPC has a control field
-                if not current.HasField("control"):
+            # Initialise the control wrapper (matching Go's explicit check)
+            if not current.HasField("control"):
+                current.control.SetInParent()
+                if current.ByteSize() > limit:
+                    current.control.ClearField("control")
+                    out.append(current)
+                    current = rpc_pb2.RPC()
                     current.control.SetInParent()
 
-                # Check if we need a new ControlIHave entry or can reuse the
-                # last one (same topicID).
-                ihave_list = current.control.ihave
-                if (
-                    len(ihave_list) == 0
-                    or ihave_list[-1].topicID != ihave.topicID
-                ):
-                    new_ihave = rpc_pb2.ControlIHave(topicID=ihave.topicID)
-                    ihave_list.append(new_ihave)
-                    if current.ByteSize() > limit:
-                        # The header alone pushed us over; flush and restart
-                        del ihave_list[-1]
-                        if current.ByteSize() > 0:
-                            out.append(current)
-                        current = rpc_pb2.RPC()
-                        current.control.SetInParent()
-                        new_ihave = rpc_pb2.ControlIHave(
-                            topicID=ihave.topicID
-                        )
-                        current.control.ihave.append(new_ihave)
+            # GRAFT
+            for graft in ctrl.graft:
+                current.control.graft.append(graft)
+                if current.ByteSize() > limit:
+                    del current.control.graft[-1]
+                    out.append(current)
+                    current = rpc_pb2.RPC()
+                    current.control.SetInParent()
+                    current.control.graft.append(graft)
 
-                for mid in ihave.messageIDs:
-                    last_ihave = current.control.ihave[-1]
-                    last_ihave.messageIDs.append(mid)
-                    if current.ByteSize() > limit:
-                        # Undo, flush, start fresh
-                        del last_ihave.messageIDs[-1]
-                        if current.ByteSize() > 0:
-                            out.append(current)
-                        current = rpc_pb2.RPC()
-                        current.control.SetInParent()
-                        fresh = rpc_pb2.ControlIHave(
-                            topicID=ihave.topicID
-                        )
-                        fresh.messageIDs.append(mid)
-                        current.control.ihave.append(fresh)
+            # PRUNE
+            for prune in ctrl.prune:
+                current.control.prune.append(prune)
+                if current.ByteSize() > limit:
+                    del current.control.prune[-1]
+                    out.append(current)
+                    current = rpc_pb2.RPC()
+                    current.control.SetInParent()
+                    current.control.prune.append(prune)
 
-            # -- IWANT --
-            # Go coalesces all IWant messageIDs into a single ControlIWant.
+            # IWANT — coalesce into a single ControlIWant
             for iwant in ctrl.iwant:
-                if not current.HasField("control"):
-                    current.control.SetInParent()
-
-                if len(current.control.iwant) == 0:
+                if not current.control.iwant:
                     new_iwant = rpc_pb2.ControlIWant()
                     current.control.iwant.append(new_iwant)
                     if current.ByteSize() > limit:
                         del current.control.iwant[-1]
-                        if current.ByteSize() > 0:
-                            out.append(current)
+                        out.append(current)
                         current = rpc_pb2.RPC()
                         current.control.SetInParent()
                         current.control.iwant.append(
@@ -299,78 +319,89 @@ class RpcQueue:
                 for mid in iwant.messageIDs:
                     current.control.iwant[0].messageIDs.append(mid)
                     if current.ByteSize() > limit:
-                        # Undo, flush, start fresh with this mid
                         del current.control.iwant[0].messageIDs[-1]
-                        if current.ByteSize() > 0:
-                            out.append(current)
+                        out.append(current)
                         current = rpc_pb2.RPC()
                         current.control.SetInParent()
-                        fresh = rpc_pb2.ControlIWant()
-                        fresh.messageIDs.append(mid)
-                        current.control.iwant.append(fresh)
+                        current.control.iwant.append(
+                            rpc_pb2.ControlIWant(
+                                messageIDs=[mid],
+                            )
+                        )
 
-            # -- GRAFT --
-            for graft in ctrl.graft:
-                if current.ByteSize() + graft.ByteSize() > limit:
-                    if current.ByteSize() > 0:
+            # IHAVE — coalesce by topicID
+            for ihave in ctrl.ihave:
+                ihave_list = current.control.ihave
+                if (
+                    not ihave_list
+                    or ihave_list[-1].topicID != ihave.topicID
+                ):
+                    new_ihave = rpc_pb2.ControlIHave(
+                        topicID=ihave.topicID
+                    )
+                    ihave_list.append(new_ihave)
+                    if current.ByteSize() > limit:
+                        del ihave_list[-1]
                         out.append(current)
                         current = rpc_pb2.RPC()
-                    if graft.ByteSize() > limit:
-                        solo = rpc_pb2.RPC()
-                        solo.control.graft.append(graft)
-                        out.append(solo)
-                        continue
-                if not current.HasField("control"):
-                    current.control.SetInParent()
-                current.control.graft.append(graft)
+                        current.control.SetInParent()
+                        current.control.ihave.append(new_ihave)
 
-            # -- PRUNE --
-            for prune in ctrl.prune:
-                if current.ByteSize() + prune.ByteSize() > limit:
-                    if current.ByteSize() > 0:
+                for mid in ihave.messageIDs:
+                    last_ihave = current.control.ihave[-1]
+                    last_ihave.messageIDs.append(mid)
+                    if current.ByteSize() > limit:
+                        del last_ihave.messageIDs[-1]
                         out.append(current)
                         current = rpc_pb2.RPC()
-                    if prune.ByteSize() > limit:
-                        solo = rpc_pb2.RPC()
-                        solo.control.prune.append(prune)
-                        out.append(solo)
-                        continue
-                if not current.HasField("control"):
-                    current.control.SetInParent()
-                current.control.prune.append(prune)
+                        current.control.SetInParent()
+                        current.control.ihave.append(
+                            rpc_pb2.ControlIHave(
+                                topicID=ihave.topicID,
+                                messageIDs=[mid],
+                            )
+                        )
 
-            # -- IDONTWANT --
+            # IDONTWANT — coalesce into a single ControlIDontWant
+            # (Not in Go's split, but we keep it so oversized IDontWant
+            #  payloads aren't silently dropped when the fast path misses.)
             for idontwant in ctrl.idontwant:
-                if current.ByteSize() + idontwant.ByteSize() > limit:
-                    if current.ByteSize() > 0:
+                if not current.control.idontwant:
+                    new_idw = rpc_pb2.ControlIDontWant()
+                    current.control.idontwant.append(new_idw)
+                    if current.ByteSize() > limit:
+                        del current.control.idontwant[-1]
                         out.append(current)
                         current = rpc_pb2.RPC()
-                    if idontwant.ByteSize() > limit:
-                        # Split individual IDONTWANT's messageIDs across RPCs
-                        for mid in idontwant.messageIDs:
-                            item = rpc_pb2.ControlIDontWant()
-                            item.messageIDs.append(mid)
-                            if current.ByteSize() + item.ByteSize() > limit:
-                                if current.ByteSize() > 0:
-                                    out.append(current)
-                                    current = rpc_pb2.RPC()
-                            if not current.HasField("control"):
-                                current.control.SetInParent()
-                            current.control.idontwant.append(item)
-                        continue
-                if not current.HasField("control"):
-                    current.control.SetInParent()
-                current.control.idontwant.append(idontwant)
+                        current.control.SetInParent()
+                        current.control.idontwant.append(
+                            rpc_pb2.ControlIDontWant()
+                        )
 
-        # ---- flush remaining ----
+                for mid in idontwant.messageIDs:
+                    current.control.idontwant[0].messageIDs.append(mid)
+                    if current.ByteSize() > limit:
+                        del current.control.idontwant[0].messageIDs[-1]
+                        out.append(current)
+                        current = rpc_pb2.RPC()
+                        current.control.SetInParent()
+                        current.control.idontwant.append(
+                            rpc_pb2.ControlIDontWant(
+                                messageIDs=[mid],
+                            )
+                        )
+
+        # ── Flush remaining ──
         if current.ByteSize() > 0:
             out.append(current)
 
-        return out if out else [rpc_pb2.RPC()]
+        # Filter out RPCs that only contain an empty control wrapper
+        # (can happen when the first item in a section already exceeds the
+        # limit, causing the accumulator with just ``control {}`` to be
+        # yielded).
+        out = [r for r in out if _rpc_has_data(r)]
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+        return out if out else [rpc_pb2.RPC()]
 
     @staticmethod
     def size_of_embedded_msg(msg: Any) -> int:
@@ -391,3 +422,18 @@ def _varint_size(value: int) -> int:
         size += 1
         value >>= 7
     return size
+
+
+def _rpc_has_data(rpc: rpc_pb2.RPC) -> bool:
+    """Return ``True`` if *rpc* carries any meaningful content.
+
+    Used by tests and callers to verify that :func:`split_rpc` never
+    emits completely empty RPCs.
+    """
+    if rpc.publish or rpc.subscriptions:
+        return True
+    if rpc.HasField("control"):
+        ctrl = rpc.control
+        if ctrl.graft or ctrl.prune or ctrl.iwant or ctrl.ihave or ctrl.idontwant:
+            return True
+    return False
