@@ -38,8 +38,8 @@ async def test_ihave_triggers_iwant_for_missing_messages():
         await trio.sleep(1.0)  # Allow time for mesh formation
 
         # Create a message ID that gsub0 doesn't have
-        # Message IDs in GossipSub are string representations of (seqno, from_id) tuples
-        missing_msg_id = str((b"seqno123", b"peer456"))
+        # Message IDs in GossipSub are hex-encoded bytes (from_id + seqno)
+        missing_msg_id = (b"peer456" + b"seqno123").hex()
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()
@@ -80,11 +80,11 @@ async def test_iwant_retrieves_missing_messages():
         await trio.sleep(1.0)  # Allow time for mesh formation
 
         # Create a message that gsub1 has but gsub0 doesn't
-        # Message IDs in GossipSub are string representations of (seqno, from_id) tuples
+        # Message IDs in GossipSub are hex-encoded bytes (from_id + seqno)
         seqno = b"seqno123"
         from_id = b"peer456"
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
+        msg_id_str = msg_id_bytes.hex()
 
         msg_data = b"test message data"
 
@@ -150,7 +150,7 @@ async def test_ihave_rate_limiting():
 
         # Create multiple message IDs
         msg_ids = [
-            str((f"seqno_{i}".encode(), f"peer_{i}".encode())) for i in range(100)
+            (f"peer_{i}".encode() + f"seqno_{i}".encode()).hex() for i in range(100)
         ]
 
         # Create IHAVE control message with many message IDs
@@ -198,15 +198,14 @@ async def test_no_infinite_gossip_loops():
         # Create a message ID that would be in the seen cache
         seqno = b"seqno123"
         from_id = host1.get_id().to_bytes()
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
+        msg_id_str = msg_id_bytes.hex()
 
         # Create a mock for pubsub
         mock_pubsub = MagicMock()
         mock_seen_messages = MagicMock()
-        mock_cache = {}
-        mock_cache[msg_id_tuple] = True
-        mock_seen_messages.cache = mock_cache
+        # Mock seen_messages.has to return True for our message ID
+        mock_seen_messages.has = MagicMock(side_effect=lambda key: key == msg_id_bytes)
         mock_pubsub.seen_messages = mock_seen_messages
 
         # Set the mock on gsub0
@@ -250,8 +249,8 @@ async def test_dropping_gossip_triggers_iwant():
         # Create a message ID that gsub0 doesn't have
         seqno = b"seqno123"
         from_id = host2.get_id().to_bytes()
-        msg_id_tuple = (seqno, from_id)
-        msg_id_str = str(msg_id_tuple)
+        msg_id_bytes = from_id + seqno
+        msg_id_str = msg_id_bytes.hex()
 
         # Mock emit_iwant to capture IWANT requests
         emit_iwant_mock = AsyncMock()

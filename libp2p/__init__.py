@@ -333,7 +333,11 @@ def new_swarm(
 
     if listen_addrs is None:
         if enable_quic:
-            transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+            transport = QUICTransport(
+                key_pair.private_key,
+                config=quic_transport_opt,
+                enable_autotls=enable_autotls,
+            )
         else:
             transport = TCP()
     else:
@@ -354,6 +358,7 @@ def new_swarm(
             temp_upgrader,
             private_key=key_pair.private_key,
             config=quic_transport_opt,
+            enable_autotls=enable_autotls,
             tls_client_config=tls_client_config,
             tls_server_config=tls_server_config
         )
@@ -367,7 +372,11 @@ def new_swarm(
     # If enable_quic is True but we didn't get a QUIC transport, force QUIC
     if enable_quic and not isinstance(transport, QUICTransport):
         logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
-        transport = QUICTransport(key_pair.private_key, config=quic_transport_opt)
+        transport = QUICTransport(
+            key_pair.private_key,
+            config=quic_transport_opt,
+            enable_autotls=enable_autotls,
+        )
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
 
@@ -384,7 +393,7 @@ def new_swarm(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
         TLS_PROTOCOL_ID: TLSTransport (
-            key_pair, enable_autotls= enable_autotls
+            key_pair, enable_autotls = enable_autotls
         ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
@@ -447,21 +456,6 @@ def new_swarm(
 
     return swarm
 
-    # Set resource manager if provided
-    # Auto-create a default ResourceManager if one was not provided
-    if resource_manager is None:
-        try:
-            from libp2p.rcmgr import new_resource_manager as _new_rm
-
-            resource_manager = _new_rm()
-        except Exception:
-            resource_manager = None
-
-    if resource_manager is not None:
-        swarm.set_resource_manager(resource_manager)
-
-    return swarm
-
 
 def new_host(
     key_pair: KeyPair | None = None,
@@ -482,6 +476,9 @@ def new_host(
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
     psk: str | None = None,
+    bootstrap_allow_ipv6: bool = False,
+    bootstrap_dns_timeout: float = 10.0,
+    bootstrap_dns_max_retries: int = 3,
     connection_config: ConnectionConfig | None = None
 ) -> IHost:
     """
@@ -504,6 +501,9 @@ def new_host(
     :param resource_manager: optional resource manager for connection/stream limits
     :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
     :param psk: optional pre-shared key (PSK)
+    :param bootstrap_allow_ipv6: if True, bootstrap accepts IPv6+TCP addresses
+    :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
+    :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
     :return: return a host instance
     """
@@ -554,6 +554,9 @@ def new_host(
             enable_upnp=enable_upnp,
             bootstrap=bootstrap,
             resource_manager=resource_manager,
+            bootstrap_allow_ipv6=bootstrap_allow_ipv6,
+            bootstrap_dns_timeout=bootstrap_dns_timeout,
+            bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         )
     return BasicHost(
         network=swarm,
@@ -562,6 +565,9 @@ def new_host(
         enable_upnp=enable_upnp,
         negotiate_timeout=negotiate_timeout,
         resource_manager=resource_manager,
+        bootstrap_allow_ipv6=bootstrap_allow_ipv6,
+        bootstrap_dns_timeout=bootstrap_dns_timeout,
+        bootstrap_dns_max_retries=bootstrap_dns_max_retries,
     )
 
 __version__ = __version("libp2p")

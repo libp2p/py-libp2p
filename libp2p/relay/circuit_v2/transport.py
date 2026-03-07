@@ -10,6 +10,7 @@ import time
 from typing import Any, cast
 
 import multiaddr
+from multiaddr.protocols import P_P2P, P_P2P_CIRCUIT
 import trio
 
 from libp2p.abc import (
@@ -39,6 +40,9 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.tools.async_service import (
     Service,
+)
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
 )
 
 from .config import (
@@ -229,38 +233,20 @@ class CircuitV2Transport(ITransport):
             If the connection cannot be established
 
         """
-        # Extract peer ID from multiaddr - P_P2P code is 0x01A5 (421)
-        relay_id_str = None
-        relay_maddr = None
-        dest_id_str = None
-        found_circuit = False
-        relay_maddr_end_index = None
+        # Parse circuit multiaddr using decapsulate_code (Phase 2.3)
+        try:
+            relay_maddr, dest_peer_id = self.parse_circuit_ma(maddr)
+        except ValueError as e:
+            raise ConnectionError(str(e)) from e
 
-        for idx, (proto, value) in enumerate(maddr.items()):
-            if proto.name == "p2p-circuit":
-                found_circuit = True
-                relay_maddr_end_index = idx
-            elif proto.name == "p2p":
-                if not found_circuit and relay_id_str is None:
-                    relay_id_str = value
-                elif found_circuit and dest_id_str is None:
-                    dest_id_str = value
-
-        if relay_id_str is not None and relay_maddr_end_index is not None:
-            relay_maddr = multiaddr.Multiaddr(
-                "/".join(str(maddr).split("/")[: relay_maddr_end_index * 2 + 1])
-            )
+        relay_id_str = relay_maddr.get_peer_id()
         if not relay_id_str:
             raise ConnectionError("Multiaddr does not contain relay peer ID")
-        if not dest_id_str:
-            raise ConnectionError(
-                "Multiaddr does not contain destination peer ID after p2p-circuit"
-            )
 
-        logger.debug(f"Relay peer ID: {relay_id_str} , \n {relay_maddr}")
+        logger.debug("Relay peer ID: %s , \n %s", relay_id_str, relay_maddr)
 
-        dest_info = PeerInfo(ID.from_string(dest_id_str), [maddr])
-        logger.debug(f"Dialing destination peer ID: {dest_id_str} , \n {maddr}")
+        dest_info = PeerInfo(dest_peer_id, [maddr])
+        logger.debug(f"Dialing destination peer ID: {dest_peer_id} , \n {maddr}")
         # Use the internal dial_peer_info method
         if isinstance(relay_id_str, str):
             relay_peer_id = ID.from_string(relay_id_str)
@@ -491,6 +477,8 @@ class CircuitV2Transport(ITransport):
         """
         Parse a /p2p-circuit/p2p/<targetPeerID> path from a relay Multiaddr.
 
+        Uses decapsulate_code for efficiency (Phase 2.3 multiaddr integration).
+
         Returns:
             relay_ma: Multiaddr to the relay
             target_peer_id: ID of the target peer
@@ -499,36 +487,34 @@ class CircuitV2Transport(ITransport):
             ValueError: if the Multiaddr is not a valid circuit address
 
         """
-        parts = ma.items()
-
-        if len(parts) < 2:
-            raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
-
-        proto_name, _ = parts[-2]
-        if proto_name.name != "p2p-circuit":
+        # Must contain /p2p-circuit (decapsulate_code is no-op if missing)
+        protocols = list(ma.protocols())
+        if not any(p.code == P_P2P_CIRCUIT for p in protocols):
             raise ValueError(f"Missing /p2p-circuit in Multiaddr: {ma}")
 
-        proto_name, val = parts[-1]
-        if proto_name.name != "p2p":
-            raise ValueError(f"Missing /p2p/<peerID> at the end: {ma}")
+        # Get destination peer ID (rightmost /p2p) before decapsulating
+        dest_id_str = ma.get_peer_id()
+        if not dest_id_str:
+            raise ValueError(
+                f"Missing /p2p/<peerID> at the end of circuit Multiaddr: {ma}"
+            )
 
         try:
-            if isinstance(val, ID):
-                target_peer_id = val
-            else:
-                target_peer_id = ID.from_string(val)
+            target_peer_id = ID.from_base58(dest_id_str)
         except Exception as e:
-            raise ValueError(f"Invalid peer ID in circuit Multiaddr: {val}") from e
+            raise ValueError(
+                f"Invalid peer ID in circuit Multiaddr: {dest_id_str}"
+            ) from e
 
-        relay_parts = parts[:-2]
-        relay_ma_str = "/".join(
-            f"{p[0].name}/{p[1]}" for p in relay_parts if p[1] is not None
-        )
-        relay_ma = (
-            multiaddr.Multiaddr(relay_ma_str)
-            if relay_ma_str
-            else multiaddr.Multiaddr("/")
-        )
+        # Remove /p2p/<dest> then /p2p-circuit to get relay multiaddr
+        try:
+            without_dest = ma.decapsulate_code(P_P2P)
+            relay_ma = without_dest.decapsulate_code(P_P2P_CIRCUIT)
+        except Exception as e:
+            raise ValueError(f"Invalid circuit Multiaddr: {ma}") from e
+
+        if not str(relay_ma) or str(relay_ma) == "/":
+            raise ValueError(f"Invalid circuit Multiaddr, too short: {ma}")
 
         return relay_ma, target_peer_id
 
@@ -547,10 +533,12 @@ class CircuitV2Transport(ITransport):
                 if not isinstance(relay_ma, multiaddr.Multiaddr):
                     continue
 
-                # Construct /p2p-circuit address
-                circuit_ma = relay_ma.encapsulate(
-                    multiaddr.Multiaddr("/p2p-circuit")
-                ).encapsulate(multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"))
+                # Construct /p2p-circuit address (Section 7.1: join when available)
+                circuit_ma = join_multiaddrs(
+                    relay_ma,
+                    multiaddr.Multiaddr("/p2p-circuit"),
+                    multiaddr.Multiaddr(f"/p2p/{peer_info.peer_id}"),
+                )
 
                 peer_store.add_addrs(peer_info.peer_id, [circuit_ma], ttl=2**31 - 1)
                 logger.debug(
@@ -571,17 +559,18 @@ class CircuitV2Transport(ITransport):
         Dial using a stored /p2p-circuit multiaddr.
 
         circuit_ma looks like: <relay-ma>/p2p-circuit/p2p/<target-peer-id>
-        We extract the relay multiaddr (everything before /p2p-circuit), dial the relay,
-        and issue a HOP CONNECT to the target peer.
+        Uses parse_circuit_ma (decapsulate_code) to extract relay multiaddr.
         """
-        ma_str = str(circuit_ma)
-        idx = ma_str.find("/p2p-circuit")
-        if idx == -1:
-            raise ConnectionError("Not a p2p-ciruit multiaddr")
+        try:
+            relay_ma, target_peer_id = self.parse_circuit_ma(circuit_ma)
+        except ValueError as e:
+            raise ConnectionError(f"Not a p2p-circuit multiaddr: {e}") from e
+        if target_peer_id != peer_info.peer_id:
+            raise ConnectionError(
+                "Circuit multiaddr target peer does not match peer_info"
+            )
 
-        relay_ma_str = ma_str[:idx]  # everything before /p2p-circuit
-        relay_ma = multiaddr.Multiaddr(relay_ma_str)
-        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        relay_peer_id_str = relay_ma.get_peer_id()
         if not relay_peer_id_str:
             raise ConnectionError("Relay multiaddr missing peer id")
 
@@ -731,7 +720,7 @@ class CircuitV2Transport(ITransport):
     def _extract_relay_id_from_ma(self, ma: multiaddr.Multiaddr) -> ID:
         """Extract relay peer ID from a circuit multiaddr."""
         relay_ma, _ = self.parse_circuit_ma(ma)
-        relay_peer_id_str = relay_ma.value_for_protocol("p2p")
+        relay_peer_id_str = relay_ma.get_peer_id()
         if not relay_peer_id_str:
             raise ValueError("Relay multiaddr missing peer id")
         return ID.from_string(relay_peer_id_str)

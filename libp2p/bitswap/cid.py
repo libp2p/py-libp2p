@@ -238,6 +238,18 @@ def cid_to_text(value: CIDInput) -> str:
     return str(parse_cid(value))
 
 
+def format_cid_for_display(cid: bytes, max_len: int | None = None) -> str:
+    """Return CID text for display, with hex fallback and optional truncation."""
+    try:
+        result = cid_to_text(cid)
+    except (TypeError, ValueError):
+        result = cid.hex()
+
+    if max_len is not None and len(result) > max_len:
+        return f"{result[:max_len]}..."
+    return result
+
+
 def cid_to_string(cid: bytes) -> str:
     """
     Convert CID bytes to a readable hex string.
