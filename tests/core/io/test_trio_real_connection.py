@@ -86,9 +86,7 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
 
         exc = exc_info.value
         assert exc.transport == "tcp"
-        logger.info(
-            "read() raised ConnectionClosedError on RST: %s", exc
-        )
+        logger.info("read() raised ConnectionClosedError on RST: %s", exc)
 
         nursery.cancel_scope.cancel()
 
@@ -135,9 +133,7 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
 
         exc = exc_info.value
         assert exc.transport == "tcp"
-        logger.info(
-            "write() raised ConnectionClosedError on RST: %s", exc
-        )
+        logger.info("write() raised ConnectionClosedError on RST: %s", exc)
 
         nursery.cancel_scope.cancel()
 
