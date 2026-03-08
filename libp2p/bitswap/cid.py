@@ -178,7 +178,7 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
     logger = logging.getLogger(__name__)
 
     logger.debug("      verify_cid:")
-    logger.debug(f"        CID: {cid.hex()}")
+    logger.debug(f"        CID: {format_cid_for_display(cid)}")
     logger.debug(f"        Data size: {len(data)} bytes")
     try:
         cid_obj = parse_cid(cid)
@@ -248,43 +248,6 @@ def format_cid_for_display(cid: bytes, max_len: int | None = None) -> str:
     if max_len is not None and len(result) > max_len:
         return f"{result[:max_len]}..."
     return result
-
-
-def cid_to_string(cid: bytes) -> str:
-    """
-    Convert CID bytes to a readable hex string.
-
-    Args:
-        cid: The CID bytes
-
-    Returns:
-        Hex string representation
-
-    """
-    return cid.hex()
-
-
-def parse_cid_version(cid: bytes) -> int:
-    """
-    Determine the CID version.
-
-    Args:
-        cid: The CID bytes
-
-    Returns:
-        CID version (0 or 1)
-
-    """
-    if len(cid) < 1:
-        return CID_V0
-
-    try:
-        return parse_cid(cid).version
-    except ValueError:
-        # Preserve previous behavior for malformed CIDs.
-        if cid[0] == CID_V1:
-            return CID_V1
-        return CID_V0
 
 
 def compute_cid(
