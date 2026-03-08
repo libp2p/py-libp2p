@@ -21,8 +21,9 @@ from libp2p.peer.id import ID
 
 logger = logging.getLogger(__name__)
 
-# TLS_IO_CHUNK_SIZE = 4096 # Original value
-TLS_IO_CHUNK_SIZE = 64 * 1024  # Optimized value for perf test
+# TLS_IO_CHUNK_SIZE = 4096  # Original value
+# Larger chunks = fewer ws round-trips; 512*1024 if still timing out
+TLS_IO_CHUNK_SIZE = 256 * 1024
 
 
 class TLSStreamReadWriter(ReadWriteCloser):
@@ -287,7 +288,7 @@ class TLSStreamReadWriter(ReadWriteCloser):
             raise RuntimeError("Call handshake() first")
 
         if n is None:
-            n = 65536
+            n = TLS_IO_CHUNK_SIZE
 
         # First, drain from read buffer if available
         if self._read_buffer:
@@ -340,7 +341,8 @@ class TLSStreamReadWriter(ReadWriteCloser):
 
             # Try to read from SSL socket
             try:
-                data = self._ssl_socket.read(min(n if n else 65536, 65536))
+                read_size = min(n if n else TLS_IO_CHUNK_SIZE, TLS_IO_CHUNK_SIZE)
+                data = self._ssl_socket.read(read_size)
                 if data:
                     buffer.extend(data)
                     logger.debug("TLS read: %d decrypted bytes", len(data))
@@ -503,7 +505,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         logger.debug("TLS read_msg: reading from stream")
         # Read a chunk from the TLS stream
         # SecureSession will buffer and multistream will parse varint messages
-        data = await self.stream_writer.read(65536)  # Read up to 64KB
+        data = await self.stream_writer.read(TLS_IO_CHUNK_SIZE)
         if not data:
             logger.debug("TLS read_msg: connection closed (no data)")
             return b""  # Connection closed
