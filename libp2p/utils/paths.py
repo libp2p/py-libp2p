@@ -3,6 +3,18 @@ Cross-platform path utilities for py-libp2p.
 
 This module provides standardized path operations to ensure consistent
 behavior across Windows, macOS, and Linux platforms.
+
+Key functions include:
+
+- :func:`join_paths` -- join path components using the OS-correct separator.
+- :func:`get_temp_dir` -- get the system temporary directory.
+- :func:`get_script_dir` -- get the directory of the calling script.
+- :func:`create_temp_file` -- create a unique temporary file.
+- :func:`ensure_dir_exists` -- create a directory (and parents) if needed.
+- :func:`resolve_relative_path` -- resolve a relative path from a base.
+
+Use these instead of ``os.path`` helpers or hard-coded separators to keep
+the codebase portable across Windows, macOS, and Linux.
 """
 
 import os
