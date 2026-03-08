@@ -364,24 +364,10 @@ or ``get_temp_dir()`` over hard-coded ``/tmp/`` or ``C:\\``. This keeps the code
 working on Windows, macOS, and Linux. Run ``python scripts/audit_paths.py`` to check
 for path issues; the same audit runs in ``pre-commit`` and fails on P0/P1 issues.
 
-Path Utilities Module
-~~~~~~~~~~~~~~~~~~~~~
+For the full API reference, see :mod:`libp2p.utils.paths`. A working example is
+available in ``examples/path_handling.py``:
 
-The ``libp2p.utils.paths`` module provides a set of cross-platform utilities for file and directory operations. These functions help ensure your code works seamlessly on Windows, macOS, and Linux.
-
-**Key functions include:**
-
-- ``join_paths(*parts)``: Join path components using the correct separator for the OS.
-- ``get_temp_dir()``: Get the system's temp directory.
-- ``get_script_dir(__file__)``: Get the directory of the current script.
-- ``create_temp_file()``: Create a unique temporary file.
-- ``ensure_dir_exists(path)``: Create a directory if it doesn't exist.
-- ``resolve_relative_path(base, rel)``: Resolve a relative path from a base directory.
-
-
-See the `path_handling_demo.py` in the ``examples/`` directory for a practical demonstration:
-
-.. literalinclude:: ../examples/path_handling_demo.py
+.. literalinclude:: ../examples/path_handling.py
     :language: python
     :caption: Example: Cross-platform path handling
 
