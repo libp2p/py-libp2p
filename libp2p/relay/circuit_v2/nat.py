@@ -7,9 +7,7 @@ This module provides utilities for NAT traversal and reachability detection.
 import ipaddress
 import logging
 
-from multiaddr import (
-    Multiaddr,
-)
+from multiaddr import Multiaddr
 
 from libp2p.abc import (
     IHost,
@@ -21,6 +19,7 @@ from libp2p.connection_types import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr as _extract_ip
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +124,9 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
     """
     Extract the IP address from a multiaddr.
 
+    Delegates to libp2p.utils.multiaddr_utils for consistent parsing
+    using py-multiaddr utilities (get_multiaddr_options with fallback).
+
     Parameters
     ----------
     addr : Multiaddr
@@ -161,7 +163,7 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
             # IP is at the end of the string
             return addr_str[ipv6_start + 5 :]
 
-    return None
+    return _extract_ip(addr)
 
 
 class ReachabilityChecker:
