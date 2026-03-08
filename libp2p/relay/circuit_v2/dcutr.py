@@ -401,6 +401,8 @@ class DCUtRProtocol(Service):
         finally:
             self._in_progress.discard(peer_id)
 
+        return False
+
     async def _perform_hole_punch(
         self, peer_id: ID, addrs: list[Multiaddr], punch_time: float | None = None
     ) -> bool:
