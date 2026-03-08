@@ -126,11 +126,7 @@ class DCUtRProtocol(Service):
         finally:
             # Clean up
             try:
-                # Use empty async lambda instead of None for stream handler
-                async def empty_handler(_: INetStream) -> None:
-                    pass
-
-                self.host.set_stream_handler(PROTOCOL_ID, empty_handler)
+                self.host.remove_stream_handler(PROTOCOL_ID)
                 logger.debug("DCUtR protocol handler unregistered")
             except Exception as e:
                 logger.error("Error unregistering DCUtR protocol handler: %s", str(e))
@@ -404,9 +400,6 @@ class DCUtRProtocol(Service):
             return False
         finally:
             self._in_progress.discard(peer_id)
-
-        # This should never be reached, but add explicit return for type checking
-        return False
 
     async def _perform_hole_punch(
         self, peer_id: ID, addrs: list[Multiaddr], punch_time: float | None = None
