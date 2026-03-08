@@ -289,7 +289,9 @@ async def run_client(
                 output_filename = filename
                 logger.info(f"Filename: {filename} (from metadata)")
             else:
-                output_filename = f"file_{root_cid[:8].hex()}.bin"
+                output_filename = (
+                    f"file_{format_cid_for_display(root_cid, max_len=16)}.bin"
+                )
                 logger.info(f"Filename: {output_filename} (no metadata)")
 
             # Handle filename conflicts
