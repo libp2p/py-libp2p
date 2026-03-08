@@ -108,7 +108,7 @@ def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
     return compute_cid_v1_obj(data, codec).buffer
 
 
-def get_cid_prefix(cid: bytes) -> bytes:
+def get_cid_prefix(cid: CIDInput) -> bytes:
     """
     Extract the CID prefix (everything except the digest).
 
@@ -161,7 +161,7 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
         return prefix + digest
 
 
-def verify_cid(cid: bytes, data: bytes) -> bool:
+def verify_cid(cid: CIDInput, data: bytes) -> bool:
     """
     Verify that data matches the given CID.
 
@@ -238,12 +238,12 @@ def cid_to_text(value: CIDInput) -> str:
     return str(parse_cid(value))
 
 
-def format_cid_for_display(cid: bytes, max_len: int | None = None) -> str:
+def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:
     """Return CID text for display, with hex fallback and optional truncation."""
     try:
         result = cid_to_text(cid)
     except (TypeError, ValueError):
-        result = cid.hex()
+        result = cid.hex() if isinstance(cid, bytes) else str(cid)
 
     if max_len is not None and len(result) > max_len:
         return f"{result[:max_len]}..."
