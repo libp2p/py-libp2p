@@ -107,6 +107,9 @@ class BitswapClient:
             return
 
         self._started = False
+        # Unregister stream handlers for all supported Bitswap protocols
+        for protocol in BITSWAP_PROTOCOLS:
+            self.host.remove_stream_handler(protocol)
         # Clear wantlists and pending requests
         self._wantlist.clear()
         self._peer_wantlists.clear()
