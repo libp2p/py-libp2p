@@ -96,16 +96,6 @@ STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 3  # Balanced retries to handle temporary issues
 
 
-# Extended interfaces for type checking
-@runtime_checkable
-class IHostWithStreamHandlers(TypingProtocol):
-    """Extended host interface with stream handler methods."""
-
-    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
-        """Remove a stream handler for a protocol."""
-        ...
-
-
 @runtime_checkable
 class INetStreamWithExtras(TypingProtocol):
     """Extended net stream interface with additional methods."""
@@ -194,22 +184,10 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(dst_stream)
             self._active_relays.clear()
 
-            # Unregister protocol handlers - safely handle missing method
+            # Unregister protocol handlers
             if self.allow_hop:
-                try:
-                    # Try to unregister handlers - some host implementations
-                    # may not have this method
-                    self.host.remove_stream_handler(PROTOCOL_ID)  # type: ignore
-                    self.host.remove_stream_handler(STOP_PROTOCOL_ID)  # type: ignore
-                except AttributeError:
-                    # Host does not support remove_stream_handler - handlers will be
-                    # garbage collected
-                    logger.debug(
-                        "Host does not support remove_stream_handler, "
-                        "handlers will be garbage collected"
-                    )
-                except Exception as e:
-                    logger.error("Error unregistering stream handlers: %s", str(e))
+                self.host.remove_stream_handler(PROTOCOL_ID)
+            self.host.remove_stream_handler(STOP_PROTOCOL_ID)
 
     async def _close_stream(self, stream: INetStream | None) -> None:
         """Helper function to safely close a stream."""
