@@ -826,6 +826,8 @@ async def test_handle_iwant(monkeypatch):
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
 
+        # Test stability fix: use wait_until_ready() and poll for peer
+        # registration instead of a fixed sleep to avoid flaky failures.
         await pubsubs_gsub[index_bob].wait_until_ready()
 
         with trio.fail_after(2.0):

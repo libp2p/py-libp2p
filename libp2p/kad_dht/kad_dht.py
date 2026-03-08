@@ -141,8 +141,7 @@ class KadDHT(Service):
         :param host: The libp2p host.
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
         :param enable_random_walk: Whether to enable automatic random walk
-        :param validator: Custom validator for DHT records
-        :param validator_changed: If True, indicates the validator was explicitly set
+        :param validator: Custom NamespacedValidator for DHT records
         :param protocol_prefix: Protocol prefix (default: /ipfs)
         :param enable_providers: Enable provider record support
         :param enable_values: Enable value record support

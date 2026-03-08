@@ -12,12 +12,6 @@ class ErrBetterRecord(Exception):
         super().__init__(f'Found better value for "{key}')
 
 
-class ValidationError(Exception):
-    """Raised when record validation fails."""
-
-    pass
-
-
 class Validator:
     """Base class for all validators"""
 
@@ -133,7 +127,6 @@ class NamespacedValidator:
 
         Raises:
             InvalidRecordType: If strict_validation is True and no validator found.
-            ValidationError: If the validator rejects the record.
 
         """
         validator = self.validator_by_key(key)
