@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
 
 from libp2p.custom_types import TProtocol
 
@@ -31,8 +30,9 @@ def dht_protocol_name(network_name: str) -> TProtocol:
     return TProtocol(FIL_DHT_PROTOCOL_PREFIX + "/" + network_name)
 
 
-def filecoin_message_id(msg: Any) -> bytes:
-    data = msg.data
+def filecoin_message_id(msg: object) -> bytes:
+    """Expect ``msg`` to expose a bytes-like ``data`` attribute."""
+    data = getattr(msg, "data", None)
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("message 'data' field must be bytes-like")
     return hashlib.blake2b(bytes(data), digest_size=32).digest()
