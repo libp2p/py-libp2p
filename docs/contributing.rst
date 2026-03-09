@@ -365,11 +365,7 @@ working on Windows, macOS, and Linux. Run ``python scripts/audit_paths.py`` to c
 for path issues; the same audit runs in ``pre-commit`` and fails on P0/P1 issues.
 
 For the full API reference, see :mod:`libp2p.utils.paths`. A working example is
-available in ``examples/path_handling.py``:
-
-.. literalinclude:: ../examples/path_handling.py
-    :language: python
-    :caption: Example: Cross-platform path handling
+available in :doc:`examples.path_handling`.
 
 Documentation
 ~~~~~~~~~~~~~
