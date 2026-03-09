@@ -467,7 +467,7 @@ class TLSTransport(ISecureTransport):
 
             if prim_remote_peer_id != peer_id:
                 logger.error(
-                    "Primitive and expected peer-id mismatch.Dropping the connection"
+                    "Primitive and expected peer-id mismatch. Dropping the connection"
                 )
                 raise
 
