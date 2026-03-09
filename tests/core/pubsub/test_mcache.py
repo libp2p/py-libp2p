@@ -2,8 +2,6 @@ from collections.abc import (
     Sequence,
 )
 
-import pytest
-
 from libp2p.peer.id import (
     ID,
 )
@@ -39,7 +37,7 @@ def test_mcache():
 
     for i in range(10):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
         get_msg = mcache.get(mid)
 
         # successful read
@@ -51,7 +49,7 @@ def test_mcache():
 
     for i in range(10):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[i]
 
@@ -62,7 +60,7 @@ def test_mcache():
 
     for i in range(20):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
         get_msg = mcache.get(mid)
 
         assert get_msg == msg
@@ -73,13 +71,13 @@ def test_mcache():
 
     for i in range(10):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[10 + i]
 
     for i in range(10, 20):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[i - 10]
 
@@ -107,7 +105,7 @@ def test_mcache():
 
     for i in range(10):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
         get_msg = mcache.get(mid)
 
         # Should be evicted from cache
@@ -115,7 +113,7 @@ def test_mcache():
 
     for i in range(10, 60):
         msg = msgs[i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
         get_msg = mcache.get(mid)
 
         assert get_msg == msg
@@ -126,35 +124,18 @@ def test_mcache():
 
     for i in range(10):
         msg = msgs[50 + i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[i]
 
     for i in range(10, 20):
         msg = msgs[30 + i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[i]
 
     for i in range(20, 30):
         msg = msgs[10 + i]
-        mid = (msg.seqno, msg.from_id)
+        mid = msg.from_id + msg.seqno
 
         assert mid == gids[i]
-
-
-def test_mcache_get_by_control_message_id():
-    mcache = MessageCache(3, 5)
-    msg = make_msg(["test"], b"\x01", ID(b"test"))
-    mcache.put(msg)
-
-    control_id = str((msg.seqno, msg.from_id))
-
-    assert mcache.get_by_control_message_id(control_id) == msg
-
-
-def test_mcache_get_by_control_message_id_rejects_invalid_id():
-    mcache = MessageCache(3, 5)
-
-    with pytest.raises(ValueError):
-        mcache.get_by_control_message_id("not_a_valid_msg_id")

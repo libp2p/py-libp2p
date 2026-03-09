@@ -1,16 +1,14 @@
 import logging
-import re
 
 from libp2p.abc import IHost
+from libp2p.custom_types import (
+    MessageID,
+)
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb.rpc_pb2 import RPC
 
 logger = logging.getLogger(__name__)
-_BYTES_LITERAL_PATTERN: str = r"""(?:b'(?:[^'\\]|\\.)*'|b"(?:[^"\\]|\\.)*")"""
-_CONTROL_MESSAGE_ID_PATTERN: re.Pattern[str] = re.compile(
-    rf"^\({_BYTES_LITERAL_PATTERN}, {_BYTES_LITERAL_PATTERN}\)$"
-)
 
 
 def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
@@ -39,10 +37,13 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     """
     if msg.HasField("senderRecord"):
         try:
+            # Convert the signed-peer-record(Envelope) from
+            # protobuf bytes
             envelope, record = consume_envelope(msg.senderRecord, "libp2p-peer-record")
             if not record.peer_id == peer_id:
                 return False
 
+            # Use the default TTL of 2 hours (7200 seconds)
             if not host.get_peerstore().consume_peer_record(envelope, 7200):
                 logger.error("Failed to update the Certified-Addr-Book")
                 return False
@@ -52,10 +53,19 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     return True
 
 
-def format_control_message_id(mid: tuple[bytes, bytes]) -> str:
-    return str(mid)
+def parse_message_id_safe(msg_id_str: str) -> MessageID:
+    """Safely handle message ID as string."""
+    return MessageID(msg_id_str)
 
 
-def validate_control_message_id(control_id: str) -> None:
-    if not _CONTROL_MESSAGE_ID_PATTERN.fullmatch(control_id):
-        raise ValueError(f"invalid control message ID: {control_id!r}")
+def safe_bytes_from_hex(hex_str: str) -> bytes | None:
+    """
+    Decode a hex-encoded string to bytes, returning None on failure.
+
+    Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
+    so that malformed hex from peers does not crash the gossip handler task.
+    """
+    try:
+        return bytes.fromhex(hex_str)
+    except ValueError:
+        return None

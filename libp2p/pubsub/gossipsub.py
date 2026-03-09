@@ -62,8 +62,8 @@ from .score import (
     ScoreParams,
 )
 from .utils import (
-    format_control_message_id,
-    validate_control_message_id,
+    parse_message_id_safe,
+    safe_bytes_from_hex,
 )
 
 PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
@@ -1334,7 +1334,7 @@ class GossipSub(IPubsubRouter, Service):
                 peers_to_emit_ihave_to = self._get_in_topic_gossipsub_peers_from_minus(
                     topic, gossip_count, current_peers, True
                 )
-                msg_id_strs = [format_control_message_id(msg_id) for msg_id in msg_ids]
+                msg_id_strs = [msg_id.hex() for msg_id in msg_ids]
                 for peer in peers_to_emit_ihave_to:
                     peers_to_gossip[peer][topic] = msg_id_strs
 
@@ -1577,25 +1577,24 @@ class GossipSub(IPubsubRouter, Service):
                 ihave_msg.topicID,
             )
             return
-        pubsub = self.pubsub
-        if pubsub is None:
+        if self.pubsub is None:
             raise NoPubsubAttached
-        # Add all unknown message IDs to the list of messages we want to request.
-        msg_ids_wanted: list[MessageID] = []
+        pubsub = self.pubsub
 
-        for raw_msg_id in ihave_msg.messageIDs:
-            try:
-                validate_control_message_id(raw_msg_id)
-                msg_id_bytes = raw_msg_id.encode("utf-8")
-            except (UnicodeEncodeError, ValueError):
+        # Add all unknown message ids (ids that appear in ihave_msg but not
+        # already seen) to list of messages we want to request
+        msg_ids_wanted: list[MessageID] = []
+        for msg_id in ihave_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id)
+            if mid_bytes is None:
                 logger.warning(
-                    "skipping malformed IHAVE message ID from peer %s",
+                    "Received invalid hex message ID in IHAVE from %s: %r",
                     sender_peer_id,
+                    msg_id,
                 )
                 continue
-
-            if not pubsub.seen_messages.has(msg_id_bytes):
-                msg_ids_wanted.append(MessageID(raw_msg_id))
+            if not pubsub.seen_messages.has(mid_bytes):
+                msg_ids_wanted.append(parse_message_id_safe(msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1618,16 +1617,21 @@ class GossipSub(IPubsubRouter, Service):
             )
             return
 
-        msgs_to_forward: list[rpc_pb2.Message] = []
-        for raw_msg_id in iwant_msg.messageIDs:
-            try:
-                msg = self.mcache.get_by_control_message_id(raw_msg_id)
-            except ValueError:
+        msg_ids: list[bytes] = []
+        for msg_id_str in iwant_msg.messageIDs:
+            mid_bytes = safe_bytes_from_hex(msg_id_str)
+            if mid_bytes is None:
                 logger.warning(
-                    "skipping malformed IWANT message ID from peer %s",
+                    "Received invalid hex message ID in IWANT from %s: %r",
                     sender_peer_id,
+                    msg_id_str,
                 )
-                raise
+                continue
+            msg_ids.append(mid_bytes)
+        msgs_to_forward: list[rpc_pb2.Message] = []
+        for msg_id_iwant in msg_ids:
+            # Check if the wanted message ID is present in mcache
+            msg: rpc_pb2.Message | None = self.mcache.get(msg_id_iwant)
 
             # Cache hit
             if msg:
