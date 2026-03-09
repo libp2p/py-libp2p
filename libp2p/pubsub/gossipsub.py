@@ -1781,10 +1781,11 @@ class GossipSub(IPubsubRouter, Service):
         will send an IHAVE to *sender_peer_id* immediately (not at the next
         heartbeat).
 
-        Per the Topic Observation spec, only peers that:
-          1. Negotiated ``/meshsub/1.3.0`` (checked by the caller), AND
-          2. Advertised the ``topicObservation`` extension in their first message
-        should be permitted to send OBSERVE.
+        Per the Topic Observation spec, only peers that meet both of the
+        following conditions should be permitted to send OBSERVE:
+
+        - Negotiated ``/meshsub/1.3.0`` (checked by the caller), and
+        - Advertised the ``topicObservation`` extension in their first message.
 
         :param observe_msg:    The OBSERVE control message.
         :param sender_peer_id: ID of the peer that sent the OBSERVE.
