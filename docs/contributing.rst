@@ -364,6 +364,9 @@ or ``get_temp_dir()`` over hard-coded ``/tmp/`` or ``C:\\``. This keeps the code
 working on Windows, macOS, and Linux. Run ``python scripts/audit_paths.py`` to check
 for path issues; the same audit runs in ``pre-commit`` and fails on P0/P1 issues.
 
+For the full API reference, see :mod:`libp2p.utils.paths`. A working example is
+available in :doc:`examples.path_handling`.
+
 Documentation
 ~~~~~~~~~~~~~
 
