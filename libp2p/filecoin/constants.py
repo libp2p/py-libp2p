@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Protocol, cast
 
 from libp2p.custom_types import TProtocol
 
@@ -18,6 +19,10 @@ ACCEPT_PX_SCORE_THRESHOLD = 1000.0
 OPPORTUNISTIC_GRAFT_SCORE_THRESHOLD = 3.5
 
 
+class _SupportsDataAttribute(Protocol):
+    data: object
+
+
 def blocks_topic(network_name: str) -> str:
     return FIL_BLOCKS_TOPIC_PREFIX + "/" + network_name
 
@@ -32,7 +37,7 @@ def dht_protocol_name(network_name: str) -> TProtocol:
 
 def filecoin_message_id(msg: object) -> bytes:
     """Expect ``msg`` to expose a bytes-like ``data`` attribute."""
-    data = getattr(msg, "data", None)
+    data = cast(_SupportsDataAttribute, msg).data
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("message 'data' field must be bytes-like")
     return hashlib.blake2b(bytes(data), digest_size=32).digest()

@@ -1,4 +1,5 @@
 import random
+from typing import cast
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -7,6 +8,7 @@ from unittest.mock import (
 import pytest
 import trio
 
+from libp2p.abc import INetStream
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
     GossipSub,
@@ -824,9 +826,11 @@ async def test_handle_iwant(monkeypatch):
         index_bob = 1
         id_alice = pubsubs_gsub[index_alice].my_id
 
-        # Connect Alice and Bob
-        await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+        bob_pubsub = gossipsubs[index_bob].pubsub
+        assert bob_pubsub is not None
+
+        peer_stream = cast(INetStream, MagicMock(spec=INetStream))
+        bob_pubsub.peers[id_alice] = peer_stream
 
         test_message = rpc_pb2.Message(data=b"test_data")
         test_seqno = b"1234"
@@ -849,6 +853,7 @@ async def test_handle_iwant(monkeypatch):
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
         mock_write_msg.assert_called_once()
+        assert mock_write_msg.call_args[0][0] is peer_stream
         packet = mock_write_msg.call_args[0][1]
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
