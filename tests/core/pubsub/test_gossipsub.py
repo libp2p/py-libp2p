@@ -791,23 +791,24 @@ async def test_handle_ihave(monkeypatch):
         mock_emit_iwant = AsyncMock()
         monkeypatch.setattr(gossipsubs[index_alice], "emit_iwant", mock_emit_iwant)
 
-        # Create a test message ID as hex-encoded bytes (from_id + seqno)
         test_seqno = b"1234"
         test_from = id_bob.to_bytes()
-        test_msg_id = (test_from + test_seqno).hex()
+        test_msg_id = str((test_seqno, test_from))
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=[test_msg_id])
 
-        # Mock seen_messages.cache to avoid false positives
-        monkeypatch.setattr(pubsubs_gsub[index_alice].seen_messages, "cache", {})
+        mock_seen_has = MagicMock(return_value=False)
+        monkeypatch.setattr(
+            pubsubs_gsub[index_alice].seen_messages, "has", mock_seen_has
+        )
 
         # Simulate Bob sending IHAVE to Alice
         await gossipsubs[index_alice].handle_ihave(ihave_msg, id_bob)
 
-        # Check if emit_iwant was called with the correct message ID
+        mock_seen_has.assert_called_once_with(test_msg_id.encode("utf-8"))
         mock_emit_iwant.assert_called_once()
         called_args = mock_emit_iwant.call_args[0]
-        assert called_args[0] == [test_msg_id]  # Expected message IDs
-        assert called_args[1] == id_bob  # Sender peer ID
+        assert called_args[0] == [test_msg_id]
+        assert called_args[1] == id_bob
 
 
 @pytest.mark.trio
@@ -834,16 +835,17 @@ async def test_handle_iwant(monkeypatch):
             while id_alice not in pubsubs_gsub[index_bob].peers:
                 await trio.sleep(0.01)
 
-        # Mock mcache.get to return a message
         test_message = rpc_pb2.Message(data=b"test_data")
         test_seqno = b"1234"
         test_from = id_alice.to_bytes()
+        test_msg_id = str((test_seqno, test_from))
 
-        # Use hex-encoded bytes (from_id + seqno) as message ID
-        test_msg_id = (test_from + test_seqno).hex()
-
-        mock_mcache_get = MagicMock(return_value=test_message)
-        monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
+        mock_mcache_lookup = MagicMock(return_value=test_message)
+        monkeypatch.setattr(
+            gossipsubs[index_bob].mcache,
+            "get_by_control_message_id",
+            mock_mcache_lookup,
+        )
 
         # Mock write_msg to capture the sent packet
         mock_write_msg = AsyncMock()
@@ -853,26 +855,19 @@ async def test_handle_iwant(monkeypatch):
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[test_msg_id])
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
-        # Check if write_msg was called with the correct packet
         mock_write_msg.assert_called_once()
         packet = mock_write_msg.call_args[0][1]
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
 
-        # Verify that mcache.get was called with the correct bytes message ID
-        mock_mcache_get.assert_called_once()
-        called_msg_id = mock_mcache_get.call_args[0][0]
-        assert isinstance(called_msg_id, bytes)
-        assert called_msg_id == test_from + test_seqno
+        mock_mcache_lookup.assert_called_once_with(test_msg_id)
 
 
 @pytest.mark.trio
 async def test_handle_iwant_invalid_msg_id(monkeypatch):
     """
-    Test that handle_iwant silently skips malformed (non-hex) message IDs
-    instead of raising ValueError, so a misbehaving peer cannot crash the handler.
-    mcache.get must not be called for invalid IDs (proving they were skipped).
+    Test that handle_iwant raises ValueError for malformed message IDs.
     """
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
         gossipsub_routers = []
@@ -888,28 +883,26 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
         await trio.sleep(0.1)
 
-        # Patch mcache.get so we can verify handle_iwant never looks up invalid IDs.
-        # NOTE: We intentionally do NOT assert on write_msg because the background
-        # pubsub service may call it asynchronously (e.g. peer-record announcements),
-        # causing race-condition flakes. The mcache.get assertion alone proves that
-        # invalid message IDs are skipped before any cache lookup or forwarding occurs.
         mock_mcache_get = MagicMock()
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
+        mock_write_msg = AsyncMock()
+        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
 
-        # Malformed message ID (not valid hex) — should be skipped without raising
+        # Malformed message ID (not a tuple string)
         malformed_msg_id = "not_a_valid_msg_id"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
-        mock_mcache_get.reset_mock()
-        # Must not raise; defensive parsing silently skips invalid IDs
-        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        with pytest.raises(ValueError):
+            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
+        mock_write_msg.assert_not_called()
 
-        # Another malformed ID — also silently skipped
+        # Message ID that's a tuple string but not (bytes, bytes)
         invalid_tuple_msg_id = "('abc', 123)"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
-        mock_mcache_get.reset_mock()
-        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        with pytest.raises(ValueError):
+            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
+        mock_write_msg.assert_not_called()
 
 
 @pytest.mark.trio
@@ -938,9 +931,6 @@ async def test_handle_ihave_empty_message_ids(monkeypatch):
 
         # Empty messageIDs list
         ihave_msg = rpc_pb2.ControlIHave(messageIDs=[])
-
-        # Mock seen_messages.cache to avoid false positives
-        monkeypatch.setattr(pubsubs_gsub[index_alice].seen_messages, "cache", {})
 
         # Simulate Bob sending IHAVE to Alice
         await gossipsubs[index_alice].handle_ihave(ihave_msg, id_bob)

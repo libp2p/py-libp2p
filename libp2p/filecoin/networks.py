@@ -35,6 +35,7 @@ CALIBNET_BOOTSTRAP: tuple[str, ...] = (
 NETWORK_PRESETS: dict[NetworkAlias, FilecoinNetworkPreset] = {
     "mainnet": FilecoinNetworkPreset(
         name="mainnet",
+        # Upstream still uses the historical mainnet genesis name "testnetnet".
         genesis_network_name="testnetnet",
         bootstrap_addresses=MAINNET_BOOTSTRAP,
     ),
