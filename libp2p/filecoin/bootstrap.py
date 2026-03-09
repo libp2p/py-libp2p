@@ -99,6 +99,7 @@ def resolve_dns_bootstrap_to_ip4_tcp(addrs: list[str]) -> list[str]:
             continue
 
         try:
+            # Startup-only blocking lookup; switch to trio.socket.getaddrinfo if needed.
             infos = socket.getaddrinfo(
                 dns_host,
                 int(tcp_port),
