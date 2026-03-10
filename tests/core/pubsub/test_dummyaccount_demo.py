@@ -2,6 +2,7 @@ from collections.abc import (
     Callable,
 )
 import logging
+
 import pytest
 import trio
 
