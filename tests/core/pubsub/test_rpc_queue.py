@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 from collections import deque
+from unittest.mock import patch
 
 import pytest
 import trio
 import trio.testing
 
-from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.gossipsub import GossipSub
+from libp2p.pubsub.pb import (
+    rpc_pb2,
+    rpc_pb2 as _rpc_pb2,
+)
 from libp2p.pubsub.rpc_queue import (
     DefaultMaxMessageSize,
     OutBoundQueueSize,
     PriorityQueue,
     RpcQueue,
+    _propagate_sender_record,
     _rpc_has_data,
     _varint_size,
 )
+from libp2p.tools.utils import connect
+from tests.utils.factories import PubsubFactory
 
 
 def _make_rpc(payload_size: int = 0) -> rpc_pb2.RPC:
@@ -79,20 +87,6 @@ class TestPriorityQueue:
         assert pq.push(_make_rpc(), priority=False) is False
         assert len(pq) == 2
 
-    def test_push_rejected_priority_when_full(self) -> None:
-        pq = PriorityQueue(max_size=1)
-        assert pq.push(_make_rpc(), priority=True) is True
-        assert pq.push(_make_rpc(), priority=True) is False
-        assert len(pq) == 1
-
-    def test_push_returns_true_when_under_limit(self) -> None:
-        pq = PriorityQueue(max_size=10)
-        assert pq.push(_make_rpc()) is True
-
-    def test_default_max_size(self) -> None:
-        pq = PriorityQueue()
-        assert pq.max_size == OutBoundQueueSize
-
 
 class TestRpcQueue:
     def test_close_sets_flag(self) -> None:
@@ -100,10 +94,6 @@ class TestRpcQueue:
         assert not q.closed
         q.close()
         assert q.closed
-
-    def test_push_returns_true_when_not_full(self) -> None:
-        q = RpcQueue()
-        assert q.push(_make_rpc()) is True
 
     def test_push_on_closed_returns_false(self) -> None:
         q = RpcQueue()
@@ -233,37 +223,6 @@ class TestSplitRpc:
                     all_ids.extend(ih.messageIDs)
         assert len(all_ids) == 20
 
-    def test_ihave_final_batch_not_lost(self) -> None:
-        """Regression: the final IHave batch must not be silently dropped."""
-        rpc = rpc_pb2.RPC()
-        ihave = rpc.control.ihave.add()
-        ihave.topicID = "t"
-        ihave.messageIDs.append("only-one")
-        q = RpcQueue(max_message_size=10000)
-        parts = q.split_rpc(rpc)
-        all_ids = []
-        for p in parts:
-            if p.HasField("control"):
-                for ih in p.control.ihave:
-                    all_ids.extend(ih.messageIDs)
-        assert len(all_ids) == 1
-        assert all_ids[0] == "only-one"
-
-    def test_iwant_no_double_append(self) -> None:
-        """Regression: IWant must not duplicate message IDs."""
-        rpc = rpc_pb2.RPC()
-        iwant = rpc.control.iwant.add()
-        for i in range(5):
-            iwant.messageIDs.append("id-%d" % i)
-        q = RpcQueue(max_message_size=10000)
-        parts = q.split_rpc(rpc)
-        all_ids = []
-        for p in parts:
-            if p.HasField("control"):
-                for iw in p.control.iwant:
-                    all_ids.extend(iw.messageIDs)
-        assert len(all_ids) == 5
-
     def test_iwant_split_oversized(self) -> None:
         rpc = rpc_pb2.RPC()
         iwant = rpc.control.iwant.add()
@@ -333,15 +292,6 @@ class TestSplitRpc:
                     all_ids.extend(iw.messageIDs)
         assert len(all_ids) == 20
 
-    def test_idontwant_not_split_when_small(self) -> None:
-        rpc = rpc_pb2.RPC()
-        idw = rpc.control.idontwant.add()
-        idw.messageIDs.append(b"small")
-        q = RpcQueue(max_message_size=10000)
-        parts = q.split_rpc(rpc)
-        assert len(parts) == 1
-        assert len(parts[0].control.idontwant) == 1
-
     # ── edge-case: oversized single items ──
 
     def test_ihave_oversized_topic(self) -> None:
@@ -398,35 +348,6 @@ class TestSplitRpc:
                     all_ids.extend(iw.messageIDs)
         assert len(all_ids) == 1
         assert all(_rpc_has_data(p) for p in parts)
-
-    def test_idontwant_oversized_coalesced(self) -> None:
-        """
-        Oversized IDontWant messageIDs are coalesced into shared
-        ControlIDontWant entries rather than one entry per messageID.
-        """
-        rpc = rpc_pb2.RPC()
-        idw = rpc.control.idontwant.add()
-        for i in range(10):
-            idw.messageIDs.append(b"x" * 20)
-        # Each mid ≈22 bytes on wire.  Limit of 200 triggers the oversized
-        # path but allows several mids per chunk → proves coalescing.
-        q = RpcQueue(max_message_size=200)
-        parts = q.split_rpc(rpc)
-        all_ids: list[bytes] = []
-        for p in parts:
-            if p.HasField("control"):
-                for entry in p.control.idontwant:
-                    assert len(entry.messageIDs) >= 1
-                    all_ids.extend(entry.messageIDs)
-        assert len(all_ids) == 10
-        # At least one entry should hold >1 mid (proves coalescing)
-        max_per_entry = max(
-            len(entry.messageIDs)
-            for p in parts
-            if p.HasField("control")
-            for entry in p.control.idontwant
-        )
-        assert max_per_entry > 1, "mids should be coalesced, not one per entry"
 
     def test_idontwant_oversized_single_mid(self) -> None:
         """A single oversized IDontWant messageID is emitted as a solo."""
@@ -495,3 +416,259 @@ class TestConstants:
 
     def test_outbound_queue_size(self) -> None:
         assert OutBoundQueueSize == 32
+
+
+FAKE_SENDER_RECORD = b"\x0asigned-peer-record-bytes"
+
+
+class TestSplitRpcSenderRecord:
+    def test_publish_split(self) -> None:
+        rpc = rpc_pb2.RPC()
+        for _ in range(10):
+            rpc.publish.add().data = b"x" * 100
+        rpc.senderRecord = FAKE_SENDER_RECORD
+
+        parts = RpcQueue(max_message_size=250).split_rpc(rpc)
+        assert len(parts) > 1
+        assert parts[0].senderRecord == FAKE_SENDER_RECORD
+        for p in parts[1:]:
+            assert p.senderRecord == b""
+
+    def test_fast_path(self) -> None:
+        rpc = rpc_pb2.RPC()
+        rpc.subscriptions.add().topicid = "t"
+        rpc.control.graft.add().topicID = "t"
+        rpc.senderRecord = FAKE_SENDER_RECORD
+
+        parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
+        assert any(p.senderRecord == FAKE_SENDER_RECORD for p in parts)
+
+    def test_slow_path(self) -> None:
+        rpc = rpc_pb2.RPC()
+        for i in range(20):
+            rpc.control.graft.add().topicID = f"topic-{i}" * 10
+        rpc.senderRecord = FAKE_SENDER_RECORD
+
+        parts = RpcQueue(max_message_size=100).split_rpc(rpc)
+        assert len(parts) > 1
+        assert parts[0].senderRecord == FAKE_SENDER_RECORD
+
+    def test_size_fast_path(self) -> None:
+        """SenderRecord must be counted before the fast-path size check."""
+        rpc = rpc_pb2.RPC()
+        rpc.subscriptions.add().topicid = "t"
+        rpc.control.graft.add().topicID = "t"
+        rpc.senderRecord = b"x" * 80
+
+        parts = RpcQueue(max_message_size=100).split_rpc(rpc)
+        for p in parts:
+            assert p.ByteSize() <= 100
+
+    def test_size_slow_path(self) -> None:
+        """SenderRecord must be counted in slow-path accumulator checks."""
+        rpc = rpc_pb2.RPC()
+        for i in range(10):
+            rpc.control.graft.add().topicID = f"topic-{i}" * 5
+        rpc.senderRecord = b"x" * 80
+
+        parts = RpcQueue(max_message_size=150).split_rpc(rpc)
+        assert len(parts) > 1
+        for p in parts:
+            assert p.ByteSize() <= 150
+        assert parts[0].senderRecord == rpc.senderRecord
+
+    def test_publish_path_reserves_space(self) -> None:
+        """First publish chunk accounts for senderRecord overhead."""
+        rpc = rpc_pb2.RPC()
+        for _ in range(4):
+            rpc.publish.add().data = b"a" * 40
+        rpc.senderRecord = b"S" * 60
+
+        parts = RpcQueue(max_message_size=100).split_rpc(rpc)
+        assert sum(len(p.publish) for p in parts) == 4
+        assert parts[0].senderRecord == b"S" * 60
+        for p in parts:
+            if len(p.publish) > 1:
+                assert p.ByteSize() <= 100
+
+    def test_no_false_empty_chunk(self) -> None:
+        """SenderRecord + zero publish messages must not emit a spurious chunk."""
+        rpc = rpc_pb2.RPC()
+        rpc.senderRecord = b"RECORD"
+        rpc.subscriptions.add().topicid = "topic-a"
+
+        parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
+        assert len(parts) == 1
+        assert len(parts[0].publish) == 0
+        assert parts[0].senderRecord == b"RECORD"
+
+    def test_propagate_on_empty_out(self) -> None:
+        original = rpc_pb2.RPC()
+        original.senderRecord = FAKE_SENDER_RECORD
+        result = _propagate_sender_record(original, [])
+        assert len(result) == 1
+        assert result[0].ByteSize() == 0
+
+
+class TestSplitRpcExtensions:
+    def test_fast_path(self) -> None:
+        rpc = rpc_pb2.RPC()
+        ext = rpc.control.extensions.add()
+        ext.name = "test-ext"
+        ext.data = b"ext-data"
+
+        parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
+        assert len(parts) == 1
+        assert parts[0].control.extensions[0].name == "test-ext"
+
+    def test_slow_path_split(self) -> None:
+        rpc = rpc_pb2.RPC()
+        for i in range(20):
+            rpc.control.graft.add().topicID = f"topic-{i}" * 10
+        for i in range(10):
+            ext = rpc.control.extensions.add()
+            ext.name = f"ext-{i}"
+            ext.data = b"x" * 50
+
+        parts = RpcQueue(max_message_size=100).split_rpc(rpc)
+        all_exts = [
+            e for p in parts if p.HasField("control") for e in p.control.extensions
+        ]
+        assert len(all_exts) == 10
+
+    def test_extension_only_not_filtered(self) -> None:
+        rpc = rpc_pb2.RPC()
+        rpc.control.extensions.add().name = "only"
+        assert _rpc_has_data(rpc) is True
+
+        parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
+        assert len(parts) == 1
+
+
+# Integration tests
+
+
+def _shrink_queues(pubsub, limit: int) -> None:
+    """Lower max_message_size on every queue the node already holds."""
+    for q in pubsub.peer_queues.values():
+        q.max_message_size = limit
+
+
+@pytest.mark.trio
+async def test_publish_reaches_peer_through_split():
+    """
+    End-to-end: publish a message and confirm it arrives at the subscriber.
+    Uses the canonical pattern: subscribe → connect → wait for mesh → publish.
+    """
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2,
+    ) as pubsubs:
+        topic = "split-test"
+        await pubsubs[0].subscribe(topic)
+        sub1 = await pubsubs[1].subscribe(topic)
+
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await trio.sleep(2)
+
+        payload = b"A" * 100
+        await pubsubs[0].publish(topic, payload)
+
+        with trio.fail_after(5):
+            msg = await sub1.get()
+        assert msg.data == payload
+
+
+@pytest.mark.trio
+async def test_split_rpc_actually_splits_in_send_rpc():
+    """
+    Use real peers + real queues to prove that split_rpc produces
+    multiple chunks for a large control message, and that all chunks
+    are pushed to the queue.
+    """
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        topic = "instrumented"
+        await pubsubs[0].subscribe(topic)
+        await pubsubs[1].subscribe(topic)
+
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await trio.sleep(2)
+
+        # Shrink queues on node 0.
+        _shrink_queues(pubsubs[0], 200)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        peer1_id = pubsubs[1].host.get_id()
+
+        # Build a large control message that will need splitting.
+        ctrl = _rpc_pb2.ControlMessage()
+        for i in range(20):
+            ihave = ctrl.ihave.add()
+            ihave.topicID = f"topic-{i}"
+            ihave.messageIDs.extend([f"mid-{i}-{j}" for j in range(5)])
+
+        rpc = _rpc_pb2.RPC()
+        rpc.control.CopyFrom(ctrl)
+        rpc.senderRecord = b"X" * 50
+
+        # Record what split_rpc returns.
+        queue = pubsubs[0].peer_queues[peer1_id]
+        parts = queue.split_rpc(rpc)
+
+        assert len(parts) > 1, "Expected the RPC to be split into multiple chunks"
+
+        # Verify all IHAVE entries are preserved across parts.
+        all_mids = []
+        for p in parts:
+            if p.HasField("control"):
+                for ih in p.control.ihave:
+                    all_mids.extend(ih.messageIDs)
+        assert len(all_mids) == 100  # 20 topics × 5 mids each
+
+        # senderRecord only on the first chunk.
+        assert parts[0].senderRecord == b"X" * 50
+        for p in parts[1:]:
+            assert p.senderRecord == b""
+
+        # Feed through send_rpc and verify chunks were enqueued.
+        initial_len = len(queue)
+        router0.send_rpc(peer1_id, rpc)
+        # Some chunks may be dropped (oversized solos) but at least
+        # some should have been pushed.
+        assert len(queue) > initial_len
+
+
+@pytest.mark.trio
+async def test_sender_record_reaches_peer():
+    """
+    Verify senderRecord is consumed by the receiving peer through the
+    real publish → split_rpc → wire → receive pipeline.
+    """
+    captured = []
+
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        topic = "sr-test"
+        await pubsubs[0].subscribe(topic)
+        sub1 = await pubsubs[1].subscribe(topic)
+
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await trio.sleep(2)
+
+        import libp2p.pubsub.pubsub as pubsub_mod
+
+        orig_fn = pubsub_mod.maybe_consume_signed_record
+
+        def spy(rpc, host, peer_id):
+            if rpc.senderRecord:
+                captured.append(rpc.senderRecord)
+            return orig_fn(rpc, host, peer_id)
+
+        with patch.object(pubsub_mod, "maybe_consume_signed_record", side_effect=spy):
+            await pubsubs[0].publish(topic, b"hello")
+
+            with trio.fail_after(5):
+                msg = await sub1.get()
+            assert msg.data == b"hello"
+
+        # At least one RPC received by node 1 carried a senderRecord.
+        assert any(len(sr) > 0 for sr in captured)

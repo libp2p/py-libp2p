@@ -179,13 +179,10 @@ class RpcQueue:
            oversized chunks (matching Go's ``sendRPC`` loop).
 
         Sections handled (in order): Publish, Subscriptions,
-        Graft, Prune, IWant, IHave, IDontWant.
+        Graft, Prune, IWant, IHave, IDontWant, Extensions.
 
-        **Note:** Go's ``split`` does *not* handle IDontWant — it only
-        survives via the fast path.  We add an explicit IDontWant section
-        (using the same append→check→undo→yield pattern) so that large
-        IDontWant payloads are preserved even when the RPC is too big
-        for the fast path.
+        Go's ``split`` doesn't handle IDontWant or Extensions; we add
+        explicit slow-path sections for both.
 
         :param rpc: the RPC to split.
         :return: a list of RPCs, each ideally within *max_message_size*
@@ -197,52 +194,57 @@ class RpcQueue:
         out: list[rpc_pb2.RPC] = []
         current = rpc_pb2.RPC()
 
+        # Wire overhead of senderRecord for first-chunk space reservation.
+        sender_record_overhead = 0
+        if rpc.senderRecord:
+            sr_len = len(rpc.senderRecord)
+            sender_record_overhead = _PB_FIELD_LT15_SIZE + _varint_size(sr_len) + sr_len
+
         # ── Publish messages (optimised incremental size tracking) ──
-        # Mirrors Go's optimised publish path that avoids calling
-        # .Size() repeatedly on accumulated messages.
-        current_size = 0
+        current_size = sender_record_overhead
         messages_in_current = 0
         publish_list = list(rpc.publish)  # snapshot for slicing
 
         for i, msg in enumerate(publish_list):
-            incremental = _PB_FIELD_LT15_SIZE + self.size_of_embedded_msg(msg)
+            incremental = self.size_of_embedded_msg(msg)
             if current_size + incremental > limit:
                 # Yield what we have so far
                 current.publish.extend(publish_list[i - messages_in_current : i])
                 if messages_in_current > 0:
                     out.append(current)
                     current = rpc_pb2.RPC()
-                current_size = 0
+                # Keep reservation while first chunk hasn't been emitted.
+                current_size = 0 if out else sender_record_overhead
                 messages_in_current = 0
             messages_in_current += 1
             current_size += incremental
 
-        if current_size > 0:
+        if messages_in_current > 0:
             # Yield the remaining publish messages
             start = len(publish_list) - messages_in_current
             current.publish.extend(publish_list[start:])
             out.append(current)
             current = rpc_pb2.RPC()
 
-        # ── Fast path ──
-        # After publish messages are handled, check whether the rest
-        # of the original RPC (subs + control) fits in one chunk.
-        # This mirrors Go's ``nextRPC = *rpc; nextRPC.Publish = nil``
-        # optimisation.
+        # ── Fast path: check if remaining subs + control fits in one chunk ──
         rest = rpc_pb2.RPC()
         rest.subscriptions.extend(rpc.subscriptions)
         if rpc.HasField("control"):
             rest.control.CopyFrom(rpc.control)
+        if rpc.senderRecord and not out:
+            rest.senderRecord = rpc.senderRecord
         rest_size = rest.ByteSize()
         if rest_size > 0 and rest_size <= limit:
             out.append(rest)
-            return out if out else [rpc_pb2.RPC()]
+            return _propagate_sender_record(rpc, out)
 
-        # The rest doesn't fit — split it section by section.
         if rest_size == 0:
-            return out if out else [rpc_pb2.RPC()]
+            return _propagate_sender_record(rpc, out)
 
         current = rpc_pb2.RPC()
+
+        if rpc.senderRecord and not out:
+            current.senderRecord = rpc.senderRecord
 
         # ── Subscriptions ──
         for sub in rpc.subscriptions:
@@ -257,7 +259,6 @@ class RpcQueue:
         if rpc.HasField("control"):
             ctrl = rpc.control
 
-            # Initialise the control wrapper (matching Go's explicit check)
             if not current.HasField("control"):
                 current.control.SetInParent()
                 if current.ByteSize() > limit:
@@ -339,9 +340,7 @@ class RpcQueue:
                             )
                         )
 
-            # IDONTWANT — coalesce into a single ControlIDontWant
-            # (Not in Go's split, but we keep it so oversized IDontWant
-            #  payloads aren't silently dropped when the fast path misses.)
+            # IDONTWANT
             for idontwant in ctrl.idontwant:
                 if not current.control.idontwant:
                     new_idw = rpc_pb2.ControlIDontWant()
@@ -366,17 +365,24 @@ class RpcQueue:
                             )
                         )
 
+            # EXTENSIONS
+            for ext in ctrl.extensions:
+                current.control.extensions.append(ext)
+                if current.ByteSize() > limit:
+                    del current.control.extensions[-1]
+                    out.append(current)
+                    current = rpc_pb2.RPC()
+                    current.control.SetInParent()
+                    current.control.extensions.append(ext)
+
         # ── Flush remaining ──
         if current.ByteSize() > 0:
             out.append(current)
 
-        # Filter out RPCs that only contain an empty control wrapper
-        # (can happen when the first item in a section already exceeds the
-        # limit, causing the accumulator with just ``control {}`` to be
-        # yielded).
+        # Filter out RPCs with only an empty control wrapper.
         out = [r for r in out if _rpc_has_data(r)]
 
-        return out if out else [rpc_pb2.RPC()]
+        return _propagate_sender_record(rpc, out)
 
     @staticmethod
     def size_of_embedded_msg(msg: Any) -> int:
@@ -400,16 +406,29 @@ def _varint_size(value: int) -> int:
 
 
 def _rpc_has_data(rpc: rpc_pb2.RPC) -> bool:
-    """
-    Return ``True`` if *rpc* carries any meaningful content.
-
-    Used by tests and callers to verify that :func:`split_rpc` never
-    emits completely empty RPCs.
-    """
+    """Return ``True`` if *rpc* carries any meaningful content."""
     if rpc.publish or rpc.subscriptions:
         return True
     if rpc.HasField("control"):
         ctrl = rpc.control
-        if ctrl.graft or ctrl.prune or ctrl.iwant or ctrl.ihave or ctrl.idontwant:
+        if (
+            ctrl.graft
+            or ctrl.prune
+            or ctrl.iwant
+            or ctrl.ihave
+            or ctrl.idontwant
+            or ctrl.extensions
+        ):
             return True
     return False
+
+
+def _propagate_sender_record(
+    original: rpc_pb2.RPC, out: list[rpc_pb2.RPC]
+) -> list[rpc_pb2.RPC]:
+    """Copy ``senderRecord`` from *original* onto the first output chunk."""
+    if not out:
+        return [rpc_pb2.RPC()]
+    if original.senderRecord and out:
+        out[0].senderRecord = original.senderRecord
+    return out
