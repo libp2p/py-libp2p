@@ -60,6 +60,35 @@ async def test_ihave_triggers_iwant_for_missing_messages():
 
 
 @pytest.mark.trio
+async def test_ihave_accepts_bytes_message_ids_from_wire():
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2, heartbeat_interval=0.5
+    ) as pubsubs:
+        gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
+        host0, host1 = (ps.host for ps in pubsubs)
+
+        await connect(host0, host1)
+        await trio.sleep(0.5)
+
+        topic = "test_ihave_bytes_message_ids"
+        await pubsubs[0].subscribe(topic)
+        await pubsubs[1].subscribe(topic)
+        await trio.sleep(1.0)
+
+        missing_msg_id = str((b"seqno123", b"peer456")).encode("utf-8")
+
+        emit_iwant_mock = AsyncMock()
+        gsub0.emit_iwant = emit_iwant_mock
+
+        ihave_msg = MagicMock()
+        ihave_msg.messageIDs = [missing_msg_id]
+        ihave_msg.topicID = topic
+        await gsub0.handle_ihave(ihave_msg, host1.get_id())
+
+        emit_iwant_mock.assert_called_once()
+
+
+@pytest.mark.trio
 async def test_iwant_retrieves_missing_messages():
     """Test that IWANT requests retrieve missing messages."""
     async with PubsubFactory.create_batch_with_gossipsub(

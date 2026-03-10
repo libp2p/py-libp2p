@@ -56,6 +56,14 @@ def format_control_message_id(mid: tuple[bytes, bytes]) -> str:
     return str(mid)
 
 
-def validate_control_message_id(control_id: str) -> None:
+def validate_control_message_id(control_id: str | bytes) -> str:
+    if isinstance(control_id, bytes):
+        try:
+            control_id = control_id.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"invalid control message ID: {control_id!r}") from exc
+
     if not _CONTROL_MESSAGE_ID_PATTERN.fullmatch(control_id):
         raise ValueError(f"invalid control message ID: {control_id!r}")
+
+    return control_id
