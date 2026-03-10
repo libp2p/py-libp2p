@@ -93,9 +93,6 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.utils.multiaddr_utils import (
-    join_multiaddrs,
-)
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -193,6 +190,7 @@ class BasicHost(IHost):
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -252,6 +250,9 @@ class BasicHost(IHost):
                 dns_max_retries=bootstrap_dns_max_retries,
             )
         self.psk = psk
+
+        # Address announcement configuration
+        self._announce_addrs = list(announce_addrs) if announce_addrs else None
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -349,13 +350,22 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Return all the multiaddr addresses this host is listening to.
+        Return the multiaddr addresses this host advertises to peers.
+
+        If ``announce_addrs`` was provided, those replace listen addresses
+        entirely.  Otherwise listen addresses are used
 
         Note: This method appends the /p2p/{peer_id} suffix to the addresses.
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [join_multiaddrs(addr, p2p_part) for addr in self.get_transport_addrs()]
+
+        if self._announce_addrs is not None:
+            addrs = list(self._announce_addrs)
+        else:
+            addrs = self.get_transport_addrs()
+
+        return [addr.encapsulate(p2p_part) for addr in addrs]
 
     def get_connected_peers(self) -> list[ID]:
         """
