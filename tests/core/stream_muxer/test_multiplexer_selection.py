@@ -15,8 +15,6 @@ from libp2p import (
 from libp2p.custom_types import TProtocol
 from libp2p.peer.peerinfo import PeerInfo
 
-# Enable logging for debugging
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
