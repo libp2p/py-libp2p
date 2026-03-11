@@ -525,8 +525,11 @@ class IPNSValidator(Validator):
             except Exception as e:
                 raise InvalidRecordType(f"Invalid validity timestamp: {e}")
         else:
-            raise InvalidRecordType(
-                f"Unsupported ValidityType: {validity_type} (only EOL=0 is supported)"
+            # Unreachable: _validate_cbor_structure() already rejects
+            # any ValidityType other than EOL before we get here.
+            raise AssertionError(
+                f"Unexpected ValidityType: {validity_type} "
+                f"(should have been rejected by _validate_cbor_structure)"
             )
 
     def _parse_rfc3339(self, timestamp: str) -> datetime:

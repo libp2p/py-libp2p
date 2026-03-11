@@ -311,7 +311,9 @@ class KadDHT(Service):
 
         vmap = self.validator._validators
 
-        # Check that both pk and ipns validators are present
+        # Check that both pk and ipns validators are present.
+        # Additional namespaces beyond these two are deliberately allowed
+        # so users can register custom validators for extensibility.
         required_validators = {"pk", "ipns"}
         if not required_validators.issubset(set(vmap.keys())):
             missing = required_validators - set(vmap.keys())
