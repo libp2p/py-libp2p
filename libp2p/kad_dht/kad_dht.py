@@ -142,6 +142,8 @@ class KadDHT(Service):
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
         :param enable_random_walk: Whether to enable automatic random walk
         :param validator: Custom NamespacedValidator for DHT records
+        :param validator_changed: If True, indicates the validator was explicitly set
+            and defaults should not be used
         :param protocol_prefix: Protocol prefix (default: /ipfs)
         :param enable_providers: Enable provider record support
         :param enable_values: Enable value record support
