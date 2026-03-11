@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+
 from prometheus_client import Counter
 
 
@@ -10,6 +11,7 @@ class RelayEvent:
     Only the event type is required because the metrics layer
     simply counts occurrences of each event type.
     """
+
     event_type: str
 
 
