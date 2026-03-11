@@ -1,4 +1,3 @@
-import asyncio
 from prometheus_client import Counter
 
 
@@ -8,7 +7,6 @@ class BandwidthMetrics:
     """
 
     def __init__(self):
-
         self.bandwidth = Counter(
             "libp2p_bandwidth_bytes_total",
             "Bandwidth usage by direction and protocol stack",
@@ -70,7 +68,6 @@ class TransportWrapper:
         self.metrics = metrics
 
     async def dial(self, addr, protocols):
-
         stream = await self.transport.dial(addr)
 
         return InstrumentedStream(
@@ -80,7 +77,6 @@ class TransportWrapper:
         )
 
     async def accept(self, protocols):
-
         stream = await self.transport.accept()
 
         return InstrumentedStream(
