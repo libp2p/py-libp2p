@@ -8,7 +8,6 @@ class KadMetrics:
     """
 
     def __init__(self):
-
         # -------------------------
         # GetRecord metrics
         # -------------------------
@@ -31,7 +30,7 @@ class KadMetrics:
         self.query_result_get_closest_peers_ok = Histogram(
             "kad_query_result_get_closest_peers_ok",
             "Number of closest peers returned by a successful query",
-            buckets=(1,2,4,8,16,32,64,128,256,512),
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
         )
 
         self.query_result_get_closest_peers_error = Counter(
@@ -47,7 +46,7 @@ class KadMetrics:
         self.query_result_get_providers_ok = Histogram(
             "kad_query_result_get_providers_ok",
             "Number of providers returned by a successful query",
-            buckets=(1,2,4,8,16,32,64,128,256,512),
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
         )
 
         self.query_result_get_providers_error = Counter(
@@ -64,28 +63,28 @@ class KadMetrics:
             "kad_query_result_num_requests",
             "Number of requests started for a Kademlia query",
             labelnames=["type"],
-            buckets=(1,2,4,8,16,32,64,128,256,512),
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
         )
 
         self.query_result_num_success = Histogram(
             "kad_query_result_num_success",
             "Number of successful requests of a Kademlia query",
             labelnames=["type"],
-            buckets=(1,2,4,8,16,32,64,128,256,512),
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
         )
 
         self.query_result_num_failure = Histogram(
             "kad_query_result_num_failure",
             "Number of failed requests of a Kademlia query",
             labelnames=["type"],
-            buckets=(1,2,4,8,16,32,64,128,256,512),
+            buckets=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512),
         )
 
         self.query_result_duration = Histogram(
             "kad_query_result_duration_seconds",
             "Duration of a Kademlia query",
             labelnames=["type"],
-            buckets=(0.1,0.2,0.4,0.8,1.6,3.2,6.4,12.8,25.6),
+            buckets=(0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4, 12.8, 25.6),
         )
 
         # -------------------------
@@ -111,7 +110,6 @@ class KadMetrics:
     # -----------------------------------------------------
 
     def record_outbound_query(self, query_type, stats):
-
         self.query_result_num_requests.labels(type=query_type).observe(
             stats["num_requests"]
         )
@@ -156,7 +154,6 @@ class KadMetrics:
     # -----------------------------------------------------
 
     def record_routing_update(self, action, bucket):
-
         self.routing_updated.labels(
             action=action,
             bucket=str(bucket),
@@ -165,7 +162,4 @@ class KadMetrics:
     # -----------------------------------------------------
 
     def record_inbound_request(self, request_type):
-
-        self.inbound_requests.labels(
-            request=request_type
-        ).inc()
+        self.inbound_requests.labels(request=request_type).inc()
