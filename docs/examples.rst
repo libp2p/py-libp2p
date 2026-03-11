@@ -29,3 +29,4 @@ Examples
    examples.tls
    examples.autotls
    examples.perf
+   examples.path_handling
