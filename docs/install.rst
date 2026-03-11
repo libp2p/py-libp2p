@@ -97,6 +97,9 @@ To install for development with all dev dependencies:
 
 py-libp2p uses `dependency groups <https://peps.python.org/pep-0735/>`_ (PEP 735)
 for dev dependencies, so the `--group dev` flag is required.
+If you use pip for development installation, ensure pip >= 25.1 so `--group`
+is available.
+For full contributor environment setup, see :doc:`contributing`.
 
 Usage
 -----
