@@ -10,14 +10,15 @@ else:
     )
 
 import pytest
-import trio
+import anyio
+from anyio import CancelScope, Event
 
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
+    AnyIOManager,
     LifecycleError,
     Service,
-    TrioManager,
     as_service,
-    background_trio_service,
+    background_anyio_service,
 )
 
 
@@ -29,15 +30,15 @@ class WaitCancelledService(Service):
 async def do_service_lifecycle_check(
     manager, manager_run_fn, trigger_exit_condition_fn, should_be_cancelled
 ):
-    async with trio.open_nursery() as nursery:
+    async with anyio.create_task_group() as tg:
         assert manager.is_started is False
         assert manager.is_running is False
         assert manager.is_cancelled is False
         assert manager.is_finished is False
 
-        nursery.start_soon(manager_run_fn)
+        tg.start_soon(manager_run_fn)
 
-        with trio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await manager.wait_started()
 
         assert manager.is_started is True
@@ -48,7 +49,7 @@ async def do_service_lifecycle_check(
         # trigger the service to exit
         trigger_exit_condition_fn()
 
-        with trio.fail_after(0.1):
+        with anyio.fail_after(0.1):
             await manager.wait_finished()
 
         if should_be_cancelled:
@@ -72,7 +73,7 @@ async def do_service_lifecycle_check(
 
 def test_service_manager_initial_state():
     service = WaitCancelledService()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     assert manager.is_started is False
     assert manager.is_running is False
@@ -80,16 +81,16 @@ def test_service_manager_initial_state():
     assert manager.is_finished is False
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_clean_exit():
-    trigger_exit = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_clean_exit():
+    trigger_exit = Event()
 
     @as_service
     async def ServiceTest(manager):
         await trigger_exit.wait()
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     await do_service_lifecycle_check(
         manager=manager,
@@ -99,14 +100,14 @@ async def test_trio_service_lifecycle_run_and_clean_exit():
     )
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_external_cancellation():
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_external_cancellation():
     @as_service
     async def ServiceTest(manager):
-        await trio.sleep_forever()
+        await Event().wait()
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     await do_service_lifecycle_check(
         manager=manager,
@@ -116,9 +117,9 @@ async def test_trio_service_lifecycle_run_and_external_cancellation():
     )
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_exception():
-    trigger_error = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_exception():
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -126,7 +127,7 @@ async def test_trio_service_lifecycle_run_and_exception():
         raise RuntimeError("Service throwing error")
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     async def do_service_run():
         with pytest.raises(ExceptionGroup):
@@ -140,9 +141,9 @@ async def test_trio_service_lifecycle_run_and_exception():
     )
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_task_exception():
-    trigger_error = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_task_exception():
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -153,7 +154,7 @@ async def test_trio_service_lifecycle_run_and_task_exception():
         manager.run_task(task_fn)
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     async def do_service_run():
         with pytest.raises(ExceptionGroup):
@@ -167,9 +168,9 @@ async def test_trio_service_lifecycle_run_and_task_exception():
     )
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_sub_service_cancelled_when_parent_stops():
-    ready_cancel = trio.Event()
+    ready_cancel = Event()
 
     # This test runs a service that runs a sub-service that sleeps forever. When the
     # parent exits, the sub-service should be cancelled as well.
@@ -178,7 +179,7 @@ async def test_sub_service_cancelled_when_parent_stops():
         ready_cancel.set()
         await manager.wait_finished()
 
-    sub_manager = TrioManager(WaitForeverService())
+    sub_manager = AnyIOManager(WaitForeverService())
 
     @as_service
     async def ServiceTest(manager):
@@ -189,7 +190,7 @@ async def test_sub_service_cancelled_when_parent_stops():
         await manager.wait_finished()
 
     s = ServiceTest()
-    async with background_trio_service(s) as manager:
+    async with background_anyio_service(s) as manager:
         await ready_cancel.wait()
 
     assert not manager.is_running
@@ -201,9 +202,9 @@ async def test_sub_service_cancelled_when_parent_stops():
     assert sub_manager.is_finished
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_daemon_task_exit():
-    trigger_error = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_daemon_task_exit():
+    trigger_error = Event()
 
     @as_service
     async def ServiceTest(manager):
@@ -214,7 +215,7 @@ async def test_trio_service_lifecycle_run_and_daemon_task_exit():
         await manager.wait_finished()
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     async def do_service_run():
         with pytest.raises(ExceptionGroup):
@@ -228,16 +229,16 @@ async def test_trio_service_lifecycle_run_and_daemon_task_exit():
     )
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_exceptiongroup_in_run():
-    # This test should cause TrioManager.run() to explicitly raise an ExceptionGroup
+    # This test should cause AnyIOManager.run() to explicitly raise an ExceptionGroup
     # containing two exceptions -- one raised inside its run() method and another
     # raised by the daemon task exiting early.
-    trigger_error = trio.Event()
+    trigger_error = Event()
 
     class ServiceTest(Service):
         async def run(self):
-            ready = trio.Event()
+            ready = Event()
             self.manager.run_task(self.error_fn, ready)
             await ready.wait()
             trigger_error.set()
@@ -249,7 +250,7 @@ async def test_exceptiongroup_in_run():
             raise ValueError("Exception inside error_fn")
 
     with pytest.raises(ExceptionGroup) as exc_info:
-        await TrioManager.run_service(ServiceTest())
+        await AnyIOManager.run_service(ServiceTest())
 
     exc = exc_info.value
     assert len(exc.exceptions) == 2
@@ -257,11 +258,11 @@ async def test_exceptiongroup_in_run():
     assert any(isinstance(err, ValueError) for err in exc.exceptions)
 
 
-@pytest.mark.trio
-async def test_trio_service_background_service_context_manager():
+@pytest.mark.anyio
+async def test_anyio_service_background_service_context_manager():
     service = WaitCancelledService()
 
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         # ensure the manager property is set.
         assert hasattr(service, "manager")
         assert service.get_manager() is manager
@@ -277,11 +278,11 @@ async def test_trio_service_background_service_context_manager():
     assert manager.is_finished is True
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_stop():
+@pytest.mark.anyio
+async def test_anyio_service_manager_stop():
     service = WaitCancelledService()
 
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         assert manager.is_started is True
         assert manager.is_running is True
         assert manager.is_cancelled is False
@@ -295,9 +296,9 @@ async def test_trio_service_manager_stop():
         assert manager.is_finished is True
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_run_task():
-    task_event = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_manager_run_task():
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -305,23 +306,21 @@ async def test_trio_service_manager_run_task():
             task_event.set()
 
         manager.run_task(task_fn)
-        # Give the task a chance to run before finishing
-        await trio.lowlevel.checkpoint()
         await manager.wait_finished()
 
-    async with background_trio_service(RunTaskService()):
-        with trio.fail_after(0.1):
+    async with background_anyio_service(RunTaskService()):
+        with anyio.fail_after(0.1):
             await task_event.wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_run_task_waits_for_task_completion():
-    task_event = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_manager_run_task_waits_for_task_completion():
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
         async def task_fn():
-            await trio.sleep(0.01)
+            await anyio.sleep(0.01)
             task_event.set()
 
         manager.run_task(task_fn)
@@ -329,15 +328,15 @@ async def test_trio_service_manager_run_task_waits_for_task_completion():
         # We want to be sure that the task is allowed to continue till
         # completion unless explicitely cancelled.
 
-    async with background_trio_service(RunTaskService()):
-        with trio.fail_after(0.1):
+    async with background_anyio_service(RunTaskService()):
+        with anyio.fail_after(0.1):
             await task_event.wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_run_task_can_still_cancel_after_run_finishes():
-    task_event = trio.Event()
-    service_finished = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishes():
+    task_event = Event()
+    service_finished = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -351,24 +350,24 @@ async def test_trio_service_manager_run_task_can_still_cancel_after_run_finishes
         # completion unless explicitely cancelled.
         service_finished.set()
 
-    async with background_trio_service(RunTaskService()) as manager:
-        with trio.fail_after(0.01):
+    async with background_anyio_service(RunTaskService()) as manager:
+        with anyio.fail_after(0.01):
             await service_finished.wait()
 
         # show that the service hangs waiting for the task to complete.
-        with trio.move_on_after(0.01) as cancel_scope:
+        with anyio.move_on_after(0.01) as cancel_scope:
             await manager.wait_finished()
-        assert cancel_scope.cancelled_caught is True
+        assert cancel_scope.cancel_called is True
 
         # trigger cancellation and see that the service actually stops
         manager.cancel()
-        with trio.fail_after(0.01):
+        with anyio.fail_after(0.01):
             await manager.wait_finished()
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_run_task_reraises_exceptions():
-    task_event = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_manager_run_task_reraises_exceptions():
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -377,19 +376,19 @@ async def test_trio_service_manager_run_task_reraises_exceptions():
             raise Exception("task exception in run_task")
 
         manager.run_task(task_fn)
-        with trio.fail_after(1):
-            await trio.sleep_forever()
+        with anyio.fail_after(1):
+            await Event().wait()
 
     with pytest.raises(ExceptionGroup):
-        async with background_trio_service(RunTaskService()):
+        async with background_anyio_service(RunTaskService()):
             task_event.set()
-            with trio.fail_after(1):
-                await trio.sleep_forever()
+            with anyio.fail_after(1):
+                await Event().wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_run_daemon_task_cancels_if_exits():
-    task_event = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
+    task_event = Event()
 
     @as_service
     async def RunTaskService(manager):
@@ -397,24 +396,24 @@ async def test_trio_service_manager_run_daemon_task_cancels_if_exits():
             await task_event.wait()
 
         manager.run_daemon_task(daemon_task_fn, name="daemon_task_fn")
-        with trio.fail_after(1):
-            await trio.sleep_forever()
+        with anyio.fail_after(1):
+            await Event().wait()
 
     with pytest.raises(ExceptionGroup):
-        async with background_trio_service(RunTaskService()):
+        async with background_anyio_service(RunTaskService()):
             task_event.set()
-            with trio.fail_after(1):
-                await trio.sleep_forever()
+            with anyio.fail_after(1):
+                await Event().wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_manager_propogates_and_records_exceptions():
+@pytest.mark.anyio
+async def test_anyio_service_manager_propogates_and_records_exceptions():
     @as_service
     async def ThrowErrorService(manager):
         raise RuntimeError("this is the error")
 
     service = ThrowErrorService()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     assert manager.did_error is False
 
@@ -424,9 +423,9 @@ async def test_trio_service_manager_propogates_and_records_exceptions():
     assert manager.did_error is True
 
 
-@pytest.mark.trio
-async def test_trio_service_lifecycle_run_and_clean_exit_with_child_service():
-    trigger_exit = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_lifecycle_run_and_clean_exit_with_child_service():
+    trigger_exit = Event()
 
     @as_service
     async def ChildServiceTest(manager):
@@ -438,7 +437,7 @@ async def test_trio_service_lifecycle_run_and_clean_exit_with_child_service():
         await child_manager.wait_started()
 
     service = ServiceTest()
-    manager = TrioManager(service)
+    manager = AnyIOManager(service)
 
     await do_service_lifecycle_check(
         manager=manager,
@@ -448,9 +447,9 @@ async def test_trio_service_lifecycle_run_and_clean_exit_with_child_service():
     )
 
 
-@pytest.mark.trio
-async def test_trio_service_with_daemon_child_service():
-    ready = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_daemon_child_service():
+    ready = Event()
 
     @as_service
     async def ChildServiceTest(manager):
@@ -464,18 +463,18 @@ async def test_trio_service_with_daemon_child_service():
         await manager.wait_finished()
 
     service = ServiceTest()
-    async with background_trio_service(service):
+    async with background_anyio_service(service):
         await ready.wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_with_daemon_child_task():
-    ready = trio.Event()
-    started = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_daemon_child_task():
+    ready = Event()
+    started = Event()
 
     async def _task():
         started.set()
-        await trio.sleep(100)
+        await anyio.sleep(100)
 
     @as_service
     async def ServiceTest(manager):
@@ -485,13 +484,13 @@ async def test_trio_service_with_daemon_child_task():
         await manager.wait_finished()
 
     service = ServiceTest()
-    async with background_trio_service(service):
+    async with background_anyio_service(service):
         await ready.wait()
 
 
-@pytest.mark.trio
-async def test_trio_service_with_async_generator():
-    is_within_agen = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_async_generator():
+    is_within_agen = Event()
 
     async def do_agen():
         while True:
@@ -500,45 +499,45 @@ async def test_trio_service_with_async_generator():
     @as_service
     async def ServiceTest(manager):
         async for _ in do_agen():  # noqa: F841
-            await trio.lowlevel.checkpoint()
+            await anyio.sleep(0)
             is_within_agen.set()
 
-    async with background_trio_service(ServiceTest()) as manager:
+    async with background_anyio_service(ServiceTest()) as manager:
         await is_within_agen.wait()
         manager.cancel()
 
 
-@pytest.mark.trio
-async def test_trio_service_disallows_task_scheduling_when_not_running():
+@pytest.mark.anyio
+async def test_anyio_service_disallows_task_scheduling_when_not_running():
     class ServiceTest(Service):
         async def run(self):
             await self.manager.wait_finished()
 
         def do_schedule(self):
-            self.manager.run_task(trio.sleep, 1)
+            self.manager.run_task(anyio.sleep, 1)
 
     service = ServiceTest()
 
-    async with background_trio_service(service):
+    async with background_anyio_service(service):
         service.do_schedule()
 
     with pytest.raises(LifecycleError):
         service.do_schedule()
 
 
-@pytest.mark.trio
-async def test_trio_service_disallows_task_scheduling_after_cancel():
+@pytest.mark.anyio
+async def test_anyio_service_disallows_task_scheduling_after_cancel():
     @as_service
     async def ServiceTest(manager):
         manager.cancel()
-        manager.run_task(trio.sleep, 1)
+        manager.run_task(anyio.sleep, 1)
 
-    await TrioManager.run_service(ServiceTest())
+    await AnyIOManager.run_service(ServiceTest())
 
 
-@pytest.mark.trio
-async def test_trio_service_cancellation_with_running_daemon_task():
-    in_daemon = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_cancellation_with_running_daemon_task():
+    in_daemon = Event()
 
     class ServiceTest(Service):
         async def run(self):
@@ -548,16 +547,16 @@ async def test_trio_service_cancellation_with_running_daemon_task():
         async def _do_daemon(self):
             in_daemon.set()
             while self.manager.is_running:
-                await trio.lowlevel.checkpoint()
+                await anyio.sleep(0)
 
-    async with background_trio_service(ServiceTest()) as manager:
+    async with background_anyio_service(ServiceTest()) as manager:
         await in_daemon.wait()
         manager.cancel()
 
 
-@pytest.mark.trio
-async def test_trio_service_with_try_finally_cleanup():
-    ready_cancel = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_try_finally_cleanup():
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -570,16 +569,16 @@ async def test_trio_service_with_try_finally_cleanup():
                 self.cleanup_up = True
 
     service = TryFinallyService()
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         await ready_cancel.wait()
         assert not service.cleanup_up
         manager.cancel()
     assert service.cleanup_up
 
 
-@pytest.mark.trio
-async def test_trio_service_with_try_finally_cleanup_with_unshielded_await():
-    ready_cancel = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -589,20 +588,20 @@ async def test_trio_service_with_try_finally_cleanup_with_unshielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                await trio.lowlevel.checkpoint()
+                await anyio.sleep(0)
                 self.cleanup_up = True
 
     service = TryFinallyService()
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         await ready_cancel.wait()
         assert not service.cleanup_up
         manager.cancel()
     assert not service.cleanup_up
 
 
-@pytest.mark.trio
-async def test_trio_service_with_try_finally_cleanup_with_shielded_await():
-    ready_cancel = trio.Event()
+@pytest.mark.anyio
+async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
+    ready_cancel = Event()
 
     class TryFinallyService(Service):
         cleanup_up = False
@@ -612,19 +611,19 @@ async def test_trio_service_with_try_finally_cleanup_with_shielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
-                    await trio.lowlevel.checkpoint()
+                with CancelScope(shield=True):
+                    await anyio.sleep(0)
                 self.cleanup_up = True
 
     service = TryFinallyService()
-    async with background_trio_service(service) as manager:
+    async with background_anyio_service(service) as manager:
         await ready_cancel.wait()
         assert not service.cleanup_up
         manager.cancel()
     assert service.cleanup_up
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_error_in_service_run():
     class ServiceTest(Service):
         async def run(self):
@@ -632,14 +631,14 @@ async def test_error_in_service_run():
             raise ValueError("Exception inside run()")
 
     with pytest.raises(ExceptionGroup):
-        await TrioManager.run_service(ServiceTest())
+        await AnyIOManager.run_service(ServiceTest())
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_daemon_task_finishes_leaving_children():
     class ServiceTest(Service):
         async def sleep_and_fail(self):
-            await trio.sleep(1)
+            await anyio.sleep(1)
             raise AssertionError(
                 "This should not happen as the task should be cancelled"
             )
@@ -651,4 +650,4 @@ async def test_daemon_task_finishes_leaving_children():
             self.manager.run_daemon_task(self.buggy_daemon)
 
     with pytest.raises(ExceptionGroup):
-        await TrioManager.run_service(ServiceTest())
+        await AnyIOManager.run_service(ServiceTest())
