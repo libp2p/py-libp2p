@@ -120,8 +120,8 @@ class TestBitswapClientWantlist:
 
         await client.want_block(cid, priority=5)
 
-        assert cid in client._wantlist
-        assert client._wantlist[cid]["priority"] == 5
+        assert parse_cid(cid) in client._wantlist
+        assert client._wantlist[parse_cid(cid)]["priority"] == 5
 
     @pytest.mark.trio
     async def test_remove_from_wantlist(self):
@@ -132,10 +132,10 @@ class TestBitswapClientWantlist:
         cid = compute_cid_v1(b"test data")
 
         await client.want_block(cid, priority=5)
-        assert cid in client._wantlist
+        assert parse_cid(cid) in client._wantlist
 
         await client.cancel_want(cid)
-        assert cid not in client._wantlist
+        assert parse_cid(cid) not in client._wantlist
 
     @pytest.mark.trio
     async def test_has_in_wantlist(self):
@@ -145,10 +145,10 @@ class TestBitswapClientWantlist:
 
         cid = compute_cid_v1(b"test data")
 
-        assert cid not in client._wantlist
+        assert parse_cid(cid) not in client._wantlist
 
         await client.want_block(cid)
-        assert cid in client._wantlist
+        assert parse_cid(cid) in client._wantlist
 
 
 class TestBitswapClientBlockOperations:
@@ -247,10 +247,10 @@ class TestBitswapClientPeerManagement:
         peer_id = PeerID(b"peer123")
         cid_bytes = compute_cid_v1(b"data")
 
-        client._peer_wantlists[peer_id] = {cid_bytes: {"priority": 1}}
+        client._peer_wantlists[peer_id] = {parse_cid(cid_bytes): {"priority": 1}}
 
         assert peer_id in client._peer_wantlists
-        assert cid_bytes in client._peer_wantlists[peer_id]
+        assert parse_cid(cid_bytes) in client._peer_wantlists[peer_id]
 
 
 class TestBitswapClientMixedCIDInputs:
@@ -276,11 +276,11 @@ class TestBitswapClientMixedCIDInputs:
         cid = compute_cid_v1(b"mixed-client-want-cancel")
 
         await client.want_block(cid_to_text(cid), priority=9)
-        assert cid in client._wantlist
-        assert client._wantlist[cid]["priority"] == 9
+        assert parse_cid(cid) in client._wantlist
+        assert client._wantlist[parse_cid(cid)]["priority"] == 9
 
         await client.cancel_want(cid.hex())
-        assert cid not in client._wantlist
+        assert parse_cid(cid) not in client._wantlist
 
     @pytest.mark.trio
     async def test_have_block_with_canonical_text_input(self):
@@ -296,8 +296,8 @@ class TestBitswapClientMixedCIDInputs:
         has_block = await client.have_block(cid_to_text(cid))
 
         assert has_block is True
-        assert cid not in client._wantlist
-        client._broadcast_wantlist.assert_awaited_once_with([cid])  # type: ignore[attr-defined]
+        assert parse_cid(cid) not in client._wantlist
+        client._broadcast_wantlist.assert_awaited_once_with([parse_cid(cid)])  # type: ignore[attr-defined]
 
 
 class TestBitswapClientMultipleBlocks:

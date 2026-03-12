@@ -38,7 +38,7 @@ from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.records.ipns import IPNSValidator
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 
