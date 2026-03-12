@@ -89,7 +89,7 @@ from libp2p.security.tls.autotls.acme import (
     compute_b36_peer_id,
 )
 from libp2p.security.tls.autotls.broker import BrokerClient
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
