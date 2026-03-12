@@ -5,6 +5,7 @@ Kademlia DHT routing table implementation.
 from collections import (
     OrderedDict,
 )
+import hashlib
 import logging
 import time
 
@@ -46,7 +47,9 @@ def peer_id_to_key(peer_id: ID) -> bytes:
     :param peer_id: The peer ID to convert
     :return: 32-byte (256-bit) key for routing table operations
     """
-    return multihash.digest(peer_id.to_bytes(), "sha2-256").digest
+    digest = hashlib.sha256(peer_id.to_bytes()).digest()
+    mh_bytes = multihash.encode(digest, "sha2-256")
+    return multihash.decode(mh_bytes).digest
 
 
 def key_to_int(key: bytes) -> int:
