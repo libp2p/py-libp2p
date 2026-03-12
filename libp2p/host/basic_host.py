@@ -93,6 +93,9 @@ from libp2p.tools.async_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
+from libp2p.utils.multiaddr_utils import (
+    join_multiaddrs,
+)
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -186,6 +189,10 @@ class BasicHost(IHost):
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
+        *,
+        bootstrap_allow_ipv6: bool = False,
+        bootstrap_dns_timeout: float = 10.0,
+        bootstrap_dns_max_retries: int = 3,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -198,6 +205,9 @@ class BasicHost(IHost):
         :param negotiate_timeout: Protocol negotiation timeout
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
+        :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
+        :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -234,7 +244,13 @@ class BasicHost(IHost):
         # we can avoid hasattr checks elsewhere.
         self.bootstrap = None
         if bootstrap:
-            self.bootstrap = BootstrapDiscovery(network, bootstrap)
+            self.bootstrap = BootstrapDiscovery(
+                network,
+                bootstrap,
+                allow_ipv6=bootstrap_allow_ipv6,
+                dns_resolution_timeout=bootstrap_dns_timeout,
+                dns_max_retries=bootstrap_dns_max_retries,
+            )
         self.psk = psk
 
         # Cache a signed-record if the local-node in the PeerStore
@@ -339,7 +355,7 @@ class BasicHost(IHost):
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [addr.encapsulate(p2p_part) for addr in self.get_transport_addrs()]
+        return [join_multiaddrs(addr, p2p_part) for addr in self.get_transport_addrs()]
 
     def get_connected_peers(self) -> list[ID]:
         """
