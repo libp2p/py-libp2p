@@ -243,6 +243,7 @@ def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:
     try:
         result = cid_to_text(cid)
     except (TypeError, ValueError):
+        # Best-effort fallback: hex for raw bytes, str() for anything else.
         result = cid.hex() if isinstance(cid, bytes) else str(cid)
 
     if max_len is not None and len(result) > max_len:
