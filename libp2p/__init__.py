@@ -13,7 +13,6 @@ from cryptography.hazmat.primitives import serialization
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.quic.config import QUICTransportConfig
 from collections.abc import (
-    Callable,
     Mapping,
     Sequence,
 )

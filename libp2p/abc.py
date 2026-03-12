@@ -2002,8 +2002,8 @@ class IHost(ABC):
 
         Returns
         -------
-        tuple[Multiaddr, ...]
-            Advertised multiaddresses (with ``/p2p/`` suffix).
+        list[Multiaddr]
+            A list of advertised multiaddresses, each with a ``/p2p/{peer_id}`` suffix.
 
         """
 

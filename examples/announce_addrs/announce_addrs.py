@@ -33,8 +33,6 @@ logger = logging.getLogger("announce_addrs_example")
 
 # Silence noisy libraries
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger().setLevel(logging.WARNING)
-logger.setLevel(logging.INFO)
 
 
 async def run_listener(port: int, announce_addrs: list[str]) -> None:
