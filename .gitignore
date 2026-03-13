@@ -196,3 +196,7 @@ _build/
 # Attack simulation test results
 tests/security/attack_simulation/results/
 libp2p-forge
+
+# OSO health report generated outputs
+reports/*.json
+reports/*.md

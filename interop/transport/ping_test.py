@@ -98,7 +98,7 @@ def configure_logging() -> None:
             "libp2p.stream_muxer.yamux",
             "libp2p.stream_muxer.mplex",
             "libp2p.host",
-            "libp2p.tools.async_service",
+            "libp2p.tools.anyio_service",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
