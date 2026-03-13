@@ -1,0 +1,1 @@
+BasicHost and test infrastructure now perform proper shutdown and resource cleanup, eliminating "Task was destroyed but it is pending!" warnings.
