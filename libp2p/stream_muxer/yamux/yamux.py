@@ -70,6 +70,8 @@ HEADER_SIZE = 12
 # Network byte order: version (B), type (B), flags (H), stream_id (I), length (I)
 YAMUX_HEADER_FORMAT = "!BBHII"
 DEFAULT_WINDOW_SIZE = 256 * 1024
+MAX_WINDOW_SIZE = 16 * 1024 * 1024  # 16 MB max receive window (matches go-yamux)
+RTT_MEASURE_INTERVAL = 30  # seconds between RTT measurements
 
 GO_AWAY_NORMAL = 0x0
 GO_AWAY_PROTOCOL_ERROR = 0x1
@@ -89,6 +91,10 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
+        self.target_recv_window: int = (
+            DEFAULT_WINDOW_SIZE  # grows up to MAX_WINDOW_SIZE
+        )
+        self.epoch_start: float = 0.0  # trio.current_time() of last window update
         self.rw_lock = ReadWriteLock()
         self.close_lock = trio.Lock()
 
@@ -234,6 +240,36 @@ class YamuxStream(IMuxedStream):
             async with self.window_lock:
                 await _do_window_update()
 
+    async def _auto_tune_and_send_window_update(self, bytes_consumed: int) -> None:
+        """
+        Auto-tune receive window size based on RTT and send window update.
+
+        Ports go-yamux's auto-tuning: starts at 256KB, doubles each RTT epoch
+        up to 16MB. Only sends update when delta >= 50% of target (hysteresis).
+        """
+        async with self.window_lock:
+            delta = self.target_recv_window - self.recv_window
+            # Hysteresis: skip if delta < 50% of target (matches go-yamux GrowTo)
+            if delta < self.target_recv_window // 2:
+                return
+
+            # Auto-tune: if within 4x RTT of last epoch, double the target
+            now = trio.current_time()
+            rtt = self.conn.rtt()
+            if rtt > 0 and self.epoch_start > 0 and (now - self.epoch_start) < rtt * 4:
+                self.target_recv_window = min(
+                    self.target_recv_window * 2, MAX_WINDOW_SIZE
+                )
+                delta = self.target_recv_window - self.recv_window
+
+            self.epoch_start = now
+            self.recv_window += delta
+            logger.debug(
+                f"Stream {self.stream_id}: Auto-tune window update "
+                f"delta={delta}, target={self.target_recv_window}"
+            )
+            await self.send_window_update(delta, skip_lock=True)
+
     async def read(self, n: int | None = -1) -> bytes:
         """
         Read data from the stream.
@@ -288,11 +324,8 @@ class YamuxStream(IMuxedStream):
                     buffer.clear()
                     data += chunk
 
-                    # Send window update for the chunk we just read
-                    async with self.window_lock:
-                        self.recv_window += len(chunk)
-                        logger.debug(f"Stream {self.stream_id}: Update {len(chunk)}")
-                        await self.send_window_update(len(chunk), skip_lock=True)
+                    # Auto-tune and send window update for the chunk we just read
+                    await self._auto_tune_and_send_window_update(len(chunk))
 
                 # Check for reset
                 if self.reset_received:
@@ -337,13 +370,7 @@ class YamuxStream(IMuxedStream):
             return b""
         else:
             data = await self.conn.read_stream(self.stream_id, n)
-            async with self.window_lock:
-                self.recv_window += len(data)
-                logger.debug(
-                    f"Stream {self.stream_id}: Sending window update after read, "
-                    f"increment={len(data)}"
-                )
-                await self.send_window_update(len(data), skip_lock=True)
+            await self._auto_tune_and_send_window_update(len(data))
             return data
 
     async def close(self) -> None:
@@ -463,6 +490,40 @@ class Yamux(IMuxedConn):
         self.stream_events: dict[int, trio.Event] = {}
         self._write_lock = trio.Lock()
         self._nursery: Nursery | None = None
+        self._rtt: float = 0.0  # smoothed RTT in seconds
+        self._ping_id: int = 0  # incrementing ping nonce
+        self._ping_sent_time: float = 0.0  # trio.current_time() when ping sent
+        self._ping_event: trio.Event = trio.Event()
+
+    def rtt(self) -> float:
+        """Return the current smoothed RTT estimate in seconds."""
+        return self._rtt
+
+    async def _measure_rtt_loop(self) -> None:
+        """Background task that periodically measures RTT via ping/pong."""
+        # Initial delay to let the connection establish
+        await trio.sleep(0.5)
+        while not self.event_shutting_down.is_set():
+            try:
+                self._ping_id += 1
+                self._ping_event = trio.Event()
+                self._ping_sent_time = trio.current_time()
+                header = struct.pack(
+                    YAMUX_HEADER_FORMAT, 0, TYPE_PING, FLAG_SYN, 0, self._ping_id
+                )
+                await self.secured_conn.write(header)
+                # Wait for pong with timeout
+                with trio.move_on_after(10.0):
+                    await self._ping_event.wait()
+            except Exception:
+                # Connection likely closed, exit the loop
+                break
+            if self.event_shutting_down.is_set():
+                break
+            # Sleep between measurements, checking shutdown periodically
+            with trio.move_on_after(RTT_MEASURE_INTERVAL):
+                while not self.event_shutting_down.is_set():
+                    await trio.sleep(1.0)
 
     async def start(self) -> None:
         logger.debug(f"Starting Yamux for {self.peer_id}")
@@ -475,7 +536,15 @@ class Yamux(IMuxedConn):
             logger.debug(
                 f"Yamux.start() starting handle_incoming task for {self.peer_id}"
             )
-            nursery.start_soon(self.handle_incoming)
+
+            async def _run_incoming_then_cancel() -> None:
+                try:
+                    await self.handle_incoming()
+                finally:
+                    nursery.cancel_scope.cancel()
+
+            nursery.start_soon(_run_incoming_then_cancel)
+            nursery.start_soon(self._measure_rtt_loop)
             logger.debug(f"Yamux.start() setting event_started for {self.peer_id}")
             self.event_started.set()
         logger.debug(
@@ -836,12 +905,9 @@ class Yamux(IMuxedConn):
                             elif typ == TYPE_DATA and length > 0:
                                 # Data SYN: length is payload bytes
                                 try:
-                                    data = await read_exactly(
-                                        self.secured_conn, length
-                                    )
-                                    self.stream_buffers[stream_id].extend(
-                                        data
-                                    )
+                                    data = await read_exactly(self.secured_conn, length)
+                                    self.stream_buffers[stream_id].extend(data)
+                                    stream.recv_window -= len(data)
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Read {length} bytes with SYN "
@@ -881,7 +947,9 @@ class Yamux(IMuxedConn):
                                 0,
                             )
                             await self._write_frame(rst_header)
-                elif (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_ACK:
+                elif (
+                    typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE
+                ) and flags & FLAG_ACK:
                     async with self.streams_lock:
                         if stream_id in self.streams:
                             stream = self.streams[stream_id]
@@ -898,10 +966,9 @@ class Yamux(IMuxedConn):
                             elif typ == TYPE_DATA and length > 0:
                                 # Data ACK: length is payload bytes
                                 try:
-                                    data = await read_exactly(
-                                        self.secured_conn, length
-                                    )
+                                    data = await read_exactly(self.secured_conn, length)
                                     self.stream_buffers[stream_id].extend(data)
+                                    self.streams[stream_id].recv_window -= len(data)
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Received ACK with {length} bytes "
@@ -956,9 +1023,17 @@ class Yamux(IMuxedConn):
                         )
                         await self._write_frame(ping_header)
                     elif flags & FLAG_ACK:
+                        # Compute RTT with exponential smoothing
+                        now = trio.current_time()
+                        new_rtt = now - self._ping_sent_time
+                        if self._rtt == 0.0:
+                            self._rtt = new_rtt
+                        else:
+                            self._rtt = (self._rtt + new_rtt) / 2
+                        self._ping_event.set()
                         logger.debug(
                             f"Received ping response with value"
-                            f"{length} for peer {self.peer_id}"
+                            f"{length} for peer {self.peer_id}, rtt={self._rtt:.4f}s"
                         )
                 elif typ == TYPE_DATA:
                     try:
@@ -1002,6 +1077,7 @@ class Yamux(IMuxedConn):
                         async with self.streams_lock:
                             if stream_id in self.streams:
                                 self.stream_buffers[stream_id].extend(data)
+                                self.streams[stream_id].recv_window -= len(data)
                                 # Always set event, even if no data
                                 # in case FIN/RST is set
                                 self.stream_events[stream_id].set()
