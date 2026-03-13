@@ -25,7 +25,7 @@ from libp2p.filecoin import (
 )
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.tools.async_service.trio_service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 from libp2p.utils.address_validation import find_free_port
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

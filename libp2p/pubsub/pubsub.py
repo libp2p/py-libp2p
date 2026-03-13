@@ -58,7 +58,6 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.anyio_service import (
     Service,
 )
