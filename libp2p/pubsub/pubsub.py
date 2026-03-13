@@ -58,7 +58,6 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
-from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.anyio_service import (
     Service,
 )
@@ -79,6 +78,10 @@ from .pubsub_notifee import (
 )
 from .subscription import (
     TrioSubscriptionAPI,
+)
+from .utils import (
+    format_control_message_id,
+    maybe_consume_signed_record,
 )
 from .validators import (
     PUBSUB_SIGNING_PREFIX,
@@ -1182,6 +1185,10 @@ class Pubsub(Service, IPubsub):
     def _mark_msg_seen(self, msg: rpc_pb2.Message) -> None:
         msg_id = self._msg_id_constructor(msg)
         self.seen_messages.add(msg_id)
+        # Mirror the control-message string ID so IHAVE checks can use has().
+        self.seen_messages.add(
+            format_control_message_id((msg.seqno, msg.from_id)).encode("utf-8")
+        )
 
     def _is_subscribed_to_msg(self, msg: rpc_pb2.Message) -> bool:
         return any(topic in self.topic_ids for topic in msg.topicIDs)
