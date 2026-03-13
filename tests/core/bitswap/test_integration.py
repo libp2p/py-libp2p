@@ -1,5 +1,6 @@
 """Integration tests for Bitswap file transfer between nodes."""
 
+import logging
 from pathlib import Path
 import tempfile
 
@@ -9,11 +10,13 @@ import trio
 
 from libp2p import new_host
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import cid_to_text, compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
+
+logger = logging.getLogger(__name__)
 
 
 class TestBitswapIntegration:
@@ -447,9 +450,8 @@ class TestBitswapIntegration:
 
                     # Step 4: Request a non-existent block and verify we
                     # get a DontHave response
-                    print(
-                        "\n--- Step 4: Request nonexistent block and "
-                        "verify DontHave response ---"
+                    logger.debug(
+                        "Step 4: Request nonexistent block and verify DontHave response"
                     )
 
                     # Start the request in the background (will eventually
@@ -475,18 +477,24 @@ class TestBitswapIntegration:
 
                         # The ACTUAL test: Did we receive a DontHave
                         # response?
-                        print(
-                            f"DontHave responses: {client_bitswap._dont_have_responses}"
+                        logger.debug(
+                            "DontHave responses: %s",
+                            client_bitswap._dont_have_responses,
                         )
-                        assert nonexistent_cid in client_bitswap._dont_have_responses, (
+                        assert (
+                            parse_cid(nonexistent_cid)
+                            in client_bitswap._dont_have_responses
+                        ), (
                             "Client should have received a DontHave "
                             "response for the nonexistent CID"
                         )
                         assert (
                             provider_host.get_id()
-                            in client_bitswap._dont_have_responses[nonexistent_cid]
+                            in client_bitswap._dont_have_responses[
+                                parse_cid(nonexistent_cid)
+                            ]
                         ), "Provider should have sent the DontHave response"
-                        print("✓ DontHave response received from provider!")
+                        logger.debug("DontHave response received from provider")
 
                         # Cancel the background request
                         test_nursery.cancel_scope.cancel()

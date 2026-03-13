@@ -27,6 +27,9 @@ from libp2p.crypto.serialization import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.io.exceptions import (
+    ConnectionClosedError,
+)
 from libp2p.io.msgio import (
     VarIntLengthMsgReadWriter,
 )
@@ -132,12 +135,12 @@ async def run_handshake(
     read_writer = PlaintextHandshakeReadWriter(conn)
     try:
         await read_writer.write_msg(msg_bytes)
-    except RawConnError as e:
+    except (RawConnError, ConnectionClosedError) as e:
         raise HandshakeFailure("connection closed") from e
 
     try:
         remote_msg_bytes = await read_writer.read_msg()
-    except RawConnError as e:
+    except (RawConnError, ConnectionClosedError) as e:
         raise HandshakeFailure("connection closed") from e
     remote_msg = plaintext_pb2.Exchange()
     remote_msg.ParseFromString(remote_msg_bytes)
