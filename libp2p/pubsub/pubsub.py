@@ -736,7 +736,7 @@ class Pubsub(Service, IPubsub):
 
         # Notify anyone waiting in wait_for_peer()
         if peer_id in self._peer_added_events:
-            self._peer_added_events[peer_id].set()
+            self._peer_added_events.pop(peer_id).set()
 
         # Flush any messages that were queued while this peer's protocol
         # identification was still in progress (identify-aware publishing).
@@ -842,7 +842,7 @@ class Pubsub(Service, IPubsub):
                 # Notify anyone waiting in wait_for_subscription()
                 key = (origin_id, sub_message.topicid)
                 if key in self._subscription_events:
-                    self._subscription_events[key].set()
+                    self._subscription_events.pop(key).set()
 
                 # Flush any messages that were queued while waiting for this
                 # peer's subscription (identify-aware publishing).

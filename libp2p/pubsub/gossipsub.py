@@ -707,6 +707,11 @@ class GossipSub(IPubsubRouter, Service):
             if msg is None:
                 continue
 
+            scorer = self.scorer
+            if scorer is not None:
+                if not scorer.allow_publish(peer_id, list(msg.topicIDs)):
+                    continue
+
             # Create RPC with this message
             rpc_msg = rpc_pb2.RPC(publish=[msg])
 
