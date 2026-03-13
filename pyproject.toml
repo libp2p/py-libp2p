@@ -19,6 +19,7 @@ maintainers = [
 ]
 dependencies = [
     "aioquic>=1.2.0",
+    "anyio>=4.0",
     "base58>=1.0.3",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
@@ -74,6 +75,8 @@ mdns-demo = "examples.mDNS.mDNS:main"
 circuit-relay-demo = "examples.circuit_relay.relay_example:main"
 tls-demo = "examples.tls.example_tls_server:main"
 tls-client-demo = "examples.tls.example_tls_client:main"
+path-handling = "examples.path_handling_demo:main"
+oso-health-report = "libp2p.observability.oso.cli:main"
 
 [dependency-groups]
 dev = [
