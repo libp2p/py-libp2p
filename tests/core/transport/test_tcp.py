@@ -154,10 +154,10 @@ async def test_tcp_yamux_stress_ping():
                     if response == b"\x01" * PING_LENGTH:
                         latency_ms = int((trio.current_time() - start) * 1000)
                         latencies.append(latency_ms)
-                        print(f"[TCP Ping #{i}] Latency: {latency_ms} ms")
+                        logger.debug("[TCP Ping #%d] Latency: %d ms", i, latency_ms)
                     await stream.close()
                 except Exception as e:
-                    print(f"[TCP Ping #{i}] Failed: {e}")
+                    logger.warning("[TCP Ping #%d] Failed: %s", i, e)
                     failures.append(i)
                     if stream:
                         try:
