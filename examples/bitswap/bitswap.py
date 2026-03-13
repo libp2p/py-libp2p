@@ -31,7 +31,7 @@ logging.basicConfig(
 # Silence verbose loggers
 logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
 logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
-logging.getLogger("libp2p.tools.async_service.base").setLevel(logging.WARNING)
+logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -289,7 +289,9 @@ async def run_client(
                 output_filename = filename
                 logger.info(f"Filename: {filename} (from metadata)")
             else:
-                output_filename = f"file_{root_cid[:8].hex()}.bin"
+                output_filename = (
+                    f"file_{format_cid_for_display(root_cid, max_len=16)}.bin"
+                )
                 logger.info(f"Filename: {output_filename} (no metadata)")
 
             # Handle filename conflicts

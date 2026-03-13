@@ -35,7 +35,7 @@ from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.utils import InvalidRecordType
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from tests.utils.factories import (
@@ -277,9 +277,12 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     local_value_record = dht_a.value_store.get(key_bytes)
     assert local_value_record is not None
     assert local_value_record.value == value, "Local value storage failed"
-    print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
+    logger.debug(
+        "Number of nodes in peer store: %s",
+        dht_a.host.get_peerstore().peer_ids(),
+    )
     await dht_a.routing_table.add_peer(peer_b_info)
-    print("Routing table of a has ", dht_a.routing_table.get_peer_ids())
+    logger.debug("Routing table of a has: %s", dht_a.routing_table.get_peer_ids())
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before PUT_VALUE req is sent
@@ -330,7 +333,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     # Retrieve the value using the second node
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(key)
-        print("the value stored in node b is", dht_b.get_value_store_size())
+        logger.debug("Value store size in node b: %s", dht_b.get_value_store_size())
         logger.debug("Retrieved value: %s", retrieved_value)
 
     # These are the records that were sent between the peers during the PUT_VALUE req
