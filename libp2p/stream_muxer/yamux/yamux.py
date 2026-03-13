@@ -355,7 +355,7 @@ class YamuxStream(IMuxedStream):
                         YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
                     )
                     await self.conn.secured_conn.write(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending FIN, connection likely closed: {e}")
                 finally:
                     self.send_closed = True
@@ -376,7 +376,7 @@ class YamuxStream(IMuxedStream):
                         YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
                     )
                     await self.conn.secured_conn.write(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending RST, connection likely closed: {e}")
                 finally:
                     self.closed = True
