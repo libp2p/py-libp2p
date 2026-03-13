@@ -15,6 +15,7 @@ Usage:
 import logging
 
 import multiaddr
+import trio
 
 from libp2p.transport import (
     create_transport,
