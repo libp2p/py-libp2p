@@ -19,6 +19,7 @@ maintainers = [
 ]
 dependencies = [
     "aioquic>=1.2.0",
+    "anyio>=4.0",
     "base58>=1.0.3",
     "coincurve==21.0.0",
     "exceptiongroup>=1.2.0; python_version < '3.11'",
@@ -79,6 +80,7 @@ filecoin-dx = "libp2p.filecoin.cli:main"
 filecoin-connect-demo = "examples.filecoin.filecoin_connect_demo:main"
 filecoin-ping-identify-demo = "examples.filecoin.filecoin_ping_identify_demo:main"
 filecoin-pubsub-demo = "examples.filecoin.filecoin_pubsub_demo:main"
+oso-health-report = "libp2p.observability.oso.cli:main"
 
 [dependency-groups]
 dev = [
