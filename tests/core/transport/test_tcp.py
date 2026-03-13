@@ -218,11 +218,8 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
     """
     transport = TCP()
 
-    try:
+    with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
-        assert False, "Should have raised OpenConnectionError"
-    except Exception as e:
-        assert "Failed to open TCP stream" in str(e) or "Failed to dial" in str(e)
 
 
 @pytest.mark.trio
