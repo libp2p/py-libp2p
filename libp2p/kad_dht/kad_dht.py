@@ -240,16 +240,18 @@ class KadDHT(Service):
         The validator is the source of truth when it supports
         ``strict_validation`` at runtime.
         """
-        if isinstance(getattr(self, "validator", None), NamespacedValidator):
-            return self.validator.strict_validation
+        validator = self.validator
+        if isinstance(validator, NamespacedValidator):
+            return validator.strict_validation
         return self._strict_validation
 
     @strict_validation.setter
     def strict_validation(self, value: bool) -> None:
         """Set strict validation mode and synchronize with validator."""
         self._strict_validation = value
-        if isinstance(getattr(self, "validator", None), NamespacedValidator):
-            self.validator.strict_validation = value
+        validator = self.validator
+        if isinstance(validator, NamespacedValidator):
+            validator.strict_validation = value
 
     def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
         """
