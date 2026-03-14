@@ -151,7 +151,7 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
         >>> encoded = encode_dag_pb(links, data)
         >>> decoded_links, decoded_data = decode_dag_pb(encoded)
         >>> for link in decoded_links:
-        ...     print(f"Child CID: {link.cid.hex()[:16]}...")
+        ...     print(f"Child CID: {format_cid_for_display(link.cid, max_len=16)}")
 
     """
     # Parse PBNode
