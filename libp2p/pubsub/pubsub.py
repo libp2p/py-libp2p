@@ -77,6 +77,9 @@ from .pb import (
 from .pubsub_notifee import (
     PubsubNotifee,
 )
+from .rpc_queue import (
+    RpcQueue,
+)
 from .subscription import (
     TrioSubscriptionAPI,
 )
@@ -289,6 +292,7 @@ class Pubsub(Service, IPubsub):
 
     peer_topics: dict[str, set[ID]]
     peers: dict[ID, INetStream]
+    peer_queues: dict[ID, RpcQueue]
 
     topic_validators: dict[str, TopicValidator]
     validation_cache: ValidationCache
@@ -386,6 +390,9 @@ class Pubsub(Service, IPubsub):
 
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
+
+        # Per-peer outbound RPC queues
+        self.peer_queues = {}
 
         # Map of topic to topic validator
         self.topic_validators = {}
@@ -734,6 +741,11 @@ class Pubsub(Service, IPubsub):
 
         self.peers[peer_id] = stream
 
+        # Create per-peer outbound queue and spawn sending task
+        queue = RpcQueue()
+        self.peer_queues[peer_id] = queue
+        self.manager.run_task(self.handle_sending_messages, peer_id, stream, queue)
+
         # Fire event for any task blocked in wait_for_peer()
         if peer_id in self._peer_added_events:
             self._peer_added_events.pop(peer_id).set()
@@ -755,6 +767,10 @@ class Pubsub(Service, IPubsub):
         if peer_id not in self.peers:
             return
         del self.peers[peer_id]
+
+        # Close the outbound queue so the sending task exits
+        if peer_id in self.peer_queues:
+            self.peer_queues.pop(peer_id).close()
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
@@ -803,6 +819,29 @@ class Pubsub(Service, IPubsub):
                         continue
                 # Remove Peer - no more active connections
                 self._handle_dead_peer(peer_id)
+
+    async def handle_sending_messages(
+        self, peer_id: ID, stream: INetStream, queue: RpcQueue
+    ) -> None:
+        """
+        Per-peer sending loop: pops RPCs from *queue*, splits them if needed,
+        and writes each chunk to *stream*.
+
+        Runs as a task spawned by :meth:`_handle_new_peer`.  Exits when the
+        queue is closed (peer disconnected) or the stream errors.
+        """
+        try:
+            while True:
+                rpc = await queue.pop()
+                if rpc is None:
+                    # Queue was closed
+                    return
+                ok = await self.write_msg(stream, rpc)
+                if not ok:
+                    return
+        except Exception:
+            logger.debug("sending loop for %s terminated with error", peer_id)
+            self._handle_dead_peer(peer_id)
 
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
@@ -930,15 +969,35 @@ class Pubsub(Service, IPubsub):
 
         :param raw_msg: raw contents of the message to broadcast
         """
-        # Broadcast message
-        for stream in self.peers.values():
-            # Write message to stream
-            try:
-                await stream.write(encode_varint_prefixed(raw_msg))
-            except StreamClosed:
-                peer_id = stream.muxed_conn.peer_id
-                logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+        rpc_msg = rpc_pb2.RPC()
+        rpc_msg.ParseFromString(raw_msg)
+
+        # Broadcast message via per-peer outbound queues to preserve
+        # queue back-pressure/drop semantics.
+        for peer_id in tuple(self.peers):
+            queue = self.peer_queues.get(peer_id)
+            if queue is None:
+                logger.debug("No outbound queue for peer %s", peer_id)
+                continue
+
+            for part in queue.split_rpc(rpc_msg):
+                if part.ByteSize() > queue.max_message_size:
+                    self.drop_rpc(peer_id, part)
+                    continue
+
+                ok = queue.push(part)
+                if not ok:
+                    self.drop_rpc(peer_id, part)
+                    break
+
+    def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+        """Log (and in the future, meter) a dropped outbound RPC."""
+        logger.debug(
+            "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
+            peer_id,
+            len(rpc.publish),
+            rpc.HasField("control"),
+        )
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
