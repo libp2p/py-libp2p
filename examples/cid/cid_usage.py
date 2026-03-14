@@ -9,11 +9,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
+    cid_to_text,
     compute_cid_v0,
     compute_cid_v1,
     compute_cid_v1_obj,
+    parse_cid,
     parse_cid_codec,
-    parse_cid_version,
     verify_cid,
 )
 
@@ -31,9 +32,9 @@ def main() -> None:
     cid_v1_raw = compute_cid_v1(data, codec=CODEC_RAW)
     cid_v1_dag_pb = compute_cid_v1(data, codec=CODEC_DAG_PB)
 
-    logger.info("CIDv0: %s", cid_v0.hex())
-    logger.info("CIDv1 (raw): %s", cid_v1_raw.hex())
-    logger.info("CIDv1 (dag-pb): %s", cid_v1_dag_pb.hex())
+    logger.info("CIDv0: %s", cid_to_text(cid_v0))
+    logger.info("CIDv1 (raw): %s", cid_to_text(cid_v1_raw))
+    logger.info("CIDv1 (dag-pb): %s", cid_to_text(cid_v1_dag_pb))
 
     logger.info("verify_cid(cid_v0, data): %s", verify_cid(cid_v0, data))
     logger.info("verify_cid(cid_v1_raw, data): %s", verify_cid(cid_v1_raw, data))
@@ -47,7 +48,7 @@ def main() -> None:
         logger.info(
             "%s: version=%s, codec=%s",
             name,
-            parse_cid_version(cid),
+            parse_cid(cid).version,
             parse_cid_codec(cid),
         )
 
