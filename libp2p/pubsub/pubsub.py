@@ -969,15 +969,35 @@ class Pubsub(Service, IPubsub):
 
         :param raw_msg: raw contents of the message to broadcast
         """
-        # Broadcast message
-        for stream in self.peers.values():
-            # Write message to stream
-            try:
-                await stream.write(encode_varint_prefixed(raw_msg))
-            except StreamClosed:
-                peer_id = stream.muxed_conn.peer_id
-                logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+        rpc_msg = rpc_pb2.RPC()
+        rpc_msg.ParseFromString(raw_msg)
+
+        # Broadcast message via per-peer outbound queues to preserve
+        # queue back-pressure/drop semantics.
+        for peer_id in tuple(self.peers):
+            queue = self.peer_queues.get(peer_id)
+            if queue is None:
+                logger.debug("No outbound queue for peer %s", peer_id)
+                continue
+
+            for part in queue.split_rpc(rpc_msg):
+                if part.ByteSize() > queue.max_message_size:
+                    self.drop_rpc(peer_id, part)
+                    continue
+
+                ok = queue.push(part)
+                if not ok:
+                    self.drop_rpc(peer_id, part)
+                    break
+
+    def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+        """Log (and in the future, meter) a dropped outbound RPC."""
+        logger.debug(
+            "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
+            peer_id,
+            len(rpc.publish),
+            rpc.HasField("control"),
+        )
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
