@@ -843,33 +843,34 @@ class KadDHT(Service):
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
 
-        # 3. Store at remote peers in batches of ALPHA, in parallel
-        stored_count = 0
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
-            batch_results = [False] * len(batch)
+        # 3. Store at remote peers using a semaphore-based sliding window.
+        #    Up to ALPHA stores run concurrently; a new one starts as soon as
+        #    any in-flight store completes.
+        stored_count_list: list[int] = [0]
+        sem = trio.Semaphore(ALPHA)
 
-            async def store_one(idx: int, peer: ID) -> None:
-                try:
-                    with trio.move_on_after(QUERY_TIMEOUT):
-                        success = await self.value_store._store_at_peer(
-                            peer, key_bytes, value
-                        )
-                        batch_results[idx] = success
-                        if success:
-                            logger.debug(f"Stored value at peer {peer}")
-                        else:
-                            logger.debug(f"Failed to store value at peer {peer}")
-                except Exception as e:
-                    logger.debug(f"Error storing value at peer {peer}: {e}")
+        async def store_one(peer: ID) -> None:
+            try:
+                with trio.move_on_after(QUERY_TIMEOUT):
+                    success = await self.value_store._store_at_peer(
+                        peer, key_bytes, value
+                    )
+                    if success:
+                        stored_count_list[0] += 1
+                        logger.debug(f"Stored value at peer {peer}")
+                    else:
+                        logger.debug(f"Failed to store value at peer {peer}")
+            except Exception as e:
+                logger.debug(f"Error storing value at peer {peer}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for idx, peer in enumerate(batch):
-                    nursery.start_soon(store_one, idx, peer)
+        async with trio.open_nursery() as nursery:
+            for peer in closest_peers:
+                await sem.acquire()
+                nursery.start_soon(store_one, peer)
 
-            stored_count += sum(batch_results)
-
-        logger.info(f"Successfully stored value at {stored_count} peers")
+        logger.info(f"Successfully stored value at {stored_count_list[0]} peers")
 
     async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
         """
@@ -910,47 +911,49 @@ class KadDHT(Service):
         # Collect valid records from peers: mapping peer -> Record
         valid_records: list[tuple[ID, Record]] = []
 
-        # 3. Query ALPHA peers at a time in parallel
-        # Use list to track mutable state (pyrefly requirement)
+        # 3. Query peers using a semaphore-based sliding window (up to ALPHA
+        #    concurrent queries). A new query starts as soon as any finishes.
         total_responses_list: list[int] = [0]
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
+        sem = trio.Semaphore(ALPHA)
+        quorum_reached = trio.Event()
 
-            async def query_one(peer: ID) -> None:
-                try:
-                    with trio.move_on_after(QUERY_TIMEOUT):
-                        # Fetch the record directly to get timeReceived
-                        rec = await self.value_store._get_from_peer(
-                            peer, key_bytes, return_record=True
-                        )
-                        if rec is not None:
-                            total_responses_list[0] += 1
-                            # Validate the record's value
-                            try:
-                                if self.validator is None:
-                                    raise ValueError("Validator is required")
-                                if not isinstance(rec, Record):
-                                    raise TypeError("Expected Record type")
-                                self.validator.validate(key, rec.value)
-                                valid_records.append((peer, rec))
-                                logger.debug(f"Found valid record at peer {peer}")
-                            except Exception as e:
+        async def query_one(peer: ID) -> None:
+            try:
+                with trio.move_on_after(QUERY_TIMEOUT):
+                    rec = await self.value_store._get_from_peer(
+                        peer, key_bytes, return_record=True
+                    )
+                    if rec is not None:
+                        total_responses_list[0] += 1
+                        try:
+                            if self.validator is None:
+                                raise ValueError("Validator is required")
+                            if not isinstance(rec, Record):
+                                raise TypeError("Expected Record type")
+                            self.validator.validate(key, rec.value)
+                            valid_records.append((peer, rec))
+                            logger.debug(f"Found valid record at peer {peer}")
+                            if quorum and len(valid_records) >= quorum:
                                 logger.debug(
-                                    f"Received invalid record from {peer}, "
-                                    f"discarding: {e}"
+                                    f"Quorum reached "
+                                    f"({len(valid_records)} valid records)"
                                 )
-                except Exception as e:
-                    logger.debug(f"Error querying peer {peer}: {e}")
+                                quorum_reached.set()
+                        except Exception as e:
+                            logger.debug(
+                                f"Received invalid record from {peer}, discarding: {e}"
+                            )
+            except Exception as e:
+                logger.debug(f"Error querying peer {peer}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for peer in batch:
-                    nursery.start_soon(query_one, peer)
-
-            # If quorum is set and we have enough valid records, we can stop early
-            # Note: quorum counts valid records, not all responses.
-            if quorum and len(valid_records) >= quorum:
-                logger.debug(f"Quorum reached ({len(valid_records)} valid records)")
-                break
+        async with trio.open_nursery() as nursery:
+            for peer in closest_peers:
+                if quorum_reached.is_set():
+                    break
+                await sem.acquire()
+                nursery.start_soon(query_one, peer)
 
         # 4. Select the best record if any valid records were found
         if valid_records:

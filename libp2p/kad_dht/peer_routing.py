@@ -220,32 +220,46 @@ class PeerRouting(IPeerRouting):
             logger.debug("No local peers available for network lookup")
             return []
 
-        # Iterative lookup until convergence
+        # Iterative lookup using a semaphore-based sliding window.
+        # Instead of lock-step batches (start ALPHA, wait for ALL, repeat),
+        # we keep up to ALPHA queries in flight at all times. When one finishes,
+        # the next candidate starts immediately — no idle slots.
+        #
+        # Each round still picks a bounded set of candidates (up to `count`)
+        # so that Kademlia's iterative refinement is preserved: after each
+        # round we re-sort and may discover closer peers for the next round.
+        sem = trio.Semaphore(ALPHA)
+        new_peers: list[ID] = []
+        query_count = 0
+
+        async def _guarded_query(peer: ID) -> None:
+            """Run a single peer query while holding one semaphore slot."""
+            try:
+                await self._query_single_peer_for_closest(peer, target_key, new_peers)
+            finally:
+                sem.release()
+
         while rounds < MAX_PEER_LOOKUP_ROUNDS:
             rounds += 1
             logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
-            # Find peers we haven't queried yet
-            peers_to_query = [p for p in closest_peers if p not in queried_peers]
+            # Find peers we haven't queried yet, capped to `count` so we
+            # don't over-query before re-sorting with newly discovered peers.
+            peers_to_query = [p for p in closest_peers if p not in queried_peers][
+                :count
+            ]
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
-                break  # No more peers to query
+                break
 
-            # Query these peers for their closest peers to target
-            peers_batch = peers_to_query[:ALPHA]  # Limit to ALPHA peers at a time
-
-            # Mark these peers as queried before we actually query them
-            for peer in peers_batch:
-                queried_peers.add(peer)
-
-            # Run queries in parallel for this batch using trio nursery
-            new_peers: list[ID] = []  # Shared array to collect all results
+            new_peers.clear()
 
             async with trio.open_nursery() as nursery:
-                for peer in peers_batch:
-                    nursery.start_soon(
-                        self._query_single_peer_for_closest, peer, target_key, new_peers
-                    )
+                for peer in peers_to_query:
+                    await sem.acquire()
+                    queried_peers.add(peer)
+                    query_count += 1
+                    nursery.start_soon(_guarded_query, peer)
 
             # If we got no new peers, we're done
             if not new_peers:
@@ -266,8 +280,8 @@ class PeerRouting(IPeerRouting):
                 break
 
         logger.info(
-            f"Network lookup completed after {rounds} rounds, "
-            f"found {len(closest_peers)} peers"
+            f"Network lookup completed after {rounds} rounds "
+            f"({query_count} queries), found {len(closest_peers)} peers"
         )
         return closest_peers
 
