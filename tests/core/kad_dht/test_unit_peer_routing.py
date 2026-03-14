@@ -19,6 +19,7 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 import varint
 
 from libp2p.crypto.secp256k1 import (
@@ -585,3 +586,57 @@ class TestPeerRouting:
 
                     # Should stop after max rounds, not infinite loop
                     assert isinstance(result, list)
+
+    @pytest.mark.trio
+    async def test_sliding_window_no_idle_slots(self, peer_routing, mock_host):
+        """
+        Verify the semaphore-based sliding window: a fast query finishing
+        should let the next candidate start immediately, instead of waiting
+        for every peer in the batch to finish first.
+        """
+        target_key = b"target_key"
+
+        # 5 peers, ALPHA=3.  Under old lock-step batching the order would be:
+        #   batch 1: [p0, p1, p2] all start, wait for ALL to finish
+        #   batch 2: [p3, p4] start, wait again
+        # With the sliding window, p3 should start as soon as any of
+        # p0/p1/p2 finishes — it doesn't have to wait for the slowest.
+        peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(5)]
+        started_at: dict[str, float] = {}
+
+        async def mock_query(peer, _target_key, _new_peers):
+            started_at[str(peer)] = trio.current_time()
+            # Peers 0 and 1 are fast, peer 2 is slow
+            if peer == peers[2]:
+                await trio.sleep(0.5)
+            else:
+                await trio.sleep(0.01)
+
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=peers,
+        ):
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            with patch.object(
+                peer_routing,
+                "_query_single_peer_for_closest",
+                side_effect=mock_query,
+            ):
+                await peer_routing.find_closest_peers_network(target_key)
+
+        # All 5 peers should have been queried
+        assert len(started_at) == 5
+
+        # Peer 3 should have started well before peer 2 finished (0.5s).
+        # Under lock-step, p3 wouldn't start until t≈0.5s.
+        # Under sliding window, p3 starts around t≈0.01s.
+        p2_name = str(peers[2])
+        p3_name = str(peers[3])
+        assert p3_name in started_at and p2_name in started_at
+        assert started_at[p3_name] < started_at[p2_name] + 0.3, (
+            f"Peer 3 started at {started_at[p3_name]:.3f}, "
+            f"peer 2 started at {started_at[p2_name]:.3f}. "
+            "Expected peer 3 to start before peer 2 finished (sliding window)."
+        )
