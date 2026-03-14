@@ -47,8 +47,8 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
+    python3 -m venv .venv
+    source .venv/bin/activate
     ./scripts/setup_dev.sh
 
 **Option 2: Using uv (recommended, same as CI):**
@@ -70,19 +70,16 @@ Then set up the development environment:
 .. code:: sh
 
     cd py-libp2p
-    uv venv venv
-    source venv/bin/activate
-    uv pip install --upgrade pip
-    uv pip install --group dev -e .
-    pre-commit install
+    uv sync --group dev
+    uv run pre-commit install
 
 **Option 3: Manual setup with pip:**
 
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
+    python3 -m venv .venv
+    source .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
@@ -95,8 +92,8 @@ An alternative using ``virtualenv``:
 .. code:: sh
 
     cd py-libp2p
-    virtualenv -p python venv
-    . venv/bin/activate
+    virtualenv -p python .venv
+    source .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
@@ -129,8 +126,6 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
     ./scripts/setup_dev.sh
 
 **Option 2: Using uv (recommended, same as CI):**
@@ -158,35 +153,21 @@ Then set up the development environment:
 .. code:: sh
 
     cd py-libp2p
-    uv venv venv
-    source venv/bin/activate
-    uv pip install --upgrade pip
-    uv pip install --group dev -e .
-    pre-commit install
-
-On macOS, help the build command find and link against the ``gmp`` library:
-
-.. code:: sh
-
-    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" uv pip install --group dev -e .
+    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" uv sync --group dev
+    uv run pre-commit install
 
 **Option 3: Manual setup with pip:**
 
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv ./venv
-    . venv/bin/activate
+    python3 -m venv .venv
+    source .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
-    pip install --group dev -e .
+    CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
 
 On macOS, help the build command find and link against the ``gmp`` library:
-
-.. code:: sh
-
-    pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
-    CFLAGS="`pkg-config --cflags gmp`" LDFLAGS="`pkg-config --libs gmp`" pip install --group dev -e .
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
 If you have an older pip version, upgrade it first.
@@ -196,8 +177,8 @@ An alternative using ``virtualenv``:
 .. code:: sh
 
     cd py-libp2p
-    virtualenv -p python venv
-    . venv/bin/activate
+    virtualenv -p python .venv
+    source .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
@@ -282,11 +263,8 @@ Setup Steps
 
    .. code:: powershell
 
-        uv venv venv
-        .\venv\Scripts\activate
-        uv pip install --upgrade pip
-        uv pip install --group dev -e .
-        pre-commit install
+        uv sync --group dev
+        uv run pre-commit install
 
    **Option B: Using pip:**
 
