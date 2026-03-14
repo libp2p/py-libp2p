@@ -25,6 +25,7 @@ Examples
    tls-support
    gossipsub-1.2
    examples.websocket
+   examples.webrtc
    examples.tls
    examples.autotls
    examples.perf

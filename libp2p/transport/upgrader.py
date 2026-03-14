@@ -82,9 +82,34 @@ class TransportUpgrader:
 
     async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         """Upgrade secured connection to a muxed connection."""
+        import logging
+
+        logger = logging.getLogger("libp2p.transport.upgrader")
+        logger.info(
+            f"🟢 TransportUpgrader.upgrade_connection() called: "
+            f"peer={peer_id}, conn_type={type(conn).__name__}, "
+            f"is_initiator={getattr(conn, 'is_initiator', None)}"
+        )
         try:
-            return await self.muxer_multistream.new_conn(conn, peer_id)
+            logger.info(
+                f"🟢 About to call muxer_multistream.new_conn() for peer={peer_id}"
+            )
+            result = await self.muxer_multistream.new_conn(conn, peer_id)
+            logger.info(
+                f"✅ muxer_multistream.new_conn() returned for peer={peer_id}, "
+                f"muxed_conn_type={type(result).__name__}"
+            )
+            return result
         except (MultiselectError, MultiselectClientError) as error:
+            logger.error(
+                f"❌ Muxer upgrade failed for peer={peer_id}: {error}", exc_info=True
+            )
             raise MuxerUpgradeFailure(
                 "failed to negotiate the multiplexer protocol"
             ) from error
+        except Exception as error:
+            logger.error(
+                f"❌ Unexpected error during muxer upgrade for peer={peer_id}: {error}",
+                exc_info=True,
+            )
+            raise

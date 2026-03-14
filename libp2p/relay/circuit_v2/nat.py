@@ -138,6 +138,31 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
         IP address or None if not found
 
     """
+    # Convert to string representation
+    addr_str = str(addr)
+
+    # Look for IPv4 address
+    ipv4_start = addr_str.find("/ip4/")
+    if ipv4_start != -1:
+        # Extract the IPv4 address
+        ipv4_end = addr_str.find("/", ipv4_start + 5)
+        if ipv4_end != -1:
+            return addr_str[ipv4_start + 5 : ipv4_end]
+        else:
+            # IP is at the end of the string
+            return addr_str[ipv4_start + 5 :]
+
+    # Look for IPv6 address
+    ipv6_start = addr_str.find("/ip6/")
+    if ipv6_start != -1:
+        # Extract the IPv6 address
+        ipv6_end = addr_str.find("/", ipv6_start + 5)
+        if ipv6_end != -1:
+            return addr_str[ipv6_start + 5 : ipv6_end]
+        else:
+            # IP is at the end of the string
+            return addr_str[ipv6_start + 5 :]
+
     return _extract_ip(addr)
 
 
