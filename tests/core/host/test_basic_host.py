@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -92,6 +93,38 @@ def test_get_addrs_and_transport_addrs():
     assert addr_str.endswith(f"/p2p/{peer_id_str}") or addr_str.endswith(
         f"/ipfs/{peer_id_str}"
     )
+
+
+def _make_host_with_listener(
+    announce_addrs: Sequence[Multiaddr] | None = None,
+):
+    """Helper: create a BasicHost with a mocked listener returning a known addr."""
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm, announce_addrs=announce_addrs)
+    mock_transport = MagicMock()
+    mock_transport.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+    swarm.listeners = {"tcp": mock_transport}
+    return host
+
+
+def test_announce_addrs_replaces_listen_addrs():
+    announce = [Multiaddr("/ip4/1.2.3.4/tcp/4001")]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    # Should contain only the announce addr, not the listen addr
+    assert len(addrs) == 1
+    addr_str = str(addrs[0])
+    assert "/ip4/1.2.3.4/tcp/4001" in addr_str
+    assert "/ip4/127.0.0.1/tcp/8000" not in addr_str
+    assert peer_id_str in addr_str
+
+    # get_transport_addrs still returns the real listen addr
+    transport_addrs = host.get_transport_addrs()
+    assert str(transport_addrs[0]) == "/ip4/127.0.0.1/tcp/8000"
 
 
 @pytest.mark.trio
