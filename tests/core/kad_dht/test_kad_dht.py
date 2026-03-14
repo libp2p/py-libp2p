@@ -665,8 +665,17 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Test 4: Enable strict_validation and verify it rejects unregistered namespaces
     if dht_a.validator is not None:
+        # Toggling validator.strict_validation should be reflected by
+        # dht.strict_validation.
+        assert dht_a.strict_validation is False
         dht_a.validator.strict_validation = True
+        assert dht_a.strict_validation is True
         with pytest.raises(InvalidRecordType, match="strict validation"):
             await dht_a.put_value(unregistered_key, b"another-value")
+
+        # Toggling dht.strict_validation should synchronize back to validator.
+        dht_a.strict_validation = False
+        assert dht_a.validator.strict_validation is False
+
         # Reset to default
         dht_a.validator.strict_validation = False

@@ -190,17 +190,17 @@ class KadDHT(Service):
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
         self.enable_values = enable_values
-        self.strict_validation = strict_validation
+        self._strict_validation = strict_validation
         self.validator = validator
 
-        if validator is None:
+        if self.validator is None:
             self.validator = NamespacedValidator(
                 {"pk": PublicKeyValidator()},
                 strict_validation=strict_validation,
             )
-        elif strict_validation and isinstance(validator, NamespacedValidator):
-            # If strict_validation is requested, enable it on the validator
-            validator.strict_validation = strict_validation
+
+        # Keep strict_validation synchronized with the active validator.
+        self.strict_validation = strict_validation
 
         # If true implies that the validator has been changed and that
         # Defaults should not be used
@@ -231,6 +231,25 @@ class KadDHT(Service):
 
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+
+    @property
+    def strict_validation(self) -> bool:
+        """
+        Return strict validation mode.
+
+        The validator is the source of truth when it supports
+        ``strict_validation`` at runtime.
+        """
+        if isinstance(getattr(self, "validator", None), NamespacedValidator):
+            return self.validator.strict_validation
+        return self._strict_validation
+
+    @strict_validation.setter
+    def strict_validation(self, value: bool) -> None:
+        """Set strict validation mode and synchronize with validator."""
+        self._strict_validation = value
+        if isinstance(getattr(self, "validator", None), NamespacedValidator):
+            self.validator.strict_validation = value
 
     def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
         """
@@ -361,6 +380,8 @@ class KadDHT(Service):
         validators (pk and ipns) will not be automatically applied later.
         """
         self.validator = val
+        # Keep the new validator in sync with current strict mode.
+        self.validator.strict_validation = self._strict_validation
         self.validator_changed = True
         return
 
