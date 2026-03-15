@@ -1,0 +1,1 @@
+Added optional ``strict_validation`` parameter to ``KadDHT``. When enabled, all DHT record keys must use a registered namespace validator; non-namespaced or unknown-namespace keys are rejected. Default remains permissive for backward compatibility, aligning with go-libp2p and rust-libp2p behavior.
