@@ -252,7 +252,9 @@ class BasicHost(IHost):
         self.psk = psk
 
         # Address announcement configuration
-        self._announce_addrs = list(announce_addrs) if announce_addrs else None
+        self._announce_addrs = (
+            list(announce_addrs) if announce_addrs is not None else None
+        )
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -365,7 +367,13 @@ class BasicHost(IHost):
         else:
             addrs = self.get_transport_addrs()
 
-        return [addr.encapsulate(p2p_part) for addr in addrs]
+        result = []
+        for addr in addrs:
+            if "p2p" in [p.name for p in addr.protocols()]:
+                result.append(addr)
+            else:
+                result.append(addr.encapsulate(p2p_part))
+        return result
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -398,7 +406,7 @@ class BasicHost(IHost):
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
@@ -413,7 +421,7 @@ class BasicHost(IHost):
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
