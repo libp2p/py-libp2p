@@ -7,7 +7,6 @@ This module tests:
 - Concurrency behavior in both get_value and put_value operations
 """
 
-
 import pytest
 import trio
 
