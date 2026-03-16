@@ -1,0 +1,1 @@
+Added ``IHost.remove_stream_handler()`` and ``IMultiselectMuxer.remove_handler()`` to allow services to cleanly unregister protocol handlers during shutdown. Migrated Circuit Relay v2, DCUtR, Bitswap, and Perf services to use the new API, replacing ad-hoc workarounds.
