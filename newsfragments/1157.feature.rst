@@ -1,0 +1,4 @@
+Added ``IPNSValidator`` for the Kademlia DHT, enabling validation of IPNS records
+per the `IPNS Record Specification <https://specs.ipfs.tech/ipns/ipns-record/>`_
+(V2 signatureV2, DAG-CBOR data, expiry, V1/V2 consistency). The ``/ipns``
+namespace is now validated by default alongside the ``/pk`` namespace.
