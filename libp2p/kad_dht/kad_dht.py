@@ -974,6 +974,11 @@ class KadDHT(Service):
 
         # 3. Query peers using a semaphore-based sliding window (up to ALPHA
         #    concurrent queries). A new query starts as soon as any finishes.
+        #
+        #    When quorum is reached:
+        #    - No new peer queries will be scheduled (early-stop via sem + quorum check)
+        #    - In-flight queries continue to completion for robustness and observability
+        #    - This prevents resource waste while allowing partial results to propagate
         total_responses_list: list[int] = [0]
         sem = trio.Semaphore(ALPHA)
         quorum_reached = trio.Event()
@@ -1011,9 +1016,10 @@ class KadDHT(Service):
 
         async with trio.open_nursery() as nursery:
             for peer in closest_peers:
-                if quorum_reached.is_set():
-                    break
                 await sem.acquire()
+                if quorum_reached.is_set():
+                    sem.release()
+                    break
                 nursery.start_soon(query_one, peer)
 
         # 4. Select the best record if any valid records were found
