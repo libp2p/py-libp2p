@@ -90,6 +90,16 @@ from .validators import (
     signature_validator,
 )
 
+# GossipSub v1.3+ protocol IDs. Extensions Control Message is only sent when
+# negotiating one of these protocols (per spec: extensions in first message).
+_MESHSUB_V13_PLUS = frozenset(
+    (
+        TProtocol("/meshsub/1.3.0"),
+        TProtocol("/meshsub/1.4.0"),
+        TProtocol("/meshsub/2.0.0"),
+    )
+)
+
 
 class _RouterWithExtensions(Protocol):
     """Protocol for a router that supports GossipSub v1.3 extensions."""
@@ -735,14 +745,14 @@ class Pubsub(Service, IPubsub):
         # GossipSub v1.3 – Extensions Control Message injection.
         # Per spec: "If a peer supports any extension, the Extensions control
         # message MUST be included in the first message on the stream."
-        # We ask the router (if it is a v1.3-capable GossipSub router) to
-        # attach ControlExtensions to the hello packet before we serialise it.
-        # This is done via duck-typing so pubsub.py stays decoupled from
-        # gossipsub.py (matching the existing architecture).
+        # Only inject when we negotiated v1.3+; peers on v1.1/v1.2 must not
+        # receive extension fields.
         negotiated_protocol = stream.get_protocol()
         router = self.router
-        if hasattr(router, "extensions_state") and hasattr(
-            router, "supports_v13_features"
+        if (
+            negotiated_protocol in _MESHSUB_V13_PLUS
+            and hasattr(router, "extensions_state")
+            and hasattr(router, "supports_v13_features")
         ):
             # We pass the peer_id because extensions_state needs to track
             # "sent_extensions" per peer for the at-most-once rule.

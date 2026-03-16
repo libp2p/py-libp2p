@@ -2,6 +2,11 @@
 // Updated with GossipSub v1.3 Extensions Control Message support.
 // Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
 // extensions.proto: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/extensions/extensions.proto
+//
+// Interop note: The Topic Observation extension (observe/unobserve, topicObservation)
+// is not yet in the upstream libp2p/specs extensions.proto. Field numbers
+// follow the go-libp2p reference implementation for cross-client interop.
+// See: https://ethresear.ch/t/gossipsub-topic-observation-proposed-gossipsub-1-3/20907
 
 syntax = "proto2";
 

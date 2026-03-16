@@ -2171,7 +2171,9 @@ class GossipSub(IPubsubRouter, Service):
             return
         pubsub = self.pubsub  # narrow type for pyrefly / mypy
 
-        msg_id_str = str(msg_id)
+        # Use hex() to match heartbeat path; str(bytes) produces "b'...'" which
+        # fails safe_bytes_from_hex() in handle_ihave().
+        msg_id_str = msg_id.hex()
 
         for topic in topic_ids:
             observers = self.topic_observation.get_observers(topic)
