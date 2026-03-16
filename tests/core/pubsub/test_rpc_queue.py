@@ -12,7 +12,6 @@ import trio.testing
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import (
     rpc_pb2,
-    rpc_pb2 as _rpc_pb2,
 )
 from libp2p.pubsub.rpc_queue import (
     DefaultMaxMessageSize,
@@ -157,11 +156,10 @@ class TestRpcQueue:
 
 
 class TestSplitRpc:
-    def test_empty_rpc_returns_single_empty(self) -> None:
+    def test_empty_rpc_returns_no_chunks(self) -> None:
         q = RpcQueue()
         parts = q.split_rpc(rpc_pb2.RPC())
-        assert len(parts) == 1
-        assert parts[0].ByteSize() == 0
+        assert len(parts) == 0
 
     def test_small_rpc_not_split(self) -> None:
         rpc = rpc_pb2.RPC()
@@ -506,8 +504,7 @@ class TestSplitRpcSenderRecord:
         original = rpc_pb2.RPC()
         original.senderRecord = FAKE_SENDER_RECORD
         result = _propagate_sender_record(original, [])
-        assert len(result) == 1
-        assert result[0].ByteSize() == 0
+        assert len(result) == 0
 
 
 class TestSplitRpcExtensions:
@@ -601,13 +598,13 @@ async def test_split_rpc_actually_splits_in_send_rpc():
         peer1_id = pubsubs[1].host.get_id()
 
         # Build a large control message that will need splitting.
-        ctrl = _rpc_pb2.ControlMessage()
+        ctrl = rpc_pb2.ControlMessage()
         for i in range(20):
             ihave = ctrl.ihave.add()
             ihave.topicID = f"topic-{i}"
             ihave.messageIDs.extend([f"mid-{i}-{j}" for j in range(5)])
 
-        rpc = _rpc_pb2.RPC()
+        rpc = rpc_pb2.RPC()
         rpc.control.CopyFrom(ctrl)
         rpc.senderRecord = b"X" * 50
 

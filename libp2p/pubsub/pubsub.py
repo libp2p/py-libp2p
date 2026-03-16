@@ -79,6 +79,7 @@ from .pubsub_notifee import (
 )
 from .rpc_queue import (
     RpcQueue,
+    drop_rpc,
 )
 from .subscription import (
     TrioSubscriptionAPI,
@@ -1010,8 +1011,7 @@ class Pubsub(Service, IPubsub):
 
         :param raw_msg: raw contents of the message to broadcast
         """
-        rpc_msg = rpc_pb2.RPC()
-        rpc_msg.ParseFromString(raw_msg)
+        rpc_msg: rpc_pb2.RPC | None = None
 
         # Broadcast message via per-peer outbound queues to preserve
         # queue back-pressure/drop semantics.
@@ -1021,24 +1021,30 @@ class Pubsub(Service, IPubsub):
                 logger.debug("No outbound queue for peer %s", peer_id)
                 continue
 
+            # Fast path for small RPCs: avoid split/clone overhead and
+            # enqueue the parsed RPC directly.
+            if len(raw_msg) <= queue.max_message_size:
+                if rpc_msg is None:
+                    rpc_msg = rpc_pb2.RPC()
+                    rpc_msg.ParseFromString(raw_msg)
+                ok = queue.push(rpc_msg)
+                if not ok:
+                    drop_rpc(peer_id, rpc_msg)
+                continue
+
+            if rpc_msg is None:
+                rpc_msg = rpc_pb2.RPC()
+                rpc_msg.ParseFromString(raw_msg)
+
             for part in queue.split_rpc(rpc_msg):
                 if part.ByteSize() > queue.max_message_size:
-                    self.drop_rpc(peer_id, part)
+                    drop_rpc(peer_id, part)
                     continue
 
                 ok = queue.push(part)
                 if not ok:
-                    self.drop_rpc(peer_id, part)
+                    drop_rpc(peer_id, part)
                     break
-
-    def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
-        """Log (and in the future, meter) a dropped outbound RPC."""
-        logger.debug(
-            "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
-            peer_id,
-            len(rpc.publish),
-            rpc.HasField("control"),
-        )
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """

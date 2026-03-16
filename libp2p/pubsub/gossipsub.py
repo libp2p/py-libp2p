@@ -57,6 +57,7 @@ from .pb import (
 from .pubsub import (
     Pubsub,
 )
+from .rpc_queue import drop_rpc
 from .score import (
     PeerScorer,
     ScoreParams,
@@ -1870,20 +1871,11 @@ class GossipSub(IPubsubRouter, Service):
             # Caller-side size check matching Go's sendRPC:
             #   if rpc.Size() > gs.p.maxMessageSize { gs.doDropRPC(...) }
             if part.ByteSize() > queue.max_message_size:
-                self.drop_rpc(peer_id, part)
+                drop_rpc(peer_id, part)
                 continue
             ok = queue.push(part, priority=priority)
             if not ok:
-                self.drop_rpc(peer_id, part)
-
-    def drop_rpc(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
-        """Log (and in the future, meter) a dropped outbound RPC."""
-        logger.debug(
-            "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
-            peer_id,
-            len(rpc.publish),
-            rpc.HasField("control"),
-        )
+                drop_rpc(peer_id, part)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID

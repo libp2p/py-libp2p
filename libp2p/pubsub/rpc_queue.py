@@ -4,7 +4,7 @@ Per-peer outbound RPC queue with priority support and message splitting.
 Implements the outbound message queue pattern from go-libp2p-pubsub:
 - Priority queue with non-priority and priority (control) message deques
 - RPC splitting to respect max message size limits
-- Drop-from-front semantics when the queue is full
+- Reject-on-full semantics when the queue is full
 
 Reference: https://github.com/libp2p/go-libp2p-pubsub/blob/master/comm.go
 """
@@ -16,6 +16,8 @@ import logging
 from typing import Any
 
 import trio
+
+from libp2p.peer.id import ID
 
 from .pb import rpc_pb2
 
@@ -428,7 +430,17 @@ def _propagate_sender_record(
 ) -> list[rpc_pb2.RPC]:
     """Copy ``senderRecord`` from *original* onto the first output chunk."""
     if not out:
-        return [rpc_pb2.RPC()]
+        return []
     if original.senderRecord and out:
         out[0].senderRecord = original.senderRecord
     return out
+
+
+def drop_rpc(peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+    """Log (and in the future, meter) a dropped outbound RPC."""
+    logger.debug(
+        "Dropping outbound RPC for peer %s (publish=%d, control=%s)",
+        peer_id,
+        len(rpc.publish),
+        rpc.HasField("control"),
+    )
