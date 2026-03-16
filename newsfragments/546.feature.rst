@@ -1,0 +1,17 @@
+Added WebRTC transport support to py-libp2p, enabling browser-to-browser and browser-to-server peer-to-peer connections.
+
+Two transport implementations:
+- WebRTC (private-to-private): Circuit Relay v2 signaling for NAT-traversed connections with STUN/TURN support
+- WebRTC-Direct (private-to-public): Direct connections with certificate hash authentication and UDP hole punching
+
+Key features:
+- SDP offer/answer exchange via libp2p signaling protocol (/libp2p/webrtc/signal/1.0.0)
+- ICE candidate trickling and queuing for efficient connection establishment
+- NAT detection and reachability checking for optimized address advertisement
+- Certificate-based authentication with automatic renewal (14-day lifespan, 1-day renewal threshold)
+- Integration with Circuit Relay v2 for fallback when direct connections fail
+- Stream multiplexing over WebRTC data channels with configurable buffer sizes
+- Noise security protocol integration with certhash validation
+- Multiaddr protocol support (webrtc, webrtc-direct, certhash) with proper codec registration
+
+Built on aiortc library with trio-asyncio bridge for async compatibility. Supports both public and NAT-traversed network environments.

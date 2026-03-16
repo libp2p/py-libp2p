@@ -64,14 +64,24 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
         logger.debug("Noise read_msg: reading encrypted message")
-        noise_msg_encrypted = await self.read_writer.read_msg()
-        logger.debug(f"Noise read_msg: read {len(noise_msg_encrypted)} encrypted bytes")
-        if prefix_encoded:
-            result = self.decrypt(noise_msg_encrypted[len(self.prefix) :])
-        else:
-            result = self.decrypt(noise_msg_encrypted)
-        logger.debug(f"Noise read_msg: decrypted to {len(result)} bytes")
-        return result
+        try:
+            noise_msg_encrypted = await self.read_writer.read_msg()
+            if not noise_msg_encrypted:
+                logger.warning("Noise read_msg: received empty message")
+                raise ValueError("Received empty noise message")
+            logger.debug(
+                f"Noise read_msg: read {len(noise_msg_encrypted)} encrypted bytes"
+            )
+            if prefix_encoded:
+                result = self.decrypt(noise_msg_encrypted[len(self.prefix) :])
+            else:
+                result = self.decrypt(noise_msg_encrypted)
+            logger.debug(f"Noise read_msg: decrypted to {len(result)} bytes")
+            return result
+        except Exception as e:
+            logger.error(f"Noise read_msg failed: {e}", exc_info=True)
+            # Re-raise with more context
+            raise
 
     async def close(self) -> None:
         await self.read_writer.close()
@@ -91,7 +101,15 @@ class NoiseHandshakeReadWriter(BaseNoiseMsgReadWriter):
         return bytes(self.noise_state.write_message(data))
 
     def decrypt(self, data: bytes) -> bytes:
-        return bytes(self.noise_state.read_message(data))
+        try:
+            return bytes(self.noise_state.read_message(data))
+        except Exception as e:
+            logger.error(
+                f"Noise handshake decrypt failed: {e}, "
+                f"data length: {len(data)}, "
+                f"handshake_finished: {self.noise_state.handshake_finished}"
+            )
+            raise
 
 
 class NoiseTransportReadWriter(BaseNoiseMsgReadWriter):
