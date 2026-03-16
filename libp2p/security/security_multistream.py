@@ -89,9 +89,10 @@ class SecurityMultistream(ABC):
         :return: secure connection object (that implements secure_conn_interface)
         """
         logger.debug("SecurityMultistream.secure_inbound: selecting transport")
-        transport = await self.select_transport(conn, False)
+        protocol, transport = await self.select_transport_and_protocol(conn, False)
         logger.debug("SecurityMultistream: transport selected, securing")
         secure_conn = await transport.secure_inbound(conn)
+        setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         logger.debug("SecurityMultistream: secure connection established")
         return secure_conn
 
@@ -102,9 +103,23 @@ class SecurityMultistream(ABC):
 
         :return: secure connection object (that implements secure_conn_interface)
         """
-        transport = await self.select_transport(conn, True)
+        protocol, transport = await self.select_transport_and_protocol(conn, True)
         secure_conn = await transport.secure_outbound(conn, peer_id)
+        setattr(secure_conn, "negotiated_security_protocol", str(protocol))
         return secure_conn
+
+    async def select_transport_and_protocol(
+        self,
+        conn: IRawConnection,
+        is_initiator: bool,
+    ) -> tuple[TProtocol, ISecureTransport]:
+        try:
+            protocol, transport = await self._selector.select(conn, is_initiator)
+        except (MultiselectError, MultiselectClientError) as error:
+            raise MultiselectError(
+                "Failed to negotiate a security protocol: no protocol selected"
+            ) from error
+        return protocol, transport
 
     async def select_transport(
         self, conn: IRawConnection, is_initiator: bool
@@ -117,10 +132,5 @@ class SecurityMultistream(ABC):
         :param is_initiator: true if we are the initiator, false otherwise
         :return: selected secure transport
         """
-        try:
-            _, transport = await self._selector.select(conn, is_initiator)
-        except (MultiselectError, MultiselectClientError) as error:
-            raise MultiselectError(
-                "Failed to negotiate a security protocol: no protocol selected"
-            ) from error
+        _, transport = await self.select_transport_and_protocol(conn, is_initiator)
         return transport

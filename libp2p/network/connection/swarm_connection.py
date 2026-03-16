@@ -22,6 +22,8 @@ from libp2p.rcmgr import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
+from libp2p.stream_muxer.mplex.mplex import MPLEX_PROTOCOL_ID
+from libp2p.stream_muxer.yamux.yamux import PROTOCOL_ID as YAMUX_PROTOCOL_ID
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm  # noqa: F401
@@ -42,6 +44,8 @@ class SwarmConn(INetConn):
     _direction: Direction
     _actual_transport_addresses: list[Multiaddr] | None
     _connection_type: ConnectionType
+    _negotiated_security_protocol: str | None
+    _negotiated_muxer_protocol: str | None
 
     def __init__(
         self,
@@ -65,6 +69,8 @@ class SwarmConn(INetConn):
             self._direction = Direction.from_string(str(direction))
         self._actual_transport_addresses = None
         self._connection_type = ConnectionType.UNKNOWN
+        self._negotiated_security_protocol = None
+        self._negotiated_muxer_protocol = None
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -328,6 +334,91 @@ class SwarmConn(INetConn):
         """
         self._actual_transport_addresses = addresses
         self._connection_type = conn_type
+
+    def set_negotiated_protocols(
+        self,
+        security_protocol: str | None,
+        muxer_protocol: str | None,
+    ) -> None:
+        self._negotiated_security_protocol = security_protocol
+        self._negotiated_muxer_protocol = muxer_protocol
+
+    def get_negotiated_security_protocol(self) -> str | None:
+        if self._negotiated_security_protocol is not None:
+            return self._negotiated_security_protocol
+
+        for conn in (
+            self.muxed_conn,
+            getattr(self.muxed_conn, "secured_conn", None),
+        ):
+            protocol = getattr(conn, "negotiated_security_protocol", None)
+            if protocol is not None:
+                return str(protocol)
+        return None
+
+    def get_negotiated_muxer_protocol(self) -> str | None:
+        if self._negotiated_muxer_protocol is not None:
+            return self._negotiated_muxer_protocol
+
+        protocol = getattr(self.muxed_conn, "negotiated_muxer_protocol", None)
+        if protocol is not None:
+            return str(protocol)
+
+        muxed_conn_type = type(self.muxed_conn).__name__
+        if muxed_conn_type == "Yamux":
+            return YAMUX_PROTOCOL_ID
+        if muxed_conn_type == "Mplex":
+            return str(MPLEX_PROTOCOL_ID)
+        return None
+
+    def _get_connection_type_metadata(self) -> ConnectionType:
+        if self._connection_type != ConnectionType.UNKNOWN:
+            return self._connection_type
+        try:
+            conn_type = self.muxed_conn.get_connection_type()
+            if conn_type != ConnectionType.UNKNOWN:
+                return conn_type
+        except Exception:
+            pass
+
+        transport_addresses = self.get_transport_addresses()
+        if any("/p2p-circuit" in str(addr) for addr in transport_addresses):
+            return ConnectionType.RELAYED
+        if transport_addresses:
+            return ConnectionType.DIRECT
+        return self._connection_type
+
+    def get_transport_family(self) -> str:
+        for addr in self.get_transport_addresses():
+            addr_text = str(addr)
+            if "/webtransport" in addr_text:
+                return "webtransport"
+            if "/quic-v1" in addr_text:
+                return "quic-v1"
+            if "/wss" in addr_text:
+                return "wss"
+            if "/ws" in addr_text:
+                return "ws"
+            if "/tcp/" in addr_text:
+                return "tcp"
+            if "/udp/" in addr_text:
+                return "udp"
+        return "unknown"
+
+    def get_interop_metadata(self) -> dict[str, Any]:
+        transport_family = self.get_transport_family()
+        muxer_protocol = self.get_negotiated_muxer_protocol()
+        if muxer_protocol is None and transport_family == "quic-v1":
+            muxer_protocol = "n/a"
+        return {
+            "transport_family": transport_family,
+            "transport_addresses": [
+                str(addr) for addr in self.get_transport_addresses()
+            ],
+            "connection_type": self._get_connection_type_metadata().value,
+            "security_protocol": self.get_negotiated_security_protocol(),
+            "muxer_protocol": muxer_protocol,
+        }
 
     def remove_stream(self, stream: NetStream) -> None:
         if stream not in self.streams:

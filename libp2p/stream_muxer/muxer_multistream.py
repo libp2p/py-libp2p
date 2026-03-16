@@ -110,6 +110,20 @@ class MuxerMultistream:
             ) from error
         return transport
 
+    @staticmethod
+    def _annotate_connection(
+        muxed_conn: IMuxedConn,
+        secured_conn: ISecureConn,
+        protocol: TProtocol,
+    ) -> IMuxedConn:
+        setattr(muxed_conn, "negotiated_muxer_protocol", str(protocol))
+        setattr(
+            muxed_conn,
+            "negotiated_security_protocol",
+            getattr(secured_conn, "negotiated_security_protocol", None),
+        )
+        return muxed_conn
+
     async def new_conn(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
         logger.debug(
             "MuxerMultistream: muxer negotiation peer=%s initiator=%s",
@@ -126,7 +140,12 @@ class MuxerMultistream:
                 async def on_close() -> None:
                     pass
 
-                return Yamux(
-                    conn, peer_id, is_initiator=conn.is_initiator, on_close=on_close
+                yamux_conn = Yamux(
+                    conn,
+                    peer_id,
+                    is_initiator=conn.is_initiator,
+                    on_close=on_close,
                 )
-        return transport_class(conn, peer_id)
+                return self._annotate_connection(yamux_conn, conn, protocol)
+        muxed_conn = transport_class(conn, peer_id)
+        return self._annotate_connection(muxed_conn, conn, protocol)

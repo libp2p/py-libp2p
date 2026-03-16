@@ -1309,8 +1309,8 @@ class GossipSub(IPubsubRouter, Service):
 
         for raw_msg_id in ihave_msg.messageIDs:
             try:
-                validate_control_message_id(raw_msg_id)
-                msg_id_bytes = raw_msg_id.encode("utf-8")
+                normalized_msg_id = validate_control_message_id(raw_msg_id)
+                msg_id_bytes = normalized_msg_id.encode("utf-8")
             except (UnicodeEncodeError, ValueError):
                 logger.warning(
                     "skipping malformed IHAVE message ID from peer %s",
@@ -1319,7 +1319,7 @@ class GossipSub(IPubsubRouter, Service):
                 continue
 
             if not pubsub.seen_messages.has(msg_id_bytes):
-                msg_ids_wanted.append(MessageID(raw_msg_id))
+                msg_ids_wanted.append(MessageID(normalized_msg_id))
 
         # Request messages with IWANT message
         if msg_ids_wanted:

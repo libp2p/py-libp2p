@@ -84,9 +84,12 @@ class MessageCache:
 
         return None
 
-    def get_by_control_message_id(self, control_id: str) -> rpc_pb2.Message | None:
-        validate_control_message_id(control_id)
-        mid = self.control_msgs.get(control_id)
+    def get_by_control_message_id(
+        self,
+        control_id: str | bytes,
+    ) -> rpc_pb2.Message | None:
+        normalized = validate_control_message_id(control_id)
+        mid = self.control_msgs.get(normalized)
         if mid is None:
             return None
         return self.get(mid)

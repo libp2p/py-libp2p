@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import trio
 
@@ -13,6 +15,7 @@ from libp2p.security.secio.transport import ID as SECIO_PROTOCOL_ID
 from libp2p.security.secure_session import (
     SecureSession,
 )
+from libp2p.security.security_multistream import SecurityMultistream
 from libp2p.stream_muxer.mplex.mplex import Mplex
 from libp2p.stream_muxer.yamux.yamux import Yamux
 from tests.utils.factories import (
@@ -101,3 +104,19 @@ async def test_default_insecure_security():
         assert isinstance(conn, InsecureSession)
 
     await perform_simple_test(assertion_func, None)
+
+
+@pytest.mark.trio
+async def test_security_multistream_records_negotiated_protocol() -> None:
+    multistream = SecurityMultistream({})
+    mock_transport = MagicMock()
+    secure_conn = MagicMock()
+    mock_transport.secure_outbound = AsyncMock(return_value=secure_conn)
+    multistream._selector.select = AsyncMock(
+        return_value=(NOISE_PROTOCOL_ID, mock_transport)
+    )
+
+    result = await multistream.secure_outbound(MagicMock(), MagicMock())
+
+    assert result is secure_conn
+    assert result.negotiated_security_protocol == str(NOISE_PROTOCOL_ID)

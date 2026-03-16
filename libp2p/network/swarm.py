@@ -1481,14 +1481,24 @@ class Swarm(Service, INetworkService):
             direction=direction,
         )
 
-        # Set actual transport addresses and connection type from the muxed connection.
-        # This captures the real transport info (IP/port, direct vs relayed)
-        # to ensure it's available via the SwarmConn interface without
-        # needing to access raw_conn properties.
         try:
             addresses = muxed_conn.get_transport_addresses()
             conn_type = muxed_conn.get_connection_type()
             swarm_conn.set_transport_info(addresses, conn_type)
+
+            security_protocol = getattr(
+                muxed_conn,
+                "negotiated_security_protocol",
+                None,
+            )
+            if security_protocol is None:
+                security_protocol = getattr(
+                    getattr(muxed_conn, "secured_conn", None),
+                    "negotiated_security_protocol",
+                    None,
+                )
+            muxer_protocol = getattr(muxed_conn, "negotiated_muxer_protocol", None)
+            swarm_conn.set_negotiated_protocols(security_protocol, muxer_protocol)
         except (AttributeError, TypeError, ValueError) as e:
             # Log expected errors at debug level (e.g., missing methods, invalid data)
             logger.debug(

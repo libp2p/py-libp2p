@@ -10,6 +10,10 @@ import trio
 
 from libp2p import new_host
 from libp2p.filecoin import get_network_preset, get_runtime_bootstrap_addresses
+from libp2p.filecoin.interop import (
+    classify_probe_result,
+    extract_connection_metadata,
+)
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.utils.address_validation import find_free_port
 
@@ -24,6 +28,8 @@ def _build_result(
     connected: bool,
     address: str | None,
     peer_id: str | None,
+    connection: dict[str, Any] | None,
+    interop: dict[str, Any],
     error: str | None,
 ) -> dict[str, Any]:
     return {
@@ -33,6 +39,8 @@ def _build_result(
         "connected": connected,
         "address": address,
         "peer_id": peer_id,
+        "connection": connection,
+        "interop": interop,
         "error": error,
     }
 
@@ -52,8 +60,20 @@ async def run(
         if peer
         else get_runtime_bootstrap_addresses(network, resolve_dns=resolve_dns)
     )
+    workflow = "explicit_peer" if peer else "runtime_bootstrap_smoke"
+    case = (
+        "explicit_filecoin_peer_connect"
+        if peer
+        else "public_filecoin_bootstrap_connect"
+    )
 
     if not candidates:
+        interop = {
+            "case": case,
+            "workflow": workflow,
+            "result": "fail",
+            "failure_mode": "no candidate peer addresses available",
+        }
         result = _build_result(
             network_alias=network,
             network_name=network_name,
@@ -61,6 +81,8 @@ async def run(
             connected=False,
             address=None,
             peer_id=None,
+            connection=None,
+            interop=interop,
             error="no candidate peer addresses available",
         )
         if as_json:
@@ -75,6 +97,7 @@ async def run(
 
     selected_addr: str | None = None
     selected_peer_id: str | None = None
+    selected_connection: dict[str, Any] | None = None
     last_error: str | None = None
 
     async with host.run(listen_addrs=listen_addrs):
@@ -85,11 +108,22 @@ async def run(
                     await host.connect(info)
                 selected_addr = addr
                 selected_peer_id = str(info.peer_id)
+                selected_connection = extract_connection_metadata(host, info.peer_id)
                 break
             except Exception as exc:
                 last_error = str(exc)
 
     connected = selected_addr is not None
+    interop = {
+        "case": case,
+        "workflow": workflow,
+        "result": classify_probe_result(
+            connected=connected,
+            metadata_captured=selected_connection is not None,
+            checks_satisfied=connected,
+        ),
+        "failure_mode": None if connected else last_error,
+    }
     result = _build_result(
         network_alias=network,
         network_name=network_name,
@@ -97,6 +131,8 @@ async def run(
         connected=connected,
         address=selected_addr,
         peer_id=selected_peer_id,
+        connection=selected_connection,
+        interop=interop,
         error=None if connected else last_error,
     )
 
@@ -109,6 +145,13 @@ async def run(
         if connected:
             logger.info("connected peer: %s", result["peer_id"])
             logger.info("connected address: %s", result["address"])
+            if result["connection"] is not None:
+                logger.info(
+                    "transport/security/muxer: %s / %s / %s",
+                    result["connection"]["transport_family"],
+                    result["connection"]["security_protocol"],
+                    result["connection"]["muxer_protocol"],
+                )
         else:
             logger.error("connect failed: %s", result["error"])
 

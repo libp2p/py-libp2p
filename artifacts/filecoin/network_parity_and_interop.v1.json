@@ -1,0 +1,389 @@
+{
+  "interop_matrix": [
+    {
+      "evidence_source": "examples/filecoin/filecoin_connect_demo.py",
+      "focus": "connectivity and negotiated transport/security capture",
+      "id": "public_filecoin_bootstrap_connect",
+      "notes": "Confirms runtime bootstrap dialing against public Filecoin peers.",
+      "reproducible_steps": [
+        "filecoin-connect-demo --network mainnet --resolve-dns --json"
+      ],
+      "result": "pass",
+      "target": "public_bootstrap_peers",
+      "workflow": "runtime_bootstrap_smoke"
+    },
+    {
+      "evidence_source": "examples/filecoin/filecoin_ping_identify_demo.py",
+      "focus": "identify, ping, and advertised Filecoin protocol IDs",
+      "id": "public_filecoin_ping_identify",
+      "notes": "Records negotiated transport/security/muxer metadata where available.",
+      "reproducible_steps": [
+        "filecoin-ping-identify-demo --network mainnet --resolve-dns --json"
+      ],
+      "result": "pass",
+      "target": "public_filecoin_peers",
+      "workflow": "runtime_bootstrap_smoke"
+    },
+    {
+      "evidence_source": "docs/filecoin_network_parity_and_interop.rst",
+      "focus": "identify and ping over an explicit Lotus multiaddr",
+      "id": "lotus_identify_ping_tcp",
+      "notes": "Reproducible by operators, but not launched in CI by this module.",
+      "reproducible_steps": [
+        "filecoin-connect-demo --peer /.../p2p/<lotus-peer-id> --json",
+        "filecoin-ping-identify-demo --peer /.../p2p/<lotus-peer-id> --json"
+      ],
+      "result": "partial",
+      "target": "operator_supplied_lotus_node",
+      "workflow": "controlled_explicit_peer"
+    },
+    {
+      "evidence_source": "docs/filecoin_network_parity_and_interop.rst",
+      "focus": "identify and ping over an explicit Forest multiaddr",
+      "id": "forest_identify_ping_tcp",
+      "notes": "Same probe path as Lotus, using the existing Filecoin examples.",
+      "reproducible_steps": [
+        "filecoin-connect-demo --peer /.../p2p/<forest-peer-id> --json",
+        "filecoin-ping-identify-demo --peer /.../p2p/<forest-peer-id> --json"
+      ],
+      "result": "partial",
+      "target": "operator_supplied_forest_node",
+      "workflow": "controlled_explicit_peer"
+    },
+    {
+      "evidence_source": "examples/filecoin/filecoin_ping_identify_demo.py",
+      "focus": "advertised Hello and ChainExchange protocol IDs",
+      "id": "lotus_protocol_advertisement",
+      "notes": "Checks protocol advertisement, not full runtime protocol exchange.",
+      "reproducible_steps": [
+        "filecoin-ping-identify-demo --peer /.../p2p/<lotus-peer-id> --json"
+      ],
+      "result": "partial",
+      "target": "operator_supplied_lotus_node",
+      "workflow": "controlled_explicit_peer"
+    },
+    {
+      "evidence_source": "examples/filecoin/filecoin_ping_identify_demo.py",
+      "focus": "advertised Hello and ChainExchange protocol IDs",
+      "id": "forest_protocol_advertisement",
+      "notes": "Checks protocol advertisement, not full runtime protocol exchange.",
+      "reproducible_steps": [
+        "filecoin-ping-identify-demo --peer /.../p2p/<forest-peer-id> --json"
+      ],
+      "result": "partial",
+      "target": "operator_supplied_forest_node",
+      "workflow": "controlled_explicit_peer"
+    },
+    {
+      "evidence_source": "examples/filecoin/filecoin_pubsub_demo.py",
+      "focus": "read-only observer mode over Filecoin topics",
+      "id": "filecoin_read_only_gossipsub_observer",
+      "notes": "Observer mode is intentionally safe/read-only and may log expected peer-specific failures.",
+      "reproducible_steps": [
+        "filecoin-pubsub-demo --network mainnet --seconds 5 --json"
+      ],
+      "result": "partial",
+      "target": "public_filecoin_gossip_peers",
+      "workflow": "runtime_bootstrap_smoke"
+    },
+    {
+      "evidence_source": "docs/filecoin_network_parity_and_interop.rst",
+      "focus": "runtime Hello request/response behavior",
+      "id": "hello_runtime_exchange",
+      "notes": "Module 1 documents the gap instead of shipping a stub implementation.",
+      "reproducible_steps": [],
+      "result": "expected_gap",
+      "target": "lotus_or_forest_nodes",
+      "workflow": "controlled_explicit_peer"
+    },
+    {
+      "evidence_source": "docs/filecoin_network_parity_and_interop.rst",
+      "focus": "runtime ChainExchange request/response behavior",
+      "id": "chain_exchange_request_response",
+      "notes": "Protocol IDs are present; request/response behavior remains follow-up work.",
+      "reproducible_steps": [],
+      "result": "expected_gap",
+      "target": "lotus_or_forest_nodes",
+      "workflow": "controlled_explicit_peer"
+    }
+  ],
+  "meta": {
+    "allowed_interop_results": [
+      "pass",
+      "partial",
+      "fail",
+      "expected_gap"
+    ],
+    "allowed_parity_statuses": [
+      "aligned",
+      "partial",
+      "different",
+      "out_of_scope"
+    ],
+    "format": "filecoin_network_parity_and_interop.v1",
+    "sources": {
+      "forest": {
+        "version": "0.32.2"
+      },
+      "lotus": {
+        "version": "v1.35.0"
+      }
+    }
+  },
+  "network_parity_audit": [
+    {
+      "concern": "Listen address defaults",
+      "forest_evidence": [
+        "src/libp2p/config.rs:29"
+      ],
+      "id": "listen_addresses",
+      "implication": "Generic py-libp2p defaults do not imply QUIC or WebTransport parity for Filecoin nodes.",
+      "lotus_evidence": [
+        "node/config/def.go:35",
+        "node/config/types.go:318"
+      ],
+      "priority": "P1",
+      "pylibp2p_evidence": [
+        "libp2p/__init__.py:331"
+      ],
+      "status": "different",
+      "suggested_change": "Document Filecoin-specific listen-address recommendations rather than changing the global host default in this module."
+    },
+    {
+      "concern": "Transport stack defaults",
+      "forest_evidence": [
+        "src/libp2p/config.rs:29",
+        "src/libp2p/discovery.rs:82"
+      ],
+      "id": "transport_stack",
+      "implication": "TCP interop is straightforward, but broader Filecoin transport defaults are not mirrored by a plain py-libp2p host.",
+      "lotus_evidence": [
+        "node/modules/lp2p/transport.go:14"
+      ],
+      "priority": "P1",
+      "pylibp2p_evidence": [
+        "libp2p/__init__.py:331",
+        "libp2p/transport/quic/transport.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Keep the transport metadata visible in interop probe outputs and document the Filecoin-oriented transport settings."
+    },
+    {
+      "concern": "Security stack ordering",
+      "forest_evidence": [
+        "src/libp2p/service.rs:271"
+      ],
+      "id": "security_stack_order",
+      "implication": "Noise-first operation interoperates, but exact ordering/config shape differs from Lotus configurability.",
+      "lotus_evidence": [
+        "node/modules/lp2p/transport.go:21"
+      ],
+      "priority": "P1",
+      "pylibp2p_evidence": [
+        "libp2p/__init__.py:383",
+        "libp2p/security/security_multistream.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Expose negotiated security protocol in probe output and recommend Filecoin-specific security choices in docs."
+    },
+    {
+      "concern": "Muxer defaults",
+      "forest_evidence": [
+        "src/libp2p/service.rs:283"
+      ],
+      "id": "muxer_defaults",
+      "implication": "Yamux-first aligns well for TCP, but py-libp2p still keeps a generic Mplex fallback path.",
+      "lotus_evidence": [
+        "node/modules/lp2p/smux.go:11"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/__init__.py:228",
+        "libp2p/stream_muxer/muxer_multistream.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Keep Yamux-first and capture the negotiated muxer during probes."
+    },
+    {
+      "concern": "Ping and identify host defaults",
+      "forest_evidence": [
+        "src/libp2p/discovery.rs:108"
+      ],
+      "id": "ping_identify_host_defaults",
+      "implication": "Ping and identify diagnostics already provide a good interoperability surface for Filecoin nodes.",
+      "lotus_evidence": [
+        "node/modules/lp2p/host.go:49"
+      ],
+      "priority": null,
+      "pylibp2p_evidence": [
+        "libp2p/host/basic_host.py",
+        "examples/filecoin/filecoin_ping_identify_demo.py"
+      ],
+      "status": "aligned",
+      "suggested_change": "None in this module."
+    },
+    {
+      "concern": "Connection manager thresholds and grace period",
+      "forest_evidence": [
+        "src/libp2p/config.rs:37"
+      ],
+      "id": "connection_manager_thresholds",
+      "implication": "py-libp2p defaults are looser than current Filecoin node expectations.",
+      "lotus_evidence": [
+        "node/modules/lp2p/libp2p.go:63",
+        "node/config/def.go:47"
+      ],
+      "priority": "P1",
+      "pylibp2p_evidence": [
+        "libp2p/network/config.py:13"
+      ],
+      "status": "different",
+      "suggested_change": "Publish Filecoin-specific recommended limits instead of mutating global defaults in this module."
+    },
+    {
+      "concern": "Resource manager behavior and scaling",
+      "forest_evidence": [
+        "src/libp2p/peer_manager.rs:121"
+      ],
+      "id": "resource_manager_defaults",
+      "implication": "Long-running Filecoin services need explicit resource planning in py-libp2p today.",
+      "lotus_evidence": [
+        "node/modules/lp2p/rcmgr.go:34"
+      ],
+      "priority": "P1",
+      "pylibp2p_evidence": [
+        "libp2p/rcmgr/manager.py"
+      ],
+      "status": "different",
+      "suggested_change": "Treat Lotus-style autoscaling/bootstrap allowlisting as a follow-up reliability/resource-management track."
+    },
+    {
+      "concern": "Bootstrap peer protection and allowlisting",
+      "forest_evidence": [
+        "src/libp2p/discovery.rs:65",
+        "src/libp2p/peer_manager.rs:221"
+      ],
+      "id": "bootstrap_protection",
+      "implication": "Bootstrap peers are not automatically protected/allowlisted in a Lotus-equivalent way.",
+      "lotus_evidence": [
+        "node/modules/lp2p/libp2p.go:82",
+        "node/modules/lp2p/rcmgr.go:129"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/network/tag_store.py",
+        "libp2p/network/swarm.py"
+      ],
+      "status": "different",
+      "suggested_change": "Document the gap and prefer application-level protection/tagging for long-lived Filecoin peers."
+    },
+    {
+      "concern": "Discovery stack and bootstrap dialing",
+      "forest_evidence": [
+        "src/libp2p/discovery.rs:82"
+      ],
+      "id": "discovery_stack",
+      "implication": "The Filecoin examples rely on runtime bootstrap dialing rather than Filecoin-shaped discovery lifecycle parity.",
+      "lotus_evidence": [
+        "node/modules/lp2p/discovery.go:13",
+        "node/modules/lp2p/nat.go:25"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "examples/filecoin/filecoin_connect_demo.py",
+        "libp2p/discovery"
+      ],
+      "status": "different",
+      "suggested_change": "Keep reproducible interop probe steps explicit and defer discovery-lifecycle parity to later work."
+    },
+    {
+      "concern": "Idle connection policy and redial assumptions",
+      "forest_evidence": [
+        "src/libp2p/service.rs:326"
+      ],
+      "id": "idle_connection_and_redial",
+      "implication": "py-libp2p can maintain peers, but its lifecycle heuristics are still generic rather than Filecoin-specific.",
+      "lotus_evidence": [
+        "node/modules/lp2p/libp2p.go:63"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/network/auto_connector.py",
+        "libp2p/network/connection_pruner.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Record parity notes now and treat deeper lifecycle tuning as a follow-up reliability task."
+    },
+    {
+      "concern": "Request/response stream concurrency assumptions",
+      "forest_evidence": [
+        "src/libp2p/service.rs:768"
+      ],
+      "id": "request_response_stream_concurrency",
+      "implication": "Filecoin request/response workloads should not assume Lotus/Forest-sized concurrency defaults in py-libp2p.",
+      "lotus_evidence": [
+        "node/modules/lp2p/rcmgr.go:70"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/transport/quic/config.py",
+        "libp2p/network/config.py"
+      ],
+      "status": "different",
+      "suggested_change": "Document the gap and keep future tuning tied to measured interop/perf work."
+    },
+    {
+      "concern": "Peer protection, bad-peer handling, and availability assumptions",
+      "forest_evidence": [
+        "src/libp2p/peer_manager.rs:121"
+      ],
+      "id": "peer_protection_and_bans",
+      "implication": "py-libp2p exposes building blocks, but not the same Filecoin peer-availability model.",
+      "lotus_evidence": [
+        "node/modules/lp2p/libp2p.go:72",
+        "node/modules/lp2p/conngater.go:10"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/network/tag_store.py",
+        "libp2p/network/connection_gate.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Keep the current gap visible and do not imply Lotus/Forest-grade peer availability semantics."
+    },
+    {
+      "concern": "DHT protocol naming and routing filters",
+      "forest_evidence": [
+        "src/libp2p/discovery.rs:82"
+      ],
+      "id": "dht_protocol_and_filters",
+      "implication": "The Filecoin DHT protocol helper exists, but Lotus-style routing-table/query filters are not mirrored.",
+      "lotus_evidence": [
+        "node/modules/lp2p/host.go:82"
+      ],
+      "priority": "P3",
+      "pylibp2p_evidence": [
+        "libp2p/filecoin/constants.py:30"
+      ],
+      "status": "partial",
+      "suggested_change": "Keep naming parity and document behavioural gaps."
+    },
+    {
+      "concern": "Pubsub and peer-scoring parity note",
+      "forest_evidence": [
+        "src/libp2p/gossip_params.rs:125"
+      ],
+      "id": "pubsub_peer_scoring_note",
+      "implication": "The Filecoin pubsub preset is useful today, but full scoring/gating parity remains a separate track.",
+      "lotus_evidence": [
+        "node/modules/lp2p/pubsub.go:31"
+      ],
+      "priority": "P2",
+      "pylibp2p_evidence": [
+        "libp2p/filecoin/pubsub.py"
+      ],
+      "status": "partial",
+      "suggested_change": "Point users to the existing Filecoin pubsub docs/examples and keep this module focused on network parity and interop."
+    }
+  ]
+}

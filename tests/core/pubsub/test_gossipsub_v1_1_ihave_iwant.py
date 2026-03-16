@@ -6,7 +6,7 @@ This module tests the IHAVE/IWANT mechanism in GossipSub v1.1, including:
 - Prevention of infinite gossip loops
 """
 
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -166,6 +166,33 @@ async def test_ihave_rate_limiting():
         requested_msg_ids = call_args[0]
         assert len(requested_msg_ids) > 0
         assert len(requested_msg_ids) <= len(msg_ids)
+
+
+@pytest.mark.trio
+async def test_ihave_accepts_bytes_message_ids_from_wire():
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2, heartbeat_interval=0.5
+    ) as pubsubs:
+        gsub0, gsub1 = (cast(GossipSub, ps.router) for ps in pubsubs)
+        host0, host1 = (ps.host for ps in pubsubs)
+
+        await connect(host0, host1)
+        await trio.sleep(0.5)
+
+        topic = "test_ihave_bytes_message_ids"
+        await pubsubs[0].subscribe(topic)
+        await pubsubs[1].subscribe(topic)
+        await trio.sleep(1.0)
+
+        missing_msg_id = str((b"seqno123", b"peer456")).encode("utf-8")
+        emit_iwant_mock = AsyncMock()
+        gsub0.emit_iwant = emit_iwant_mock
+
+        ihave_msg = rpc_pb2.ControlIHave(topicID=topic)
+        cast(Any, ihave_msg.messageIDs).append(missing_msg_id)
+        await gsub0.handle_ihave(ihave_msg, host1.get_id())
+
+        emit_iwant_mock.assert_called_once()
 
 
 @pytest.mark.trio

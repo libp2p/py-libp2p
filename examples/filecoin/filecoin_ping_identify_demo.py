@@ -16,6 +16,10 @@ from libp2p.filecoin import (
     get_network_preset,
     get_runtime_bootstrap_addresses,
 )
+from libp2p.filecoin.interop import (
+    classify_probe_result,
+    extract_connection_metadata,
+)
 from libp2p.host.ping import PingService
 from libp2p.identity.identify.identify import (
     ID as IDENTIFY_PROTOCOL_ID,
@@ -35,8 +39,10 @@ def _build_result(
     connected: bool,
     address: str | None,
     peer_id: str | None,
+    connection: dict[str, Any] | None,
     identify: dict[str, Any] | None,
     ping: dict[str, Any] | None,
+    interop: dict[str, Any],
     error: str | None,
 ) -> dict[str, Any]:
     return {
@@ -45,8 +51,10 @@ def _build_result(
         "connected": connected,
         "address": address,
         "peer_id": peer_id,
+        "connection": connection,
         "identify": identify,
         "ping": ping,
+        "interop": interop,
         "error": error,
     }
 
@@ -58,11 +66,15 @@ async def _run_identify(host: Any, peer_id: Any) -> dict[str, Any]:
 
     identify_msg = parse_identify_response(raw_response)
     protocols = list(identify_msg.protocols)
+    advertised_filecoin_protocols = [
+        protocol for protocol in protocols if protocol.startswith("/fil/")
+    ]
 
     return {
         "agent_version": identify_msg.agent_version,
         "protocol_version": identify_msg.protocol_version,
         "protocol_count": len(protocols),
+        "advertised_filecoin_protocols": advertised_filecoin_protocols,
         "supports_filecoin_hello": str(FIL_HELLO_PROTOCOL) in protocols,
         "supports_filecoin_chain_exchange": str(FIL_CHAIN_EXCHANGE_PROTOCOL)
         in protocols,
@@ -95,6 +107,10 @@ async def run(
         if peer
         else get_runtime_bootstrap_addresses(network, resolve_dns=resolve_dns)
     )
+    workflow = "explicit_peer" if peer else "runtime_bootstrap_smoke"
+    case = (
+        "explicit_filecoin_ping_identify" if peer else "public_filecoin_ping_identify"
+    )
 
     if not candidates:
         result = _build_result(
@@ -103,8 +119,15 @@ async def run(
             connected=False,
             address=None,
             peer_id=None,
+            connection=None,
             identify=None,
             ping=None,
+            interop={
+                "case": case,
+                "workflow": workflow,
+                "result": "fail",
+                "failure_mode": "no candidate peer addresses available",
+            },
             error="no candidate peer addresses available",
         )
         if as_json:
@@ -119,6 +142,7 @@ async def run(
 
     selected_addr: str | None = None
     selected_info = None
+    selected_connection: dict[str, Any] | None = None
     last_error: str | None = None
     identify_payload: dict[str, Any] | None = None
     ping_payload: dict[str, Any] | None = None
@@ -131,6 +155,7 @@ async def run(
                     await host.connect(info)
                 selected_addr = addr
                 selected_info = info
+                selected_connection = extract_connection_metadata(host, info.peer_id)
                 break
             except Exception as exc:
                 last_error = str(exc)
@@ -143,16 +168,27 @@ async def run(
                 last_error = str(exc)
 
     connected = selected_addr is not None
+    checks_satisfied = identify_payload is not None and ping_payload is not None
+    interop = {
+        "case": case,
+        "workflow": workflow,
+        "result": classify_probe_result(
+            connected=connected,
+            metadata_captured=selected_connection is not None,
+            checks_satisfied=checks_satisfied,
+        ),
+        "failure_mode": None if checks_satisfied else last_error,
+    }
     result = _build_result(
         network_alias=network,
         network_name=network_name,
-        connected=(
-            connected and identify_payload is not None and ping_payload is not None
-        ),
+        connected=connected and checks_satisfied,
         address=selected_addr,
         peer_id=str(selected_info.peer_id) if selected_info else None,
+        connection=selected_connection,
         identify=identify_payload,
         ping=ping_payload,
+        interop=interop,
         error=last_error,
     )
 
@@ -163,6 +199,13 @@ async def run(
         logger.info("network name: %s", result["network_name"])
         logger.info("peer: %s", result["peer_id"])
         logger.info("address: %s", result["address"])
+        if result["connection"] is not None:
+            logger.info(
+                "transport/security/muxer: %s / %s / %s",
+                result["connection"]["transport_family"],
+                result["connection"]["security_protocol"],
+                result["connection"]["muxer_protocol"],
+            )
         if result["identify"] is not None:
             logger.info("agent version: %s", result["identify"]["agent_version"])
             logger.info(

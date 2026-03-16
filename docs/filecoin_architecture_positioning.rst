@@ -9,7 +9,7 @@ How py-libp2p fits in Filecoin architecture today
 
 ``py-libp2p`` is a Python networking toolkit that can interoperate at the
 libp2p layer, and this package provides a Filecoin-focused DX layer for protocol
-IDs, topic formats, bootstrap presets, and practical examples.
+IDs, topic formats, bootstrap presets, and practical examples. For current defaults parity, connection lifecycle notes, and reproducible interop probe steps, see :doc:`filecoin_network_parity_and_interop`.
 
 Normative references:
 

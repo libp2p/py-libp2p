@@ -4,6 +4,7 @@ Filecoin DX Examples
 Read this first:
 
 - :doc:`filecoin_architecture_positioning`
+- :doc:`filecoin_network_parity_and_interop`
 
 These examples show practical Filecoin-focused workflows using
 ``libp2p.filecoin``.

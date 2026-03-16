@@ -112,6 +112,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._is_initiator = is_client if isinstance(is_client, bool) else is_initiator
         self._maddr = maddr
         self._transport = transport
+        self.negotiated_security_protocol = "quic-tls"
+        self.negotiated_muxer_protocol = None
         self._security_manager = security_manager
         self._resource_scope = resource_scope
         # Owning listener context (server-side). Used to register newly-issued

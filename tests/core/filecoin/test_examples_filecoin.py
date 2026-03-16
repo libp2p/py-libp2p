@@ -49,6 +49,19 @@ def test_connect_demo_json_payload_shape() -> None:
         connected=True,
         address="/ip4/127.0.0.1/tcp/1234/p2p/12D3KooW...",
         peer_id="12D3KooW...",
+        connection={
+            "transport_family": "tcp",
+            "transport_addresses": ["/ip4/127.0.0.1/tcp/1234"],
+            "connection_type": "direct",
+            "security_protocol": "/noise",
+            "muxer_protocol": "/yamux/1.0.0",
+        },
+        interop={
+            "case": "public_filecoin_bootstrap_connect",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "pass",
+            "failure_mode": None,
+        },
         error=None,
     )
     assert set(payload.keys()) == {
@@ -58,6 +71,8 @@ def test_connect_demo_json_payload_shape() -> None:
         "connected",
         "address",
         "peer_id",
+        "connection",
+        "interop",
         "error",
     }
 
@@ -69,14 +84,31 @@ def test_ping_identify_demo_json_payload_shape() -> None:
         connected=True,
         address="/ip4/127.0.0.1/tcp/9999/p2p/12D3KooW...",
         peer_id="12D3KooW...",
+        connection={
+            "transport_family": "tcp",
+            "transport_addresses": ["/ip4/127.0.0.1/tcp/9999"],
+            "connection_type": "direct",
+            "security_protocol": "/noise",
+            "muxer_protocol": "/yamux/1.0.0",
+        },
         identify={
             "agent_version": "lotus/1.35.0",
             "protocol_version": "ipfs/0.1.0",
             "protocol_count": 8,
+            "advertised_filecoin_protocols": [
+                "/fil/hello/1.0.0",
+                "/fil/chain/xchg/0.0.1",
+            ],
             "supports_filecoin_hello": True,
             "supports_filecoin_chain_exchange": True,
         },
         ping={"count": 3, "rtts_us": [100, 110, 120], "avg_rtt_us": 110},
+        interop={
+            "case": "public_filecoin_ping_identify",
+            "workflow": "runtime_bootstrap_smoke",
+            "result": "pass",
+            "failure_mode": None,
+        },
         error=None,
     )
     assert set(payload.keys()) == {
@@ -85,14 +117,17 @@ def test_ping_identify_demo_json_payload_shape() -> None:
         "connected",
         "address",
         "peer_id",
+        "connection",
         "identify",
         "ping",
+        "interop",
         "error",
     }
     assert set(payload["identify"].keys()) == {
         "agent_version",
         "protocol_version",
         "protocol_count",
+        "advertised_filecoin_protocols",
         "supports_filecoin_hello",
         "supports_filecoin_chain_exchange",
     }
@@ -114,6 +149,9 @@ def test_pubsub_demo_json_payload_shape() -> None:
         "/fil/msgs/testnetnet",
     ]
     assert payload["max_messages"] == 25
+    assert payload["interop"]["case"] == "filecoin_read_only_gossipsub_observer"
+    assert payload["interop"]["result"] == "partial"
+    assert payload["interop"]["expected_failure_modes"]
 
 
 def test_pubsub_observer_demo_has_no_publish_call_path() -> None:

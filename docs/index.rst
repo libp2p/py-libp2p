@@ -18,6 +18,7 @@ The Python implementation of the libp2p networking stack
 
     Examples <examples>
     Filecoin Architecture Positioning <filecoin_architecture_positioning>
+    Filecoin Network Parity and Interop <filecoin_network_parity_and_interop>
     API <libp2p>
 
 .. toctree::

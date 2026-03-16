@@ -104,3 +104,24 @@ async def test_add_transport_updates_precedence():
     # Re-add proto1 to check if it moves to the end
     muxer.add_transport(TProtocol("proto1"), mock_transport1)
     assert list(muxer.transports.keys()) == ["proto2", "proto1"]
+
+
+@pytest.mark.trio
+async def test_new_conn_records_negotiated_muxer_protocol() -> None:
+    muxer = MuxerMultistream({}, negotiate_timeout=30)
+    secure_conn = MagicMock()
+    secure_conn.is_initiator = True
+    secure_conn.negotiated_security_protocol = "/noise"
+    mock_peer_id = ID(b"test_peer")
+    mock_muxed_conn = MagicMock()
+    mock_transport = MagicMock(return_value=mock_muxed_conn)
+
+    muxer._selector.select = AsyncMock(
+        return_value=(TProtocol("/yamux/1.0.0x"), mock_transport)
+    )
+
+    result = await muxer.new_conn(secure_conn, mock_peer_id)
+
+    assert result is mock_muxed_conn
+    assert result.negotiated_security_protocol == "/noise"
+    assert result.negotiated_muxer_protocol == "/yamux/1.0.0x"
