@@ -1,246 +1,274 @@
 """
-Unit tests for KadDHT quorum behavior and sliding-window scheduling.
+Method-level tests for KadDHT sliding-window scheduling and quorum early-stop.
 
-This module tests:
-- Quorum early-stop: verifies no over-query when quorum is reached
-- Sliding-window scheduling: ensures faster peers can start before slower ones finish
-- Concurrency behavior in both get_value and put_value operations
+These tests instantiate real KadDHT objects and mock the underlying
+_get_from_peer / _store_at_peer calls to verify that the semaphore-based
+concurrency works end-to-end through the actual put_value / get_value paths.
 """
 
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+from multiaddr import Multiaddr
 import trio
 
-from libp2p.crypto.secp256k1 import (
-    create_new_key_pair,
-)
-from libp2p.peer.id import (
-    ID,
-)
+from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
+from libp2p.kad_dht.pb.kademlia_pb2 import Record
+from libp2p.peer.id import ID
 from libp2p.records.validator import Validator
 
 
-def create_valid_peer_id(name: str) -> ID:
-    """Create a valid peer ID for testing."""
+def _make_peer_id(name: str) -> ID:
     key_pair = create_new_key_pair()
     return ID.from_pubkey(key_pair.public_key)
 
 
 class SimpleValidator(Validator):
-    """Simple validator that accepts all values."""
+    """Accepts all byte values, selects the first."""
 
     def validate(self, key: str, value: bytes) -> None:
-        """Accept all values."""
         if not isinstance(value, bytes):
             raise TypeError("Value must be bytes")
 
     def select(self, key: str, values: list[bytes]) -> int:
-        """Return the first value."""
-        return 0 if values else 0
+        return 0
 
 
-class TestKadDHTQuorumBehavior:
-    """Test quorum early-stop behavior in get_value."""
+def _make_dht() -> KadDHT:
+    """Build a KadDHT with a mock host and simple validator."""
+    host = MagicMock()
+    key_pair = create_new_key_pair()
+    host.get_id.return_value = ID.from_pubkey(key_pair.public_key)
+    host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+    host.get_peerstore.return_value = MagicMock()
+    host.new_stream = AsyncMock()
 
-    @pytest.mark.trio
-    async def test_quorum_early_stop_no_overquery(self):
-        """
-        Verify that when quorum is reached, no additional peers are scheduled
-        after acquiring the semaphore.
+    from libp2p.records.validator import NamespacedValidator
 
-        This tests the fix for the early-stop issue where quorum could be
-        reached but additional peers would still be scheduled because the
-        check only happened before sem.acquire(), not after.
-        """
-        ALPHA = 3
-        quorum = 2
-
-        # Track which peers were queried
-        queried_peers = []
-        sem = trio.Semaphore(ALPHA)
-        quorum_reached = trio.Event()
-        valid_count = [0]
-
-        async def query_peer(peer_id):
-            """Mock peer query."""
-            queried_peers.append(peer_id)
-            # First 2 peers return quickly with valid records
-            if peer_id < 2:
-                await trio.sleep(0.01)
-                valid_count[0] += 1
-                if valid_count[0] >= quorum:
-                    quorum_reached.set()
-            else:
-                # Slow peers
-                await trio.sleep(0.5)
-            sem.release()
-
-        peers = list(range(10))
-
-        async with trio.open_nursery() as nursery:
-            for peer in peers:
-                # This is the FIXED version with re-check after acquire
-                await sem.acquire()
-                if quorum_reached.is_set():
-                    sem.release()
-                    break
-                nursery.start_soon(query_peer, peer)
-
-        # With the fix, only up to quorum + ALPHA - 1 peers should be queried
-        # (where quorum = 2, ALPHA = 3)
-        # So maximum 2 + 3 - 1 = 4 peers should be queried
-        assert len(queried_peers) <= 4, (
-            f"Too many peers queried ({len(queried_peers)}). "
-            "Quorum early-stop failed. Should query at most K + ALPHA - 1 peers."
-        )
-        assert valid_count[0] >= quorum, "Quorum was not reached"
+    validator = NamespacedValidator(
+        {"test": SimpleValidator()}, strict_validation=False
+    )
+    dht = KadDHT(host, DHTMode.SERVER, validator=validator)
+    return dht
 
 
-class TestKadDHTSlidingWindow:
-    """Test sliding-window scheduling in get_value."""
+# ---------------------------------------------------------------------------
+# get_value: quorum early-stop through real method
+# ---------------------------------------------------------------------------
+
+
+class TestGetValueQuorumEarlyStop:
+    """Call KadDHT.get_value() with mocked peers."""
 
     @pytest.mark.trio
-    async def test_sliding_window_faster_peers_start_early(self):
+    async def test_get_value_stops_after_quorum(self):
         """
-        Verify that faster peers start before slower peers finish.
-
-        Under the sliding-window with semaphore:
-        - Peers 0, 1, 2 are in the first batch (ALPHA=3)
-        - Peers 0 and 1 are fast (10ms)
-        - Peer 2 is slow (500ms)
-        - Peer 3 should start as one of peers 0/1 finishes (around 10ms)
-        - NOT wait for peer 2 to finish (would be 500ms+)
+        With 8 closest peers and quorum=2, get_value should not
+        query all 8.
         """
-        ALPHA = 3
-        peers = list(range(5))
+        dht = _make_dht()
+        peers = [_make_peer_id(f"peer{i}") for i in range(8)]
+        query_count: list[int] = [0]
 
-        # Track start times for each peer
-        started_at = {}
-        sem = trio.Semaphore(ALPHA)
-
-        async def query_peer(peer_id):
-            """Mock peer query with variable latency."""
-            started_at[peer_id] = trio.current_time()
-
-            # Peers 0 and 1 are fast
-            if peer_id in [0, 1]:
-                await trio.sleep(0.01)
-            # Peer 2 is slow
-            elif peer_id == 2:
-                await trio.sleep(0.5)
-            # Peers 3+ are fast
-            else:
-                await trio.sleep(0.01)
-
-            sem.release()
-
-        async with trio.open_nursery() as nursery:
-            for peer in peers:
-                await sem.acquire()
-                nursery.start_soon(query_peer, peer)
-
-        # All 5 peers should have been scheduled
-        assert len(started_at) == 5
-
-        # Peer 3 should start soon after peer 0/1 finish (within 100ms),
-        # NOT wait for peer 2 (500ms)
-        p2_start = started_at[2]
-        p3_start = started_at[3]
-
-        # Peer 3 should start before peer 2 finishes (0.5s after p2 starts)
-        assert p3_start < p2_start + 0.4, (
-            f"Peer 3 started at {p3_start:.3f}, peer 2 started at {p2_start:.3f}. "
-            "Expected sliding window: peer 3 should start before peer 2 finishes."
-        )
-
-
-class TestKadDHTPutValueSlidingWindow:
-    """Test sliding-window scheduling in put_value."""
-
-    @pytest.mark.trio
-    async def test_put_value_scheduling_with_mixed_latency(self):
-        """
-        Verify put_value uses sliding window - faster peers scheduled before
-        slower ones finish.
-
-        This is a simpler unit test without requiring a full DHT pair.
-        """
-        # Just verify the semaphore-based scheduling pattern works
-        # by simulating the core scheduling logic
-        peers = list(range(5))  # 5 peers
-        ALPHA = 3
-        sem = trio.Semaphore(ALPHA)
-
-        scheduled_order = []
-        completed = []
-
-        async def task(peer):
-            scheduled_order.append(peer)
-            # Some peers are fast, some slow
-            if peer in [0, 1, 4]:
-                await trio.sleep(0.01)
-            elif peer == 2:
-                await trio.sleep(0.5)
-            else:
-                await trio.sleep(0.01)
-            completed.append(peer)
-            sem.release()
-
-        async with trio.open_nursery() as nursery:
-            for peer in peers:
-                await sem.acquire()
-                nursery.start_soon(task, peer)
-
-        # All peers should be scheduled
-        assert len(scheduled_order) == 5
-        assert len(completed) == 5
-
-
-class TestKadDHTQuorumWithMultiplePeers:
-    """Test quorum with multiple slow and fast peers."""
-
-    @pytest.mark.trio
-    async def test_quorum_stops_correctly_with_mixed_responses(self):
-        """
-        Verify quorum stops scheduling once met, even with pending slow peers.
-        """
-        ALPHA = 3
-        quorum = 2
-        peers = list(range(8))
-
-        response_count = [0]
-        query_count = [0]
-        sem = trio.Semaphore(ALPHA)
-        quorum_reached = trio.Event()
-        valid_responses = []
-
-        async def query_peer(peer):
+        async def mock_get(peer, key_bytes, return_record=False):
             query_count[0] += 1
-            # First 3 peers return valid responses
-            if peer < 3:
+            idx = peers.index(peer)
+            if idx < 3:
                 await trio.sleep(0.01)
-                response_count[0] += 1
-                valid_responses.append(peer)
-                if len(valid_responses) >= quorum:
-                    quorum_reached.set()
+                rec = Record()
+                rec.key = key_bytes
+                rec.value = b"test-value"
+                rec.timeReceived = str(int(time.time()))
+                return rec
             else:
-                # Slower peers
-                await trio.sleep(0.5)
-                response_count[0] += 1
-                valid_responses.append(peer)
-            sem.release()
+                await trio.sleep(1.0)
+                return None
 
-        async with trio.open_nursery() as nursery:
-            for peer in peers:
-                await sem.acquire()
-                if quorum_reached.is_set():
-                    sem.release()
-                    break
-                nursery.start_soon(query_peer, peer)
+        with (
+            patch.object(
+                dht.routing_table,
+                "find_local_closest_peers",
+                return_value=peers,
+            ),
+            patch.object(dht.value_store, "get", return_value=None),
+            patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
+            patch.object(dht, "validator", SimpleValidator()),
+        ):
+            result = await dht.get_value("test-key", quorum=2)
 
-        # Should not over-query
-        # At most quorum + ALPHA - 1 = 2 + 3 - 1 = 4 queries expected
-        assert query_count[0] <= 4, (
-            f"Too many queries: {query_count[0]}. "
-            "Expected at most quorum + ALPHA - 1 = 4"
+        assert result == b"test-value"
+        assert query_count[0] <= 5, (
+            f"Expected at most ~4-5 queries with quorum=2, ALPHA=3, "
+            f"but got {query_count[0]}."
         )
-        assert len(valid_responses) >= quorum
+
+    @pytest.mark.trio
+    async def test_get_value_no_quorum_queries_all(self):
+        """With quorum=0, get_value should query all peers."""
+        dht = _make_dht()
+        peers = [_make_peer_id(f"peer{i}") for i in range(5)]
+        query_count: list[int] = [0]
+
+        async def mock_get(peer, key_bytes, return_record=False):
+            query_count[0] += 1
+            await trio.sleep(0.01)
+            rec = Record()
+            rec.key = key_bytes
+            rec.value = b"val"
+            rec.timeReceived = str(int(time.time()))
+            return rec
+
+        with (
+            patch.object(
+                dht.routing_table,
+                "find_local_closest_peers",
+                return_value=peers,
+            ),
+            patch.object(dht.value_store, "get", return_value=None),
+            patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
+            patch.object(dht, "validator", SimpleValidator()),
+        ):
+            result = await dht.get_value("test-key", quorum=0)
+
+        assert result == b"val"
+        assert query_count[0] == 5, (
+            f"All 5 peers should be queried, got {query_count[0]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# put_value: sliding-window scheduling through real method
+# ---------------------------------------------------------------------------
+
+
+class TestPutValueSlidingWindow:
+    """Call KadDHT.put_value() with mocked peers."""
+
+    @pytest.mark.trio
+    async def test_put_value_sliding_window_no_idle(self):
+        """
+        With 5 peers and one slow peer, verify peer 3 starts before
+        slow peer 2 finishes.
+        """
+        dht = _make_dht()
+        peers = [_make_peer_id(f"peer{i}") for i in range(5)]
+        started_at: dict[int, float] = {}
+
+        async def mock_store(peer, key_bytes, value):
+            idx = peers.index(peer)
+            started_at[idx] = trio.current_time()
+            if idx == 2:
+                await trio.sleep(0.5)
+            else:
+                await trio.sleep(0.01)
+            return True
+
+        with (
+            patch.object(
+                dht.routing_table,
+                "find_local_closest_peers",
+                return_value=peers,
+            ),
+            patch.object(
+                dht.value_store,
+                "_store_at_peer",
+                side_effect=mock_store,
+            ),
+            patch.object(dht, "validator", SimpleValidator()),
+        ):
+            await dht.put_value("test-key", b"test-value")
+
+        assert len(started_at) == 5, (
+            f"All 5 peers should be stored to, got {len(started_at)}"
+        )
+        assert started_at[3] < started_at[2] + 0.3, (
+            f"Peer 3 started at {started_at[3]:.3f}, "
+            f"peer 2 at {started_at[2]:.3f}. "
+            "Sliding window not working."
+        )
+
+    @pytest.mark.trio
+    async def test_put_value_counts_successes(self):
+        """Verify put_value attempts all peers."""
+        dht = _make_dht()
+        peers = [_make_peer_id(f"peer{i}") for i in range(4)]
+        call_count: list[int] = [0]
+
+        async def mock_store(peer, key_bytes, value):
+            call_count[0] += 1
+            idx = peers.index(peer)
+            await trio.sleep(0.01)
+            return idx in (0, 2)
+
+        with (
+            patch.object(
+                dht.routing_table,
+                "find_local_closest_peers",
+                return_value=peers,
+            ),
+            patch.object(
+                dht.value_store,
+                "_store_at_peer",
+                side_effect=mock_store,
+            ),
+            patch.object(dht, "validator", SimpleValidator()),
+        ):
+            await dht.put_value("test-key", b"test-value")
+
+        assert call_count[0] == 4, (
+            f"All 4 peers should be attempted, got {call_count[0]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# get_value: sliding-window scheduling through real method
+# ---------------------------------------------------------------------------
+
+
+class TestGetValueSlidingWindow:
+    """Call KadDHT.get_value() with mixed-latency mocked peers."""
+
+    @pytest.mark.trio
+    async def test_get_value_sliding_window_no_idle(self):
+        """
+        With 5 peers and one slow peer, peer 3 should start before
+        slow peer 2 finishes.
+        """
+        dht = _make_dht()
+        peers = [_make_peer_id(f"peer{i}") for i in range(5)]
+        started_at: dict[int, float] = {}
+
+        async def mock_get(peer, key_bytes, return_record=False):
+            idx = peers.index(peer)
+            started_at[idx] = trio.current_time()
+            if idx == 2:
+                await trio.sleep(0.5)
+            else:
+                await trio.sleep(0.01)
+            rec = Record()
+            rec.key = key_bytes
+            rec.value = b"val"
+            rec.timeReceived = str(int(time.time()))
+            return rec
+
+        with (
+            patch.object(
+                dht.routing_table,
+                "find_local_closest_peers",
+                return_value=peers,
+            ),
+            patch.object(dht.value_store, "get", return_value=None),
+            patch.object(dht.value_store, "_get_from_peer", side_effect=mock_get),
+            patch.object(dht, "validator", SimpleValidator()),
+        ):
+            result = await dht.get_value("test-key", quorum=0)
+
+        assert result == b"val"
+        assert len(started_at) == 5
+        assert started_at[3] < started_at[2] + 0.3, (
+            f"Peer 3 started at {started_at[3]:.3f}, "
+            f"peer 2 at {started_at[2]:.3f}. "
+            "Sliding window not working in get_value."
+        )

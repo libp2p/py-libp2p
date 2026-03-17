@@ -1034,6 +1034,11 @@ class KadDHT(Service):
                     break
                 nursery.start_soon(query_one, peer)
 
+        logger.debug(
+            f"get_value query complete: {total_responses_list[0]} responses, "
+            f"{len(valid_records)} valid records from {len(closest_peers)} peers"
+        )
+
         # 4. Select the best record if any valid records were found
         if valid_records:
             # Check if quorum was met
