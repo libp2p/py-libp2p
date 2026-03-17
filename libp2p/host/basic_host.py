@@ -89,7 +89,7 @@ from libp2p.security.tls.autotls.acme import (
     compute_b36_peer_id,
 )
 from libp2p.security.tls.autotls.broker import BrokerClient
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
@@ -439,6 +439,14 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the given `protocol_id`.
+
+        :param protocol_id: protocol id to remove
+        """
+        self.multiselect.remove_handler(protocol_id)
 
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]

@@ -13,6 +13,7 @@ from libp2p import (
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -34,6 +35,34 @@ def test_default_protocols():
     # NOTE: comparing keys for equality as handlers may be closures that do not compare
     # in the way this test is concerned with
     assert handlers.keys() == get_default_protocols(host).keys()
+
+
+def test_remove_stream_handler_removes_protocol():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+
+    protocol = TProtocol("/test/remove/1.0.0")
+
+    async def dummy_handler(stream):
+        pass
+
+    # Register and verify it's present
+    host.set_stream_handler(protocol, dummy_handler)
+    assert protocol in host.get_mux().handlers
+
+    # Remove and verify it's gone
+    host.remove_stream_handler(protocol)
+    assert protocol not in host.get_mux().handlers
+
+
+def test_remove_stream_handler_nonexistent_is_safe():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+
+    # Removing a protocol that was never registered should not raise
+    host.remove_stream_handler(TProtocol("/nonexistent/1.0.0"))
 
 
 @pytest.mark.trio

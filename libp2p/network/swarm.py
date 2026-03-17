@@ -49,7 +49,7 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.transport.exceptions import (
@@ -76,6 +76,7 @@ from .connection.raw_connection import (
 
 # SwarmConn is imported conditionally above
 from .exceptions import (
+    SwarmDialAllFailedError,
     SwarmException,
 )
 
@@ -532,9 +533,11 @@ class Swarm(Service, INetworkService):
 
         if not connections:
             # Tried all addresses, raising exception.
-            raise SwarmException(
+            raise SwarmDialAllFailedError(
                 f"unable to connect to {peer_id}, no addresses established a "
-                "successful connection (with exceptions)"
+                "successful connection (with exceptions)",
+                peer_id=peer_id,
+                num_addrs_tried=len(exceptions),
             ) from MultiError(exceptions)
 
         return connections
