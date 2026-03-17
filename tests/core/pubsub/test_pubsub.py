@@ -31,9 +31,7 @@ from libp2p.pubsub.pubsub import (
     PUBSUB_SIGNING_PREFIX,
     SUBSCRIPTION_CHANNEL_SIZE,
 )
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
-)
+from libp2p.pubsub.rpc_queue import RpcQueue
 from libp2p.tools.utils import (
     connect,
 )
@@ -620,20 +618,20 @@ async def test_message_all_peers(monkeypatch, security_protocol):
         PubsubFactory.create_batch_with_gossipsub(
             1, security_protocol=security_protocol
         ) as pubsubs_fsub,
-        net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
     ):
         peer_id = IDFactory()
-        mock_peers = {peer_id: stream_pair[0]}
+        mock_peers = {peer_id: object()}
+        mock_peer_queues = {peer_id: RpcQueue()}
         with monkeypatch.context() as m:
             m.setattr(pubsubs_fsub[0], "peers", mock_peers)
+            m.setattr(pubsubs_fsub[0], "peer_queues", mock_peer_queues)
 
             empty_rpc = rpc_pb2.RPC()
             empty_rpc_bytes = empty_rpc.SerializeToString()
-            empty_rpc_bytes_len_prefixed = encode_varint_prefixed(empty_rpc_bytes)
             await pubsubs_fsub[0].message_all_peers(empty_rpc_bytes)
-            assert (
-                await stream_pair[1].read(MAX_READ_LEN)
-            ) == empty_rpc_bytes_len_prefixed
+            queued_rpc = await mock_peer_queues[peer_id].pop()
+            assert queued_rpc is not None
+            assert queued_rpc.SerializeToString() == empty_rpc_bytes
 
 
 @pytest.mark.trio
