@@ -561,8 +561,9 @@ async def test_handle_reserve_returns_signed_reservation_payload():
         await protocol._handle_reserve(stream, reserve_msg)
 
     assert stream.write.await_count == 1
-
-    response_bytes = stream.write.await_args.args[0]
+    await_args = stream.write.await_args
+    assert await_args is not None
+    response_bytes = await_args.args[0]
     response = proto.HopMessage()
     response.ParseFromString(response_bytes)
 
