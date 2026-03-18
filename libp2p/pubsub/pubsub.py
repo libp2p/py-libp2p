@@ -16,7 +16,7 @@ from typing import (
     cast,
 )
 
-import base58
+import multibase
 import trio
 
 from libp2p.abc import (
@@ -59,7 +59,7 @@ from libp2p.peer.peerdata import (
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.pubsub.utils import maybe_consume_signed_record
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.tools.timed_cache.last_seen_cache import (
@@ -77,6 +77,10 @@ from .pb import (
 from .pubsub_notifee import (
     PubsubNotifee,
 )
+from .rpc_queue import (
+    RpcQueue,
+    drop_rpc,
+)
 from .subscription import (
     TrioSubscriptionAPI,
 )
@@ -88,16 +92,108 @@ from .validators import (
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
 
-logger = logging.getLogger("libp2p.pubsub")
+logger = logging.getLogger(__name__)
 
 
 def get_peer_and_seqno_msg_id(msg: rpc_pb2.Message) -> bytes:
-    # NOTE: `string(from, seqno)` in Go
-    return msg.seqno + msg.from_id
+    # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/ab876fc71c34e89a7f0c8f4e361720ca9fa8588a/pubsub.go#L1327-L1330  # noqa: E501
+    return msg.from_id + msg.seqno
 
 
-def get_content_addressed_msg_id(msg: rpc_pb2.Message) -> bytes:
-    return base64.b64encode(hashlib.sha256(msg.data).digest())
+def get_content_addressed_msg_id(
+    msg: rpc_pb2.Message, encoding: str | None = None
+) -> bytes:
+    """
+    Generate content-addressed message ID using multibase encoding.
+
+    :param msg: Pubsub message
+    :param encoding: Encoding to use. When *None* the process-wide default
+        from :mod:`libp2p.encoding_config` is used.
+    :return: Multibase-encoded message ID
+    """
+    from libp2p.encoding_config import get_default_encoding
+
+    if encoding is None:
+        encoding = get_default_encoding()
+    digest = hashlib.sha256(msg.data).digest()
+    return multibase.encode(encoding, digest)
+
+
+def get_topic_aware_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes topic information for better deduplication
+    across topics. Useful for v1.4 multi-topic scenarios.
+    """
+    # Include topics in the hash for better separation
+    topic_str = "|".join(sorted(msg.topicIDs))
+    combined = msg.seqno + msg.from_id + topic_str.encode()
+    return hashlib.sha256(combined).digest()
+
+
+def get_timestamp_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate message ID that includes timestamp for time-based deduplication.
+    Useful for v1.4 time-sensitive applications.
+    """
+    import time
+
+    timestamp = int(time.time() * 1000).to_bytes(8, byteorder="big")
+    return msg.seqno + msg.from_id + timestamp
+
+
+def get_secure_msg_id(msg: rpc_pb2.Message) -> bytes:
+    """
+    Generate cryptographically secure message ID using HMAC.
+    Useful for v1.4 security-sensitive applications.
+    """
+    # Use a combination of message content for HMAC
+    key = msg.from_id + msg.seqno
+    content = msg.data + "|".join(msg.topicIDs).encode()
+    return hashlib.sha256(key + content).digest()
+
+
+class MessageIDGenerator:
+    """
+    Abstract base class for message ID generators in GossipSub v1.4.
+
+    Allows for more sophisticated message ID generation strategies
+    that can maintain state or use external configuration.
+    """
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        """Generate a message ID for the given message."""
+        raise NotImplementedError
+
+    def __call__(self, msg: rpc_pb2.Message) -> bytes:
+        """Make the generator callable like a function."""
+        return self.generate_id(msg)
+
+
+class CustomMessageIDGenerator(MessageIDGenerator):
+    """
+    Customizable message ID generator that allows users to provide
+    their own ID generation function.
+    """
+
+    def __init__(self, id_fn: Callable[[rpc_pb2.Message], bytes]):
+        self.id_fn = id_fn
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return self.id_fn(msg)
+
+
+class PeerAndSeqnoMessageIDGenerator(MessageIDGenerator):
+    """Standard peer+seqno message ID generator."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return msg.from_id + msg.seqno
+
+
+class ContentAddressedMessageIDGenerator(MessageIDGenerator):
+    """Content-addressed message ID generator using SHA256."""
+
+    def generate_id(self, msg: rpc_pb2.Message) -> bytes:
+        return base64.b64encode(hashlib.sha256(msg.data).digest())
 
 
 class TopicValidator(NamedTuple):
@@ -197,6 +293,7 @@ class Pubsub(Service, IPubsub):
 
     peer_topics: dict[str, set[ID]]
     peers: dict[ID, INetStream]
+    peer_queues: dict[ID, RpcQueue]
 
     topic_validators: dict[str, TopicValidator]
     validation_cache: ValidationCache
@@ -214,6 +311,8 @@ class Pubsub(Service, IPubsub):
     event_handle_peer_queue_started: trio.Event
     event_handle_dead_peer_queue_started: trio.Event
 
+    _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+
     def __init__(
         self,
         host: IHost,
@@ -222,9 +321,8 @@ class Pubsub(Service, IPubsub):
         seen_ttl: int = 120,
         sweep_interval: int = 60,
         strict_signing: bool = True,
-        msg_id_constructor: Callable[
-            [rpc_pb2.Message], bytes
-        ] = get_peer_and_seqno_msg_id,
+        msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+        | MessageIDGenerator = get_peer_and_seqno_msg_id,
         max_concurrent_validator_count: int = MAX_CONCURRENT_VALIDATORS,
         validation_cache_ttl: int = 300,
         validation_cache_size: int = 1000,
@@ -243,7 +341,11 @@ class Pubsub(Service, IPubsub):
         self.host = host
         self.router = router
 
-        self._msg_id_constructor = msg_id_constructor
+        # Support both callable functions and MessageIDGenerator objects
+        if isinstance(msg_id_constructor, MessageIDGenerator):
+            self._msg_id_constructor = msg_id_constructor.generate_id
+        else:
+            self._msg_id_constructor = msg_id_constructor
 
         # Attach this new Pubsub object to the router
         self.router.attach(self)
@@ -290,6 +392,9 @@ class Pubsub(Service, IPubsub):
         # Create peers map, which maps peer_id (as string) to stream (to a given peer)
         self.peers = {}
 
+        # Per-peer outbound RPC queues
+        self.peer_queues = {}
+
         # Map of topic to topic validator
         self.topic_validators = {}
 
@@ -303,6 +408,11 @@ class Pubsub(Service, IPubsub):
 
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
+
+        # Event-based waiting: maps for trio.Event instances
+        # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
+        self._peer_added_events: dict[ID, trio.Event] = {}
+        self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -539,6 +649,68 @@ class Pubsub(Service, IPubsub):
         await self.event_handle_peer_queue_started.wait()
         await self.event_handle_dead_peer_queue_started.wait()
 
+    async def wait_for_peer(self, peer_id: ID, timeout: float = 5.0) -> None:
+        """
+        Wait until a pubsub stream with the given peer has been established.
+
+        This method blocks until the given peer has been added to the pubsub
+        peers map, indicating that a pubsub protocol stream exists.
+        Use this instead of arbitrary trio.sleep() calls to avoid race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``_handle_new_peer`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer stream is not established within
+            the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_peer(host2.get_id())
+            # Now safe to publish or check peer_topics
+        """
+        if peer_id in self.peers:
+            return
+        event = self._peer_added_events.setdefault(peer_id, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
+    async def wait_for_subscription(
+        self, peer_id: ID, topic_id: str, timeout: float = 5.0
+    ) -> None:
+        """
+        Wait until a specific peer has subscribed to a topic.
+
+        This method blocks until the given peer appears in the peer_topics map
+        for the specified topic, indicating that they have sent a subscription
+        message. Use this instead of arbitrary trio.sleep() calls to avoid
+        race conditions.
+
+        Uses an event-based approach: the task blocks until
+        ``handle_subscription`` fires the corresponding :class:`trio.Event`,
+        consuming zero CPU while waiting.
+
+        :param peer_id: the peer ID to wait for
+        :param topic_id: the topic to check subscription for
+        :param timeout: maximum time to wait in seconds (default: 5.0)
+        :raises trio.TooSlowError: if the peer does not subscribe within the timeout
+
+        Example::
+
+            await connect(host1, host2)
+            await pubsub1.wait_for_subscription(host2.get_id(), "my-topic")
+            # Now safe to assert subscription state
+        """
+        if topic_id in self.peer_topics and peer_id in self.peer_topics[topic_id]:
+            return
+        key = (peer_id, topic_id)
+        event = self._subscription_events.setdefault(key, trio.Event())
+        with trio.fail_after(timeout):
+            await event.wait()
+
     async def _handle_new_peer(self, peer_id: ID) -> None:
         # Check if we already have a pubsub stream with this peer to avoid duplicates
         if peer_id in self.peers:
@@ -570,6 +742,28 @@ class Pubsub(Service, IPubsub):
 
         self.peers[peer_id] = stream
 
+        # Create per-peer outbound queue and spawn sending task
+        queue = RpcQueue()
+        self.peer_queues[peer_id] = queue
+        self.manager.run_task(self.handle_sending_messages, peer_id, stream, queue)
+
+        # Notify anyone waiting in wait_for_peer()
+        if peer_id in self._peer_added_events:
+            self._peer_added_events.pop(peer_id).set()
+
+        # Flush any messages that were queued while this peer's protocol
+        # identification was still in progress (identify-aware publishing).
+        if hasattr(self.router, "flush_pending_messages"):
+            try:
+                # Type narrowing: router has flush_pending_messages method
+                await self.router.flush_pending_messages(peer_id)  # type: ignore[attr-defined]
+            except Exception as error:
+                logger.debug(
+                    "failed to flush pending messages for peer %s: %s",
+                    peer_id,
+                    error,
+                )
+
         logger.debug("added new peer %s", peer_id)
 
     async def _handle_new_peer_safe(self, peer_id: ID) -> None:
@@ -587,6 +781,10 @@ class Pubsub(Service, IPubsub):
         if peer_id not in self.peers:
             return
         del self.peers[peer_id]
+
+        # Close the outbound queue so the sending task exits
+        if peer_id in self.peer_queues:
+            self.peer_queues.pop(peer_id).close()
 
         for topic in self.peer_topics:
             if peer_id in self.peer_topics[topic]:
@@ -636,6 +834,29 @@ class Pubsub(Service, IPubsub):
                 # Remove Peer - no more active connections
                 self._handle_dead_peer(peer_id)
 
+    async def handle_sending_messages(
+        self, peer_id: ID, stream: INetStream, queue: RpcQueue
+    ) -> None:
+        """
+        Per-peer sending loop: pops RPCs from *queue*, splits them if needed,
+        and writes each chunk to *stream*.
+
+        Runs as a task spawned by :meth:`_handle_new_peer`.  Exits when the
+        queue is closed (peer disconnected) or the stream errors.
+        """
+        try:
+            while True:
+                rpc = await queue.pop()
+                if rpc is None:
+                    # Queue was closed
+                    return
+                ok = await self.write_msg(stream, rpc)
+                if not ok:
+                    return
+        except Exception:
+            logger.debug("sending loop for %s terminated with error", peer_id)
+            self._handle_dead_peer(peer_id)
+
     def handle_subscription(
         self, origin_id: ID, sub_message: rpc_pb2.RPC.SubOpts
     ) -> None:
@@ -648,11 +869,43 @@ class Pubsub(Service, IPubsub):
         :param sub_message: RPC.SubOpts
         """
         if sub_message.subscribe:
+            was_newly_added = False
             if sub_message.topicid not in self.peer_topics:
                 self.peer_topics[sub_message.topicid] = {origin_id}
+                was_newly_added = True
             elif origin_id not in self.peer_topics[sub_message.topicid]:
                 # Add peer to topic
                 self.peer_topics[sub_message.topicid].add(origin_id)
+                was_newly_added = True
+
+            if was_newly_added:
+                # Notify anyone waiting in wait_for_subscription()
+                key = (origin_id, sub_message.topicid)
+                if key in self._subscription_events:
+                    self._subscription_events.pop(key).set()
+
+                # Flush any messages that were queued while waiting for this
+                # peer's subscription (identify-aware publishing).
+                # This handles messages that were queued explicitly for this peer.
+                if hasattr(self.router, "flush_pending_messages"):
+                    # Must use run_task since flush_pending_messages is async
+                    # but handle_subscription is sync
+                    if self.manager.is_running:
+                        self.manager.run_task(
+                            self.router.flush_pending_messages,  # type: ignore[attr-defined]
+                            origin_id,
+                        )
+
+                # Also send recent messages from mcache for this topic.
+                # This handles the case where messages were published before this
+                # peer was even in pubsub.peers (race during connection setup).
+                if hasattr(self.router, "send_recent_messages"):
+                    if self.manager.is_running:
+                        self.manager.run_task(
+                            self.router.send_recent_messages,  # type: ignore[attr-defined]
+                            origin_id,
+                            sub_message.topicid,
+                        )
         else:
             if sub_message.topicid in self.peer_topics:
                 if origin_id in self.peer_topics[sub_message.topicid]:
@@ -758,15 +1011,40 @@ class Pubsub(Service, IPubsub):
 
         :param raw_msg: raw contents of the message to broadcast
         """
-        # Broadcast message
-        for stream in self.peers.values():
-            # Write message to stream
-            try:
-                await stream.write(encode_varint_prefixed(raw_msg))
-            except StreamClosed:
-                peer_id = stream.muxed_conn.peer_id
-                logger.debug("Fail to message peer %s: stream closed", peer_id)
-                self._handle_dead_peer(peer_id)
+        rpc_msg: rpc_pb2.RPC | None = None
+
+        # Broadcast message via per-peer outbound queues to preserve
+        # queue back-pressure/drop semantics.
+        for peer_id in tuple(self.peers):
+            queue = self.peer_queues.get(peer_id)
+            if queue is None:
+                logger.debug("No outbound queue for peer %s", peer_id)
+                continue
+
+            # Fast path for small RPCs: avoid split/clone overhead and
+            # enqueue the parsed RPC directly.
+            if len(raw_msg) <= queue.max_message_size:
+                if rpc_msg is None:
+                    rpc_msg = rpc_pb2.RPC()
+                    rpc_msg.ParseFromString(raw_msg)
+                ok = queue.push(rpc_msg)
+                if not ok:
+                    drop_rpc(peer_id, rpc_msg)
+                continue
+
+            if rpc_msg is None:
+                rpc_msg = rpc_pb2.RPC()
+                rpc_msg.ParseFromString(raw_msg)
+
+            for part in queue.split_rpc(rpc_msg):
+                if part.ByteSize() > queue.max_message_size:
+                    drop_rpc(peer_id, part)
+                    continue
+
+                ok = queue.push(part)
+                if not ok:
+                    drop_rpc(peer_id, part)
+                    break
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """
@@ -970,7 +1248,7 @@ class Pubsub(Service, IPubsub):
                 msg_forwarder,
                 msg.data.hex(),
                 msg.topicIDs,
-                base58.b58encode(msg.from_id).decode(),
+                ID(msg.from_id).to_base58(),
                 msg.seqno.hex(),
             )
             return
@@ -988,10 +1266,7 @@ class Pubsub(Service, IPubsub):
 
         # reject messages claiming to be from ourselves but not locally published
         self_id = self.host.get_id()
-        if (
-            base58.b58encode(msg.from_id).decode() == self_id
-            and msg_forwarder != self_id
-        ):
+        if ID(msg.from_id) == self_id and msg_forwarder != self_id:
             logger.debug(
                 "dropping message claiming to be from self but forwarded from %s",
                 msg_forwarder,

@@ -1,9 +1,14 @@
 from collections.abc import Callable
 
+import multiaddr
+
 from libp2p.abc import (
     IPeerStore,
     IRawConnection,
     ISecureConn,
+)
+from libp2p.connection_types import (
+    ConnectionType,
 )
 from libp2p.crypto.exceptions import (
     MissingDeserializerError,
@@ -22,8 +27,8 @@ from libp2p.crypto.serialization import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.io.abc import (
-    ReadWriteCloser,
+from libp2p.io.exceptions import (
+    ConnectionClosedError,
 )
 from libp2p.io.msgio import (
     VarIntLengthMsgReadWriter,
@@ -71,7 +76,7 @@ class InsecureSession(BaseSession):
         remote_peer: ID,
         remote_permanent_pubkey: PublicKey,
         is_initiator: bool,
-        conn: ReadWriteCloser,
+        conn: IRawConnection,
     ) -> None:
         super().__init__(
             local_peer=local_peer,
@@ -103,6 +108,18 @@ class InsecureSession(BaseSession):
         """
         return self.conn.get_remote_address()
 
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to underlying connection.
+        """
+        return self.conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to underlying connection.
+        """
+        return self.conn.get_connection_type()
+
 
 async def run_handshake(
     local_peer: ID,
@@ -118,12 +135,12 @@ async def run_handshake(
     read_writer = PlaintextHandshakeReadWriter(conn)
     try:
         await read_writer.write_msg(msg_bytes)
-    except RawConnError as e:
+    except (RawConnError, ConnectionClosedError) as e:
         raise HandshakeFailure("connection closed") from e
 
     try:
         remote_msg_bytes = await read_writer.read_msg()
-    except RawConnError as e:
+    except (RawConnError, ConnectionClosedError) as e:
         raise HandshakeFailure("connection closed") from e
     remote_msg = plaintext_pb2.Exchange()
     remote_msg.ParseFromString(remote_msg_bytes)

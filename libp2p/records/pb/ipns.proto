@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package ipns.pb;
+
+// IpnsEntry is the IPNS record serialization format.
+// Based on https://specs.ipfs.tech/ipns/ipns-record/
+message IpnsEntry {
+    enum ValidityType {
+        // EOL (End of Life) indicates the record is valid until the expiry time
+        EOL = 0;
+    }
+
+    // Legacy V1 copy of data[Value] - content path
+    bytes value = 1;
+
+    // Legacy V1 signature (deprecated, use signatureV2)
+    bytes signatureV1 = 2;
+
+    // Validity type (0 = EOL)
+    ValidityType validityType = 3;
+
+    // Validity - RFC3339 timestamp for EOL type
+    bytes validity = 4;
+
+    // Sequence number - version of the record (starts at 0)
+    uint64 sequence = 5;
+
+    // TTL - cache hint in nanoseconds
+    uint64 ttl = 6;
+
+    // Public key for signature verification (required for RSA, optional for Ed25519)
+    bytes pubKey = 7;
+
+    // V2 signature (required) - signs "ipns-signature:" + data
+    bytes signatureV2 = 8;
+
+    // Extensible record data in DAG-CBOR format (required for V2)
+    bytes data = 9;
+}

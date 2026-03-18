@@ -32,7 +32,7 @@ from .pubsub import (
 
 PROTOCOL_ID = TProtocol("/floodsub/1.0.0")
 
-logger = logging.getLogger("libp2p.pubsub.floodsub")
+logger = logging.getLogger(__name__)
 
 
 class FloodSub(IPubsubRouter):
@@ -148,8 +148,24 @@ class FloodSub(IPubsubRouter):
         for peer_id in peers_gen:
             if peer_id not in pubsub.peers:
                 continue
-            stream = pubsub.peers[peer_id]
-            await pubsub.write_msg(stream, rpc_msg)
+            queue = pubsub.peer_queues.get(peer_id)
+            if queue is not None:
+                for part in queue.split_rpc(rpc_msg):
+                    # Caller-side size check matching Go's sendRPC:
+                    #   if rpc.Size() > gs.p.maxMessageSize { doDropRPC }
+                    if part.ByteSize() > queue.max_message_size:
+                        logger.debug(
+                            "floodsub: dropping oversized RPC chunk for peer %s",
+                            peer_id,
+                        )
+                        continue
+                    ok = queue.push(part)
+                    if not ok:
+                        logger.debug(
+                            "floodsub: queue full for peer %s, dropping RPC",
+                            peer_id,
+                        )
+                        break
 
         for topic in pubsub_msg.topicIDs:
             self.time_since_last_publish[topic] = int(time.time())

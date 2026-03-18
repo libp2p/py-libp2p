@@ -12,6 +12,14 @@ libp2p.utils.logging module
    :undoc-members:
    :show-inheritance:
 
+libp2p.utils.multiaddr_utils module
+-------------------------------------
+
+.. automodule:: libp2p.utils.multiaddr_utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 libp2p.utils.varint module
 --------------------------
 
@@ -24,6 +32,14 @@ libp2p.utils.version module
 ---------------------------
 
 .. automodule:: libp2p.utils.version
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+libp2p.utils.paths module
+-------------------------
+
+.. automodule:: libp2p.utils.paths
    :members:
    :undoc-members:
    :show-inheritance:

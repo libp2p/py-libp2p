@@ -8,7 +8,6 @@ certificate setup.
 Based on patterns from JavaScript and Go libp2p implementations.
 """
 
-import asyncio
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 import logging
@@ -21,10 +20,11 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+import trio
 
 from libp2p.peer.id import ID
 
-logger = logging.getLogger("libp2p.websocket.autotls")
+logger = logging.getLogger(__name__)
 
 
 class TLSCertificate:
@@ -218,28 +218,26 @@ class AutoTLSManager:
         self.on_certificate_renew = on_certificate_renew
 
         self._active_certificates: dict[tuple[ID, str], TLSCertificate] = {}
-        self._renewal_tasks: dict[tuple[ID, str], asyncio.Task[None]] = {}
-        self._shutdown_event = asyncio.Event()
+        self._renewal_scopes: dict[tuple[ID, str], trio.CancelScope] = {}
+        self._nursery: trio.Nursery | None = None
 
-    async def start(self) -> None:
+    async def start(self, nursery: trio.Nursery | None = None) -> None:
         """Start the AutoTLS manager."""
         logger.info("Starting AutoTLS manager")
+        if nursery is not None:
+            self._nursery = nursery
         # Manager is ready to handle certificate requests
         pass
 
     async def stop(self) -> None:
         """Stop the AutoTLS manager."""
         logger.info("Stopping AutoTLS manager")
-        self._shutdown_event.set()
 
         # Cancel all renewal tasks
-        for task in self._renewal_tasks.values():
-            if not task.done():
-                task.cancel()
+        for scope in self._renewal_scopes.values():
+            scope.cancel()
 
-        # Wait for tasks to complete
-        if self._renewal_tasks:
-            await asyncio.gather(*self._renewal_tasks.values(), return_exceptions=True)
+        logger.info("AutoTLS manager stopped")
 
     async def get_certificate(
         self,
@@ -358,13 +356,15 @@ class AutoTLSManager:
         peer_id: ID,
         domain: str,
         cert: TLSCertificate,
+        _current_scope: trio.CancelScope | None = None,
     ) -> None:
         """Schedule certificate renewal."""
         key = (peer_id, domain)
 
         # Cancel existing renewal task
-        if key in self._renewal_tasks:
-            self._renewal_tasks[key].cancel()
+        existing_scope = self._renewal_scopes.get(key)
+        if existing_scope is not None and existing_scope is not _current_scope:
+            existing_scope.cancel()
 
         # Calculate renewal time
         renewal_time = cert.expires_at - timedelta(hours=self.renewal_threshold_hours)
@@ -378,26 +378,47 @@ class AutoTLSManager:
             f"Scheduling certificate renewal for {peer_id} in {delay:.0f} seconds"
         )
 
+        scope = trio.CancelScope()
+        self._renewal_scopes[key] = scope
+
         async def renew_certificate() -> None:
-            try:
-                await asyncio.sleep(delay)
+            with scope:
+                try:
+                    await trio.sleep(delay)
 
-                if self._shutdown_event.is_set():
-                    return
+                    logger.info(f"Renewing certificate for {peer_id} on {domain}")
+                    new_cert = await self._renew_certificate_now(peer_id, domain)
 
-                logger.info(f"Renewing certificate for {peer_id} on {domain}")
-                new_cert = await self.get_certificate(peer_id, domain, force_renew=True)
+                    # Notify renewal
+                    if self.on_certificate_renew:
+                        self.on_certificate_renew(new_cert)
 
-                # Notify renewal
-                if self.on_certificate_renew:
-                    self.on_certificate_renew(new_cert)
+                    await self._schedule_renewal(
+                        peer_id,
+                        domain,
+                        new_cert,
+                        _current_scope=scope,
+                    )
+                except trio.Cancelled:
+                    logger.debug(f"Certificate renewal cancelled for {peer_id}")
+                    raise
+                except Exception as e:
+                    logger.error(f"Certificate renewal failed for {peer_id}: {e}")
+                finally:
+                    if self._renewal_scopes.get(key) is scope:
+                        self._renewal_scopes.pop(key, None)
 
-            except asyncio.CancelledError:
-                logger.debug(f"Certificate renewal cancelled for {peer_id}")
-            except Exception as e:
-                logger.error(f"Certificate renewal failed for {peer_id}: {e}")
+        if self._nursery is not None:
+            self._nursery.start_soon(renew_certificate)
+        else:
+            trio.lowlevel.spawn_system_task(renew_certificate)
 
-        self._renewal_tasks[key] = asyncio.create_task(renew_certificate())
+    async def _renew_certificate_now(self, peer_id: ID, domain: str) -> TLSCertificate:
+        key = (peer_id, domain)
+        cert = await self._generate_certificate(peer_id, domain)
+        await self.storage.store_certificate(cert)
+        self._active_certificates[key] = cert
+        return cert
 
     def get_ssl_context(self, peer_id: ID | None, domain: str) -> ssl.SSLContext | None:
         """Get SSL context for peer ID and domain."""
