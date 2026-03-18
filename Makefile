@@ -65,7 +65,8 @@ PB = libp2p/crypto/pb/crypto.proto \
 	libp2p/discovery/rendezvous/pb/rendezvous.proto \
 	libp2p/bitswap/pb/bitswap.proto \
 	libp2p/bitswap/pb/dag_pb.proto \
-	libp2p/bitswap/pb/unixfs.proto
+	libp2p/bitswap/pb/unixfs.proto \
+	libp2p/records/pb/ipns.proto
 
 PY = $(PB:.proto=_pb2.py)
 PYI = $(PB:.proto=_pb2.pyi)

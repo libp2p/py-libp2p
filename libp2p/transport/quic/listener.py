@@ -948,10 +948,12 @@ class QUICListener(IListener):
 
     async def _cleanup_promotion_lock(self, quic_key: int) -> None:
         """
-        Clean up promotion lock and related tracking for a quic_key (idempotent).
+        Clean up only the promotion lock for a quic_key (idempotent).
 
-        This method safely removes all promotion-related state for a connection,
-        preventing memory leaks from stale locks and tracking dictionaries.
+        This method intentionally preserves connection-tracking state
+        (`_conn_by_quic_id`, `_handler_invoked_quic_ids`,
+        `_pending_cid_by_quic_id`) so concurrent packets cannot recreate the
+        same logical connection and re-invoke the handler.
 
         Args:
             quic_key: The identity (id()) of the aioquic QuicConnection
@@ -959,6 +961,10 @@ class QUICListener(IListener):
         """
         async with self._promotion_lock:
             self._promotion_locks.pop(quic_key, None)
+
+    async def _cleanup_quic_tracking(self, quic_key: int) -> None:
+        """Clean up per-quic connection tracking maps when a connection ends."""
+        async with self._promotion_lock:
             self._conn_by_quic_id.pop(quic_key, None)
             self._pending_cid_by_quic_id.pop(quic_key, None)
             self._handler_invoked_quic_ids.discard(quic_key)
@@ -1121,6 +1127,7 @@ class QUICListener(IListener):
                 ):
                     quic_key = id(connection_obj._quic)
                     await self._cleanup_promotion_lock(quic_key)
+                    await self._cleanup_quic_tracking(quic_key)
 
             # Remove from registry (cleans up all mappings)
             await self._registry.remove_connection_id(destination_connection_id)
@@ -1340,6 +1347,7 @@ class QUICListener(IListener):
             if hasattr(connection_obj, "_quic") and connection_obj._quic is not None:
                 quic_key = id(connection_obj._quic)
                 await self._cleanup_promotion_lock(quic_key)
+                await self._cleanup_quic_tracking(quic_key)
 
             # Find the connection ID for this object
             connection_ids = await self._registry.get_all_cids_for_connection(

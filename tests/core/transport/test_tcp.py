@@ -188,10 +188,10 @@ async def test_tcp_yamux_stress_ping():
                     if response == b"\x01" * PING_LENGTH:
                         latency_ms = int((trio.current_time() - start) * 1000)
                         latencies.append(latency_ms)
-                        print(f"[TCP Ping #{i}] Latency: {latency_ms} ms")
+                        logger.debug("[TCP Ping #%d] Latency: %d ms", i, latency_ms)
                     await stream.close()
                 except Exception as e:
-                    print(f"[TCP Ping #{i}] Failed: {e}")
+                    logger.warning("[TCP Ping #%d] Failed: %s", i, e)
                     failures.append(i)
                     if stream:
                         try:
@@ -252,11 +252,8 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
     """
     transport = TCP()
 
-    try:
+    with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
-        assert False, "Should have raised OpenConnectionError"
-    except Exception as e:
-        assert "Failed to open TCP stream" in str(e) or "Failed to dial" in str(e)
 
 
 @pytest.mark.trio

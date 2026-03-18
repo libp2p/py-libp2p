@@ -47,7 +47,7 @@ logger = logging.getLogger("mplex-timeouts")
 # Suppress debug logging from libp2p components
 logging.getLogger("multiaddr").setLevel(logging.ERROR)
 logging.getLogger("libp2p").setLevel(logging.ERROR)
-logging.getLogger("libp2p.tools.async_service.base").setLevel(logging.ERROR)
+logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.ERROR)
 
 PROTOCOL_ID = TProtocol("/timeout-demo/1.0.0")
 TEST_MESSAGE = b"Hello, timeout world!"
@@ -378,7 +378,7 @@ if __name__ == "__main__":
         # Re-enable debug logging for libp2p components when verbose
         logging.getLogger("multiaddr").setLevel(logging.DEBUG)
         logging.getLogger("libp2p").setLevel(logging.DEBUG)
-        logging.getLogger("libp2p.tools.async_service.base").setLevel(logging.DEBUG)
+        logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.DEBUG)
         print("🔍 Verbose logging enabled")
 
     try:

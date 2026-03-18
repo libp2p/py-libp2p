@@ -63,9 +63,7 @@ if TYPE_CHECKING:
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
-from libp2p.tools.async_service import (
-    ServiceAPI,
-)
+from libp2p.tools.anyio_service.api import ServiceAPI
 
 # -------------------------- raw_connection interface.py --------------------------
 
@@ -2077,6 +2075,18 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol_id : TProtocol
+            The protocol identifier to remove the handler for.
+
+        """
+
+    @abstractmethod
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
         Initiate the ACME-AUTO-TLS-BROKER negotiation for TLS certificate
@@ -2783,6 +2793,18 @@ class IMultiselectMuxer(ABC):
             The protocol name.
         handler : StreamHandlerFn
             The handler function associated with the protocol.
+
+        """
+
+    @abstractmethod
+    def remove_handler(self, protocol: TProtocol) -> None:
+        """
+        Remove the handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol : TProtocol
+            The protocol name to remove.
 
         """
 
