@@ -6,7 +6,6 @@ https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
 import logging
-import time
 from typing import (
     Any,
     Protocol as TypingProtocol,
@@ -58,7 +57,6 @@ from .config import (
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
-    Reservation,
     Status as PbStatus,
     StopMessage,
 )
@@ -567,7 +565,7 @@ class CircuitV2Protocol(Service):
             # Check if peer already has a reservation
             if self.resource_manager.has_reservation(peer_id):
                 logger.debug("Peer %s already has a reservation — refreshing", peer_id)
-                ttl = self.resource_manager.refresh_reservation(peer_id)
+                self.resource_manager.refresh_reservation(peer_id)
                 status_code = StatusCode.OK
                 status_msg_text = "Reservation refreshed"
             else:
@@ -590,7 +588,7 @@ class CircuitV2Protocol(Service):
 
                 # Accept reservation
                 logger.debug("Accepting new reservation from peer %s", peer_id)
-                ttl = self.resource_manager.reserve(peer_id)
+                self.resource_manager.reserve(peer_id)
                 status_code = StatusCode.OK
                 status_msg_text = "Reservation accepted"
 
@@ -600,7 +598,7 @@ class CircuitV2Protocol(Service):
                 raise ValueError(f"Failed to create reservation for peer {peer_id}")
 
             # Create the protobuf reservation with voucher and signature
-            reservation_obj.to_proto()
+            pb_reservation = reservation_obj.to_proto()
 
             # Get the peer's addresses from the peerstore if available
             addrs: list[bytes] = []
@@ -633,11 +631,7 @@ class CircuitV2Protocol(Service):
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=status,
-                    reservation=Reservation(
-                        expire=int(time.time() + ttl),
-                        voucher=b"",  # We don't use vouchers yet
-                        signature=b"",  # We don't use signatures yet
-                    ),
+                    reservation=pb_reservation,
                     limit=Limit(
                         duration=self.limits.duration,
                         data=self.limits.data,
@@ -647,8 +641,9 @@ class CircuitV2Protocol(Service):
 
                 # Log the response message details for debugging
                 logger.debug(
-                    f"Sending reservation response: type={response.type},",
-                    "status={getattr(response.status, 'code', 'unknown')}, ttl={ttl}",
+                    "Sending reservation response: type=%s status=%s",
+                    response.type,
+                    getattr(response.status, "code", "unknown"),
                 )
                 await stream.write(response.SerializeToString())
                 # Add a small wait to ensure the message is fully sent
