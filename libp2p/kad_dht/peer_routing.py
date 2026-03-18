@@ -243,10 +243,11 @@ class PeerRouting(IPeerRouting):
             rounds += 1
             logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
-            # Find peers we haven't queried yet, capped to `count` so we
-            # don't over-query before re-sorting with newly discovered peers.
+            # Admit at most ALPHA peers per round to preserve classic Kademlia
+            # iterative refinement: after each small batch we re-sort with any
+            # newly discovered peers before admitting the next batch.
             peers_to_query = [p for p in closest_peers if p not in queried_peers][
-                :count
+                :ALPHA
             ]
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
