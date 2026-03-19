@@ -78,7 +78,8 @@ class TestQUICListener:
 
         async with trio.open_nursery() as nursery:
             # Start listening
-            await listener.listen(listen_addr, nursery)
+            result = await listener.listen(listen_addr, nursery)
+            assert result is None
             assert listener.is_listening()
 
             # Check bound addresses

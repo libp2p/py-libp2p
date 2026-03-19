@@ -40,9 +40,11 @@ async def test_tcp_listener(nursery):
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR, nursery)
+    assert result is None
     assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR, nursery)
+    assert result is None
     assert len(listener.get_addrs()) == 2
 
 
