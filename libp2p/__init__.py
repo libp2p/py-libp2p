@@ -579,7 +579,7 @@ def new_host(
         enable_upnp=enable_upnp,
         negotiate_timeout=negotiate_timeout,
         resource_manager=resource_manager,
-        metric_recv_channel=metric_recv_channel
+        metric_recv_channel=metric_recv_channel,
         bootstrap_allow_ipv6=bootstrap_allow_ipv6,
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
