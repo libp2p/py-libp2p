@@ -144,6 +144,11 @@ class GossipSub(IPubsubRouter, Service):
     _max_pending_messages_per_peer: int  # Maximum messages queued per peer
     _pending_messages_ttl: float  # Time-to-live for queued messages in seconds
 
+    # Deferred control retries for dropped outbound RPC chunks.
+    # Maps peer_id -> coalesced control message to piggyback on later sends.
+    _pending_control: DefaultDict[ID, rpc_pb2.ControlMessage]
+    _max_pending_graft_prune_per_peer: int
+
     def __init__(
         self,
         protocols: Sequence[TProtocol],
@@ -250,6 +255,10 @@ class GossipSub(IPubsubRouter, Service):
         self._pending_messages = defaultdict(list)
         self._max_pending_messages_per_peer = max_pending_messages_per_peer
         self._pending_messages_ttl = pending_messages_ttl
+
+        # Deferred retry queue for dropped control chunks.
+        self._pending_control = defaultdict(rpc_pb2.ControlMessage)
+        self._max_pending_graft_prune_per_peer = 64
         # Extensions support (v1.3+)
         self.extension_handlers: dict[str, Callable[[bytes, ID], Awaitable[None]]] = {}
 
@@ -757,6 +766,7 @@ class GossipSub(IPubsubRouter, Service):
 
         # Discard any pending messages for this peer
         self._pending_messages.pop(peer_id, None)
+        self._pending_control.pop(peer_id, None)
 
         # Track disconnection for adaptive gossip metrics (only when enabled)
         if self.adaptive_gossip_enabled:
@@ -1867,15 +1877,99 @@ class GossipSub(IPubsubRouter, Service):
         if queue is None:
             logger.debug("send_rpc: no queue for peer %s", peer_id)
             return
-        for part in queue.split_rpc(rpc):
+
+        outbound = rpc_pb2.RPC()
+        outbound.CopyFrom(rpc)
+        self._piggyback_control_retry(peer_id, outbound)
+
+        for part in queue.split_rpc(outbound):
             # Caller-side size check matching Go's sendRPC:
             #   if rpc.Size() > gs.p.maxMessageSize { gs.doDropRPC(...) }
             if part.ByteSize() > queue.max_message_size:
-                drop_rpc(peer_id, part)
+                self._handle_dropped_rpc(peer_id, part, "oversized")
                 continue
             ok = queue.push(part, priority=priority)
             if not ok:
-                drop_rpc(peer_id, part)
+                self._handle_dropped_rpc(peer_id, part, "queue_full")
+
+    def _handle_dropped_rpc(
+        self,
+        peer_id: ID,
+        rpc: rpc_pb2.RPC,
+        reason: str,
+    ) -> None:
+        """Record drop and enqueue retriable control intent for later send."""
+        drop_rpc(peer_id, rpc)
+        if rpc.HasField("control"):
+            self._push_control_retry(peer_id, rpc.control)
+            logger.debug(
+                "deferred dropped control for retry (peer=%s, reason=%s)",
+                peer_id,
+                reason,
+            )
+
+    def _push_control_retry(self, peer_id: ID, control: rpc_pb2.ControlMessage) -> None:
+        """
+        Merge dropped control information into per-peer deferred retry state.
+
+        Retries include GRAFT and PRUNE only (Go parity).
+        IHAVE, IWANT, IDONTWANT and EXTENSIONS are intentionally not retried.
+        """
+        pending = self._pending_control[peer_id]
+
+        if control.graft:
+            pending.graft.extend(control.graft)
+            if len(pending.graft) > self._max_pending_graft_prune_per_peer:
+                del pending.graft[: -self._max_pending_graft_prune_per_peer]
+
+        if control.prune:
+            pending.prune.extend(control.prune)
+            if len(pending.prune) > self._max_pending_graft_prune_per_peer:
+                del pending.prune[: -self._max_pending_graft_prune_per_peer]
+
+        if not self._has_retriable_control(pending):
+            self._pending_control.pop(peer_id, None)
+
+    def _piggyback_control_retry(self, peer_id: ID, rpc: rpc_pb2.RPC) -> None:
+        """Attach deferred control to rpc and clear the pending entry."""
+        pending = self._pending_control.get(peer_id)
+        if pending is None or not self._has_retriable_control(pending):
+            self._pending_control.pop(peer_id, None)
+            return
+
+        filtered = self._filter_retriable_control(peer_id, pending)
+        if not self._has_retriable_control(filtered):
+            self._pending_control.pop(peer_id, None)
+            return
+
+        if not rpc.HasField("control"):
+            rpc.control.SetInParent()
+        rpc.control.graft.extend(filtered.graft)
+        rpc.control.prune.extend(filtered.prune)
+
+        self._pending_control.pop(peer_id, None)
+
+    def _filter_retriable_control(
+        self, peer_id: ID, control: rpc_pb2.ControlMessage
+    ) -> rpc_pb2.ControlMessage:
+        """Drop stale retriable control entries before piggybacking."""
+        filtered = rpc_pb2.ControlMessage()
+
+        for graft in control.graft:
+            topic_id = graft.topicID
+            if topic_id in self.mesh and peer_id in self.mesh[topic_id]:
+                filtered.graft.append(graft)
+
+        for prune in control.prune:
+            topic_id = prune.topicID
+            if topic_id not in self.mesh or peer_id not in self.mesh[topic_id]:
+                filtered.prune.append(prune)
+
+        return filtered
+
+    @staticmethod
+    def _has_retriable_control(control: rpc_pb2.ControlMessage) -> bool:
+        return bool(control.graft or control.prune)
 
     async def emit_control_message(
         self, control_msg: rpc_pb2.ControlMessage, to_peer: ID

@@ -669,3 +669,85 @@ async def test_sender_record_reaches_peer():
 
         # At least one RPC received by node 1 carried a senderRecord.
         assert any(len(sr) > 0 for sr in captured)
+
+
+@pytest.mark.trio
+async def test_send_rpc_defers_and_piggybacks_control_on_queue_full() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        queue = pubsubs[0].peer_queues[peer1_id]
+
+        for _ in range(OutBoundQueueSize):
+            assert queue.push(_make_rpc(1))
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "deferred-topic"
+
+        router0.send_rpc(peer1_id, rpc, priority=True)
+
+        assert peer1_id in router0._pending_control
+        assert [p.topicID for p in router0._pending_control[peer1_id].prune] == [
+            "deferred-topic"
+        ]
+
+        # Free queue capacity then send another RPC: deferred control should piggyback.
+        while len(queue) > 0:
+            assert await queue.pop() is not None
+        router0.send_rpc(peer1_id, _make_rpc(5))
+
+        assert peer1_id not in router0._pending_control
+        tail_rpc = queue._queue._non_priority[-1]
+        assert tail_rpc.HasField("control")
+        assert [p.topicID for p in tail_rpc.control.prune] == ["deferred-topic"]
+
+
+@pytest.mark.trio
+async def test_send_rpc_defers_control_on_oversized_chunk() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        queue = pubsubs[0].peer_queues[peer1_id]
+        queue.max_message_size = 64
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "x" * 300
+
+        router0.send_rpc(peer1_id, rpc, priority=True)
+
+        assert peer1_id in router0._pending_control
+        assert len(router0._pending_control[peer1_id].prune) == 1
+        assert len(router0._pending_control[peer1_id].prune[0].topicID) == 300
+
+
+@pytest.mark.trio
+async def test_remove_peer_clears_pending_control_retry() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "drop-me"
+        router0._push_control_retry(peer1_id, rpc.control)
+        assert peer1_id in router0._pending_control
+
+        router0.remove_peer(peer1_id)
+        assert peer1_id not in router0._pending_control
