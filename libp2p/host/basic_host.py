@@ -49,6 +49,7 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.host.observed_addr_manager import ObservedAddrManager
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
 )
@@ -253,6 +254,8 @@ class BasicHost(IHost):
             )
         self.psk = psk
 
+        self._observed_addr_manager = ObservedAddrManager()
+
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
             self.get_id(),
@@ -355,7 +358,15 @@ class BasicHost(IHost):
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [join_multiaddrs(addr, p2p_part) for addr in self.get_transport_addrs()]
+        # Append confirmed observed (NAT) addresses.
+        addrs = list(self.get_transport_addrs())
+        seen = {str(a) for a in addrs}
+        for obs_addr in self._observed_addr_manager.addrs():
+            key = str(obs_addr)
+            if key not in seen:
+                seen.add(key)
+                addrs.append(obs_addr)
+        return [join_multiaddrs(addr, p2p_part) for addr in addrs]
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -1019,6 +1030,16 @@ class BasicHost(IHost):
             identify_msg.ParseFromString(data)
             await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
             self._identified_peers.add(peer_id)
+
+            if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
+                try:
+                    our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
+                    self._observed_addr_manager.record_observation(
+                        swarm_conn, our_observed, self.get_transport_addrs()
+                    )
+                except Exception as exc:
+                    logger.debug("ObservedAddrManager: failed to record: %s", exc)
+
             logger.debug(
                 "Identify[%s]: cached %s protocols for peer %s",
                 reason,
@@ -1066,6 +1087,7 @@ class BasicHost(IHost):
         if peer_id is None:
             return
         self._identified_peers.discard(peer_id)
+        self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
         connections = self._network.get_connections(peer_id)
