@@ -1628,7 +1628,7 @@ class GossipSub(IPubsubRouter, Service):
                     "skipping malformed IWANT message ID from peer %s",
                     sender_peer_id,
                 )
-                raise
+                continue
 
             # Cache hit
             if msg:

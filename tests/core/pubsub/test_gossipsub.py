@@ -867,7 +867,7 @@ async def test_handle_iwant(monkeypatch):
 @pytest.mark.trio
 async def test_handle_iwant_invalid_msg_id(monkeypatch):
     """
-    Test that handle_iwant raises ValueError for malformed message IDs.
+    Test that handle_iwant skips malformed message IDs.
     """
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
         gossipsub_routers = []
@@ -891,18 +891,67 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         # Malformed message ID (not a tuple string)
         malformed_msg_id = "not_a_valid_msg_id"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
         mock_write_msg.assert_not_called()
 
         # Message ID that's a tuple string but not (bytes, bytes)
         invalid_tuple_msg_id = "('abc', 123)"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
-        with pytest.raises(ValueError):
-            await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
         mock_write_msg.assert_not_called()
+
+
+@pytest.mark.trio
+async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
+    """
+    Test that handle_iwant forwards cache hits for valid message IDs
+    even when the IWANT batch includes malformed IDs.
+    """
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
+        gossipsub_routers = []
+        for pubsub in pubsubs_gsub:
+            if isinstance(pubsub.router, GossipSub):
+                gossipsub_routers.append(pubsub.router)
+        gossipsubs = tuple(gossipsub_routers)
+
+        index_alice = 0
+        index_bob = 1
+        id_alice = pubsubs_gsub[index_alice].my_id
+
+        await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
+        await pubsubs_gsub[index_bob].wait_until_ready()
+
+        with trio.fail_after(2.0):
+            while id_alice not in pubsubs_gsub[index_bob].peers:
+                await trio.sleep(0.01)
+
+        test_message = rpc_pb2.Message(data=b"test_data")
+        test_seqno = b"1234"
+        test_from = id_alice.to_bytes()
+        valid_msg_id = str((test_seqno, test_from))
+
+        mock_mcache_lookup = MagicMock(return_value=test_message)
+        monkeypatch.setattr(
+            gossipsubs[index_bob].mcache,
+            "get_by_control_message_id",
+            mock_mcache_lookup,
+        )
+
+        mock_write_msg = AsyncMock()
+        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+
+        iwant_msg = rpc_pb2.ControlIWant(
+            messageIDs=["not_a_valid_msg_id", valid_msg_id, "('abc', 123)"]
+        )
+        await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
+
+        mock_mcache_lookup.assert_called_once_with(valid_msg_id)
+        mock_write_msg.assert_called_once()
+        packet = mock_write_msg.call_args[0][1]
+        assert isinstance(packet, rpc_pb2.RPC)
+        assert list(packet.publish) == [test_message]
 
 
 @pytest.mark.trio
