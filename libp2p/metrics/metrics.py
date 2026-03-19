@@ -4,10 +4,9 @@ from prometheus_client import start_http_server
 import trio
 
 from libp2p.host.ping import PingEvent
-from libp2p.metrics.dcutr import DcutrEvent, DcutrMetrics
 from libp2p.metrics.gossipsub import GossipsubMetrics
 from libp2p.metrics.ping import PingMetrics
-from libp2p.pubsub.gossipsub import GossipsubEvent
+from libp2p.pubsub.pubsub import GossipsubEvent
 
 
 def find_available_port(start_port: int = 8000, host: str = "127.0.0.1") -> int:
@@ -28,7 +27,6 @@ class Metrics:
     def __init__(self):
         self.ping = PingMetrics()
         self.gossipsub = GossipsubMetrics()
-        self.dcutr = DcutrMetrics()
 
     async def start_prometheus_server(
         self,
@@ -59,5 +57,3 @@ class Metrics:
                     self.ping.record(event)
                 case GossipsubEvent():
                     self.gossipsub.record(event)
-                case DcutrEvent():
-                    self.dcutr.record(event)
