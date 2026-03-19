@@ -825,7 +825,14 @@ async def test_handle_iwant(monkeypatch):
 
         # Connect Alice and Bob
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
-        await trio.sleep(0.1)  # Allow connections to establish
+
+        # Test stability fix: use wait_until_ready() and poll for peer
+        # registration instead of a fixed sleep to avoid flaky failures.
+        await pubsubs_gsub[index_bob].wait_until_ready()
+
+        with trio.fail_after(2.0):
+            while id_alice not in pubsubs_gsub[index_bob].peers:
+                await trio.sleep(0.01)
 
         # Mock mcache.get to return a message
         test_message = rpc_pb2.Message(data=b"test_data")
@@ -838,17 +845,17 @@ async def test_handle_iwant(monkeypatch):
         mock_mcache_get = MagicMock(return_value=test_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
 
-        # Mock write_msg to capture the sent packet
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+        # Mock send_rpc to capture the enqueued packet
+        mock_send_rpc = MagicMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         # Simulate Alice sending IWANT to Bob
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[test_msg_id])
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
-        # Check if write_msg was called with the correct packet
-        mock_write_msg.assert_called_once()
-        packet = mock_write_msg.call_args[0][1]
+        # Check if send_rpc was called with the correct packet
+        mock_send_rpc.assert_called_once()
+        packet = mock_send_rpc.call_args[0][1]
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
@@ -892,14 +899,15 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         # Malformed message ID (not valid hex) — should be skipped without raising
         malformed_msg_id = "not_a_valid_msg_id"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[malformed_msg_id])
+
         mock_mcache_get.reset_mock()
-        # Must not raise; defensive parsing silently skips invalid IDs
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
 
         # Another malformed ID — also silently skipped
         invalid_tuple_msg_id = "('abc', 123)"
         iwant_msg = rpc_pb2.ControlIWant(messageIDs=[invalid_tuple_msg_id])
+
         mock_mcache_get.reset_mock()
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
