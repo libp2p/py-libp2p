@@ -79,6 +79,9 @@ GO_AWAY_INTERNAL_ERROR = 0x2
 
 
 class YamuxStream(IMuxedStream):
+    target_recv_window: int
+    epoch_start: float
+
     def __init__(self, stream_id: int, conn: "Yamux", is_initiator: bool) -> None:
         self.stream_id = stream_id
         self.conn = conn
@@ -91,10 +94,8 @@ class YamuxStream(IMuxedStream):
         self.send_window = DEFAULT_WINDOW_SIZE
         self.recv_window = DEFAULT_WINDOW_SIZE
         self.window_lock = trio.Lock()
-        self.target_recv_window: int = (
-            DEFAULT_WINDOW_SIZE  # grows up to MAX_WINDOW_SIZE
-        )
-        self.epoch_start: float = 0.0  # trio.current_time() of last window update
+        self.target_recv_window = DEFAULT_WINDOW_SIZE  # grows up to MAX_WINDOW_SIZE
+        self.epoch_start = 0.0  # trio.current_time() of last window update
         self.rw_lock = ReadWriteLock()
         self.close_lock = trio.Lock()
 
@@ -240,7 +241,9 @@ class YamuxStream(IMuxedStream):
             async with self.window_lock:
                 await _do_window_update()
 
-    async def _auto_tune_and_send_window_update(self, bytes_consumed: int) -> None:
+    async def _auto_tune_and_send_window_update(
+        self: "YamuxStream", bytes_consumed: int
+    ) -> None:
         """
         Auto-tune receive window size based on RTT and send window update.
 
