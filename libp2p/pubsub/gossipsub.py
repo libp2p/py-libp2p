@@ -1636,6 +1636,9 @@ class GossipSub(IPubsubRouter, Service):
                 # Add message to list of messages to forward to requesting peers
                 msgs_to_forward.append(msg)
 
+        if not msgs_to_forward:
+            return
+
         # Forward messages to requesting peer
         # Should this just be publishing? No, because then the message will forwarded to
         # peers in the topics contained in the messages.

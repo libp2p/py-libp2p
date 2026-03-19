@@ -888,6 +888,9 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         await connect(pubsubs_gsub[index_alice].host, pubsubs_gsub[index_bob].host)
         await trio.sleep(0.1)
 
+        mock_send_rpc = MagicMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
+
         # Patch mcache.get so we can verify handle_iwant never looks up invalid IDs.
         # NOTE: We intentionally do NOT assert on write_msg because the background
         # pubsub service may call it asynchronously (e.g. peer-record announcements),
@@ -903,6 +906,7 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         mock_mcache_get.reset_mock()
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
+        mock_send_rpc.assert_not_called()
 
         # Another malformed ID — also silently skipped
         invalid_tuple_msg_id = "('abc', 123)"
@@ -911,6 +915,7 @@ async def test_handle_iwant_invalid_msg_id(monkeypatch):
         mock_mcache_get.reset_mock()
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
         mock_mcache_get.assert_not_called()
+        mock_send_rpc.assert_not_called()
 
 
 @pytest.mark.trio
@@ -951,8 +956,8 @@ async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
         mock_mcache_get = MagicMock(side_effect=lookup_message)
         monkeypatch.setattr(gossipsubs[index_bob].mcache, "get", mock_mcache_get)
 
-        mock_write_msg = AsyncMock()
-        monkeypatch.setattr(gossipsubs[index_bob].pubsub, "write_msg", mock_write_msg)
+        mock_send_rpc = MagicMock()
+        monkeypatch.setattr(gossipsubs[index_bob], "send_rpc", mock_send_rpc)
 
         iwant_msg = rpc_pb2.ControlIWant(
             messageIDs=["not_a_valid_msg_id", valid_msg_id]
@@ -960,8 +965,8 @@ async def test_handle_iwant_mixed_valid_and_invalid_msg_ids(monkeypatch):
         await gossipsubs[index_bob].handle_iwant(iwant_msg, id_alice)
 
         mock_mcache_get.assert_called_once_with(valid_mid)
-        mock_write_msg.assert_called_once()
-        packet = mock_write_msg.call_args[0][1]
+        mock_send_rpc.assert_called_once()
+        packet = mock_send_rpc.call_args[0][1]
         assert isinstance(packet, rpc_pb2.RPC)
         assert len(packet.publish) == 1
         assert packet.publish[0] == test_message
