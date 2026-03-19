@@ -1,31 +1,39 @@
 from prometheus_client import Counter, Histogram
 
-from libp2p.pubsub.gossipsub import GossipsubEvent
+from libp2p.pubsub.pubsub import GossipsubEvent
 
 
 class GossipsubMetrics:
-    delivered: Counter
-    dropped: Counter
-    validated_fail: Counter
+    publish: Counter
+    subopts: Counter
+    control: Counter
+
+    received: Counter
     msg_size: Histogram
 
     def __init__(self):
-        self.delivered = Counter(
-            "gossipsub_delivered_total",
-            "Messages successfully delivered",
-            labelnames=["topic"],
+        self.received = Counter(
+            "gossipsub_receiived_total",
+            "Messages successfully received",
+            labelnames=["peer_id"],
         )
 
-        self.dropped = Counter(
-            "gossipsub_dropped_total",
-            "Messages dropped",
-            labelnames=["topic", "reason"],
+        self.publish = Counter(
+            "gossipsub_publish_total",
+            "Messages to be published",
+            labelnames=["peer_id"],
         )
 
-        self.validated_fail = Counter(
-            "gossipsub_validation_failed_total",
-            "Messages rejected by validator",
-            labelnames=["topic", "error"],
+        self.subopts = Counter(
+            "gossipsub_subopts_total",
+            "Messages notifying peer subscriptions",
+            labelnames=["peer_id"],
+        )
+
+        self.control = Counter(
+            "gossipsub_control_total",
+            "Received control messages",
+            labelnames=["peer_id"],
         )
 
         self.msg_size = Histogram(
@@ -35,20 +43,16 @@ class GossipsubMetrics:
         )
 
     def record(self, event: GossipsubEvent) -> None:
-        if event.delivered:
-            self.delivered.labels(topic=event.topic).inc()
+        self.received.labels(peer_id=event.peer_id).inc()
+
+        if event.publish:
+            self.publish.labels(peer_id=event.peer_id).inc()
+
+        if event.subopts:
+            self.subopts.labels(peer_id=event.peer_id).inc()
+
+        if event.control:
+            self.control.labels(peer_id=event.peer_id).inc()
 
         if event.message_size is not None:
             self.msg_size.observe(event.message_size)
-
-        if event.dropped_reason:
-            self.dropped.labels(
-                topic=event.topic,
-                reason=event.dropped_reason,
-            ).inc()
-
-        if event.validation_error:
-            self.validated_fail.labels(
-                topic=event.topic,
-                error=type(event.validation_error).__name__,
-            ).inc()
