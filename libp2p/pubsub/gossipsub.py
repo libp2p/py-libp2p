@@ -76,6 +76,8 @@ PROTOCOL_ID_V20 = TProtocol("/meshsub/2.0.0")
 
 logger = logging.getLogger(__name__)
 
+_MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
+
 
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
@@ -257,8 +259,9 @@ class GossipSub(IPubsubRouter, Service):
         self._pending_messages_ttl = pending_messages_ttl
 
         # Deferred retry queue for dropped control chunks.
-        self._pending_control = defaultdict(rpc_pb2.ControlMessage)
-        self._max_pending_graft_prune_per_peer = 64
+        self._pending_control = defaultdict(lambda: rpc_pb2.ControlMessage())
+        self._max_pending_graft_prune_per_peer = _MAX_PENDING_GRAFT_PRUNE_PER_PEER
+
         # Extensions support (v1.3+)
         self.extension_handlers: dict[str, Callable[[bytes, ID], Awaitable[None]]] = {}
 
@@ -1915,6 +1918,9 @@ class GossipSub(IPubsubRouter, Service):
         Retries include GRAFT and PRUNE only (Go parity).
         IHAVE, IWANT, IDONTWANT and EXTENSIONS are intentionally not retried.
         """
+        if not (control.graft or control.prune):
+            return
+
         pending = self._pending_control[peer_id]
 
         if control.graft:
