@@ -830,8 +830,7 @@ class Swarm(Service, INetworkService):
                 pass
 
         swarm_conn = await self.add_conn(muxed_conn, direction="outbound")
-
-        swarm_conn._metric_send_channel = self.metric_send_channel
+        # swarm_conn._metric_send_channel = self.metric_send_channel
 
         logger.debug("successfully dialed peer %s", peer_id)
         return swarm_conn
@@ -1526,6 +1525,7 @@ class Swarm(Service, INetworkService):
             self,
             direction=direction,
         )
+        swarm_conn._metric_send_channel = self.metric_send_channel
 
         # Set actual transport addresses and connection type from the muxed connection.
         # This captures the real transport info (IP/port, direct vs relayed)

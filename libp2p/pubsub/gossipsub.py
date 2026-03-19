@@ -78,17 +78,6 @@ logger = logging.getLogger(__name__)
 
 _MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
-class GossipsubEvent:
-    peer_id: str
-    topic: str
-
-    # one of these should be set
-    message_size: int | None = None
-    delivered: bool = False
-    dropped_reason: str | None = None
-    validation_error: Exception | None = None
-
-
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
     pubsub: Pubsub | None
