@@ -63,7 +63,6 @@ from .score import (
     ScoreParams,
 )
 from .utils import (
-    parse_message_id_safe,
     safe_bytes_from_hex,
 )
 
@@ -1592,7 +1591,7 @@ class GossipSub(IPubsubRouter, Service):
                 )
                 continue
             if not pubsub.seen_messages.has(mid_bytes):
-                msg_ids_wanted.append(parse_message_id_safe(msg_id))
+                msg_ids_wanted.append(MessageID(mid_bytes.hex()))
 
         # Request messages with IWANT message
         if msg_ids_wanted:

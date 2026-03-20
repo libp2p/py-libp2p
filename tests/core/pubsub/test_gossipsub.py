@@ -14,6 +14,9 @@ from libp2p.pubsub.gossipsub import (
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
+from libp2p.pubsub.utils import (
+    safe_bytes_from_hex,
+)
 from libp2p.tools.utils import (
     connect,
 )
@@ -810,6 +813,13 @@ async def test_handle_ihave(monkeypatch):
         assert called_args[1] == id_bob  # Sender peer ID
 
 
+def test_safe_bytes_from_hex_accepts_bytes_message_ids():
+    """safe_bytes_from_hex should handle both hex text and raw bytes inputs."""
+    assert safe_bytes_from_hex("616263") == b"abc"
+    assert safe_bytes_from_hex(b"616263") == b"abc"
+    assert safe_bytes_from_hex(b"\x01\x02") == b"\x01\x02"
+
+
 @pytest.mark.trio
 async def test_handle_iwant(monkeypatch):
     async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs_gsub:
@@ -865,6 +875,12 @@ async def test_handle_iwant(monkeypatch):
         called_msg_id = mock_mcache_get.call_args[0][0]
         assert isinstance(called_msg_id, bytes)
         assert called_msg_id == test_from + test_seqno
+
+
+def test_safe_bytes_from_hex_rejects_invalid_hex_text():
+    """safe_bytes_from_hex should return None for malformed hex strings."""
+    assert safe_bytes_from_hex("not_a_valid_msg_id") is None
+    assert safe_bytes_from_hex("('abc', 123)") is None
 
 
 @pytest.mark.trio
