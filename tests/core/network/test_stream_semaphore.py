@@ -225,9 +225,7 @@ async def test_failure_path_releases_semaphore() -> None:
     peer_id = ID(b"QmPeer")
 
     # Make get_connections raise to simulate connection failure
-    with patch.object(
-        swarm, "get_connections", side_effect=SwarmException("no conns")
-    ):
+    with patch.object(swarm, "get_connections", side_effect=SwarmException("no conns")):
         with pytest.raises(SwarmException):
             await swarm.new_stream(peer_id)
 
