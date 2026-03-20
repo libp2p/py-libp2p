@@ -4,7 +4,9 @@ from prometheus_client import start_http_server
 import trio
 
 from libp2p.host.ping import PingEvent
+from libp2p.kad_dht.kad_dht import KadDhtEvent
 from libp2p.metrics.gossipsub import GossipsubMetrics
+from libp2p.metrics.kad_dht import KadDhtMetrics
 from libp2p.metrics.ping import PingMetrics
 from libp2p.pubsub.pubsub import GossipsubEvent
 
@@ -27,6 +29,7 @@ class Metrics:
     def __init__(self):
         self.ping = PingMetrics()
         self.gossipsub = GossipsubMetrics()
+        self.kad_dht = KadDhtMetrics()
 
     async def start_prometheus_server(
         self,
@@ -57,3 +60,5 @@ class Metrics:
                     self.ping.record(event)
                 case GossipsubEvent():
                     self.gossipsub.record(event)
+                case KadDhtEvent():
+                    self.kad_dht.record(event)
