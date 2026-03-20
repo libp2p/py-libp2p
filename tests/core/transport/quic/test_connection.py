@@ -495,6 +495,22 @@ class TestQUICConnection:
         with pytest.raises(NotImplementedError):
             await quic_connection.read()
 
+    def test_quic_stream_set_deadline_not_implemented(
+        self, quic_connection: QUICConnection
+    ) -> None:
+        """QUICStream does not implement set_deadline()."""
+        stream = QUICStream(
+            connection=quic_connection,
+            stream_id=0,
+            direction=StreamDirection.OUTBOUND,
+            remote_addr=("127.0.0.1", 4001),
+        )
+
+        with pytest.raises(
+            NotImplementedError, match="does not support setting read deadlines"
+        ):
+            stream.set_deadline(5)
+
     # Mock verification helpers
 
     def test_mock_resource_scope_functionality(self, mock_resource_scope) -> None:
