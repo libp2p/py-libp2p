@@ -170,16 +170,13 @@ class WebsocketListener(IListener):
         # Fall back to legacy TLS configuration
         return self._tls_config
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening for connections.
 
         Args:
             maddr: Multiaddr to listen on
             nursery: Trio nursery for managing tasks
-
-        Returns:
-            bool: True if listening started successfully
 
         :raises OpenConnectionError: If listening fails, listener is closed,
             invalid WebSocket multiaddr, or connection limit reached
@@ -320,7 +317,6 @@ class WebsocketListener(IListener):
                     )
 
             logger.info(f"WebSocket listener started on {self._listen_maddr}")
-            return True
 
         except Exception as e:
             logger.error(f"Failed to start WebSocket listener: {e}")
