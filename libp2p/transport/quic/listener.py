@@ -1197,7 +1197,7 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Transmission error: {e}", exc_info=True)
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """Start listening on the given multiaddr with enhanced connection handling."""
         if self._listening:
             raise QUICListenError("Already listening")
@@ -1222,8 +1222,8 @@ class QUICListener(IListener):
             self._socket = await self._create_socket(host, port)
             self._nursery = active_nursery
 
-            # Get the actual bound address
-            bound_host, bound_port = self._socket.getsockname()
+            # Get the actual bound address (IPv4: 2-tuple, IPv6: 4-tuple)
+            bound_host, bound_port = self._socket.getsockname()[:2]
             quic_version = multiaddr_to_quic_version(maddr)
             bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
             self._bound_addresses = [bound_maddr]
@@ -1236,7 +1236,6 @@ class QUICListener(IListener):
             logger.info(
                 f"QUIC listener started on {bound_maddr} with connection ID support"
             )
-            return True
 
         except Exception as e:
             await self.close()
