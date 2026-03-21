@@ -273,7 +273,7 @@ class GridRoutingTable:
         :param peer_info: Optional PeerInfo object
         :param is_permanent: True for permanent peers, False for temporary
         :param is_connected: True if peer is currently connected
-        :return: True if peer was added/updated, False if already in table or bucket full
+        :return: True if added/updated, False if bucket full and no replacement
         """
         if peer_id == self.local_id:
             return False

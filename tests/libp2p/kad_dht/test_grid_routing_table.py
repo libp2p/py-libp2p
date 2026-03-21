@@ -193,7 +193,6 @@ class TestGridRoutingTable:
         peer_id = ID.from_base58("QmZLaXk3bbiHgVK3zp5A8n2DEuvMZFRv1GAjTrSvZuLnFr")
 
         rt = GridRoutingTable(local_id)
-        local_node = rt.local_node_id
         peer_node = NodeId(peer_id)
 
         bucket_index = rt._get_bucket_index(peer_node)
@@ -255,7 +254,7 @@ class TestGridRoutingTable:
         rt.update(peers[0], is_permanent=False)
         rt.update(peers[1], is_permanent=True)
 
-        success = rt.update(peers[2], is_permanent=False)
+        rt.update(peers[2], is_permanent=False)
         assert rt.size() >= 1
         assert rt.size() <= 3
 
