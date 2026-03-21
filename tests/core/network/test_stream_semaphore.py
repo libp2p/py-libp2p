@@ -239,6 +239,42 @@ async def test_failure_path_releases_semaphore() -> None:
 
 
 @pytest.mark.trio
+async def test_failed_second_open_does_not_release_first_stream_rm_slot() -> None:
+    """
+    Double-release regression: a failed open must not release the RM slot
+    that belongs to an already-open stream (see PR #1289 review).
+    """
+    swarm = _make_swarm(max_streams=5)
+    peer_id = ID(b"QmPeer")
+    conn = FakeConnection(peer_id, swarm)
+    conn.event_started.set()
+
+    rm = swarm._resource_manager
+    assert rm is not None
+
+    with patch.object(swarm, "get_connections", return_value=[conn]):
+        # Open one stream successfully
+        s1 = await swarm.new_stream(peer_id)
+        assert rm._current_streams == 1  # type: ignore[union-attr]
+
+        # Make the next new_stream() call on the connection raise
+        async def _fail_new_stream() -> INetStream:
+            raise Exception("connection broken")
+
+        conn.new_stream = _fail_new_stream  # type: ignore[assignment]
+
+        with pytest.raises(SwarmException):
+            await swarm.new_stream(peer_id)
+
+        # The first stream's RM slot must still be accounted for
+        assert rm._current_streams == 1  # type: ignore[union-attr]
+
+        # Clean up: close s1 and verify count drops to 0
+        await swarm.notify_closed_stream(s1)
+        assert rm._current_streams == 0  # type: ignore[union-attr]
+
+
+@pytest.mark.trio
 async def test_inbound_stream_acquires_and_releases_semaphore() -> None:
     """Inbound streams acquire semaphore + RM and release on handler exit."""
     swarm = _make_swarm(max_streams=5)

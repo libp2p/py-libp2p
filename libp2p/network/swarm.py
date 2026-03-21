@@ -952,11 +952,6 @@ class Swarm(Service, INetworkService):
                 logger.debug("successfully opened a stream to peer %s", peer_id)
                 return stream
             except Exception:
-                # Release stream resource on failure
-                if self._resource_manager is not None:
-                    self._resource_manager.release_stream(
-                        str(peer_id), Direction.OUTBOUND
-                    )
                 raise
 
         try:
@@ -965,21 +960,11 @@ class Swarm(Service, INetworkService):
             return net_stream
         except Exception as e:
             logger.debug(f"Failed to create stream on connection: {e}")
-            # Release stream resource on failure
-            if self._resource_manager is not None:
-                self._resource_manager.release_stream(str(peer_id), Direction.OUTBOUND)
 
             # Try other connections if available
             for other_conn in connections:
                 if other_conn != connection:
                     try:
-                        # Re-acquire stream resource for alternative connection
-                        if self._resource_manager is not None:
-                            if not self._resource_manager.acquire_stream(
-                                str(peer_id), Direction.OUTBOUND
-                            ):
-                                continue
-
                         net_stream = await other_conn.new_stream()
                         logger.debug(
                             f"Successfully opened a stream to peer {peer_id} "
@@ -987,11 +972,6 @@ class Swarm(Service, INetworkService):
                         )
                         return net_stream
                     except Exception:
-                        # Release stream resource on failure
-                        if self._resource_manager is not None:
-                            self._resource_manager.release_stream(
-                                str(peer_id), Direction.OUTBOUND
-                            )
                         continue
 
             # All connections failed, raise exception
