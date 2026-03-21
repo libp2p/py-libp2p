@@ -10,7 +10,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
 
-def example_basic_usage():
+def example_basic_usage() -> tuple[ID, GridRoutingTable]:
     """Basic usage of GridRoutingTable."""
     local_id = ID.from_base58("QmaCpDMGvV2BGHeYERUEnRQAwe5CcqarqmtA7xNXT92p2")
     print(f"Local Peer ID: {local_id}")
@@ -22,7 +22,7 @@ def example_basic_usage():
     return local_id, rt
 
 
-def example_add_peers(rt, local_id):
+def example_add_peers(rt: GridRoutingTable, local_id: ID) -> list[ID]:
     """Add peers to the routing table."""
     test_peers = [
         ID.from_base58("QmZLaXk3bbiHgVK3zp5A8n2DEuvMZFRv1GAjTrSvZuLnFr"),
@@ -48,7 +48,7 @@ def example_add_peers(rt, local_id):
     return test_peers
 
 
-def example_peer_lookup(rt, test_peers):
+def example_peer_lookup(rt: GridRoutingTable, test_peers: list[ID]) -> None:
     """Demonstrate peer lookup and retrieval."""
     for peer_id in test_peers:
         if rt.contains(peer_id):
@@ -64,7 +64,7 @@ def example_peer_lookup(rt, test_peers):
     print()
 
 
-def example_nearest_peers(rt, local_id):
+def example_nearest_peers(rt: GridRoutingTable, local_id: ID) -> None:
     """Find nearest peers to a target key."""
     import hashlib
 
@@ -82,7 +82,7 @@ def example_nearest_peers(rt, local_id):
     print()
 
 
-def example_bucket_statistics(rt):
+def example_bucket_statistics(rt: GridRoutingTable) -> None:
     """Display routing table statistics."""
     stats = rt.get_bucket_stats()
 
@@ -102,7 +102,7 @@ def example_bucket_statistics(rt):
     print()
 
 
-def example_peer_replacement(rt, local_id):
+def example_peer_replacement(rt: GridRoutingTable, local_id: ID) -> None:
     """Demonstrate peer replacement logic."""
     small_rt = GridRoutingTable(local_id, max_bucket_size=2)
 
@@ -129,7 +129,7 @@ def example_peer_replacement(rt, local_id):
     print()
 
 
-def example_xor_distance():
+def example_xor_distance() -> None:
     """Demonstrate XOR distance calculation."""
     peer_id1 = ID.from_base58("QmaCpDMGvV2BGHeYERUEnRQAwe5CcqarqmtA7xNXT92p2")
     peer_id2 = ID.from_base58("QmZLaXk3bbiHgVK3zp5A8n2DEuvMZFRv1GAjTrSvZuLnFr")
@@ -149,7 +149,7 @@ def example_xor_distance():
     print()
 
 
-def example_remove_peer(rt, test_peers):
+def example_remove_peer(rt: GridRoutingTable, test_peers: list[ID]) -> None:
     """Remove a peer from the routing table."""
     if test_peers:
         peer_to_remove = test_peers[0]
@@ -169,7 +169,7 @@ def example_remove_peer(rt, test_peers):
         print(f"Total peers remaining: {rt.size()}\n")
 
 
-def main():
+def main() -> None:
     """Run all examples."""
     print("=" * 60)
     print("Grid Topology (Kademlia DHT) Routing Table Examples")

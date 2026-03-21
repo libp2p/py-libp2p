@@ -15,6 +15,7 @@ Key features:
 from dataclasses import dataclass
 import hashlib
 import logging
+from typing import Any
 
 import multihash
 
@@ -42,7 +43,7 @@ class NodeId:
 
     def __init__(self, peer_id: ID):
         """Initialize Node ID from a peer ID."""
-        self.peer_id = peer_id
+        self.peer_id: ID | None = peer_id
         digest = hashlib.sha256(peer_id.to_bytes()).digest()
         mh_bytes = multihash.encode(digest, "sha2-256")
         self.data = multihash.decode(mh_bytes).digest
@@ -61,12 +62,15 @@ class NodeId:
         return distance
 
     def common_prefix_len(self, other: "NodeId") -> int:
-        """
+        r"""
         Calculate the number of common prefix bits between two node IDs.
 
         Returns the number of leading bits that are the same.
-        For example: 0x00 and 0xFF have 0 common prefix bits.
-                    0xFF and 0xFE have 7 common prefix bits.
+
+        Example:
+            0x00 and 0xFF have 0 common prefix bits.
+            0xFF and 0xFE have 7 common prefix bits.
+
         """
         distance = self.distance(other)
 
@@ -81,12 +85,12 @@ class NodeId:
 
         return 256
 
-    def __eq__(self, other):
+    def __eq__(self, other: Any) -> bool:
         if isinstance(other, NodeId):
             return self.data == other.data
         return False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"NodeId({self.data.hex()[:16]}...)"
 
 
@@ -424,7 +428,7 @@ class GridRoutingTable:
             return self.buckets[index]
         return None
 
-    def get_bucket_stats(self) -> dict:
+    def get_bucket_stats(self) -> dict[str, Any]:
         """Get statistics about bucket distribution."""
         stats = {
             "total_peers": self.size(),
