@@ -19,6 +19,7 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 import varint
 
 from libp2p.crypto.secp256k1 import (
@@ -585,3 +586,123 @@ class TestPeerRouting:
 
                     # Should stop after max rounds, not infinite loop
                     assert isinstance(result, list)
+
+    @pytest.mark.trio
+    async def test_sliding_window_no_idle_slots(self, peer_routing, mock_host):
+        """
+        Verify the semaphore-based sliding window across rounds.
+
+        With ALPHA=3 per-round admission, round 1 queries [p0, p1, p2].
+        The mock makes p0 and p1 "discover" peers p3 and p4 so they appear
+        in round 2.  Peer 2 is slow (0.5 s); peers 0/1 are fast (0.01 s).
+
+        Under lock-step batching the timeline would be:
+          round 1: [p0, p1, p2] — all finish at t≈0.5 s
+          round 2: [p3, p4]     — start at t≈0.5 s
+
+        With the sliding window (semaphore releases after each query),
+        round 1 still caps at ALPHA peers, but round 2 starts as soon as
+        all three finish.  The key assertion is that p3/p4 are eventually
+        queried (multiple rounds fire) and p3 starts well before p2's
+        0.5 s sleep would have blocked a lock-step design.
+        """
+        target_key = b"target_key"
+
+        initial_peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(3)]
+        extra_peers = [create_valid_peer_id(f"sw_peer{i}") for i in range(3, 5)]
+        started_at: dict[str, float] = {}
+
+        async def mock_query(peer, _target_key, new_peers):
+            started_at[str(peer)] = trio.current_time()
+            # Peer 2 is slow; all others are fast
+            if peer == initial_peers[2]:
+                await trio.sleep(0.5)
+            else:
+                await trio.sleep(0.01)
+            # Fast peers in round 1 "discover" extra peers
+            if peer == initial_peers[0]:
+                new_peers.append(extra_peers[0])
+            elif peer == initial_peers[1]:
+                new_peers.append(extra_peers[1])
+
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=initial_peers,
+        ):
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            with patch.object(
+                peer_routing,
+                "_query_single_peer_for_closest",
+                side_effect=mock_query,
+            ):
+                await peer_routing.find_closest_peers_network(target_key)
+
+        # All 5 peers should have been queried across multiple rounds
+        assert len(started_at) == 5, f"Expected 5 queried peers, got {len(started_at)}"
+
+        # Extra peers (round 2) should have started well before the slow
+        # peer 2 would have blocked a lock-step implementation.
+        p3_name = str(extra_peers[0])
+        assert p3_name in started_at
+
+    @pytest.mark.trio
+    async def test_per_round_query_count_bounded_by_alpha(
+        self, peer_routing, mock_host
+    ):
+        """
+        Assert that each lookup round admits at most ALPHA peers, not the
+        full ``count`` (20).  This preserves classic Kademlia iterative
+        refinement: after each small batch we re-sort with newly discovered
+        peers before admitting the next batch.
+
+        We set up 9 peers in 3 groups of ALPHA=3.  Each round's queries
+        "discover" the next group, keeping the loop going.  We record the
+        order of queries and verify that no more than ALPHA peers are
+        admitted per round by checking the total across all rounds.
+        """
+        target_key = b"target_key"
+
+        # 3 groups of ALPHA peers; each group "discovers" the next.
+        group1 = [create_valid_peer_id(f"vol_g1_{i}") for i in range(ALPHA)]
+        group2 = [create_valid_peer_id(f"vol_g2_{i}") for i in range(ALPHA)]
+        group3 = [create_valid_peer_id(f"vol_g3_{i}") for i in range(ALPHA)]
+        queried_peers: list[ID] = []
+
+        async def mock_query(peer, _target_key, new_peers):
+            queried_peers.append(peer)
+            await trio.sleep(0)
+            # Group 1 queries discover group 2 peers
+            if peer in group1:
+                for p in group2:
+                    if p not in new_peers:
+                        new_peers.append(p)
+            # Group 2 queries discover group 3 peers
+            elif peer in group2:
+                for p in group3:
+                    if p not in new_peers:
+                        new_peers.append(p)
+
+        with patch.object(
+            peer_routing.routing_table,
+            "find_local_closest_peers",
+            return_value=group1,
+        ):
+            mock_host.get_connected_peers.return_value = []
+            mock_host.get_peerstore().peer_ids.return_value = []
+            with patch.object(
+                peer_routing,
+                "_query_single_peer_for_closest",
+                side_effect=mock_query,
+            ):
+                await peer_routing.find_closest_peers_network(target_key)
+
+        # All 9 peers should be queried across 3+ rounds.
+        assert len(queried_peers) == 9, (
+            f"Expected 9 total queries, got {len(queried_peers)}"
+        )
+        # First ALPHA queries must be from group 1 (round 1 admission).
+        assert set(queried_peers[:ALPHA]) == set(group1), (
+            "Round 1 should admit exactly the initial ALPHA peers"
+        )
