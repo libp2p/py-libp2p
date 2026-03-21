@@ -51,7 +51,7 @@ class NodeId:
     @classmethod
     def from_hash(cls, hash_data: bytes) -> "NodeId":
         """Create a NodeId from a pre-computed hash."""
-        node_id = cls.__new__(cls)
+        node_id: NodeId = cls.__new__(cls)  # type: ignore[assignment]
         node_id.peer_id = None
         node_id.data = hash_data
         return node_id
