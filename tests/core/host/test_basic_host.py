@@ -156,6 +156,58 @@ def test_announce_addrs_replaces_listen_addrs():
     assert str(transport_addrs[0]) == "/ip4/127.0.0.1/tcp/8000"
 
 
+def test_announce_addrs_strips_wrong_peer_id():
+    wrong_peer_id = "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
+    announce = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{wrong_peer_id}")]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    assert len(addrs) == 1
+    addr_str = str(addrs[0])
+    # Wrong peer id must be stripped and replaced with the host's own
+    assert wrong_peer_id not in addr_str
+    assert addr_str == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+
+
+def test_announce_addrs_empty_list_advertises_nothing():
+    host = _make_host_with_listener(announce_addrs=[])
+
+    addrs = host.get_addrs()
+    assert addrs == []
+
+
+def test_announce_addrs_multiple():
+    announce = [
+        Multiaddr("/ip4/1.2.3.4/tcp/4001"),
+        Multiaddr("/ip4/5.6.7.8/tcp/4002"),
+    ]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    assert len(addrs) == 2
+    assert str(addrs[0]) == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+    assert str(addrs[1]) == f"/ip4/5.6.7.8/tcp/4002/p2p/{peer_id_str}"
+
+
+def test_announce_addrs_with_correct_peer_id():
+    # First create a host to get its peer ID, then set announce with that ID
+    host = _make_host_with_listener(announce_addrs=[])
+    peer_id_str = str(host.get_id())
+
+    # Set announce addr that already includes the correct /p2p/ suffix
+    host._announce_addrs = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}")]
+
+    addrs = host.get_addrs()
+
+    assert len(addrs) == 1
+    # Should still have exactly one /p2p/ component, no duplication
+    assert str(addrs[0]) == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+
+
 @pytest.mark.trio
 async def test_initiate_autotls_procedure_builds_transport_aware_broker_multiaddr(
     monkeypatch, tmp_path

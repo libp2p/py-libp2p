@@ -18,6 +18,7 @@ import weakref
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
+from multiaddr.exceptions import ProtocolLookupError
 import trio
 
 import libp2p
@@ -206,6 +207,9 @@ class BasicHost(IHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: Optional addresses to advertise instead of
+            listen addresses.  ``None`` (default) uses listen addresses;
+            an empty list advertises no addresses.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -355,7 +359,7 @@ class BasicHost(IHost):
         Return the multiaddr addresses this host advertises to peers.
 
         If ``announce_addrs`` was provided, those replace listen addresses
-        entirely.  Otherwise listen addresses are used
+        entirely.  Otherwise listen addresses are used.
 
         Note: This method appends the /p2p/{peer_id} suffix to the addresses.
         Use get_transport_addrs() for raw transport addresses.
@@ -369,10 +373,16 @@ class BasicHost(IHost):
 
         result = []
         for addr in addrs:
-            if "p2p" in [p.name for p in addr.protocols()]:
-                result.append(addr)
-            else:
-                result.append(addr.encapsulate(p2p_part))
+            # Strip any existing /p2p/ component, then always append our own.
+            # This avoids identity confusion when announce addrs contain a
+            # mismatched peer ID (mirrors js-libp2p behaviour).
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except ProtocolLookupError:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+            result.append(addr.encapsulate(p2p_part))
         return result
 
     def get_connected_peers(self) -> list[ID]:
