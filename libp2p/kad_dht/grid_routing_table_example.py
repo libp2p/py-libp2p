@@ -57,9 +57,14 @@ def example_peer_lookup(rt: GridRoutingTable, test_peers: list[ID]) -> None:
             print(f"✗ {str(peer_id)[:16]}... is NOT in routing table")
 
     if test_peers:
-        peer_info = rt.get_peer_info(test_peers[0])
-        if peer_info:
-            print(f"\nPeer info for {str(test_peers[0])[:16]}...: {peer_info}")
+        node_id = NodeId(test_peers[0])
+        bucket_index = rt._get_bucket_index(node_id)
+        if bucket_index is not None:
+            bucket = rt.get_bucket(bucket_index)
+            if bucket:
+                peer_info = bucket.get_peer_info(test_peers[0])
+                if peer_info:
+                    print(f"\nPeer info for {str(test_peers[0])[:16]}...: {peer_info}")
 
     print()
 
