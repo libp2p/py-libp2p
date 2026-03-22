@@ -34,3 +34,4 @@ Examples
    examples.autotls
    examples.perf
    examples.path_handling
+   examples.metrics

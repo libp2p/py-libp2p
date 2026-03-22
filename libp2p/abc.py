@@ -336,7 +336,7 @@ class INetStream(ReadWriteCloser):
     """
 
     muxed_conn: IMuxedConn
-    metric_send_channel: trio.MemorySendChannel | None
+    metric_send_channel: trio.MemorySendChannel[Any] | None
 
     @abstractmethod
     def get_protocol(self) -> TProtocol | None:
@@ -2101,6 +2101,12 @@ class IHost(ABC):
         """
 
     @abstractmethod
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
+        """
+
+    @abstractmethod
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
         Initiate the ACME-AUTO-TLS-BROKER negotiation for TLS certificate
@@ -2220,10 +2226,6 @@ class IHost(ABC):
             If the upgrade process (security handshake or multiplexer negotiation) fails
 
         """
-
-    @abstractmethod
-    async def next_event(self) -> None:
-        """"""
 
 
 # -------------------------- peer-record interface.py --------------------------
