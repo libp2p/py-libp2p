@@ -132,20 +132,11 @@ class TrackedRawConnection(IRawConnection):
         return self._wrapped.get_remote_address()
 
     def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
-        """
-        Get the actual transport addresses used by this connection.
-
-        For relayed connections, this should include /p2p-circuit in the path.
-        Delegates to wrapped connection but ensures relay context is preserved.
-        """
+        """Delegate to wrapped connection."""
         return self._wrapped.get_transport_addresses()
 
     def get_connection_type(self) -> ConnectionType:
-        """
-        Get the type of connection.
-
-        This is always RELAYED since TrackedRawConnection wraps relay connections.
-        """
+        """Always RELAYED since this wraps relay connections."""
         return ConnectionType.RELAYED
 
     def __getattr__(self, name: str) -> Any:
@@ -201,10 +192,6 @@ class CircuitV2Transport(ITransport):
         # Performance tracker for intelligent relay selection
         self.performance_tracker = RelayPerformanceTracker()
 
-        # Stored addresses and DHT (from origin/main)
-        self._last_relay_index = -1
-        self._relay_list: list[ID] = []
-        self._relay_metrics: dict[ID, dict[str, float | int]] = {}
         self._reservations: dict[ID, float] = {}
         self._refreshing = False
         self.dht: KadDHT | None = None
@@ -764,36 +751,6 @@ class CircuitV2Transport(ITransport):
         except Exception:
             return False
 
-    async def _measure_relay(
-        self, relay_id: ID, scored_relays: list[tuple[ID, float]]
-    ) -> None:
-        metrics = self._relay_metrics.setdefault(
-            relay_id, {"latency": 0, "failures": 0, "last_seen": 0}
-        )
-        start = time.monotonic()
-        available = await self._is_relay_available(relay_id)
-        latency = time.monotonic() - start
-
-        if not available:
-            metrics["failures"] += 1
-            return
-
-        metrics.update(
-            {
-                "latency": latency,
-                "failures": max(0.0, metrics["failures"] - 1),
-                "last_seen": time.time(),
-            }
-        )
-
-        score = (
-            1000
-            - (metrics["failures"] * 10)
-            - (latency * 100)
-            - ((time.time() - metrics["last_seen"]) * 0.1)
-        )
-        scored_relays.append((relay_id, score))
-
     async def reserve(
         self, stream: INetStream, relay_peer_id: ID, nursery: trio.Nursery
     ) -> bool:
@@ -1107,7 +1064,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1118,11 +1075,6 @@ class CircuitV2Listener(Service, IListener):
         nursery : trio.Nursery
             The nursery to run tasks in
 
-        Returns
-        -------
-        bool
-            True if listening successfully started
-
         """
         # Convert string to Multiaddr if needed
         addr = (
@@ -1131,7 +1083,6 @@ class CircuitV2Listener(Service, IListener):
             else multiaddr.Multiaddr(maddr)
         )
         self.multiaddrs.append(addr)
-        return True
 
     def get_addrs(self) -> tuple[multiaddr.Multiaddr, ...]:
         """
