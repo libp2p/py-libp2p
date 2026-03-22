@@ -114,6 +114,7 @@ class KadDhtEvent:
     get_providers: bool = False
     add_provider: bool = False
 
+
 class KadDHT(Service):
     """
     Kademlia DHT implementation for libp2p.
@@ -877,7 +878,8 @@ class KadDHT(Service):
                 logger.warning(f"Failed to parse protobuf message: {proto_err}")
 
             # Send KAD-DHT event to Metrics
-            stream.metric_send_channel.send(event)
+            if stream.metric_send_channel is not None:
+                await stream.metric_send_channel.send(event)
 
             await stream.close()
         except Exception as e:
