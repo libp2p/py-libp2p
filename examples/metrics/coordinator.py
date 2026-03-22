@@ -8,10 +8,13 @@ from libp2p.host.ping import (
     PingService,
     handle_ping,
 )
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
+from libp2p.records.validator import Validator
+from libp2p.utils.paths import get_script_dir, join_paths
 
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 COMMANDS = """
@@ -21,22 +24,37 @@ Available commands:
 - join <topic>                      - Subscribe to a topic
 - leave <topic>                     - Unsubscribe to a topic
 - publish <topic> <message>         - Publish a message
+- put <key> <value>               - Execute PUT_VALUE in DHT
+- get <key>                         - Execute GET_VALUE in DHT
+- advertize <content-id>            - Execute ADD_PROVIDER in DHT
+- get_provider <content-id>         - Execute GET_PROVIDERS in DHT
 - local                             - List local multiaddr
 - help                              - List the existing commands
 - exit                              - Shut down
 """
 
 
+class ExampleValidator(Validator):
+    def validate(self, key: str, value: bytes) -> None:
+        if not value:
+            raise ValueError("Value cannot be empty")
+
+    def select(self, key: str, values: list[bytes]) -> int:
+        return 0
+
+
 class Node:
-    def __init__(self, listen_addrs: list[multiaddr.Multiaddr]):
+    def __init__(
+        self, listen_addrs: list[multiaddr.Multiaddr], dht_role: str
+    ):
         # Create a libp2p-host
         self.host = new_host(listen_addrs=listen_addrs, enable_metrics=True)
 
-        # Setup PING service
+        # PING
         self.host.set_stream_handler(PING_ID, handle_ping)
         self.ping_service = PingService(self.host)
 
-        # Set up Pubsub/Gossipsub
+        # Pubsub/Gossipsub
         self.gossipsub = GossipSub(
             protocols=[GOSSIPSUB_PROTOCOL_ID],
             degree=3,  # Number of peers to maintain in mesh
@@ -50,6 +68,14 @@ class Node:
             heartbeat_interval=5,  # More frequent heartbeats for testing
         )
         self.pubsub = Pubsub(self.host, self.gossipsub)
+
+        # KAD-DHT
+        if dht_role == "server":
+            dht_mode = DHTMode.SERVER
+        else:
+            dht_mode = DHTMode.CLIENT
+        self.dht = KadDHT(self.host, dht_mode)
+        self.dht.register_validator("exp", ExampleValidator())
 
         # CLI input send/receive channels
         self.input_send_channel, self.input_receive_channel = trio.open_memory_channel(
@@ -105,7 +131,44 @@ class Node:
                     if cmd == "publish" and len(parts) > 2:
                         await self.pubsub.publish(parts[1], parts[2].encode())
                         print(f"Published: {parts[2]}")
-
+                        
+                    if cmd == "put" and len(parts) > 2:
+                        key = parts[1]
+                        value = parts[2].encode()
+                                                
+                        await self.dht.put_value(key, value)
+                        print(f"Stored value: {value.decode()} with key: {key}")
+                        
+                    if cmd == "get" and len(parts) > 1:
+                        key = parts[1]
+                                                
+                        retrieved_value = await self.dht.get_value(key)
+                        if retrieved_value:
+                            print(f"Retrieved value: {retrieved_value.decode()}")
+                        else:
+                            print("Failed to retrieve")
+                        
+                    if cmd == "advertize" and len(parts) > 1:
+                        content_id = parts[1]
+                        
+                        success = await self.dht.provide(content_id)
+                        if success:
+                            print(f"Advertised as provider for content: {content_id}")
+                        else:
+                            print("Failed to advertise as provider")
+                        
+                    if cmd == "get_provider" and len(parts) > 1:
+                        content_id = parts[1]
+                        
+                        providers = await self.dht.find_providers(content_id)
+                        if providers:
+                            print(
+                                f"Found {len(providers)} providers: "
+                                f"{[p.peer_id for p in providers]}"
+                            )
+                        else:
+                            print("No providers found")
+                        
                     if cmd == "local":
                         maddr = self.host.get_addrs()[0]
                         print(maddr)
