@@ -8,6 +8,7 @@ from libp2p.kad_dht.kad_dht import KadDhtEvent
 from libp2p.metrics.gossipsub import GossipsubMetrics
 from libp2p.metrics.kad_dht import KadDhtMetrics
 from libp2p.metrics.ping import PingMetrics
+from libp2p.metrics.swarm import SwarmEvent, SwarmMetrics
 from libp2p.pubsub.pubsub import GossipsubEvent
 
 
@@ -30,6 +31,7 @@ class Metrics:
         self.ping = PingMetrics()
         self.gossipsub = GossipsubMetrics()
         self.kad_dht = KadDhtMetrics()
+        self.swarm = SwarmMetrics()
 
     async def start_prometheus_server(
         self,
@@ -62,3 +64,5 @@ class Metrics:
                     self.gossipsub.record(event)
                 case KadDhtEvent():
                     self.kad_dht.record(event)
+                case SwarmEvent():
+                    self.swarm.record(event)

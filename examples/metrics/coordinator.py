@@ -14,7 +14,6 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.records.validator import Validator
-from libp2p.utils.paths import get_script_dir, join_paths
 
 GOSSIPSUB_PROTOCOL_ID = TProtocol("/meshsub/1.0.0")
 COMMANDS = """
@@ -24,7 +23,7 @@ Available commands:
 - join <topic>                      - Subscribe to a topic
 - leave <topic>                     - Unsubscribe to a topic
 - publish <topic> <message>         - Publish a message
-- put <key> <value>               - Execute PUT_VALUE in DHT
+- put <key> <value>                 - Execute PUT_VALUE in DHT
 - get <key>                         - Execute GET_VALUE in DHT
 - advertize <content-id>            - Execute ADD_PROVIDER in DHT
 - get_provider <content-id>         - Execute GET_PROVIDERS in DHT
@@ -44,9 +43,7 @@ class ExampleValidator(Validator):
 
 
 class Node:
-    def __init__(
-        self, listen_addrs: list[multiaddr.Multiaddr], dht_role: str
-    ):
+    def __init__(self, listen_addrs: list[multiaddr.Multiaddr], dht_role: str):
         # Create a libp2p-host
         self.host = new_host(listen_addrs=listen_addrs, enable_metrics=True)
 
@@ -89,6 +86,11 @@ class Node:
         while not self.termination_event.is_set():
             try:
                 message = await subsription.get()
+
+                from_peer_id = ID(message.from_id).to_base58()
+                if from_peer_id == self.host.get_id().pretty():
+                    continue
+
                 print(f"From: {ID(message.from_id).to_base58()}")
                 print(f"Received: {message.data.decode('utf-8')}")
             except Exception:
@@ -131,35 +133,35 @@ class Node:
                     if cmd == "publish" and len(parts) > 2:
                         await self.pubsub.publish(parts[1], parts[2].encode())
                         print(f"Published: {parts[2]}")
-                        
+
                     if cmd == "put" and len(parts) > 2:
                         key = parts[1]
                         value = parts[2].encode()
-                                                
+
                         await self.dht.put_value(key, value)
                         print(f"Stored value: {value.decode()} with key: {key}")
-                        
+
                     if cmd == "get" and len(parts) > 1:
                         key = parts[1]
-                                                
+
                         retrieved_value = await self.dht.get_value(key)
                         if retrieved_value:
                             print(f"Retrieved value: {retrieved_value.decode()}")
                         else:
                             print("Failed to retrieve")
-                        
+
                     if cmd == "advertize" and len(parts) > 1:
                         content_id = parts[1]
-                        
+
                         success = await self.dht.provide(content_id)
                         if success:
                             print(f"Advertised as provider for content: {content_id}")
                         else:
                             print("Failed to advertise as provider")
-                        
+
                     if cmd == "get_provider" and len(parts) > 1:
                         content_id = parts[1]
-                        
+
                         providers = await self.dht.find_providers(content_id)
                         if providers:
                             print(
@@ -168,7 +170,7 @@ class Node:
                             )
                         else:
                             print("No providers found")
-                        
+
                     if cmd == "local":
                         maddr = self.host.get_addrs()[0]
                         print(maddr)
