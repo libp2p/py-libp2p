@@ -185,8 +185,7 @@ class BasicHost(IHost):
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
-        psk: str | None = None,
-        metric_recv_channel: trio.MemoryReceiveChannel | None = None,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
@@ -253,7 +252,6 @@ class BasicHost(IHost):
                 dns_resolution_timeout=bootstrap_dns_timeout,
                 dns_max_retries=bootstrap_dns_max_retries,
             )
-        self.psk = psk
 
         # Address announcement configuration
         self._announce_addrs = (
@@ -517,6 +515,12 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
+        """
+        return self.metric_recv_channel
 
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
@@ -929,10 +933,6 @@ class BasicHost(IHost):
 
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
-
-    async def next_event(self):
-        event = await self.metric_recv_channel.receive()
-        return event
 
     async def _run_identify(self, peer_id: ID) -> None:
         """

@@ -11,9 +11,9 @@ class GossipsubMetrics:
     received: Counter
     msg_size: Histogram
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.received = Counter(
-            "gossipsub_receiived_total",
+            "gossipsub_received_total",
             "Messages successfully received",
             labelnames=["peer_id"],
         )

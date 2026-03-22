@@ -20,7 +20,7 @@ class KadDhtMetrics:
     get_providers: Counter
     add_provider: Counter
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.inbound = Counter(
             "kad_inbound_total",
             "Total inbound requests received",

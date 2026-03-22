@@ -5,6 +5,7 @@ from enum import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 import trio
@@ -122,13 +123,13 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
-    metric_send_channel: trio.MemorySendChannel | None
+    metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
         self,
         muxed_stream: IMuxedStream,
         swarm_conn: "SwarmConn | None",
-        metric_send_channel: trio.MemorySendChannel | None,
+        metric_send_channel: trio.MemorySendChannel[Any] | None,
     ) -> None:
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
