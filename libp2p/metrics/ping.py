@@ -7,7 +7,7 @@ class PingMetrics:
     rtt: Histogram
     failures: Counter
 
-    def __init__(self):
+    def __init__(self) -> None:
         rtt = Histogram(
             "ping",
             "round-trip time sending a 'ping' and receiving a 'pong'",
@@ -16,7 +16,7 @@ class PingMetrics:
 
         failures = Counter(
             "ping_failure",
-            "FAilure while sending a ping or receiving a ping",
+            "Failure while sending a ping or receiving a ping",
             labelnames=["reason", "peer_id"],
         )
 

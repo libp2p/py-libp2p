@@ -485,7 +485,7 @@ class KadDHT(Service):
                 )
 
                 event = KadDhtEvent()
-                event.peer_id = peer_id
+                event.peer_id = peer_id.pretty()
                 event.inbound = True
 
                 # Handle FIND_NODE message

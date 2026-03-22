@@ -28,7 +28,7 @@ class SwarmMetrics:
     dial_attempt: Counter
     dial_attempt_error: Counter
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.conn_incoming = Counter(
             "swarm_incoming_conn",
             "Incoming connection received by libp2p-swarm",

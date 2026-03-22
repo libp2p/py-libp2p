@@ -1,4 +1,5 @@
 import socket
+from typing import Any
 
 from prometheus_client import start_http_server
 import trio
@@ -23,11 +24,16 @@ def find_available_port(start_port: int = 8000, host: str = "127.0.0.1") -> int:
             except OSError:
                 port += 1
 
+    raise RuntimeError("Unreachable")
+
 
 class Metrics:
     ping: PingMetrics
+    gossipsub: GossipsubMetrics
+    kad_dht: KadDhtMetrics
+    swarm: SwarmMetrics
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.ping = PingMetrics()
         self.gossipsub = GossipsubMetrics()
         self.kad_dht = KadDhtMetrics()
@@ -35,23 +41,22 @@ class Metrics:
 
     async def start_prometheus_server(
         self,
-        metric_recv_channel: trio.MemoryReceiveChannel,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any],
     ) -> None:
         metrics = find_available_port(8000)
-        prometheus_dashboard = find_available_port(9000)
-        grafana_dashboard = find_available_port(7000)
+        prometheus = find_available_port(9000)
+        grafana = find_available_port(7000)
 
         start_http_server(metrics)
 
         print(f"\nPrometheus metrics visible at: http://localhost:{metrics}")
-        print(
-            f"Prometheus dashboard visible at: http://localhost:{prometheus_dashboard}"
-        )
-        print(f"Grafana dashboard visible at: http://localhost:{grafana_dashboard}\n")
 
         print(
-            "\nStart prometheus and grafana dashboard, for another terminal: \n"
-            f"PROMETHEUS_PORT={prometheus_dashboard} GRAFANA_PORT={grafana_dashboard} docker compose up\n"
+            "\nTo start prometheus and grafana dashboards, from another terminal: \n"
+            f"PROMETHEUS_PORT={prometheus} GRAFANA_PORT={grafana} docker compose up\n"
+            "\nAfter this:\n"
+            f"Prometheus dashboard will be visible at: http://localhost:{prometheus}\n"
+            f"Grafana dashboard will be visible at: http://localhost:{grafana}\n"
         )
 
         while True:

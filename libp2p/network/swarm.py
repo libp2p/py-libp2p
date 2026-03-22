@@ -129,7 +129,7 @@ class Swarm(Service, INetworkService):
         retry_config: RetryConfig | None = None,
         connection_config: ConnectionConfig | QUICTransportConfig | None = None,
         psk: str | None = None,
-        metric_send_channel: trio.MemorySendChannel | None = None,
+        metric_send_channel: trio.MemorySendChannel[Any] | None = None,
     ):
         self.self_id = peer_id
         self.peerstore = peerstore
@@ -504,7 +504,7 @@ class Swarm(Service, INetworkService):
         """
         # Emit metric-event for dial-attempt
         event = SwarmEvent()
-        event.peer_id = peer_id
+        event.peer_id = peer_id.pretty()
         event.dial_attempt = True
 
         if self.metric_send_channel is not None:
@@ -569,7 +569,7 @@ class Swarm(Service, INetworkService):
 
             # Emit metric-event for dial_attempt failure
             event = SwarmEvent()
-            event.peer_id = peer_id
+            event.peer_id = peer_id.pretty()
             event.dial_attempt_error = True
 
             if self.metric_send_channel is not None:
