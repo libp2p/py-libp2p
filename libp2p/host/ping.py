@@ -118,23 +118,24 @@ class PingService:
     async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
         stream = await self._host.new_stream(peer_id, [ID])
 
+        rtts: list[int]
+        event: PingEvent
+
         try:
             rtts = [await _ping(stream) for _ in range(ping_amt)]
-            await stream.close()
-
             event = PingEvent(
                 peer_id=peer_id,
                 rtts=rtts,
                 failure_error=None,
             )
 
-            return rtts
-
         except Exception as error:
-            await stream.close()
-
             event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
             raise
 
         finally:
-            await stream.metric_send_channel.send(event)
+            await stream.close()
+            if stream.metric_send_channel is not None:
+                await stream.metric_send_channel.send(event)
+
+        return rtts

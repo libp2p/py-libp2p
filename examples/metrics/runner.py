@@ -34,8 +34,10 @@ async def main() -> None:
 
                     # METRICS
                     metrics = Metrics()
+                    metrics_recv_channel = node.host.get_metrics_recv_channel()
+
                     nursery.start_soon(
-                        metrics.start_prometheus_server, node.host.metric_recv_channel
+                        metrics.start_prometheus_server, metrics_recv_channel
                     )
                     nursery.start_soon(node.command_executor, nursery)
                     await trio.sleep(1)
@@ -62,7 +64,7 @@ async def main() -> None:
 def cli() -> None:
     try:
         trio.run(main)
-    except* KeyboardInterrupt:
+    except KeyboardInterrupt:
         print("Session terminated by user")
 
 

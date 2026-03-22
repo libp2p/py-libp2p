@@ -33,7 +33,6 @@ class RoutedHost(BasicHost):
         router: IPeerRouting,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         resource_manager: ResourceManager | None = None,
         *,
@@ -57,11 +56,10 @@ class RoutedHost(BasicHost):
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
         """
         super().__init__(
-            network,
-            enable_mDNS,
-            enable_upnp,
-            enable_autotls,
-            bootstrap,
+            network=network,
+            enable_mDNS=enable_mDNS,
+            enable_upnp=enable_upnp,
+            bootstrap=bootstrap,
             resource_manager=resource_manager,
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,

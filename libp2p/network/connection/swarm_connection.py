@@ -42,7 +42,7 @@ class SwarmConn(INetConn):
     _direction: Direction
     _actual_transport_addresses: list[Multiaddr] | None
     _connection_type: ConnectionType
-    _metric_send_channel: trio.MemorySendChannel | None = None
+    _metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
         self,

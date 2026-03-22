@@ -490,7 +490,7 @@ class Pubsub(Service, IPubsub):
                     continue
 
                 event = GossipsubEvent()
-                event.peer_id = peer_id
+                event.peer_id = peer_id.pretty()
                 event.message_size = len(incoming)
 
                 if rpc_incoming.publish:

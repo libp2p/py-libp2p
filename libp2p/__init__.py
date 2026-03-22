@@ -296,7 +296,7 @@ def new_swarm(
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
     psk: str | None = None,
-    metric_send_channel: trio.MemorySendChannel | None = None
+    metric_send_channel: trio.MemorySendChannel[Any] | None = None
 ) -> INetworkService:
     logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
