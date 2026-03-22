@@ -14,7 +14,7 @@ async def main() -> None:
     listen_addrs = get_available_interfaces(0)
     node = Node(
         listen_addrs=listen_addrs,
-        dht_role=  "server",
+        dht_role="server",
     )
 
     async with (
