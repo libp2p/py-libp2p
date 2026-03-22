@@ -554,7 +554,9 @@ class Pubsub(Service, IPubsub):
                     )
                     await self.router.handle_rpc(rpc_incoming, peer_id)
 
-                await stream.metric_send_channel.send(event)
+                if stream.metric_send_channel is not None:
+                    await stream.metric_send_channel.send(event)
+
         except StreamEOF:
             logger.debug(
                 f"Stream closed for peer {peer_id}, exiting read loop cleanly."
