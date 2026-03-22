@@ -11,6 +11,7 @@ from libp2p.kad_dht.kad_dht import KadDhtEvent
 # GET_PROVIDERS
 # ADD_PROVIDERS
 
+
 class KadDhtMetrics:
     inbound: Counter
     find_node: Counter
@@ -59,26 +60,18 @@ class KadDhtMetrics:
     def record(self, event: KadDhtEvent) -> None:
         if event.inbound:
             self.inbound.labels(peer_id=event.peer_id).inc()
-            print("inbound")
 
         if event.find_node:
             self.find_node.labels(peer_id=event.peer_id).inc()
-            print("find_node")
 
         if event.get_value:
             self.get_value.labels(peer_id=event.peer_id).inc()
-            print("get_value")
 
         if event.put_value:
             self.put_value.labels(peer_id=event.peer_id).inc()
-            print("put_value")
 
         if event.get_providers:
             self.get_providers.labels(peer_id=event.peer_id).inc()
-            print("get_provider")
 
         if event.add_provider:
             self.add_provider.labels(peer_id=event.peer_id).inc()
-            print("add_provider")
-            
-        print("\n")
