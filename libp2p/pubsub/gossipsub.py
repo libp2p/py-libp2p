@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_PENDING_GRAFT_PRUNE_PER_PEER = 64
 
+
 class GossipSub(IPubsubRouter, Service):
     protocols: list[TProtocol]
     pubsub: Pubsub | None

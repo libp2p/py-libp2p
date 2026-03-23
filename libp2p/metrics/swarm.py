@@ -1,12 +1,5 @@
 from prometheus_client import Counter
 
-# METRICS
-
-# conn_incoming
-# conn_incoming_error
-# dial_attemp
-# conn_outgoing_error
-
 
 class SwarmEvent:
     peer_id: str | None = None
