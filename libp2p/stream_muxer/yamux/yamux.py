@@ -279,7 +279,7 @@ class YamuxStream(IMuxedStream):
                     extra_delta = self.target_recv_window - new_current
                     if extra_delta > 0:
                         self.recv_window += extra_delta
-                        delta = extra_delta  # Only send incremental delta
+                        delta += extra_delta  # Send total delta (pass 1 + pass 2)
 
             self.epoch_start = now
             logger.debug(
