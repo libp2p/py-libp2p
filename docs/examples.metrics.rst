@@ -65,6 +65,20 @@ start the prometheus and grafana dashboards. For this create a `docker-compose.y
     depends_on:
       - prometheus
 
+And a `prometheus.yml` file like this:
+
+.. code-block:: console
+
+    global:
+        scrape_interval: 5s
+
+    scrape_configs:
+    - job_name: "libp2p-python"
+        static_configs:
+        - targets:
+            - "host.docker.internal:8000"
+
+
 And run it like this
 .. code-block:: console
 
@@ -73,6 +87,7 @@ And run it like this
 A similar file is present in `py-libp2p/libp2p/metrics` directory also, so either create a new docker-compose
 file or run it from the above path. This basically starts a prometheus and grafana server in your localhost,
 with which the metrics can be viewed in graph format.
+Remember that the dashboards will be created for the node, whose prometheus metric-server is running on port `8000`.
 
 Now see how to communicate between the 2 nodes, via Pubsub/Gossipsub, Ping and Kad-DHT
 
