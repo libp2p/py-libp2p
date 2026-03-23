@@ -241,32 +241,47 @@ class YamuxStream(IMuxedStream):
             async with self.window_lock:
                 await _do_window_update()
 
-    async def _auto_tune_and_send_window_update(
-        self: "YamuxStream", bytes_consumed: int
-    ) -> None:
+    async def _auto_tune_and_send_window_update(self: "YamuxStream") -> None:
         """
         Auto-tune receive window size based on RTT and send window update.
 
-        Ports go-yamux's auto-tuning: starts at 256KB, doubles each RTT epoch
-        up to 16MB. Only sends update when delta >= 50% of target (hysteresis).
+        Ports go-yamux's two-pass GrowTo + sendWindowUpdate logic:
+        - Pass 1: GrowTo(current_target) — restore window to current target
+        - Auto-tune: if within 4x RTT of last epoch, double the target
+        - Pass 2: GrowTo(new_target, force=True) — grow to new target
+        - Only the final delta is sent to the peer (matches go-yamux behavior)
         """
         async with self.window_lock:
-            delta = self.target_recv_window - self.recv_window
+            # Match go-yamux GrowTo: currentWindow = cap + len
+            buffered = len(self.conn.stream_buffers.get(self.stream_id, b""))
+            current_window = self.recv_window + buffered
+
+            # Pass 1: GrowTo(target_recv_window) — like go's first GrowTo call
+            delta = self.target_recv_window - current_window
+            if delta <= 0:
+                return
             # Hysteresis: skip if delta < 50% of target (matches go-yamux GrowTo)
             if delta < self.target_recv_window // 2:
                 return
+            # Apply first pass growth to recv_window (like go's cap += delta)
+            self.recv_window += delta
 
             # Auto-tune: if within 4x RTT of last epoch, double the target
             now = trio.current_time()
             rtt = self.conn.rtt()
             if rtt > 0 and self.epoch_start > 0 and (now - self.epoch_start) < rtt * 4:
-                self.target_recv_window = min(
-                    self.target_recv_window * 2, MAX_WINDOW_SIZE
-                )
-                delta = self.target_recv_window - self.recv_window
+                new_target = min(self.target_recv_window * 2, MAX_WINDOW_SIZE)
+                if new_target > self.target_recv_window:
+                    self.target_recv_window = new_target
+                    # Pass 2: GrowTo(new_target, force=True) — incremental
+                    # Recompute current_window after pass 1 growth
+                    new_current = self.recv_window + buffered
+                    extra_delta = self.target_recv_window - new_current
+                    if extra_delta > 0:
+                        self.recv_window += extra_delta
+                        delta = extra_delta  # Only send incremental delta
 
             self.epoch_start = now
-            self.recv_window += delta
             logger.debug(
                 f"Stream {self.stream_id}: Auto-tune window update "
                 f"delta={delta}, target={self.target_recv_window}"
@@ -328,7 +343,7 @@ class YamuxStream(IMuxedStream):
                     data += chunk
 
                     # Auto-tune and send window update for the chunk we just read
-                    await self._auto_tune_and_send_window_update(len(chunk))
+                    await self._auto_tune_and_send_window_update()
 
                 # Check for reset
                 if self.reset_received:
@@ -373,7 +388,7 @@ class YamuxStream(IMuxedStream):
             return b""
         else:
             data = await self.conn.read_stream(self.stream_id, n)
-            await self._auto_tune_and_send_window_update(len(data))
+            await self._auto_tune_and_send_window_update()
             return data
 
     async def close(self) -> None:
@@ -390,7 +405,7 @@ class YamuxStream(IMuxedStream):
                         0,
                     )
                     await self.conn._write_frame(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending FIN, connection likely closed: {e}")
                 finally:
                     self.send_closed = True
@@ -416,7 +431,7 @@ class YamuxStream(IMuxedStream):
                         0,
                     )
                     await self.conn._write_frame(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending RST, connection likely closed: {e}")
                 finally:
                     self.closed = True
@@ -509,11 +524,13 @@ class Yamux(IMuxedConn):
             try:
                 self._ping_id += 1
                 self._ping_event = trio.Event()
-                self._ping_sent_time = trio.current_time()
                 header = struct.pack(
                     YAMUX_HEADER_FORMAT, 0, TYPE_PING, FLAG_SYN, 0, self._ping_id
                 )
-                await self.secured_conn.write(header)
+                await self._write_frame(header)
+                # Record time AFTER write completes, matching go-yamux which
+                # times after dispatch to avoid including write-lock wait time.
+                self._ping_sent_time = trio.current_time()
                 # Wait for pong with timeout
                 with trio.move_on_after(10.0):
                     await self._ping_event.wait()
@@ -637,7 +654,7 @@ class Yamux(IMuxedConn):
             if flags & FLAG_RST:
                 flag_names.append("RST")
             type_names = {0: "DATA", 1: "WINDOW_UPDATE", 2: "PING", 3: "GO_AWAY"}
-            logger.info(
+            logger.debug(
                 f"YAMUX TX: type={type_names.get(typ, typ)} "
                 f"flags={'+'.join(flag_names) or '0'} "
                 f"stream={sid} length={length} "
@@ -669,7 +686,7 @@ class Yamux(IMuxedConn):
                 TYPE_WINDOW_UPDATE,
                 FLAG_SYN,
                 stream_id,
-                DEFAULT_WINDOW_SIZE,
+                0,
             )
             logger.debug(f"Sending SYN header for stream {stream_id}")
             await self._write_frame(header)
@@ -881,7 +898,7 @@ class Yamux(IMuxedConn):
                     flag_names.append("FIN")
                 if flags & FLAG_RST:
                     flag_names.append("RST")
-                logger.info(
+                logger.debug(
                     f"YAMUX RX: type={type_names.get(typ, typ)} "
                     f"flags={'+'.join(flag_names) or '0'} "
                     f"stream={stream_id} length={length} "
@@ -896,10 +913,10 @@ class Yamux(IMuxedConn):
                             self.stream_events[stream_id] = trio.Event()
 
                             if typ == TYPE_WINDOW_UPDATE and length > 0:
-                                # Window update SYN: length is initial
-                                # window size, not data
+                                # Window update SYN: length is a delta
+                                # to add to the initial send window
                                 async with stream.window_lock:
-                                    stream.send_window = length
+                                    stream.send_window += length
                                 logger.debug(
                                     f"SYN window update for stream "
                                     f"{stream_id}: window={length}"
@@ -910,6 +927,13 @@ class Yamux(IMuxedConn):
                                     data = await read_exactly(self.secured_conn, length)
                                     self.stream_buffers[stream_id].extend(data)
                                     stream.recv_window -= len(data)
+                                    if stream.recv_window < 0:
+                                        logger.warning(
+                                            f"Stream {stream_id}: peer exceeded "
+                                            f"receive window by "
+                                            f"{-stream.recv_window} bytes"
+                                        )
+                                        stream.recv_window = 0
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Read {length} bytes with SYN "
@@ -931,7 +955,7 @@ class Yamux(IMuxedConn):
                                 TYPE_WINDOW_UPDATE,
                                 FLAG_ACK,
                                 stream_id,
-                                DEFAULT_WINDOW_SIZE,
+                                0,
                             )
                             await self._write_frame(ack_header)
                             logger.debug(
@@ -956,13 +980,14 @@ class Yamux(IMuxedConn):
                         if stream_id in self.streams:
                             stream = self.streams[stream_id]
                             if typ == TYPE_WINDOW_UPDATE:
-                                # Window update ACK: length is window delta
+                                # Window update ACK: length is a delta
+                                # (matches go-yamux incrSendWindow).
                                 if length > 0:
                                     async with stream.window_lock:
                                         stream.send_window += length
                                 logger.debug(
                                     f"Received WINDOW_UPDATE ACK for stream "
-                                    f"{stream_id}, window_delta={length} "
+                                    f"{stream_id}, send_window={length} "
                                     f"for peer {self.peer_id}"
                                 )
                             elif typ == TYPE_DATA and length > 0:
@@ -971,6 +996,14 @@ class Yamux(IMuxedConn):
                                     data = await read_exactly(self.secured_conn, length)
                                     self.stream_buffers[stream_id].extend(data)
                                     self.streams[stream_id].recv_window -= len(data)
+                                    if self.streams[stream_id].recv_window < 0:
+                                        logger.warning(
+                                            f"Stream {stream_id}: peer exceeded "
+                                            f"receive window by "
+                                            f"{-self.streams[stream_id].recv_window}"
+                                            f" bytes"
+                                        )
+                                        self.streams[stream_id].recv_window = 0
                                     self.stream_events[stream_id].set()
                                     logger.debug(
                                         f"Received ACK with {length} bytes "
@@ -1080,6 +1113,14 @@ class Yamux(IMuxedConn):
                             if stream_id in self.streams:
                                 self.stream_buffers[stream_id].extend(data)
                                 self.streams[stream_id].recv_window -= len(data)
+                                if self.streams[stream_id].recv_window < 0:
+                                    logger.warning(
+                                        f"Stream {stream_id}: peer exceeded "
+                                        f"receive window by "
+                                        f"{-self.streams[stream_id].recv_window}"
+                                        f" bytes"
+                                    )
+                                    self.streams[stream_id].recv_window = 0
                                 # Always set event, even if no data
                                 # in case FIN/RST is set
                                 self.stream_events[stream_id].set()
