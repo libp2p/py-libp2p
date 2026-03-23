@@ -20,13 +20,18 @@ COMMANDS = """
 Available commands:
 - connect <multiaddr>               - Connect to another peer
 - ping <maddr> <count>              - Ping to another peer
+
+GOSSIPSUB
 - join <topic>                      - Subscribe to a topic
 - leave <topic>                     - Unsubscribe to a topic
 - publish <topic> <message>         - Publish a message
+
+KAD-DHT
 - put <key> <value>                 - Execute PUT_VALUE in DHT
 - get <key>                         - Execute GET_VALUE in DHT
 - advertize <content-id>            - Execute ADD_PROVIDER in DHT
 - get_provider <content-id>         - Execute GET_PROVIDERS in DHT
+
 - local                             - List local multiaddr
 - help                              - List the existing commands
 - exit                              - Shut down

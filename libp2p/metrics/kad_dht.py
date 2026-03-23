@@ -2,15 +2,6 @@ from prometheus_client import Counter
 
 from libp2p.kad_dht.kad_dht import KadDhtEvent
 
-# COUNTER
-
-# INBOUND_REQ
-# FIND_NODE
-# GET_VALUE
-# PUT_VALUE
-# GET_PROVIDERS
-# ADD_PROVIDERS
-
 
 class KadDhtMetrics:
     inbound: Counter
