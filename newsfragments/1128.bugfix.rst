@@ -1,1 +1,1 @@
-Fixed DHT regression on v0.5.0 where streams failed to open to bootstrap peers due to a race condition in stream muxer initialization. Added ``is_established`` property to ``IMuxedConn`` interface and improved connection readiness verification in Yamux, Mplex, and Swarm modules.
+Fixed DHT regression on v0.5.0 where streams failed to open to bootstrap peers due to a race condition in stream muxer initialization.
