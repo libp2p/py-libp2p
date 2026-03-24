@@ -16,6 +16,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.rcmgr.metrics import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
@@ -131,6 +132,11 @@ class NetStream(INetStream):
         self._state = StreamState.INIT
         self.swarm_conn = swarm_conn
         self.logger = logging.getLogger(__name__)
+
+        # Stream direction for resource release tracking
+        self._direction: Direction = Direction.UNKNOWN
+        # Idempotency guard against double-release of RM/semaphore resources
+        self._resource_released: bool = False
 
         # Thread safety for state operations (following AkMo3's approach)
         self._state_lock = trio.Lock()
