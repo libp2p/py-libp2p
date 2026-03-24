@@ -384,13 +384,12 @@ class YamuxStream(IMuxedStream):
                     self.recv_closed = True
                     self.reset_received = True  # Mark as reset
 
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
-        Set a deadline for the stream. Yamux does not support deadlines natively,
-        so this method always returns False to indicate the operation is unsupported.
+        Set a deadline for the stream. Yamux does not support deadlines natively.
 
         :param ttl: Time-to-live in seconds (ignored).
-        :return: False, as deadlines are not supported.
+        :raises NotImplementedError: Yamux does not support setting deadlines.
         """
         raise NotImplementedError("Yamux does not support setting read deadlines")
 
