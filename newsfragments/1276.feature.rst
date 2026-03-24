@@ -1,0 +1,1 @@
+Align PubSub and GossipSub routing with Go's `go-libp2p-pubsub` by deferring dropped outbound control RPCs (Graft/Prune) and subscription announcements for later retry.
