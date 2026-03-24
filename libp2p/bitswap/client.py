@@ -19,9 +19,10 @@ from libp2p.peer.id import ID as PeerID
 from .block_store import BlockStore, MemoryBlockStore
 from .cid import (
     CIDInput,
-    cid_to_bytes,
+    CIDObject,
     format_cid_for_display,
     get_cid_prefix,
+    parse_cid,
     reconstruct_cid_from_prefix_and_data,
     verify_cid,
 )
@@ -73,16 +74,18 @@ class BitswapClient:
         self.block_store = block_store or MemoryBlockStore()
         self.protocol_version = protocol_version
         self._wantlist: dict[
-            bytes, dict[str, Any]
+            CIDObject, dict[str, Any]
         ] = {}  # CID -> {priority, want_type, send_dont_have}
         self._peer_wantlists: dict[
-            PeerID, dict[bytes, dict[str, Any]]
+            PeerID, dict[CIDObject, dict[str, Any]]
         ] = {}  # peer -> wantlist
-        self._pending_requests: dict[bytes, trio.Event] = {}  # CID -> event
+        self._pending_requests: dict[CIDObject, trio.Event] = {}  # CID -> event
         # CID -> peers who sent DontHave
-        self._dont_have_responses: dict[bytes, set[PeerID]] = {}
+        self._dont_have_responses: dict[CIDObject, set[PeerID]] = {}
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
-        self._expected_blocks: dict[PeerID, set[bytes]] = {}  # peer -> expected CIDs
+        self._expected_blocks: dict[
+            PeerID, set[CIDObject]
+        ] = {}  # peer -> expected CIDs
         self._nursery: trio.Nursery | None = None
         self._started = False
 
@@ -107,6 +110,9 @@ class BitswapClient:
             return
 
         self._started = False
+        # Unregister stream handlers for all supported Bitswap protocols
+        for protocol in BITSWAP_PROTOCOLS:
+            self.host.remove_stream_handler(protocol)
         # Clear wantlists and pending requests
         self._wantlist.clear()
         self._peer_wantlists.clear()
@@ -137,15 +143,15 @@ class BitswapClient:
                 f"Block size {len(data)} exceeds maximum {MAX_BLOCK_SIZE}"
             )
 
-        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid)
 
-        await self.block_store.put_block(cid_bytes, data)
+        await self.block_store.put_block(cid_obj, data)
         logger.debug(
-            f"Added block {format_cid_for_display(cid_bytes, max_len=16)} to store"
+            f"Added block {format_cid_for_display(cid_obj, max_len=16)} to store"
         )
 
         # Notify peers who wanted this block
-        await self._notify_peers_about_block(cid_bytes, data)
+        await self._notify_peers_about_block(cid_obj, data)
 
     async def get_block(
         self,
@@ -169,15 +175,15 @@ class BitswapClient:
             BitswapTimeoutError: If the request times out
 
         """
-        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid)
 
         # Check local store first
-        data = await self.block_store.get_block(cid_bytes)
+        data = await self.block_store.get_block(cid_obj)
         if data is not None:
             return data
 
         # Request from network
-        return await self._request_block(cid_bytes, peer_id, timeout)
+        return await self._request_block(cid_obj, peer_id, timeout)
 
     async def want_block(
         self,
@@ -196,15 +202,15 @@ class BitswapClient:
             send_dont_have: Whether to request DontHave response if not found - v1.2.0
 
         """
-        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid)
 
-        self._wantlist[cid_bytes] = {
+        self._wantlist[cid_obj] = {
             "priority": priority,
             "want_type": want_type,
             "send_dont_have": send_dont_have,
         }
         logger.debug(
-            f"Added {format_cid_for_display(cid_bytes, max_len=16)} to wantlist "
+            f"Added {format_cid_for_display(cid_obj, max_len=16)} to wantlist "
             f"(priority={priority}, type={'Have' if want_type else 'Block'})"
         )
 
@@ -220,29 +226,29 @@ class BitswapClient:
             True if peer has the block, False otherwise
 
         """
-        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid)
 
         # Add to wantlist with Have type
-        await self.want_block(cid_bytes, want_type=1, send_dont_have=True)
+        await self.want_block(cid_obj, want_type=1, send_dont_have=True)
 
         # Send wantlist to peer(s)
         if peer_id:
-            await self._send_wantlist_to_peer(peer_id, [cid_bytes])
+            await self._send_wantlist_to_peer(peer_id, [cid_obj])
         else:
-            await self._broadcast_wantlist([cid_bytes])
+            await self._broadcast_wantlist([cid_obj])
 
         # Wait for response (simplified - in production, track Have/DontHave responses)
         # For now, check if block appeared in store
         result = False
         try:
             with trio.fail_after(5.0):
-                while not await self.block_store.has_block(cid_bytes):
+                while not await self.block_store.has_block(cid_obj):
                     await trio.sleep(0.1)
             result = True
         except trio.TooSlowError:
             result = False
         finally:
-            await self.cancel_want(cid_bytes)
+            await self.cancel_want(cid_obj)
 
         return result
 
@@ -254,19 +260,19 @@ class BitswapClient:
             cid: The CID to cancel
 
         """
-        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid)
 
-        if cid_bytes in self._wantlist:
-            del self._wantlist[cid_bytes]
+        if cid_obj in self._wantlist:
+            del self._wantlist[cid_obj]
             logger.debug(
-                f"Removed {format_cid_for_display(cid_bytes, max_len=16)} from wantlist"
+                f"Removed {format_cid_for_display(cid_obj, max_len=16)} from wantlist"
             )
 
             # Send cancel message to all peers
-            await self._broadcast_cancel(cid_bytes)
+            await self._broadcast_cancel(cid_obj)
 
     async def _request_block(
-        self, cid: bytes, peer_id: PeerID | None, timeout: float
+        self, cid: CIDObject, peer_id: PeerID | None, timeout: float
     ) -> bytes:
         """Request a block from the network."""
         logger.info(f"📤 Requesting block: {format_cid_for_display(cid)}")
@@ -323,7 +329,9 @@ class BitswapClient:
         assert result is not None
         return result
 
-    async def _send_wantlist_to_peer(self, peer_id: PeerID, cids: list[bytes]) -> None:
+    async def _send_wantlist_to_peer(
+        self, peer_id: PeerID, cids: list[CIDObject]
+    ) -> None:
         """Send wantlist to a specific peer."""
         # Track expected blocks for this peer
         if peer_id not in self._expected_blocks:
@@ -399,7 +407,7 @@ class BitswapClient:
         except Exception as e:
             logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
 
-    async def _broadcast_wantlist(self, cids: list[bytes]) -> None:
+    async def _broadcast_wantlist(self, cids: list[CIDObject]) -> None:
         """Broadcast wantlist to all connected peers."""
         peers = self.host.get_network().connections.keys()
         for peer_id in peers:
@@ -408,7 +416,7 @@ class BitswapClient:
             else:
                 await self._send_wantlist_to_peer(peer_id, cids)
 
-    async def _broadcast_cancel(self, cid: bytes) -> None:
+    async def _broadcast_cancel(self, cid: CIDObject) -> None:
         """Broadcast a cancel message to all peers."""
         entry = create_wantlist_entry(cid, cancel=True)
         msg = create_message(wantlist_entries=[entry])
@@ -424,7 +432,7 @@ class BitswapClient:
             except Exception as e:
                 logger.debug(f"Failed to send cancel to peer {peer_id}: {e}")
 
-    async def _notify_peers_about_block(self, cid: bytes, data: bytes) -> None:
+    async def _notify_peers_about_block(self, cid: CIDObject, data: bytes) -> None:
         """Notify peers who wanted this block."""
         peers_to_notify = []
 
@@ -608,38 +616,39 @@ class BitswapClient:
         presences_to_send = []  # For v1.2.0
 
         for entry in wantlist.entries:
+            entry_cid = parse_cid(entry.block)
             if entry.cancel:
                 # Remove from peer's wantlist
-                if entry.block in peer_wantlist:
-                    del peer_wantlist[entry.block]
+                if entry_cid in peer_wantlist:
+                    del peer_wantlist[entry_cid]
             else:
                 # Add to peer's wantlist with full info (v1.2.0)
-                peer_wantlist[entry.block] = {
+                peer_wantlist[entry_cid] = {
                     "priority": entry.priority,
                     "want_type": entry.wantType,
                     "send_dont_have": entry.sendDontHave,
                 }
 
                 # Check if we have this block
-                has_block = await self.block_store.has_block(entry.block)
+                has_block = await self.block_store.has_block(entry_cid)
 
                 # Handle based on want type (v1.2.0)
                 if entry.wantType == 1:  # Have request
                     # Send presence information
                     if has_block or entry.sendDontHave:
-                        presences_to_send.append((entry.block, has_block))
+                        presences_to_send.append((entry_cid, has_block))
                 else:  # Block request
                     if has_block:
-                        data = await self.block_store.get_block(entry.block)
+                        data = await self.block_store.get_block(entry_cid)
                         if data:
                             if peer_protocol == BITSWAP_PROTOCOL_V100:
                                 blocks_to_send_v100.append(data)
                             else:
-                                prefix = get_cid_prefix(entry.block)
+                                prefix = get_cid_prefix(entry_cid)
                                 blocks_to_send_v110.append((prefix, data))
                     elif entry.sendDontHave:
                         # Send DontHave (v1.2.0)
-                        presences_to_send.append((entry.block, False))
+                        presences_to_send.append((entry_cid, False))
 
         # Send responses
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
@@ -752,8 +761,9 @@ class BitswapClient:
             prefix = block.prefix
             data = block.data
 
-            # Decode CID from prefix and data
-            cid = reconstruct_cid_from_prefix_and_data(prefix, data)
+            # Decode CID from prefix and data, then convert to CID object
+            cid_bytes = reconstruct_cid_from_prefix_and_data(prefix, data)
+            cid = parse_cid(cid_bytes)
 
             # Store the block
             await self.block_store.put_block(cid, data)
@@ -791,7 +801,7 @@ class BitswapClient:
         This matches IPFS Bitswap behavior.
         """
         for presence in presences:
-            cid = presence.cid
+            cid = parse_cid(presence.cid)
             has_block = presence.type == Message.Have
 
             logger.debug(

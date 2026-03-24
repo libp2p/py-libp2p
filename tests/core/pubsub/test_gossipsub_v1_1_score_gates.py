@@ -6,7 +6,7 @@ gossip emission, peer exchange (PX) acceptance, and graylisting in GossipSub v1.
 """
 
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import trio
@@ -44,10 +44,9 @@ class TestScoreGates:
             await pubsubs[1].subscribe(topic)
             await trio.sleep(0.2)
 
-            # Mock write_msg to capture sent messages
-            mock_write_msg = AsyncMock()
-            if gsub0.pubsub is not None:
-                gsub0.pubsub.write_msg = mock_write_msg
+            # Mock send_rpc to capture sent messages
+            mock_send_rpc = MagicMock()
+            gsub0.send_rpc = mock_send_rpc
 
             # Create a message to publish
             msg = rpc_pb2.Message(
@@ -85,7 +84,7 @@ class TestScoreGates:
             await gsub0.publish(host0.get_id(), msg)
 
             # Verify that no message was sent to the low-scoring peer
-            mock_write_msg.assert_not_called()
+            mock_send_rpc.assert_not_called()
 
             # Increase peer's score
             # Add enough score to exceed threshold
@@ -108,7 +107,7 @@ class TestScoreGates:
             await gsub0.publish(host0.get_id(), msg)
 
             # Verify that message was sent
-            mock_write_msg.assert_called()
+            mock_send_rpc.assert_called()
 
     @pytest.mark.trio
     async def test_gossip_gate_filters_peers(self):

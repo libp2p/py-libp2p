@@ -40,10 +40,46 @@ async def test_tcp_listener(nursery):
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR, nursery)
+    assert result is None
     assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR, nursery)
+    assert result is None
     assert len(listener.get_addrs()) == 2
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_missing_port(nursery):
+    """listen() raises OpenConnectionError when TCP port is missing in multiaddr."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+    with pytest.raises(OpenConnectionError, match="TCP port is missing"):
+        await listener.listen(Multiaddr("/ip4/127.0.0.1"), nursery)
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_bind_failure(nursery):
+    """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+
+    # Bind to a specific port with the first listener
+    listener1 = transport.create_listener(noop_handler)
+    await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"), nursery)
+    bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+
+    # Attempting to bind the same port a second time should raise OpenConnectionError,
+    # not a raw OSError from trio.serve_tcp.
+    listener2 = transport.create_listener(noop_handler)
+    with pytest.raises(OpenConnectionError, match="Failed to start TCP listener"):
+        await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"), nursery)
 
 
 @pytest.mark.trio
@@ -154,10 +190,10 @@ async def test_tcp_yamux_stress_ping():
                     if response == b"\x01" * PING_LENGTH:
                         latency_ms = int((trio.current_time() - start) * 1000)
                         latencies.append(latency_ms)
-                        print(f"[TCP Ping #{i}] Latency: {latency_ms} ms")
+                        logger.debug("[TCP Ping #%d] Latency: %d ms", i, latency_ms)
                     await stream.close()
                 except Exception as e:
-                    print(f"[TCP Ping #{i}] Failed: {e}")
+                    logger.warning("[TCP Ping #%d] Failed: %s", i, e)
                     failures.append(i)
                     if stream:
                         try:
@@ -218,11 +254,8 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
     """
     transport = TCP()
 
-    try:
+    with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
-        assert False, "Should have raised OpenConnectionError"
-    except Exception as e:
-        assert "Failed to open TCP stream" in str(e) or "Failed to dial" in str(e)
 
 
 @pytest.mark.trio

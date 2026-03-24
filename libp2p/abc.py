@@ -63,9 +63,7 @@ if TYPE_CHECKING:
 from libp2p.pubsub.pb import (
     rpc_pb2,
 )
-from libp2p.tools.async_service import (
-    ServiceAPI,
-)
+from libp2p.tools.anyio_service.api import ServiceAPI
 
 # -------------------------- raw_connection interface.py --------------------------
 
@@ -289,13 +287,12 @@ class IMuxedStream(ReadWriteCloser, AsyncContextManager["IMuxedStream"]):
         """
 
     @abstractmethod
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set a deadline for the stream.
 
         :param ttl: Time-to-live for the stream in seconds.
-        :return: True if the deadline was set successfully,
-            otherwise False.
+        :raises ValueError: if ttl is invalid (e.g. negative).
         """
 
     @abstractmethod
@@ -1415,7 +1412,7 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening on the specified multiaddress.
 
@@ -1426,10 +1423,12 @@ class IListener(ABC):
         nursery : trio.Nursery
             The nursery for spawning listening tasks.
 
-        Returns
-        -------
-        bool
-            True if the listener started successfully, otherwise False.
+        Raises
+        ------
+        Exception
+            Transport-specific listener exception, such as
+            ``OpenConnectionError`` (TCP/WebSocket) or ``QUICListenError`` (QUIC),
+            if listening fails (e.g. missing/invalid port or failed start).
 
         """
 
@@ -2072,6 +2071,18 @@ class IHost(ABC):
             The protocol identifier used on the stream.
         stream_handler : StreamHandlerFn
             The stream handler function to be set.
+
+        """
+
+    @abstractmethod
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol_id : TProtocol
+            The protocol identifier to remove the handler for.
 
         """
 
@@ -2782,6 +2793,18 @@ class IMultiselectMuxer(ABC):
             The protocol name.
         handler : StreamHandlerFn
             The handler function associated with the protocol.
+
+        """
+
+    @abstractmethod
+    def remove_handler(self, protocol: TProtocol) -> None:
+        """
+        Remove the handler for the specified protocol.
+
+        Parameters
+        ----------
+        protocol : TProtocol
+            The protocol name to remove.
 
         """
 

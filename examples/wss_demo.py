@@ -195,18 +195,19 @@ async def run_server(port: int):
             server_addr = str(addrs[0])
             client_addr = server_addr.replace("/ip4/0.0.0.0/", "/ip4/127.0.0.1/")
 
-            logger.info("🌐 WSS Server Started Successfully!")
-            logger.info("=" * 50)
-            logger.info(f"📍 Server Address: {client_addr}")
-            logger.info("🔧 Protocol: /echo/1.0.0")
-            logger.info("🚀 Transport: WebSocket Secure (WSS)")
-            logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info("")
-            logger.info("📋 To test the connection, run this in another terminal:")
-            logger.info(f"   python wss_demo.py -d {client_addr}")
-            logger.info("")
-            logger.info("⏳ Waiting for incoming WSS connections...")
-            logger.info("─" * 50)
+            # Use print() so output is always visible (logging may be suppressed)
+            print("🌐 WSS Server Started Successfully!", flush=True)
+            print("=" * 50, flush=True)
+            print(f"📍 Server Address: {client_addr}", flush=True)
+            print("🔧 Protocol: /echo/1.0.0", flush=True)
+            print("🚀 Transport: WebSocket Secure (WSS)", flush=True)
+            print("🔐 Security: TLS with self-signed certificate", flush=True)
+            print("", flush=True)
+            print("📋 To test, run in another terminal:", flush=True)
+            print(f"   python wss_demo.py -d {client_addr}", flush=True)
+            print("", flush=True)
+            print("⏳ Waiting for incoming WSS connections...", flush=True)
+            print("─" * 50, flush=True)
 
             # Wait indefinitely
             await trio.sleep_forever()
@@ -219,7 +220,6 @@ async def run_server(port: int):
 
 async def run_client(destination: str):
     """Run WSS client."""
-    logger.info("🔐 Creating self-signed certificates for WSS...")
     server_context, client_context, cert_file, key_file = (
         create_self_signed_certificate()
     )
@@ -233,57 +233,58 @@ async def run_client(destination: str):
             maddr = Multiaddr(destination)
             info = info_from_p2p_addr(maddr)
 
-            logger.info("🔌 WSS Client Starting...")
-            logger.info("=" * 40)
-            logger.info(f"🎯 Target Peer: {info.peer_id}")
-            logger.info(f"📍 Target Address: {destination}")
-            logger.info("🔐 Security: TLS with self-signed certificate")
-            logger.info("")
+            # Use print() so output is always visible (logging may be suppressed)
+            print("🔌 WSS Client Starting...", flush=True)
+            print("=" * 40, flush=True)
+            print(f"🎯 Target Peer: {info.peer_id}", flush=True)
+            print(f"📍 Target Address: {destination}", flush=True)
+            print("🔐 Security: TLS with self-signed certificate", flush=True)
+            print("", flush=True)
 
             try:
-                logger.info("🔗 Connecting to WSS server...")
+                print("🔗 Connecting to WSS server...", flush=True)
                 await host.connect(info)
-                logger.info("✅ Successfully connected to WSS server!")
+                print("✅ Successfully connected to WSS server!", flush=True)
             except Exception as e:
-                logger.error(f"❌ Connection Failed: {e}")
+                print(f"❌ Connection Failed: {e}", flush=True)
                 return
 
             # Create a stream and send test data
             try:
                 stream = await host.new_stream(info.peer_id, [ECHO_PROTOCOL_ID])
             except Exception as e:
-                logger.error(f"❌ Failed to create stream: {e}")
+                print(f"❌ Failed to create stream: {e}", flush=True)
                 return
 
             try:
-                logger.info("🚀 Starting Echo Protocol Test...")
-                logger.info("─" * 40)
+                print("🚀 Starting Echo Protocol Test...", flush=True)
+                print("─" * 40, flush=True)
 
                 # Send test data
                 test_message = b"Hello WSS Transport!"
-                logger.info(f"📤 Sending message: {test_message.decode('utf-8')}")
+                print(f"📤 Sending message: {test_message.decode('utf-8')}", flush=True)
                 await stream.write(test_message)
 
                 # Read response
-                logger.info("⏳ Waiting for server response...")
+                print("⏳ Waiting for server response...", flush=True)
                 response = await stream.read(1024)
-                logger.info(f"📥 Received response: {response.decode('utf-8')}")
+                print(f"📥 Received response: {response.decode('utf-8')}", flush=True)
 
                 await stream.close()
 
-                logger.info("─" * 40)
+                print("─" * 40, flush=True)
                 if response == test_message:
-                    logger.info("🎉 Echo test successful!")
-                    logger.info("✅ WSS transport is working perfectly!")
-                    logger.info("✅ Client completed successfully, exiting.")
+                    print("🎉 Echo test successful!", flush=True)
+                    print("✅ WSS transport is working perfectly!", flush=True)
+                    print("✅ Client completed successfully, exiting.", flush=True)
                 else:
-                    logger.error("❌ Echo test failed!")
-                    logger.error("   Response doesn't match sent data.")
-                    logger.error(f"   Sent: {test_message}")
-                    logger.error(f"   Received: {response}")
+                    print("❌ Echo test failed!", flush=True)
+                    print("   Response doesn't match sent data.", flush=True)
+                    print(f"   Sent: {test_message}", flush=True)
+                    print(f"   Received: {response}", flush=True)
 
             except Exception as e:
-                logger.error(f"Echo protocol error: {e}")
+                print(f"❌ Echo protocol error: {e}", flush=True)
             finally:
                 # Ensure stream is closed
                 try:
@@ -292,17 +293,17 @@ async def run_client(destination: str):
                 except Exception:
                     pass
 
-                logger.info("")
-                logger.info("🎉 WSS Demo Completed Successfully!")
-                logger.info("=" * 50)
-                logger.info("✅ WSS transport is working perfectly!")
-                logger.info("✅ Echo protocol communication successful!")
-                logger.info("✅ libp2p integration verified!")
-                logger.info("")
-                logger.info("🚀 Your WSS transport is ready for production use!")
+                print("", flush=True)
+                print("🎉 WSS Demo Completed Successfully!", flush=True)
+                print("=" * 50, flush=True)
+                print("✅ WSS transport is working perfectly!", flush=True)
+                print("✅ Echo protocol communication successful!", flush=True)
+                print("✅ libp2p integration verified!", flush=True)
+                print("", flush=True)
+                print("🚀 Your WSS transport is ready for production use!", flush=True)
 
     except KeyboardInterrupt:
-        logger.info("🛑 Shutting down WSS client...")
+        print("🛑 Shutting down WSS client...", flush=True)
     finally:
         cleanup_certificates(cert_file, key_file)
 
