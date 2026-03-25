@@ -71,6 +71,7 @@ HEADER_SIZE = 12
 YAMUX_HEADER_FORMAT = "!BBHII"
 DEFAULT_WINDOW_SIZE = 256 * 1024
 MAX_WINDOW_SIZE = 16 * 1024 * 1024  # 16 MB max receive window (matches go-yamux)
+MAX_MESSAGE_SIZE = 64 * 1024  # 64KB max frame payload, matches go-yamux default
 RTT_MEASURE_INTERVAL = 30  # seconds between RTT measurements
 
 GO_AWAY_NORMAL = 0x0
@@ -150,8 +151,13 @@ class YamuxStream(IMuxedStream):
                     if self.closed:
                         raise MuxedStreamError("Stream is closed")
 
-                    # Calculate how much we can send now
-                    to_send = min(self.send_window, total_len - sent)
+                    # Calculate how much we can send now (cap at MaxMessageSize
+                    # minus header, matching go-yamux's per-frame limit)
+                    to_send = min(
+                        self.send_window,
+                        MAX_MESSAGE_SIZE - HEADER_SIZE,
+                        total_len - sent,
+                    )
                     chunk = data[sent : sent + to_send]
                     self.send_window -= to_send
 
