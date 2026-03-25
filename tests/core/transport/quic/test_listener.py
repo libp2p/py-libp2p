@@ -78,8 +78,8 @@ class TestQUICListener:
 
         async with trio.open_nursery() as nursery:
             # Start listening
-            success = await listener.listen(listen_addr, nursery)
-            assert success
+            result = await listener.listen(listen_addr, nursery)
+            assert result is None
             assert listener.is_listening()
 
             # Check bound addresses
@@ -105,8 +105,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr, nursery)
                 await trio.sleep(0.01)
 
                 addrs = listener.get_addrs()
@@ -127,8 +126,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr, nursery)
                 await trio.sleep(0.5)
 
                 addrs = listener.get_addrs()
@@ -241,9 +239,7 @@ async def test_connection_id_tracking_with_real_connection():
         async with trio.open_nursery() as nursery:
             # Start server
             server_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
-
+            await listener.listen(listen_addr, nursery)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0, "Server should have listen addresses"
 
