@@ -58,16 +58,24 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
     async def write_msg(self, msg: bytes, prefix_encoded: bool = False) -> None:
         # Chunk large messages to stay within the Noise 65535-byte transport
         # message limit, matching go-libp2p's noise/rw.go Write() approach.
-        total = len(msg)
-        written = 0
-        while written < total:
-            end = min(written + MAX_PLAINTEXT_LENGTH, total)
-            chunk = msg[written:end]
-            data_encrypted = self.encrypt(chunk)
-            if prefix_encoded and written == 0:
+        if len(msg) <= MAX_PLAINTEXT_LENGTH:
+            # Fast path: single message (covers handshake and small writes)
+            data_encrypted = self.encrypt(msg)
+            if prefix_encoded:
                 data_encrypted = self.prefix + data_encrypted
             await self.read_writer.write_msg(data_encrypted)
-            written = end
+        else:
+            # Slow path: chunk into multiple Noise messages
+            total = len(msg)
+            written = 0
+            while written < total:
+                end = min(written + MAX_PLAINTEXT_LENGTH, total)
+                chunk = msg[written:end]
+                data_encrypted = self.encrypt(chunk)
+                if prefix_encoded and written == 0:
+                    data_encrypted = self.prefix + data_encrypted
+                await self.read_writer.write_msg(data_encrypted)
+                written = end
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
         logger.debug("Noise read_msg: reading encrypted message")
