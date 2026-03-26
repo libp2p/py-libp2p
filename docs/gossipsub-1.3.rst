@@ -1,5 +1,5 @@
 GossipSub 1.3 Extensions and Topic Observation
-=============================================
+==============================================
 
 Overview
 --------
@@ -54,7 +54,7 @@ Usage Example
     await gossipsub.stop_observing_topic("my-topic")
 
 Protocol Requirements
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 * Topic Observation requires both peers to negotiate ``/meshsub/1.3.0`` (or
   later) and to advertise support via the Extensions Control Message.
