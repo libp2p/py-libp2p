@@ -327,6 +327,7 @@ class INetStream(ReadWriteCloser):
     """
 
     muxed_conn: IMuxedConn
+    metric_send_channel: trio.MemorySendChannel[Any] | None
 
     @abstractmethod
     def get_protocol(self) -> TProtocol | None:
@@ -2084,6 +2085,12 @@ class IHost(ABC):
         protocol_id : TProtocol
             The protocol identifier to remove the handler for.
 
+        """
+
+    @abstractmethod
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
         """
 
     @abstractmethod
