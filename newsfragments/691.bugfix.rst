@@ -1,0 +1,1 @@
+Completed Circuit Relay v2 reservation proof wiring by returning signed reservation voucher/signature payloads from HOP RESERVE responses and attaching valid reservation proofs on subsequent HOP CONNECT requests. Also made relay DHT discovery toggle configurable through RelayConfig.
