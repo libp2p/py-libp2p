@@ -380,12 +380,12 @@ async def test_notify_observers_sends_ihave_to_each_observer() -> None:
 
     await router._notify_observers([topic], msg_id)
 
-    # emit_ihave(topic, [str(msg_id)], observer_peer) is expected.
+    # emit_ihave(topic, [msg_id.hex()], observer_peer) is expected.
     router.emit_ihave.assert_awaited_once()
     called_topic, called_msg_ids, called_peer = router.emit_ihave.call_args.args
     assert called_topic == topic
     assert called_peer == observer_peer
-    assert called_msg_ids == [str(msg_id)]
+    assert called_msg_ids == [msg_id.hex()]
 
 
 @pytest.mark.trio
