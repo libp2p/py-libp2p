@@ -209,7 +209,10 @@ async def run_server(port: int):
             print("🔐 Security: TLS with self-signed certificate", flush=True)
             print("", flush=True)
             print("📋 To test, run in another terminal:", flush=True)
-            print(f"   python wss_demo.py -d {client_addr}", flush=True)
+            print(
+                f"   python examples/websocket/wss_demo.py -d {client_addr}",
+                flush=True,
+            )
             print("", flush=True)
             print("⏳ Waiting for incoming WSS connections...", flush=True)
             print("─" * 50, flush=True)
@@ -335,12 +338,8 @@ def main():
     args = parser.parse_args()
 
     if args.destination:
-        # Client mode
-        print("DEBUG: Client mode selected")
         trio.run(run_client, args.destination)
     else:
-        # Server mode
-        print("DEBUG: Server mode selected")
         trio.run(run_server, args.port)
 
 
