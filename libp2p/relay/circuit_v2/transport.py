@@ -55,6 +55,7 @@ from .discovery import (
 from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
+    Reservation,
     StopMessage,
 )
 from .performance_tracker import (
@@ -193,6 +194,7 @@ class CircuitV2Transport(ITransport):
         self.performance_tracker = RelayPerformanceTracker()
 
         self._reservations: dict[ID, float] = {}
+        self._reservation_proofs: dict[ID, Reservation] = {}
         self._refreshing = False
         self.dht: KadDHT | None = None
         if config.enable_dht_discovery:
@@ -392,6 +394,10 @@ class CircuitV2Transport(ITransport):
                 peer=dest_info.peer_id.to_bytes(),
                 senderRecord=envelope_bytes,
             )
+
+            reservation_proof = self._reservation_proofs.get(relay_peer_id)
+            if reservation_proof and reservation_proof.expire > int(time.time()):
+                connect_msg.reservation.CopyFrom(reservation_proof)
             await relay_stream.write(connect_msg.SerializeToString())
 
             # Read response with timeout
@@ -846,7 +852,13 @@ class CircuitV2Transport(ITransport):
                 return False
 
             self._reservations[relay_peer_id] = expires
-            logger.info("Reserved peer %s (ttl=%.1fs)", relay_peer_id, expires)
+            self._reservation_proofs[relay_peer_id] = Reservation(
+                expire=expires,
+                voucher=getattr(resp.reservation, "voucher", b""),
+                signature=getattr(resp.reservation, "signature", b""),
+            )
+            ttl = max(0, expires - int(time.time()))
+            logger.info("Reserved peer %s (ttl=%ss)", relay_peer_id, ttl)
 
             return True
 
@@ -870,6 +882,7 @@ class CircuitV2Transport(ITransport):
                 for relay_peer_id in expired:
                     logger.info("Reservation expired for peer %s", relay_peer_id)
                     del self._reservations[relay_peer_id]
+                    self._reservation_proofs.pop(relay_peer_id, None)
 
                 to_refresh = [
                     relay_peer_id
