@@ -1,0 +1,1 @@
+Added ``ObservedAddrManager`` that tracks externally observed addresses reported by peers via the Identify protocol and includes confirmed addresses in ``BasicHost.get_addrs()``.
