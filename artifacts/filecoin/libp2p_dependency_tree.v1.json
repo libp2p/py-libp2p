@@ -1,0 +1,932 @@
+{
+  "meta": {
+    "format": "libp2p_dependency_tree.v1",
+    "generated_by": "manual-v1-curation",
+    "generated_on": "2026-03-05",
+    "sources": {
+      "lotus": {
+        "version": "v1.35.0",
+        "basis": "pinned snapshot provided in task"
+      },
+      "forest": {
+        "version": "0.32.2",
+        "basis": "pinned snapshot provided in task"
+      },
+      "py-libp2p": {
+        "version": "feat/filecoin-dx-and-tooling",
+        "basis": "local workspace"
+      }
+    },
+    "allowed_relations": [
+      "defines",
+      "consumes",
+      "configures",
+      "maps_to",
+      "derived_from"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "py_FIL_HELLO_PROTOCOL",
+      "project": "py-libp2p",
+      "symbol": "FIL_HELLO_PROTOCOL",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 8,
+      "line_end": 8,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FIL_CHAIN_EXCHANGE_PROTOCOL",
+      "project": "py-libp2p",
+      "symbol": "FIL_CHAIN_EXCHANGE_PROTOCOL",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 9,
+      "line_end": 9,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_GOSSIP_SCORE_THRESHOLD",
+      "project": "py-libp2p",
+      "symbol": "GOSSIP_SCORE_THRESHOLD",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 15,
+      "line_end": 15,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_PUBLISH_SCORE_THRESHOLD",
+      "project": "py-libp2p",
+      "symbol": "PUBLISH_SCORE_THRESHOLD",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 16,
+      "line_end": 16,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_GRAYLIST_SCORE_THRESHOLD",
+      "project": "py-libp2p",
+      "symbol": "GRAYLIST_SCORE_THRESHOLD",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 17,
+      "line_end": 17,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_ACCEPT_PX_SCORE_THRESHOLD",
+      "project": "py-libp2p",
+      "symbol": "ACCEPT_PX_SCORE_THRESHOLD",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 18,
+      "line_end": 18,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_OPPORTUNISTIC_GRAFT_SCORE_THRESHOLD",
+      "project": "py-libp2p",
+      "symbol": "OPPORTUNISTIC_GRAFT_SCORE_THRESHOLD",
+      "kind": "const",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 19,
+      "line_end": 19,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_blocks_topic",
+      "project": "py-libp2p",
+      "symbol": "blocks_topic",
+      "kind": "fn",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 22,
+      "line_end": 23,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_messages_topic",
+      "project": "py-libp2p",
+      "symbol": "messages_topic",
+      "kind": "fn",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 26,
+      "line_end": 27,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_dht_protocol_name",
+      "project": "py-libp2p",
+      "symbol": "dht_protocol_name",
+      "kind": "fn",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 30,
+      "line_end": 31,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_filecoin_message_id",
+      "project": "py-libp2p",
+      "symbol": "filecoin_message_id",
+      "kind": "fn",
+      "file": "libp2p/filecoin/constants.py",
+      "line_start": 34,
+      "line_end": 38,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FilecoinNetworkPreset",
+      "project": "py-libp2p",
+      "symbol": "FilecoinNetworkPreset",
+      "kind": "type",
+      "file": "libp2p/filecoin/networks.py",
+      "line_start": 9,
+      "line_end": 13,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_MAINNET_BOOTSTRAP",
+      "project": "py-libp2p",
+      "symbol": "MAINNET_BOOTSTRAP",
+      "kind": "bootstrap_list",
+      "file": "libp2p/filecoin/networks.py",
+      "line_start": 16,
+      "line_end": 25,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_CALIBNET_BOOTSTRAP",
+      "project": "py-libp2p",
+      "symbol": "CALIBNET_BOOTSTRAP",
+      "kind": "bootstrap_list",
+      "file": "libp2p/filecoin/networks.py",
+      "line_start": 27,
+      "line_end": 33,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_get_network_preset",
+      "project": "py-libp2p",
+      "symbol": "get_network_preset",
+      "kind": "fn",
+      "file": "libp2p/filecoin/networks.py",
+      "line_start": 49,
+      "line_end": 56,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_get_bootstrap_addresses",
+      "project": "py-libp2p",
+      "symbol": "get_bootstrap_addresses",
+      "kind": "fn",
+      "file": "libp2p/filecoin/bootstrap.py",
+      "line_start": 42,
+      "line_end": 45,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_filter_bootstrap_for_transport",
+      "project": "py-libp2p",
+      "symbol": "filter_bootstrap_for_transport",
+      "kind": "fn",
+      "file": "libp2p/filecoin/bootstrap.py",
+      "line_start": 48,
+      "line_end": 61,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_resolve_dns_bootstrap_to_ip4_tcp",
+      "project": "py-libp2p",
+      "symbol": "resolve_dns_bootstrap_to_ip4_tcp",
+      "kind": "fn",
+      "file": "libp2p/filecoin/bootstrap.py",
+      "line_start": 79,
+      "line_end": 119,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_get_runtime_bootstrap_addresses",
+      "project": "py-libp2p",
+      "symbol": "get_runtime_bootstrap_addresses",
+      "kind": "fn",
+      "file": "libp2p/filecoin/bootstrap.py",
+      "line_start": 122,
+      "line_end": 153,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FILECOIN_GOSSIPSUB_PROTOCOLS",
+      "project": "py-libp2p",
+      "symbol": "FILECOIN_GOSSIPSUB_PROTOCOLS",
+      "kind": "config",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 27,
+      "line_end": 32,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FILECOIN_TOPIC_SCORE_REFERENCE",
+      "project": "py-libp2p",
+      "symbol": "FILECOIN_TOPIC_SCORE_REFERENCE",
+      "kind": "config",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 34,
+      "line_end": 53,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FILECOIN_PEER_SCORE_REFERENCE",
+      "project": "py-libp2p",
+      "symbol": "FILECOIN_PEER_SCORE_REFERENCE",
+      "kind": "config",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 55,
+      "line_end": 61,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_build_filecoin_score_params",
+      "project": "py-libp2p",
+      "symbol": "build_filecoin_score_params",
+      "kind": "constructor",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 64,
+      "line_end": 75,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_build_filecoin_gossipsub",
+      "project": "py-libp2p",
+      "symbol": "build_filecoin_gossipsub",
+      "kind": "constructor",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 78,
+      "line_end": 115,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_build_filecoin_pubsub",
+      "project": "py-libp2p",
+      "symbol": "build_filecoin_pubsub",
+      "kind": "constructor",
+      "file": "libp2p/filecoin/pubsub.py",
+      "line_start": 118,
+      "line_end": 138,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_cli_topics",
+      "project": "py-libp2p",
+      "symbol": "cli:_cmd_topics",
+      "kind": "handler",
+      "file": "libp2p/filecoin/cli.py",
+      "line_start": 37,
+      "line_end": 55,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_cli_bootstrap",
+      "project": "py-libp2p",
+      "symbol": "cli:_cmd_bootstrap",
+      "kind": "handler",
+      "file": "libp2p/filecoin/cli.py",
+      "line_start": 58,
+      "line_end": 82,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_cli_preset",
+      "project": "py-libp2p",
+      "symbol": "cli:_cmd_preset",
+      "kind": "handler",
+      "file": "libp2p/filecoin/cli.py",
+      "line_start": 85,
+      "line_end": 153,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_public_exports",
+      "project": "py-libp2p",
+      "symbol": "libp2p.filecoin.__all__",
+      "kind": "config",
+      "file": "libp2p/filecoin/__init__.py",
+      "line_start": 37,
+      "line_end": 63,
+      "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "lotus_hello_protocol",
+      "project": "lotus",
+      "symbol": "hello.ProtocolID",
+      "kind": "const",
+      "file": "node/hello/hello.go",
+      "line_start": 31,
+      "line_end": 31,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_chain_exchange_protocol",
+      "project": "lotus",
+      "symbol": "exchange.ChainExchangeProtocolID",
+      "kind": "const",
+      "file": "chain/exchange/protocol.go",
+      "line_start": 18,
+      "line_end": 18,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_blocks_topic",
+      "project": "lotus",
+      "symbol": "build.BlocksTopic",
+      "kind": "fn",
+      "file": "build/params_shared_funcs.go",
+      "line_start": 16,
+      "line_end": 16,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_messages_topic",
+      "project": "lotus",
+      "symbol": "build.MessagesTopic",
+      "kind": "fn",
+      "file": "build/params_shared_funcs.go",
+      "line_start": 17,
+      "line_end": 17,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_dht_protocol",
+      "project": "lotus",
+      "symbol": "build.DhtProtocolName",
+      "kind": "fn",
+      "file": "build/params_shared_funcs.go",
+      "line_start": 18,
+      "line_end": 19,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_pubsub_thresholds",
+      "project": "lotus",
+      "symbol": "lp2p.{Gossip,Publish,Graylist,AcceptPX,OpportunisticGraft}ScoreThreshold",
+      "kind": "config",
+      "file": "node/modules/lp2p/pubsub.go",
+      "line_start": 31,
+      "line_end": 36,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_pubsub_mesh_defaults",
+      "project": "lotus",
+      "symbol": "pubsub init GossipSubD/Dlo/Dhi/History",
+      "kind": "config",
+      "file": "node/modules/lp2p/pubsub.go",
+      "line_start": 24,
+      "line_end": 33,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_hash_msg_id",
+      "project": "lotus",
+      "symbol": "HashMsgId",
+      "kind": "fn",
+      "file": "node/modules/lp2p/pubsub.go",
+      "line_start": 429,
+      "line_end": 432,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_mainnet_bootstrap",
+      "project": "lotus",
+      "symbol": "build/bootstrap/mainnet",
+      "kind": "bootstrap_list",
+      "file": "build/bootstrap/mainnet",
+      "line_start": 1,
+      "line_end": 8,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_calibnet_bootstrap",
+      "project": "lotus",
+      "symbol": "build/bootstrap/calibnet",
+      "kind": "bootstrap_list",
+      "file": "build/bootstrap/calibnet",
+      "line_start": 1,
+      "line_end": 5,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_mainnet_network_name",
+      "project": "lotus",
+      "symbol": "dtypes.NetworkName(mainnet)=testnetnet",
+      "kind": "const",
+      "file": "node/modules/chain.go",
+      "line_start": 128,
+      "line_end": 129,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "lotus_calibnet_network_name",
+      "project": "lotus",
+      "symbol": "buildconstants calibnet bundle name",
+      "kind": "const",
+      "file": "build/buildconstants/params_calibnet.go",
+      "line_start": 27,
+      "line_end": 27,
+      "version": "v1.35.0"
+    },
+    {
+      "id": "forest_hello_protocol",
+      "project": "forest",
+      "symbol": "HELLO_PROTOCOL_NAME",
+      "kind": "const",
+      "file": "src/libp2p/hello/mod.rs",
+      "line_start": 12,
+      "line_end": 12,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_chain_exchange_protocol",
+      "project": "forest",
+      "symbol": "CHAIN_EXCHANGE_PROTOCOL_NAME",
+      "kind": "const",
+      "file": "src/libp2p/chain_exchange/mod.rs",
+      "line_start": 12,
+      "line_end": 12,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_topic_prefixes",
+      "project": "forest",
+      "symbol": "PUBSUB_BLOCK_STR/PUBSUB_MSG_STR",
+      "kind": "const",
+      "file": "src/libp2p/service.rs",
+      "line_start": 75,
+      "line_end": 78,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_message_id",
+      "project": "forest",
+      "symbol": "gossipsub.message_id_fn(blake2b_256(data))",
+      "kind": "config",
+      "file": "src/libp2p/behaviour.rs",
+      "line_start": 79,
+      "line_end": 83,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_score_thresholds",
+      "project": "forest",
+      "symbol": "build_peer_score_threshold",
+      "kind": "fn",
+      "file": "src/libp2p/gossip_params.rs",
+      "line_start": 125,
+      "line_end": 133,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_topic_scores",
+      "project": "forest",
+      "symbol": "build_{block,msg}_topic_config",
+      "kind": "fn",
+      "file": "src/libp2p/gossip_params.rs",
+      "line_start": 17,
+      "line_end": 80,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_mainnet_network_name",
+      "project": "forest",
+      "symbol": "NETWORK_GENESIS_NAME=testnetnet",
+      "kind": "const",
+      "file": "src/networks/mainnet/mod.rs",
+      "line_start": 26,
+      "line_end": 26,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_calibnet_network_name",
+      "project": "forest",
+      "symbol": "NETWORK_GENESIS_NAME=calibrationnet",
+      "kind": "const",
+      "file": "src/networks/calibnet/mod.rs",
+      "line_start": 24,
+      "line_end": 24,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_mainnet_bootstrap",
+      "project": "forest",
+      "symbol": "DEFAULT_BOOTSTRAP mainnet include_str",
+      "kind": "bootstrap_list",
+      "file": "src/networks/mainnet/mod.rs",
+      "line_start": 37,
+      "line_end": 37,
+      "version": "0.32.2"
+    },
+    {
+      "id": "forest_calibnet_bootstrap",
+      "project": "forest",
+      "symbol": "DEFAULT_BOOTSTRAP calibnet include_str",
+      "kind": "bootstrap_list",
+      "file": "src/networks/calibnet/mod.rs",
+      "line_start": 33,
+      "line_end": 33,
+      "version": "0.32.2"
+    },
+    {
+      "id": "py_filecoin_architecture_positioning",
+      "project": "py-libp2p",
+      "symbol": "docs:filecoin_architecture_positioning",
+      "kind": "doc",
+      "file": "docs/filecoin_architecture_positioning.rst",
+      "line_start": 1,
+      "line_end": 150,
+      "version": "feat/filecoin-dx-and-tooling"
+    }
+  ],
+  "edges": [
+    {
+      "from": "lotus_hello_protocol",
+      "to": "py_FIL_HELLO_PROTOCOL",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_hello_protocol",
+      "to": "py_FIL_HELLO_PROTOCOL",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_chain_exchange_protocol",
+      "to": "py_FIL_CHAIN_EXCHANGE_PROTOCOL",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_chain_exchange_protocol",
+      "to": "py_FIL_CHAIN_EXCHANGE_PROTOCOL",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_blocks_topic",
+      "to": "py_blocks_topic",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_messages_topic",
+      "to": "py_messages_topic",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_dht_protocol",
+      "to": "py_dht_protocol_name",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_topic_prefixes",
+      "to": "py_blocks_topic",
+      "relation": "derived_from"
+    },
+    {
+      "from": "forest_topic_prefixes",
+      "to": "py_messages_topic",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_hash_msg_id",
+      "to": "py_filecoin_message_id",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_message_id",
+      "to": "py_filecoin_message_id",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_mainnet_bootstrap",
+      "to": "py_MAINNET_BOOTSTRAP",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_calibnet_bootstrap",
+      "to": "py_CALIBNET_BOOTSTRAP",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_mainnet_bootstrap",
+      "to": "py_MAINNET_BOOTSTRAP",
+      "relation": "derived_from"
+    },
+    {
+      "from": "forest_calibnet_bootstrap",
+      "to": "py_CALIBNET_BOOTSTRAP",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_mainnet_network_name",
+      "to": "py_get_network_preset",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_calibnet_network_name",
+      "to": "py_get_network_preset",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_mainnet_network_name",
+      "to": "py_get_network_preset",
+      "relation": "derived_from"
+    },
+    {
+      "from": "forest_calibnet_network_name",
+      "to": "py_get_network_preset",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_pubsub_thresholds",
+      "to": "py_GOSSIP_SCORE_THRESHOLD",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_pubsub_thresholds",
+      "to": "py_PUBLISH_SCORE_THRESHOLD",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_pubsub_thresholds",
+      "to": "py_GRAYLIST_SCORE_THRESHOLD",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_pubsub_thresholds",
+      "to": "py_ACCEPT_PX_SCORE_THRESHOLD",
+      "relation": "maps_to"
+    },
+    {
+      "from": "lotus_pubsub_thresholds",
+      "to": "py_OPPORTUNISTIC_GRAFT_SCORE_THRESHOLD",
+      "relation": "maps_to"
+    },
+    {
+      "from": "forest_score_thresholds",
+      "to": "py_FILECOIN_PEER_SCORE_REFERENCE",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_pubsub_mesh_defaults",
+      "to": "py_build_filecoin_gossipsub",
+      "relation": "derived_from"
+    },
+    {
+      "from": "forest_topic_scores",
+      "to": "py_FILECOIN_TOPIC_SCORE_REFERENCE",
+      "relation": "derived_from"
+    },
+    {
+      "from": "py_GOSSIP_SCORE_THRESHOLD",
+      "to": "py_build_filecoin_score_params",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_PUBLISH_SCORE_THRESHOLD",
+      "to": "py_build_filecoin_score_params",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_GRAYLIST_SCORE_THRESHOLD",
+      "to": "py_build_filecoin_score_params",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_ACCEPT_PX_SCORE_THRESHOLD",
+      "to": "py_build_filecoin_score_params",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_build_filecoin_score_params",
+      "to": "py_build_filecoin_gossipsub",
+      "relation": "configures"
+    },
+    {
+      "from": "py_build_filecoin_gossipsub",
+      "to": "py_build_filecoin_pubsub",
+      "relation": "configures"
+    },
+    {
+      "from": "py_filecoin_message_id",
+      "to": "py_build_filecoin_pubsub",
+      "relation": "configures"
+    },
+    {
+      "from": "py_get_network_preset",
+      "to": "py_get_bootstrap_addresses",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_get_network_preset",
+      "to": "py_get_runtime_bootstrap_addresses",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_get_bootstrap_addresses",
+      "to": "py_cli_bootstrap",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_get_runtime_bootstrap_addresses",
+      "to": "py_cli_bootstrap",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_blocks_topic",
+      "to": "py_cli_topics",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_messages_topic",
+      "to": "py_cli_topics",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_dht_protocol_name",
+      "to": "py_cli_topics",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_blocks_topic",
+      "to": "py_cli_preset",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_messages_topic",
+      "to": "py_cli_preset",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_dht_protocol_name",
+      "to": "py_cli_preset",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_build_filecoin_gossipsub",
+      "to": "py_cli_preset",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_build_filecoin_score_params",
+      "to": "py_cli_preset",
+      "relation": "consumes"
+    },
+    {
+      "from": "py_FIL_HELLO_PROTOCOL",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_FIL_CHAIN_EXCHANGE_PROTOCOL",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_GOSSIP_SCORE_THRESHOLD",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_PUBLISH_SCORE_THRESHOLD",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_GRAYLIST_SCORE_THRESHOLD",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_ACCEPT_PX_SCORE_THRESHOLD",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_OPPORTUNISTIC_GRAFT_SCORE_THRESHOLD",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_blocks_topic",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_messages_topic",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_dht_protocol_name",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_filecoin_message_id",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_FilecoinNetworkPreset",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_MAINNET_BOOTSTRAP",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_CALIBNET_BOOTSTRAP",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_get_network_preset",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_get_bootstrap_addresses",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_filter_bootstrap_for_transport",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_resolve_dns_bootstrap_to_ip4_tcp",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_get_runtime_bootstrap_addresses",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_FILECOIN_GOSSIPSUB_PROTOCOLS",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_FILECOIN_TOPIC_SCORE_REFERENCE",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_FILECOIN_PEER_SCORE_REFERENCE",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_build_filecoin_score_params",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_build_filecoin_gossipsub",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "py_build_filecoin_pubsub",
+      "to": "py_public_exports",
+      "relation": "defines"
+    },
+    {
+      "from": "lotus_mainnet_network_name",
+      "to": "py_filecoin_architecture_positioning",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_calibnet_network_name",
+      "to": "py_filecoin_architecture_positioning",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_hello_protocol",
+      "to": "py_filecoin_architecture_positioning",
+      "relation": "derived_from"
+    },
+    {
+      "from": "lotus_chain_exchange_protocol",
+      "to": "py_filecoin_architecture_positioning",
+      "relation": "derived_from"
+    },
+    {
+      "from": "forest_mainnet_network_name",
+      "to": "py_filecoin_architecture_positioning",
+      "relation": "derived_from"
+    }
+  ]
+}

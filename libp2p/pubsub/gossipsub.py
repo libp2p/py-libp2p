@@ -63,7 +63,6 @@ from .score import (
     ScoreParams,
 )
 from .utils import (
-    parse_message_id_safe,
     safe_bytes_from_hex,
 )
 
@@ -1605,7 +1604,7 @@ class GossipSub(IPubsubRouter, Service):
                 )
                 continue
             if not pubsub.seen_messages.has(mid_bytes):
-                msg_ids_wanted.append(parse_message_id_safe(msg_id))
+                msg_ids_wanted.append(MessageID(mid_bytes.hex()))
 
         # Request messages with IWANT message
         if msg_ids_wanted:
@@ -1648,6 +1647,9 @@ class GossipSub(IPubsubRouter, Service):
             if msg:
                 # Add message to list of messages to forward to requesting peers
                 msgs_to_forward.append(msg)
+
+        if not msgs_to_forward:
+            return
 
         # Forward messages to requesting peer
         # Should this just be publishing? No, because then the message will forwarded to
