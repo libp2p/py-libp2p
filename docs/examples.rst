@@ -27,6 +27,8 @@ Examples
    gossipsub-1.2
    examples.websocket
    examples.tls
+   examples.tcp
+   examples.transport
    examples.autotls
    examples.perf
    examples.path_handling
