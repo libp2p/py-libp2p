@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import (
+    Sequence,
+)
+
+import multiaddr
+
 from libp2p.abc import (
     INetworkService,
     IPeerRouting,
@@ -40,6 +46,7 @@ class RoutedHost(BasicHost):
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     ):
         """
         Initialize a RoutedHost instance.
@@ -55,6 +62,7 @@ class RoutedHost(BasicHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: If set, replace listen addrs in get_addrs()
         """
         super().__init__(
             network,
@@ -66,6 +74,7 @@ class RoutedHost(BasicHost):
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+            announce_addrs=announce_addrs,
         )
         self._router = router
 

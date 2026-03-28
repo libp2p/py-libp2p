@@ -1993,12 +1993,16 @@ class IHost(ABC):
     @abstractmethod
     def get_addrs(self) -> list[Multiaddr]:
         """
-        Retrieve all multiaddresses on which the host is listening.
+        Return the addresses this host advertises to other peers.
+
+        These may differ from the actual listen addresses when
+        ``announce_addrs`` is configured. Each address includes a
+        ``/p2p/{peer_id}`` suffix.
 
         Returns
         -------
         list[Multiaddr]
-            A list of multiaddresses.
+            A list of advertised multiaddresses, each with a ``/p2p/{peer_id}`` suffix.
 
         """
 
