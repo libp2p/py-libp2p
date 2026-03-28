@@ -27,6 +27,16 @@ Overview of TLS in Libp2p
 Installation Requirements
 -------------------------
 
+**Python requirements**
+
+- Python 3.8+
+
+**Install with TLS support**
+
+.. code-block:: bash
+
+   pip install "libp2p[tls]"
+
 **Additional dependencies**
 
 Ubuntu / Debian:
@@ -50,82 +60,44 @@ Listener node:
 
 .. code-block:: python
 
-  import trio
-  import multiaddr
-  from libp2p import new_host
-  from libp2p.crypto.secp256k1 import create_new_key_pair
-  from libp2p.security.tls.transport import PROTOCOL_ID, TLSTransport
+   import trio
+   from libp2p import new_host
+   from libp2p.security.tls.transport import TLSTransport
 
-  async def main():
-    key_pair = create_new_key_pair(secret=None)
-    tls_transport = TLSTransport(libp2p_keypair=key_pair)
-    sec_opt = {PROTOCOL_ID: tls_transport}
-    host = new_host(key_pair=key_pair, sec_opt=sec_opt)
-    listen_addr = multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/8000")
-    async with host.run(listen_addrs=[listen_addr]):
-        while not host.get_addrs():
-            await trio.sleep(0.1)
-        addrs = host.get_addrs()
-        peer_id = host.get_id()
-        print("TLS-enabled listener at:", addrs[0] if addrs else "No addresses")
-        print("Peer ID:", peer_id)
-        print("\nUse this address with the dialer:")
-        print(f"  /ip4/127.0.0.1/tcp/8000/p2p/{peer_id}")
-        await trio.sleep_forever()
+   async def main():
+       host = await new_host(security_transports=[TLSTransport()])
+       await host.listen("/ip4/0.0.0.0/tcp/8000")
+       print("TLS-enabled listener at:", host.get_addrs())
 
-  if __name__ == "__main__":
-    trio.run(main)
+       await trio.sleep_forever()
+
+   if __name__ == "__main__":
+       trio.run(main())
 
 Dialer node:
 
 .. code-block:: python
 
-  import trio
-  import multiaddr
-  from libp2p import new_host
-  from libp2p.crypto.secp256k1 import create_new_key_pair
-  from libp2p.security.tls.transport import PROTOCOL_ID, TLSTransport
-  from libp2p.peer.peerinfo import info_from_p2p_addr
+   import trio
+   from libp2p import new_host
+   from libp2p.security.tls.transport import TLSTransport
+   from libp2p.peer.peerinfo import info_from_p2p_addr
 
-  async def main():
-      key_pair = create_new_key_pair(secret=None)
-      tls_transport = TLSTransport(libp2p_keypair=key_pair)
-      sec_opt = {PROTOCOL_ID: tls_transport}
-      host = new_host(key_pair=key_pair, sec_opt=sec_opt)
+   async def main():
+       host = await new_host(security_transports=[TLSTransport()])
 
-      addr = "/ip4/127.0.0.1/tcp/8000/p2p/16Uiu2HAm3hATVnBDT13acn2utRJXsFa2LRRGrZwDsosJ1mFZsM2Q"
-      maddr = multiaddr.Multiaddr(addr)
-      peer_info = info_from_p2p_addr(maddr)
+       addr = "/ip4/127.0.0.1/tcp/8000/p2p/QmPeerIDHere"
+       peer_info = info_from_p2p_addr(addr)
 
-      async with host.run(listen_addrs=[]):
-          await trio.sleep(0.5)
-          host.peerstore.add_addrs(peer_info.peer_id, peer_info.addrs, 120)
+       await host.connect(peer_info)
+       print("Connected securely to", peer_info.peer_id)
 
-          try:
-              await host.connect(peer_info)
-              print("Connected securely to", peer_info.peer_id)
-              await trio.sleep(1)
-          except Exception as e:
-              print(f"Connection failed: {e}")
-              raise
-
-  if __name__ == "__main__":
-      trio.run(main)
+   if __name__ == "__main__":
+       trio.run(main())
 
 **Defaults if no configuration is provided**
 
 - Generates a self-signed certificate automatically.
-
-**Note for testing with self-signed certificates**
-
-When testing with self-signed certificates, peers need to trust each other's certificates.
-You can do this by calling ``trust_peer_cert_pem()`` on the TLS transport before creating the host:
-
-.. code-block:: python
-
-   # For testing: trust peer certificates
-   listener_tls.trust_peer_cert_pem(dialer_tls.get_certificate_pem())
-   dialer_tls.trust_peer_cert_pem(listener_tls.get_certificate_pem())
 
 Certificate Management
 ----------------------
@@ -181,6 +153,9 @@ Troubleshooting
    * - SSL handshake failure
      - TLS version mismatch or clock skew
      - Enforce TLS 1.3, sync system clock.
+   * - `ImportError: No module named libp2p.security.tls`
+     - TLS extras not installed
+     - Run `pip install "libp2p[tls]"`.
    * - Connection refused
      - Port blocked or listener not running
      - Check firewall rules and listener status.
