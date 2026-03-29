@@ -41,8 +41,7 @@ async def test_send_window_update_handles_connection_closed_error():
     by type — no string matching required.
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
-    mock_conn.secured_conn.write = AsyncMock(
+    mock_conn._write_frame = AsyncMock(
         side_effect=ConnectionClosedError(
             "WebSocket connection closed by peer during write operation",
             close_code=1000,
@@ -57,7 +56,7 @@ async def test_send_window_update_handles_connection_closed_error():
     # Should not raise — ConnectionClosedError is handled gracefully
     await stream.send_window_update(32)
 
-    assert mock_conn.secured_conn.write.called
+    assert mock_conn._write_frame.called
 
 
 @pytest.mark.trio
@@ -75,14 +74,13 @@ async def test_send_window_update_handles_connection_closed_error_any_message():
 
     for msg in unusual_messages:
         mock_conn = Mock()
-        mock_conn.secured_conn = AsyncMock()
-        mock_conn.secured_conn.write = AsyncMock(
+        mock_conn._write_frame = AsyncMock(
             side_effect=ConnectionClosedError(msg, close_code=1000)
         )
 
         stream = YamuxStream(1, mock_conn, is_initiator=True)
         await stream.send_window_update(32)  # Should not raise
-        assert mock_conn.secured_conn.write.called
+        assert mock_conn._write_frame.called
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +95,7 @@ async def test_send_window_update_handles_raw_conn_error():
     gracefully (string-matching fallback for TCP transport).
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
-    mock_conn.secured_conn.write = AsyncMock(
-        side_effect=RawConnError("Connection closed")
-    )
+    mock_conn._write_frame = AsyncMock(side_effect=RawConnError("Connection closed"))
 
     stream_id = 1
     stream = YamuxStream(stream_id, mock_conn, is_initiator=True)
@@ -108,7 +103,7 @@ async def test_send_window_update_handles_raw_conn_error():
     # Should not raise — falls through to string-matching fallback
     await stream.send_window_update(32)
 
-    assert mock_conn.secured_conn.write.called
+    assert mock_conn._write_frame.called
 
 
 @pytest.mark.trio
@@ -126,14 +121,13 @@ async def test_send_window_update_handles_various_closure_messages():
 
     for error_msg in closure_messages:
         mock_conn = Mock()
-        mock_conn.secured_conn = AsyncMock()
-        mock_conn.secured_conn.write = AsyncMock(side_effect=IOException(error_msg))
+        mock_conn._write_frame = AsyncMock(side_effect=IOException(error_msg))
 
         stream = YamuxStream(1, mock_conn, is_initiator=True)
 
         # Should not raise for any of these messages
         await stream.send_window_update(32)
-        assert mock_conn.secured_conn.write.called
+        assert mock_conn._write_frame.called
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +141,7 @@ async def test_send_window_update_raises_unexpected_errors():
     Test that unexpected errors (not connection closure) are still raised.
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
-    mock_conn.secured_conn.write = AsyncMock(side_effect=ValueError("Unexpected error"))
+    mock_conn._write_frame = AsyncMock(side_effect=ValueError("Unexpected error"))
 
     stream_id = 1
     stream = YamuxStream(stream_id, mock_conn, is_initiator=True)
@@ -163,8 +156,7 @@ async def test_send_window_update_raises_non_closure_io_exception():
     Test that plain IOException with non-closure message is still raised.
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
-    mock_conn.secured_conn.write = AsyncMock(side_effect=IOException("Disk full error"))
+    mock_conn._write_frame = AsyncMock(side_effect=IOException("Disk full error"))
 
     stream_id = 1
     stream = YamuxStream(stream_id, mock_conn, is_initiator=True)
@@ -184,16 +176,15 @@ async def test_send_window_update_succeeds_when_connection_open():
     Test that send_window_update succeeds normally when connection is open.
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
-    mock_conn.secured_conn.write = AsyncMock()  # No error
+    mock_conn._write_frame = AsyncMock()  # No error
 
     stream_id = 1
     stream = YamuxStream(stream_id, mock_conn, is_initiator=True)
 
     await stream.send_window_update(32)
 
-    assert mock_conn.secured_conn.write.called
-    call_args = mock_conn.secured_conn.write.call_args[0][0]
+    assert mock_conn._write_frame.called
+    call_args = mock_conn._write_frame.call_args[0][0]
     assert len(call_args) == 12  # Yamux header is 12 bytes
     assert call_args[1] == 0x1  # Window update type
 
@@ -204,13 +195,13 @@ async def test_send_window_update_skips_zero_increment():
     Test that send_window_update skips sending when increment is zero or negative.
     """
     mock_conn = Mock()
-    mock_conn.secured_conn = AsyncMock()
+    mock_conn._write_frame = AsyncMock()
 
     stream_id = 1
     stream = YamuxStream(stream_id, mock_conn, is_initiator=True)
 
     await stream.send_window_update(0)
-    assert not mock_conn.secured_conn.write.called
+    assert not mock_conn._write_frame.called
 
     await stream.send_window_update(-1)
-    assert not mock_conn.secured_conn.write.called
+    assert not mock_conn._write_frame.called
