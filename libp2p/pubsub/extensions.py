@@ -16,6 +16,9 @@ Key spec rules implemented here:
 
 from __future__ import annotations
 
+from collections.abc import (
+    Callable,
+)
 from dataclasses import (
     dataclass,
     field,
@@ -31,6 +34,8 @@ from .pb import (
 )
 
 logger = logging.getLogger("libp2p.pubsub.extensions")
+
+ReportMisbehaviour = Callable[[ID], None]
 
 
 @dataclass
@@ -130,10 +135,11 @@ class ExtensionsState:
     _sent_extensions: set[ID] = field(default_factory=set, init=False, repr=False)
 
     # Optional callback invoked when a peer sends a duplicate extensions message.
-    # Signature: report_misbehaviour(peer_id: ID) -> None
-    _report_misbehaviour: object = field(default=None, init=False, repr=False)
+    _report_misbehaviour: ReportMisbehaviour | None = field(
+        default=None, init=False, repr=False
+    )
 
-    def set_report_misbehaviour(self, callback: object) -> None:
+    def set_report_misbehaviour(self, callback: ReportMisbehaviour | None) -> None:
         """
         Register the callback that penalises misbehaving peers.
 
@@ -229,8 +235,8 @@ class ExtensionsState:
                     "this is a protocol violation (GossipSub v1.3 spec rule 2).",
                     peer_id,
                 )
-                if callable(self._report_misbehaviour):
-                    self._report_misbehaviour(peer_id)  # type: ignore[operator]
+                if self._report_misbehaviour is not None:
+                    self._report_misbehaviour(peer_id)
 
     # ------------------------------------------------------------------
     # Peer lifecycle
