@@ -2326,10 +2326,6 @@ class GossipSub(IPubsubRouter, Service):
                 peer_id,
             )
 
-    # ------------------------------------------------------------------ #
-    # GossipSub v1.3 – TODO for contributors
-    # ------------------------------------------------------------------ #
-
     async def start_observing_topic(self, topic: str) -> None:
         """
         Start observing *topic* by sending OBSERVE to all in-topic v1.3 peers

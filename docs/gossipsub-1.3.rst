@@ -31,23 +31,32 @@ Lifecycle
 3. **Stop observing**: Call ``stop_observing_topic(topic)`` to send UNOBSERVE
    control messages and stop receiving IHAVE notifications for that topic.
 
-Usage Example
-~~~~~~~~~~~~~
+API Usage Snippet
+~~~~~~~~~~~~~~~~~
+
+The snippet below demonstrates the Topic Observation API calls. It is not a
+complete runnable program (host setup, service lifecycle, and peer wiring are
+omitted for brevity). For a runnable end-to-end example, see
+:doc:`examples.pubsub`.
 
 .. code-block:: python
 
-    from libp2p import new_node
-    from libp2p.pubsub.gossipsub import GossipSub
+    from libp2p import new_host
+    from libp2p.pubsub.gossipsub import PROTOCOL_ID_V13, GossipSub
     from libp2p.pubsub.pubsub import Pubsub
 
-    # Create node with GossipSub v1.3
-    node = await new_node()
-    gossipsub = GossipSub()  # Default config includes v1.3 protocols
-    pubsub = PubSub(gossipsub)
-    await node.start()
-    pubsub.set_pubsub(node)
+    # Create host and Pubsub with a v1.3-capable GossipSub router.
+    host = new_host()
+    gossipsub = GossipSub(
+        protocols=[PROTOCOL_ID_V13],
+        degree=6,
+        degree_low=4,
+        degree_high=12,
+    )
+    pubsub = Pubsub(host, gossipsub)
 
-    # Start observing a topic (no subscription; IHAVE-only notifications)
+    # Start observing a topic (IHAVE-only presence notifications).
+    # In practice, call this once Pubsub/GossipSub services are running.
     await gossipsub.start_observing_topic("my-topic")
 
     # ... later, when done ...
