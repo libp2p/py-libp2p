@@ -38,7 +38,7 @@ Usage Example
 
     from libp2p import new_node
     from libp2p.pubsub.gossipsub import GossipSub
-    from libp2p.pubsub.pubsub import PubSub
+    from libp2p.pubsub.pubsub import Pubsub
 
     # Create node with GossipSub v1.3
     node = await new_node()
