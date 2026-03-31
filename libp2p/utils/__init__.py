@@ -36,6 +36,5 @@ __all__ = [
     "get_available_interfaces",
     "get_optimal_binding_address",
     "expand_wildcard_address",
-
     "find_free_port",
 ]
