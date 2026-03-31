@@ -24,6 +24,7 @@ Examples
    examples.multiple_connections
    tls-support
    gossipsub-1.2
+   gossipsub-1.3
    examples.websocket
    examples.tls
    examples.tcp
