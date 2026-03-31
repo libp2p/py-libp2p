@@ -1550,10 +1550,21 @@ class Swarm(Service, INetworkService):
         logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
+        logger.debug(
+            f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
+        )
+        # Verify connection is fully established before proceeding.
+        # For QUIC connections, wait for the connected event.
+        # For other muxers (like Yamux/Mplex), check the is_established property.
         # For QUIC connections, also verify connection is established
         if isinstance(muxed_conn, QUICConnection):
             if not muxed_conn.is_established:
                 await muxed_conn._connected_event.wait()
+        elif not muxed_conn.is_established:
+            logger.warning(
+                f"Swarm::add_conn | muxer event_started set but "
+                f"is_established=False for peer {muxed_conn.peer_id}"
+            )
         logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()
