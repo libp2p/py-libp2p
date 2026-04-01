@@ -4,11 +4,12 @@ This directory contains comprehensive examples showcasing the differences betwee
 
 ## Overview
 
-With the recent implementation of Gossipsub 2.0 support in py-libp2p, we now have full protocol version support spanning:
+Py-libp2p has full protocol version support spanning:
 
 - **Gossipsub 1.0** (`/meshsub/1.0.0`) - Basic mesh-based pubsub
 - **Gossipsub 1.1** (`/meshsub/1.1.0`) - Added peer scoring and behavioral penalties
 - **Gossipsub 1.2** (`/meshsub/1.2.0`) - Added IDONTWANT message filtering
+- **Gossipsub 1.3** (`/meshsub/1.3.0`) - Extensions Control Message and Topic Observation
 - **Gossipsub 2.0** (`/meshsub/2.0.0`) - Enhanced security, adaptive gossip, and advanced peer scoring
 
 ## Examples
@@ -66,7 +67,39 @@ Demonstrates Gossipsub 1.2 (`/meshsub/1.2.0`) with IDONTWANT message filtering.
 python gossipsub_v1.2.py --nodes 5 --duration 30
 ```
 
-### 4. Gossipsub 2.0 Demo (`gossipsub_v2.0.py`)
+### 4. Gossipsub 1.3 Demo (`gossipsub_v1.3.py`)
+
+Demonstrates GossipSub 1.3 (`/meshsub/1.3.0`) with the Extensions Control Message
+mechanism and the Topic Observation extension.
+
+**Features:**
+
+- All GossipSub 1.2 features (IDONTWANT, peer scoring)
+- **Extensions Control Message**: sent exactly once in the first message per peer
+- **At-most-once enforcement**: duplicate Extensions from a peer triggers a score penalty
+- **Topic Observation**: observer nodes receive IHAVE presence notifications without
+  full message payloads
+- **Protocol gating**: extension fields are only attached when `/meshsub/1.3.0` is negotiated
+
+**Node roles in the demo:**
+
+| Role         | Behaviour                                                 |
+| ------------ | --------------------------------------------------------- |
+| `publisher`  | Subscribes and publishes messages every 2 seconds         |
+| `subscriber` | Subscribes and reads full message payloads                |
+| `observer`   | Uses Topic Observation (IHAVE-only); no full subscription |
+
+At the halfway point one observer sends UNOBSERVE to stop receiving notifications,
+demonstrating the full OBSERVE → IHAVE → UNOBSERVE lifecycle.
+
+**Usage:**
+
+```bash
+python gossipsub_v1.3.py --nodes 6 --duration 40
+python gossipsub_v1.3.py --nodes 6 --duration 40 --verbose
+```
+
+### 5. Gossipsub 2.0 Demo (`gossipsub_v2.0.py`)
 
 Demonstrates Gossipsub 2.0 (`/meshsub/2.0.0`) with adaptive gossip and advanced security features.
 
@@ -130,6 +163,17 @@ python gossipsub_v2.0.py --nodes 5 --duration 60
 - **Message Filtering**: Reduces redundant message transmission
 - **Improved Efficiency**: Lower bandwidth usage in dense networks
 - All v1.1 features included
+
+### Gossipsub 1.3 (`/meshsub/1.3.0`)
+
+- **Extensions Control Message**: carried in the first RPC on a stream, at most once per peer
+- **Misbehaviour Scoring**: duplicate Extensions messages trigger `scorer.penalize_behavior`
+- **Topic Observation**: `start_observing_topic` / `stop_observing_topic` API; observers
+  receive IHAVE notifications immediately on publish without fetching full payloads
+- **Protocol Gating**: extension fields are injected only when the negotiated protocol
+  is `/meshsub/1.3.0` or later
+- **Forward Compatibility**: unknown extension fields are silently ignored by decoders
+- All v1.2 features included
 
 ### Gossipsub 2.0 (`/meshsub/2.0.0`)
 
@@ -196,6 +240,7 @@ cd examples/pubsub/gossipsub
 python gossipsub_v1.0.py --nodes 5 --duration 30
 python gossipsub_v1.1.py --nodes 5 --duration 30
 python gossipsub_v1.2.py --nodes 5 --duration 30
+python gossipsub_v1.3.py --nodes 6 --duration 40
 python gossipsub_v2.0.py --nodes 5 --duration 60
 ```
 
@@ -281,6 +326,7 @@ Enable verbose logging for detailed information:
 python gossipsub_v1.0.py --verbose ...
 python gossipsub_v1.1.py --verbose ...
 python gossipsub_v1.2.py --verbose ...
+python gossipsub_v1.3.py --verbose ...
 python gossipsub_v2.0.py --verbose ...
 ```
 
@@ -288,4 +334,6 @@ python gossipsub_v2.0.py --verbose ...
 
 - [Gossipsub v1.1 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.1.md)
 - [Gossipsub v1.2 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.2.md)
+- [Gossipsub v1.3 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md)
+- [Topic Observation proposal (ethresearch)](https://ethresear.ch/t/gossipsub-topic-observation-proposed-gossipsub-1-3/20907)
 - [Gossipsub v2.0 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v2.0.md)
