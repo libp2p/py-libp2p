@@ -510,32 +510,36 @@ class TestSplitRpcSenderRecord:
 class TestSplitRpcExtensions:
     def test_fast_path(self) -> None:
         rpc = rpc_pb2.RPC()
-        ext = rpc.control.extensions.add()
-        ext.name = "test-ext"
-        ext.data = b"ext-data"
+        rpc.control.extensions.topicObservation = True
 
         parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
         assert len(parts) == 1
-        assert parts[0].control.extensions[0].name == "test-ext"
+        assert parts[0].control.HasField("extensions")
+        assert parts[0].control.extensions.topicObservation is True
 
     def test_slow_path_split(self) -> None:
         rpc = rpc_pb2.RPC()
         for i in range(20):
             rpc.control.graft.add().topicID = f"topic-{i}" * 10
-        for i in range(10):
-            ext = rpc.control.extensions.add()
-            ext.name = f"ext-{i}"
-            ext.data = b"x" * 50
+        rpc.control.extensions.topicObservation = True
 
         parts = RpcQueue(max_message_size=100).split_rpc(rpc)
-        all_exts = [
-            e for p in parts if p.HasField("control") for e in p.control.extensions
-        ]
-        assert len(all_exts) == 10
+        assert len(parts) > 1
+        ext_count = sum(
+            1
+            for p in parts
+            if p.HasField("control") and p.control.HasField("extensions")
+        )
+        assert ext_count == 1
+        assert any(
+            p.control.extensions.topicObservation
+            for p in parts
+            if p.HasField("control") and p.control.HasField("extensions")
+        )
 
     def test_extension_only_not_filtered(self) -> None:
         rpc = rpc_pb2.RPC()
-        rpc.control.extensions.add().name = "only"
+        rpc.control.extensions.topicObservation = True
         assert _rpc_has_data(rpc) is True
 
         parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
