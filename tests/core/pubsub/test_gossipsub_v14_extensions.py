@@ -49,7 +49,15 @@ async def test_extension_registration():
 
 @pytest.mark.trio
 async def test_extension_message_handling():
-    """Test extension message handling between peers."""
+    """
+    Test extension handler registration and that emit_extension completes.
+
+    In GossipSub v1.3 wire format, extension data is only sent in the first
+    hello (control.extensions); there is no wire format for arbitrary
+    extension name/data. So emit_extension is a no-op and handlers are not
+    invoked for custom data. This test verifies registration and that
+    emit_extension completes without raising.
+    """
     received_extensions = []
 
     async def extension_handler(data: bytes, sender_peer_id: ID):
@@ -73,17 +81,17 @@ async def test_extension_message_handling():
         # Get peer IDs
         peer1_id = pubsubs[1].host.get_id()
 
-        # Send extension message from router0 to router1
+        # emit_extension is a no-op (v1.3 does not send arbitrary extension
+        # name/data); it should complete without raising.
         test_data = b"test extension data"
         await router0.emit_extension("test-ext", test_data, peer1_id)
 
         # Wait for message processing
         await trio.sleep(0.5)
 
-        # Verify extension was received and handled
-        assert len(received_extensions) == 1
-        assert received_extensions[0][0] == test_data
-        assert received_extensions[0][1] == pubsubs[0].host.get_id()
+        # No extension data is delivered over the wire (only hello carries
+        # control.extensions), so the handler is never called.
+        assert len(received_extensions) == 0
 
 
 @pytest.mark.trio
@@ -110,7 +118,13 @@ async def test_extension_message_to_unsupported_peer():
 
 @pytest.mark.trio
 async def test_extension_handler_error_handling():
-    """Test error handling in extension handlers."""
+    """
+    Test that emit_extension completes when a failing handler is registered.
+
+    emit_extension is a no-op (v1.3 does not send arbitrary extension data),
+    so the handler is never invoked. We verify emit_extension does not raise
+    and the handler is not called.
+    """
     error_count = [0]  # Use list to make it mutable
 
     async def failing_handler(data: bytes, sender_peer_id: ID):
@@ -132,15 +146,15 @@ async def test_extension_handler_error_handling():
         await connect(pubsubs[0].host, pubsubs[1].host)
         await trio.sleep(0.5)
 
-        # Send extension message
+        # emit_extension is a no-op; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         await router0.emit_extension("failing-ext", b"data", peer1_id)
 
         # Wait for processing
         await trio.sleep(0.5)
 
-        # Verify handler was called but error was caught
-        assert error_count[0] == 1
+        # Handler is never called (no extension data is sent over the wire)
+        assert error_count[0] == 0
 
 
 @pytest.mark.trio
@@ -168,13 +182,8 @@ async def test_unregistered_extension_handling():
 
 @pytest.mark.trio
 async def test_extension_message_from_unsupported_peer():
-    """Test receiving extension message from peer that doesn't support extensions."""
+    """Extension data from a v1.1 peer is not processed; only v1.3+ are handled."""
     from libp2p.pubsub.gossipsub import PROTOCOL_ID_V11
-
-    received_count = [0]  # Use list to make it mutable
-
-    async def handler(data: bytes, sender_peer_id: ID):
-        received_count[0] += 1
 
     # Create one v1.4 peer and one v1.1 peer
     async with PubsubFactory.create_batch_with_gossipsub(
@@ -184,40 +193,41 @@ async def test_extension_message_from_unsupported_peer():
             1, protocols=[PROTOCOL_ID_V11]
         ) as v11_pubsubs:
             v14_router = v14_pubsubs[0].router
-            v11_router = v11_pubsubs[0].router
             assert isinstance(v14_router, GossipSub)
-            assert isinstance(v11_router, GossipSub)
 
-            # Register handler on v1.4 peer
-            v14_router.register_extension_handler("test-ext", handler)
-
-            # Connect peers
             await connect(v14_pubsubs[0].host, v11_pubsubs[0].host)
             await trio.sleep(0.5)
 
-            # Manually set the peer protocol mapping to simulate v1.1 peer
+            # Simulate v1.1 peer: router thinks this peer speaks v1.1 only
             v11_peer_id = v11_pubsubs[0].host.get_id()
             v14_router.peer_protocol[v11_peer_id] = PROTOCOL_ID_V11
 
-            # Verify the peer is recognized as not supporting extensions
             assert not v14_router.supports_protocol_feature(v11_peer_id, "extensions")
 
-            # Create extension message from v1.1 peer
-            extension_msg = rpc_pb2.ControlExtension()
-            extension_msg.name = "test-ext"
-            extension_msg.data = b"test data"
+            # Build an RPC that would carry control.extensions (as a v1.3 peer would)
+            rpc = rpc_pb2.RPC()
+            rpc.control.CopyFrom(rpc_pb2.ControlMessage())
+            rpc.control.extensions.CopyFrom(
+                rpc_pb2.ControlExtensions(topicObservation=True)
+            )
 
-            # This should be ignored due to protocol version check
-            await v14_router.handle_extension(extension_msg, v11_peer_id)
-            await trio.sleep(0.5)
+            # handle_rpc must not process extensions for v1.1 peers
+            await v14_router.handle_rpc(rpc, v11_peer_id)
 
-            # Handler should not have been called
-            assert received_count[0] == 0
+            # v1.1 peer's extensions must not be recorded (we skip extensions_state
+            # when sender does not support v1.3+)
+            assert v14_router.extensions_state.get_peer_extensions(v11_peer_id) is None
 
 
 @pytest.mark.trio
 async def test_multiple_extension_handlers():
-    """Test multiple extension handlers on the same router."""
+    """
+    Test multiple extension handlers registered and emit_extension completes.
+
+    emit_extension is a no-op (v1.3 does not send arbitrary extension data),
+    so handlers are never invoked. We verify both handlers can be registered
+    and emit_extension for each completes without raising.
+    """
     received_messages = []
 
     async def handler1(data: bytes, sender_peer_id: ID):
@@ -242,7 +252,7 @@ async def test_multiple_extension_handlers():
         await connect(pubsubs[0].host, pubsubs[1].host)
         await trio.sleep(0.5)
 
-        # Send messages to different extensions
+        # emit_extension is a no-op for both; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         await router0.emit_extension("ext1", b"data1", peer1_id)
         await router0.emit_extension("ext2", b"data2", peer1_id)
@@ -250,15 +260,19 @@ async def test_multiple_extension_handlers():
         # Wait for processing
         await trio.sleep(0.5)
 
-        # Verify both handlers were called
-        assert len(received_messages) == 2
-        assert ("handler1", b"data1") in received_messages
-        assert ("handler2", b"data2") in received_messages
+        # No extension data is delivered, so neither handler is called
+        assert len(received_messages) == 0
 
 
 @pytest.mark.trio
 async def test_extension_v13_compatibility():
-    """Test extensions work with v1.3 protocol."""
+    """
+    Test extension registration and emit_extension with v1.3 protocol.
+
+    Same as v1.4: emit_extension is a no-op (v1.3 wire format only sends
+    extensions in the first hello). We verify registration and that
+    emit_extension completes without raising.
+    """
     received_extensions = []
 
     async def extension_handler(data: bytes, sender_peer_id: ID):
@@ -279,7 +293,7 @@ async def test_extension_v13_compatibility():
         await connect(pubsubs[0].host, pubsubs[1].host)
         await trio.sleep(0.5)
 
-        # Send extension message
+        # emit_extension is a no-op; should complete without raising
         peer1_id = pubsubs[1].host.get_id()
         test_data = b"v1.3 extension data"
         await router0.emit_extension("v13-ext", test_data, peer1_id)
@@ -287,6 +301,5 @@ async def test_extension_v13_compatibility():
         # Wait for processing
         await trio.sleep(0.5)
 
-        # Verify extension was handled
-        assert len(received_extensions) == 1
-        assert received_extensions[0][0] == test_data
+        # No extension data is delivered over the wire
+        assert len(received_extensions) == 0
