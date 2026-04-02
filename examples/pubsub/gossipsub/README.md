@@ -10,6 +10,7 @@ Py-libp2p has full protocol version support spanning:
 - **Gossipsub 1.1** (`/meshsub/1.1.0`) - Added peer scoring and behavioral penalties
 - **Gossipsub 1.2** (`/meshsub/1.2.0`) - Added IDONTWANT message filtering
 - **Gossipsub 1.3** (`/meshsub/1.3.0`) - Extensions Control Message and Topic Observation
+- **Gossipsub 1.4** (`/meshsub/1.4.0`) - Rate limiting, GRAFT flood protection, and adaptive gossip
 - **Gossipsub 2.0** (`/meshsub/2.0.0`) - Enhanced security, adaptive gossip, and advanced peer scoring
 
 ## Examples
@@ -99,7 +100,48 @@ python gossipsub_v1.3.py --nodes 6 --duration 40
 python gossipsub_v1.3.py --nodes 6 --duration 40 --verbose
 ```
 
-### 5. Gossipsub 2.0 Demo (`gossipsub_v2.0.py`)
+### 5. Gossipsub 1.4 Demo (`gossipsub_v1.4.py`)
+
+Demonstrates GossipSub 1.4 (`/meshsub/1.4.0`) with enhanced rate limiting, GRAFT flood
+protection, and adaptive gossip parameter tuning.
+
+**Features:**
+
+- All GossipSub 1.3 features (Extensions Control Message, Topic Observation)
+- **IWANT request rate limiting** per peer – prevents IWANT spam storms; excess requests
+  trigger a `penalize_iwant_spam` score deduction
+- **IHAVE message rate limiting** per peer per topic – caps IHAVE floods;
+  excess triggers `penalize_ihave_spam`
+- **GRAFT flood protection** – a peer that sends GRAFT too soon after receiving PRUNE
+  is penalised via `penalize_graft_flood` and immediately re-pruned
+- **Adaptive gossip factor** – the gossip spread factor scales with a multi-metric
+  network health score (connectivity, peer scores, delivery rate, mesh stability, churn)
+- **Opportunistic grafting threshold adaptation** – in poor health the threshold
+  is lowered so high-quality peers are grafted more aggressively
+- **Heartbeat interval adaptation** – under critical health the heartbeat is
+  accelerated for faster mesh recovery
+- **Extended scoring (P5-P7)** gated to `/meshsub/1.4.0`
+
+**Node roles in the demo:**
+
+| Role        | Behaviour                                                          |
+| ----------- | ------------------------------------------------------------------ |
+| `honest`    | Subscribes and publishes at a normal cadence                       |
+| `validator` | Subscribes and reads messages; no publishing                       |
+| `spammer`   | Bursts rapid messages to trigger IWANT / IHAVE rate-limiting paths |
+| `observer`  | Uses Topic Observation (IHAVE-only, inherited from v1.3)           |
+
+At `t = duration/4` the spammer fires a burst of 12 messages in rapid succession to
+demonstrate rate-limit enforcement. At `t = duration/2` one observer sends UNOBSERVE.
+
+**Usage:**
+
+```bash
+python gossipsub_v1.4.py --nodes 6 --duration 40
+python gossipsub_v1.4.py --nodes 6 --duration 40 --verbose
+```
+
+### 6. Gossipsub 2.0 Demo (`gossipsub_v2.0.py`)
 
 Demonstrates Gossipsub 2.0 (`/meshsub/2.0.0`) with adaptive gossip and advanced security features.
 
@@ -175,6 +217,25 @@ python gossipsub_v2.0.py --nodes 5 --duration 60
 - **Forward Compatibility**: unknown extension fields are silently ignored by decoders
 - All v1.2 features included
 
+### Gossipsub 1.4 (`/meshsub/1.4.0`)
+
+- **IWANT Rate Limiting**: caps IWANT requests per peer per second; excess triggers
+  `penalize_iwant_spam` score deduction
+- **IHAVE Rate Limiting**: caps IHAVE messages per peer per topic per second; excess
+  triggers `penalize_ihave_spam`
+- **GRAFT Flood Protection**: peers that re-GRAFT before the backoff window expires
+  receive `penalize_graft_flood` and are immediately re-pruned
+- **Adaptive Gossip Factor**: gossip spread factor (`gossip_factor`) scales dynamically
+  based on a composite network health score (mesh connectivity, peer scores, delivery
+  rate, mesh stability, and connection churn)
+- **Opportunistic Grafting Threshold Adaptation**: lower threshold in poor health
+  promotes more aggressive peer selection for mesh repair
+- **Heartbeat Interval Adaptation**: heartbeat interval shrinks under critical health
+  for faster mesh recovery, expanding again once health improves
+- **Extended Scoring (P5-P7) Gate**: `supports_protocol_feature(peer, "extended_scoring")`
+  returns `True` only for `/meshsub/1.4.0`
+- All v1.3 features included
+
 ### Gossipsub 2.0 (`/meshsub/2.0.0`)
 
 - **Enhanced Peer Scoring**: P6 (application-specific) and P7 (IP colocation) parameters
@@ -241,6 +302,7 @@ python gossipsub_v1.0.py --nodes 5 --duration 30
 python gossipsub_v1.1.py --nodes 5 --duration 30
 python gossipsub_v1.2.py --nodes 5 --duration 30
 python gossipsub_v1.3.py --nodes 6 --duration 40
+python gossipsub_v1.4.py --nodes 6 --duration 40
 python gossipsub_v2.0.py --nodes 5 --duration 60
 ```
 
@@ -327,6 +389,7 @@ python gossipsub_v1.0.py --verbose ...
 python gossipsub_v1.1.py --verbose ...
 python gossipsub_v1.2.py --verbose ...
 python gossipsub_v1.3.py --verbose ...
+python gossipsub_v1.4.py --verbose ...
 python gossipsub_v2.0.py --verbose ...
 ```
 
@@ -336,4 +399,5 @@ python gossipsub_v2.0.py --verbose ...
 - [Gossipsub v1.2 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.2.md)
 - [Gossipsub v1.3 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md)
 - [Topic Observation proposal (ethresearch)](https://ethresear.ch/t/gossipsub-topic-observation-proposed-gossipsub-1-3/20907)
+- [Gossipsub v1.4 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.4.md)
 - [Gossipsub v2.0 Specification](https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v2.0.md)
