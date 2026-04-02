@@ -16,8 +16,8 @@ Features demonstrated:
   - Equivocation detection
   - Enhanced message validation
 
-Usage:
-    python gossipsub_v2.0.py --nodes 5 --duration 30
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v2.0.py --nodes 5 --duration 30
 """
 
 import argparse

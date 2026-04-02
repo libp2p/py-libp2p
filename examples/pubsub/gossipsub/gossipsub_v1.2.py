@@ -12,8 +12,8 @@ Features demonstrated:
 - Reduced bandwidth usage
 - Improved efficiency in dense networks
 
-Usage:
-    python gossipsub_v1.2.py --nodes 5 --duration 30
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v1.2.py --nodes 5 --duration 30
 """
 
 import argparse

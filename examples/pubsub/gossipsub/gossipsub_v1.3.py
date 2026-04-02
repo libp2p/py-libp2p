@@ -19,9 +19,9 @@ Roles in this demo:
   - subscriber : subscribes to the topic and reads full message payloads
   - observer   : starts observing (IHAVE-only) without subscribing; tracks presence
 
-Usage:
-    python gossipsub_v1.3.py --nodes 6 --duration 40
-    python gossipsub_v1.3.py --nodes 6 --duration 40 --verbose
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v1.3.py --nodes 6 --duration 40
+    python examples/pubsub/gossipsub/gossipsub_v1.3.py --nodes 6 --duration 40 --verbose
 """
 
 import argparse

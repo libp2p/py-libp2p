@@ -15,8 +15,8 @@ Features demonstrated:
 - Fanout behaviour: a publisher that is not in the mesh (e.g. does not subscribe)
   sends to a random set of topic subscribers (fanout peers) instead of mesh peers
 
-Usage:
-    python gossipsub_v1.0.py --nodes 5 --duration 30
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v1.0.py --nodes 5 --duration 30
 """
 
 import argparse

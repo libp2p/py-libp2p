@@ -22,9 +22,9 @@ Node roles in this demo:
   - observer   : uses Topic Observation (IHAVE-only) inherited from v1.3
   - validator  : receives messages and validates them; no publishing
 
-Usage:
-    python gossipsub_v1.4.py --nodes 6 --duration 40
-    python gossipsub_v1.4.py --nodes 6 --duration 40 --verbose
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v1.4.py --nodes 6 --duration 40
+    python examples/pubsub/gossipsub/gossipsub_v1.4.py --nodes 6 --duration 40 --verbose
 """
 
 import argparse

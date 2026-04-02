@@ -16,8 +16,8 @@ Features demonstrated:
 - Signed peer records
 - Better resilience against attacks
 
-Usage:
-    python gossipsub_v1.1.py --nodes 5 --duration 30
+Usage (from repository root):
+    python examples/pubsub/gossipsub/gossipsub_v1.1.py --nodes 5 --duration 30
 """
 
 import argparse
