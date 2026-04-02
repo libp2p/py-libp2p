@@ -7,6 +7,7 @@ from libp2p.utils.multiaddr_utils import (
     extract_host_from_multiaddr,
     extract_ip_from_multiaddr,
     format_host_for_url,
+    join_multiaddrs,
 )
 
 
@@ -111,3 +112,10 @@ class TestFormatHostForUrl:
         """Verify that format_host_for_url produces valid URLs."""
         ws_url = f"ws://{format_host_for_url(host)}:8080/"
         assert ws_url == expected
+
+
+class TestJoinMultiaddrs:
+    def test_join_multiaddrs_mixed_inputs(self) -> None:
+        tcp_bin = Multiaddr("/tcp/4001").to_bytes()
+        out = join_multiaddrs("/ip4/127.0.0.1", tcp_bin, Multiaddr("/ws"))
+        assert str(out) == "/ip4/127.0.0.1/tcp/4001/ws"
