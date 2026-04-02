@@ -1,0 +1,1 @@
+Added a new ``libp2p.request_response`` helper that provides safe one-shot request/response exchanges with framed messages, bounded payload sizes, default timeouts, pluggable codecs, and a generic demo.
