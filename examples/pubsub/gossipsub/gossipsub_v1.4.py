@@ -85,10 +85,11 @@ class GossipsubV14Node:
 
         key_pair = create_new_key_pair()
 
-        self.host = new_host(
+        host = new_host(
             key_pair=key_pair,
             muxer_opt={MPLEX_PROTOCOL_ID: Mplex},
         )
+        self.host = host
 
         # Full peer scoring: P1-P4 topic-scoped + P5 behavior + P6/P7 global.
         score_params = ScoreParams(
@@ -115,7 +116,7 @@ class GossipsubV14Node:
         #   max_ihave_messages_per_second  – caps IHAVE flood per peer/topic
         #   graft_flood_threshold          – minimum seconds between PRUNE and GRAFT
         #   adaptive_gossip_enabled        – turn on health-based parameter adaptation
-        self.gossipsub = GossipSub(
+        gossipsub = GossipSub(
             protocols=[PROTOCOL_ID_V14],
             degree=3,
             degree_low=2,
@@ -128,14 +129,15 @@ class GossipsubV14Node:
             # v1.4 rate limiting
             adaptive_gossip_enabled=True,
         )
+        self.gossipsub = gossipsub
 
         # Override v1.4 rate limiting thresholds directly on the router so the
         # demo can observe them being triggered with a small message volume.
-        self.gossipsub.max_iwant_requests_per_second = 5.0
-        self.gossipsub.max_ihave_messages_per_second = 5.0
-        self.gossipsub.graft_flood_threshold = 8.0
+        gossipsub.max_iwant_requests_per_second = 5.0
+        gossipsub.max_ihave_messages_per_second = 5.0
+        gossipsub.graft_flood_threshold = 8.0
 
-        self.pubsub = Pubsub(self.host, self.gossipsub)
+        self.pubsub = Pubsub(host, gossipsub)
 
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{self.port}")]
 
@@ -177,11 +179,12 @@ class GossipsubV14Node:
 
     async def receive_messages(self) -> None:
         """Drain the subscription queue and count deliveries."""
-        if not self.subscription:
+        subscription = self.subscription
+        if subscription is None:
             return
         try:
             while True:
-                message = await self.subscription.get()
+                message = await subscription.get()
                 decoded = message.data.decode("utf-8")
                 self.messages_received += 1
                 logger.info(

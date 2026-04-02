@@ -161,11 +161,12 @@ class GossipsubV13Node:
 
     async def receive_messages(self) -> None:
         """Read full message payloads (subscriber / publisher roles)."""
-        if not self.subscription:
+        subscription = self.subscription
+        if subscription is None:
             return
         try:
             while True:
-                message = await self.subscription.get()
+                message = await subscription.get()
                 decoded = message.data.decode("utf-8")
                 self.messages_received += 1
                 logger.info(
