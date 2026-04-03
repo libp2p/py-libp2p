@@ -35,7 +35,7 @@ if command -v uv &> /dev/null; then
     echo -e "${GREEN}Installing pre-commit hooks...${NC}"
     uv run pre-commit install
 
-    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes.${NC}"
+    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes, or 'make docs' to build the docs.${NC}"
 else
     # Check if virtual environment flag is set
     if [[ -z "$VIRTUAL_ENV" ]]; then
@@ -65,5 +65,5 @@ else
     echo -e "${GREEN}Installing pre-commit hooks...${NC}"
     pre-commit install
 
-    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes.${NC}"
+    echo -e "${GREEN}Setup complete! You can now run 'make pr' to check your changes, or 'make docs' to build the docs.${NC}"
 fi
