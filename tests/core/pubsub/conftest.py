@@ -41,9 +41,7 @@ class GossipSubHarness:
 
 
 @asynccontextmanager
-async def gossipsub_nodes(
-    n: int, **kwargs: Any
-) -> AsyncIterator[GossipSubHarness]:
+async def gossipsub_nodes(n: int, **kwargs: Any) -> AsyncIterator[GossipSubHarness]:
     """
     Create *n* GossipSub-backed pubsub nodes wrapped in a harness.
 
