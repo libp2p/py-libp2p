@@ -48,8 +48,13 @@ Install the development dependencies using a virtual environment:
 
     cd py-libp2p
     python3 -m venv .venv
-    source .venv/bin/activate
+    . .venv/bin/activate
     ./scripts/setup_dev.sh
+
+.. note::
+
+    On Linux, if you are not already in a virtual environment, the script will create one
+    automatically and instruct you to activate it.
 
 **Option 2: Using uv (recommended, same as CI):**
 
@@ -166,8 +171,6 @@ Then set up the development environment:
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
-
-On macOS, help the build command find and link against the ``gmp`` library:
 
 **Note:** This project uses PEP 735 ``[dependency-groups]`` which requires pip >= 25.1.
 If you have an older pip version, upgrade it first.
