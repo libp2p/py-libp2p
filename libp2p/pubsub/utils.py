@@ -57,8 +57,6 @@ def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
     Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
     so that malformed hex from peers does not crash the gossip handler task.
     """
-    if isinstance(s, bytes):
-        return s
     try:
         if isinstance(value, str):
             return bytes.fromhex(value)
@@ -75,8 +73,3 @@ def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
         return None
     except ValueError:
         return None
-
-
-def parse_message_id_safe(msg_id_str: str) -> MessageID:
-    """Safely handle message ID as string."""
-    return MessageID(msg_id_str)
