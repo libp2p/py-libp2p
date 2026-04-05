@@ -1,10 +1,10 @@
 # Interop Directory
 
-This directory contains **interoperability and performance test material** for py-libp2p, designed to integrate with the [unified-testing framework](https://github.com/libp2p/unified-testing) (successor to libp2p/test-plans).
+This directory contains **interoperability and performance test material** for py-libp2p. It is used by more than one harness: the [unified-testing framework](https://github.com/libp2p/unified-testing) and [libp2p/test-plans](https://github.com/libp2p/test-plans) (transport-interop and related suites) are maintained **independently**; both can build Docker images and run cross-implementation tests from this repo.
 
 ## Purpose
 
-The `interop/` directory houses the Docker images, test scripts, and configuration needed to run py-libp2p in cross-implementation tests. The unified-testing convention allows this material to live in the implementation repository itself, which:
+The `interop/` directory houses the Docker images, test scripts, and configuration needed to run py-libp2p in cross-implementation tests. Keeping this material **in the py-libp2p repository** means:
 
 - Enables **local testing** against other libp2p implementations (Rust, Go, JS, .NET) without syncing between repos
 - Serves as an **example** for setting up Docker-based protocol tests with py-libp2p
@@ -24,7 +24,15 @@ interop/
     └── pyproject.toml
 ```
 
-Each subdirectory corresponds to a **test type** in the unified-testing framework.
+Each subdirectory corresponds to a **test type** (perf vs transport) consumed by the harnesses below.
+
+## Relationship to libp2p/test-plans
+
+The **canonical** transport ping harness is **`interop/transport/ping_test.py`** in this repository.
+
+The **test-plans** repo builds a **python-v0.x** image for [transport-interop](https://github.com/libp2p/test-plans/tree/master/transport-interop) using its own **`impl/python/v0.x/Dockerfile`**: it vendors a py-libp2p tree (zip/commit), may apply **test-plans-only** patches (for example a Yamux interoperability fix), sets **`ENTRYPOINT`** to run `ping_test.py` with **`--test-plans`**, and pins dependencies via **`impl/python/v0.x/pyproject.toml`**. That layout tracks this repo; **do not treat the test-plans copy of `ping_test.py` as the source of truth**—change it here, then sync or bump the pinned commit in test-plans.
+
+By contrast, **`interop/transport/Dockerfile`** in py-libp2p targets the **unified-testing** workflow (venv via **uv**, Python 3.13 slim, default **`ENTRYPOINT`** without `--test-plans`). The two Dockerfiles are **not** interchangeable; only the **script and library expectations** should stay aligned.
 
 ## How It Integrates with Unified-Testing
 
@@ -52,6 +60,8 @@ The test app (`perf_test.py`) implements the [libp2p perf protocol](https://gith
 
 Transport tests verify that py-libp2p can establish connections and exchange protocols with other implementations over various transport, secure channel, and muxer combinations (TCP, QUIC, WebSocket, Noise, TLS, yamux, mplex).
 
+The entry point is **`ping_test.py`**, which supports **unified-testing** (YAML / `TEST_KEY` Redis keys) and, when invoked with **`--test-plans`**, the **test-plans** harness (JSON on stdout, `listenerAddr` Redis key). See **`interop/transport/pyproject.toml`** for install-time dependencies.
+
 ## Build Context
 
 When building from the py-libp2p repo:
@@ -76,10 +86,12 @@ To run the perf test script directly (e.g. for development), see `examples/perf/
 ## Relationship to CI
 
 - Code in `interop/` is **not** run by py-libp2p's own CI (which uses `tests/`).
-- The unified-testing framework runs this code when py-libp2p is included in `images.yaml` and the perf/transport test suite is executed (e.g. in the test-plans or unified-testing repo).
+- **unified-testing** runs this code when py-libp2p is listed in `images.yaml` and the perf/transport suite is executed.
+- **test-plans** CI runs transport-interop (and may build the Python image from a pinned commit of this repo).
 
 ## References
 
+- [libp2p/test-plans](https://github.com/libp2p/test-plans) – transport-interop and other matrix tests
 - [Unified-testing framework](https://github.com/libp2p/unified-testing) – Bash + Docker test runner
 - [write-a-perf-test-app.md](https://github.com/libp2p/unified-testing/blob/master/docs/write-a-perf-test-app.md) – Perf test app specification
 - [write-a-transport-test-app.md](https://github.com/libp2p/unified-testing/blob/master/docs/write-a-transport-test-app.md) – Transport test app specification
