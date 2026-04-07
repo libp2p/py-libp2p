@@ -15,15 +15,6 @@ echo -e "${GREEN}Setting up py-libp2p development environment...${NC}"
 # Check if uv is available
 if command -v uv &> /dev/null; then
     echo -e "${GREEN}Using uv for installation (recommended)...${NC}"
-    # Check if virtual environment flag is set
-    if [[ -z "$VIRTUAL_ENV" ]]; then
-        echo -e "${YELLOW}No virtual environment detected. Creating one with uv...${NC}"
-        uv venv
-        echo -e "${YELLOW}Activate it with:${NC}"
-        echo -e "  source .venv/bin/activate"
-        echo -e "${YELLOW}Then run this script again.${NC}"
-        exit 1
-    fi
     # if on macOS, add gmp flags to the sync command
     if [[ "$(uname -s)" == "Darwin" ]]; then
         CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" uv sync --group dev
@@ -42,7 +33,7 @@ else
         echo -e "${YELLOW}Warning: Not in a virtual environment. Creating one...${NC}"
         python3 -m venv .venv
         echo -e "${GREEN}Virtual environment created. Activate it with:${NC}"
-        echo -e "  source .venv/bin/activate"
+        echo -e "  . .venv/bin/activate"
         echo -e "${YELLOW}Then run this script again.${NC}"
         exit 1
     fi

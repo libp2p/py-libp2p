@@ -84,7 +84,7 @@ Then set up the development environment:
 
     cd py-libp2p
     python3 -m venv .venv
-    source .venv/bin/activate
+    . .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
@@ -98,7 +98,7 @@ An alternative using ``virtualenv``:
 
     cd py-libp2p
     virtualenv -p python .venv
-    source .venv/bin/activate
+    . .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
@@ -167,7 +167,7 @@ Then set up the development environment:
 
     cd py-libp2p
     python3 -m venv .venv
-    source .venv/bin/activate
+    . .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     CFLAGS="$(pkg-config --cflags gmp)" LDFLAGS="$(pkg-config --libs gmp)" pip install --group dev -e .
     pre-commit install
@@ -181,7 +181,7 @@ An alternative using ``virtualenv``:
 
     cd py-libp2p
     virtualenv -p python .venv
-    source .venv/bin/activate
+    . .venv/bin/activate
     pip install --upgrade pip  # Ensure pip >= 25.1 for PEP 735 support
     pip install --group dev -e .
     pre-commit install
