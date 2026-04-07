@@ -61,9 +61,14 @@ async def connected_gossipsub_nodes(
     n: int, **kwargs: Any
 ) -> AsyncIterator[GossipSubHarness]:
     """Create *n* GossipSub nodes with dense connectivity."""
+    peer_wait_timeout = kwargs.pop("peer_wait_timeout", 5.0)
     async with gossipsub_nodes(n, **kwargs) as harness:
         await dense_connect(harness.hosts)
-        await trio.sleep(0.1)
+        if n > 1:
+            with trio.fail_after(peer_wait_timeout):
+                for index, pubsub in enumerate(harness.pubsubs):
+                    target_host = harness.hosts[(index + 1) % n]
+                    await pubsub.wait_for_peer(target_host.get_id())
         yield harness
 
 
