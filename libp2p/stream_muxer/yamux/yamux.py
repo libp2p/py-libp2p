@@ -579,17 +579,11 @@ class Yamux(IMuxedConn):
                 f"Yamux.start() starting handle_incoming task for {self.peer_id}"
             )
 
-            async def _run_incoming_then_cancel() -> None:
-                try:
-                    await self.handle_incoming()
-                finally:
-                    nursery.cancel_scope.cancel()
-
-            nursery.start_soon(_run_incoming_then_cancel)
             nursery.start_soon(self._measure_rtt_loop)
             # Use nursery.start() to ensure handle_incoming has started
             # before we set event_started. This prevents race conditions
             # where streams are opened before the muxer is ready.
+            # When handle_incoming exits, the finally block cancels the nursery.
             await nursery.start(self._handle_incoming_with_ready_signal)
 
             logger.debug(f"Yamux.start() setting event_started for {self.peer_id}")
@@ -860,13 +854,18 @@ class Yamux(IMuxedConn):
         This method uses trio's task_status to signal that the handle_incoming
         loop is ready to process frames. This prevents race conditions where
         streams are opened before the muxer is ready to handle them.
+        When handle_incoming exits, this cancels the nursery scope.
         """
         logger.debug(
             f"Yamux _handle_incoming_with_ready_signal() starting for "
             f"peer {self.peer_id}"
         )
         task_status.started()
-        await self.handle_incoming()
+        try:
+            await self.handle_incoming()
+        finally:
+            if self._nursery is not None:
+                self._nursery.cancel_scope.cancel()
 
     async def handle_incoming(self) -> None:
         logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
