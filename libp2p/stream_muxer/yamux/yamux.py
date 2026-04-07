@@ -513,6 +513,7 @@ class Yamux(IMuxedConn):
         self.stream_events: dict[int, trio.Event] = {}
         self._write_lock = trio.Lock()
         self._nursery: Nursery | None = None
+        self._established: bool = False
         self._rtt: float = 0.0  # smoothed RTT in seconds
         self._ping_id: int = 0  # incrementing ping nonce
         self._ping_sent_time: float = 0.0  # trio.current_time() when ping sent
@@ -550,6 +551,22 @@ class Yamux(IMuxedConn):
                 while not self.event_shutting_down.is_set():
                     await trio.sleep(1.0)
 
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Yamux connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
+
     async def start(self) -> None:
         logger.debug(f"Starting Yamux for {self.peer_id}")
         if self.event_started.is_set():
@@ -570,7 +587,13 @@ class Yamux(IMuxedConn):
 
             nursery.start_soon(_run_incoming_then_cancel)
             nursery.start_soon(self._measure_rtt_loop)
+            # Use nursery.start() to ensure handle_incoming has started
+            # before we set event_started. This prevents race conditions
+            # where streams are opened before the muxer is ready.
+            await nursery.start(self._handle_incoming_with_ready_signal)
+
             logger.debug(f"Yamux.start() setting event_started for {self.peer_id}")
+            self._established = True
             self.event_started.set()
         logger.debug(
             f"Yamux.start() exiting for {self.peer_id}, closing new stream channel"
@@ -827,6 +850,23 @@ class Yamux(IMuxedConn):
 
         # This line should never be reached, but satisfies the type checker
         raise MuxedStreamEOF("Unexpected end of read_stream")
+
+    async def _handle_incoming_with_ready_signal(
+        self, task_status: Any = trio.TASK_STATUS_IGNORED
+    ) -> None:
+        """
+        Wrapper for handle_incoming that signals when the task is ready.
+
+        This method uses trio's task_status to signal that the handle_incoming
+        loop is ready to process frames. This prevents race conditions where
+        streams are opened before the muxer is ready to handle them.
+        """
+        logger.debug(
+            f"Yamux _handle_incoming_with_ready_signal() starting for "
+            f"peer {self.peer_id}"
+        )
+        task_status.started()
+        await self.handle_incoming()
 
     async def handle_incoming(self) -> None:
         logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
