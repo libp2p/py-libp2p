@@ -159,12 +159,13 @@ class BasePattern(IPattern):
         # Sign the X25519 public key (not the Ed25519 public key)
         # The Noise protocol uses X25519 keys for the DH exchange
         noise_static_pubkey = self._validate_noise_static_key()
+        noise_static_pubkey_hex = noise_static_pubkey.to_bytes().hex()
         logger.debug(
-            f"make_handshake_payload: X25519 pubkey: {noise_static_pubkey.to_bytes().hex()}"
+            f"make_handshake_payload: X25519 pubkey: {noise_static_pubkey_hex}"
         )
         signature = make_handshake_payload_sig(self.libp2p_privkey, noise_static_pubkey)
 
-        # Determine final extensions: prioritize extensions.early_data, fallback to self.early_data
+        # Prefer explicit early_data and fall back to self.early_data.
         final_extensions = extensions
         if (
             extensions is not None

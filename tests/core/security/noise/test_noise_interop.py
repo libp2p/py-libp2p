@@ -77,14 +77,13 @@ class TestNoiseKeyTypeCorrectness:
 
         # Create handshake payload
         payload = pattern.make_handshake_payload()
-
-        # Verify by reconstructing what should have been signed
-        expected_signed_data = make_data_to_be_signed(noise_pubkey)
-        actual_signed_data = make_data_to_be_signed(noise_pubkey)
-        assert actual_signed_data == expected_signed_data
+        signed_data = make_data_to_be_signed(noise_pubkey)
+        prefix = SIGNED_DATA_PREFIX.encode("utf-8")
 
         # Verify the signature validates with the X25519 public key
         assert verify_handshake_payload_sig(payload, noise_pubkey)
+        assert signed_data.startswith(prefix)
+        assert signed_data[len(prefix):] == noise_pubkey.to_bytes()
 
     def test_make_handshake_payload_rejects_non_x25519(self):
         """Verify make_handshake_payload rejects non-X25519 noise_static_key."""
@@ -101,7 +100,7 @@ class TestNoiseKeyTypeCorrectness:
             pattern.make_handshake_payload()
 
     def test_signature_format_matches_spec(self, pattern_setup):
-        """Verify signed data format: 'noise-libp2p-static-key:' + X25519 Montgomery bytes."""
+        """Verify signed data format uses the X25519 public key bytes."""
         pattern, libp2p_keypair, noise_key = pattern_setup
 
         # Get X25519 public key bytes (Montgomery form)
@@ -169,10 +168,11 @@ class TestNoiseHandshakeInterop:
             assert init_conn is not None
             assert resp_conn is not None
 
-            # Verify remote_permanent_pubkey is correct X25519 type
+            # Verify the interface exposes the expected X25519 public key.
             for conn in (init_conn, resp_conn):
-                assert isinstance(conn.remote_permanent_pubkey, X25519PublicKey)
-                assert conn.remote_permanent_pubkey.get_type() == KeyType.X25519
+                remote_pubkey = conn.get_remote_public_key()
+                assert isinstance(remote_pubkey, X25519PublicKey)
+                assert remote_pubkey.get_type() == KeyType.X25519
 
     @pytest.mark.trio
     async def test_data_exchange_after_handshake(
