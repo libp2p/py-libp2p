@@ -40,6 +40,10 @@ from .config import (
 from .pb.circuit_pb2 import (
     HopMessage,
 )
+from .pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
+)
 from .protocol import (
     PROTOCOL_ID,
 )
@@ -405,10 +409,10 @@ class RelayDiscovery(Service):
                 )
 
                 with trio.fail_after(self.stream_timeout):
-                    await stream.write(request.SerializeToString())
+                    await write_circuit_v2_pb(stream, request.SerializeToString())
 
                     # Wait for response
-                    response_bytes = await stream.read(1024)
+                    response_bytes = await read_circuit_v2_pb(stream)
                     if not response_bytes:
                         logger.error("No response received from relay %s", peer_id)
                         return False

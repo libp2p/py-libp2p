@@ -28,6 +28,10 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
 from libp2p.relay.circuit_v2.pb.circuit_pb2 import Reservation as PbReservation
+from libp2p.relay.circuit_v2.pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
+)
 from libp2p.relay.circuit_v2.protocol import (
     DEFAULT_RELAY_LIMITS,
     PROTOCOL_ID,
@@ -42,12 +46,10 @@ from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
-)
 from libp2p.tools.utils import (
     connect,
 )
+from libp2p.utils.varint import decode_varint_with_size
 from tests.utils.factories import (
     HostFactory,
 )
@@ -143,7 +145,7 @@ async def assert_stream_response(
 
                 # Try to read response
                 logger.debug("Attempt %d: Reading response from stream", attempt + 1)
-                response_bytes = await stream.read(MAX_READ_LEN)
+                response_bytes = await read_circuit_v2_pb(stream)
 
                 # Check if we got any data
                 if not response_bytes:
@@ -563,9 +565,10 @@ async def test_handle_reserve_returns_signed_reservation_payload():
     assert stream.write.await_count == 1
     await_args = stream.write.await_args
     assert await_args is not None
-    response_bytes = await_args.args[0]
+    framed = await_args.args[0]
+    plen, off = decode_varint_with_size(framed)
     response = proto.HopMessage()
-    response.ParseFromString(response_bytes)
+    response.ParseFromString(framed[off : off + plen])
 
     assert response.type == proto.HopMessage.STATUS
     assert response.status.code == proto.Status.OK
@@ -588,7 +591,7 @@ async def test_circuit_v2_reservation_basic():
             # Read the request
             logger.info("Mock handler received stream request")
             try:
-                request_data = await stream.read(MAX_READ_LEN)
+                request_data = await read_circuit_v2_pb(stream)
                 request = proto.HopMessage()
                 request.ParseFromString(request_data)
                 logger.info("Mock handler parsed request: type=%s", request.type)
@@ -628,7 +631,7 @@ async def test_circuit_v2_reservation_basic():
 
                     # Send the response
                     logger.info("Mock handler sending response")
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     logger.info("Mock handler sent response")
 
                     # Keep stream open for client to read response
@@ -678,7 +681,7 @@ async def test_circuit_v2_reservation_basic():
                 )
 
                 logger.info("Sending reservation request")
-                await stream.write(request.SerializeToString())
+                await write_circuit_v2_pb(stream, request.SerializeToString())
                 logger.info("Reservation request sent")
 
                 # Wait to ensure the request is processed
@@ -686,7 +689,7 @@ async def test_circuit_v2_reservation_basic():
 
                 # Read response directly
                 logger.info("Reading response directly")
-                response_bytes = await stream.read(MAX_READ_LEN)
+                response_bytes = await read_circuit_v2_pb(stream)
                 assert response_bytes, "No response received"
 
                 # Parse response
@@ -740,7 +743,7 @@ async def test_circuit_v2_reservation_limit():
             # Read the request
             logger.info("Mock handler received stream request")
             try:
-                request_data = await stream.read(MAX_READ_LEN)
+                request_data = await read_circuit_v2_pb(stream)
                 request = proto.HopMessage()
                 request.ParseFromString(request_data)
                 logger.info("Mock handler parsed request: type=%s", request.type)
@@ -772,7 +775,7 @@ async def test_circuit_v2_reservation_limit():
                                         message="Invalid senderRecord",
                                     ),
                                 )
-                                await stream.write(response.SerializeToString())
+                                await write_circuit_v2_pb(stream, response.SerializeToString())
                                 return
                         except Exception as e:
                             logger.warning(
@@ -785,7 +788,7 @@ async def test_circuit_v2_reservation_limit():
                                     message=f"SPR validation error: {e}",
                                 ),
                             )
-                            await stream.write(response.SerializeToString())
+                            await write_circuit_v2_pb(stream, response.SerializeToString())
                             return
                     else:
                         logger.warning(
@@ -799,7 +802,7 @@ async def test_circuit_v2_reservation_limit():
                                 message="Missing senderRecord",
                             ),
                         )
-                        await stream.write(response.SerializeToString())
+                        await write_circuit_v2_pb(stream, response.SerializeToString())
                         return
 
                     # Check if we've reached reservation limit
@@ -847,7 +850,7 @@ async def test_circuit_v2_reservation_limit():
 
                     # Send the response
                     logger.info("Mock handler sending response")
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     logger.info("Mock handler sent response")
 
                     # Keep stream open for client to read response
@@ -899,7 +902,7 @@ async def test_circuit_v2_reservation_limit():
                 )
 
                 logger.info("Sending reservation request for client1")
-                await stream1.write(request1.SerializeToString())
+                await write_circuit_v2_pb(stream1, request1.SerializeToString())
                 logger.info("Sent reservation request for client1")
 
                 # Wait to ensure the request is processed
@@ -907,7 +910,7 @@ async def test_circuit_v2_reservation_limit():
 
                 # Read response directly
                 logger.info("Reading response for client1")
-                response_bytes = await stream1.read(MAX_READ_LEN)
+                response_bytes = await read_circuit_v2_pb(stream1)
                 assert response_bytes, "No response received for client1"
 
                 # Parse response
@@ -958,7 +961,7 @@ async def test_circuit_v2_reservation_limit():
                 )
 
                 logger.info("Sending reservation request for client2")
-                await stream2.write(request2.SerializeToString())
+                await write_circuit_v2_pb(stream2, request2.SerializeToString())
                 logger.info("Sent reservation request for client2")
 
                 # Wait to ensure the request is processed
@@ -966,7 +969,7 @@ async def test_circuit_v2_reservation_limit():
 
                 # Read response directly
                 logger.info("Reading response for client2")
-                response_bytes = await stream2.read(MAX_READ_LEN)
+                response_bytes = await read_circuit_v2_pb(stream2)
                 assert response_bytes, "No response received for client2"
 
                 # Parse response
@@ -1014,7 +1017,7 @@ async def test_circuit_v2_fails_with_invalid_SPR():
         # Handler that checks SPR validity
         async def spr_validation_handler(stream):
             try:
-                request_data = await stream.read(MAX_READ_LEN)
+                request_data = await read_circuit_v2_pb(stream)
                 request = proto.HopMessage()
                 request.ParseFromString(request_data)
 
@@ -1034,7 +1037,7 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                         type=proto.HopMessage.RESERVE,
                         status=proto.Status(code=status_code, message=message),
                     )
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     await trio.sleep(2)  # Brief wait for client to read
             except Exception as e:
                 logger.error("Handler error: %s", str(e))
@@ -1047,7 +1050,9 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                             message=f"Handler error: {str(e)}",
                         ),
                     )
-                    await stream.write(error_response.SerializeToString())
+                    await write_circuit_v2_pb(
+                        stream, error_response.SerializeToString()
+                    )
                 except Exception:
                     pass
 
@@ -1067,10 +1072,10 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                     peer=client_host.get_id().to_bytes(),
                     senderRecord=b"invalid-spr",  # Invalid SPR
                 )
-                await stream.write(request.SerializeToString())
+                await write_circuit_v2_pb(stream, request.SerializeToString())
                 await trio.sleep(SLEEP_TIME)
 
-                response_bytes = await stream.read(MAX_READ_LEN)
+                response_bytes = await read_circuit_v2_pb(stream)
                 assert response_bytes, "No response received"
 
                 response = proto.HopMessage()
@@ -1153,13 +1158,13 @@ async def test_reservation_fails_with_invalid_record_transfer():
                         senderRecord=corrupted_env.marshal_envelope(),  # Invalid SPR
                     )
 
-                    await stream.write(request.SerializeToString())
+                    await write_circuit_v2_pb(stream, request.SerializeToString())
                     logger.info("Sent request with invalid SPR")
                     await trio.sleep(SLEEP_TIME)
 
                     # Try to read response, but expect the stream to be closed
                     try:
-                        response_bytes = await stream.read(MAX_READ_LEN)
+                        response_bytes = await read_circuit_v2_pb(stream)
                         if not response_bytes:
                             # Empty response indicates stream was closed
                             stream_closed_by_relay = True

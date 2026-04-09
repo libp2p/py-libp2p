@@ -58,6 +58,10 @@ from .pb.circuit_pb2 import (
     Reservation,
     StopMessage,
 )
+from .pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
+)
 from .performance_tracker import (
     RelayPerformanceTracker,
 )
@@ -398,11 +402,13 @@ class CircuitV2Transport(ITransport):
             reservation_proof = self._reservation_proofs.get(relay_peer_id)
             if reservation_proof and reservation_proof.expire > int(time.time()):
                 connect_msg.reservation.CopyFrom(reservation_proof)
-            await relay_stream.write(connect_msg.SerializeToString())
+            await write_circuit_v2_pb(
+                relay_stream, connect_msg.SerializeToString()
+            )
 
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
-                resp_bytes = await relay_stream.read(1024)
+                resp_bytes = await read_circuit_v2_pb(relay_stream)
                 resp = HopMessage()
                 resp.ParseFromString(resp_bytes)
 
@@ -584,9 +590,9 @@ class CircuitV2Transport(ITransport):
                 type=HopMessage.CONNECT,
                 peer=peer_info.peer_id.to_bytes(),
             )
-            await relay_stream.write(hop_msg.SerializeToString())
+            await write_circuit_v2_pb(relay_stream, hop_msg.SerializeToString())
 
-            resp_bytes = await relay_stream.read()
+            resp_bytes = await read_circuit_v2_pb(relay_stream)
             resp = HopMessage()
             resp.ParseFromString(resp_bytes)
 
@@ -805,7 +811,7 @@ class CircuitV2Transport(ITransport):
             )
 
             try:
-                await stream.write(reserve_msg.SerializeToString())
+                await write_circuit_v2_pb(stream, reserve_msg.SerializeToString())
                 logger.debug("Successfully sent reservation request")
             except Exception as e:
                 logger.error("Failed to send reservation request: %s", str(e))
@@ -814,7 +820,7 @@ class CircuitV2Transport(ITransport):
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 try:
-                    resp_bytes = await stream.read(1024)
+                    resp_bytes = await read_circuit_v2_pb(stream)
                     logger.debug(
                         "Received reservation response: %d bytes", len(resp_bytes)
                     )
@@ -1014,7 +1020,7 @@ class CircuitV2Listener(Service, IListener):
 
         try:
             # Read STOP message
-            msg_bytes = await stream.read()
+            msg_bytes = await read_circuit_v2_pb(stream)
             stop_msg = StopMessage()
             stop_msg.ParseFromString(msg_bytes)
 

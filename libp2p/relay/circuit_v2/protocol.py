@@ -64,6 +64,10 @@ from .pb.circuit_pb2 import (
     Status as PbStatus,
     StopMessage,
 )
+from .pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
+)
 from .protocol_buffer import (
     StatusCode,
     create_status,
@@ -76,8 +80,9 @@ from .utils import maybe_consume_signed_record
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
-STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
+# Must match other libp2p implementations (e.g. rust-libp2p HOP_PROTOCOL_NAME / STOP_PROTOCOL_NAME).
+PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/0.2.0/hop")
+STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/0.2.0/stop")
 
 
 # Default limits for relay resources
@@ -315,7 +320,7 @@ class CircuitV2Protocol(Service):
                 # First, handle the read timeout gracefully
                 try:
                     with trio.fail_after(STREAM_READ_TIMEOUT * 2):
-                        msg_bytes = await stream.read(1024)
+                        msg_bytes = await read_circuit_v2_pb(stream)
                         if not msg_bytes:
                             logger.error(f"Empty read from stream from {remote_id}")
 
@@ -328,7 +333,9 @@ class CircuitV2Protocol(Service):
                                 status=pb_status,
                                 senderRecord=signed_envelope,
                             )
-                            await stream.write(response.SerializeToString())
+                            await write_circuit_v2_pb(
+                                stream, response.SerializeToString()
+                            )
                             await trio.sleep(
                                 0.5
                             )  # Longer wait to ensure message is sent
@@ -346,7 +353,7 @@ class CircuitV2Protocol(Service):
                         status=pb_status,
                         senderRecord=signed_envelope,
                     )
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     await trio.sleep(0.5)
                     break
                 except Exception as e:
@@ -360,7 +367,7 @@ class CircuitV2Protocol(Service):
                         status=pb_status,
                         senderRecord=signed_envelope,
                     )
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     await trio.sleep(0.5)  # Longer wait to ensure the message is sent
                     break
                 # Parse the message
@@ -379,7 +386,7 @@ class CircuitV2Protocol(Service):
                         status=pb_status,
                         senderRecord=signed_envelope,
                     )
-                    await stream.write(response.SerializeToString())
+                    await write_circuit_v2_pb(stream, response.SerializeToString())
                     await trio.sleep(0.5)
                     continue
                 if hop_msg.HasField("senderRecord"):
@@ -438,7 +445,7 @@ class CircuitV2Protocol(Service):
         try:
             # Read the incoming message with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
-                msg_bytes = await stream.read(1024)
+                msg_bytes = await read_circuit_v2_pb(stream)
                 stop_msg = StopMessage()
                 stop_msg.ParseFromString(msg_bytes)
 
@@ -575,7 +582,9 @@ class CircuitV2Protocol(Service):
                         status=status,
                         senderRecord=signed_envelope.marshal_envelope(),
                     )
-                    await stream.write(status_msg.SerializeToString())
+                    await write_circuit_v2_pb(
+                        stream, status_msg.SerializeToString()
+                    )
                     return
 
                 # Accept reservation
@@ -637,7 +646,7 @@ class CircuitV2Protocol(Service):
                     response.type,
                     getattr(response.status, "code", "unknown"),
                 )
-                await stream.write(response.SerializeToString())
+                await write_circuit_v2_pb(stream, response.SerializeToString())
                 # Add a small wait to ensure the message is fully sent
                 await trio.sleep(0.1)
 
@@ -729,10 +738,12 @@ class CircuitV2Protocol(Service):
                     senderRecord=relay_envelope_bytes,
                 )
 
-                await dst_stream.write(stop_msg.SerializeToString())
+                await write_circuit_v2_pb(
+                    dst_stream, stop_msg.SerializeToString()
+                )
 
                 # Wait for response from destination
-                resp_bytes = await dst_stream.read(1024)
+                resp_bytes = await read_circuit_v2_pb(dst_stream)
                 resp = StopMessage()
                 resp.ParseFromString(resp_bytes)
 
@@ -948,7 +959,7 @@ class CircuitV2Protocol(Service):
                 msg_bytes = status_msg.SerializeToString()
                 logger.debug("Status message serialized (%d bytes)", len(msg_bytes))
 
-                await stream.write(msg_bytes)
+                await write_circuit_v2_pb(stream, msg_bytes)
                 logger.debug("Status message sent successfully")
         except trio.TooSlowError:
             logger.error(
@@ -982,6 +993,6 @@ class CircuitV2Protocol(Service):
                 if senderRecord is not None:
                     status_msg.senderRecord = senderRecord.marshal_envelope()
 
-                await stream.write(status_msg.SerializeToString())
+                await write_circuit_v2_pb(stream, status_msg.SerializeToString())
         except Exception as e:
             logger.error("Error sending stop status message: %s", str(e))
