@@ -1,0 +1,1 @@
+Added standardized methods to connection interfaces to access transport address information and connection type without requiring low-level connection access. Connections now expose ``get_transport_addresses()`` and ``get_connection_type()`` methods to determine if a connection is direct or relayed, and to retrieve the actual transport addresses used.

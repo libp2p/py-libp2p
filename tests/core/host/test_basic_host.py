@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -12,6 +13,7 @@ from libp2p import (
 from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
+from libp2p.custom_types import TProtocol
 from libp2p.host.basic_host import (
     BasicHost,
 )
@@ -33,6 +35,34 @@ def test_default_protocols():
     # NOTE: comparing keys for equality as handlers may be closures that do not compare
     # in the way this test is concerned with
     assert handlers.keys() == get_default_protocols(host).keys()
+
+
+def test_remove_stream_handler_removes_protocol():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+
+    protocol = TProtocol("/test/remove/1.0.0")
+
+    async def dummy_handler(stream):
+        pass
+
+    # Register and verify it's present
+    host.set_stream_handler(protocol, dummy_handler)
+    assert protocol in host.get_mux().handlers
+
+    # Remove and verify it's gone
+    host.remove_stream_handler(protocol)
+    assert protocol not in host.get_mux().handlers
+
+
+def test_remove_stream_handler_nonexistent_is_safe():
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+
+    # Removing a protocol that was never registered should not raise
+    host.remove_stream_handler(TProtocol("/nonexistent/1.0.0"))
 
 
 @pytest.mark.trio
@@ -92,3 +122,259 @@ def test_get_addrs_and_transport_addrs():
     assert addr_str.endswith(f"/p2p/{peer_id_str}") or addr_str.endswith(
         f"/ipfs/{peer_id_str}"
     )
+
+
+def _make_host_with_listener(
+    announce_addrs: Sequence[Multiaddr] | None = None,
+):
+    """Helper: create a BasicHost with a mocked listener returning a known addr."""
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm, announce_addrs=announce_addrs)
+    mock_transport = MagicMock()
+    mock_transport.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+    swarm.listeners = {"tcp": mock_transport}
+    return host
+
+
+def test_announce_addrs_replaces_listen_addrs():
+    announce = [Multiaddr("/ip4/1.2.3.4/tcp/4001")]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    # Should contain only the announce addr, not the listen addr
+    assert len(addrs) == 1
+    addr_str = str(addrs[0])
+    assert "/ip4/1.2.3.4/tcp/4001" in addr_str
+    assert "/ip4/127.0.0.1/tcp/8000" not in addr_str
+    assert peer_id_str in addr_str
+
+    # get_transport_addrs still returns the real listen addr
+    transport_addrs = host.get_transport_addrs()
+    assert str(transport_addrs[0]) == "/ip4/127.0.0.1/tcp/8000"
+
+
+def test_announce_addrs_strips_wrong_peer_id():
+    wrong_peer_id = "QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
+    announce = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{wrong_peer_id}")]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    assert len(addrs) == 1
+    addr_str = str(addrs[0])
+    # Wrong peer id must be stripped and replaced with the host's own
+    assert wrong_peer_id not in addr_str
+    assert addr_str == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+
+
+def test_announce_addrs_empty_list_advertises_nothing():
+    host = _make_host_with_listener(announce_addrs=[])
+
+    addrs = host.get_addrs()
+    assert addrs == []
+
+
+def test_announce_addrs_multiple():
+    announce = [
+        Multiaddr("/ip4/1.2.3.4/tcp/4001"),
+        Multiaddr("/ip4/5.6.7.8/tcp/4002"),
+    ]
+    host = _make_host_with_listener(announce_addrs=announce)
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    assert len(addrs) == 2
+    assert str(addrs[0]) == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+    assert str(addrs[1]) == f"/ip4/5.6.7.8/tcp/4002/p2p/{peer_id_str}"
+
+
+def test_announce_addrs_with_correct_peer_id():
+    # First create a host to get its peer ID, then set announce with that ID
+    host = _make_host_with_listener(announce_addrs=[])
+    peer_id_str = str(host.get_id())
+
+    # Set announce addr that already includes the correct /p2p/ suffix
+    host._announce_addrs = [Multiaddr(f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}")]
+
+    addrs = host.get_addrs()
+
+    assert len(addrs) == 1
+    # Should still have exactly one /p2p/ component, no duplication
+    assert str(addrs[0]) == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
+
+
+@pytest.mark.trio
+async def test_initiate_autotls_procedure_builds_transport_aware_broker_multiaddr(
+    monkeypatch, tmp_path
+):
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+    peer_id = str(host.get_id())
+
+    # Ensure procedure takes the ACME path (no cached cert present).
+    monkeypatch.setattr(
+        "libp2p.utils.paths.AUTOTLS_CERT_PATH", tmp_path / "missing-autotls-cert.pem"
+    )
+
+    captured_addrs = []
+
+    class FakeACMEClient:
+        def __init__(self, private_key, peer_id):
+            self.private_key = private_key
+            self.peer_id = peer_id
+            self.key_auth = "fake-key-auth"
+            self.b36_peerid = "fake-b36-peer-id"
+
+        async def create_acme_acct(self):
+            return None
+
+        async def initiate_order(self):
+            return None
+
+        async def get_dns01_challenge(self):
+            return None
+
+        async def notify_dns_ready(self):
+            return None
+
+        async def fetch_cert_url(self):
+            return None
+
+        async def fetch_certificate(self):
+            return None
+
+    class FakeBrokerClient:
+        def __init__(self, private_key, addr, key_auth, b36_peerid):
+            self.private_key = private_key
+            self.addr = addr
+            self.key_auth = key_auth
+            self.b36_peerid = b36_peerid
+            captured_addrs.append(addr)
+
+        async def http_peerid_auth(self):
+            return None
+
+        async def wait_for_dns(self):
+            return None
+
+    monkeypatch.setattr("libp2p.host.basic_host.ACMEClient", FakeACMEClient)
+    monkeypatch.setattr("libp2p.host.basic_host.BrokerClient", FakeBrokerClient)
+
+    # QUIC case should advertise /udp/{port}/quic-v1
+    monkeypatch.setattr(
+        host,
+        "get_addrs",
+        lambda: [Multiaddr(f"/ip4/127.0.0.1/udp/4001/quic-v1/p2p/{peer_id}")],
+    )
+    monkeypatch.setattr(
+        host,
+        "get_transport_addrs",
+        lambda: [Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1")],
+    )
+    await host.initiate_autotls_procedure(public_ip="11.22.33.44")
+
+    quic_addr = captured_addrs[-1]
+    assert quic_addr.value_for_protocol("ip4") == "11.22.33.44"
+    assert "/udp/4001/quic-v1" in str(quic_addr)
+
+    # TCP case should advertise /tcp/{port}
+    monkeypatch.setattr(
+        host,
+        "get_addrs",
+        lambda: [Multiaddr(f"/ip4/127.0.0.1/tcp/4002/p2p/{peer_id}")],
+    )
+    monkeypatch.setattr(
+        host,
+        "get_transport_addrs",
+        lambda: [Multiaddr("/ip4/127.0.0.1/tcp/4002")],
+    )
+    await host.initiate_autotls_procedure(public_ip="11.22.33.44")
+
+    tcp_addr = captured_addrs[-1]
+    assert tcp_addr.value_for_protocol("ip4") == "11.22.33.44"
+    assert "/tcp/4002" in str(tcp_addr)
+    assert "/quic-v1" not in str(tcp_addr)
+
+
+@pytest.mark.trio
+async def test_initiate_autotls_procedure_supports_udp_only_public_ip_path(
+    monkeypatch, tmp_path
+):
+    key_pair = create_new_key_pair()
+    swarm = new_swarm(key_pair)
+    host = BasicHost(swarm)
+    peer_id = str(host.get_id())
+
+    # Ensure procedure takes the ACME path (no cached cert present).
+    monkeypatch.setattr(
+        "libp2p.utils.paths.AUTOTLS_CERT_PATH", tmp_path / "missing-autotls-cert.pem"
+    )
+
+    captured_addrs = []
+
+    class FakeACMEClient:
+        def __init__(self, private_key, peer_id):
+            self.private_key = private_key
+            self.peer_id = peer_id
+            self.key_auth = "fake-key-auth"
+            self.b36_peerid = "fake-b36-peer-id"
+
+        async def create_acme_acct(self):
+            return None
+
+        async def initiate_order(self):
+            return None
+
+        async def get_dns01_challenge(self):
+            return None
+
+        async def notify_dns_ready(self):
+            return None
+
+        async def fetch_cert_url(self):
+            return None
+
+        async def fetch_certificate(self):
+            return None
+
+    class FakeBrokerClient:
+        def __init__(self, private_key, addr, key_auth, b36_peerid):
+            self.private_key = private_key
+            self.addr = addr
+            self.key_auth = key_auth
+            self.b36_peerid = b36_peerid
+            captured_addrs.append(addr)
+
+        async def http_peerid_auth(self):
+            return None
+
+        async def wait_for_dns(self):
+            return None
+
+    monkeypatch.setattr("libp2p.host.basic_host.ACMEClient", FakeACMEClient)
+    monkeypatch.setattr("libp2p.host.basic_host.BrokerClient", FakeBrokerClient)
+
+    # Only UDP QUIC addresses are available; no TCP address at all.
+    monkeypatch.setattr(
+        host,
+        "get_addrs",
+        lambda: [Multiaddr(f"/ip4/11.22.33.44/udp/4001/quic-v1/p2p/{peer_id}")],
+    )
+    monkeypatch.setattr(
+        host,
+        "get_transport_addrs",
+        lambda: [Multiaddr("/ip4/11.22.33.44/udp/4001/quic-v1")],
+    )
+
+    # Should not raise RuntimeError and should register a QUIC broker multiaddr.
+    await host.initiate_autotls_procedure(public_ip=None)
+
+    assert captured_addrs
+    broker_addr = captured_addrs[-1]
+    assert "/ip4/11.22.33.44/udp/4001/quic-v1" in str(broker_addr)
