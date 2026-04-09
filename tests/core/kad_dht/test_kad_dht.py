@@ -11,6 +11,7 @@ from collections.abc import Awaitable
 import hashlib
 import logging
 import os
+import random
 from typing import TypeVar
 from unittest.mock import patch
 import uuid
@@ -34,7 +35,7 @@ from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.utils import InvalidRecordType
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from tests.utils.factories import (
@@ -276,9 +277,12 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     local_value_record = dht_a.value_store.get(key_bytes)
     assert local_value_record is not None
     assert local_value_record.value == value, "Local value storage failed"
-    print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
+    logger.debug(
+        "Number of nodes in peer store: %s",
+        dht_a.host.get_peerstore().peer_ids(),
+    )
     await dht_a.routing_table.add_peer(peer_b_info)
-    print("Routing table of a has ", dht_a.routing_table.get_peer_ids())
+    logger.debug("Routing table of a has: %s", dht_a.routing_table.get_peer_ids())
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before PUT_VALUE req is sent
@@ -329,7 +333,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     # Retrieve the value using the second node
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(key)
-        print("the value stored in node b is", dht_b.get_value_store_size())
+        logger.debug("Value store size in node b: %s", dht_b.get_value_store_size())
         logger.debug("Retrieved value: %s", retrieved_value)
 
     # These are the records that were sent between the peers during the PUT_VALUE req
@@ -543,7 +547,8 @@ async def test_reissue_when_listen_addrs_change(dht_pair: tuple[KadDHT, KadDHT])
     seq0 = env0.record().seq
 
     # Simulate B's listen addrs changing (different port)
-    new_addr = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/123")
+    # Pick a port unlikely to be used, or increment existing port
+    new_addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{random.randint(20000, 40000)}")
 
     # Patch just for the duration we force B to respond:
     with patch.object(dht_b.host, "get_addrs", return_value=[new_addr]):
@@ -652,7 +657,25 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
     with pytest.raises(ValueError, match="Value must start with 'valid:'"):
         await dht_a.put_value(key, invalid_value)
 
-    # Test 3: Key with unregistered namespace should raise InvalidRecordType
+    # Test 3: Key with unregistered namespace should be accepted with
+    # strict_validation=False (default behavior for backward compatibility)
     unregistered_key = "/unknown/some-key"
-    with pytest.raises(InvalidRecordType):
-        await dht_a.put_value(unregistered_key, b"some-value")
+    # With default settings (strict_validation=False), this should succeed
+    await dht_a.put_value(unregistered_key, b"some-value")
+
+    # Test 4: Enable strict_validation and verify it rejects unregistered namespaces
+    if dht_a.validator is not None:
+        # Toggling validator.strict_validation should be reflected by
+        # dht.strict_validation.
+        assert dht_a.strict_validation is False
+        dht_a.validator.strict_validation = True
+        assert dht_a.strict_validation is True
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            await dht_a.put_value(unregistered_key, b"another-value")
+
+        # Toggling dht.strict_validation should synchronize back to validator.
+        dht_a.strict_validation = False
+        assert dht_a.validator.strict_validation is False
+
+        # Reset to default
+        dht_a.validator.strict_validation = False

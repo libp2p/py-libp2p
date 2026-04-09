@@ -32,7 +32,7 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
-from libp2p.tools.async_service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 from libp2p.tools.constants import MAX_READ_LEN
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.transport import WebsocketTransport

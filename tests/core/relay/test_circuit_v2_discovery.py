@@ -14,7 +14,7 @@ from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds
 STREAM_TIMEOUT = 15  # seconds
 HANDLER_TIMEOUT = 15  # seconds
-SLEEP_TIME = 1.0  # seconds
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 DISCOVERY_TIMEOUT = 20  # seconds
 
 

@@ -7,17 +7,19 @@ This module provides utilities for NAT traversal and reachability detection.
 import ipaddress
 import logging
 
-from multiaddr import (
-    Multiaddr,
-)
+from multiaddr import Multiaddr
 
 from libp2p.abc import (
     IHost,
     INetConn,
 )
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr as _extract_ip
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,9 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
     """
     Extract the IP address from a multiaddr.
 
+    Delegates to libp2p.utils.multiaddr_utils for consistent parsing
+    using py-multiaddr utilities (get_multiaddr_options with fallback).
+
     Parameters
     ----------
     addr : Multiaddr
@@ -133,26 +138,7 @@ def extract_ip_from_multiaddr(addr: Multiaddr) -> str | None:
         IP address or None if not found
 
     """
-    # Convert to string representation
-    addr_str = str(addr)
-
-    # Look for IPv4 address
-    ipv4_start = addr_str.find("/ip4/")
-    if ipv4_start != -1:
-        # Extract the IPv4 address
-        ipv4_end = addr_str.find("/", ipv4_start + 5)
-        if ipv4_end != -1:
-            return addr_str[ipv4_start + 5 : ipv4_end]
-
-    # Look for IPv6 address
-    ipv6_start = addr_str.find("/ip6/")
-    if ipv6_start != -1:
-        # Extract the IPv6 address
-        ipv6_end = addr_str.find("/", ipv6_start + 5)
-        if ipv6_end != -1:
-            return addr_str[ipv6_start + 5 : ipv6_end]
-
-    return None
+    return _extract_ip(addr)
 
 
 class ReachabilityChecker:
@@ -246,22 +232,35 @@ class ReachabilityChecker:
         # Check if any connection is direct (not relayed)
         if isinstance(connections, list):
             for conn in connections:
-                # Get the transport addresses
-                addrs = conn.get_transport_addresses()
-
-                # If any address doesn't start with /p2p-circuit,
-                # it's a direct connection
-                if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+                if conn.get_connection_type() == ConnectionType.DIRECT:
                     self._peer_reachability[peer_id] = True
                     return True
         else:
             # Handle single connection case
-            addrs = connections.get_transport_addresses()
-            if any(not str(addr).startswith("/p2p-circuit") for addr in addrs):
+            if connections.get_connection_type() == ConnectionType.DIRECT:
                 self._peer_reachability[peer_id] = True
                 return True
 
-        # Get the peer's addresses from peerstore
+        # Default to not directly reachable
+        self._peer_reachability[peer_id] = False
+
+        # Try to use actual transport addresses from the connection if available
+        # logic: if we have a connection, check if its actual addresses are public
+        if isinstance(connections, list):
+            for conn in connections:
+                actual_addrs = conn.get_transport_addresses()
+                public_addrs = self.get_public_addrs(actual_addrs)
+                if public_addrs:
+                    self._peer_reachability[peer_id] = True
+                    return True
+        else:
+            actual_addrs = connections.get_transport_addresses()
+            public_addrs = self.get_public_addrs(actual_addrs)
+            if public_addrs:
+                self._peer_reachability[peer_id] = True
+                return True
+
+        # Fallback: Get the peer's addresses from peerstore
         try:
             addrs = self.host.get_peerstore().addrs(peer_id)
             # Check if peer has any public addresses
@@ -272,8 +271,6 @@ class ReachabilityChecker:
         except Exception as e:
             logger.debug("Error getting peer addresses: %s", str(e))
 
-        # Default to not directly reachable
-        self._peer_reachability[peer_id] = False
         return False
 
     async def check_self_reachability(self) -> tuple[bool, list[Multiaddr]]:

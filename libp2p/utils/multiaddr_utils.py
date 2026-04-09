@@ -3,21 +3,60 @@ Multiaddr utility functions for IPv4/IPv6 handling.
 
 This module provides helper functions to extract IP addresses from multiaddrs
 in a version-agnostic way, supporting both IPv4 and IPv6.
+Uses py-multiaddr utilities (e.g. get_multiaddr_options) when available.
 """
 
+from collections.abc import Callable
 import socket
-from typing import Any
+from typing import Any, cast
 
 from multiaddr import Multiaddr
+from multiaddr.utils import get_multiaddr_options
+
+
+def join_multiaddrs(*addrs: str | bytes | Multiaddr) -> Multiaddr:
+    """
+    Concatenate multiple multiaddrs (Section 7.1).
+
+    Uses Multiaddr.join() when available (py-multiaddr 0.1.1+), otherwise
+    chains encapsulate() for compatibility with older versions.
+
+    :param addrs: One or more multiaddr strings, bytes, or Multiaddr instances
+    :return: Single Multiaddr combining all parts in order
+    """
+    if not addrs:
+        return Multiaddr("")
+    # Normalize to Multiaddr for fallback path
+    normalized = [a if isinstance(a, Multiaddr) else Multiaddr(a) for a in addrs]
+    join_method = getattr(Multiaddr, "join", None)
+    if callable(join_method):
+        join_fn = cast(Callable[..., Multiaddr], join_method)
+        return join_fn(*normalized)
+    result = normalized[0]
+    for a in normalized[1:]:
+        result = result.encapsulate(a)
+    return result
 
 
 def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
     """
-    Extract IP address (IPv4 or IPv6) from multiaddr.
+    Extract IP address (IPv4 or IPv6) from multiaddr using py-multiaddr utilities.
+
+    Prefers get_multiaddr_options for consistent parsing; falls back to
+    value_for_protocol for ip4/ip6 when options do not provide a host.
 
     :param maddr: Multiaddr to extract from
     :return: IP address string or None if not found
     """
+    try:
+        options = get_multiaddr_options(maddr)
+        if options:
+            host = options.get("host")
+            if host:
+                return host
+    except Exception:
+        pass
+
     try:
         ip4 = maddr.value_for_protocol("ip4")
         if ip4:
@@ -33,6 +72,22 @@ def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
         pass
 
     return None
+
+
+def get_protocol_layers(maddr: Multiaddr, maxsplit: int = -1) -> list[Multiaddr]:
+    """
+    Return protocol stack as per-layer multiaddrs (Section 3.2 multiaddr integration).
+
+    Uses Multiaddr.split() for protocol stack analysis and debugging.
+
+    :param maddr: Multiaddr to analyze
+    :param maxsplit: Optional max number of splits (-1 for no limit)
+    :return: List of Multiaddr, one per protocol layer
+    """
+    try:
+        return list(maddr.split(maxsplit=maxsplit))
+    except Exception:
+        return [maddr]
 
 
 def get_ip_protocol_from_multiaddr(maddr: Multiaddr) -> str | None:
@@ -51,6 +106,51 @@ def get_ip_protocol_from_multiaddr(maddr: Multiaddr) -> str | None:
             return "ip6"
         except Exception:
             return None
+
+
+def extract_host_from_multiaddr(maddr: Multiaddr) -> str | None:
+    """
+    Extract host (IP or DNS name) from multiaddr.
+
+    Tries ip4, ip6, dns, dns4, dns6 in order. Returns the first found value,
+    or None if no host protocol is present. Handles ``ProtocolLookupError``
+    gracefully for each protocol.
+
+    :param maddr: Multiaddr to extract host from
+    :return: Host string or None if not found
+    """
+    for protocol in ("ip4", "ip6", "dns", "dns4", "dns6"):
+        try:
+            value = maddr.value_for_protocol(protocol)
+            if value:
+                return value
+        except Exception:
+            continue
+    return None
+
+
+def format_host_for_url(host: str) -> str:
+    """
+    Format host for use in URLs.
+
+    IPv6 addresses (detected by presence of ``:``) are wrapped in square
+    brackets per `RFC 3986 <https://www.rfc-editor.org/rfc/rfc3986>`_.
+
+    Examples::
+
+        >>> format_host_for_url("127.0.0.1")
+        '127.0.0.1'
+        >>> format_host_for_url("::1")
+        '[::1]'
+        >>> format_host_for_url("example.com")
+        'example.com'
+
+    :param host: Hostname or IP address string
+    :return: Host formatted for URL inclusion
+    """
+    if ":" in host:
+        return f"[{host}]"
+    return host
 
 
 def multiaddr_from_socket(socket_obj: socket.socket | Any) -> Multiaddr:
@@ -72,7 +172,11 @@ def multiaddr_from_socket(socket_obj: socket.socket | Any) -> Multiaddr:
 
 
 __all__ = [
+    "extract_host_from_multiaddr",
     "extract_ip_from_multiaddr",
+    "format_host_for_url",
     "get_ip_protocol_from_multiaddr",
+    "get_protocol_layers",
+    "join_multiaddrs",
     "multiaddr_from_socket",
 ]

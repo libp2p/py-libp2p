@@ -11,12 +11,12 @@ from collections.abc import Sequence
 import logging
 import threading
 import time
-from typing import Any
 
 from multiaddr import Multiaddr
 
 from libp2p.abc import IPeerStore
 from libp2p.crypto.keys import KeyPair, PrivateKey, PublicKey
+from libp2p.custom_types import MetadataValue
 from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData, PeerDataError
@@ -521,7 +521,7 @@ class SyncPersistentPeerStore(IPeerStore):
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -534,7 +534,7 @@ class SyncPersistentPeerStore(IPeerStore):
         except PeerDataError as error:
             raise PeerStoreError() from error
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
