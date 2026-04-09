@@ -8,8 +8,8 @@ import multiaddr
 import trio
 
 from libp2p.abc import INotifee
-from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_key_pair
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.swarm import Swarm
@@ -75,8 +75,8 @@ def create_websocket_host(listen_addrs=None, use_plaintext=False):
             muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
         )
     else:
-        # Create separate Ed25519 key for Noise protocol
-        noise_key_pair = create_ed25519_key_pair()
+        # Create a dedicated X25519 key for the Noise static key.
+        noise_key_pair = create_new_x25519_key_pair()
 
         # Create Noise transport
         noise_transport = NoiseTransport(
