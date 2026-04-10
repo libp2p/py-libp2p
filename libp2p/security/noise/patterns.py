@@ -26,13 +26,13 @@ from libp2p.abc import (
     IRawConnection,
     ISecureConn,
 )
-from libp2p.crypto.x25519 import (
-    X25519PublicKey,
-)
 from libp2p.crypto.keys import (
     KeyType,
     PrivateKey,
     PublicKey,
+)
+from libp2p.crypto.x25519 import (
+    X25519PublicKey,
 )
 from libp2p.peer.id import (
     ID,
@@ -143,6 +143,7 @@ class BasePattern(IPattern):
 
         Raises:
             NoiseStateError: If noise_static_key is not X25519 type
+
         """
         if self.noise_static_key.get_type() != KeyType.X25519:
             raise NoiseStateError(

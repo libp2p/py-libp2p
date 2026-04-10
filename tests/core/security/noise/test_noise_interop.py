@@ -83,7 +83,7 @@ class TestNoiseKeyTypeCorrectness:
         # Verify the signature validates with the X25519 public key
         assert verify_handshake_payload_sig(payload, noise_pubkey)
         assert signed_data.startswith(prefix)
-        assert signed_data[len(prefix):] == noise_pubkey.to_bytes()
+        assert signed_data[len(prefix) :] == noise_pubkey.to_bytes()
 
     def test_make_handshake_payload_rejects_non_x25519(self):
         """Verify make_handshake_payload rejects non-X25519 noise_static_key."""
@@ -112,7 +112,7 @@ class TestNoiseKeyTypeCorrectness:
         prefix = SIGNED_DATA_PREFIX.encode("utf-8")
 
         assert signed_data.startswith(prefix)
-        assert signed_data[len(prefix):] == x25519_pub_bytes
+        assert signed_data[len(prefix) :] == x25519_pub_bytes
 
     def test_handshake_payload_signature_verifies_with_x25519(self, pattern_setup):
         """Verify handshake payload signature is over X25519 key, not Ed25519."""
