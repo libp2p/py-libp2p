@@ -55,14 +55,11 @@ async def simple_stream_handler(stream):
         logger.info("Received request: type=%s", request.type)
 
         # Only handle RESERVE requests
-        if request.type == proto.HopMessage.RESERVE:
+        if request.type == proto.HopMessage.Type.RESERVE:
             # Create a valid response
             response = proto.HopMessage(
-                type=proto.HopMessage.STATUS,
-                status=proto.Status(
-                    code=proto.Status.OK,
-                    message="Test reservation accepted",
-                ),
+                type=proto.HopMessage.Type.STATUS,
+                status=proto.Status.OK,
                 reservation=proto.Reservation(
                     expire=int(time.time()) + 3600,  # 1 hour from now
                     voucher=b"test-voucher",

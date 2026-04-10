@@ -39,6 +39,7 @@ from .config import (
 )
 from .pb.circuit_pb2 import (
     HopMessage,
+    Peer,
 )
 from .pb_framing import (
     read_circuit_v2_pb,
@@ -402,11 +403,13 @@ class RelayDiscovery(Service):
                 # Prepare signed envelope
                 envelope_bytes, _ = env_to_send_in_RPC(self.host)
                 # Create and send reservation request
+                rpeer = Peer()
+                rpeer.id = self.host.get_id().to_bytes()
                 request = HopMessage(
-                    type=HopMessage.RESERVE,
-                    peer=self.host.get_id().to_bytes(),
+                    type=HopMessage.Type.RESERVE,
                     senderRecord=envelope_bytes,
                 )
+                request.peer.CopyFrom(rpeer)
 
                 with trio.fail_after(self.stream_timeout):
                     await write_circuit_v2_pb(stream, request.SerializeToString())
@@ -432,12 +435,10 @@ class RelayDiscovery(Service):
                             await stream.close()
                             return False
 
-                    # Check if reservation was successful
-                    if response.type == HopMessage.STATUS and response.HasField(
+                    if response.type == HopMessage.Type.STATUS and response.HasField(
                         "status"
                     ):
-                        # Access status code directly from protobuf object
-                        status_code = getattr(response.status, "code", StatusCode.OK)
+                        status_code = StatusCode(response.status)
 
                         if status_code == StatusCode.OK:
                             # Update relay info with reservation details
@@ -457,11 +458,9 @@ class RelayDiscovery(Service):
                             )
                             return True
 
-                    # Reservation failed
                     error_message = "Unknown error"
                     if response.HasField("status"):
-                        # Access message directly from protobuf object
-                        error_message = getattr(response.status, "message", "")
+                        error_message = StatusCode(response.status).name
 
                     logger.warning(
                         "Reservation request rejected by relay %s: %s",

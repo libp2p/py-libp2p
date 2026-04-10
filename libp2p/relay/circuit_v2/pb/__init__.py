@@ -13,9 +13,18 @@ from .dcutr_pb2 import (
 from .circuit_pb2 import (
     HopMessage,
     Limit,
+    Peer,
     Reservation,
     Status,
     StopMessage,
 )
 
-__all__ = ["HopMessage", "Limit", "Reservation", "Status", "StopMessage", "HolePunch"]
+__all__ = [
+    "HopMessage",
+    "Limit",
+    "Peer",
+    "Reservation",
+    "Status",
+    "StopMessage",
+    "HolePunch",
+]
