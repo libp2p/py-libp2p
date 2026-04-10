@@ -370,9 +370,7 @@ class TestNoisePerformance:
 
         # Test concurrent payload creation
         start_time = time.time()
-        payloads = [
-            pattern.make_handshake_payload() for pattern in patterns
-        ]  # type: ignore
+        payloads = [pattern.make_handshake_payload() for pattern in patterns]  # type: ignore
         concurrent_payload_time = time.time() - start_time
 
         # Concurrent payload creation should be fast (< 0.1 seconds)
