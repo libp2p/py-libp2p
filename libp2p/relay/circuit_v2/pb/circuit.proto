@@ -2,7 +2,9 @@ syntax = "proto3";
 
 package circuit.pb.v2;
 
-// Circuit v2 message types
+// Aligned with libp2p relay/circuit-v2 and rust-libp2p 0.52
+// (protocols/relay/src/generated/message.proto), proto3 + optional for presence.
+
 message HopMessage {
   enum Type {
     RESERVE = 0;
@@ -10,12 +12,12 @@ message HopMessage {
     STATUS = 2;
   }
 
-  Type type = 1;
-  bytes peer = 2;
-  Reservation reservation = 3;
-  Limit limit = 4;
-  Status status = 5;
-  optional bytes senderRecord = 6;  // Envelope(PeerRecord)
+  optional Type type = 1;
+  optional Peer peer = 2;
+  optional Reservation reservation = 3;
+  optional Limit limit = 4;
+  optional Status status = 5;
+  optional bytes senderRecord = 6;
 }
 
 message StopMessage {
@@ -24,34 +26,39 @@ message StopMessage {
     STATUS = 1;
   }
 
-  Type type = 1;
-  bytes peer = 2;
-  Status status = 3;
-  optional bytes senderRecord = 4;   // Envelope(PeerRecord) encoded
+  optional Type type = 1;
+  optional Peer peer = 2;
+  optional Limit limit = 3;
+  optional Status status = 4;
+  optional bytes senderRecord = 5;
+}
+
+message Peer {
+  optional bytes id = 1;
+  repeated bytes addrs = 2;
 }
 
 message Reservation {
-  bytes voucher = 1;
-  bytes signature = 2;
-  int64 expire = 3;
+  optional uint64 expire = 1;
+  repeated bytes addrs = 2;
+  optional bytes voucher = 3;
+  // py-libp2p relay↔relay signing extension; ignored by rust-libp2p
+  optional bytes signature = 4;
 }
 
 message Limit {
-  int64 duration = 1;
-  int64 data = 2;
+  optional uint32 duration = 1;
+  optional uint64 data = 2;
 }
 
-message Status {
-  enum Code {
-    OK = 0;
-    RESERVATION_REFUSED = 100;
-    RESOURCE_LIMIT_EXCEEDED = 101;
-    PERMISSION_DENIED = 102;
-    CONNECTION_FAILED = 200;
-    DIAL_REFUSED = 201;
-    STOP_FAILED = 300;
-    MALFORMED_MESSAGE = 400;
-  }
-  Code code = 1;
-  string message = 2;
+enum Status {
+  UNUSED = 0;
+  OK = 100;
+  RESERVATION_REFUSED = 200;
+  RESOURCE_LIMIT_EXCEEDED = 201;
+  PERMISSION_DENIED = 202;
+  CONNECTION_FAILED = 203;
+  NO_RESERVATION = 204;
+  MALFORMED_MESSAGE = 400;
+  UNEXPECTED_MESSAGE = 401;
 }

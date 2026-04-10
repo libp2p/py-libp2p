@@ -55,8 +55,13 @@ from .discovery import (
 from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
+    Peer,
     Reservation,
     StopMessage,
+)
+from .pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
 )
 from .performance_tracker import (
     RelayPerformanceTracker,
@@ -385,24 +390,36 @@ class CircuitV2Transport(ITransport):
                     logger.warning(
                         "Failed to make reservation with relay %s", relay_peer_id
                     )
+                # rust-libp2p relay (v0.52) finishes each HOP substream after one
+                # exchange. Use a new stream for CONNECT so the relay does not drop
+                # the connection before we read the STATUS response.
+                await relay_stream.close()
+                relay_stream = await self.host.new_stream(relay_peer_id, [PROTOCOL_ID])
+                if not relay_stream:
+                    raise ConnectionError(
+                        f"Could not open hop stream for CONNECT to relay "
+                        f"{relay_peer_id}"
+                    )
             # Create signed peer record to send with the HOP message
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
 
-            # Send HOP CONNECT message
+            dest_peer = Peer()
+            dest_peer.id = dest_info.peer_id.to_bytes()
             connect_msg = HopMessage(
-                type=HopMessage.CONNECT,
-                peer=dest_info.peer_id.to_bytes(),
+                type=HopMessage.Type.CONNECT,
                 senderRecord=envelope_bytes,
             )
+            connect_msg.peer.CopyFrom(dest_peer)
 
-            reservation_proof = self._reservation_proofs.get(relay_peer_id)
-            if reservation_proof and reservation_proof.expire > int(time.time()):
-                connect_msg.reservation.CopyFrom(reservation_proof)
-            await relay_stream.write(connect_msg.SerializeToString())
+            # Do not attach ``_reservation_proofs[relay]`` here: that voucher is for
+            # *this* host's reservation with the relay. HOP CONNECT must carry the
+            # *destination* peer's reservation when present (obtained out-of-band);
+            # wrong voucher fails ``verify_reservation(dest, ...)`` on the relay.
+            await write_circuit_v2_pb(relay_stream, connect_msg.SerializeToString())
 
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
-                resp_bytes = await relay_stream.read(1024)
+                resp_bytes = await read_circuit_v2_pb(relay_stream)
                 resp = HopMessage()
                 resp.ParseFromString(resp_bytes)
 
@@ -416,9 +433,12 @@ class CircuitV2Transport(ITransport):
                     # Don't fail the connection - the senderRecord is optional
                     # and the relay might not have the destination's signed peer record
 
-            # Access status attributes directly
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
+            if resp.HasField("status"):
+                status_code = StatusCode(resp.status)
+                status_msg = status_code.name
+            else:
+                status_code = StatusCode.OK
+                status_msg = status_code.name
 
             if status_code != StatusCode.OK:
                 raise RelayConnectionError(
@@ -580,18 +600,22 @@ class CircuitV2Transport(ITransport):
             raise ConnectionError(f"Could not open stream to relay {relay_peer_id}")
 
         try:
-            hop_msg = HopMessage(
-                type=HopMessage.CONNECT,
-                peer=peer_info.peer_id.to_bytes(),
-            )
-            await relay_stream.write(hop_msg.SerializeToString())
+            dest_peer = Peer()
+            dest_peer.id = peer_info.peer_id.to_bytes()
+            hop_msg = HopMessage(type=HopMessage.Type.CONNECT)
+            hop_msg.peer.CopyFrom(dest_peer)
+            await write_circuit_v2_pb(relay_stream, hop_msg.SerializeToString())
 
-            resp_bytes = await relay_stream.read()
+            resp_bytes = await read_circuit_v2_pb(relay_stream)
             resp = HopMessage()
             resp.ParseFromString(resp_bytes)
 
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
+            if resp.HasField("status"):
+                status_code = StatusCode(resp.status)
+                status_msg = status_code.name
+            else:
+                status_code = StatusCode.OK
+                status_msg = status_code.name
 
             if status_code != StatusCode.OK:
                 await relay_stream.close()
@@ -798,14 +822,16 @@ class CircuitV2Transport(ITransport):
             # Create signed envelope for the reservation request to relay
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             # Send reservation request
+            rpeer = Peer()
+            rpeer.id = self.host.get_id().to_bytes()
             reserve_msg = HopMessage(
-                type=HopMessage.RESERVE,
-                peer=self.host.get_id().to_bytes(),
+                type=HopMessage.Type.RESERVE,
                 senderRecord=envelope_bytes,
             )
+            reserve_msg.peer.CopyFrom(rpeer)
 
             try:
-                await stream.write(reserve_msg.SerializeToString())
+                await write_circuit_v2_pb(stream, reserve_msg.SerializeToString())
                 logger.debug("Successfully sent reservation request")
             except Exception as e:
                 logger.error("Failed to send reservation request: %s", str(e))
@@ -814,7 +840,7 @@ class CircuitV2Transport(ITransport):
             # Read response with timeout
             with trio.fail_after(STREAM_READ_TIMEOUT):
                 try:
-                    resp_bytes = await stream.read(1024)
+                    resp_bytes = await read_circuit_v2_pb(stream)
                     logger.debug(
                         "Received reservation response: %d bytes", len(resp_bytes)
                     )
@@ -834,9 +860,12 @@ class CircuitV2Transport(ITransport):
                     )
                     # Don't fail the reservation - the senderRecord is optional
 
-            # Access status attributes directly
-            status_code = getattr(resp.status, "code", StatusCode.OK)
-            status_msg = getattr(resp.status, "message", "Unknown error")
+            if resp.HasField("status"):
+                status_code = StatusCode(resp.status)
+                status_msg = status_code.name
+            else:
+                status_code = StatusCode.OK
+                status_msg = status_code.name
             expires = getattr(resp.reservation, "expire", 0)
 
             logger.debug(
@@ -852,11 +881,10 @@ class CircuitV2Transport(ITransport):
                 return False
 
             self._reservations[relay_peer_id] = expires
-            self._reservation_proofs[relay_peer_id] = Reservation(
-                expire=expires,
-                voucher=getattr(resp.reservation, "voucher", b""),
-                signature=getattr(resp.reservation, "signature", b""),
-            )
+            proof = Reservation()
+            if resp.HasField("reservation"):
+                proof.CopyFrom(resp.reservation)
+            self._reservation_proofs[relay_peer_id] = proof
             ttl = max(0, expires - int(time.time()))
             logger.info("Reserved peer %s (ttl=%ss)", relay_peer_id, ttl)
 
@@ -1014,16 +1042,19 @@ class CircuitV2Listener(Service, IListener):
 
         try:
             # Read STOP message
-            msg_bytes = await stream.read()
+            msg_bytes = await read_circuit_v2_pb(stream)
             stop_msg = StopMessage()
             stop_msg.ParseFromString(msg_bytes)
 
-            if stop_msg.type != StopMessage.CONNECT:
+            if stop_msg.type != StopMessage.Type.CONNECT:
                 raise ConnectionError("Invalid STOP message type")
+
+            if not stop_msg.HasField("peer") or not stop_msg.peer.HasField("id"):
+                raise ConnectionError("Invalid STOP message peer")
 
             # Create raw connection for relayed connection
             # Construct circuit multiaddr: /p2p/{relay}/p2p-circuit/p2p/{source}
-            peer_id = ID(stop_msg.peer)
+            peer_id = ID(stop_msg.peer.id)
             relay_peer_id = self.host.get_id()
             circuit_ma = multiaddr.Multiaddr(
                 f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"

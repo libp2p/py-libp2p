@@ -219,11 +219,13 @@ class Reservation:
                 self.peer_id,
             )
 
-        return PbReservation(
+        pb = PbReservation(
             expire=int(self.expires_at),
             voucher=self.voucher,
             signature=signature,
         )
+        pb.addrs.extend(getattr(self, "addrs", []) or [])
+        return pb
 
     def get_data_to_sign(self) -> bytes:
         """
@@ -368,12 +370,23 @@ class RelayResourceManager:
             )
             return False
 
-        # Signature verification is required for security
         if not proto_res.signature:
+            if self.host is None:
+                logger.debug(
+                    "No signature on reservation proto and no relay host; rejecting "
+                    "peer %s",
+                    peer_id,
+                )
+                return False
+            # Other implementations (e.g. rust-libp2p) may omit the separate
+            # signature field; voucher+expire matching our reservation is enough
+            # at this relay when we could have verified a signature if present.
             logger.debug(
-                "No signature provided, rejecting reservation for peer %s", peer_id
+                "Reservation for peer %s has empty signature field; "
+                "accepting voucher+expire match (interop)",
+                peer_id,
             )
-            return False
+            return True
 
         if self.host is None:
             logger.warning(
@@ -383,7 +396,6 @@ class RelayResourceManager:
             )
             return False
 
-        # Verify the signature using the relay's public key (not the client's)
         data_to_sign = self._get_data_to_sign(proto_res.voucher, proto_res.expire)
         return self._verify_signature_with_relay_key(data_to_sign, proto_res.signature)
 
