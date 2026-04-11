@@ -128,13 +128,15 @@ class BasePattern(IPattern):
     libp2p_privkey: PrivateKey
     early_data: bytes | None
 
-    def create_noise_state(self) -> NoiseState:
+    def create_noise_state(self, prologue: bytes | None = None) -> NoiseState:
         noise_state = NoiseState.from_name(self.protocol_name)
         noise_state.set_keypair_from_private_bytes(
             NoiseKeypairEnum.STATIC, self.noise_static_key.to_bytes()
         )
         if noise_state.noise_protocol is None:
             raise NoiseStateError("noise_protocol is not initialized")
+        if prologue is not None:
+            noise_state.noise_protocol.prologue = prologue
         return noise_state
 
     def make_handshake_payload(
@@ -212,16 +214,18 @@ class PatternXX(BasePattern):
         libp2p_privkey: PrivateKey,
         noise_static_key: PrivateKey,
         early_data: bytes | None = None,
+        prologue: bytes | None = None,
     ) -> None:
         self.protocol_name = b"Noise_XX_25519_ChaChaPoly_SHA256"
         self.local_peer = local_peer
         self.libp2p_privkey = libp2p_privkey
         self.noise_static_key = noise_static_key
         self.early_data = early_data
+        self.prologue = prologue
 
     async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
         logger.debug(f"Noise XX handshake_inbound started for peer {self.local_peer}")
-        noise_state = self.create_noise_state()
+        noise_state = self.create_noise_state(prologue=self.prologue)
         noise_state.set_as_responder()
         noise_state.start_handshake()
         if noise_state.noise_protocol is None:
@@ -285,7 +289,7 @@ class PatternXX(BasePattern):
         self, conn: IRawConnection, remote_peer: ID
     ) -> ISecureConn:
         logger.debug(f"Noise XX handshake_outbound started to peer {remote_peer}")
-        noise_state = self.create_noise_state()
+        noise_state = self.create_noise_state(prologue=self.prologue)
 
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
         noise_state.set_as_initiator()
