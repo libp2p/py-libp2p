@@ -15,7 +15,7 @@ scripts, or full run with timeout) for deeper checks.
 
 Run from repo root with the project venv active::
 
-    source venv/bin/activate && python scripts/smoke_test_examples.py
+    . venv/bin/activate && python scripts/smoke_test_examples.py
 """
 
 from __future__ import annotations
