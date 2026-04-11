@@ -84,6 +84,7 @@ async def subscribed_mesh(
     async with connected_gossipsub_nodes(n, **kwargs) as harness:
         for ps in harness.pubsubs:
             await ps.subscribe(topic)
+        # TODO(#378): replace fixed sleep with predicate-based mesh-ready polling
         await trio.sleep(settle_time)
         yield harness
 

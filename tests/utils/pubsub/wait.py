@@ -25,17 +25,19 @@ async def wait_for(
     """
     Poll until *predicate()* returns a truthy value, or raise ``TimeoutError``.
 
-    Supports both sync and async predicates.  If the predicate raises an
-    exception it is treated as falsy; on timeout the last such exception is
-    chained to the ``TimeoutError``.
+    Supports sync predicates, async predicates, and callables that return
+    awaitables (e.g. ``lambda: some_async_fn()``).  If the predicate raises
+    an exception it is treated as falsy; on timeout the last such exception
+    is chained to the ``TimeoutError``.
     """
-    _is_async = inspect.iscoroutinefunction(predicate)
     start = trio.current_time()
     last_exc: Exception | None = None
 
     while True:
         try:
-            result = (await predicate()) if _is_async else predicate()  # type: ignore[misc]
+            result = predicate()
+            if inspect.isawaitable(result):
+                result = await result
             if result:
                 return
         except Exception as exc:
