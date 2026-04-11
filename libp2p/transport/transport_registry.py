@@ -37,6 +37,18 @@ def _get_websocket_transport() -> Any:
     return WebsocketTransport
 
 
+def _get_webrtc_direct_transport() -> Any:
+    from libp2p.transport.webrtc.transport import WebRTCDirectTransport
+
+    return WebRTCDirectTransport
+
+
+def _get_webrtc_private_transport() -> Any:
+    from libp2p.transport.webrtc.private_transport import WebRTCPrivateTransport
+
+    return WebRTCPrivateTransport
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -103,6 +115,15 @@ class TransportRegistry:
         QUICTransport = _get_quic_transport()
         self.register_transport("quic", QUICTransport)
         self.register_transport("quic-v1", QUICTransport)
+
+        # Register WebRTC transports (lazy-loaded, optional dep)
+        try:
+            WebRTCDirectTransport = _get_webrtc_direct_transport()
+            self.register_transport("webrtc-direct", WebRTCDirectTransport)
+            WebRTCPrivateTransport = _get_webrtc_private_transport()
+            self.register_transport("webrtc", WebRTCPrivateTransport)
+        except ImportError:
+            pass  # aiortc not installed — skip WebRTC registration
 
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
