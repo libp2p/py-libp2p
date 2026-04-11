@@ -61,6 +61,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/libp2p/py-libp2p"
 
+[project.optional-dependencies]
+webrtc = ["aiortc>=1.5.0,<2.0"]
+
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
