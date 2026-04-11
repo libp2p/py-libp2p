@@ -1,0 +1,25 @@
+// WebRTC signaling messages for private-to-private connections.
+// Exchanged over a Circuit Relay v2 stream using the
+// /webrtc-signaling/0.0.1 protocol.
+//
+// The ICE_DONE message type addresses the race condition described in
+// libp2p/specs#585: both sides must send AND receive ICE_DONE before
+// closing the signaling stream, ensuring all ICE candidates are delivered.
+//
+// Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
+
+syntax = "proto3";
+
+package webrtc.signaling;
+
+message SignalingMessage {
+  enum Type {
+    SDP_OFFER = 0;
+    SDP_ANSWER = 1;
+    ICE_CANDIDATE = 2;
+    ICE_DONE = 3;
+  }
+
+  Type type = 1;
+  bytes data = 2;
+}
