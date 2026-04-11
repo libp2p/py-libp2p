@@ -9,9 +9,7 @@ from libp2p import (
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
-from libp2p.crypto.x25519 import (
-    create_new_key_pair as create_new_x25519_key_pair,
-)
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
@@ -33,9 +31,9 @@ async def main():
 
     # Create a Noise security transport
     noise_transport = NoiseTransport(
-        # local_key_pair: The key pair used for libp2p identity and authentication
+        # libp2p_keypair: libp2p identity (distinct from the Noise static key per spec)
         libp2p_keypair=key_pair,
-        # noise_privkey: A dedicated X25519 private key for Noise encryption
+        # noise_privkey: X25519 static key for Noise DH (libp2p Noise spec)
         noise_privkey=noise_key_pair.private_key,
         # early_data: Optional data to send during the handshake
         # (None means no early data)

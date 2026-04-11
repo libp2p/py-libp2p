@@ -75,7 +75,8 @@ def create_websocket_host(listen_addrs=None, use_plaintext=False):
             muxer_transports_by_protocol={TProtocol("/yamux/1.0.0"): Yamux},
         )
     else:
-        # Create a dedicated X25519 key for the Noise static key.
+        # Separate X25519 keypair for Noise static DH (libp2p Noise spec); identity
+        # uses secp256k1 key_pair above.
         noise_key_pair = create_new_x25519_key_pair()
 
         # Create Noise transport
