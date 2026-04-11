@@ -7,7 +7,8 @@ including signature generation, verification, and data preparation.
 
 import pytest
 
-from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.ed25519 import create_new_key_pair as create_new_ed25519_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.security.noise.messages import (
     NoiseExtensions,
     NoiseHandshakePayload,
@@ -23,7 +24,7 @@ class TestMessagesCoreFunctions:
     def test_make_data_to_be_signed(self):
         """Test data preparation for signing."""
         # Create test key pair
-        key_pair = create_new_key_pair()
+        key_pair = create_new_x25519_key_pair()
         public_key = key_pair.public_key
 
         # Test data preparation
@@ -46,7 +47,7 @@ class TestMessagesCoreFunctions:
         assert data == data2
 
         # Test different keys produce different data
-        key_pair2 = create_new_key_pair()
+        key_pair2 = create_new_x25519_key_pair()
         public_key2 = key_pair2.public_key
         data3 = make_data_to_be_signed(public_key2)
         assert data != data3
@@ -54,8 +55,8 @@ class TestMessagesCoreFunctions:
     def test_make_handshake_payload_sig(self):
         """Test handshake payload signature generation."""
         # Create test key pairs
-        libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        libp2p_keypair = create_new_ed25519_key_pair()
+        noise_keypair = create_new_x25519_key_pair()
 
         libp2p_privkey = libp2p_keypair.private_key
         noise_static_pubkey = noise_keypair.public_key
@@ -72,7 +73,7 @@ class TestMessagesCoreFunctions:
         assert signature == signature2
 
         # Test different keys produce different signatures
-        libp2p_keypair2 = create_new_key_pair()
+        libp2p_keypair2 = create_new_ed25519_key_pair()
         libp2p_privkey2 = libp2p_keypair2.private_key
         signature3 = make_handshake_payload_sig(libp2p_privkey2, noise_static_pubkey)
         assert signature != signature3
@@ -80,8 +81,8 @@ class TestMessagesCoreFunctions:
     def test_verify_handshake_payload_sig(self):
         """Test handshake payload signature verification."""
         # Create test key pairs
-        libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        libp2p_keypair = create_new_ed25519_key_pair()
+        noise_keypair = create_new_x25519_key_pair()
 
         libp2p_privkey = libp2p_keypair.private_key
         libp2p_pubkey = libp2p_keypair.public_key
@@ -102,7 +103,7 @@ class TestMessagesCoreFunctions:
         assert verification_result is True
 
         # Test with wrong noise static public key
-        wrong_noise_keypair = create_new_key_pair()
+        wrong_noise_keypair = create_new_x25519_key_pair()
         wrong_noise_static_pubkey = wrong_noise_keypair.public_key
         verification_result = verify_handshake_payload_sig(
             payload, wrong_noise_static_pubkey
@@ -120,7 +121,7 @@ class TestMessagesCoreFunctions:
         assert verification_result is False
 
         # Test with wrong identity public key
-        wrong_libp2p_keypair = create_new_key_pair()
+        wrong_libp2p_keypair = create_new_ed25519_key_pair()
         wrong_payload = NoiseHandshakePayload(
             id_pubkey=wrong_libp2p_keypair.public_key,
             id_sig=signature,  # Signature from different key
@@ -133,8 +134,8 @@ class TestMessagesCoreFunctions:
     def test_signature_roundtrip(self):
         """Test complete signature generation and verification."""
         # Create test key pairs
-        libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        libp2p_keypair = create_new_ed25519_key_pair()
+        noise_keypair = create_new_x25519_key_pair()
 
         libp2p_privkey = libp2p_keypair.private_key
         libp2p_pubkey = libp2p_keypair.public_key
@@ -231,8 +232,8 @@ class TestMessagesCoreFunctions:
     def test_handshake_payload_with_extensions(self):
         """Test handshake payload with extensions."""
         # Create test key pairs
-        libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        libp2p_keypair = create_new_ed25519_key_pair()
+        noise_keypair = create_new_x25519_key_pair()
 
         libp2p_privkey = libp2p_keypair.private_key
         libp2p_pubkey = libp2p_keypair.public_key
@@ -278,8 +279,8 @@ class TestMessagesCoreFunctions:
     def test_handshake_payload_without_extensions(self):
         """Test handshake payload without extensions."""
         # Create test key pairs
-        libp2p_keypair = create_new_key_pair()
-        noise_keypair = create_new_key_pair()
+        libp2p_keypair = create_new_ed25519_key_pair()
+        noise_keypair = create_new_x25519_key_pair()
 
         libp2p_privkey = libp2p_keypair.private_key
         libp2p_pubkey = libp2p_keypair.public_key
@@ -328,8 +329,8 @@ class TestMessagesCoreFunctions:
     def test_multiple_signatures_different_keys(self):
         """Test signature generation with multiple different key pairs."""
         # Create multiple key pairs
-        key_pairs = [create_new_key_pair() for _ in range(5)]
-        noise_keypair = create_new_key_pair()
+        key_pairs = [create_new_ed25519_key_pair() for _ in range(5)]
+        noise_keypair = create_new_x25519_key_pair()
         noise_static_pubkey = noise_keypair.public_key
 
         signatures = []

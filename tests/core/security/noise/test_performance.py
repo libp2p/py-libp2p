@@ -10,6 +10,7 @@ import time
 import pytest
 
 from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.security.noise.early_data import BufferingEarlyDataHandler
 from libp2p.security.noise.rekey import TimeBasedRekeyPolicy
 from libp2p.security.noise.transport import Transport
@@ -201,7 +202,7 @@ class TestNoisePerformance:
         """Test stress scenarios for key generation."""
         # Test multiple key pair generation
         start_time = time.time()
-        key_pairs_list = [create_new_key_pair() for _ in range(100)]
+        key_pairs_list = [create_new_x25519_key_pair() for _ in range(100)]
         key_generation_time = time.time() - start_time
 
         # Key generation should be reasonably fast (< 1 second for 100 pairs)
