@@ -94,24 +94,42 @@ class SecureSession(BaseSession):
             return b""
 
         data_from_buffer = self._drain(n)
-        if len(data_from_buffer) > 0:
+        if n is None and len(data_from_buffer) > 0:
             return data_from_buffer
 
-        msg = await self.conn.read_msg()
-
-        # If underlying connection returned empty bytes, treat as closed
-        # and raise to signal that reads after close are invalid.
-        if msg == b"":
-            raise Exception("Connection closed")
-
         if n is None:
+            msg = await self.conn.read_msg()
+
+            # If underlying connection returned empty bytes, treat as closed
+            # and raise to signal that reads after close are invalid.
+            if msg == b"":
+                raise Exception("Connection closed")
+
             return msg
 
-        if n < len(msg):
-            self._fill(msg)
-            return self._drain(n)
-        else:
-            return msg
+        if len(data_from_buffer) == n:
+            return data_from_buffer
+
+        result = bytearray(data_from_buffer)
+        while len(result) < n:
+            msg = await self.conn.read_msg()
+
+            # If the connection closes after a partial read, return the bytes
+            # we already assembled. This preserves the stream-read behavior
+            # expected by higher layers.
+            if msg == b"":
+                if result:
+                    return bytes(result)
+                raise Exception("Connection closed")
+
+            remaining = n - len(result)
+            if len(msg) <= remaining:
+                result.extend(msg)
+            else:
+                result.extend(msg[:remaining])
+                self._fill(msg[remaining:])
+
+        return bytes(result)
 
     async def write(self, data: bytes) -> None:
         await self.conn.write_msg(data)
