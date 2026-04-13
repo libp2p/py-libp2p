@@ -45,11 +45,19 @@ class TCPListener(IListener):
     def __init__(self, handler_function: THandler) -> None:
         self.listeners = []
         self.handler = handler_function
+        # Internal concurrency state — see listen() / close().
+        self._nursery: trio.Nursery | None = None
+        self._started: trio.Event = trio.Event()
+        self._stopped: trio.Event = trio.Event()
+        self._start_error: BaseException | None = None
 
-    # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Put listener in listening mode and wait for incoming connections.
+
+        The listener spawns its own internal nursery as a trio system task
+        so that ``serve_tcp`` keeps running after ``listen()`` returns.
+        The nursery is cancelled on :meth:`close`.
 
         :param maddr: maddr of peer
         :raises OpenConnectionError: if listening fails (e.g. missing/invalid
@@ -105,19 +113,42 @@ class TCPListener(IListener):
         # For trio.serve_tcp, host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        try:
-            started_listeners = await nursery.start(
-                serve_tcp,
-                handler,
-                tcp_port,
-                host_str,
-            )
-        except Exception as error:
-            error_msg = f"Failed to start TCP listener for {maddr}: {error}"
-            logger.error(error_msg)
-            raise OpenConnectionError(error_msg) from error
+        # Reset state in case of a re-listen.
+        self._started = trio.Event()
+        self._stopped = trio.Event()
+        self._start_error = None
 
-        self.listeners.extend(started_listeners)
+        async def _run_server() -> None:
+            try:
+                async with trio.open_nursery() as nursery:
+                    self._nursery = nursery
+                    try:
+                        started_listeners = await nursery.start(
+                            serve_tcp,
+                            handler,
+                            tcp_port,
+                            host_str,
+                        )
+                        self.listeners.extend(started_listeners)
+                    except BaseException as error:
+                        self._start_error = error
+                    finally:
+                        self._started.set()
+                    # Nursery stays open serving connections until cancelled
+                    # from close().
+            finally:
+                self._stopped.set()
+                self._nursery = None
+
+        trio.lowlevel.spawn_system_task(_run_server)
+        await self._started.wait()
+
+        if self._start_error is not None:
+            error_msg = (
+                f"Failed to start TCP listener for {maddr}: {self._start_error}"
+            )
+            logger.error(error_msg)
+            raise OpenConnectionError(error_msg) from self._start_error
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
@@ -130,9 +161,23 @@ class TCPListener(IListener):
         )
 
     async def close(self) -> None:
+        """
+        Cancel the listener's internal nursery and close all sockets.
+
+        Safe to call multiple times.  Waits for the background system task
+        to finish before returning.
+        """
+        if self._nursery is not None:
+            self._nursery.cancel_scope.cancel()
+
         async with trio.open_nursery() as nursery:
             for listener in self.listeners:
                 nursery.start_soon(listener.aclose)
+        self.listeners.clear()
+
+        # Wait for the background _run_server task to finish cleaning up.
+        if self._started.is_set():
+            await self._stopped.wait()
 
 
 class TCP(ITransport):
