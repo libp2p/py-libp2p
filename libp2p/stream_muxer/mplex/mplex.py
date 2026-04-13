@@ -24,6 +24,7 @@ from libp2p.exceptions import (
     ParseError,
 )
 from libp2p.io.exceptions import (
+    ConnectionClosedError,
     IncompleteReadError,
 )
 from libp2p.network.connection.exceptions import (
@@ -77,6 +78,7 @@ class Mplex(IMuxedConn):
     event_closed: trio.Event
     event_started: trio.Event
     on_close: Callable[[], Awaitable[Any]] | None
+    _established: bool
 
     def __init__(
         self,
@@ -108,6 +110,23 @@ class Mplex(IMuxedConn):
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
         self.on_close = on_close
+        self._established = False
+
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Mplex connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
 
     async def start(self) -> None:
         await self.handle_incoming()
@@ -210,7 +229,7 @@ class Mplex(IMuxedConn):
         """
         try:
             await self.secured_conn.write(_bytes)
-        except RawConnError as e:
+        except (RawConnError, ConnectionClosedError) as e:
             raise MplexUnavailable(
                 "failed to write message to the underlying connection"
             ) from e
@@ -220,6 +239,7 @@ class Mplex(IMuxedConn):
         Read a message off of the secured connection and add it to the
         corresponding message buffer.
         """
+        self._established = True
         self.event_started.set()
         while True:
             try:
@@ -239,14 +259,24 @@ class Mplex(IMuxedConn):
         """
         try:
             header = await decode_uvarint_from_stream(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the header correctly from the underlying connection: "
                 f"{error}"
             )
         try:
             message = await read_varint_prefixed_bytes(self.secured_conn)
-        except (ParseError, RawConnError, IncompleteReadError) as error:
+        except (
+            ParseError,
+            RawConnError,
+            ConnectionClosedError,
+            IncompleteReadError,
+        ) as error:
             raise MplexUnavailable(
                 "failed to read the message body correctly from the underlying "
                 f"connection: {error}"
