@@ -2,8 +2,6 @@
 Tests for WebRTC protobuf message framing.
 """
 
-import pytest
-
 from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
 
 

@@ -19,7 +19,6 @@ from libp2p.transport.webrtc._asyncio_bridge import (
     AsyncioBridgeError,
 )
 
-
 # ---------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------
@@ -330,6 +329,7 @@ class TestFireAndForget:
     @pytest.mark.trio
     async def test_fire_and_forget_error_is_logged_not_raised(self):
         async with AsyncioBridge() as bridge:
+
             async def _explode() -> None:
                 raise RuntimeError("kaboom")
 
@@ -342,8 +342,10 @@ class TestFireAndForget:
     @pytest.mark.trio
     async def test_fire_and_forget_on_stopped_bridge(self):
         bridge = AsyncioBridge()
+
         async def _noop() -> None:
             pass
+
         # Should not raise — just silently discards
         bridge.schedule_fire_and_forget(_noop())
 

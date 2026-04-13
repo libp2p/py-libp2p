@@ -49,8 +49,10 @@ class TestSDPBuilder:
 
     def test_answer_has_setup_active(self):
         sdp, _, _ = self.builder.build_answer(
-            host="127.0.0.1", port=9090,
-            remote_ufrag="abc", remote_pwd="xyz",
+            host="127.0.0.1",
+            port=9090,
+            remote_ufrag="abc",
+            remote_pwd="xyz",
         )
         assert "a=setup:active" in sdp
 
@@ -89,7 +91,9 @@ class TestSDPFromMultiaddr:
         cert = WebRTCCertificate.generate()
         certhash = cert.fingerprint_to_multibase()
         sdp = SDPBuilder.build_sdp_from_multiaddr(
-            host="1.2.3.4", port=4001, certhash_multibase=certhash,
+            host="1.2.3.4",
+            port=4001,
+            certhash_multibase=certhash,
         )
         assert "1.2.3.4" in sdp
         assert "4001" in sdp

@@ -4,11 +4,9 @@ Tests for Noise prologue construction and DataChannelReadWriter.
 
 from __future__ import annotations
 
-import struct
 from unittest.mock import AsyncMock
 
 import pytest
-import trio
 
 from libp2p.transport.webrtc.constants import NOISE_PROLOGUE_PREFIX
 from libp2p.transport.webrtc.noise_handshake import (
@@ -29,7 +27,7 @@ class TestBuildNoisePrologue:
         remote_fp = b"\xbb" * 32
         prologue = build_noise_prologue(local_fp, remote_fp)
         # After prefix: local_mh (34 bytes) + remote_mh (34 bytes)
-        after_prefix = prologue[len(NOISE_PROLOGUE_PREFIX):]
+        after_prefix = prologue[len(NOISE_PROLOGUE_PREFIX) :]
         assert len(after_prefix) == 68  # 34 + 34
         # Verify multihash headers
         assert after_prefix[0] == 0x12  # SHA-256 code
@@ -70,7 +68,9 @@ class TestDataChannelReadWriter:
         send_cb = AsyncMock()
         recv_cb = AsyncMock(return_value=b"response")
         rw = DataChannelReadWriter(
-            send_cb=send_cb, recv_cb=recv_cb, is_initiator=True,
+            send_cb=send_cb,
+            recv_cb=recv_cb,
+            is_initiator=True,
         )
         await rw.write(b"hello")
         send_cb.assert_called_once_with(b"hello")
@@ -80,7 +80,9 @@ class TestDataChannelReadWriter:
         send_cb = AsyncMock()
         recv_cb = AsyncMock(return_value=b"data-from-peer")
         rw = DataChannelReadWriter(
-            send_cb=send_cb, recv_cb=recv_cb, is_initiator=False,
+            send_cb=send_cb,
+            recv_cb=recv_cb,
+            is_initiator=False,
         )
         data = await rw.read()
         assert data == b"data-from-peer"
@@ -88,18 +90,24 @@ class TestDataChannelReadWriter:
     @pytest.mark.trio
     async def test_close_is_noop(self):
         rw = DataChannelReadWriter(
-            send_cb=AsyncMock(), recv_cb=AsyncMock(), is_initiator=True,
+            send_cb=AsyncMock(),
+            recv_cb=AsyncMock(),
+            is_initiator=True,
         )
         await rw.close()  # Should not raise
 
     def test_is_initiator_property(self):
         rw = DataChannelReadWriter(
-            send_cb=AsyncMock(), recv_cb=AsyncMock(), is_initiator=True,
+            send_cb=AsyncMock(),
+            recv_cb=AsyncMock(),
+            is_initiator=True,
         )
         assert rw.is_initiator is True
 
     def test_transport_addresses_empty(self):
         rw = DataChannelReadWriter(
-            send_cb=AsyncMock(), recv_cb=AsyncMock(), is_initiator=True,
+            send_cb=AsyncMock(),
+            recv_cb=AsyncMock(),
+            is_initiator=True,
         )
         assert rw.get_transport_addresses() == []

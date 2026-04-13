@@ -7,7 +7,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import trio
 
 from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
 from libp2p.transport.webrtc.stream import StreamState, WebRTCStream

@@ -11,8 +11,8 @@ import trio
 
 from libp2p.connection_types import ConnectionType
 from libp2p.peer.id import ID
-from libp2p.transport.webrtc.connection import WebRTCConnection
 from libp2p.transport.webrtc.config import WebRTCTransportConfig
+from libp2p.transport.webrtc.connection import WebRTCConnection
 from libp2p.transport.webrtc.constants import OUTBOUND_STREAM_START_ID
 from libp2p.transport.webrtc.exceptions import WebRTCStreamError
 
@@ -140,8 +140,9 @@ class TestClose:
     @pytest.mark.trio
     async def test_close_resets_all_streams(self):
         conn = _make_connection()
-        s1 = await conn.open_stream()
-        s2 = await conn.open_stream()
+        # Open two streams to ensure close() iterates and resets them all.
+        await conn.open_stream()
+        await conn.open_stream()
         await conn.close()
         assert conn.is_closed is True
         assert not conn.is_established

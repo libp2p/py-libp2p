@@ -51,8 +51,9 @@ class TestIsWebrtcMultiaddr:
 
     def test_valid_relay_webrtc(self):
         # Use a valid base58 peer ID (Ed25519 key hash)
+        relay_peer_id = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
         maddr = Multiaddr(
-            "/ip4/1.2.3.4/udp/4001/quic-v1/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN/p2p-circuit/webrtc"
+            f"/ip4/1.2.3.4/udp/4001/quic-v1/p2p/{relay_peer_id}/p2p-circuit/webrtc"
         )
         assert is_webrtc_multiaddr(maddr)
 
@@ -89,10 +90,11 @@ class TestBuildWebrtcDirectMultiaddr:
     def test_build_with_peer_id(self):
         cert = WebRTCCertificate.generate()
         certhash = cert.fingerprint_to_multibase()
+        peer_id = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
         maddr = build_webrtc_direct_multiaddr(
-            "127.0.0.1", 9090, certhash, peer_id="12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN"
+            "127.0.0.1", 9090, certhash, peer_id=peer_id
         )
-        assert "/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN" in str(maddr)
+        assert f"/p2p/{peer_id}" in str(maddr)
 
 
 class TestParseWebrtcDirectMultiaddr:
@@ -111,14 +113,15 @@ class TestParseWebrtcDirectMultiaddr:
     def test_parse_with_peer_id(self):
         cert = WebRTCCertificate.generate()
         certhash = cert.fingerprint_to_multibase()
+        expected_peer = "12D3KooWJdGFj8RkDMPSLFsgAbHfcLTwSm3GVnSCbGTAoMnGcEms"
         maddr = build_webrtc_direct_multiaddr(
-            "192.168.1.1", 4001, certhash, peer_id="12D3KooWJdGFj8RkDMPSLFsgAbHfcLTwSm3GVnSCbGTAoMnGcEms"
+            "192.168.1.1", 4001, certhash, peer_id=expected_peer
         )
         host, port, parsed_certhash, peer_id = parse_webrtc_direct_multiaddr(maddr)
         assert host == "192.168.1.1"
         assert port == 4001
         assert parsed_certhash == certhash
-        assert peer_id == "12D3KooWJdGFj8RkDMPSLFsgAbHfcLTwSm3GVnSCbGTAoMnGcEms"
+        assert peer_id == expected_peer
 
     def test_parse_invalid_multiaddr(self):
         maddr = Multiaddr("/ip4/127.0.0.1/tcp/9090")
@@ -129,8 +132,9 @@ class TestParseWebrtcDirectMultiaddr:
         """Build a multiaddr and parse it back — values should survive."""
         cert = WebRTCCertificate.generate()
         certhash = cert.fingerprint_to_multibase()
+        expected_peer = "12D3KooWRBy97UB99e3J6hiPesre1MZeuNQvfan7ATZ8HbRL9vbs"
         original_maddr = build_webrtc_direct_multiaddr(
-            "10.0.0.1", 5555, certhash, peer_id="12D3KooWRBy97UB99e3J6hiPesre1MZeuNQvfan7ATZ8HbRL9vbs"
+            "10.0.0.1", 5555, certhash, peer_id=expected_peer
         )
         host, port, parsed_hash, peer_id = parse_webrtc_direct_multiaddr(original_maddr)
         assert host == "10.0.0.1"

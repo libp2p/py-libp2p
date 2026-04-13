@@ -115,7 +115,9 @@ class TestFingerprintFromMultibase:
     """Test decoding multibase-encoded fingerprints."""
 
     def test_invalid_prefix(self):
-        with pytest.raises(WebRTCCertificateError, match="Unsupported multibase prefix"):
+        with pytest.raises(
+            WebRTCCertificateError, match="Unsupported multibase prefix"
+        ):
             fingerprint_from_multibase("zInvalidBase58")
 
     def test_invalid_base64(self):
