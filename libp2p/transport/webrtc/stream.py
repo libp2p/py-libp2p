@@ -57,6 +57,7 @@ class WebRTCStream(IMuxedStream):
         connection: WebRTCConnection,
         channel_id: int,
         is_initiator: bool,
+        trio_token: trio.lowlevel.TrioToken | None = None,
     ) -> None:
         self.muxed_conn = connection
         self._channel_id = channel_id
@@ -84,14 +85,32 @@ class WebRTCStream(IMuxedStream):
         # Set by WebRTCConnection after construction.
         self._send_callback: _SendCallback | None = None
 
+        # Trio token used to safely route asyncio-side callbacks back to the
+        # trio thread.  Prefer the explicitly-supplied token (the connection
+        # passes its own trio_token when constructing inbound streams from
+        # the asyncio thread).  Fall back to capturing one inline only when
+        # we're already on a trio task (tests / outbound streams).
+        if trio_token is not None:
+            self._trio_token: trio.lowlevel.TrioToken | None = trio_token
+        else:
+            try:
+                self._trio_token = trio.lowlevel.current_trio_token()
+            except RuntimeError:
+                self._trio_token = None
+
     @property
     def channel_id(self) -> int:
         """The WebRTC data channel ID for this stream."""
         return self._channel_id
 
     def get_remote_address(self) -> tuple[str, int] | None:
-        """Delegate to the connection (data channels don't have individual addresses)."""
-        return self.muxed_conn.get_remote_address()
+        """Delegate to the connection (data channels share its address)."""
+        # WebRTCConnection adds get_remote_address() on top of the bare
+        # IMuxedConn ABC.  Fall back to None for any other muxed connection.
+        get_addr = getattr(self.muxed_conn, "get_remote_address", None)
+        if callable(get_addr):
+            return get_addr()
+        return None
 
     # ------------------------------------------------------------------
     # IMuxedStream: read
@@ -267,63 +286,107 @@ class WebRTCStream(IMuxedStream):
         Parses the :class:`Message`, processes any flag, and enqueues
         payload bytes for :meth:`read`.
 
-        .. note::
-
-            This may be called from the asyncio bridge thread.  We use
-            ``send_nowait`` which is safe under CPython's GIL for simple
-            enqueue operations.  State mutations (``_read_closed``,
-            ``_write_closed``, ``_state``) are atomic single-assignment
-            operations, also safe under the GIL.  The ``_schedule_send``
-            method routes through the bridge's ``schedule_fire_and_forget``
-            to avoid calling trio APIs from the asyncio thread.
+        May be invoked from the asyncio bridge thread (not a Trio task).
+        To stay safe we route every Trio primitive call (memory channel,
+        :class:`trio.Event`) through :func:`trio.from_thread.run_sync`
+        with a captured :class:`trio.lowlevel.TrioToken`.  When called
+        from within a Trio task (for example in unit tests) we execute
+        the mutations inline.
         """
         msg = Message()
         msg.ParseFromString(raw)
 
-        # Enqueue payload BEFORE processing flags.  The spec allows a
-        # message to carry both data and FIN — the data must be delivered
-        # to the reader before the read channel is closed.
-        if msg.HasField("message") and msg.message:
+        # Snapshot flags/payload first; all subsequent state mutations are
+        # performed under the Trio thread.
+        has_payload = msg.HasField("message") and bool(msg.message)
+        payload = bytes(msg.message) if has_payload else b""
+        has_flag = msg.HasField("flag")
+        flag = msg.flag if has_flag else None
+
+        def _apply_on_trio_thread() -> None:
+            # Enqueue payload BEFORE processing flags — the spec allows a
+            # message to carry both data and FIN, and the data must be
+            # delivered to the reader before the read channel is closed.
+            if has_payload:
+                try:
+                    self._read_send.send_nowait(payload)
+                except trio.WouldBlock:
+                    logger.warning(
+                        "WebRTCStream channel=%d: read buffer full, dropping message",
+                        self._channel_id,
+                    )
+                except trio.ClosedResourceError:
+                    pass
+
+            if has_flag:
+                if flag == Message.FIN:
+                    self._read_closed = True
+                    self._enqueue_eof_sentinel_locked()
+                    self._schedule_send(Message(flag=Message.FIN_ACK))
+                elif flag == Message.FIN_ACK:
+                    self._fin_ack_received.set()
+                elif flag == Message.STOP_SENDING:
+                    self._write_closed = True
+                elif flag == Message.RESET:
+                    self._state = StreamState.RESET
+                    self._enqueue_eof_sentinel_locked()
+
+        self._run_on_trio_thread(_apply_on_trio_thread)
+
+    def _run_on_trio_thread(self, fn: Callable[[], None]) -> None:
+        """
+        Execute *fn* on the Trio thread.
+
+        If we're already inside a Trio task, call directly.  Otherwise
+        route through :func:`trio.from_thread.run_sync` using the token
+        captured at construction time.  If no token was captured (e.g.
+        tests that build a stream without a running Trio loop) fall back
+        to a direct call — those tests never cross thread boundaries
+        anyway.
+        """
+        token = self._trio_token
+        try:
+            trio.lowlevel.current_task()
+            in_trio = True
+        except RuntimeError:
+            in_trio = False
+
+        if in_trio or token is None:
+            fn()
+        else:
             try:
-                self._read_send.send_nowait(msg.message)
-            except trio.WouldBlock:
-                logger.warning(
-                    "WebRTCStream channel=%d: read buffer full, dropping message",
+                trio.from_thread.run_sync(fn, trio_token=token)
+            except trio.RunFinishedError:
+                logger.debug(
+                    "WebRTCStream channel=%d: trio run finished, dropping "
+                    "asyncio-side callback",
                     self._channel_id,
                 )
-            except trio.ClosedResourceError:
-                pass  # Read side already closed
 
-        # Handle flags
-        if msg.HasField("flag"):
-            flag = msg.flag
-            if flag == Message.FIN:
-                self._read_closed = True
-                # Signal EOF via sentinel — do NOT call close() here because
-                # on_data may be called from a non-trio thread (asyncio bridge).
-                # trio.MemorySendChannel.close() is not thread-safe.
-                self._enqueue_eof_sentinel()
-                self._schedule_send(Message(flag=Message.FIN_ACK))
-            elif flag == Message.FIN_ACK:
-                self._fin_ack_received.set()
-            elif flag == Message.STOP_SENDING:
-                self._write_closed = True
-            elif flag == Message.RESET:
-                self._state = StreamState.RESET
-                self._enqueue_eof_sentinel()
+    def _enqueue_eof_sentinel_locked(self) -> None:
+        """
+        Send an empty sentinel to signal EOF to the trio-side reader.
 
-    def _enqueue_eof_sentinel(self) -> None:
-        """Send an empty sentinel to signal EOF to the trio-side reader."""
+        MUST be called from a Trio task — use via
+        :meth:`_run_on_trio_thread` when routing from a foreign thread.
+        """
         try:
             self._read_send.send_nowait(b"")
         except (trio.WouldBlock, trio.ClosedResourceError):
             pass
 
+    # Preserved name for internal callers already on the Trio side.
+    _enqueue_eof_sentinel = _enqueue_eof_sentinel_locked
+
     def on_channel_close(self) -> None:
         """Called when the underlying data channel is closed."""
-        self._read_closed = True
-        self._write_closed = True
-        self._enqueue_eof_sentinel()
+
+        def _apply() -> None:
+            self._read_closed = True
+            self._write_closed = True
+            self._enqueue_eof_sentinel_locked()
+
+        self._run_on_trio_thread(_apply)
 
     # ------------------------------------------------------------------
     # Internal
@@ -366,8 +429,14 @@ class WebRTCStream(IMuxedStream):
             return
         data = msg.SerializeToString()
         bridge = getattr(self.muxed_conn, "_bridge", None)
-        if bridge is not None and bridge.is_running:
-            bridge.schedule_fire_and_forget(self._send_callback(data))
+        # CRITICAL: do NOT use self._send_callback here.  That callback is
+        # the trio-facing wrapper which itself awaits bridge.run_coro() —
+        # invoking it via schedule_fire_and_forget would block the asyncio
+        # thread on a future that can only be resolved from a trio task.
+        # Bypass it and call the asyncio-native callback directly.
+        send_cb = getattr(self.muxed_conn, "_send_on_channel_cb", None)
+        if bridge is not None and bridge.is_running and send_cb is not None:
+            bridge.schedule_fire_and_forget(send_cb(self._channel_id, data))
 
     def _cleanup(self) -> None:
         """Release resources."""

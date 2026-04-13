@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IMuxedConn, IMuxedStream, IRawConnection
 from libp2p.connection_types import ConnectionType
@@ -29,7 +29,6 @@ from libp2p.peer.id import ID
 from .config import WebRTCTransportConfig
 from .constants import (
     ACCEPT_QUEUE_SIZE,
-    NOISE_HANDSHAKE_CHANNEL_ID,
     OUTBOUND_STREAM_START_ID,
 )
 from .exceptions import WebRTCConnectionError, WebRTCStreamError
@@ -95,12 +94,27 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
         self._send_on_channel_cb: Any = None  # async (channel_id, data) -> None
         self._close_pc_cb: Any = None  # async () -> None
 
+        # Trio token captured at construction time, used to safely route
+        # aiortc callbacks (which run on the asyncio bridge thread) back
+        # into the Trio thread via trio.from_thread.run_sync().  May be
+        # None in unit tests that construct the connection outside a trio
+        # task; in that case we call the mutations inline.
+        try:
+            self._trio_token: trio.lowlevel.TrioToken | None = (
+                trio.lowlevel.current_trio_token()
+            )
+        except RuntimeError:
+            self._trio_token = None
+
     # ------------------------------------------------------------------
     # IRawConnection interface
     # ------------------------------------------------------------------
 
     @property
-    def is_initiator(self) -> bool:
+    def is_initiator(self) -> bool:  # type: ignore[override]
+        # IRawConnection declares is_initiator as a writable attribute while
+        # IMuxedConn declares it as an abstract property; we satisfy the
+        # property side because QUIC uses the same pattern.
         return self._is_init
 
     def get_transport_addresses(self) -> list[Multiaddr]:
@@ -192,14 +206,13 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
             connection=self,
             channel_id=channel_id,
             is_initiator=True,
+            trio_token=self._trio_token,
         )
 
         # Create the data channel via the bridge
         if self._create_channel_cb is not None:
             try:
-                await self._bridge.run_coro(
-                    self._create_channel_cb(channel_id, "")
-                )
+                await self._bridge.run_coro(self._create_channel_cb(channel_id, ""))
             except Exception as e:
                 raise WebRTCStreamError(
                     f"Failed to create data channel {channel_id}: {e}"
@@ -232,7 +245,9 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
             stream = await self._accept_recv.receive()
             return stream
         except trio.EndOfChannel:
-            raise WebRTCStreamError("Connection closed while waiting for stream") from None
+            raise WebRTCStreamError(
+                "Connection closed while waiting for stream"
+            ) from None
 
     # ------------------------------------------------------------------
     # Inbound data-channel handler (called by transport)
@@ -243,36 +258,46 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
         Register an inbound data channel as a new stream.
 
         Called by the transport layer when a remote peer creates a data channel.
+        May be invoked from the asyncio bridge thread; any Trio-side
+        enqueueing is routed through :meth:`_run_on_trio_thread`.
 
         :param channel_id: The data channel ID.
         :returns: The created :class:`WebRTCStream`.
         """
+        # Pass our captured trio_token so the stream can route foreign-thread
+        # callbacks back into trio even when constructed off-thread.
         stream = WebRTCStream(
             connection=self,
             channel_id=channel_id,
             is_initiator=False,
+            trio_token=self._trio_token,
         )
         stream._send_callback = self._make_send_callback(channel_id)
 
+        # Stream registry is guarded by threading.Lock so this is safe from
+        # either thread.
         with self._streams_lock:
             self._streams[channel_id] = stream
 
-        # Enqueue for accept_stream()
-        try:
-            self._accept_send.send_nowait(stream)
-        except (trio.WouldBlock, trio.ClosedResourceError):
-            logger.warning(
-                "Accept queue full or closed, dropping inbound channel=%d",
-                channel_id,
-            )
+        def _enqueue_stream() -> None:
+            try:
+                self._accept_send.send_nowait(stream)
+            except (trio.WouldBlock, trio.ClosedResourceError):
+                logger.warning(
+                    "Accept queue full or closed, dropping inbound channel=%d",
+                    channel_id,
+                )
 
+        self._run_on_trio_thread(_enqueue_stream)
         return stream
 
     def on_channel_message(self, channel_id: int, data: bytes) -> None:
         """
         Route a received data-channel message to the correct stream.
 
-        Called by the transport layer from the asyncio bridge.
+        Stream-level routing is done on whatever thread we're called from;
+        the stream itself (:meth:`WebRTCStream.on_data`) handles the
+        foreign-thread hand-off to Trio.
         """
         with self._streams_lock:
             stream = self._streams.get(channel_id)
@@ -282,11 +307,39 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
             logger.debug("Message for unknown channel=%d, ignoring", channel_id)
 
     def on_channel_closed(self, channel_id: int) -> None:
-        """Handle data-channel close event."""
+        """Handle data-channel close event (safe from any thread)."""
         with self._streams_lock:
             stream = self._streams.pop(channel_id, None)
         if stream is not None:
             stream.on_channel_close()
+
+    def _run_on_trio_thread(self, fn: Callable[[], None]) -> None:
+        """
+        Execute *fn* on the Trio thread.
+
+        If we're already inside a Trio task, call directly.  Otherwise
+        route through :func:`trio.from_thread.run_sync` using the captured
+        token.  Falls back to a direct call if no token was captured
+        (happens only in tests that construct the connection outside a
+        trio run).
+        """
+        token = self._trio_token
+        try:
+            trio.lowlevel.current_task()
+            in_trio = True
+        except RuntimeError:
+            in_trio = False
+
+        if in_trio or token is None:
+            fn()
+        else:
+            try:
+                trio.from_thread.run_sync(fn, trio_token=token)
+            except trio.RunFinishedError:
+                logger.debug(
+                    "WebRTCConnection: trio run finished, dropping "
+                    "asyncio-side callback"
+                )
 
     # ------------------------------------------------------------------
     # Internal
@@ -308,9 +361,7 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
 
         async def _send(data: bytes) -> None:
             if self._send_on_channel_cb is not None:
-                await self._bridge.run_coro(
-                    self._send_on_channel_cb(channel_id, data)
-                )
+                await self._bridge.run_coro(self._send_on_channel_cb(channel_id, data))
 
         return _send
 
