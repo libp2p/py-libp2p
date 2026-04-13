@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener
 from libp2p.crypto.keys import PrivateKey
@@ -27,14 +27,13 @@ from libp2p.peer.id import ID
 
 from .certificate import WebRTCCertificate
 from .config import WebRTCTransportConfig
-from .exceptions import WebRTCConnectionError
 from .multiaddr_utils import (
     build_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
 
 if TYPE_CHECKING:
-    from ._asyncio_bridge import AsyncioBridge
+    pass
 
 logger = logging.getLogger(__name__)
 

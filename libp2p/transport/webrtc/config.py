@@ -60,7 +60,9 @@ class WebRTCTransportConfig:
     # ------------------------------------------------------------------
     # STUN / TURN servers (for ICE candidate gathering)
     # ------------------------------------------------------------------
-    ice_servers: list[str] = field(default_factory=lambda: ["stun:stun.l.google.com:19302"])
+    ice_servers: list[str] = field(
+        default_factory=lambda: ["stun:stun.l.google.com:19302"]
+    )
 
     def get_or_generate_certificate(self) -> WebRTCCertificate:
         """Return the configured certificate or generate a new one."""

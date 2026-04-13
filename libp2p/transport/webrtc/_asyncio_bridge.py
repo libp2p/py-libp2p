@@ -161,9 +161,7 @@ class AsyncioBridge:
             def _join_thread() -> None:
                 thread.join(timeout=5.0)
                 if thread.is_alive():
-                    logger.warning(
-                        "AsyncioBridge thread did not stop within timeout"
-                    )
+                    logger.warning("AsyncioBridge thread did not stop within timeout")
 
             await trio.to_thread.run_sync(_join_thread)
 
@@ -202,8 +200,9 @@ class AsyncioBridge:
         try:
             # abandon_on_cancel=True lets trio cancel the scope immediately.
             # The background thread is abandoned but we cancel the asyncio
-            # future below so it doesn't leak.
-            return await trio.to_thread.run_sync(
+            # future below so it doesn't leak.  The keyword is supported at
+            # runtime by trio>=0.22 even though the stubs don't declare it.
+            return await trio.to_thread.run_sync(  # type: ignore[call-arg]
                 _wait_for_result, abandon_on_cancel=True
             )
         except trio.Cancelled:
@@ -248,7 +247,7 @@ class AsyncioBridge:
             coro.close()
             return
 
-        def _done_callback(fut: asyncio.Future[Any]) -> None:
+        def _done_callback(fut: concurrent.futures.Future[Any]) -> None:
             exc = fut.exception()
             if exc is not None:
                 logger.debug("Fire-and-forget coroutine failed: %s", exc)
@@ -292,5 +291,10 @@ class AsyncioBridge:
         await self.stop()
 
     def __repr__(self) -> str:
-        state = "running" if self.is_running else ("stopped" if self._stopped else "idle")
+        if self.is_running:
+            state = "running"
+        elif self._stopped:
+            state = "stopped"
+        else:
+            state = "idle"
         return f"<AsyncioBridge state={state}>"

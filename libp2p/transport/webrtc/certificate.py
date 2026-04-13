@@ -11,10 +11,10 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import struct
-from datetime import datetime, timedelta, timezone
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -113,7 +113,8 @@ class WebRTCCertificate:
         For SHA-256 both code (0x12) and length (32) fit in a single byte,
         so we avoid a full varint encoder.
         """
-        return struct.pack("BB", _SHA256_MULTIHASH_CODE, _SHA256_DIGEST_SIZE) + self._fingerprint
+        header = struct.pack("BB", _SHA256_MULTIHASH_CODE, _SHA256_DIGEST_SIZE)
+        return header + self._fingerprint
 
     def fingerprint_to_multibase(self) -> str:
         """
@@ -190,11 +191,13 @@ def fingerprint_from_multibase(encoded: str) -> bytes:
         )
     if code != _SHA256_MULTIHASH_CODE:
         raise WebRTCCertificateError(
-            f"Unsupported multihash function code: 0x{code:02x} (expected 0x12 / SHA-256)"
+            f"Unsupported multihash function code: 0x{code:02x} "
+            "(expected 0x12 / SHA-256)"
         )
     if length != _SHA256_DIGEST_SIZE:
         raise WebRTCCertificateError(
-            f"Unexpected multihash digest length: {length} (expected {_SHA256_DIGEST_SIZE})"
+            f"Unexpected multihash digest length: {length} "
+            f"(expected {_SHA256_DIGEST_SIZE})"
         )
     digest = raw[2:]
     if len(digest) != _SHA256_DIGEST_SIZE:

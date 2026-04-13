@@ -22,7 +22,10 @@ import logging
 import struct
 from typing import Awaitable, Callable
 
+from multiaddr import Multiaddr
+
 from libp2p.abc import IRawConnection
+from libp2p.connection_types import ConnectionType
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
 from libp2p.security.noise.patterns import PatternXX
@@ -96,24 +99,18 @@ async def perform_noise_handshake(
                 raise WebRTCHandshakeError(
                     "remote_peer is required for outbound Noise handshake"
                 )
-            secure_conn = await pattern.handshake_outbound(
-                conn, remote_peer
-            )
+            secure_conn = await pattern.handshake_outbound(conn, remote_peer)
         else:
             secure_conn = await pattern.handshake_inbound(conn)
 
-        authenticated_peer = secure_conn.remote_peer
-        logger.debug(
-            "Noise handshake completed: remote_peer=%s", authenticated_peer
-        )
+        authenticated_peer = secure_conn.get_remote_peer()
+        logger.debug("Noise handshake completed: remote_peer=%s", authenticated_peer)
         return authenticated_peer
 
     except WebRTCHandshakeError:
         raise
     except Exception as e:
-        raise WebRTCHandshakeError(
-            f"Noise handshake failed: {e}"
-        ) from e
+        raise WebRTCHandshakeError(f"Noise handshake failed: {e}") from e
 
 
 class DataChannelReadWriter(IRawConnection):
@@ -150,14 +147,11 @@ class DataChannelReadWriter(IRawConnection):
     def get_remote_address(self) -> tuple[str, int] | None:
         return None
 
-    def get_transport_addresses(self) -> list:
+    def get_transport_addresses(self) -> list[Multiaddr]:
         return []
 
-    def get_connection_type(self):  # type: ignore[override]
-        from libp2p.connection_types import ConnectionType
-
+    def get_connection_type(self) -> ConnectionType:
         return ConnectionType.DIRECT
-
 
 
 # Callback types for data channel I/O

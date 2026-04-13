@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener, INetStream
 from libp2p.crypto.keys import PrivateKey
@@ -31,7 +31,7 @@ from .config import WebRTCTransportConfig
 from .constants import WEBRTC_SIGNALING_PROTOCOL_ID
 
 if TYPE_CHECKING:
-    from ._asyncio_bridge import AsyncioBridge
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -130,9 +130,7 @@ class WebRTCPrivateListener(IListener):
             # 7. Create connection, call handler
 
         except Exception:
-            logger.debug(
-                "WebRTC signaling handler failed", exc_info=True
-            )
+            logger.debug("WebRTC signaling handler failed", exc_info=True)
         finally:
             try:
                 await stream.close()

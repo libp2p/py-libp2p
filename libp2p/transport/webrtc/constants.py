@@ -26,7 +26,8 @@ WEBRTC_SIGNALING_PROTOCOL_ID = TProtocol("/webrtc-signaling/0.0.1")
 # Message size constraints (from spec §Message Framing)
 # ---------------------------------------------------------------------------
 MAX_MESSAGE_SIZE = 16_384  # 16 KiB — hard limit for browser compat
-RECOMMENDED_PAYLOAD_SIZE = 1_200  # Spec-recommended, avoids IP fragmentation at IPv6 min MTU
+# Spec-recommended payload, avoids IP fragmentation at the IPv6 minimum MTU.
+RECOMMENDED_PAYLOAD_SIZE = 1_200
 
 # ---------------------------------------------------------------------------
 # Data-channel ID allocation (from spec §Multiplexing)
