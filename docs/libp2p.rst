@@ -59,14 +59,6 @@ libp2p.custom_types module
    :show-inheritance:
    :exclude-members: INetStream, IMuxedConn, ISecureTransport
 
-libp2p.utils module
--------------------
-
-.. automodule:: libp2p.utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 Module contents
 ---------------
 
