@@ -21,29 +21,26 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
        pip install uv
 
-2. Create and activate a virtual environment:
+2. Create a virtual environment and install `py-libp2p`:
 
    .. code:: sh
 
-       uv venv .venv
+       uv sync
+
+   This automatically creates a ``.venv`` in the project directory and installs
+   the package. Activate the environment to use it:
 
    - **Linux / macOS**
 
      .. code:: sh
 
-         source .venv/bin/activate
+         . .venv/bin/activate
 
    - **Windows (PowerShell)**
 
      .. code:: powershell
 
          .venv\Scripts\Activate.ps1
-
-3. Install `py-libp2p`:
-
-   .. code:: sh
-
-       uv pip install libp2p
 
 Using pip
 ~~~~~~~~~
@@ -62,7 +59,7 @@ If you prefer pip, you can install `py-libp2p` the traditional way:
 
      .. code:: sh
 
-         source .venv/bin/activate
+         . .venv/bin/activate
 
    - **Windows (cmd)**
 
@@ -85,21 +82,14 @@ If you prefer pip, you can install `py-libp2p` the traditional way:
 Development Installation
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-To install for development with all dev dependencies:
+To install for development with all dev dependencies, use the ``dev`` dependency group:
 
 .. code:: sh
 
-    # Using uv (recommended)
-    uv pip install --group dev -e .
+    uv sync --group dev
 
-    # Or using pip
-    pip install --group dev -e .
-
-py-libp2p uses `dependency groups <https://peps.python.org/pep-0735/>`_ (PEP 735)
-for dev dependencies, so the `--group dev` flag is required.
-If you use pip for development installation, ensure pip >= 25.1 so `--group`
-is available.
-For full contributor environment setup, see :doc:`contributing`.
+For the full contributor environment setup (including pre-commit hooks), see
+:doc:`contributing`.
 
 Usage
 -----
