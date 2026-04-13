@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Python libp2p ping test implementation for transport-interop tests.
+Python libp2p ping test implementation for transport-interop and unified-testing.
 
-This implementation follows the transport-interop test specification:
-- Reads configuration from environment variables
-- Connects to Redis for coordination
-- Implements both dialer and listener roles
-- Measures ping RTT and handshake times
-- Outputs results in JSON format to stdout
+- Default: unified-testing (YAML dialer output, TEST_KEY + namespaced Redis keys).
+- --test-plans: test-plans harness (one-line JSON on stdout, listenerAddr Redis key).
+
+Environment variables are accepted in uppercase or lowercase where listed in get_env.
 """
 
+import argparse
 from datetime import datetime, timedelta
 import ipaddress
+import json
 import logging
 import os
 import ssl
@@ -38,6 +38,16 @@ from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_hos
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
+
+# nim-libp2p identify `decodeMsg` is strict: any protobuf field that fails to
+# decode aborts the whole message ("Incorrect message received!"). In practice:
+# - Field 8 (signed peer record): py-libp2p's envelope may not decode as nim's
+#   SignedPeerRecord.
+# - Repeated field 2 (listen addrs): advertised addrs can include `/p2p/...`;
+#   nim may reject every entry so repeated-field decode returns IncorrectBlob.
+# - Field 4 (observed addr) / repeated field 3 (protocols): can also trip
+#   nim's decoder on WS interop; omit for a minimal identify response.
+import libp2p.identity.identify.identify as _identify_mod
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
@@ -51,16 +61,55 @@ from libp2p.security.tls.transport import (
 )
 from libp2p.utils.address_validation import get_available_interfaces
 
+_orig_mk_identify_protobuf = _identify_mod._mk_identify_protobuf
+
+
+def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
+    msg = _orig_mk_identify_protobuf(host, observed_multiaddr)
+    msg.ClearField("listen_addrs")
+    msg.ClearField("observed_addr")
+    msg.ClearField("protocols")
+    for field in msg.DESCRIPTOR.fields:
+        if field.number == 8:
+            msg.ClearField(field.name)
+            break
+    return msg
+
+
+_identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
+
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 MAX_TEST_TIMEOUT = 300  # Max timeout (default Docker timeout is 600s)
 
+# `docker compose up --exit-code-from=dialer` implies `--abort-on-container-exit`.
+# If the listener process exits first, Compose stops the dialer with SIGTERM (exit 143)
+# even after a successful ping. Non-Python dialers need a short window after the ping
+# handshake to emit JSON and shut down (e.g. jvm-libp2p `node.stop()`).
+TEST_PLANS_LISTENER_POST_PING_GRACE_SECS = 12.0
+# TLS + mplex: peer teardown and mplex background tasks often race;
+# give dialers more time.
+TEST_PLANS_LISTENER_POST_PING_GRACE_TLS_MPLEX_SECS = 30.0
+
 logger = logging.getLogger("libp2p.ping_test")
 
 
+def env_first(*keys: str) -> str | None:
+    """Return the first non-empty env value for any of the given keys (exact case)."""
+    for k in keys:
+        v = os.getenv(k)
+        if v is not None and v != "":
+            return v
+    return None
+
+
 def configure_logging() -> None:
-    """Configure logging based on debug environment variable."""
-    debug_value = os.getenv("DEBUG") or "false"  # Optional, default to "false"
+    """Configure logging based on DEBUG / LIBP2P_DEBUG (any common case)."""
+    debug_value = (
+        env_first("DEBUG", "debug")
+        or env_first("LIBP2P_DEBUG", "libp2p_debug")
+        or "false"
+    )
     debug_enabled = debug_value.upper() in [
         "DEBUG",
         "1",
@@ -98,7 +147,7 @@ def configure_logging() -> None:
             "libp2p.stream_muxer.yamux",
             "libp2p.stream_muxer.mplex",
             "libp2p.host",
-            "libp2p.tools.async_service",
+            "libp2p.tools.anyio_service",
         ]
         for logger_name in logger_names:
             logging.getLogger(logger_name).setLevel(logging.DEBUG)
@@ -115,55 +164,57 @@ def configure_logging() -> None:
 
 
 class PingTest:
-    def __init__(self) -> None:
+    def __init__(self, test_plans: bool = False) -> None:
         """Initialize ping test with configuration from environment variables."""
-        # All environment variables use uppercase names only and are required
-        self.transport = os.getenv("TRANSPORT")
+        self.test_plans = test_plans
+
+        self.transport = env_first("TRANSPORT", "transport")
         if not self.transport:
             raise ValueError("TRANSPORT environment variable is required")
 
-        # Standalone transports don't use separate security/muxer
-        standalone_transports = ["quic-v1"]  # Python currently only supports quic-v1
+        standalone_transports = ["quic-v1"]
 
-        # Check if transport is standalone before requiring MUXER/SECURE_CHANNEL
         self.muxer: str | None = None
         self.security: str | None = None
         if self.transport not in standalone_transports:
-            # Non-standalone transports: MUXER and SECURE_CHANNEL are required
-            muxer_env = os.getenv("MUXER")
+            muxer_env = env_first("MUXER", "muxer")
             if muxer_env is None:
                 raise ValueError("MUXER environment variable is required")
             self.muxer = muxer_env
 
-            security_env = os.getenv("SECURE_CHANNEL")
+            security_env = env_first("SECURE_CHANNEL", "security")
             if security_env is None:
-                raise ValueError("SECURE_CHANNEL environment variable is required")
+                raise ValueError(
+                    "SECURE_CHANNEL or security environment variable is required"
+                )
             self.security = security_env
         else:
-            # Standalone transports: MUXER and SECURE_CHANNEL are optional
-            # (not set by framework)
-            muxer_env = os.getenv("MUXER")
+            muxer_env = env_first("MUXER", "muxer")
             self.muxer = muxer_env if muxer_env else None
 
-            security_env = os.getenv("SECURE_CHANNEL")
+            security_env = env_first("SECURE_CHANNEL", "security")
             self.security = security_env if security_env else None
 
-        is_dialer_value = os.getenv("IS_DIALER")
+        is_dialer_value = env_first("IS_DIALER", "is_dialer")
         if is_dialer_value is None:
             raise ValueError("IS_DIALER environment variable is required")
-        self.is_dialer = is_dialer_value == "true"  # Case-sensitive match
+        self.is_dialer = is_dialer_value.lower() == "true"
 
-        self.ip = os.getenv("LISTENER_IP")
+        self.ip = env_first("LISTENER_IP", "ip")
         if not self.ip:
-            raise ValueError("LISTENER_IP environment variable is required")
+            if test_plans:
+                self.ip = "0.0.0.0"
+            else:
+                raise ValueError("LISTENER_IP environment variable is required")
 
-        self.redis_addr = os.getenv("REDIS_ADDR")
+        self.redis_addr = env_first("redis_addr", "REDIS_ADDR")
         if not self.redis_addr:
-            raise ValueError("REDIS_ADDR environment variable is required")
+            if test_plans:
+                self.redis_addr = "redis:6379"
+            else:
+                raise ValueError("REDIS_ADDR environment variable is required")
 
-        # Framework timeout: use TEST_TIMEOUT_SECS if set,
-        # otherwise default to 180 seconds
-        timeout_value = os.getenv("TEST_TIMEOUT_SECS") or "180"
+        timeout_value = env_first("TEST_TIMEOUT_SECS", "test_timeout_seconds") or "180"
         raw_timeout = int(timeout_value)
         self.test_timeout_seconds = min(raw_timeout, MAX_TEST_TIMEOUT)
         self.resp_timeout = max(30, int(self.test_timeout_seconds * 0.6))
@@ -175,10 +226,13 @@ class PingTest:
             self.redis_host = self.redis_addr
             self.redis_port = 6379
 
-        # Read TEST_KEY for Redis key namespacing (required by transport test framework)
-        self.test_key = os.getenv("TEST_KEY")
-        if not self.test_key:
-            raise ValueError("TEST_KEY environment variable is required")
+        self.test_key = env_first("TEST_KEY", "test_key")
+        if test_plans:
+            self.redis_listener_key = "listenerAddr"
+        else:
+            if not self.test_key:
+                raise ValueError("TEST_KEY environment variable is required")
+            self.redis_listener_key = f"{self.test_key}_listener_multiaddr"
 
         self.host: Any = None
         self.redis_client: redis.Redis[str] | None = None
@@ -577,9 +631,19 @@ class PingTest:
         if exc is None:
             return False
 
-        # Check direct exception message
+        # Check direct exception message (shutdown races with many implementations)
         exc_str = str(exc).lower()
-        if "connection closed" in exc_str:
+        if any(
+            phrase in exc_str
+            for phrase in (
+                "connection closed",
+                "stream reset",
+                "connection reset",
+                "broken pipe",
+                "stream eof",
+                "end of file",
+            )
+        ):
             return True
 
         # Check cause chain
@@ -594,6 +658,13 @@ class PingTest:
             )
 
         return False
+
+    def _listener_post_ping_grace_secs(self) -> float:
+        if not self.test_plans:
+            return 0.2
+        if self.security == "tls" and self.muxer == "mplex":
+            return TEST_PLANS_LISTENER_POST_PING_GRACE_TLS_MPLEX_SECS
+        return TEST_PLANS_LISTENER_POST_PING_GRACE_SECS
 
     async def handle_ping(self, stream: INetStream) -> None:
         """Handle incoming ping requests."""
@@ -807,15 +878,10 @@ class PingTest:
                     file=sys.stderr,
                 )
                 # Redis Coordination Protocol:
-                # - Key format: {TEST_KEY}_listener_multiaddr
-                #   (per transport test framework spec)
-                # - Operation: RPUSH (Redis list operation) - creates list
-                #   with multiaddr
-                # - Why RPUSH/BLPOP: Blocking list operations allow dialer to wait
-                #   efficiently without polling. Matches Rust/JS implementations.
-                # - Key cleanup: Delete key first to prevent WRONGTYPE errors
-                #   from leftover data (string vs list type conflicts)
-                redis_key = f"{self.test_key}_listener_multiaddr"
+                # - Key: self.redis_listener_key (test-plans: listenerAddr;
+                #   unified: {TEST_KEY}_listener_multiaddr)
+                # - Operation: RPUSH; dialer uses BLPOP on the same key.
+                redis_key = self.redis_listener_key
 
                 # Clean up any existing key to ensure it's a list type
                 try:
@@ -823,6 +889,10 @@ class PingTest:
                     self.redis_client.delete(redis_key)
                 except Exception:
                     pass  # Ignore if key doesn't exist
+
+                # Dialers may race multistream after WS upgrade; brief settle helps.
+                if self.test_plans and self.transport in ("ws", "wss"):
+                    await trio.sleep(0.3)
 
                 # Publish listener address using RPUSH (list operation)
                 # Dialer will use BLPOP to block and read this value
@@ -843,8 +913,10 @@ class PingTest:
                             file=sys.stderr,
                         )
                         listener_success = True
-                        # Small delay to allow muxer to drain before exit
-                        await trio.sleep(0.2)
+                        # Small muxer drain delay; in test-plans wait longer so the
+                        # dialer container can exit before we do (see module note).
+                        grace = self._listener_post_ping_grace_secs()
+                        await trio.sleep(grace)
                         break
                     await trio.sleep(check_interval)
                     elapsed += check_interval
@@ -1012,14 +1084,7 @@ class PingTest:
 
             print("Waiting for listener address from Redis...", file=sys.stderr)
 
-            # Redis Coordination Protocol:
-            # - Key format: {TEST_KEY}_listener_multiaddr
-            #   (per transport test framework spec)
-            # - Operation: BLPOP (blocking list pop) - waits for listener address
-            # - Why BLPOP: Blocking operation avoids polling, matches Rust/JS
-            # - Return value: BLPOP returns (key, value) tuple where value is
-            #   the multiaddr string
-            redis_key = f"{self.test_key}_listener_multiaddr"
+            redis_key = self.redis_listener_key
             redis_wait_timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
 
             # Block and wait for listener to publish its address
@@ -1242,18 +1307,63 @@ class PingTest:
                 stream = await self._create_stream_with_retry(info.peer_id)
 
                 print("Performing ping test", file=sys.stderr)
-                ping_rtt = await self.send_ping(stream)
+                try:
+                    ping_rtt = await self.send_ping(stream)
+                except Exception as first_err:
+                    # Some stacks race WS + muxer teardown; one retry helps.
+                    if (
+                        self.test_plans
+                        and self.transport in ("ws", "wss")
+                        and any(
+                            x in str(first_err).lower()
+                            for x in (
+                                "eof",
+                                "reset",
+                                "closed",
+                                "broken",
+                                "incomplete",
+                            )
+                        )
+                    ):
+                        print(
+                            f"Ping failed ({first_err!r}), "
+                            "retrying once on new stream...",
+                            file=sys.stderr,
+                        )
+                        await trio.sleep(0.5)
+                        try:
+                            await stream.close()
+                        except Exception:
+                            pass
+                        stream = await self._create_stream_with_retry(info.peer_id)
+                        ping_rtt = await self.send_ping(stream)
+                    else:
+                        raise
                 print(f"Ping test completed, RTT: {ping_rtt}ms", file=sys.stderr)
 
                 handshake_plus_one_rtt = (time.time() - handshake_start) * 1000
-                # Output YAML format as specified in transport test framework
-                print("latency:", file=sys.stdout)
-                print(
-                    f"  handshake_plus_one_rtt: {handshake_plus_one_rtt}",
-                    file=sys.stdout,
-                )
-                print(f"  ping_rtt: {ping_rtt}", file=sys.stdout)
-                print("  unit: ms", file=sys.stdout)
+                if self.test_plans:
+                    # Three decimals: compact one-line "Finished:" logs in Node.
+                    print(
+                        json.dumps(
+                            {
+                                "handshakePlusOneRTTMillis": round(
+                                    handshake_plus_one_rtt, 3
+                                ),
+                                "pingRTTMilllis": round(ping_rtt, 3),
+                            },
+                            separators=(",", ":"),
+                        ),
+                        flush=True,
+                    )
+                else:
+                    print("latency:", file=sys.stdout)
+                    print(
+                        f"  handshake_plus_one_rtt: {handshake_plus_one_rtt}",
+                        file=sys.stdout,
+                    )
+                    print(f"  ping_rtt: {ping_rtt}", file=sys.stdout)
+                    print("  unit: ms", file=sys.stdout)
 
                 await stream.close()
                 print("Stream closed successfully", file=sys.stderr)
@@ -1380,10 +1490,21 @@ class PingTest:
             return "172.17.0.1"
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="libp2p transport interop ping test")
+    p.add_argument(
+        "--test-plans",
+        action="store_true",
+        help="test-plans harness: JSON dialer output, listenerAddr Redis key",
+    )
+    return p.parse_args()
+
+
 async def main() -> None:
     """Main entry point."""
+    args = parse_args()
     configure_logging()
-    ping_test = PingTest()
+    ping_test = PingTest(test_plans=args.test_plans)
     await ping_test.run()
 
 

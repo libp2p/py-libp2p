@@ -22,6 +22,7 @@ from libp2p.peer.id import ID
 from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import parse_websocket_multiaddr
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 from .autotls import AutoTLSConfig, AutoTLSManager
 from .connection import P2PWebSocketConnection
@@ -169,16 +170,13 @@ class WebsocketListener(IListener):
         # Fall back to legacy TLS configuration
         return self._tls_config
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
+    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
         """
         Start listening for connections.
 
         Args:
             maddr: Multiaddr to listen on
             nursery: Trio nursery for managing tasks
-
-        Returns:
-            bool: True if listening started successfully
 
         :raises OpenConnectionError: If listening fails, listener is closed,
             invalid WebSocket multiaddr, or connection limit reached
@@ -225,11 +223,7 @@ class WebsocketListener(IListener):
                 )
 
             # Extract host and port from the rest_multiaddr
-            host = (
-                proto_info.rest_multiaddr.value_for_protocol("ip4")
-                or proto_info.rest_multiaddr.value_for_protocol("ip6")
-                or "0.0.0.0"
-            )
+            host = extract_ip_from_multiaddr(proto_info.rest_multiaddr) or "0.0.0.0"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
             # Create WebSocket server using nursery.start pattern
@@ -323,7 +317,6 @@ class WebsocketListener(IListener):
                     )
 
             logger.info(f"WebSocket listener started on {self._listen_maddr}")
-            return True
 
         except Exception as e:
             logger.error(f"Failed to start WebSocket listener: {e}")

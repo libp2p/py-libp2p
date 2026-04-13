@@ -1,0 +1,4 @@
+Removed dead code from ``CircuitV2Transport`` left over from the old relay
+selection strategy (``_relay_list``, ``_last_relay_index``, ``_relay_metrics``,
+and ``_measure_relay``), which were superseded by ``RelayPerformanceTracker``
+introduced in https://github.com/libp2p/py-libp2p/pull/972.

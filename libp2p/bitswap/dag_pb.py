@@ -5,22 +5,38 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 import logging
 
+from .cid import CIDInput, cid_to_bytes
 from .pb.dag_pb_pb2 import PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+def _normalize_link_cid(cid: CIDInput) -> bytes:
+    """Normalize CID input for DAG links while preserving raw-bytes compatibility."""
+    if isinstance(cid, bytes):
+        return cid
+    return cid_to_bytes(cid)
+
+
+@dataclass(init=False)
 class Link:
     """Represents a link to another block in the DAG."""
 
     cid: bytes
     name: str = ""
     size: int = 0
+
+    def __init__(self, cid: CIDInput, name: str = "", size: int = 0) -> None:
+        """Initialize and normalize link CID input."""
+        self.cid = _normalize_link_cid(cid)
+        self.name = name
+        self.size = size
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         """Validate link data."""
@@ -135,7 +151,7 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
         >>> encoded = encode_dag_pb(links, data)
         >>> decoded_links, decoded_data = decode_dag_pb(encoded)
         >>> for link in decoded_links:
-        ...     print(f"Child CID: {link.cid.hex()[:16]}...")
+        ...     print(f"Child CID: {format_cid_for_display(link.cid, max_len=16)}")
 
     """
     # Parse PBNode
@@ -177,7 +193,7 @@ def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
     return links, unixfs_data
 
 
-def create_file_node(chunks: list[tuple[bytes, int]]) -> bytes:
+def create_file_node(chunks: Sequence[tuple[CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a file with multiple chunks.
 
@@ -206,7 +222,7 @@ def create_file_node(chunks: list[tuple[bytes, int]]) -> bytes:
     return encode_dag_pb(links, unixfs_data)
 
 
-def create_directory_node(entries: list[tuple[str, bytes, int]]) -> bytes:
+def create_directory_node(entries: Sequence[tuple[str, CIDInput, int]]) -> bytes:
     """
     Create a DAG-PB node for a directory.
 

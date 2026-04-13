@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import trio
@@ -38,7 +39,7 @@ from libp2p.relay.circuit_v2.resources import (
     RelayResourceManager,
 )
 from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -57,7 +58,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds (increased)
 STREAM_TIMEOUT = 15  # seconds (increased)
 HANDLER_TIMEOUT = 15  # seconds (increased)
-SLEEP_TIME = 1.0  # seconds (increased)
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 
 
 @pytest.fixture
@@ -350,7 +351,7 @@ async def test_circuit_v2_protocol_initialization():
 
         async with background_trio_service(protocol):
             await protocol.event_started.wait()
-            await trio.sleep(SLEEP_TIME)  # Give time for handlers to be registered
+            # Handlers are registered when event_started is set, no sleep needed
 
             # Verify protocol handlers are registered by trying to use them
             test_stream = None
@@ -520,6 +521,56 @@ async def test_circuit_v2_voucher_verification_complete():
         logger.info("Reservation correctly rejected when no host available")
 
         logger.info("All voucher verification tests passed successfully!")
+
+
+@pytest.mark.trio
+async def test_handle_reserve_returns_signed_reservation_payload():
+    relay_key_pair = create_new_key_pair()
+    client_key_pair = create_new_key_pair()
+    client_peer_id = ID.from_pubkey(client_key_pair.public_key)
+
+    mock_peerstore = Mock()
+    mock_peerstore.addrs.return_value = []
+
+    mock_host = Mock()
+    mock_host.get_private_key.return_value = relay_key_pair.private_key
+    mock_host.get_public_key.return_value = relay_key_pair.public_key
+    mock_host.get_peerstore.return_value = mock_peerstore
+
+    protocol = CircuitV2Protocol(mock_host, DEFAULT_RELAY_LIMITS, allow_hop=True)
+
+    stream = AsyncMock()
+    stream.write = AsyncMock()
+
+    reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
+    reserve_msg.peer = client_peer_id.to_bytes()
+
+    fake_envelope = Mock()
+    fake_envelope.marshal_envelope.return_value = b"signed-relay-record"
+
+    with (
+        patch(
+            "libp2p.relay.circuit_v2.protocol.env_to_send_in_RPC",
+            return_value=(b"relay-record", None),
+        ),
+        patch(
+            "libp2p.relay.circuit_v2.protocol.unmarshal_envelope",
+            return_value=fake_envelope,
+        ),
+    ):
+        await protocol._handle_reserve(stream, reserve_msg)
+
+    assert stream.write.await_count == 1
+    await_args = stream.write.await_args
+    assert await_args is not None
+    response_bytes = await_args.args[0]
+    response = proto.HopMessage()
+    response.ParseFromString(response_bytes)
+
+    assert response.type == proto.HopMessage.STATUS
+    assert response.status.code == proto.Status.OK
+    assert response.reservation.voucher != b""
+    assert response.reservation.signature != b""
 
 
 @pytest.mark.trio

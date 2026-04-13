@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -19,6 +20,8 @@ from libp2p.transport.quic.transport import (
 from libp2p.transport.quic.utils import (
     create_quic_multiaddr,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TestQUICListener:
@@ -75,8 +78,8 @@ class TestQUICListener:
 
         async with trio.open_nursery() as nursery:
             # Start listening
-            success = await listener.listen(listen_addr, nursery)
-            assert success
+            result = await listener.listen(listen_addr, nursery)
+            assert result is None
             assert listener.is_listening()
 
             # Check bound addresses
@@ -102,8 +105,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr, nursery)
                 await trio.sleep(0.01)
 
                 addrs = listener.get_addrs()
@@ -124,8 +126,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                success = await listener.listen(listen_addr, nursery)
-                assert success
+                await listener.listen(listen_addr, nursery)
                 await trio.sleep(0.5)
 
                 addrs = listener.get_addrs()
@@ -137,7 +138,7 @@ class TestQUICListener:
 
         # By the time we get here, the listener and its tasks have been fully
         # shut down, allowing the nursery to exit without hanging.
-        print("TEST COMPLETED SUCCESSFULLY.")
+        logger.debug("Test completed successfully.")
 
     @pytest.mark.trio
     async def test_listener_stats_tracking(self, listener):
@@ -238,9 +239,7 @@ async def test_connection_id_tracking_with_real_connection():
         async with trio.open_nursery() as nursery:
             # Start server
             server_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
-
+            await listener.listen(listen_addr, nursery)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0, "Server should have listen addresses"
 

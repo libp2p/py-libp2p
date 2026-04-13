@@ -4,6 +4,7 @@ from libp2p.crypto.rsa import (
     create_new_key_pair,
 )
 from libp2p.peer.envelope import (
+    PEER_RECORD_CODEC,
     Envelope,
     consume_envelope,
     make_unsigned,
@@ -25,7 +26,7 @@ def test_basic_protobuf_serialization_deserialization():
 
     env = env_pb.Envelope()
     env.public_key.CopyFrom(pubkey)
-    env.payload_type = b"\x03\x01"
+    env.payload_type = PEER_RECORD_CODEC
     env.payload = b"test-payload"
     env.signature = b"signature-bytes"
 
@@ -36,7 +37,7 @@ def test_basic_protobuf_serialization_deserialization():
 
     assert new_env.public_key.Type == crypto_pb.KeyType.Ed25519
     assert new_env.public_key.Data == b"\x01\x02\x03"
-    assert new_env.payload_type == b"\x03\x01"
+    assert new_env.payload_type == PEER_RECORD_CODEC
     assert new_env.payload == b"test-payload"
     assert new_env.signature == b"signature-bytes"
 
@@ -46,7 +47,7 @@ def test_enevelope_marshal_unmarshal_roundtrip():
     pubkey = keypair.public_key
     private_key = keypair.private_key
 
-    payload_type = b"\x03\x01"
+    payload_type = PEER_RECORD_CODEC
     payload = b"test-record"
     sig = private_key.sign(make_unsigned(DOMAIN, payload_type, payload))
 
@@ -112,11 +113,13 @@ def test_envelope_equal():
     assert env1.equal(env2)
 
     # Now change something — payload type
-    env2.payload_type = b"\x99\x99"
+    # Change the underlying Code on env2 to a different one
+    env2.payload_type_code = env1.payload_type_code
+    env2.payload_type_code = type(env1.payload_type_code)(0x99)
     assert not env1.equal(env2)
 
     # Restore payload_type but change signature
-    env2.payload_type = env1.payload_type
+    env2.payload_type_code = env1.payload_type_code
     env2.signature = b"wrong-signature"
     assert not env1.equal(env2)
 

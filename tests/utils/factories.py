@@ -114,7 +114,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -261,6 +261,10 @@ async def raw_conn_factory(
 async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    # create_ed25519_key_pair() supplies the libp2p identity KeyPair only.
+    # The Noise static private key is not taken from that argument:
+    # noise_transport_factory always sets noise_privkey=noise_static_key_factory()
+    # (X25519). See noise_transport_factory above.
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
@@ -611,6 +615,8 @@ class GossipsubFactory(factory.Factory):
     unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
     score_params = None
     max_idontwant_messages = 10
+    max_pending_messages_per_peer = GOSSIPSUB_PARAMS.max_pending_messages_per_peer
+    pending_messages_ttl = GOSSIPSUB_PARAMS.pending_messages_ttl
 
 
 class PubsubFactory(factory.Factory):
@@ -742,6 +748,8 @@ class PubsubFactory(factory.Factory):
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
         score_params: ScoreParams | None = None,
         max_idontwant_messages: int = 10,
+        max_pending_messages_per_peer: int = GOSSIPSUB_PARAMS.max_pending_messages_per_peer,  # noqa: E501
+        pending_messages_ttl: float = GOSSIPSUB_PARAMS.pending_messages_ttl,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -768,6 +776,8 @@ class PubsubFactory(factory.Factory):
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -788,6 +798,8 @@ class PubsubFactory(factory.Factory):
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
 
         async with cls._create_batch_with_router(

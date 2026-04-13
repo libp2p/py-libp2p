@@ -15,9 +15,13 @@ from typing import (
 )
 import weakref
 
+from cryptography import x509
+from cryptography.x509.oid import ExtensionOID
 import multiaddr
+from multiaddr.exceptions import ProtocolLookupError
 import trio
 
+import libp2p
 from libp2p.abc import (
     IHost,
     IMuxedConn,
@@ -80,10 +84,17 @@ from libp2p.protocol_muxer.multiselect_communicator import (
     MultiselectCommunicator,
 )
 from libp2p.rcmgr import ResourceManager
-from libp2p.tools.async_service import (
+from libp2p.relay.circuit_v2.nat import is_private_ip
+from libp2p.security.tls.autotls.acme import (
+    ACMEClient,
+    compute_b36_peer_id,
+)
+from libp2p.security.tls.autotls.broker import BrokerClient
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
+import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
 )
@@ -92,13 +103,11 @@ if TYPE_CHECKING:
     from collections import (
         OrderedDict,
     )
-from multiaddr import Multiaddr
 
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
 # telling it to listen on the given listen addresses.
-
 
 logger = logging.getLogger(__name__)
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased to 30s for high-concurrency scenarios
@@ -172,11 +181,17 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
+        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
+        *,
+        bootstrap_allow_ipv6: bool = False,
+        bootstrap_dns_timeout: float = 10.0,
+        bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -189,6 +204,12 @@ class BasicHost(IHost):
         :param negotiate_timeout: Protocol negotiation timeout
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
+        :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
+        :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: Optional addresses to advertise instead of
+            listen addresses.  ``None`` (default) uses listen addresses;
+            an empty list advertises no addresses.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -225,8 +246,19 @@ class BasicHost(IHost):
         # we can avoid hasattr checks elsewhere.
         self.bootstrap = None
         if bootstrap:
-            self.bootstrap = BootstrapDiscovery(network, bootstrap)
+            self.bootstrap = BootstrapDiscovery(
+                network,
+                bootstrap,
+                allow_ipv6=bootstrap_allow_ipv6,
+                dns_resolution_timeout=bootstrap_dns_timeout,
+                dns_max_retries=bootstrap_dns_max_retries,
+            )
         self.psk = psk
+
+        # Address announcement configuration
+        self._announce_addrs = (
+            list(announce_addrs) if announce_addrs is not None else None
+        )
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -324,13 +356,34 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Return all the multiaddr addresses this host is listening to.
+        Return the multiaddr addresses this host advertises to peers.
+
+        If ``announce_addrs`` was provided, those replace listen addresses
+        entirely.  Otherwise listen addresses are used.
 
         Note: This method appends the /p2p/{peer_id} suffix to the addresses.
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [addr.encapsulate(p2p_part) for addr in self.get_transport_addrs()]
+
+        if self._announce_addrs is not None:
+            addrs = list(self._announce_addrs)
+        else:
+            addrs = self.get_transport_addrs()
+
+        result = []
+        for addr in addrs:
+            # Strip any existing /p2p/ component, then always append our own.
+            # This avoids identity confusion when announce addrs contain a
+            # mismatched peer ID (mirrors js-libp2p behaviour).
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except ProtocolLookupError:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+            result.append(addr.encapsulate(p2p_part))
+        return result
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -363,7 +416,7 @@ class BasicHost(IHost):
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
@@ -378,7 +431,7 @@ class BasicHost(IHost):
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
@@ -396,6 +449,14 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the given `protocol_id`.
+
+        :param protocol_id: protocol id to remove
+        """
+        self.multiselect.remove_handler(protocol_id)
 
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]
@@ -454,6 +515,174 @@ class BasicHost(IHost):
             )
         return None
 
+    async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
+        """
+        Run the AutoTLS certificate provisioning flow for this host.
+
+        If a cached ACME certificate already exists on disk, it is loaded and validated
+        and procedure exists early. Otherwise the method performs the full AutoTLS flow:
+
+        - create or load an ACME account bound to the host's identity key
+        - initiate a certificate order
+        - obtain a DNS-01 challenge
+        - discover a publicly reachable IPv4 address from the host's listen addrs
+        - register the challenge with the AutoTLS broker
+        - wait for DNS propagation
+        - finalize the order and fetch the certificate
+
+        Only publicly reachable IPv4 addresses are considered valid for AutoTLS.
+        If no such address can be determined, the procedure fails.
+
+        :param public_ip: Optional externally known public IPv4 address. If not
+            provided, the address is inferred from the host's transport addresses.
+        :return: None
+        :raises RuntimeError: if no publicly reachable IPv4 address can be determined
+            for DNS challenge registration.
+        """
+        if libp2p.utils.paths.AUTOTLS_CERT_PATH.exists():
+            pem_bytes = libp2p.utils.paths.AUTOTLS_CERT_PATH.read_bytes()
+            cert_chain = x509.load_pem_x509_certificates(pem_bytes)
+
+            san = (
+                cert_chain[0]
+                .extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+                .value
+            )
+            # DNS names
+            dns_names = san.get_values_for_type(x509.DNSName)  # type: ignore
+            b36_pid = compute_b36_peer_id(self.get_id())
+
+            logger.info(
+                "AutoTLS procedure: Loaded existing cert, DNS: %s, b36_pid: %s",
+                dns_names,
+                b36_pid,
+            )
+
+            return
+
+        logger.info("ACME certificate not cached, initiating the procedure...")
+        acme = ACMEClient(self.get_private_key(), self.get_id())
+        await acme.create_acme_acct()
+        await acme.initiate_order()
+        await acme.get_dns01_challenge()
+
+        # Select one concrete transport address and derive both IP + transport
+        # tuple from that exact address to avoid mixed tuples.
+        all_addrs = self.get_transport_addrs()
+
+        def extract_transport_part(addr: multiaddr.Multiaddr, ip: str) -> str | None:
+            addr_str = str(addr)
+            ip_prefix = f"/ip4/{ip}"
+            if not addr_str.startswith(ip_prefix):
+                return None
+
+            transport_part = addr_str[len(ip_prefix) :]
+            if not transport_part:
+                return None
+
+            if transport_part.startswith("/tcp/"):
+                return transport_part
+
+            if transport_part.startswith("/udp/"):
+                return transport_part
+
+            return None
+
+        selected_ip: str | None = None
+        transport_part: str | None = None
+
+        if public_ip is None:
+            for addr in all_addrs:
+                try:
+                    ip = addr.value_for_protocol("ip4")
+                except Exception:
+                    continue
+
+                if not isinstance(ip, str) or not ip or is_private_ip(ip):
+                    continue
+
+                parsed_transport = extract_transport_part(addr, ip)
+                if parsed_transport is None:
+                    continue
+
+                selected_ip = ip
+                transport_part = parsed_transport
+                break
+
+            if not selected_ip or not transport_part:
+                raise RuntimeError(
+                    "No public IP address found in listening addresses. "
+                    "AutoTLS requires at least one publicly reachable IPv4 address."
+                )
+
+            public_ip = selected_ip
+        else:
+            for addr in all_addrs:
+                try:
+                    ip = addr.value_for_protocol("ip4")
+                except Exception:
+                    continue
+
+                if not isinstance(ip, str) or ip != public_ip:
+                    continue
+
+                parsed_transport = extract_transport_part(addr, ip)
+                if parsed_transport is None:
+                    continue
+
+                selected_ip = ip
+                transport_part = parsed_transport
+                break
+
+            if not selected_ip or not transport_part:
+                for addr in all_addrs:
+                    try:
+                        ip = addr.value_for_protocol("ip4")
+                    except Exception:
+                        continue
+
+                    if not isinstance(ip, str) or not ip:
+                        continue
+
+                    parsed_transport = extract_transport_part(addr, ip)
+                    if parsed_transport is None:
+                        continue
+
+                    selected_ip = ip
+                    transport_part = parsed_transport
+                    logger.warning(
+                        "Provided public_ip %s did not match listen addresses; "
+                        "using transport tuple from %s (ip4=%s).",
+                        public_ip,
+                        addr,
+                        ip,
+                    )
+                    break
+
+            if not selected_ip or not transport_part:
+                raise RuntimeError(
+                    f"Provided public_ip {public_ip} did not match any supported "
+                    "listen address."
+                )
+
+        broker = BrokerClient(
+            self.get_private_key(),
+            multiaddr.Multiaddr(
+                f"/ip4/{public_ip}{transport_part}/p2p/{self.get_id()}"
+            ),
+            acme.key_auth,
+            acme.b36_peerid,
+        )
+
+        await broker.http_peerid_auth()
+        await broker.wait_for_dns()
+
+        await acme.notify_dns_ready()
+        await acme.fetch_cert_url()
+        await acme.fetch_certificate()
+
+        return
+
     async def new_stream(
         self,
         peer_id: ID,
@@ -491,6 +720,17 @@ class BasicHost(IHost):
 
         net_stream = await self._network.new_stream(peer_id)
 
+        # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (outbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.outbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
         protocol_choices = list(protocol_ids)
         # Check if we already know the peer supports any of these protocols
         # from the identify exchange. If so, request that protocol directly
@@ -535,7 +775,7 @@ class BasicHost(IHost):
             selected_protocol = await self.multiselect_client.select_one_of(
                 protocol_choices,
                 communicator,
-                self.negotiate_timeout,
+                negotiate_timeout,
             )
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
@@ -874,6 +1114,17 @@ class BasicHost(IHost):
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
         # Perform protocol muxing to determine protocol to use
+        # Use ConnectionConfig timeout if available (inbound stream negotiation)
+        negotiate_timeout = self.negotiate_timeout
+        connection_config = getattr(self._network, "connection_config", None)
+        if connection_config is not None:
+            # Convert float seconds to int for negotiate_timeout parameter
+            config_timeout = int(
+                connection_config.inbound_stream_protocol_negotiation_timeout
+            )
+            if config_timeout > 0:
+                negotiate_timeout = config_timeout
+
         # For QUIC connections, use connection-level semaphore to limit
         # concurrent negotiations and prevent server-side overload
         # This matches the client-side protection for symmetric behavior
@@ -899,12 +1150,12 @@ class BasicHost(IHost):
                 semaphore_to_use = server_semaphore or negotiation_semaphore
                 async with semaphore_to_use:
                     protocol, handler = await self.multiselect.negotiate(
-                        MultiselectCommunicator(net_stream), self.negotiate_timeout
+                        MultiselectCommunicator(net_stream), negotiate_timeout
                     )
             else:
                 # For non-QUIC connections, negotiate directly (no semaphore needed)
                 protocol, handler = await self.multiselect.negotiate(
-                    MultiselectCommunicator(net_stream), self.negotiate_timeout
+                    MultiselectCommunicator(net_stream), negotiate_timeout
                 )
             if protocol is None:
                 await net_stream.reset()
@@ -977,7 +1228,7 @@ class BasicHost(IHost):
         return await self._network.upgrade_outbound_raw_conn(raw_conn, peer_id)
 
     async def upgrade_inbound_connection(
-        self, raw_conn: IRawConnection, maddr: Multiaddr
+        self, raw_conn: IRawConnection, maddr: multiaddr.Multiaddr
     ) -> IMuxedConn:
         """
         Upgrade a raw inbound connection using the underlying network.
