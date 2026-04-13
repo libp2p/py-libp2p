@@ -27,8 +27,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import ITransport
 from libp2p.crypto.keys import PrivateKey
@@ -36,11 +36,9 @@ from libp2p.custom_types import THandler
 from libp2p.peer.id import ID
 
 from ._asyncio_bridge import AsyncioBridge
-from .certificate import WebRTCCertificate
 from .config import WebRTCTransportConfig
 from .connection import WebRTCConnection
-from .constants import WEBRTC_SIGNALING_PROTOCOL_ID
-from .exceptions import WebRTCConnectionError, WebRTCSignalingError
+from .exceptions import WebRTCConnectionError
 from .multiaddr_utils import is_webrtc_multiaddr
 from .private_listener import WebRTCPrivateListener
 from .sdp import SDPBuilder
@@ -99,37 +97,26 @@ class WebRTCPrivateTransport(ITransport):
 
         :param maddr: A ``/p2p-circuit/webrtc/p2p/<peer-id>`` multiaddr.
         :returns: A :class:`WebRTCConnection`.
-        :raises WebRTCConnectionError: If the connection fails.
+        :raises NotImplementedError: The aiortc / signaling integration is
+            not yet wired up.  Returning a bare :class:`WebRTCConnection`
+            here would make the swarm treat the peer as connected while
+            streams silently drop data.  The full sequence (relay dial,
+            SDP/ICE signaling with bilateral ICE_DONE, Noise handshake)
+            lands in a follow-up PR.
+        :raises WebRTCConnectionError: If the multiaddr is malformed.
         """
+        # Validate the multiaddr so callers get consistent errors once the
+        # transport is live.
         if not is_webrtc_multiaddr(maddr):
-            raise WebRTCConnectionError(
-                f"Not a relay-based WebRTC multiaddr: {maddr}"
-            )
-
-        bridge = await self._ensure_bridge()
-        logger.info("Dialing WebRTC (private-to-private) via %s", maddr)
-
-        # Extract the remote peer ID from the multiaddr
+            raise WebRTCConnectionError(f"Not a relay-based WebRTC multiaddr: {maddr}")
         maddr_str = str(maddr)
         parts = maddr_str.split("/p2p/")
         if len(parts) < 2:
             raise WebRTCConnectionError(
                 f"Cannot extract remote peer ID from multiaddr: {maddr}"
             )
-        remote_peer_id_str = parts[-1].split("/")[0]
-        remote_peer_id = ID.from_base58(remote_peer_id_str)
 
-        conn = WebRTCConnection(
-            peer_id=remote_peer_id,
-            bridge=bridge,
-            is_initiator=True,
-            config=self._config,
-            remote_addrs=[maddr],
-        )
-
-        # NOTE: Full dial sequence (relay connection → signaling → ICE → Noise)
-        # is wired up when aiortc integration is complete.  The sequence:
-        #
+        # The full dial sequence is:
         # 1. host.new_stream(relay_peer, [RELAY_PROTOCOL])
         # 2. Open /webrtc-signaling/0.0.1 stream on relayed connection
         # 3. SignalingSession.send_offer()
@@ -138,8 +125,11 @@ class WebRTCPrivateTransport(ITransport):
         # 6. Create RTCPeerConnection, wait for ICE connected
         # 7. Noise XX handshake over data channel 0
         # 8. conn.start()
-
-        return conn
+        raise NotImplementedError(
+            "WebRTC private-to-private dial is not yet wired to aiortc / "
+            "signaling. This transport is registered for interface-compliance "
+            "and test coverage only; see PR #1309 for scope."
+        )
 
     def create_listener(self, handler_function: THandler) -> WebRTCPrivateListener:
         """
@@ -163,7 +153,13 @@ class WebRTCPrivateTransport(ITransport):
         )
 
     async def close(self) -> None:
-        """Shut down the transport and its asyncio bridge."""
-        if self._bridge is not None:
-            await self._bridge.stop()
-            self._bridge = None
+        """
+        Shut down the transport and its asyncio bridge.
+
+        Acquires the same lock as :meth:`_ensure_bridge` so a concurrent
+        dial cannot resurrect the bridge mid-shutdown.
+        """
+        async with self._bridge_lock:
+            if self._bridge is not None:
+                await self._bridge.stop()
+                self._bridge = None

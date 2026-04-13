@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import ITransport
 from libp2p.crypto.keys import PrivateKey
@@ -92,42 +92,24 @@ class WebRTCDirectTransport(ITransport):
         :param maddr: A ``/webrtc-direct`` multiaddr with certhash.
         :returns: A :class:`WebRTCConnection` (implements both
             ``IRawConnection`` and ``IMuxedConn``).
-        :raises WebRTCConnectionError: If the connection fails.
+        :raises NotImplementedError: The aiortc integration is not yet
+            wired up.  Returning a bare :class:`WebRTCConnection` at this
+            stage would make the swarm treat the peer as connected while
+            streams silently drop data.  The full dial sequence
+            (RTCPeerConnection creation, ICE/DTLS, Noise handshake,
+            ``conn.start()``) lands in a follow-up PR.
+        :raises WebRTCConnectionError: If the multiaddr is malformed.
         """
+        # Validate the multiaddr even though we can't complete the dial, so
+        # callers get a consistent error shape once the transport is live.
         if not is_webrtc_direct_multiaddr(maddr):
             raise WebRTCConnectionError(f"Not a WebRTC Direct multiaddr: {maddr}")
-
-        host, port, certhash, peer_id_str = parse_webrtc_direct_multiaddr(maddr)
+        _host, _port, certhash, _peer_id_str = parse_webrtc_direct_multiaddr(maddr)
         if not certhash:
             raise WebRTCConnectionError(
                 f"WebRTC Direct multiaddr missing certhash: {maddr}"
             )
 
-        bridge = await self._ensure_bridge()
-        logger.info("Dialing WebRTC Direct %s:%d", host, port)
-
-        # Parse remote peer ID if present
-        remote_peer_id: ID | None = None
-        if peer_id_str:
-            remote_peer_id = ID.from_base58(peer_id_str)
-
-        # Build SDP offer
-        offer_sdp, ufrag, pwd = self._sdp_builder.build_offer(host=host, port=port)
-
-        # Create the connection object
-        conn = WebRTCConnection(
-            peer_id=remote_peer_id or ID(b"\x00"),  # Will be set after handshake
-            bridge=bridge,
-            is_initiator=True,
-            config=self._config,
-            remote_addrs=[maddr],
-        )
-
-        # NOTE: The actual RTCPeerConnection creation, SDP exchange, ICE
-        # negotiation, and Noise handshake would happen here when aiortc is
-        # wired up.  For now, we create the connection object with the
-        # correct structure so the swarm integration (Phase 3) can be tested.
-        #
         # The full dial sequence is:
         # 1. Create RTCPeerConnection via bridge
         # 2. Set local SDP offer
@@ -136,8 +118,11 @@ class WebRTCDirectTransport(ITransport):
         # 5. Perform Noise XX handshake over data channel 0
         # 6. Verify remote peer identity
         # 7. Call conn.start()
-
-        return conn
+        raise NotImplementedError(
+            "WebRTC Direct dial is not yet wired to aiortc. "
+            "This transport is registered for interface-compliance and "
+            "test coverage only; see PR #1309 for scope."
+        )
 
     def create_listener(self, handler_function: THandler) -> WebRTCDirectListener:
         """
@@ -156,10 +141,16 @@ class WebRTCDirectTransport(ITransport):
         )
 
     async def close(self) -> None:
-        """Shut down the transport and its asyncio bridge."""
-        if self._bridge is not None:
-            await self._bridge.stop()
-            self._bridge = None
+        """
+        Shut down the transport and its asyncio bridge.
+
+        Acquires the same lock as :meth:`_ensure_bridge` so a concurrent
+        dial cannot resurrect the bridge mid-shutdown.
+        """
+        async with self._bridge_lock:
+            if self._bridge is not None:
+                await self._bridge.stop()
+                self._bridge = None
 
     @property
     def certificate(self) -> WebRTCCertificate:
