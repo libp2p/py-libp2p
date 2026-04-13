@@ -11,6 +11,8 @@ Examples
    examples.echo
    examples.echo_quic
    examples.ping
+   examples.request_response
+   examples.agentic_request_response
    examples.interop
    examples.pubsub
    examples.bitswap
