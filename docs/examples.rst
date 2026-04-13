@@ -19,6 +19,7 @@ Examples
    examples.kademlia
    examples.mDNS
    examples.nat
+   examples.filecoin
    examples.announce_addrs
    examples.rendezvous
    examples.random_walk
