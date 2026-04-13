@@ -1,8 +1,18 @@
 import pytest
 import trio
-from trio.testing import (
-    wait_all_tasks_blocked,
-)
+
+
+async def _wait_for_conn_closed(conn, *, timeout: float = 5.0) -> None:
+    """Wait for connection to be closed (event-based, no arbitrary sleeps)."""
+    with trio.fail_after(timeout):
+        await conn.event_closed.wait()
+
+
+async def _wait_for_stream_count(conn, expected: int, *, timeout: float = 5.0) -> None:
+    """Wait until connection has at least `expected` streams (event-based)."""
+    with trio.fail_after(timeout):
+        while len(conn.get_streams()) < expected:
+            await trio.sleep(0)  # Yield to let other tasks run
 
 
 @pytest.mark.trio
@@ -14,8 +24,8 @@ async def test_swarm_conn_close(swarm_conn_pair):
 
     await conn_0.close()
 
-    await trio.sleep(0.1)
-    await wait_all_tasks_blocked()
+    # Wait for conn_1 to observe the closed connection (event-based, not arbitrary time)
+    await _wait_for_conn_closed(conn_1)
 
     assert conn_0.is_closed
     assert conn_1.is_closed
@@ -31,12 +41,12 @@ async def test_swarm_conn_streams(swarm_conn_pair):
     assert len(conn_1.get_streams()) == 0
 
     stream_0_0 = await conn_0.new_stream()
-    await trio.sleep(0.01)
+    await _wait_for_stream_count(conn_1, 1)
     assert len(conn_0.get_streams()) == 1
     assert len(conn_1.get_streams()) == 1
 
     stream_0_1 = await conn_0.new_stream()
-    await trio.sleep(0.01)
+    await _wait_for_stream_count(conn_1, 2)
     assert len(conn_0.get_streams()) == 2
     assert len(conn_1.get_streams()) == 2
 

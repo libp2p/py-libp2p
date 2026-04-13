@@ -80,6 +80,8 @@ FLOODSUB_PROTOCOL_ID = floodsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID = gossipsub.PROTOCOL_ID
 GOSSIPSUB_PROTOCOL_ID_V1 = gossipsub.PROTOCOL_ID_V11
 GOSSIPSUB_PROTOCOL_ID_V12 = gossipsub.PROTOCOL_ID_V12
+GOSSIPSUB_PROTOCOL_ID_V13 = gossipsub.PROTOCOL_ID_V13
+GOSSIPSUB_PROTOCOL_ID_V14 = gossipsub.PROTOCOL_ID_V14
 
 
 class GossipsubParams(NamedTuple):
@@ -98,6 +100,8 @@ class GossipsubParams(NamedTuple):
     px_peers_count: int = 16
     prune_back_off: int = 60
     unsubscribe_back_off: int = 10
+    max_pending_messages_per_peer: int = 100
+    pending_messages_ttl: float = 30.0
 
 
 GOSSIPSUB_PARAMS = GossipsubParams()

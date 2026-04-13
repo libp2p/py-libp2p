@@ -19,11 +19,18 @@ Examples
    examples.kademlia
    examples.mDNS
    examples.nat
+   examples.filecoin
+   examples.announce_addrs
    examples.rendezvous
    examples.random_walk
    examples.multiple_connections
    tls-support
    gossipsub-1.2
+   gossipsub-1.3
    examples.websocket
    examples.tls
+   examples.tcp
+   examples.transport
    examples.autotls
+   examples.perf
+   examples.path_handling

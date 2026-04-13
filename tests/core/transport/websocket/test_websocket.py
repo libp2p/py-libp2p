@@ -22,6 +22,7 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 from libp2p.security.insecure.transport import InsecureTransport
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.transport.exceptions import OpenConnectionError
 from libp2p.transport.upgrader import TransportUpgrader
 from libp2p.transport.websocket.multiaddr_utils import (
     is_valid_websocket_multiaddr,
@@ -101,6 +102,26 @@ async def test_listener_basic_listen():
     assert ma.value_for_protocol("tcp") == "0"
 
     # Test that listener can be closed
+    await listener.close()
+
+
+@pytest.mark.trio
+async def test_listener_listen_returns_none():
+    """Test listener.listen returns None on successful start."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
+    ma = Multiaddr("/ip4/127.0.0.1/tcp/0/ws")
+
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    listener = transport.create_listener(dummy_handler)
+
+    async with trio.open_nursery() as nursery:
+        result = await listener.listen(ma, nursery)
+        assert result is None
+        nursery.cancel_scope.cancel()
+
     await listener.close()
 
 
@@ -338,9 +359,10 @@ async def test_dial_invalid_address():
 
 
 @pytest.mark.trio
-async def test_listen_invalid_address():
-    """Test listening on invalid addresses"""
-    # upgrader = create_upgrader()  # Not used in this test
+async def test_listen_invalid_address(nursery):
+    """Test listening on invalid addresses raises OpenConnectionError."""
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
 
     # Test listening on non-WebSocket addresses
     invalid_addresses = [
@@ -348,15 +370,14 @@ async def test_listen_invalid_address():
         Multiaddr("/ip4/127.0.0.1/ws"),  # No tcp
     ]
 
-    # Test that invalid addresses are properly identified
+    async def dummy_handler(conn):
+        await trio.sleep(0)
+
+    # Invalid listen addresses should fail fast with transport-level exception.
     for ma in invalid_addresses:
-        # Test that the address parsing works correctly
-        if "/ws" in str(ma) and "tcp" not in str(ma):
-            # This should be invalid
-            assert "tcp" not in str(ma)
-        elif "/ws" not in str(ma):
-            # This should be invalid
-            assert "/ws" not in str(ma)
+        listener = transport.create_listener(dummy_handler)
+        with pytest.raises(OpenConnectionError, match="WebSocket multiaddr"):
+            await listener.listen(ma, nursery)
 
 
 @pytest.mark.trio

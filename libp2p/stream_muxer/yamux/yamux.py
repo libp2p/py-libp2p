@@ -18,6 +18,7 @@ from typing import (
     Any,
 )
 
+import multiaddr
 import trio
 from trio import (
     MemoryReceiveChannel,
@@ -26,6 +27,7 @@ from trio import (
 )
 
 from libp2p.abc import (
+    ConnectionType,
     IMuxedConn,
     IMuxedStream,
     ISecureConn,
@@ -353,7 +355,7 @@ class YamuxStream(IMuxedStream):
                         YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_FIN, self.stream_id, 0
                     )
                     await self.conn.secured_conn.write(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending FIN, connection likely closed: {e}")
                 finally:
                     self.send_closed = True
@@ -374,7 +376,7 @@ class YamuxStream(IMuxedStream):
                         YAMUX_HEADER_FORMAT, 0, TYPE_DATA, FLAG_RST, self.stream_id, 0
                     )
                     await self.conn.secured_conn.write(header)
-                except RawConnError as e:
+                except (RawConnError, ConnectionClosedError) as e:
                     logger.debug(f"Error sending RST, connection likely closed: {e}")
                 finally:
                     self.closed = True
@@ -382,13 +384,12 @@ class YamuxStream(IMuxedStream):
                     self.recv_closed = True
                     self.reset_received = True  # Mark as reset
 
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
-        Set a deadline for the stream. Yamux does not support deadlines natively,
-        so this method always returns False to indicate the operation is unsupported.
+        Set a deadline for the stream. Yamux does not support deadlines natively.
 
         :param ttl: Time-to-live in seconds (ignored).
-        :return: False, as deadlines are not supported.
+        :raises NotImplementedError: Yamux does not support setting deadlines.
         """
         raise NotImplementedError("Yamux does not support setting read deadlines")
 
@@ -450,6 +451,23 @@ class Yamux(IMuxedConn):
         self.stream_buffers: dict[int, bytearray] = {}
         self.stream_events: dict[int, trio.Event] = {}
         self._nursery: Nursery | None = None
+        self._established: bool = False
+
+    @property
+    def is_established(self) -> bool:
+        """
+        Check if the Yamux connection is fully established and ready for streams.
+
+        Returns True when:
+        - The event_started has been set
+        - The handle_incoming task is actively running
+        - The connection is not shutting down
+        """
+        return (
+            self._established
+            and self.event_started.is_set()
+            and not self.event_shutting_down.is_set()
+        )
 
     async def start(self) -> None:
         logger.debug(f"Starting Yamux for {self.peer_id}")
@@ -462,8 +480,12 @@ class Yamux(IMuxedConn):
             logger.debug(
                 f"Yamux.start() starting handle_incoming task for {self.peer_id}"
             )
-            nursery.start_soon(self.handle_incoming)
+            # Use nursery.start() to ensure handle_incoming has started
+            # before we set event_started. This prevents race conditions
+            # where streams are opened before the muxer is ready.
+            await nursery.start(self._handle_incoming_with_ready_signal)
             logger.debug(f"Yamux.start() setting event_started for {self.peer_id}")
+            self._established = True
             self.event_started.set()
         logger.debug(
             f"Yamux.start() exiting for {self.peer_id}, closing new stream channel"
@@ -524,6 +546,18 @@ class Yamux(IMuxedConn):
     @property
     def is_closed(self) -> bool:
         return self.event_closed.is_set()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to secured_conn.
+        """
+        return self.secured_conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to secured_conn.
+        """
+        return self.secured_conn.get_connection_type()
 
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot
@@ -677,6 +711,23 @@ class Yamux(IMuxedConn):
 
         # This line should never be reached, but satisfies the type checker
         raise MuxedStreamEOF("Unexpected end of read_stream")
+
+    async def _handle_incoming_with_ready_signal(
+        self, task_status: Any = trio.TASK_STATUS_IGNORED
+    ) -> None:
+        """
+        Wrapper for handle_incoming that signals when the task is ready.
+
+        This method uses trio's task_status to signal that the handle_incoming
+        loop is ready to process frames. This prevents race conditions where
+        streams are opened before the muxer is ready to handle them.
+        """
+        logger.debug(
+            f"Yamux _handle_incoming_with_ready_signal() starting for "
+            f"peer {self.peer_id}"
+        )
+        task_status.started()
+        await self.handle_incoming()
 
     async def handle_incoming(self) -> None:
         logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
