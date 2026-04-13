@@ -19,6 +19,8 @@ The Python implementation of the libp2p networking stack
     Examples <examples>
     Filecoin Architecture Positioning <filecoin_architecture_positioning>
     API <libp2p>
+    tls-support
+    GossipSub 1.2 <gossipsub-1.2>
 
 .. toctree::
     :maxdepth: 1
