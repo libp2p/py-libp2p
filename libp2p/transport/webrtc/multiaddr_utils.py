@@ -19,8 +19,10 @@ from __future__ import annotations
 import logging
 import threading
 
-from multiaddr import Multiaddr
-from multiaddr import protocols as _mp
+from multiaddr import (
+    Multiaddr,
+    protocols as _mp,
+)
 
 from .constants import (
     CERTHASH_PROTOCOL_CODE,
@@ -53,25 +55,53 @@ _registration_lock = threading.Lock()
 
 
 def _ensure_protocols_registered() -> None:
-    """Register WebRTC multiaddr protocols (idempotent, thread-safe)."""
+    """
+    Register WebRTC multiaddr protocols (idempotent, thread-safe).
+
+    py-multiaddr normally locks its protocol registry after initial setup.
+    We have to temporarily unlock it to add the WebRTC protocol codes that
+    ship on the spec but not in the library yet.  We use the public
+    ``REGISTRY.add`` API for the insertion itself; the unlock / relock
+    step touches ``REGISTRY._locked`` because no public equivalent is
+    exposed.  The call is guarded with ``hasattr`` so that if py-multiaddr
+    ever changes the internal attribute name, registration fails gracefully
+    (logged, skipped) instead of raising on import.
+    """
     global _registered
     if _registered:
         return
     with _registration_lock:
         if _registered:  # double-checked locking
             return
-        was_locked = _mp.REGISTRY.locked
+
+        registry = _mp.REGISTRY
+        was_locked = getattr(registry, "locked", False)
+
+        if was_locked and not hasattr(registry, "_locked"):
+            logger.warning(
+                "py-multiaddr REGISTRY is locked but has no `_locked` attribute "
+                "we can toggle; skipping WebRTC multiaddr protocol registration. "
+                "Install a compatible py-multiaddr version or register the "
+                "protocols manually."
+            )
+            _registered = True  # don't retry on every call
+            return
+
         if was_locked:
-            _mp.REGISTRY._locked = False
+            registry._locked = False  # type: ignore[attr-defined]
         try:
             for proto in _PROTOCOLS_TO_REGISTER:
                 try:
-                    _mp.REGISTRY.add(proto)
-                except Exception:
-                    pass  # Already registered or conflict — skip
+                    registry.add(proto)
+                except Exception as e:
+                    logger.debug(
+                        "WebRTC multiaddr protocol %s not registered: %s",
+                        proto.name,
+                        e,
+                    )
         finally:
             if was_locked:
-                _mp.REGISTRY._locked = True
+                registry._locked = True  # type: ignore[attr-defined]
         _registered = True
         logger.debug("Registered WebRTC multiaddr protocols")
 
@@ -88,12 +118,31 @@ _CERTHASH_NAME = "certhash"
 # distinguish protocol names from protocol values.  If the next path segment
 # is in this set it starts a new protocol; otherwise it is the current
 # protocol's value (e.g. "127.0.0.1" for ip4, "uEi..." for certhash).
-_KNOWN_PROTOCOL_NAMES = frozenset({
-    "ip4", "ip6", "tcp", "udp",
-    _WEBRTC_DIRECT_NAME, _WEBRTC_NAME, _CERTHASH_NAME,
-    "p2p", "p2p-circuit", "quic", "quic-v1", "tls", "noise", "http", "https",
-    "ws", "wss", "dns", "dns4", "dns6", "dnsaddr",
-})
+_KNOWN_PROTOCOL_NAMES = frozenset(
+    {
+        "ip4",
+        "ip6",
+        "tcp",
+        "udp",
+        _WEBRTC_DIRECT_NAME,
+        _WEBRTC_NAME,
+        _CERTHASH_NAME,
+        "p2p",
+        "p2p-circuit",
+        "quic",
+        "quic-v1",
+        "tls",
+        "noise",
+        "http",
+        "https",
+        "ws",
+        "wss",
+        "dns",
+        "dns4",
+        "dns6",
+        "dnsaddr",
+    }
+)
 
 
 def _parse_multiaddr_string(maddr_str: str) -> list[tuple[str, str]]:
@@ -161,7 +210,8 @@ def parse_webrtc_direct_multiaddr(
     Extract components from a ``/webrtc-direct`` multiaddr.
 
     :param maddr: A WebRTC Direct multiaddr.
-    :returns: Tuple of ``(host, port, certhash_multibase_or_none, peer_id_str_or_none)``.
+    :returns: Tuple of ``(host, port, certhash_multibase, peer_id_str)``,
+        where the last two may be ``None`` if absent in the multiaddr.
     :raises WebRTCMultiaddrError: If the multiaddr is malformed.
     """
     if not is_webrtc_direct_multiaddr(maddr):
@@ -218,7 +268,10 @@ def build_webrtc_direct_multiaddr(
             f"got: {certhash_multibase!r}"
         )
     ip_proto = "ip6" if ":" in host else "ip4"
-    addr = f"/{ip_proto}/{host}/udp/{port}/{_WEBRTC_DIRECT_NAME}/{_CERTHASH_NAME}/{certhash_multibase}"
+    addr = (
+        f"/{ip_proto}/{host}/udp/{port}/{_WEBRTC_DIRECT_NAME}"
+        f"/{_CERTHASH_NAME}/{certhash_multibase}"
+    )
     if peer_id:
         addr += f"/p2p/{peer_id}"
     return Multiaddr(addr)

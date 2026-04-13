@@ -14,14 +14,10 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
 
 from __future__ import annotations
 
-import hashlib
-import logging
 import secrets
 
 from .certificate import WebRTCCertificate, fingerprint_from_multibase
 from .exceptions import WebRTCConnectionError
-
-logger = logging.getLogger(__name__)
 
 # SDP template for a data-channel-only WebRTC session.
 # Based on the minimal SDP that go-libp2p and js-libp2p generate.
@@ -121,8 +117,12 @@ class SDPBuilder:
             setup_role="active",
         )
         sdp = _apply_ice_credentials(
-            sdp, ufrag, pwd, self._certificate.fingerprint_hex,
-            remote_ufrag=remote_ufrag, remote_pwd=remote_pwd,
+            sdp,
+            ufrag,
+            pwd,
+            self._certificate.fingerprint_hex,
+            remote_ufrag=remote_ufrag,
+            remote_pwd=remote_pwd,
         )
         return sdp, ufrag, pwd
 
@@ -242,13 +242,20 @@ def fingerprint_from_sdp(sdp: str) -> bytes:
     for line in sdp.splitlines():
         line = line.strip()
         if line.startswith("a=fingerprint:sha-256 "):
-            hex_str = line[len("a=fingerprint:sha-256 "):]
+            hex_str = line[len("a=fingerprint:sha-256 ") :]
             try:
-                return bytes(int(b, 16) for b in hex_str.split(":"))
+                fingerprint = bytes(int(b, 16) for b in hex_str.split(":"))
             except (ValueError, TypeError) as e:
                 raise WebRTCConnectionError(
                     f"Malformed fingerprint in SDP: {hex_str}"
                 ) from e
+            # SHA-256 digests are exactly 32 bytes; reject anything else so
+            # callers never feed an off-size value into the Noise prologue.
+            if len(fingerprint) != 32:
+                raise WebRTCConnectionError(
+                    f"SHA-256 fingerprint must be 32 bytes, got {len(fingerprint)}"
+                )
+            return fingerprint
     raise WebRTCConnectionError("No SHA-256 fingerprint found in SDP")
 
 

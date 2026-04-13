@@ -27,14 +27,12 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
 from __future__ import annotations
 
 import logging
-import struct
 from typing import AsyncIterator
 
 import trio
 
 from libp2p.abc import INetStream
 
-from .constants import WEBRTC_SIGNALING_PROTOCOL_ID
 from .exceptions import WebRTCSignalingError
 from .signaling_pb.signaling_pb2 import SignalingMessage
 
@@ -83,20 +81,20 @@ async def read_signaling_message(stream: INetStream) -> SignalingMessage:
                 f"Signaling message too large: {length} bytes "
                 f"(max {_MAX_SIGNALING_MSG_SIZE})"
             )
-        data = b""
-        while len(data) < length:
-            chunk = await stream.read(length - len(data))
+        # Linear-time assembly — bytes += bytes is O(n²) for large n.
+        buf = bytearray()
+        while len(buf) < length:
+            chunk = await stream.read(length - len(buf))
             if not chunk:
                 raise WebRTCSignalingError(
                     "Stream closed before full signaling message received"
                 )
-            data += chunk
+            buf.extend(chunk)
+        data = bytes(buf)
     except WebRTCSignalingError:
         raise
     except Exception as e:
-        raise WebRTCSignalingError(
-            f"Failed to read signaling message: {e}"
-        ) from e
+        raise WebRTCSignalingError(f"Failed to read signaling message: {e}") from e
 
     msg = SignalingMessage()
     msg.ParseFromString(data)
@@ -178,9 +176,7 @@ class SignalingSession:
         :param candidates: List of serialized ICE candidate strings.
         """
         for candidate in candidates:
-            msg = SignalingMessage(
-                type=SignalingMessage.ICE_CANDIDATE, data=candidate
-            )
+            msg = SignalingMessage(type=SignalingMessage.ICE_CANDIDATE, data=candidate)
             await write_signaling_message(self._stream, msg)
         logger.debug("Sent %d ICE candidates", len(candidates))
 

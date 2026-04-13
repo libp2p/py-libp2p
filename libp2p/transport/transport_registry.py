@@ -116,14 +116,24 @@ class TransportRegistry:
         self.register_transport("quic", QUICTransport)
         self.register_transport("quic-v1", QUICTransport)
 
-        # Register WebRTC transports (lazy-loaded, optional dep)
-        try:
-            WebRTCDirectTransport = _get_webrtc_direct_transport()
-            self.register_transport("webrtc-direct", WebRTCDirectTransport)
-            WebRTCPrivateTransport = _get_webrtc_private_transport()
-            self.register_transport("webrtc", WebRTCPrivateTransport)
-        except ImportError:
-            pass  # aiortc not installed — skip WebRTC registration
+        # Register WebRTC transports only when aiortc is actually installed.
+        # The scaffolding modules themselves do not import aiortc (aiortc is
+        # loaded lazily inside the bridge), so we probe for it explicitly.
+        import importlib.util as _importlib_util
+
+        if _importlib_util.find_spec("aiortc") is not None:
+            try:
+                WebRTCDirectTransport = _get_webrtc_direct_transport()
+                self.register_transport("webrtc-direct", WebRTCDirectTransport)
+                WebRTCPrivateTransport = _get_webrtc_private_transport()
+                self.register_transport("webrtc", WebRTCPrivateTransport)
+            except ImportError as e:
+                logger.debug("aiortc present but WebRTC transport import failed: %s", e)
+        else:
+            logger.debug(
+                "aiortc not installed; skipping /webrtc and /webrtc-direct "
+                "transport registration (install libp2p[webrtc] to enable)"
+            )
 
     def register_transport(
         self, protocol: str, transport_class: type[ITransport]
@@ -213,6 +223,27 @@ class TransportRegistry:
                 return QUICTransport(
                     private_key, config=config, enable_autotls=enable_autotls
                 )
+            elif protocol in ["webrtc-direct", "webrtc"]:
+                # WebRTC transports require a private key for the local peer
+                # identity used in the Noise XX handshake.  The transport
+                # classes are loaded lazily; mypy can't see the concrete
+                # signature here, so we cast the call.
+                private_key = kwargs.get("private_key")
+                if private_key is None:
+                    logger.warning(
+                        "WebRTC transport '%s' requires private_key", protocol
+                    )
+                    return None
+                config = kwargs.get("config")
+                if protocol == "webrtc-direct":
+                    return transport_class(  # type: ignore[call-arg]
+                        private_key=private_key, config=config
+                    )
+                # private-to-private also accepts an optional host
+                host = kwargs.get("host")
+                return transport_class(  # type: ignore[call-arg]
+                    private_key=private_key, host=host, config=config
+                )
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()
@@ -257,7 +288,22 @@ def create_transport_for_multiaddr(
 
         # Check for supported transport protocols in order of preference
         # We need to validate that the multiaddr structure is valid for our transports
-        if "quic" in protocols or "quic-v1" in protocols:
+        if "webrtc-direct" in protocols or "webrtc" in protocols:
+            # WebRTC Direct: /ip4/<ip>/udp/<port>/webrtc-direct/...
+            # WebRTC (relayed): <relay-maddr>/p2p-circuit/webrtc/...
+            # Both are only routable when the corresponding transport is
+            # registered (which only happens when aiortc is installed).
+            registry = get_transport_registry()
+            proto = "webrtc-direct" if "webrtc-direct" in protocols else "webrtc"
+            if proto in registry.get_supported_protocols():
+                return registry.create_transport(proto, upgrader, **kwargs)
+            logger.warning(
+                "Multiaddr requires the WebRTC transport (%s) but it is not "
+                "registered. Install libp2p[webrtc] to enable WebRTC support.",
+                proto,
+            )
+            return None
+        elif "quic" in protocols or "quic-v1" in protocols:
             # For QUIC, we need a valid structure like:
             # /ip4/127.0.0.1/udp/4001/quic
             # /ip4/127.0.0.1/udp/4001/quic-v1
