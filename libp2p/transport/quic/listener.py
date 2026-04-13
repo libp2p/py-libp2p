@@ -107,6 +107,12 @@ class QUICListener(IListener):
         self._listening = False
         self._nursery: trio.Nursery | None = None
 
+        # State for the "owned nursery" fallback path in listen().  Populated
+        # only when no transport background nursery is available.
+        self._owned_started: trio.Event | None = None
+        self._owned_stopped: trio.Event | None = None
+        self._owned_start_error: BaseException | None = None
+
         # Serialize promotion of pending connections to avoid duplicate promotions
         # and repeated connect() calls under concurrent packet processing.
         self._promotion_lock = trio.Lock()
@@ -1197,49 +1203,89 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Transmission error: {e}", exc_info=True)
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
-        """Start listening on the given multiaddr with enhanced connection handling."""
+    async def listen(self, maddr: Multiaddr) -> None:
+        """
+        Start listening on the given multiaddr with enhanced connection handling.
+
+        The listener uses the transport's background nursery when available
+        (set via :meth:`QUICTransport.set_background_nursery`), and otherwise
+        spawns a private internal nursery as a trio system task.  In either
+        case the listener no longer requires the caller to supply a nursery.
+        """
         if self._listening:
             raise QUICListenError("Already listening")
 
         if not is_quic_multiaddr(maddr):
             raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
 
-        if self._transport._background_nursery:
-            active_nursery = self._transport._background_nursery
-            logger.debug("Using transport background nursery for listener")
-        elif nursery:
-            active_nursery = nursery
-            self._transport._background_nursery = nursery
-            logger.debug("Using provided nursery for listener")
-        else:
-            raise QUICListenError("No nursery available")
+        host, port = quic_multiaddr_to_endpoint(maddr)
 
-        try:
-            host, port = quic_multiaddr_to_endpoint(maddr)
+        if self._transport._background_nursery is not None:
+            # Preferred path: reuse the transport's already-running nursery.
+            try:
+                self._socket = await self._create_socket(host, port)
+                self._nursery = self._transport._background_nursery
 
-            # Create and configure socket
-            self._socket = await self._create_socket(host, port)
-            self._nursery = active_nursery
+                bound_host, bound_port = self._socket.getsockname()[:2]
+                quic_version = multiaddr_to_quic_version(maddr)
+                bound_maddr = create_quic_multiaddr(
+                    bound_host, bound_port, quic_version
+                )
+                self._bound_addresses = [bound_maddr]
+                self._listening = True
 
-            # Get the actual bound address (IPv4: 2-tuple, IPv6: 4-tuple)
-            bound_host, bound_port = self._socket.getsockname()[:2]
-            quic_version = multiaddr_to_quic_version(maddr)
-            bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
-            self._bound_addresses = [bound_maddr]
+                self._nursery.start_soon(self._handle_incoming_packets)
+                logger.info(
+                    f"QUIC listener started on {bound_maddr} "
+                    "with connection ID support"
+                )
+                return
+            except Exception as e:
+                await self.close()
+                raise QUICListenError(f"Failed to start listening: {e}") from e
 
-            self._listening = True
+        # Fallback: spawn our own internal nursery as a trio system task
+        # so the listener is fully self-contained.
+        self._owned_started = trio.Event()
+        self._owned_stopped = trio.Event()
+        self._owned_start_error: BaseException | None = None
 
-            # Start packet handling loop
-            active_nursery.start_soon(self._handle_incoming_packets)
+        async def _run_server() -> None:
+            try:
+                async with trio.open_nursery() as inner_nursery:
+                    try:
+                        self._socket = await self._create_socket(host, port)
+                        self._nursery = inner_nursery
 
-            logger.info(
-                f"QUIC listener started on {bound_maddr} with connection ID support"
-            )
+                        bound_host, bound_port = self._socket.getsockname()[:2]
+                        quic_version = multiaddr_to_quic_version(maddr)
+                        bound_maddr = create_quic_multiaddr(
+                            bound_host, bound_port, quic_version
+                        )
+                        self._bound_addresses = [bound_maddr]
+                        self._listening = True
 
-        except Exception as e:
+                        inner_nursery.start_soon(self._handle_incoming_packets)
+                        logger.info(
+                            f"QUIC listener started on {bound_maddr} "
+                            "with connection ID support"
+                        )
+                    except BaseException as error:
+                        self._owned_start_error = error
+                    finally:
+                        self._owned_started.set()
+            finally:
+                self._owned_stopped.set()
+                self._nursery = None
+
+        trio.lowlevel.spawn_system_task(_run_server)
+        await self._owned_started.wait()
+
+        if self._owned_start_error is not None:
             await self.close()
-            raise QUICListenError(f"Failed to start listening: {e}") from e
+            raise QUICListenError(
+                f"Failed to start listening: {self._owned_start_error}"
+            ) from self._owned_start_error
 
     async def _create_socket(self, host: str, port: int) -> trio.socket.SocketType:
         """Create and configure UDP socket."""
@@ -1332,6 +1378,14 @@ class QUICListener(IListener):
                 self._socket = None
 
             self._bound_addresses.clear()
+
+            # If we spawned our own internal nursery (fallback path),
+            # cancel it and wait for the background system task to finish.
+            if self._owned_started is not None and self._owned_started.is_set():
+                if self._nursery is not None:
+                    self._nursery.cancel_scope.cancel()
+                if self._owned_stopped is not None:
+                    await self._owned_stopped.wait()
 
             logger.info("QUIC listener closed")
 
