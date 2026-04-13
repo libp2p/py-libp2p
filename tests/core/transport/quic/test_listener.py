@@ -69,7 +69,7 @@ class TestQUICListener:
             invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
 
             with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
-                await listener.listen(invalid_addr, nursery)
+                await listener.listen(invalid_addr)
 
     @pytest.mark.trio
     async def test_listener_basic_lifecycle(self, listener: QUICListener):
@@ -78,7 +78,7 @@ class TestQUICListener:
 
         async with trio.open_nursery() as nursery:
             # Start listening
-            result = await listener.listen(listen_addr, nursery)
+            result = await listener.listen(listen_addr)
             assert result is None
             assert listener.is_listening()
 
@@ -105,14 +105,14 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                await listener.listen(listen_addr, nursery)
+                await listener.listen(listen_addr)
                 await trio.sleep(0.01)
 
                 addrs = listener.get_addrs()
                 assert len(addrs) > 0
                 async with trio.open_nursery() as nursery2:
                     with pytest.raises(QUICListenError, match="Already listening"):
-                        await listener.listen(listen_addr, nursery2)
+                        await listener.listen(listen_addr)
                         nursery2.cancel_scope.cancel()
 
                 nursery.cancel_scope.cancel()
@@ -126,7 +126,7 @@ class TestQUICListener:
 
         try:
             async with trio.open_nursery() as nursery:
-                await listener.listen(listen_addr, nursery)
+                await listener.listen(listen_addr)
                 await trio.sleep(0.5)
 
                 addrs = listener.get_addrs()
@@ -239,7 +239,7 @@ async def test_connection_id_tracking_with_real_connection():
         async with trio.open_nursery() as nursery:
             # Start server
             server_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0, "Server should have listen addresses"
 

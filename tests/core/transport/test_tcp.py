@@ -40,10 +40,10 @@ async def test_tcp_listener(nursery):
 
     listener = transport.create_listener(handler)
     assert len(listener.get_addrs()) == 0
-    result = await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR)
     assert result is None
     assert len(listener.get_addrs()) == 1
-    result = await listener.listen(LISTEN_MADDR, nursery)
+    result = await listener.listen(LISTEN_MADDR)
     assert result is None
     assert len(listener.get_addrs()) == 2
 
@@ -58,7 +58,7 @@ async def test_tcp_listener_raises_on_missing_port(nursery):
     transport = TCP()
     listener = transport.create_listener(noop_handler)
     with pytest.raises(OpenConnectionError, match="TCP port is missing"):
-        await listener.listen(Multiaddr("/ip4/127.0.0.1"), nursery)
+        await listener.listen(Multiaddr("/ip4/127.0.0.1"))
 
 
 @pytest.mark.trio
@@ -72,14 +72,14 @@ async def test_tcp_listener_raises_on_bind_failure(nursery):
 
     # Bind to a specific port with the first listener
     listener1 = transport.create_listener(noop_handler)
-    await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"), nursery)
+    await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
     bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
 
     # Attempting to bind the same port a second time should raise OpenConnectionError,
     # not a raw OSError from trio.serve_tcp.
     listener2 = transport.create_listener(noop_handler)
     with pytest.raises(OpenConnectionError, match="Failed to start TCP listener"):
-        await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"), nursery)
+        await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"))
 
 
 @pytest.mark.trio
@@ -100,7 +100,7 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     listen_addr = addrs[0]
@@ -278,7 +278,7 @@ async def test_ipv6_tcp_listen_and_dial(nursery):
     # Listen on IPv6 loopback
     listen_addr = Multiaddr("/ip6/::1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
+    await listener.listen(listen_addr)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
 
@@ -314,7 +314,7 @@ async def test_ipv6_tcp_dial_with_ipv4_fallback(nursery):
     # Listen on IPv4 loopback
     listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
+    await listener.listen(listen_addr)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
 

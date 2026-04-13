@@ -67,7 +67,7 @@ async def test_read_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -110,7 +110,7 @@ async def test_write_after_abrupt_reset_raises_error() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -157,7 +157,7 @@ async def test_graceful_close_read_returns_eof() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 
@@ -194,7 +194,7 @@ async def test_normal_data_transfer_works() -> None:
 
         transport = TCP()
         listener = transport.create_listener(on_accept)
-        await listener.listen(LISTEN_MADDR, nursery)
+        await listener.listen(LISTEN_MADDR)
         local_conn = await transport.dial(listener.get_addrs()[0])
         await ready.wait()
 

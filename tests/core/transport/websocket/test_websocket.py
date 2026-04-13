@@ -118,7 +118,7 @@ async def test_listener_listen_returns_none():
     listener = transport.create_listener(dummy_handler)
 
     async with trio.open_nursery() as nursery:
-        result = await listener.listen(ma, nursery)
+        result = await listener.listen(ma)
         assert result is None
         nursery.cancel_scope.cancel()
 
@@ -377,7 +377,7 @@ async def test_listen_invalid_address(nursery):
     for ma in invalid_addresses:
         listener = transport.create_listener(dummy_handler)
         with pytest.raises(OpenConnectionError, match="WebSocket multiaddr"):
-            await listener.listen(ma, nursery)
+            await listener.listen(ma)
 
 
 @pytest.mark.trio
@@ -942,7 +942,7 @@ async def test_wss_listen_without_tls_config():
     # This should raise an error when TLS config is not provided
     try:
         async with trio.open_nursery() as nursery:
-            await listener.listen(wss_maddr, nursery)
+            await listener.listen(wss_maddr)
         pytest.fail("WSS listen without TLS config should have failed")
     except Exception as e:
         # Handle any exception and check if it contains the TLS configuration error
