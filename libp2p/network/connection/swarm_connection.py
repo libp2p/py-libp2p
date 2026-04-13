@@ -224,6 +224,13 @@ class SwarmConn(INetConn):
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        # Acquire semaphore slot for inbound stream (queues if at capacity)
+        semaphore = getattr(self.swarm, "_stream_semaphore", None)
+        semaphore_acquired = False
+        if semaphore is not None:
+            await semaphore.acquire()
+            semaphore_acquired = True
+
         # Acquire inbound stream resource if a manager is configured
         rm = getattr(self.swarm, "_resource_manager", None)
         peer_id_str = str(getattr(self.muxed_conn, "peer_id", ""))
@@ -235,6 +242,9 @@ class SwarmConn(INetConn):
                 acquired = False
 
         if rm is not None and not acquired:
+            # Release semaphore since we're rejecting this stream
+            if semaphore_acquired and semaphore is not None:
+                semaphore.release()
             # Deny stream: best-effort reset/close
             try:
                 await muxed_stream.reset()  # type: ignore[attr-defined]
@@ -246,18 +256,16 @@ class SwarmConn(INetConn):
             return
 
         net_stream = await self._add_stream(muxed_stream)
+        # Tag stream with direction so notify_closed_stream releases resources
+        net_stream._direction = Direction.INBOUND
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
-            # Always remove the stream when the handler finishes
-            # Use simple remove_stream since stream handles notifications itself
+            # Safety net: ensure stream is removed from connection tracking
             self.remove_stream(net_stream)
-            # Release inbound stream resource
-            if rm is not None and acquired:
-                try:
-                    rm.release_stream(peer_id_str, Direction.INBOUND)
-                except Exception:
-                    pass
+            # Release resources via notify_closed_stream (idempotent guard)
+            if not net_stream._resource_released:
+                await self.swarm.notify_closed_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
         #

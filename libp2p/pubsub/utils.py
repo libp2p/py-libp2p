@@ -1,9 +1,6 @@
 import logging
 
 from libp2p.abc import IHost
-from libp2p.custom_types import (
-    MessageID,
-)
 from libp2p.peer.envelope import consume_envelope
 from libp2p.peer.id import ID
 from libp2p.pubsub.pb.rpc_pb2 import RPC
@@ -53,19 +50,26 @@ def maybe_consume_signed_record(msg: RPC, host: IHost, peer_id: ID) -> bool:
     return True
 
 
-def parse_message_id_safe(msg_id_str: str) -> MessageID:
-    """Safely handle message ID as string."""
-    return MessageID(msg_id_str)
-
-
-def safe_bytes_from_hex(hex_str: str) -> bytes | None:
+def safe_bytes_from_hex(value: str | bytes | bytearray) -> bytes | None:
     """
-    Decode a hex-encoded string to bytes, returning None on failure.
+    Decode a wire message ID to bytes, returning None on failure.
 
     Used for defensively parsing wire message IDs in IHAVE/IWANT handlers
     so that malformed hex from peers does not crash the gossip handler task.
     """
     try:
-        return bytes.fromhex(hex_str)
+        if isinstance(value, str):
+            return bytes.fromhex(value)
+
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            # Prefer canonical hex text if the bytes decode cleanly as ASCII hex.
+            try:
+                return bytes.fromhex(raw.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                # Some peers may emit raw bytes over this path. Treat them as-is.
+                return raw
+
+        return None
     except ValueError:
         return None

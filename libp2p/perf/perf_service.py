@@ -70,8 +70,8 @@ class PerfService(IPerf):
 
     async def stop(self) -> None:
         """Stop the perf service and unregister the protocol handler."""
-        # Note: py-libp2p may not have unregister, but we set the flag
         self._started = False
+        self._host.remove_stream_handler(self._protocol)
         logger.debug("Perf service stopped")
 
     def is_started(self) -> bool:
