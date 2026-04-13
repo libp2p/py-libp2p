@@ -113,9 +113,5 @@ class TestMDNSDiscovery:
             assert len(peer_info.addrs) == 1
             assert "/tcp/8001" in str(peer_info.addrs[0])
 
-            print("✅ Service info extraction test successful!")
-            print(f"   Extracted peer ID: {peer_info.peer_id}")
-            print(f"   Extracted addresses: {[str(addr) for addr in peer_info.addrs]}")
-
         finally:
             zeroconf.close()

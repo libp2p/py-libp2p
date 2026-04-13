@@ -35,9 +35,10 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.ipns import IPNSValidator
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 
@@ -65,8 +66,7 @@ from .value_store import (
     ValueStore,
 )
 
-logger = logging.getLogger("kademlia-example.kad_dht")
-# logger = logging.getLogger("libp2p.kademlia")
+logger = logging.getLogger(__name__)
 # Default parameters
 ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
 
@@ -134,6 +134,7 @@ class KadDHT(Service):
         protocol_prefix: TProtocol = PROTOCOL_PREFIX,
         enable_providers: bool = True,
         enable_values: bool = True,
+        strict_validation: bool = False,
     ):
         """
         Initialize a new Kademlia DHT node.
@@ -141,10 +142,40 @@ class KadDHT(Service):
         :param host: The libp2p host.
         :param mode: The mode of host (Client or Server) - must be DHTMode enum
         :param enable_random_walk: Whether to enable automatic random walk
+        :param validator: Custom NamespacedValidator for DHT records
+        :param validator_changed: If True, indicates the validator was explicitly set
+            and defaults should not be used
+        :param protocol_prefix: Protocol prefix (default: /ipfs)
+        :param enable_providers: Enable provider record support
+        :param enable_values: Enable value record support
+        :param strict_validation: If True, enforce strict namespace validation for all
+            records. Only namespaced keys (e.g., /pk/, /ipns/, /myapp/) with registered
+            validators will be accepted. If False (default), non-namespaced keys will
+            be accepted without validation for backward compatibility.
+
+            Setting this to True aligns behavior with go-libp2p and rust-libp2p where:
+            - All DHT records MUST have a registered validator for their namespace
+            - Keys without a matching namespace validator are rejected
+            - This enforces permissioned keyspaces for security and correctness
+
+        Example with strict validation:
+            # Create validator with custom namespace
+            validator = NamespacedValidator({
+                "pk": PublicKeyValidator(),
+                "myapp": MyAppValidator(),
+            }, strict_validation=True)
+            dht = KadDHT(
+                host, DHTMode.SERVER, validator=validator, strict_validation=True
+            )
+
+            # Only namespaced keys are allowed:
+            await dht.put_value("/myapp/key", b"value")  # OK
+            await dht.put_value("/pk/...", pubkey)       # OK
+            await dht.put_value("plain-key", b"value")   # Raises InvalidRecordType
         """
         super().__init__()
 
-        self.host = host
+        self.host: IHost = host
         self.local_peer_id = host.get_id()
 
         # Validate that mode is a DHTMode enum
@@ -155,15 +186,22 @@ class KadDHT(Service):
         self.enable_random_walk = enable_random_walk
 
         # Initialize the routing table
-        self.routing_table = RoutingTable(self.local_peer_id, self.host)
+        self.routing_table = RoutingTable(self.local_peer_id, host)
 
         self.protocol_prefix = protocol_prefix
         self.enable_providers = enable_providers
         self.enable_values = enable_values
+        self._strict_validation = strict_validation
         self.validator = validator
 
-        if validator is None:
-            self.validator = NamespacedValidator({"pk": PublicKeyValidator()})
+        if self.validator is None:
+            self.validator = NamespacedValidator(
+                {"pk": PublicKeyValidator()},
+                strict_validation=strict_validation,
+            )
+
+        # Keep strict_validation synchronized with the active validator.
+        self.strict_validation = strict_validation
 
         # If true implies that the validator has been changed and that
         # Defaults should not be used
@@ -194,6 +232,27 @@ class KadDHT(Service):
 
         # Set protocol handlers
         host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+
+    @property
+    def strict_validation(self) -> bool:
+        """
+        Return strict validation mode.
+
+        The validator is the source of truth when it supports
+        ``strict_validation`` at runtime.
+        """
+        validator = self.validator
+        if isinstance(validator, NamespacedValidator):
+            return validator.strict_validation
+        return self._strict_validation
+
+    @strict_validation.setter
+    def strict_validation(self, value: bool) -> None:
+        """Set strict validation mode and synchronize with validator."""
+        self._strict_validation = value
+        validator = self.validator
+        if isinstance(validator, NamespacedValidator):
+            validator.strict_validation = value
 
     def _create_query_function(self) -> Callable[[bytes], Awaitable[list[ID]]]:
         """
@@ -270,15 +329,20 @@ class KadDHT(Service):
         the default validator set hasn't been overridden.
         """
         if not self.validator_changed:
+            # Ensure validator is a NamespacedValidator (cannot be None at this point)
             if not isinstance(self.validator, NamespacedValidator):
                 raise ValueError(
                     "Default validator was changed without marking it True"
                 )
 
-            if "pk" not in self.validator._validators:
-                self.validator._validators["pk"] = PublicKeyValidator()
+            # Use a local variable to help type checker narrow the type
+            validator = self.validator
 
-            # TODO: Do the same thing for ipns, but need to implement first.
+            # Add missing default validators
+            if "pk" not in validator._validators:
+                validator._validators["pk"] = PublicKeyValidator()
+            if "ipns" not in validator._validators:
+                validator._validators["ipns"] = IPNSValidator()
 
     def validate_config(self) -> None:
         """
@@ -306,15 +370,21 @@ class KadDHT(Service):
 
         vmap = self.validator._validators
 
-        # TODO: Need to add ipns also in the check
-        if set(vmap.keys()) != {"pk"}:
-            raise ValueError(f"{PROTOCOL_PREFIX} must have 'pk' and 'ipns' validators")
+        # Check that both pk and ipns validators are present.
+        # Additional namespaces beyond these two are deliberately allowed
+        # so users can register custom validators for extensibility.
+        required_validators = {"pk", "ipns"}
+        if not required_validators.issubset(set(vmap.keys())):
+            missing = required_validators - set(vmap.keys())
+            raise ValueError(f"{PROTOCOL_PREFIX} must include validators for {missing}")
 
         pk_validator = vmap.get("pk")
         if not isinstance(pk_validator, PublicKeyValidator):
-            raise TypeError("'pk' namesapce must use PublicKeyValidator")
+            raise TypeError("'pk' namespace must use PublicKeyValidator")
 
-        # TODO: ipns checks
+        ipns_validator = vmap.get("ipns")
+        if not isinstance(ipns_validator, IPNSValidator):
+            raise TypeError("'ipns' namespace must use IPNSValidator")
 
     def set_validator(self, val: NamespacedValidator) -> None:
         """
@@ -324,6 +394,8 @@ class KadDHT(Service):
         validators (pk and ipns) will not be automatically applied later.
         """
         self.validator = val
+        # Keep the new validator in sync with current strict mode.
+        self.validator.strict_validation = self._strict_validation
         self.validator_changed = True
         return
 
@@ -844,33 +916,34 @@ class KadDHT(Service):
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
 
-        # 3. Store at remote peers in batches of ALPHA, in parallel
-        stored_count = 0
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
-            batch_results = [False] * len(batch)
+        # 3. Store at remote peers using a semaphore-based sliding window.
+        #    Up to ALPHA stores run concurrently; a new one starts as soon as
+        #    any in-flight store completes.
+        stored_count_list: list[int] = [0]
+        sem = trio.Semaphore(ALPHA)
 
-            async def store_one(idx: int, peer: ID) -> None:
-                try:
-                    with trio.move_on_after(QUERY_TIMEOUT):
-                        success = await self.value_store._store_at_peer(
-                            peer, key_bytes, value
-                        )
-                        batch_results[idx] = success
-                        if success:
-                            logger.debug(f"Stored value at peer {peer}")
-                        else:
-                            logger.debug(f"Failed to store value at peer {peer}")
-                except Exception as e:
-                    logger.debug(f"Error storing value at peer {peer}: {e}")
+        async def store_one(peer: ID) -> None:
+            try:
+                with trio.move_on_after(QUERY_TIMEOUT):
+                    success = await self.value_store._store_at_peer(
+                        peer, key_bytes, value
+                    )
+                    if success:
+                        stored_count_list[0] += 1
+                        logger.debug(f"Stored value at peer {peer}")
+                    else:
+                        logger.debug(f"Failed to store value at peer {peer}")
+            except Exception as e:
+                logger.debug(f"Error storing value at peer {peer}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for idx, peer in enumerate(batch):
-                    nursery.start_soon(store_one, idx, peer)
+        async with trio.open_nursery() as nursery:
+            for peer in closest_peers:
+                await sem.acquire()
+                nursery.start_soon(store_one, peer)
 
-            stored_count += sum(batch_results)
-
-        logger.info(f"Successfully stored value at {stored_count} peers")
+        logger.info(f"Successfully stored value at {stored_count_list[0]} peers")
 
     async def get_value(self, key: str, quorum: int = 0) -> bytes | None:
         """
@@ -911,47 +984,60 @@ class KadDHT(Service):
         # Collect valid records from peers: mapping peer -> Record
         valid_records: list[tuple[ID, Record]] = []
 
-        # 3. Query ALPHA peers at a time in parallel
-        # Use list to track mutable state (pyrefly requirement)
+        # 3. Query peers using a semaphore-based sliding window (up to ALPHA
+        #    concurrent queries). A new query starts as soon as any finishes.
+        #
+        #    When quorum is reached:
+        #    - No new peer queries will be scheduled (early-stop via sem + quorum check)
+        #    - In-flight queries continue to completion for robustness and observability
+        #    - This prevents resource waste while allowing partial results to propagate
         total_responses_list: list[int] = [0]
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
+        sem = trio.Semaphore(ALPHA)
+        quorum_reached = trio.Event()
 
-            async def query_one(peer: ID) -> None:
-                try:
-                    with trio.move_on_after(QUERY_TIMEOUT):
-                        # Fetch the record directly to get timeReceived
-                        rec = await self.value_store._get_from_peer(
-                            peer, key_bytes, return_record=True
-                        )
-                        if rec is not None:
-                            total_responses_list[0] += 1
-                            # Validate the record's value
-                            try:
-                                if self.validator is None:
-                                    raise ValueError("Validator is required")
-                                if not isinstance(rec, Record):
-                                    raise TypeError("Expected Record type")
-                                self.validator.validate(key, rec.value)
-                                valid_records.append((peer, rec))
-                                logger.debug(f"Found valid record at peer {peer}")
-                            except Exception as e:
+        async def query_one(peer: ID) -> None:
+            try:
+                with trio.move_on_after(QUERY_TIMEOUT):
+                    rec = await self.value_store._get_from_peer(
+                        peer, key_bytes, return_record=True
+                    )
+                    if rec is not None:
+                        total_responses_list[0] += 1
+                        try:
+                            if self.validator is None:
+                                raise ValueError("Validator is required")
+                            if not isinstance(rec, Record):
+                                raise TypeError("Expected Record type")
+                            self.validator.validate(key, rec.value)
+                            valid_records.append((peer, rec))
+                            logger.debug(f"Found valid record at peer {peer}")
+                            if quorum and len(valid_records) >= quorum:
                                 logger.debug(
-                                    f"Received invalid record from {peer}, "
-                                    f"discarding: {e}"
+                                    f"Quorum reached "
+                                    f"({len(valid_records)} valid records)"
                                 )
-                except Exception as e:
-                    logger.debug(f"Error querying peer {peer}: {e}")
+                                quorum_reached.set()
+                        except Exception as e:
+                            logger.debug(
+                                f"Received invalid record from {peer}, discarding: {e}"
+                            )
+            except Exception as e:
+                logger.debug(f"Error querying peer {peer}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for peer in batch:
-                    nursery.start_soon(query_one, peer)
+        async with trio.open_nursery() as nursery:
+            for peer in closest_peers:
+                await sem.acquire()
+                if quorum_reached.is_set():
+                    sem.release()
+                    break
+                nursery.start_soon(query_one, peer)
 
-            # If quorum is set and we have enough valid records, we can stop early
-            # Note: quorum counts valid records, not all responses.
-            if quorum and len(valid_records) >= quorum:
-                logger.debug(f"Quorum reached ({len(valid_records)} valid records)")
-                break
+        logger.debug(
+            f"get_value query complete: {total_responses_list[0]} responses, "
+            f"{len(valid_records)} valid records from {len(closest_peers)} peers"
+        )
 
         # 4. Select the best record if any valid records were found
         if valid_records:

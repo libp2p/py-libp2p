@@ -1,7 +1,6 @@
 import argparse
 import logging
 
-import base58
 import multiaddr
 import trio
 
@@ -25,7 +24,7 @@ from libp2p.stream_muxer.mplex.mplex import (
     MPLEX_PROTOCOL_ID,
     Mplex,
 )
-from libp2p.tools.async_service.trio_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.utils.address_validation import (
@@ -51,7 +50,9 @@ async def receive_loop(subscription, termination_event):
     while not termination_event.is_set():
         try:
             message = await subscription.get()
-            logger.info(f"From peer: {base58.b58encode(message.from_id).decode()}")
+            from libp2p.peer.id import ID
+
+            logger.info(f"From peer: {ID(message.from_id).to_base58()}")
             print(f"Received message: {message.data.decode('utf-8')}")
         except Exception:
             logger.exception("Error in receive loop")

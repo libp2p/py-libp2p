@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py-libp2p-ping-test"
-version = "0.4.0"
+version = "0.5.0"
 description = "Python libp2p ping test implementation for transport interoperability"
 authors = [
     {name = "libp2p", email = "team@libp2p.io"}

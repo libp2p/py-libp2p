@@ -14,6 +14,7 @@ from multiaddr import Multiaddr
 
 from libp2p import new_host
 from libp2p.bitswap import BitswapClient
+from libp2p.bitswap.cid import cid_to_bytes, format_cid_for_display
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.utils.address_validation import (
@@ -30,7 +31,7 @@ logging.basicConfig(
 # Silence verbose loggers
 logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
 logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
-logging.getLogger("async_service.Manager").setLevel(logging.WARNING)
+logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,9 @@ async def run_provider(file_path: str, port: int = 0):
         for i, cid in enumerate(all_cids, 1):
             block_data = await bitswap.block_store.get_block(cid)
             block_size = len(block_data) if block_data else 0
-            logger.info(f"  {i}. {cid.hex()} ({format_size(block_size)})")
+            logger.info(
+                f"  {i}. {format_cid_for_display(cid)} ({format_size(block_size)})"
+            )
 
         logger.info("")
         logger.info("=" * 70)
@@ -130,14 +133,15 @@ async def run_provider(file_path: str, port: int = 0):
 
         # Get the first address (clean multiaddr without duplicate /p2p/)
         provider_addr = host.get_addrs()[0]
-        logger.info(f"Root CID:  {root_cid.hex()}")
+        root_cid_text = format_cid_for_display(root_cid)
+        logger.info(f"Root CID:  {root_cid_text}")
         logger.info("")
         logger.info("=" * 70)
         logger.info("📋 COPY THIS COMMAND TO RUN CLIENT:")
         logger.info("=" * 70)
         logger.info(
             f"python bitswap.py --mode client "
-            f'--provider "{provider_addr}" --cid "{root_cid.hex()}"'
+            f'--provider "{provider_addr}" --cid "{root_cid_text}"'
         )
         logger.info("=" * 70)
         logger.info("")
@@ -154,7 +158,7 @@ async def run_provider(file_path: str, port: int = 0):
 
 async def run_client(
     provider_multiaddr_str: str,
-    root_cid_hex: str,
+    root_cid_input: str,
     output_dir: str = "/tmp",
     port: int = 0,
 ):
@@ -163,7 +167,7 @@ async def run_client(
 
     Args:
         provider_multiaddr_str: Provider's multiaddress
-        root_cid_hex: Root CID as hex string
+        root_cid_input: Root CID (canonical text, /ipfs/... path, or hex string)
         output_dir: Directory to save the file
         port: TCP port to listen on (0 for auto)
 
@@ -173,7 +177,8 @@ async def run_client(
 
     try:
         provider_multiaddr = Multiaddr(provider_multiaddr_str)
-        root_cid = bytes.fromhex(root_cid_hex)
+        root_cid = cid_to_bytes(root_cid_input)
+        root_cid_text = format_cid_for_display(root_cid)
     except Exception as e:
         logger.error(f"Invalid input: {e}")
         return
@@ -182,7 +187,7 @@ async def run_client(
     logger.info("CLIENT NODE STARTING")
     logger.info("=" * 70)
     logger.info(f"Provider:   {provider_multiaddr}")
-    logger.info(f"Root CID:   {root_cid_hex}")
+    logger.info(f"Root CID:   {root_cid_text}")
     logger.info(f"Output dir: {output_path}")
     logger.info("=" * 70)
 
@@ -240,7 +245,10 @@ async def run_client(
                 for i, cid in enumerate(all_blocks, 1):
                     block_data = await bitswap.block_store.get_block(cid)
                     block_size = len(block_data) if block_data else 0
-                    logger.info(f"  ✓ {i}. {cid.hex()} ({format_size(block_size)})")
+                    logger.info(
+                        f"  ✓ {i}. {format_cid_for_display(cid)} "
+                        f"({format_size(block_size)})"
+                    )
 
             except Exception as fetch_error:
                 # Show what failed
@@ -258,7 +266,8 @@ async def run_client(
                         block_data = await bitswap.block_store.get_block(cid)
                         block_size = len(block_data) if block_data else 0
                         logger.error(
-                            f"  ✓ {i}. {cid.hex()} ({format_size(block_size)})"
+                            f"  ✓ {i}. {format_cid_for_display(cid)} "
+                            f"({format_size(block_size)})"
                         )
                 else:
                     logger.error("No blocks were successfully fetched")
@@ -280,7 +289,9 @@ async def run_client(
                 output_filename = filename
                 logger.info(f"Filename: {filename} (from metadata)")
             else:
-                output_filename = f"file_{root_cid_hex[:16]}.bin"
+                output_filename = (
+                    f"file_{format_cid_for_display(root_cid, max_len=16)}.bin"
+                )
                 logger.info(f"Filename: {output_filename} (no metadata)")
 
             # Handle filename conflicts
@@ -338,7 +349,10 @@ def parse_args():
     parser.add_argument(
         "--cid",
         type=str,
-        help="Root CID as hex string (client mode only)",
+        help=(
+            "Root CID (canonical text, /ipfs/... path, or legacy hex string; "
+            "client mode only)"
+        ),
     )
     parser.add_argument(
         "--output",

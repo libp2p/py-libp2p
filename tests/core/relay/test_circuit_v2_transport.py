@@ -28,6 +28,7 @@ from libp2p.relay.circuit_v2.discovery import (
 )
 from libp2p.relay.circuit_v2.pb.circuit_pb2 import (
     HopMessage,
+    Reservation,
 )
 from libp2p.relay.circuit_v2.protocol import (
     STOP_PROTOCOL_ID,
@@ -58,7 +59,7 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = 15  # seconds
 STREAM_TIMEOUT = 15  # seconds
 HANDLER_TIMEOUT = 15  # seconds
-SLEEP_TIME = 1.0  # seconds
+SLEEP_TIME = 0.05  # seconds (reduced for CI performance)
 RELAY_TIMEOUT = 20  # seconds
 
 # Default limits for relay
@@ -1099,32 +1100,11 @@ def circuit_v2_transport():
     return transport
 
 
-def _metrics_for(transport, relay):
-    """
-    Find metric dict for a relay by comparing
-    to_string() to avoid identity issues.
-    """
-    for k, v in transport._relay_metrics.items():
-        # some tests set relay.to_string.return_value
-        try:
-            if k.to_string() == relay.to_string():
-                return v
-        except Exception:
-            # fallback if to_string is not a callable on the mock
-            try:
-                if k.to_string.return_value == relay.to_string.return_value:
-                    return v
-            except Exception:
-                continue
-    raise AssertionError("Metrics for relay not found")
-
-
 @pytest.mark.trio
 async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
     """Test _select_relay when no relays are available."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
 
     result = await circuit_v2_transport._select_relay(peer_info)
@@ -1134,7 +1114,6 @@ async def test_select_relay_no_relays(circuit_v2_transport, peer_info, mocker):
         circuit_v2_transport.discovery.get_relays.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
     )
-    assert circuit_v2_transport._relay_list == []
     assert (
         mock_sleep.call_count
         == circuit_v2_transport.client_config.max_auto_relay_attempts
@@ -1390,7 +1369,6 @@ async def test_select_relay_backoff_timing(circuit_v2_transport, peer_info, mock
     """Test _select_relay exponential backoff on empty scored_relays."""
     circuit_v2_transport.discovery.get_relays.return_value = []
     circuit_v2_transport.client_config.enable_auto_relay = True
-    circuit_v2_transport._relay_list = []
     mock_sleep = mocker.patch("trio.sleep", new=AsyncMock())
     circuit_v2_transport.client_config.max_auto_relay_attempts = 3
 
@@ -1595,7 +1573,8 @@ async def test_dial_peer_info_uses_stored_multiaddr(protocol):
     peer_info = PeerInfo(peer_id, [])
 
     circuit_ma = multiaddr.Multiaddr(
-        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+        f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
+        f"/p2p-circuit/p2p/{peer_id.to_base58()}"
     )
     relay_addr = multiaddr.Multiaddr(
         f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}"
@@ -1662,40 +1641,104 @@ async def test_dial_peer_info_creates_and_stores_circuit(protocol):
     assert conn.is_initiator
 
 
-def test_valid_circuit_multiaddr(id_mock, circuit_v2_transport):
+@pytest.mark.trio
+async def test_dial_peer_info_includes_reservation_proof(protocol):
+    mock_host = Mock()
+    peerstore = Mock()
+    mock_host.get_peerstore.return_value = peerstore
+
+    relay_key = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key.public_key)
+    relay_addr = Multiaddr(f"/ip4/127.0.0.1/tcp/4001/p2p/{relay_peer_id.to_base58()}")
+    relay_info = PeerInfo(relay_peer_id, [relay_addr])
+
+    dest_key = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key.public_key)
+    dest_info = PeerInfo(dest_peer_id, [])
+
+    peerstore.addrs.side_effect = (
+        lambda pid: [] if pid == dest_peer_id else [relay_addr]
+    )
+    peerstore.peer_info.return_value = relay_info
+
+    mock_host.connect = AsyncMock(return_value=None)
+    relay_stream = AsyncMock()
+    relay_stream.write = AsyncMock()
+    relay_stream.read = AsyncMock(
+        return_value=HopMessage(
+            type=HopMessage.STATUS,
+            status=create_status(code=StatusCode.OK, message="connected"),
+        ).SerializeToString()
+    )
+    mock_host.new_stream = AsyncMock(return_value=relay_stream)
+
+    transport = CircuitV2Transport(
+        host=mock_host,
+        config=Mock(enable_client=False),
+        protocol=protocol,
+    )
+    transport._select_relay = AsyncMock(return_value=relay_peer_id)
+
+    reservation_expiry = int(time.time()) + 120
+    transport._reservation_proofs[relay_peer_id] = Reservation(
+        expire=reservation_expiry,
+        voucher=b"voucher-bytes",
+        signature=b"signature-bytes",
+    )
+
+    with patch(
+        "libp2p.relay.circuit_v2.transport.env_to_send_in_RPC",
+        return_value=(b"", None),
+    ):
+        await transport.dial_peer_info(dest_info)
+
+    outbound_bytes = relay_stream.write.await_args_list[0].args[0]
+    outbound_hop = HopMessage()
+    outbound_hop.ParseFromString(outbound_bytes)
+
+    assert outbound_hop.type == HopMessage.CONNECT
+    assert outbound_hop.reservation.expire == reservation_expiry
+    assert outbound_hop.reservation.voucher == b"voucher-bytes"
+    assert outbound_hop.reservation.signature == b"signature-bytes"
+
+
+def test_valid_circuit_multiaddr(circuit_v2_transport):
+    """Parse circuit multiaddr using decapsulate_code (Phase 2.3)."""
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-    id_obj = Mock(spec=ID)
-    id_mock.from_base58.return_value = id_obj
+    ma = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}")
+    relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
 
-    ip4_proto = Mock()
-    ip4_proto.name = "ip4"
-    tcp_proto = Mock()
-    tcp_proto.name = "tcp"
-    circuit_proto = Mock()
-    circuit_proto.name = "p2p-circuit"
-    p2p_proto = Mock()
-    p2p_proto.name = "p2p"
-
-    with patch.object(multiaddr.Multiaddr, "items") as mock_items:
-        mock_items.return_value = [
-            (ip4_proto, "127.0.0.1"),
-            (tcp_proto, "1234"),
-            (circuit_proto, None),
-            (p2p_proto, id_obj),
-        ]
-
-        ma = multiaddr.Multiaddr(
-            f"/ip4/127.0.0.1/tcp/1234/p2p-circuit/p2p/{valid_peer_id}"
-        )
-        relay_ma, target_peer_id = circuit_v2_transport.parse_circuit_ma(ma)
-
-        assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
-        assert target_peer_id == id_obj
-        id_mock.from_base58.assert_not_called()
+    assert str(relay_ma) == "/ip4/127.0.0.1/tcp/1234"
+    assert target_peer_id.to_base58() == valid_peer_id
 
 
-def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
+def test_invalid_circuit_multiaddr(circuit_v2_transport, id_mock):
+    """Parse invalid circuit multiaddrs raises ValueError (Phase 2.3)."""
     valid_peer_id = "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+
+    # Case 1: Missing /p2p-circuit (only /p2p at end)
+    ma1 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma1)
+    assert "Missing /p2p-circuit" in str(exc_info.value)
+
+    # Case 2: Has /p2p-circuit but no /p2p/<peerID> at end
+    ma2 = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma2)
+    assert "Missing /p2p/<peerID>" in str(exc_info.value)
+
+    # Case 3: Too short (no p2p, no p2p-circuit)
+    ma3 = multiaddr.Multiaddr("/ip4/127.0.0.1")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma3)
+    assert "Missing" in str(exc_info.value) or "Invalid" in str(exc_info.value)
+
+    # Case 4: No /p2p-circuit in path (ip6 before p2p)
+    ma4 = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/1234/ip6/::1/p2p/{valid_peer_id}")
+    with pytest.raises(ValueError) as exc_info:
+        circuit_v2_transport.parse_circuit_ma(ma4)
+    assert "Missing /p2p-circuit" in str(exc_info.value)
     id_obj = Mock(spec=ID)
     id_mock.from_base58.return_value = id_obj
 
@@ -1759,15 +1802,17 @@ def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
             ma = multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234/p2p-circuit/ip6/::1")
             with pytest.raises(ValueError) as exc_info:
                 circuit_v2_transport.parse_circuit_ma(ma)
-            assert str(exc_info.value) == f"Missing /p2p/<peerID> at the end: {ma}"
+            assert str(exc_info.value) == (
+                f"Missing /p2p/<peerID> at the end of circuit Multiaddr: {ma}"
+            )
 
-    # Test case 3: Too short
+    # Test case 3: Too short (single component) — code hits "Missing /p2p-circuit" first
     with patch.object(multiaddr.Multiaddr, "items") as mock_items:
         mock_items.return_value = [(ip4_proto, "127.0.0.1")]
         ma = multiaddr.Multiaddr("/ip4/127.0.0.1")
         with pytest.raises(ValueError) as exc_info:
             circuit_v2_transport.parse_circuit_ma(ma)
-        assert str(exc_info.value) == f"Invalid circuit Multiaddr, too short: {ma}"
+        assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
 
     # Test case 4: Wrong protocol instead of p2p-circuit
     with patch.object(multiaddr.Multiaddr, "items") as mock_items:
@@ -1781,3 +1826,93 @@ def test_invalid_circuit_multiaddr(id_mock, circuit_v2_transport):
         with pytest.raises(ValueError) as exc_info:
             circuit_v2_transport.parse_circuit_ma(ma)
         assert str(exc_info.value) == f"Missing /p2p-circuit in Multiaddr: {ma}"
+
+
+def test_connection_type_relayed_exists():
+    """Test that ConnectionType.RELAYED exists and has correct value."""
+    from libp2p.connection_types import ConnectionType
+
+    assert hasattr(ConnectionType, "RELAYED")
+    assert ConnectionType.RELAYED.value == "relayed"
+
+
+def test_connection_type_direct_exists():
+    """Test that ConnectionType.DIRECT exists and has correct value."""
+    from libp2p.connection_types import ConnectionType
+
+    assert hasattr(ConnectionType, "DIRECT")
+    assert ConnectionType.DIRECT.value == "direct"
+
+
+def test_circuit_multiaddr_format():
+    """Test that circuit multiaddrs are properly formatted with /p2p-circuit."""
+    relay_key_pair = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
+
+    dest_key_pair = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key_pair.public_key)
+
+    circuit_ma_str = (
+        f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
+    )
+    circuit_ma = multiaddr.Multiaddr(circuit_ma_str)
+
+    ma_str = str(circuit_ma)
+    assert "/p2p-circuit/" in ma_str, (
+        f"Multiaddr should contain /p2p-circuit/: {ma_str}"
+    )
+
+    parts = ma_str.split("/")
+    try:
+        p2p_circuit_idx = parts.index("p2p-circuit")
+        assert p2p_circuit_idx > 2, "p2p-circuit should not be at the beginning"
+        assert parts[p2p_circuit_idx - 2] == "p2p", "Should have p2p before relay id"
+        assert p2p_circuit_idx + 2 < len(parts), (
+            "Should have destination peer after p2p-circuit"
+        )
+        assert parts[p2p_circuit_idx + 1] == "p2p", "Should have p2p after p2p-circuit"
+    except ValueError:
+        pytest.fail(f"Multiaddr does not contain p2p-circuit: {ma_str}")
+
+
+def test_raw_connection_accepts_relayed_type():
+    """Test that RawConnection accepts ConnectionType.RELAYED."""
+    from libp2p.connection_types import ConnectionType
+
+    mock_stream = Mock()
+
+    relay_key_pair = create_new_key_pair()
+    relay_peer_id = ID.from_pubkey(relay_key_pair.public_key)
+    dest_key_pair = create_new_key_pair()
+    dest_peer_id = ID.from_pubkey(dest_key_pair.public_key)
+
+    circuit_ma = multiaddr.Multiaddr(
+        f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{dest_peer_id.to_base58()}"
+    )
+
+    raw_conn = RawConnection(
+        stream=mock_stream,
+        initiator=True,
+        connection_type=ConnectionType.RELAYED,
+        addresses=[circuit_ma],
+    )
+
+    assert raw_conn.get_connection_type() == ConnectionType.RELAYED
+
+    addrs = raw_conn.get_transport_addresses()
+    assert len(addrs) == 1
+    assert "/p2p-circuit/" in str(addrs[0])
+
+
+def test_raw_connection_default_is_direct():
+    """Test that RawConnection defaults to ConnectionType.DIRECT."""
+    from libp2p.connection_types import ConnectionType
+
+    mock_stream = Mock()
+
+    raw_conn = RawConnection(
+        stream=mock_stream,
+        initiator=True,
+    )
+
+    assert raw_conn.get_connection_type() == ConnectionType.DIRECT

@@ -6,7 +6,6 @@ https://github.com/libp2p/specs/blob/master/relay/circuit-v2.md
 """
 
 import logging
-import time
 from typing import (
     Any,
     Protocol as TypingProtocol,
@@ -20,6 +19,9 @@ import trio
 from libp2p.abc import (
     IHost,
     INetStream,
+)
+from libp2p.connection_types import (
+    ConnectionType,
 )
 from libp2p.custom_types import (
     TProtocol,
@@ -39,7 +41,7 @@ from libp2p.stream_muxer.mplex.exceptions import (
     MplexStreamEOF,
     MplexStreamReset,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.tools.constants import (
@@ -55,10 +57,10 @@ from .config import (
     DEFAULT_PROTOCOL_READ_TIMEOUT,
     DEFAULT_PROTOCOL_WRITE_TIMEOUT,
 )
+from .exceptions import RelayConnectionError
 from .pb.circuit_pb2 import (
     HopMessage,
     Limit,
-    Reservation,
     Status as PbStatus,
     StopMessage,
 )
@@ -72,7 +74,7 @@ from .resources import (
 )
 from .utils import maybe_consume_signed_record
 
-logger = logging.getLogger("libp2p.relay.circuit_v2")
+logger = logging.getLogger(__name__)
 
 PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0")
 STOP_PROTOCOL_ID = TProtocol("/libp2p/circuit/relay/2.0.0/stop")
@@ -91,16 +93,6 @@ STREAM_READ_TIMEOUT = 15  # seconds
 STREAM_WRITE_TIMEOUT = 15  # seconds
 STREAM_CLOSE_TIMEOUT = 10  # seconds
 MAX_READ_RETRIES = 3  # Balanced retries to handle temporary issues
-
-
-# Extended interfaces for type checking
-@runtime_checkable
-class IHostWithStreamHandlers(TypingProtocol):
-    """Extended host interface with stream handler methods."""
-
-    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
-        """Remove a stream handler for a protocol."""
-        ...
 
 
 @runtime_checkable
@@ -191,22 +183,10 @@ class CircuitV2Protocol(Service):
                 await self._close_stream(dst_stream)
             self._active_relays.clear()
 
-            # Unregister protocol handlers - safely handle missing method
+            # Unregister protocol handlers
             if self.allow_hop:
-                try:
-                    # Try to unregister handlers - some host implementations
-                    # may not have this method
-                    self.host.remove_stream_handler(PROTOCOL_ID)  # type: ignore
-                    self.host.remove_stream_handler(STOP_PROTOCOL_ID)  # type: ignore
-                except AttributeError:
-                    # Host does not support remove_stream_handler - handlers will be
-                    # garbage collected
-                    logger.debug(
-                        "Host does not support remove_stream_handler, "
-                        "handlers will be garbage collected"
-                    )
-                except Exception as e:
-                    logger.error("Error unregistering stream handlers: %s", str(e))
+                self.host.remove_stream_handler(PROTOCOL_ID)
+            self.host.remove_stream_handler(STOP_PROTOCOL_ID)
 
     async def _close_stream(self, stream: INetStream | None) -> None:
         """Helper function to safely close a stream."""
@@ -535,8 +515,8 @@ class CircuitV2Protocol(Service):
         ----------
         stream : INetStream
             The incoming stream
-        remote_peer_id : ID
-            The remote peer's ID
+        remote_peer_id : bytes
+            The remote peer's ID bytes
 
         Raises
         ------
@@ -545,9 +525,19 @@ class CircuitV2Protocol(Service):
 
         """
         try:
-            # Create raw connection
-            raw_conn = RawConnection(stream=stream, initiator=False)
-            ma = multiaddr.Multiaddr(remote_peer_id)
+            # Create raw connection with proper circuit relay multiaddr
+            peer_id = ID(remote_peer_id)
+            relay_peer_id = self.host.get_id()
+            # Construct circuit relay multiaddr: /p2p/{relay}/p2p-circuit/p2p/{remote}
+            ma = multiaddr.Multiaddr(
+                f"/p2p/{relay_peer_id.to_base58()}/p2p-circuit/p2p/{peer_id.to_base58()}"
+            )
+            raw_conn = RawConnection(
+                stream=stream,
+                initiator=False,
+                connection_type=ConnectionType.RELAYED,
+                addresses=[ma],
+            )
             await self.host.upgrade_inbound_connection(raw_conn, ma)
 
         except Exception as e:
@@ -567,7 +557,7 @@ class CircuitV2Protocol(Service):
             # Check if peer already has a reservation
             if self.resource_manager.has_reservation(peer_id):
                 logger.debug("Peer %s already has a reservation — refreshing", peer_id)
-                ttl = self.resource_manager.refresh_reservation(peer_id)
+                self.resource_manager.refresh_reservation(peer_id)
                 status_code = StatusCode.OK
                 status_msg_text = "Reservation refreshed"
             else:
@@ -590,7 +580,7 @@ class CircuitV2Protocol(Service):
 
                 # Accept reservation
                 logger.debug("Accepting new reservation from peer %s", peer_id)
-                ttl = self.resource_manager.reserve(peer_id)
+                self.resource_manager.reserve(peer_id)
                 status_code = StatusCode.OK
                 status_msg_text = "Reservation accepted"
 
@@ -600,7 +590,7 @@ class CircuitV2Protocol(Service):
                 raise ValueError(f"Failed to create reservation for peer {peer_id}")
 
             # Create the protobuf reservation with voucher and signature
-            reservation_obj.to_proto()
+            pb_reservation = reservation_obj.to_proto()
 
             # Get the peer's addresses from the peerstore if available
             addrs: list[bytes] = []
@@ -633,11 +623,7 @@ class CircuitV2Protocol(Service):
                 response = HopMessage(
                     type=HopMessage.STATUS,
                     status=status,
-                    reservation=Reservation(
-                        expire=int(time.time() + ttl),
-                        voucher=b"",  # We don't use vouchers yet
-                        signature=b"",  # We don't use signatures yet
-                    ),
+                    reservation=pb_reservation,
                     limit=Limit(
                         duration=self.limits.duration,
                         data=self.limits.data,
@@ -647,8 +633,9 @@ class CircuitV2Protocol(Service):
 
                 # Log the response message details for debugging
                 logger.debug(
-                    f"Sending reservation response: type={response.type},",
-                    "status={getattr(response.status, 'code', 'unknown')}, ttl={ttl}",
+                    "Sending reservation response: type=%s status=%s",
+                    response.type,
+                    getattr(response.status, "code", "unknown"),
                 )
                 await stream.write(response.SerializeToString())
                 # Add a small wait to ensure the message is fully sent
@@ -774,8 +761,10 @@ class CircuitV2Protocol(Service):
                         status_msg,
                         status_code,
                     )
-                    raise ConnectionError(
-                        f"Destination rejected connection: {status_msg}"
+                    raise RelayConnectionError(
+                        f"Destination rejected connection: {status_msg}",
+                        status_code=status_code,
+                        status_msg=status_msg,
                     )
 
             # Update active relays with destination stream

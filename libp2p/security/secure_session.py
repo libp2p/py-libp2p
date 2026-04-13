@@ -1,5 +1,10 @@
 import io
 
+import multiaddr
+
+from libp2p.connection_types import (
+    ConnectionType,
+)
 from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
@@ -44,6 +49,18 @@ class SecureSession(BaseSession):
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the underlying connection's get_remote_address method."""
         return self.conn.get_remote_address()
+
+    def get_transport_addresses(self) -> list[multiaddr.Multiaddr]:
+        """
+        Get transport addresses by delegating to underlying connection.
+        """
+        return self.conn.get_transport_addresses()
+
+    def get_connection_type(self) -> ConnectionType:
+        """
+        Get connection type by delegating to underlying connection.
+        """
+        return self.conn.get_connection_type()
 
     def _reset_internal_buffer(self) -> None:
         self.buf = io.BytesIO()

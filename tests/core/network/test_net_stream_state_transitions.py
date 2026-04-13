@@ -31,8 +31,8 @@ class MockMuxedStream(IMuxedStream):
     def get_remote_address(self) -> tuple[str, int] | None:
         return ("127.0.0.1", 8080)
 
-    def set_deadline(self, ttl: int) -> bool:
-        return True
+    def set_deadline(self, ttl: int) -> None:
+        pass
 
     async def __aenter__(self) -> "IMuxedStream":
         return self
