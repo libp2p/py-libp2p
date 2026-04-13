@@ -34,7 +34,8 @@ dependencies = [
     "multiaddr==0.0.11",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
-    "protobuf>=4.25.0,<7.0.0",
+    # Match generated *_pb2.py (e.g. circuit_v2 uses runtime_version + 7.34.1 validation).
+    "protobuf>=7.34.1,<8.0.0",
     "pycryptodome>=3.9.2",
     "py-multibase>=2.0.0",
     "py-multihash>=3.0.0",
