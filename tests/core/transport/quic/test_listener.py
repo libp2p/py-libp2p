@@ -65,11 +65,10 @@ class TestQUICListener:
     @pytest.mark.trio
     async def test_listener_invalid_multiaddr(self, listener: QUICListener):
         """Test listener with invalid multiaddr."""
-        async with trio.open_nursery() as nursery:
-            invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+        invalid_addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
 
-            with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
-                await listener.listen(invalid_addr)
+        with pytest.raises(QUICListenError, match="Invalid QUIC multiaddr"):
+            await listener.listen(invalid_addr)
 
     @pytest.mark.trio
     async def test_listener_basic_lifecycle(self, listener: QUICListener):

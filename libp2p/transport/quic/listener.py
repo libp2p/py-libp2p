@@ -1236,8 +1236,7 @@ class QUICListener(IListener):
 
                 self._nursery.start_soon(self._handle_incoming_packets)
                 logger.info(
-                    f"QUIC listener started on {bound_maddr} "
-                    "with connection ID support"
+                    f"QUIC listener started on {bound_maddr} with connection ID support"
                 )
                 return
             except Exception as e:
@@ -1246,9 +1245,11 @@ class QUICListener(IListener):
 
         # Fallback: spawn our own internal nursery as a trio system task
         # so the listener is fully self-contained.
-        self._owned_started = trio.Event()
-        self._owned_stopped = trio.Event()
-        self._owned_start_error: BaseException | None = None
+        started = trio.Event()
+        stopped = trio.Event()
+        self._owned_started = started
+        self._owned_stopped = stopped
+        self._owned_start_error = None
 
         async def _run_server() -> None:
             try:
@@ -1273,9 +1274,9 @@ class QUICListener(IListener):
                     except BaseException as error:
                         self._owned_start_error = error
                     finally:
-                        self._owned_started.set()
+                        started.set()
             finally:
-                self._owned_stopped.set()
+                stopped.set()
                 self._nursery = None
 
         trio.lowlevel.spawn_system_task(_run_server)

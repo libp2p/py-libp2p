@@ -144,9 +144,7 @@ class TCPListener(IListener):
         await self._started.wait()
 
         if self._start_error is not None:
-            error_msg = (
-                f"Failed to start TCP listener for {maddr}: {self._start_error}"
-            )
+            error_msg = f"Failed to start TCP listener for {maddr}: {self._start_error}"
             logger.error(error_msg)
             raise OpenConnectionError(error_msg) from self._start_error
 
