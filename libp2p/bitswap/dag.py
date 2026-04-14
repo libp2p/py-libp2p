@@ -32,6 +32,7 @@ from .cid import (
     verify_cid,
 )
 from .client import BitswapClient
+from .errors import BlockNotFoundError
 from .dag_pb import (
     create_file_node,
     decode_dag_pb,
@@ -417,160 +418,189 @@ class MerkleDag:
 
         """
         root_cid_bytes = cid_to_bytes(root_cid)
-        logger.info(
-            f"Fetching file: {format_cid_for_display(root_cid_bytes, max_len=16)}"
-        )
-        logger.info(
-            "=== Starting file fetch for CID: "
-            f"{format_cid_for_display(root_cid_bytes)} ==="
-        )
+        logger.info(f"Fetching file: {format_cid_for_display(root_cid_bytes)}")
 
-        # Get root block
+        # Step 1: Fetch the root block
         root_data = await self.bitswap.get_block(root_cid_bytes, peer_id, timeout)
-
-        # Verify root block
         if not verify_cid(root_cid_bytes, root_data):
-            raise ValueError(
-                "Root block verification failed: "
-                f"{format_cid_for_display(root_cid_bytes)}"
-            )
+            raise ValueError(f"Root block CID verification failed: {format_cid_for_display(root_cid_bytes)}")
 
-        # Check if it's a directory wrapper (IPFS-standard way for filename)
+        # Step 2: Handle directory wrapper (produced by `ipfs add --wrap-with-directory`)
         filename = None
         actual_file_cid = root_cid_bytes
         actual_file_data = root_data
 
         if is_directory_node(root_data):
-            logger.info("Root is a directory node, extracting file entry...")
-            links, _ = decode_dag_pb(root_data)
-
-            if links:
-                # Get the first (and typically only) file entry
-                first_link = links[0]
-                filename = first_link.name if first_link.name else None
+            logger.info("Root is a directory node — extracting filename and file CID")
+            dir_links, _ = decode_dag_pb(root_data)
+            if dir_links:
+                first_link = dir_links[0]
+                filename = first_link.name or None
                 actual_file_cid = first_link.cid
-
-                logger.info(f"Extracted filename: {filename}")
-                logger.info(
-                    f"Actual file CID: "
-                    f"{format_cid_for_display(actual_file_cid, max_len=16)}"
-                )
-
-                # Fetch the actual file block
-                actual_file_data = await self.bitswap.get_block(
-                    actual_file_cid, peer_id, timeout
-                )
-
+                logger.info(f"Filename from directory: {filename!r}")
+                actual_file_data = await self.bitswap.get_block(actual_file_cid, peer_id, timeout)
                 if not verify_cid(actual_file_cid, actual_file_data):
-                    raise ValueError(
-                        "File block verification failed: "
-                        f"{format_cid_for_display(actual_file_cid)}"
-                    )
+                    raise ValueError(f"File block CID verification failed: {format_cid_for_display(actual_file_cid)}")
 
-        # Now process the actual file data
-        # Check if it's a DAG-PB file node
-        if is_file_node(actual_file_data):
-            logger.debug("Root is a DAG-PB file node, resolving chunks...")
+        # Step 3: Handle raw block (not a DAG-PB node at all)
+        if not is_file_node(actual_file_data):
+            logger.info(f"Root is a raw block: {len(actual_file_data)} bytes")
+            return actual_file_data, filename
 
-            # Decode to get links and metadata
-            links, unixfs_data = decode_dag_pb(actual_file_data)
+        # Step 4: Parse the file node
+        top_links, top_unixfs = decode_dag_pb(actual_file_data)
+        total_size = (top_unixfs.filesize if top_unixfs else 0) or sum(lnk.size for lnk in top_links)
+        logger.info(f"File node: {len(top_links)} top-level links, total size={total_size} bytes")
 
-            if not links:
-                # File with inline data (small file)
-                logger.debug("File has inline data")
-                file_data = (
-                    unixfs_data.data if unixfs_data and unixfs_data.data else b""
-                )
-
-                # Notify progress callback with metadata
-                if progress_callback:
-                    await _call_progress_callback(
-                        progress_callback,
-                        len(file_data),
-                        len(file_data),
-                        f"metadata: size={len(file_data)}, chunks=0",
-                    )
-
-                return file_data, filename
-
-            # File with multiple chunks
-            total_size = unixfs_data.filesize if unixfs_data else 0
-            logger.debug(f"File has {len(links)} chunks, total size: {total_size}")
-            logger.info(
-                f"Fetching multi-chunk file: {len(links)} chunks, {total_size} bytes"
-            )
-            logger.info("=== Chunk CIDs to fetch ===")
-            for i, link in enumerate(links):
-                logger.info(
-                    f"  Chunk {i}: {format_cid_for_display(link.cid)} "
-                    f"({link.size} bytes)"
-                )
-            logger.info("=" * 50)
-
-            # Notify progress callback with file metadata at the start
+        # Step 5: Small file with inline data (no links)
+        if not top_links:
+            file_data = top_unixfs.data if top_unixfs and top_unixfs.data else b""
+            logger.info(f"Inline file data: {len(file_data)} bytes")
             if progress_callback:
-                await _call_progress_callback(
-                    progress_callback,
-                    0,
-                    total_size,
-                    f"metadata: size={total_size}, chunks={len(links)}",
-                )
-
-            file_data = b""
-            bytes_fetched = 0
-
-            # Fetch each chunk
-            for i, link in enumerate(links):
-                if progress_callback:
-                    await _call_progress_callback(
-                        progress_callback,
-                        bytes_fetched,
-                        total_size,
-                        f"fetching chunk {i + 1}/{len(links)}",
-                    )
-
-                logger.info(
-                    f"Fetching chunk {i + 1}/{len(links)}: "
-                    f"CID={format_cid_for_display(link.cid)}"
-                )
-
-                # Fetch chunk
-                chunk_data = await self.bitswap.get_block(link.cid, peer_id, timeout)
-
-                # Verify chunk
-                if not verify_cid(link.cid, chunk_data):
-                    raise ValueError(
-                        f"Chunk verification failed: {format_cid_for_display(link.cid)}"
-                    )
-
-                file_data += chunk_data
-                bytes_fetched += len(chunk_data)
-
-                logger.info(
-                    f"✓ Chunk {i + 1} fetched and verified: "
-                    f"{len(chunk_data)} bytes (total: {bytes_fetched}/{total_size})"
-                )
-                logger.debug(
-                    f"Fetched chunk {i + 1}/{len(links)}: "
-                    f"{format_cid_for_display(link.cid, max_len=16)} "
-                    f"({len(chunk_data)} bytes)"
-                )
-
-            if progress_callback:
-                await _call_progress_callback(
-                    progress_callback, total_size, total_size, "completed"
-                )
-
-            logger.info("=== File fetch completed ===")
-            logger.info(f"Total bytes fetched: {len(file_data)}")
-            logger.info(f"All {len(links)} chunks verified successfully")
-            logger.info("=" * 50)
-            logger.info(f"Fetched file: {len(file_data)} bytes")
+                await _call_progress_callback(progress_callback, len(file_data), len(file_data), "completed")
             return file_data, filename
 
-        # Not a DAG-PB file node - return as raw data
-        logger.debug("Root is a raw block, returning directly")
-        return actual_file_data, filename
+        # Step 6: Collect all leaf CIDs without opening streams for intermediate nodes
+        # Strategy: Recursively batch-fetch all DAG nodes, then traverse locally to collect leaves
+        
+        logger.info(f"[DAG] Recursively batch-fetching DAG tree ({len(top_links)} top links)...")
+        print(f"[FETCH] Recursively batch-fetching DAG tree ({len(top_links)} top links)...", flush=True)
+        
+        # Map to store ALL fetched blocks (both intermediate and leaves)
+        all_blocks_map: dict[bytes, bytes] = {}
+        
+        async def _batch_fetch_tree(cid_list: list[bytes], depth: int) -> None:
+            """Recursively batch-fetch a level of DAG nodes and queue their children."""
+            if not cid_list:
+                return
+            
+            logger.info(f"[DAG] Depth {depth}: batch-fetching {len(cid_list)} blocks...")
+            print(f"[FETCH] Depth {depth}: batch-fetching {len(cid_list)} blocks...", flush=True)
+            
+            # Batch-fetch this level's blocks
+            level_blocks = await self.bitswap.get_blocks_batch(
+                cid_list, peer_id=peer_id, timeout=timeout, batch_size=32
+            )
+            logger.info(f"[DAG] Depth {depth}: ✓ received {len(level_blocks)} blocks")
+            all_blocks_map.update(level_blocks)
+            
+            # Collect child CIDs for recursion
+            child_cids: list[bytes] = []
+            for cid_bytes in cid_list:
+                block_data = level_blocks.get(cid_bytes)
+                if block_data is None:
+                    logger.warning(f"[DAG] Depth {depth}: block {format_cid_for_display(cid_bytes)} missing after fetch")
+                    continue
+                
+                if is_file_node(block_data):
+                    node_links, _ = decode_dag_pb(block_data)
+                    logger.debug(f"[DAG] Depth {depth}: {format_cid_for_display(cid_bytes)} has {len(node_links)} children")
+                    for link in node_links:
+                        child_cids.append(link.cid)
+            
+            # Recursively fetch next level if there are children
+            if child_cids:
+                logger.info(f"[DAG] Depth {depth}: found {len(child_cids)} child CIDs, fetching next level...")
+                await _batch_fetch_tree(child_cids, depth + 1)
+        
+        # Starting from the top-level links
+        await _batch_fetch_tree([top_link.cid for top_link in top_links], depth=1)
+        logger.info(f"[DAG] ✓ Tree fetch complete: {len(all_blocks_map)} total blocks")
+        print(f"[FETCH] ✓ Tree fetch complete: {len(all_blocks_map)} total blocks", flush=True)
+        
+        # Now traverse locally to collect leaf CIDs in order
+        ordered_leaf_cids: list[bytes] = []
+        
+        def _collect_leaves_local(cid_bytes: bytes, depth: int = 1) -> None:
+            """Traverse locally-fetched blocks to collect leaf CIDs."""
+            block_data = all_blocks_map.get(cid_bytes)
+            if block_data is None:
+                logger.warning(f"[DAG] Depth {depth}: block {format_cid_for_display(cid_bytes)} not in map")
+                return
+                
+            if not is_file_node(block_data):
+                # Raw block - it's a leaf
+                logger.debug(f"[DAG] Depth {depth}: raw block (leaf)")
+                ordered_leaf_cids.append(cid_bytes)
+                return
+            
+            node_links, _ = decode_dag_pb(block_data)
+            logger.debug(f"[DAG] Depth {depth}: {len(node_links)} links")
+            
+            if not node_links:
+                # Leaf node (no children, data is inline in UnixFS)
+                logger.debug(f"[DAG] Depth {depth}: file node with inline data (leaf)")
+                ordered_leaf_cids.append(cid_bytes)
+                return
+            
+            # Intermediate node - recursively process children
+            for j, child_link in enumerate(node_links):
+                logger.debug(f"[DAG] Depth {depth}: processing child {j+1}/{len(node_links)}")
+                _collect_leaves_local(child_link.cid, depth + 1)
+        
+        # Traverse each top-level block
+        for i, top_link in enumerate(top_links):
+            logger.info(f"[DAG] Traversing top-level {i+1}/{len(top_links)}...")
+            _collect_leaves_local(top_link.cid, depth=1)
+        
+        logger.info(f"[DAG] ✓ Collected {len(ordered_leaf_cids)} leaf blocks")
+
+        # Step 7: Batch-fetch all leaf blocks (single wantlist per batch → avoids GO_AWAY)
+        if progress_callback:
+            await _call_progress_callback(
+                progress_callback, 0, total_size,
+                f"fetching {len(ordered_leaf_cids)} leaf blocks in batches"
+            )
+
+        logger.info(f"[DAG] Starting batch fetch of {len(ordered_leaf_cids)} leaves with batch_size=32, timeout={timeout}s")
+        print(f"[FETCH] Batch fetching {len(ordered_leaf_cids)} leaves (batch_size=32, timeout={timeout}s)", flush=True)
+        block_map = await self.bitswap.get_blocks_batch(
+            ordered_leaf_cids, peer_id=peer_id, timeout=timeout, batch_size=32
+        )
+        logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
+        print(f"[FETCH] ✓ Batch fetch complete: {len(block_map)} blocks", flush=True)
+
+        # Step 8: Reassemble data in order, extracting UnixFS inline data from leaf nodes
+        file_data = b""
+        bytes_fetched = 0
+        missing_blocks = []
+        for idx, leaf_cid in enumerate(ordered_leaf_cids):
+            leaf_raw = block_map.get(bytes(leaf_cid))
+            if leaf_raw is None:
+                logger.error(f"[DAG] Leaf block {idx+1}/{len(ordered_leaf_cids)} MISSING: {format_cid_for_display(leaf_cid)}")
+                print(f"[FETCH] ✗ Leaf {idx+1}/{len(ordered_leaf_cids)} MISSING", flush=True)
+                missing_blocks.append(leaf_cid)
+                continue
+
+            # Extract data: leaf blocks are UnixFS file nodes with inline data
+            if is_file_node(leaf_raw):
+                _, leaf_unixfs = decode_dag_pb(leaf_raw)
+                chunk = leaf_unixfs.data if leaf_unixfs and leaf_unixfs.data else b""
+                logger.debug(f"[DAG] Leaf {idx+1}: extracted {len(chunk)} bytes from file node")
+            else:
+                chunk = leaf_raw
+                logger.debug(f"[DAG] Leaf {idx+1}: raw block {len(chunk)} bytes")
+
+            file_data += chunk
+            bytes_fetched += len(chunk)
+
+            if (idx + 1) % 10 == 0 or idx == len(ordered_leaf_cids) - 1:
+                logger.info(f"[DAG] Reassembled {idx+1}/{len(ordered_leaf_cids)} leaves: {bytes_fetched}/{total_size} bytes")
+                print(f"[FETCH] Reassembled {idx+1}/{len(ordered_leaf_cids)} leaves: {bytes_fetched}/{total_size} bytes", flush=True)
+
+            if progress_callback:
+                await _call_progress_callback(progress_callback, bytes_fetched, total_size, "downloading")
+
+        if missing_blocks:
+            logger.error(f"[DAG] ✗ {len(missing_blocks)} blocks missing after batch fetch!")
+            raise BlockNotFoundError(f"{len(missing_blocks)} leaf blocks missing: {[format_cid_for_display(cid) for cid in missing_blocks[:5]]}...")
+
+        if progress_callback:
+            await _call_progress_callback(progress_callback, total_size, total_size, "completed")
+
+        logger.info(f"[DAG] ✓ File fetch complete: {len(file_data)} bytes, filename={filename!r}")
+        print(f"[FETCH] ✓ DOWNLOAD COMPLETE: {len(file_data)} bytes", flush=True)
+        return file_data, filename
 
     async def get_file_info(
         self, root_cid: CIDInput, peer_id: PeerID | None = None, timeout: float = 30.0

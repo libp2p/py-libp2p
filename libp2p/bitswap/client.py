@@ -153,6 +153,85 @@ class BitswapClient:
         # Notify peers who wanted this block
         await self._notify_peers_about_block(cid_obj, data)
 
+    async def get_blocks_batch(
+        self,
+        cids: list[CIDInput],
+        peer_id: PeerID | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        batch_size: int = 32,
+    ) -> dict[bytes, bytes]:
+        """
+        Fetch multiple blocks in batches using a single wantlist per batch.
+
+        Sends all CIDs in one wantlist message, waits for all responses on the
+        same stream. This avoids opening hundreds of individual streams which
+        causes Kubo to send GO_AWAY.
+
+        Args:
+            cids: List of CIDs to fetch
+            peer_id: Optional specific peer to request from
+            timeout: Timeout per batch in seconds
+            batch_size: How many CIDs to request per wantlist message
+
+        Returns:
+            Dict mapping cid_bytes -> block_data for all successfully fetched blocks
+        """
+        results: dict[bytes, bytes] = {}
+        cid_objs = [parse_cid(c) for c in cids]
+
+        # Check local store first
+        remaining: list[CIDObject] = []
+        for cid_obj in cid_objs:
+            data = await self.block_store.get_block(cid_obj)
+            if data is not None:
+                results[cid_obj.buffer] = data
+            else:
+                remaining.append(cid_obj)
+
+        if not remaining:
+            return results
+
+        # Process in batches to avoid overwhelming the peer
+        for batch_start in range(0, len(remaining), batch_size):
+            batch = remaining[batch_start : batch_start + batch_size]
+
+            # Register pending events for all CIDs in batch
+            for cid_obj in batch:
+                if cid_obj not in self._pending_requests:
+                    self._pending_requests[cid_obj] = trio.Event()
+                await self.want_block(cid_obj, send_dont_have=True)
+
+            # Send all CIDs in a single wantlist to the peer
+            if peer_id:
+                await self._send_wantlist_to_peer(peer_id, batch)
+            else:
+                await self._broadcast_wantlist(batch)
+
+            # Wait for all blocks in this batch
+            try:
+                with trio.fail_after(timeout):
+                    for cid_obj in batch:
+                        if cid_obj in self._pending_requests:
+                            await self._pending_requests[cid_obj].wait()
+            except trio.TooSlowError:
+                logger.warning(f"Batch timeout: {len(batch)} blocks, got partial results")
+
+            # Collect results and clean up
+            for cid_obj in batch:
+                data = await self.block_store.get_block(cid_obj)
+                if data is not None:
+                    results[cid_obj.buffer] = data
+                else:
+                    logger.warning(f"Block not received: {format_cid_for_display(cid_obj)}")
+
+                # Cleanup
+                if cid_obj in self._pending_requests:
+                    del self._pending_requests[cid_obj]
+                if cid_obj in self._wantlist:
+                    del self._wantlist[cid_obj]
+
+        return results
+
     async def get_block(
         self,
         cid: CIDInput,
@@ -286,10 +365,8 @@ class BitswapClient:
 
         # Send wantlist to peers
         if peer_id:
-            logger.info(f"  → Sending wantlist to peer {peer_id}")
             await self._send_wantlist_to_peer(peer_id, [cid])
         else:
-            logger.info("  → Broadcasting wantlist")
             await self._broadcast_wantlist([cid])
 
         # Wait for block to arrive

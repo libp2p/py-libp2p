@@ -76,9 +76,8 @@ async def run_provider(file_path: str, port: int = 0):
     # Create host
     host = new_host()
 
-    async with host.run(listen_addrs=listen_addrs):
-        peer_id = host.get_id()
-        logger.info(f"Peer ID: {peer_id}")
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
+        logger.info(f"Peer ID: {host.get_id()}")
 
         # Get actual listening addresses
         addrs = host.get_addrs()
@@ -91,7 +90,8 @@ async def run_provider(file_path: str, port: int = 0):
         await bitswap.start()
         logger.info("✓ Bitswap started")
 
-        # Create Merkle DAG
+        # Set nursery so bitswap can spawn background tasks
+        bitswap.set_nursery(nursery)
         dag = MerkleDag(bitswap)
 
         logger.info("")
@@ -198,13 +198,14 @@ async def run_client(
     # Create host
     host = new_host()
 
-    async with host.run(listen_addrs=listen_addrs):
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         logger.info(f"Client Peer ID: {host.get_id()}")
 
         # Start Bitswap
         bitswap = BitswapClient(host)
         await bitswap.start()
         logger.info("✓ Bitswap started")
+        bitswap.set_nursery(nursery)
 
         try:
             # Connect to provider
@@ -214,7 +215,6 @@ async def run_client(
             await host.connect(peer_info)
             logger.info("✓ Connected")
 
-            # Create Merkle DAG
             dag = MerkleDag(bitswap)
 
             logger.info("")
@@ -232,7 +232,7 @@ async def run_client(
             # Fetch file with automatic filename extraction
             try:
                 file_data, filename = await dag.fetch_file(
-                    root_cid, progress_callback=progress_callback
+                    root_cid, progress_callback=progress_callback, timeout=120.0
                 )
 
                 # Show fetch statistics
@@ -284,18 +284,18 @@ async def run_client(
             logger.info("=" * 70)
             logger.info(f"Size: {format_size(len(file_data))}")
 
-            # Determine output filename
+            # Determine output filename (priority: metadata > generated)
             if filename:
-                output_filename = filename
-                logger.info(f"Filename: {filename} (from metadata)")
+                final_filename = filename
+                logger.info(f"Filename: {final_filename} (from metadata)")
             else:
-                output_filename = (
+                final_filename = (
                     f"file_{format_cid_for_display(root_cid, max_len=16)}.bin"
                 )
-                logger.info(f"Filename: {output_filename} (no metadata)")
+                logger.info(f"Filename: {final_filename} (generated from CID)")
 
             # Handle filename conflicts
-            output_file = output_path / output_filename
+            output_file = output_path / final_filename
             if output_file.exists():
                 stem = output_file.stem
                 suffix = output_file.suffix
@@ -315,7 +315,9 @@ async def run_client(
         except Exception as e:
             logger.error(f"Failed: {e}")
             logger.exception("Full traceback:")
+            raise
         finally:
+            pass  # Nursery will cleanup background tasks
             await bitswap.stop()
 
 

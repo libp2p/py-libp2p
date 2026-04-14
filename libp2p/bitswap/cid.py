@@ -209,7 +209,16 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
         return value
 
     if isinstance(value, bytes):
-        return make_cid(value)
+        try:
+            return make_cid(value)
+        except ValueError:
+            # make_cid(bytes) fails for raw CIDv0 buffers (multihash bytes).
+            # CIDv0 is simply a bare multihash, so try constructing directly.
+            try:
+                return CIDv0(value)
+            except Exception:
+                pass
+            raise
 
     if isinstance(value, str):
         cid_str = value.strip()
