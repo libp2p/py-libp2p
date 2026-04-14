@@ -1421,16 +1421,18 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening on the specified multiaddress.
+
+        The listener manages its own background tasks internally and keeps
+        them alive until :meth:`close` is called.  Callers do not need to
+        supply a nursery.
 
         Parameters
         ----------
         maddr : Multiaddr
             The multiaddress on which to listen.
-        nursery : trio.Nursery
-            The nursery for spawning listening tasks.
 
         Raises
         ------
