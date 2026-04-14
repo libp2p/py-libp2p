@@ -70,7 +70,7 @@ class MockMuxedStream(IMuxedStream):
 def mock_stream():
     """Create a mock stream for testing."""
     muxed_stream = MockMuxedStream()
-    return NetStream(muxed_stream, None)
+    return NetStream(muxed_stream, None, None)
 
 
 @pytest.mark.trio
@@ -190,7 +190,7 @@ async def test_is_operational_with_open_state(mock_stream):
 async def test_error_state_lifecycle():
     """Test complete ERROR state lifecycle."""
     muxed_stream = MockMuxedStream()
-    stream = NetStream(muxed_stream, None)
+    stream = NetStream(muxed_stream, None, None)
 
     # Start in INIT state
     assert await stream.state == StreamState.INIT

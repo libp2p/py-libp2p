@@ -29,6 +29,7 @@ Subpackages
    libp2p.tools
    libp2p.transport
    libp2p.utils
+   libp2p.metrics
 
 Submodules
 ----------
