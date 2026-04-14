@@ -1,18 +1,14 @@
 import pytest
+from prometheus_client import REGISTRY
 import trio
 
-from libp2p.kad_dht.kad_dht import KadDhtEvent
-from libp2p.metrics.metrics import find_available_port
-from libp2p.metrics.ping import PingMetrics
-from libp2p.metrics.gossipsub import GossipsubMetrics
 from libp2p.host.ping import PingEvent
+from libp2p.kad_dht.kad_dht import KadDhtEvent
+from libp2p.metrics.metrics import Metrics, find_available_port
+from libp2p.metrics.swarm import SwarmEvent
 from libp2p.peer.id import ID
 from libp2p.pubsub.pubsub import GossipsubEvent
-from libp2p.metrics.swarm import SwarmMetrics, SwarmEvent
-from libp2p.metrics.kad_dht import KadDhtMetrics
-from libp2p.metrics.metrics import Metrics
 
-from prometheus_client import REGISTRY
 
 def clear_registry():
     collectors = list(REGISTRY._collector_to_names.keys())
@@ -22,11 +18,11 @@ def clear_registry():
         except KeyError:
             pass
 
+
 def test_find_available_port_returns_free_port() -> None:
     port = find_available_port(8000)
     assert isinstance(port, int)
     assert port >= 8000
-    
 
 
 def test_ping_metrics_records_rtt() -> None:
@@ -44,10 +40,10 @@ def test_ping_metrics_records_rtt() -> None:
         rtts=None,
         failure_error=None,
     )
-    
+
     # Just ensuring no error throw for valid Ping events
-    metrics.ping.record(event)    
-    
+    metrics.ping.record(event)
+
     with pytest.raises(ValueError):
         metrics.ping.record(invalid_event)
 
@@ -60,7 +56,7 @@ def test_gossipsub_metrics_records_events() -> None:
     event.peer_id = "12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"
     event.message_size = 512
     event.subopts = True
-    
+
     # Just ensuring no error is thrown
     metrics.gossipsub.record(event)
 
@@ -69,7 +65,7 @@ def test_kad_dht_metrics_records_all_events() -> None:
     clear_registry()
     metrics = Metrics()
 
-    event =  KadDhtEvent()
+    event = KadDhtEvent()
     event.peer_id = "12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"
     event.inbound = True
     event.find_node = True
@@ -89,7 +85,7 @@ def test_swarm_metrics_records_all_events() -> None:
 
     # Just ensuring no exception is thrown
     metrics.swarm.record(event)
-    
+
 
 @pytest.mark.trio
 async def test_metrics_pipeline_dispatches_ping(monkeypatch) -> None:
@@ -119,7 +115,9 @@ async def test_metrics_pipeline_dispatches_ping(monkeypatch) -> None:
         nursery.start_soon(run)
 
         event = PingEvent(
-            peer_id=ID.from_string("12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"),
+            peer_id=ID.from_string(
+                "12D3KooWRcqGSY7VJKZihipeo3NMikpWb185DxA5ZQreJ364ihEx"
+            ),
             rtts=[100],
             failure_error=None,
         )
