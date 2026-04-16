@@ -316,5 +316,8 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "./tests/core/transport/webrtc",
+    "./libp2p/transport/webrtc/_asyncio_bridge.py",
+    "./libp2p/transport/webrtc/certificate.py",
 ]
 search_path = ["stubs"]
