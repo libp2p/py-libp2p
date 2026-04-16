@@ -18,9 +18,9 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md#noise-handsha
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 import logging
 import struct
-from typing import Awaitable, Callable
 
 from multiaddr import Multiaddr
 

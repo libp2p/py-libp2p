@@ -14,8 +14,9 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
 import trio

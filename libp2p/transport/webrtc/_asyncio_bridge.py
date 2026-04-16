@@ -28,10 +28,11 @@ tasks) until the asyncio future completes.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 import concurrent.futures
 import logging
 import threading
-from typing import Any, Coroutine, TypeVar
+from typing import Any, TypeVar
 
 import trio
 

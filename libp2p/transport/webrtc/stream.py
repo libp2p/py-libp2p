@@ -11,9 +11,10 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 import enum
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable
+from typing import TYPE_CHECKING
 
 import trio
 

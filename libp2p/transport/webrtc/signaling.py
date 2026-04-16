@@ -26,8 +26,8 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 import logging
-from typing import AsyncIterator
 
 import trio
 

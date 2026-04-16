@@ -15,9 +15,10 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 import threading
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
 import trio
