@@ -287,6 +287,7 @@ def new_swarm(
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     enable_quic: bool = False,
+    enable_webrtc: bool = False,
     enable_autotls: bool = False,
     retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
@@ -377,6 +378,13 @@ def new_swarm(
             config=quic_transport_opt,
             enable_autotls=enable_autotls,
         )
+
+    # If enable_webrtc is True, force WebRTC Direct transport
+    if enable_webrtc:
+        from libp2p.transport.webrtc.transport import WebRTCDirectTransport
+
+        logger.debug("new_swarm: Creating WebRTC Direct transport")
+        transport = WebRTCDirectTransport(private_key=key_pair.private_key)
 
     logger.debug(f"new_swarm: Final transport type: {type(transport)}")
 
@@ -471,6 +479,7 @@ def new_host(
     bootstrap: list[str] | None = None,
     negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
     enable_quic: bool = False,
+    enable_webrtc: bool = False,
     quic_transport_opt: QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
@@ -534,6 +543,7 @@ def new_host(
 
     swarm = new_swarm(
         enable_quic=enable_quic,
+        enable_webrtc=enable_webrtc,
         key_pair=key_pair,
         muxer_opt=muxer_opt,
         sec_opt=sec_opt,
