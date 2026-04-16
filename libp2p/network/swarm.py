@@ -50,7 +50,7 @@ from libp2p.peer.peerstore import (
 )
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     Service,
 )
 from libp2p.transport.exceptions import (
@@ -74,6 +74,7 @@ from .connection.raw_connection import (
 
 # SwarmConn is imported conditionally above
 from .exceptions import (
+    SwarmDialAllFailedError,
     SwarmException,
 )
 
@@ -148,6 +149,7 @@ class Swarm(Service, INetworkService):
         # Load balancing state
         self._round_robin_index = {}
         self._resource_manager = None
+        self._stream_semaphore: trio.Semaphore | None = None
 
         # Initialize connection management components
         self._init_connection_management()
@@ -187,9 +189,17 @@ class Swarm(Service, INetworkService):
         # Initialize tag store for peer tagging/protection (go-libp2p TagPeer, Protect)
         self.tag_store = TagStore()
 
-    def set_resource_manager(self, resource_manager: ResourceManager | None) -> None:
+    def set_resource_manager(
+        self,
+        resource_manager: ResourceManager | None,
+        enable_stream_semaphore: bool = True,
+    ) -> None:
         """Attach a ResourceManager to wire connection/stream scopes."""
         self._resource_manager = resource_manager
+        if resource_manager is not None and enable_stream_semaphore:
+            self._stream_semaphore = trio.Semaphore(resource_manager.limits.max_streams)
+        else:
+            self._stream_semaphore = None
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
@@ -527,9 +537,11 @@ class Swarm(Service, INetworkService):
 
         if not connections:
             # Tried all addresses, raising exception.
-            raise SwarmException(
+            raise SwarmDialAllFailedError(
                 f"unable to connect to {peer_id}, no addresses established a "
-                "successful connection (with exceptions)"
+                "successful connection (with exceptions)",
+                peer_id=peer_id,
+                num_addrs_tried=len(exceptions),
             ) from MultiError(exceptions)
 
         return connections
@@ -827,72 +839,115 @@ class Swarm(Service, INetworkService):
         """
         Enhanced: Create a new stream with load balancing across multiple connections.
 
+        When a stream semaphore is configured (via ``set_resource_manager``), this
+        method awaits an available slot instead of raising immediately when the
+        stream limit is reached.
+
         :param peer_id: peer_id of destination
         :raises SwarmException: raised when an error occurs
         :return: net stream instance
         """
         logger.debug("attempting to open a stream to peer %s", peer_id)
 
-        # Check resource manager for stream limits
-        if self._resource_manager is not None:
-            if not self._resource_manager.acquire_stream(
-                str(peer_id), Direction.OUTBOUND
-            ):
-                logger.warning("Stream limit exceeded for peer %s", peer_id)
-                raise SwarmException("Stream limit exceeded")
+        # Await semaphore slot (queues if at capacity)
+        semaphore_acquired = False
+        if self._stream_semaphore is not None:
+            await self._stream_semaphore.acquire()
+            semaphore_acquired = True
 
-        # Get existing connections or dial new ones
-        connections = self.get_connections(peer_id)
-        if not connections:
-            connections = await self.dial_peer(peer_id)
+        rm_acquired = False
+        try:
+            # Hard-cap safety check via ResourceManager
+            if self._resource_manager is not None:
+                if not self._resource_manager.acquire_stream(
+                    str(peer_id), Direction.OUTBOUND
+                ):
+                    logger.warning("Stream limit exceeded for peer %s", peer_id)
+                    raise SwarmException("Stream limit exceeded")
+                rm_acquired = True
 
-        # Filter out closed/invalid connections
-        connections = self._filter_valid_connections(connections)
-
-        if not connections:
-            raise SwarmException(f"No valid connections available for peer {peer_id}")
-
-        # Ensure connections are ready (wait briefly if needed)
-        ready_connections = await self._ensure_connections_ready(connections, peer_id)
-
-        if not ready_connections:
-            raise SwarmException(f"No ready connections available for peer {peer_id}")
-
-        # Load balancing strategy at interface level
-        connection = self._select_connection(ready_connections, peer_id)
-
-        # Final validation before using connection
-        if connection is None:
-            raise SwarmException(f"Failed to select a connection for peer {peer_id}")
-
-        if connection.is_closed:
-            # Connection was closed between selection and use, try again
-            logger.debug(f"Selected connection for {peer_id} was closed, retrying")
-            connections = await self._ensure_connections_ready(
-                self._filter_valid_connections(self.get_connections(peer_id)), peer_id
-            )
+            # Get existing connections or dial new ones
+            connections = self.get_connections(peer_id)
             if not connections:
+                connections = await self.dial_peer(peer_id)
+
+            # Filter out closed/invalid connections
+            connections = self._filter_valid_connections(connections)
+
+            if not connections:
+                raise SwarmException(
+                    f"No valid connections available for peer {peer_id}"
+                )
+
+            # Ensure connections are ready (wait briefly if needed)
+            ready_connections = await self._ensure_connections_ready(
+                connections, peer_id
+            )
+
+            if not ready_connections:
                 raise SwarmException(
                     f"No ready connections available for peer {peer_id}"
                 )
-            connection = self._select_connection(connections, peer_id)
-            if connection is None or connection.is_closed:
+
+            # Load balancing strategy at interface level
+            connection = self._select_connection(ready_connections, peer_id)
+
+            # Final validation before using connection
+            if connection is None:
                 raise SwarmException(
-                    f"Failed to get a valid connection for peer {peer_id}"
+                    f"Failed to select a connection for peer {peer_id}"
                 )
 
+            if connection.is_closed:
+                # Connection was closed between selection and use, try again
+                logger.debug(f"Selected connection for {peer_id} was closed, retrying")
+                connections = await self._ensure_connections_ready(
+                    self._filter_valid_connections(self.get_connections(peer_id)),
+                    peer_id,
+                )
+                if not connections:
+                    raise SwarmException(
+                        f"No ready connections available for peer {peer_id}"
+                    )
+                connection = self._select_connection(connections, peer_id)
+                if connection is None or connection.is_closed:
+                    raise SwarmException(
+                        f"Failed to get a valid connection for peer {peer_id}"
+                    )
+
         if getattr(self.transport, 'provides_muxing', False) and connection is not None:
+            net_stream = await self._open_stream_on_connection(
+                connection, connections, peer_id
+            )
+            # Tag stream with direction so notify_closed_stream can release it
+            net_stream._direction = Direction.OUTBOUND  # type: ignore[attr-defined]
+            # RM resource now owned by the stream; cleared via notify_closed_stream
+            rm_acquired = False
+            return net_stream
+
+        except BaseException:
+            # Release RM resource if we acquired but never handed off to a stream
+            if rm_acquired and self._resource_manager is not None:
+                self._resource_manager.release_stream(str(peer_id), Direction.OUTBOUND)
+            # Release semaphore on any failure so waiters are not starved
+            if semaphore_acquired and self._stream_semaphore is not None:
+                self._stream_semaphore.release()
+            raise
+
+    async def _open_stream_on_connection(
+        self,
+        connection: INetConn,
+        connections: list[INetConn],
+        peer_id: ID,
+    ) -> INetStream:
+        """Try to open a stream on *connection*, falling back to alternatives."""
+        if isinstance(self.transport, QUICTransport) and connection is not None:
             conn = cast("SwarmConn", connection)
             try:
                 stream = await conn.new_stream()
                 logger.debug("successfully opened a stream to peer %s", peer_id)
                 return stream
             except Exception:
-                # Release stream resource on failure
-                if self._resource_manager is not None:
-                    self._resource_manager.release_stream(
-                        str(peer_id), Direction.OUTBOUND
-                    )
                 raise
 
         try:
@@ -901,21 +956,11 @@ class Swarm(Service, INetworkService):
             return net_stream
         except Exception as e:
             logger.debug(f"Failed to create stream on connection: {e}")
-            # Release stream resource on failure
-            if self._resource_manager is not None:
-                self._resource_manager.release_stream(str(peer_id), Direction.OUTBOUND)
 
             # Try other connections if available
             for other_conn in connections:
                 if other_conn != connection:
                     try:
-                        # Re-acquire stream resource for alternative connection
-                        if self._resource_manager is not None:
-                            if not self._resource_manager.acquire_stream(
-                                str(peer_id), Direction.OUTBOUND
-                            ):
-                                continue
-
                         net_stream = await other_conn.new_stream()
                         logger.debug(
                             f"Successfully opened a stream to peer {peer_id} "
@@ -923,11 +968,6 @@ class Swarm(Service, INetworkService):
                         )
                         return net_stream
                     except Exception:
-                        # Release stream resource on failure
-                        if self._resource_manager is not None:
-                            self._resource_manager.release_stream(
-                                str(peer_id), Direction.OUTBOUND
-                            )
                         continue
 
             # All connections failed, raise exception
@@ -1515,6 +1555,21 @@ class Swarm(Service, INetworkService):
         ):
             if not muxed_conn.is_established:  # type: ignore[attr-defined]
                 await muxed_conn._connected_event.wait()  # type: ignore[attr-defined]
+        logger.debug(
+            f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
+        )
+        # Verify connection is fully established before proceeding.
+        # For QUIC connections, wait for the connected event.
+        # For other muxers (like Yamux/Mplex), check the is_established property.
+        # For QUIC connections, also verify connection is established
+        if isinstance(muxed_conn, QUICConnection):
+            if not muxed_conn.is_established:
+                await muxed_conn._connected_event.wait()
+        elif not muxed_conn.is_established:
+            logger.warning(
+                f"Swarm::add_conn | muxer event_started set but "
+                f"is_established=False for peer {muxed_conn.peer_id}"
+            )
         logger.debug("Swarm::add_conn | starting swarm connection")
         self.manager.run_task(swarm_conn.start)
         await swarm_conn.event_started.wait()
@@ -1673,6 +1728,27 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.listen, self, multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
+        # Release RM + semaphore resources exactly once per stream
+        if not getattr(stream, "_resource_released", False):
+            stream._resource_released = True  # type: ignore[attr-defined]
+            direction = getattr(stream, "_direction", Direction.UNKNOWN)
+            if direction != Direction.UNKNOWN:
+                if self._resource_manager is not None:
+                    try:
+                        peer_id_str = str(stream.muxed_conn.peer_id)
+                        self._resource_manager.release_stream(peer_id_str, direction)
+                    except Exception:
+                        logger.debug(
+                            "failed to release RM stream resource", exc_info=True
+                        )
+                if self._stream_semaphore is not None:
+                    try:
+                        self._stream_semaphore.release()
+                    except Exception:
+                        logger.debug(
+                            "failed to release stream semaphore", exc_info=True
+                        )
+
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
                 nursery.start_soon(notifee.closed_stream, self, stream)

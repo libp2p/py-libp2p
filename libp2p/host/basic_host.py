@@ -18,6 +18,7 @@ import weakref
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
+from multiaddr.exceptions import ProtocolLookupError
 import trio
 
 import libp2p
@@ -90,7 +91,7 @@ from libp2p.security.tls.autotls.acme import (
     compute_b36_peer_id,
 )
 from libp2p.security.tls.autotls.broker import BrokerClient
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 import libp2p.utils.paths
@@ -188,6 +189,11 @@ class BasicHost(IHost):
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
         resolver: ConnectionResolver | None = None,
+        bootstrap_allow_ipv6: bool = False,
+        bootstrap_dns_timeout: float = 10.0,
+        bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+        *,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -204,6 +210,12 @@ class BasicHost(IHost):
             When set, :meth:`connect` can use the resolver to build the
             connection stack dynamically instead of the fixed
             ``TransportUpgrader`` pipeline.
+        :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
+        :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
+        :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: Optional addresses to advertise instead of
+            listen addresses.  ``None`` (default) uses listen addresses;
+            an empty list advertises no addresses.
         :type resolver: :class:`libp2p.network.resolver.ConnectionResolver`
             or None
         """
@@ -243,8 +255,19 @@ class BasicHost(IHost):
         # we can avoid hasattr checks elsewhere.
         self.bootstrap = None
         if bootstrap:
-            self.bootstrap = BootstrapDiscovery(network, bootstrap)
+            self.bootstrap = BootstrapDiscovery(
+                network,
+                bootstrap,
+                allow_ipv6=bootstrap_allow_ipv6,
+                dns_resolution_timeout=bootstrap_dns_timeout,
+                dns_max_retries=bootstrap_dns_max_retries,
+            )
         self.psk = psk
+
+        # Address announcement configuration
+        self._announce_addrs = (
+            list(announce_addrs) if announce_addrs is not None else None
+        )
 
         # Cache a signed-record if the local-node in the PeerStore
         envelope = create_signed_peer_record(
@@ -347,13 +370,34 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Return all the multiaddr addresses this host is listening to.
+        Return the multiaddr addresses this host advertises to peers.
+
+        If ``announce_addrs`` was provided, those replace listen addresses
+        entirely.  Otherwise listen addresses are used.
 
         Note: This method appends the /p2p/{peer_id} suffix to the addresses.
         Use get_transport_addrs() for raw transport addresses.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        return [addr.encapsulate(p2p_part) for addr in self.get_transport_addrs()]
+
+        if self._announce_addrs is not None:
+            addrs = list(self._announce_addrs)
+        else:
+            addrs = self.get_transport_addrs()
+
+        result = []
+        for addr in addrs:
+            # Strip any existing /p2p/ component, then always append our own.
+            # This avoids identity confusion when announce addrs contain a
+            # mismatched peer ID (mirrors js-libp2p behaviour).
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except ProtocolLookupError:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+            result.append(addr.encapsulate(p2p_part))
+        return result
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -386,7 +430,7 @@ class BasicHost(IHost):
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
@@ -401,7 +445,7 @@ class BasicHost(IHost):
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
@@ -419,6 +463,14 @@ class BasicHost(IHost):
         :param stream_handler: a stream handler function
         """
         self.multiselect.add_handler(protocol_id, stream_handler)
+
+    def remove_stream_handler(self, protocol_id: TProtocol) -> None:
+        """
+        Remove the stream handler for the given `protocol_id`.
+
+        :param protocol_id: protocol id to remove
+        """
+        self.multiselect.remove_handler(protocol_id)
 
     def _preferred_protocol(
         self, peer_id: ID, protocol_ids: Sequence[TProtocol]

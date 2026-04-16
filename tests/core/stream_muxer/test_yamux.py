@@ -182,6 +182,18 @@ async def test_yamux_accept_stream(yamux_pair):
 
 
 @pytest.mark.trio
+async def test_yamux_stream_set_deadline_raises_not_implemented(yamux_pair):
+    """Yamux streams do not support set_deadline()."""
+    client_yamux, _server_yamux = yamux_pair
+    stream = await client_yamux.open_stream()
+
+    with pytest.raises(
+        NotImplementedError, match="does not support setting read deadlines"
+    ):
+        stream.set_deadline(5)
+
+
+@pytest.mark.trio
 async def test_yamux_data_transfer(yamux_pair):
     logging.debug("Starting test_yamux_data_transfer")
     client_yamux, server_yamux = yamux_pair

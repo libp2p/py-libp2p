@@ -88,7 +88,7 @@ class MerkleDag:
         ...
         ...         # Add a large file (auto-chunked)
         ...         root_cid = await dag.add_file('movie.mp4')
-        ...         print(f"Share: {root_cid.hex()}")
+        ...         print(f"Share: {cid_to_text(root_cid)}")
         ...
         ...         # Fetch file (auto-resolves all chunks)
         ...         data = await dag.fetch_file(root_cid)
@@ -141,7 +141,7 @@ class MerkleDag:
             >>> async def progress(current, total, status):
             ...     print(f"{status}: {current}/{total}")
             >>> root_cid = await dag.add_file('movie.mp4', progress_callback=progress)
-            >>> print(f"Share this: {root_cid.hex()}")
+            >>> print(f"Share this: {cid_to_text(root_cid)}")
 
         """
         # Get file size
