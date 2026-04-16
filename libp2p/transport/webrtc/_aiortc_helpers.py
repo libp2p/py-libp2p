@@ -56,7 +56,7 @@ async def create_peer_connection(
     :param ice_servers: Optional STUN/TURN server URLs.
     :returns: A new peer connection.
     """
-    config = RTCConfiguration(certificates=[rtc_cert])
+    config = RTCConfiguration(certificates=[rtc_cert])  # type: ignore[call-arg]
     return RTCPeerConnection(configuration=config)
 
 
@@ -199,12 +199,12 @@ def _bind_channel_events(
 ) -> None:
     """Bind message/close events on a single data channel."""
 
-    @channel.on("message")
+    @channel.on("message")  # type: ignore[misc,untyped-decorator]
     def _on_message(message: str | bytes) -> None:
         data = message if isinstance(message, bytes) else message.encode()
         conn.on_channel_message(channel_id, data)
 
-    @channel.on("close")
+    @channel.on("close")  # type: ignore[misc,untyped-decorator]
     def _on_close() -> None:
         conn.on_channel_closed(channel_id)
 
@@ -225,7 +225,7 @@ def make_noise_channel_callbacks(
     """
     recv_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    @channel.on("message")
+    @channel.on("message")  # type: ignore[misc,untyped-decorator]
     def _on_noise_msg(message: str | bytes) -> None:
         data = message if isinstance(message, bytes) else message.encode()
         recv_queue.put_nowait(data)

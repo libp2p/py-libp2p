@@ -138,9 +138,12 @@ class WebRTCDirectTransport(ITransport):
             # 1. Create RTCPeerConnection + Noise channel
             pc = await bridge.run_coro(create_peer_connection(rtc_cert))
             noise_ch = await bridge.run_coro(create_noise_channel(pc))
-            noise_send, noise_recv, _ = await bridge.run_coro(
-                _async_noop(make_noise_channel_callbacks(noise_ch))
-            )
+
+            # make_noise_channel_callbacks is sync; wrap inline.
+            async def _setup_noise() -> tuple:  # type: ignore[type-arg]
+                return make_noise_channel_callbacks(noise_ch)
+
+            noise_send, noise_recv, _ = await bridge.run_coro(_setup_noise())
 
             # 2. Create offer, set local description
             offer = await bridge.run_coro(pc.createOffer())

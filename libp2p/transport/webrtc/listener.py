@@ -71,7 +71,7 @@ class WebRTCDirectListener(IListener):
         self._signaling_server: asyncio.Server | None = None
         self._bridge: AsyncioBridge | None = None
 
-    async def listen(self, maddr: Multiaddr) -> None:
+    async def listen(self, maddr: Multiaddr, nursery: object = None) -> None:  # type: ignore[override]
         """
         Start listening for incoming WebRTC Direct connections.
 
