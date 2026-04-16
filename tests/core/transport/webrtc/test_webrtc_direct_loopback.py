@@ -12,7 +12,6 @@ Requires aiortc to be installed.  Skipped automatically otherwise.
 from __future__ import annotations
 
 import pytest
-import trio
 
 try:
     import aiortc  # noqa: F401
@@ -22,17 +21,9 @@ except ImportError:
     HAS_AIORTC = False
 
 from libp2p.crypto.ed25519 import create_new_key_pair
-from libp2p.peer.id import ID
-from libp2p.transport.webrtc.certificate import WebRTCCertificate
-from libp2p.transport.webrtc.config import WebRTCTransportConfig
-from libp2p.transport.webrtc.multiaddr_utils import (
-    build_webrtc_direct_multiaddr,
-)
 from libp2p.transport.webrtc.transport import WebRTCDirectTransport
 
-pytestmark = pytest.mark.skipif(
-    not HAS_AIORTC, reason="aiortc not installed"
-)
+pytestmark = pytest.mark.skipif(not HAS_AIORTC, reason="aiortc not installed")
 
 
 @pytest.mark.trio

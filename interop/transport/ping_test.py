@@ -547,13 +547,9 @@ class PingTest:
                     ip_value = self._get_ip_value(addr)
                     tcp_port = addr.value_for_protocol("tcp") or port
                     if ip_value:
-                        wrtc_addr = self._build_webrtc_direct_addr(
-                            ip_value, tcp_port
-                        )
+                        wrtc_addr = self._build_webrtc_direct_addr(ip_value, tcp_port)
                         _, p2p_value = self._extract_and_preserve_p2p(addr)
-                        wrtc_addr = self._encapsulate_with_p2p(
-                            wrtc_addr, p2p_value
-                        )
+                        wrtc_addr = self._encapsulate_with_p2p(wrtc_addr, p2p_value)
                         webrtc_addrs.append(wrtc_addr)
                 except Exception as e:
                     print(
@@ -773,14 +769,10 @@ class PingTest:
                 filtered.append(addr)
             elif self.transport == "quic-v1" and "quic-v1" in protocols:
                 filtered.append(addr)
-            elif (
-                self.transport == "webrtc-direct"
-                and "webrtc-direct" in protocols
-            ):
+            elif self.transport == "webrtc-direct" and "webrtc-direct" in protocols:
                 filtered.append(addr)
             elif self.transport == "tcp" and not any(
-                p in protocols
-                for p in ["ws", "wss", "quic-v1", "webrtc-direct"]
+                p in protocols for p in ["ws", "wss", "quic-v1", "webrtc-direct"]
             ):
                 filtered.append(addr)
         return filtered if filtered else addresses
