@@ -61,6 +61,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/libp2p/py-libp2p"
 
+[project.optional-dependencies]
+webrtc = ["aiortc>=1.5.0,<2.0"]
+
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
@@ -313,5 +316,11 @@ project_excludes = [
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "./tests/core/transport/webrtc",
+    "./libp2p/transport/webrtc/_asyncio_bridge.py",
+    "./libp2p/transport/webrtc/_aiortc_helpers.py",
+    "./libp2p/transport/webrtc/certificate.py",
+    "./libp2p/transport/webrtc/transport.py",
+    "./libp2p/transport/webrtc/listener.py",
 ]
 search_path = ["stubs"]

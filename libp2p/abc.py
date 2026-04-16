@@ -3000,6 +3000,11 @@ class ITransport(ABC):
 
     """
 
+    # Transports that provide their own stream multiplexing (QUIC, WebRTC)
+    # override this to True.  The swarm skips the TransportUpgrader for
+    # these transports and passes the connection directly to add_conn().
+    provides_native_muxing: bool = False
+
     @abstractmethod
     async def dial(self, maddr: Multiaddr) -> IRawConnection:
         """

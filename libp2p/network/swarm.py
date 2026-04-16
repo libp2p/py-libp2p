@@ -59,7 +59,6 @@ from libp2p.transport.exceptions import (
 )
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -210,9 +209,9 @@ class Swarm(Service, INetworkService):
 
             # Set background nursery BEFORE setting the event
             # This ensures transports have the nursery when they check
-            if isinstance(self.transport, QUICTransport):
-                self.transport.set_background_nursery(nursery)
-                self.transport.set_swarm(self)
+            if hasattr(self.transport, "set_swarm"):
+                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
+                self.transport.set_swarm(self)  # type: ignore[attr-defined]
             elif hasattr(self.transport, "set_background_nursery"):
                 # WebSocket transport also needs background nursery
                 # for connection management
@@ -659,11 +658,12 @@ class Swarm(Service, INetworkService):
                 pass
             raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
 
-        if isinstance(self.transport, QUICTransport) and isinstance(
+        if getattr(self.transport, "provides_native_muxing", False) and isinstance(
             raw_conn, IMuxedConn
         ):
             logger.info(
-                "Skipping upgrade for QUIC, QUIC connections are already multiplexed"
+                "Skipping upgrade for native-mux transport "
+                "(connection already multiplexed)"
             )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
@@ -945,19 +945,17 @@ class Swarm(Service, INetworkService):
         peer_id: ID,
     ) -> INetStream:
         """Try to open a stream on *connection*, falling back to alternatives."""
-        if isinstance(self.transport, QUICTransport) and connection is not None:
-            conn = cast("SwarmConn", connection)
-            try:
-                stream = await conn.new_stream()
-                logger.debug("successfully opened a stream to peer %s", peer_id)
-                return stream
-            except Exception:
-                raise
-
         try:
-            net_stream = await connection.new_stream()
+            if (
+                getattr(self.transport, "provides_native_muxing", False)
+                and connection is not None
+            ):
+                conn = cast("SwarmConn", connection)
+                stream = await conn.new_stream()
+            else:
+                stream = await connection.new_stream()  # type: ignore[assignment]
             logger.debug("successfully opened a stream to peer %s", peer_id)
-            return net_stream
+            return stream
         except Exception as e:
             logger.debug(f"Failed to create stream on connection: {e}")
 
@@ -1154,14 +1152,15 @@ class Swarm(Service, INetworkService):
                             pass
                         return
 
-                # No need to upgrade QUIC Connection
-                if isinstance(self.transport, QUICTransport):
+                # No need to upgrade native-mux connections (QUIC, WebRTC)
+                if getattr(self.transport, "provides_native_muxing", False):
                     try:
-                        quic_conn = cast(QUICConnection, read_write_closer)
-                        await self.add_conn(quic_conn, direction="inbound")
-                        peer_id = quic_conn.peer_id
+                        muxed_conn = cast(IMuxedConn, read_write_closer)
+                        await self.add_conn(muxed_conn, direction="inbound")
+                        peer_id = muxed_conn.peer_id
                         logger.debug(
-                            f"successfully opened quic connection to peer {peer_id}"
+                            "successfully opened native-mux connection to peer %s",
+                            peer_id,
                         )
                         # NOTE: This is a intentional barrier to prevent from the
                         # handler exiting and closing the connection.
