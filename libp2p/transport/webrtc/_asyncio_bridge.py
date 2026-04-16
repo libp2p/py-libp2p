@@ -156,9 +156,12 @@ class AsyncioBridge:
             except Exception:
                 logger.debug("Error during task cancellation", exc_info=True)
 
-            loop.call_soon_threadsafe(loop.stop)
+            loop.call_soon_threadsafe(
+                lambda: loop.stop()
+            )  # pyrefly: ignore[bad-argument-type]
 
             def _join_thread() -> None:
+                assert thread is not None  # narrowing for pyrefly
                 thread.join(timeout=5.0)
                 if thread.is_alive():
                     logger.warning("AsyncioBridge thread did not stop within timeout")

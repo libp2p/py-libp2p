@@ -6,6 +6,7 @@ plain asyncio coroutines (sleep, gather, etc.) to exercise the bridge
 mechanics: lifecycle, concurrency, error propagation, cancellation, and
 stress.
 """
+# pyrefly: ignore
 
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
 """
 Tests for WebRTCConnection stream management and lifecycle.
 """
+# pyrefly: ignore
 
 from __future__ import annotations
 

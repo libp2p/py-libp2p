@@ -59,7 +59,6 @@ from libp2p.transport.exceptions import (
 )
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -663,7 +662,8 @@ class Swarm(Service, INetworkService):
             raw_conn, IMuxedConn
         ):
             logger.info(
-                "Skipping upgrade for native-mux transport (connection already multiplexed)"
+                "Skipping upgrade for native-mux transport "
+                "(connection already multiplexed)"
             )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
@@ -945,19 +945,17 @@ class Swarm(Service, INetworkService):
         peer_id: ID,
     ) -> INetStream:
         """Try to open a stream on *connection*, falling back to alternatives."""
-        if getattr(self.transport, "provides_native_muxing", False) and connection is not None:
-            conn = cast("SwarmConn", connection)
-            try:
-                stream = await conn.new_stream()
-                logger.debug("successfully opened a stream to peer %s", peer_id)
-                return stream
-            except Exception:
-                raise
-
         try:
-            net_stream = await connection.new_stream()
+            if (
+                getattr(self.transport, "provides_native_muxing", False)
+                and connection is not None
+            ):
+                conn = cast("SwarmConn", connection)
+                stream = await conn.new_stream()
+            else:
+                stream = await connection.new_stream()  # type: ignore[assignment]
             logger.debug("successfully opened a stream to peer %s", peer_id)
-            return net_stream
+            return stream
         except Exception as e:
             logger.debug(f"Failed to create stream on connection: {e}")
 

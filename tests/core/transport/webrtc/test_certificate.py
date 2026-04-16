@@ -1,6 +1,7 @@
 """
 Tests for WebRTC certificate generation and fingerprint encoding.
 """
+# pyrefly: ignore
 
 import base64
 import hashlib

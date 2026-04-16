@@ -1,6 +1,7 @@
 """
 Tests for SDP construction and parsing.
 """
+# pyrefly: ignore
 
 from __future__ import annotations
 

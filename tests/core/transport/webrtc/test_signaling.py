@@ -1,6 +1,12 @@
 """
 Tests for WebRTC signaling protocol.
+
+Note: MockStream is a simplified test double that implements just
+read/write/close.  pyrefly flags it as not assignable to INetStream
+because it doesn't satisfy the full ABC; this is expected for unit
+tests where we only exercise the signaling wire format.
 """
+# pyrefly: ignore
 
 from __future__ import annotations
 

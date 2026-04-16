@@ -1,6 +1,7 @@
 """
 Tests for WebRTCStream protobuf framing and lifecycle.
 """
+# pyrefly: ignore
 
 from __future__ import annotations
 

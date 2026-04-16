@@ -103,13 +103,15 @@ class WebRTCStream(IMuxedStream):
         """The WebRTC data channel ID for this stream."""
         return self._channel_id
 
-    def get_remote_address(self) -> tuple[str, int] | None:
+    def get_remote_address(
+        self,
+    ) -> tuple[str, int] | None:  # pyrefly: ignore[bad-return]
         """Delegate to the connection (data channels share its address)."""
         # WebRTCConnection adds get_remote_address() on top of the bare
         # IMuxedConn ABC.  Fall back to None for any other muxed connection.
         get_addr = getattr(self.muxed_conn, "get_remote_address", None)
         if callable(get_addr):
-            return get_addr()
+            return get_addr()  # type: ignore[no-any-return]
         return None
 
     # ------------------------------------------------------------------
@@ -150,7 +152,7 @@ class WebRTCStream(IMuxedStream):
         # Block for the next chunk
         try:
             if self._deadline > 0:
-                timeout = max(0, self._deadline - trio.current_time())
+                timeout = max(0.0, self._deadline - trio.current_time())
                 with trio.move_on_after(timeout) as scope:
                     chunk = await self._read_recv.receive()
                 if scope.cancelled_caught:
