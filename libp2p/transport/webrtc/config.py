@@ -65,7 +65,17 @@ class WebRTCTransportConfig:
     )
 
     def get_or_generate_certificate(self) -> WebRTCCertificate:
-        """Return the configured certificate or generate a new one."""
+        """
+        Return the configured certificate or generate a new one.
+
+        Prefers aiortc-native generation when available so the resulting
+        ``RTCCertificate`` can be passed directly to
+        ``RTCPeerConnection(certificates=[...])``.  Falls back to pure
+        ``cryptography`` generation when aiortc is not installed.
+        """
         if self.certificate is None:
-            self.certificate = WebRTCCertificate.generate()
+            try:
+                self.certificate = WebRTCCertificate.from_aiortc()
+            except ImportError:
+                self.certificate = WebRTCCertificate.generate()
         return self.certificate

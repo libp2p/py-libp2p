@@ -101,6 +101,41 @@ class WebRTCCertificate:
                 f"Failed to generate WebRTC certificate: {e}"
             ) from e
 
+    @classmethod
+    def from_aiortc(cls) -> WebRTCCertificate:
+        """
+        Generate a certificate using aiortc's ``RTCCertificate``.
+
+        Preferred when aiortc is installed because it avoids any
+        cryptography ↔ pyOpenSSL conversion — aiortc's internal cert is
+        already a :class:`cryptography.x509.Certificate`.
+
+        :returns: A new :class:`WebRTCCertificate` backed by an aiortc cert.
+        :raises ImportError: If aiortc is not installed.
+        :raises WebRTCCertificateError: If certificate generation fails.
+        """
+        try:
+            from aiortc.rtcdtlstransport import RTCCertificate
+        except ImportError:
+            raise
+
+        try:
+            rtc_cert = RTCCertificate.generateCertificate()
+            # aiortc stores _cert as a cryptography x509.Certificate
+            x509_cert = rtc_cert._cert  # type: ignore[attr-defined]
+            priv_key = rtc_cert._key  # type: ignore[attr-defined]
+            instance = cls(certificate=x509_cert, private_key=priv_key)
+            # Keep the aiortc cert so RTCPeerConnection can use it directly.
+            instance._rtc_certificate = rtc_cert  # type: ignore[attr-defined]
+            logger.debug("Generated WebRTC certificate via aiortc")
+            return instance
+        except ImportError:
+            raise
+        except Exception as e:
+            raise WebRTCCertificateError(
+                f"Failed to generate aiortc certificate: {e}"
+            ) from e
+
     # ------------------------------------------------------------------
     # Fingerprint accessors
     # ------------------------------------------------------------------

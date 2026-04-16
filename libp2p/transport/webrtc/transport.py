@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _async_noop(value: object) -> object:
+    """Wrap a synchronous value as an awaitable for bridge.run_coro()."""
+    return value
+
+
 class WebRTCDirectTransport(ITransport):
     """
     WebRTC Direct transport (``/webrtc-direct``).
@@ -92,37 +97,130 @@ class WebRTCDirectTransport(ITransport):
         :param maddr: A ``/webrtc-direct`` multiaddr with certhash.
         :returns: A :class:`WebRTCConnection` (implements both
             ``IRawConnection`` and ``IMuxedConn``).
-        :raises NotImplementedError: The aiortc integration is not yet
-            wired up.  Returning a bare :class:`WebRTCConnection` at this
-            stage would make the swarm treat the peer as connected while
-            streams silently drop data.  The full dial sequence
-            (RTCPeerConnection creation, ICE/DTLS, Noise handshake,
-            ``conn.start()``) lands in a follow-up PR.
-        :raises WebRTCConnectionError: If the multiaddr is malformed.
+        :raises WebRTCConnectionError: If the connection fails.
         """
-        # Validate the multiaddr even though we can't complete the dial, so
-        # callers get a consistent error shape once the transport is live.
         if not is_webrtc_direct_multiaddr(maddr):
             raise WebRTCConnectionError(f"Not a WebRTC Direct multiaddr: {maddr}")
-        _host, _port, certhash, _peer_id_str = parse_webrtc_direct_multiaddr(maddr)
+        host, port, certhash, peer_id_str = parse_webrtc_direct_multiaddr(maddr)
         if not certhash:
             raise WebRTCConnectionError(
                 f"WebRTC Direct multiaddr missing certhash: {maddr}"
             )
 
-        # The full dial sequence is:
-        # 1. Create RTCPeerConnection via bridge
-        # 2. Set local SDP offer
-        # 3. Construct remote SDP from multiaddr certhash
-        # 4. Wait for ICE connection
-        # 5. Perform Noise XX handshake over data channel 0
-        # 6. Verify remote peer identity
-        # 7. Call conn.start()
-        raise NotImplementedError(
-            "WebRTC Direct dial is not yet wired to aiortc. "
-            "This transport is registered for interface-compliance and "
-            "test coverage only; see PR #1309 for scope."
+        bridge = await self._ensure_bridge()
+        logger.info("Dialing WebRTC Direct %s:%d", host, port)
+
+        remote_peer_id: ID | None = None
+        if peer_id_str:
+            remote_peer_id = ID.from_base58(peer_id_str)
+
+        # All aiortc calls go through the bridge (asyncio thread).
+        from ._aiortc_helpers import (
+            create_noise_channel,
+            create_peer_connection,
+            get_remote_fingerprint,
+            make_noise_channel_callbacks,
+            post_sdp,
+            wait_for_connected,
+            wire_pc_to_connection,
         )
+        from .certificate import fingerprint_from_multibase
+        from .noise_handshake import DataChannelReadWriter, perform_noise_handshake
+
+        rtc_cert = getattr(self._certificate, "_rtc_certificate", None)
+        if rtc_cert is None:
+            raise WebRTCConnectionError(
+                "WebRTC certificate was not generated via aiortc. "
+                "Ensure aiortc is installed and config uses from_aiortc()."
+            )
+
+        try:
+            # 1. Create RTCPeerConnection + Noise channel
+            pc = await bridge.run_coro(_async_noop(create_peer_connection(rtc_cert)))
+            noise_ch = await bridge.run_coro(create_noise_channel(pc))
+            noise_send, noise_recv, _ = await bridge.run_coro(
+                _async_noop(make_noise_channel_callbacks(noise_ch))
+            )
+
+            # 2. Create offer, set local description
+            offer = await bridge.run_coro(pc.createOffer())
+            await bridge.run_coro(pc.setLocalDescription(offer))
+
+            # 3. Exchange SDP via HTTP POST to the listener
+            answer_sdp = await bridge.run_coro(
+                post_sdp(host, port, pc.localDescription.sdp)
+            )
+
+            # 4. Set remote description
+            from aiortc import RTCSessionDescription
+
+            answer = RTCSessionDescription(sdp=answer_sdp, type="answer")
+            await bridge.run_coro(pc.setRemoteDescription(answer))
+
+            # 5. Wait for ICE connection
+            await bridge.run_coro(wait_for_connected(pc))
+
+            # 6. Verify remote DTLS fingerprint
+            expected_fp = fingerprint_from_multibase(certhash)
+            remote_fp = await bridge.run_coro(_async_noop(get_remote_fingerprint(pc)))
+            if remote_fp != expected_fp:
+                await bridge.run_coro(pc.close())
+                raise WebRTCConnectionError(
+                    "Remote DTLS fingerprint does not match certhash in the multiaddr"
+                )
+
+            # 7. Build WebRTCConnection and wire callbacks
+            conn = WebRTCConnection(
+                peer_id=remote_peer_id or ID(b"\x00" * 32),
+                bridge=bridge,
+                is_initiator=True,
+                config=self._config,
+                remote_addrs=[maddr],
+            )
+            await bridge.run_coro(_async_noop(wire_pc_to_connection(pc, conn)))
+
+            # 8. Noise XX handshake over channel 0
+            from libp2p.crypto.x25519 import (
+                create_new_key_pair as create_x25519_keypair,
+            )
+
+            noise_kp = create_x25519_keypair()
+
+            async def _trio_noise_send(data: bytes) -> None:
+                await bridge.run_coro(noise_send(data))
+
+            async def _trio_noise_recv() -> bytes:
+                return await bridge.run_coro(noise_recv())
+
+            noise_rw = DataChannelReadWriter(
+                send_cb=_trio_noise_send,
+                recv_cb=_trio_noise_recv,
+                is_initiator=True,
+            )
+            authenticated_peer = await perform_noise_handshake(
+                conn=noise_rw,
+                local_peer=self._local_peer_id,
+                libp2p_privkey=self._private_key,
+                noise_static_key=noise_kp.private_key,
+                local_fingerprint=self._certificate.fingerprint,
+                remote_fingerprint=expected_fp,
+                is_initiator=True,
+                remote_peer=remote_peer_id,
+            )
+
+            # 9. Finalize connection
+            conn.peer_id = authenticated_peer
+            await conn.start()
+            logger.info(
+                "WebRTC Direct connection established to %s",
+                authenticated_peer,
+            )
+            return conn
+
+        except WebRTCConnectionError:
+            raise
+        except Exception as e:
+            raise WebRTCConnectionError(f"WebRTC Direct dial failed: {e}") from e
 
     def create_listener(self, handler_function: THandler) -> WebRTCDirectListener:
         """
