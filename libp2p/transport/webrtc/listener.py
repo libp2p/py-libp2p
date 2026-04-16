@@ -139,7 +139,7 @@ class WebRTCDirectListener(IListener):
             )
 
             # Create PC, set remote (offer), create answer.
-            pc = create_peer_connection(rtc_cert)
+            pc = await create_peer_connection(rtc_cert)
             noise_ch = await create_noise_channel(pc)
             noise_send, noise_recv, _ = make_noise_channel_callbacks(noise_ch)
 

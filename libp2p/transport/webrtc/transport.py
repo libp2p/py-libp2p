@@ -136,7 +136,7 @@ class WebRTCDirectTransport(ITransport):
 
         try:
             # 1. Create RTCPeerConnection + Noise channel
-            pc = await bridge.run_coro(_async_noop(create_peer_connection(rtc_cert)))
+            pc = await bridge.run_coro(create_peer_connection(rtc_cert))
             noise_ch = await bridge.run_coro(create_noise_channel(pc))
             noise_send, noise_recv, _ = await bridge.run_coro(
                 _async_noop(make_noise_channel_callbacks(noise_ch))
@@ -162,7 +162,7 @@ class WebRTCDirectTransport(ITransport):
 
             # 6. Verify remote DTLS fingerprint
             expected_fp = fingerprint_from_multibase(certhash)
-            remote_fp = await bridge.run_coro(_async_noop(get_remote_fingerprint(pc)))
+            remote_fp = get_remote_fingerprint(pc)  # sync, safe off-thread
             if remote_fp != expected_fp:
                 await bridge.run_coro(pc.close())
                 raise WebRTCConnectionError(
@@ -177,7 +177,7 @@ class WebRTCDirectTransport(ITransport):
                 config=self._config,
                 remote_addrs=[maddr],
             )
-            await bridge.run_coro(_async_noop(wire_pc_to_connection(pc, conn)))
+            wire_pc_to_connection(pc, conn)  # sync, wires callbacks
 
             # 8. Noise XX handshake over channel 0
             from libp2p.crypto.x25519 import (

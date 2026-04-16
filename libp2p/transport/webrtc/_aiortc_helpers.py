@@ -40,12 +40,16 @@ _SDP_HTTP_TIMEOUT = 15.0
 # ------------------------------------------------------------------
 
 
-def create_peer_connection(
+async def create_peer_connection(
     rtc_cert: RTCCertificate,
     ice_servers: list[str] | None = None,
 ) -> RTCPeerConnection:
     """
     Create an ``RTCPeerConnection`` with the given certificate.
+
+    Must run on the asyncio bridge loop because aiortc's
+    ``RTCPeerConnection.__init__`` calls ``asyncio.get_event_loop()``
+    internally to schedule ICE initialization.
 
     :param rtc_cert: An aiortc certificate
         (from ``WebRTCCertificate._rtc_certificate``).
@@ -92,7 +96,7 @@ async def wait_for_connected(
             failed.set()
 
     try:
-        done, _ = await asyncio.wait(
+        done, pending = await asyncio.wait(
             [
                 asyncio.ensure_future(_event_wait(connected)),
                 asyncio.ensure_future(_event_wait(failed)),
@@ -100,6 +104,13 @@ async def wait_for_connected(
             timeout=timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Cancel any pending tasks to avoid leaks on the asyncio loop.
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         if not done:
             raise TimeoutError(f"ICE connection did not complete within {timeout}s")
         if failed.is_set():
@@ -205,13 +216,12 @@ def _bind_channel_events(
 
 def make_noise_channel_callbacks(
     channel: Any,
-) -> tuple[Any, asyncio.Queue[bytes]]:
+) -> tuple[Any, Any, asyncio.Queue[bytes]]:
     """
-    Wire a data channel for the Noise handshake and return (send_fn, recv_queue).
+    Wire a data channel for the Noise handshake.
 
-    The returned ``send_fn`` is an async callable that sends bytes on the
-    channel.  ``recv_queue`` receives bytes pushed by the channel's
-    ``on_message`` handler.
+    :returns: ``(send_fn, recv_fn, recv_queue)`` — async callables for
+        sending/receiving bytes, and the underlying queue.
     """
     recv_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
