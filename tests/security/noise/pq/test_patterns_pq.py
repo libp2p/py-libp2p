@@ -1,25 +1,21 @@
-"""Tests for PatternXXhfs: the Noise XXhfs handshake with X-Wing KEM.
+"""
+Tests for PatternXXhfs: the Noise XXhfs handshake with X-Wing KEM.
 
 Follows TDD: these tests are written before the implementation and initially fail.
 """
 
 import math
-from typing import cast
 
 import pytest
 import trio
 
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import X25519PrivateKey
-from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
 from libp2p.security.noise.exceptions import (
-    InvalidSignature,
     PeerIDMismatchesPubkey,
 )
-from libp2p.security.noise.io import NoisePacketReadWriter
 from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
-
 
 # ---------------------------------------------------------------------------
 # In-memory connection helpers
@@ -27,7 +23,8 @@ from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
 
 
 class _MemoryConn:
-    """Async in-memory bidirectional stream backed by trio memory channels.
+    """
+    Async in-memory bidirectional stream backed by trio memory channels.
 
     Implements the ReadWriteCloser duck-type expected by NoisePacketReadWriter.
     """
@@ -387,8 +384,9 @@ class TestPatternXXhfsWireFormat:
         frame = spy.writes[0]
         msg_len = int.from_bytes(frame[:2], "big")
 
-        # Fixed overhead: 32 (e) + 1136 (enc_ct) + 48 (enc_s) + 16 (AEAD tag for payload)
-        # Payload size varies (protobuf-serialised NoiseHandshakePayload) but overhead is fixed
+        # Fixed overhead: 32 (e) + 1136 (enc_ct) + 48 (enc_s) + 16 (AEAD tag)
+        # Payload size varies (protobuf-serialised NoiseHandshakePayload) but
+        # total fixed overhead is constant
         fixed_overhead = 32 + 1136 + 48 + 16
         assert msg_len >= fixed_overhead, (
             f"Message B too short: {msg_len} < {fixed_overhead}"

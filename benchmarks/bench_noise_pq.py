@@ -16,10 +16,9 @@ Run:
 """
 
 import math
-import statistics
-import sys
-import time
 from pathlib import Path
+import statistics
+import time
 
 import trio
 
@@ -27,10 +26,10 @@ import trio
 # Configuration
 # ---------------------------------------------------------------------------
 
-N_WARMUP = 3          # warm-up rounds discarded before measurement
-N_HANDSHAKES = 50     # handshake latency iterations
-N_THROUGHPUT = 200    # throughput iterations per message size
-N_KEM = 200           # KEM micro-benchmark iterations
+N_WARMUP = 3  # warm-up rounds discarded before measurement
+N_HANDSHAKES = 50  # handshake latency iterations
+N_THROUGHPUT = 200  # throughput iterations per message size
+N_KEM = 200  # KEM micro-benchmark iterations
 
 # ---------------------------------------------------------------------------
 # In-memory connection (same as test helpers)
@@ -72,6 +71,7 @@ class _MemoryConn:
 
     def get_connection_type(self):
         from libp2p.connection_types import ConnectionType
+
         return ConnectionType.UNKNOWN
 
 
@@ -96,8 +96,12 @@ def _make_pq_pair():
 
     kp_l = create_new_key_pair()
     kp_r = create_new_key_pair()
-    t_l = TransportPQ(KeyPair(kp_l.private_key, kp_l.public_key), X25519PrivateKey.new())
-    t_r = TransportPQ(KeyPair(kp_r.private_key, kp_r.public_key), X25519PrivateKey.new())
+    t_l = TransportPQ(
+        KeyPair(kp_l.private_key, kp_l.public_key), X25519PrivateKey.new()
+    )
+    t_r = TransportPQ(
+        KeyPair(kp_r.private_key, kp_r.public_key), X25519PrivateKey.new()
+    )
     peer_r = ID.from_pubkey(kp_r.public_key)
     return t_l, peer_r, t_r
 
@@ -177,9 +181,12 @@ def bench_kem() -> dict:
     decap_ms, decap_ops = _stats(samples)
 
     return {
-        "keygen_ms": keygen_ms, "keygen_ops": keygen_ops,
-        "encap_ms": encap_ms, "encap_ops": encap_ops,
-        "decap_ms": decap_ms, "decap_ops": decap_ops,
+        "keygen_ms": keygen_ms,
+        "keygen_ops": keygen_ops,
+        "encap_ms": encap_ms,
+        "encap_ops": encap_ops,
+        "decap_ms": decap_ms,
+        "decap_ops": decap_ops,
     }
 
 
@@ -230,8 +237,10 @@ async def bench_handshakes() -> dict:
     overhead = xxhfs_ms / xx_ms if xx_ms > 0 else float("inf")
 
     return {
-        "xx_ms": xx_ms, "xx_ops": xx_ops,
-        "xxhfs_ms": xxhfs_ms, "xxhfs_ops": xxhfs_ops,
+        "xx_ms": xx_ms,
+        "xx_ops": xx_ops,
+        "xxhfs_ms": xxhfs_ms,
+        "xxhfs_ops": xxhfs_ops,
         "overhead_x": overhead,
     }
 
@@ -248,9 +257,7 @@ async def _throughput_one(session_out, session_in, payload: bytes) -> float:
     return time.perf_counter() - t0
 
 
-async def _bench_throughput_one_size(
-    make_pair_fn, size: int, n_rounds: int
-) -> float:
+async def _bench_throughput_one_size(make_pair_fn, size: int, n_rounds: int) -> float:
     """Return throughput in MB/s for a single payload size."""
     payload = b"X" * size
 
@@ -326,9 +333,9 @@ def wire_sizes() -> dict:
     # Msg A: e_pk (32) + e1_pk (1216)                                   = 1248
     # Msg B: e (32) + enc_ct (1120+16=1136) + enc_s (48) + enc_payload
     # Msg C: enc_s (48) + enc_payload
-    msg_a = x25519 + XWING_PK_SIZE          # 32 + 1216 = 1248
+    msg_a = x25519 + XWING_PK_SIZE  # 32 + 1216 = 1248
     msg_b_fixed = x25519 + (XWING_CT_SIZE + aead_tag) + (x25519 + aead_tag)  # 1216
-    msg_c_fixed = x25519 + aead_tag          # 48
+    msg_c_fixed = x25519 + aead_tag  # 48
 
     return {
         "classical_msg1": 32,
@@ -368,14 +375,14 @@ async def run_all() -> dict:
     # ---- print ----
 
     print_section("X-Wing KEM micro-benchmarks")
-    print(f"  keygen     : {_fmt(kem['keygen_ms'],  kem['keygen_ops'])}")
-    print(f"  encapsulate: {_fmt(kem['encap_ms'],   kem['encap_ops'])}")
-    print(f"  decapsulate: {_fmt(kem['decap_ms'],   kem['decap_ops'])}")
+    print(f"  keygen     : {_fmt(kem['keygen_ms'], kem['keygen_ops'])}")
+    print(f"  encapsulate: {_fmt(kem['encap_ms'], kem['encap_ops'])}")
+    print(f"  decapsulate: {_fmt(kem['decap_ms'], kem['decap_ops'])}")
     kem_round_trip = kem["encap_ms"] + kem["decap_ms"]
     print(f"  round-trip (encap+decap): {kem_round_trip:.2f} ms")
 
     print_section("Handshake latency (in-memory, round-trip)")
-    print(f"  Classical XX : {_fmt(handshakes['xx_ms'],    handshakes['xx_ops'])}")
+    print(f"  Classical XX : {_fmt(handshakes['xx_ms'], handshakes['xx_ops'])}")
     print(f"  XXhfs (PQ)   : {_fmt(handshakes['xxhfs_ms'], handshakes['xxhfs_ops'])}")
     print(f"  Overhead     : {handshakes['overhead_x']:.1f}x")
 
@@ -399,7 +406,10 @@ async def run_all() -> dict:
     print(f"    Msg B: {wires['xxhfs_msg_b_fixed']} B (e + enc_ct + enc_s)")
     print(f"    Msg C: {wires['xxhfs_msg_c_fixed']} B (enc_s, fixed)")
     overhead_b = wires["xxhfs_total_fixed"] - wires["classical_total_fixed"]
-    print(f"  Wire overhead vs classical: +{overhead_b} B ({overhead_b / wires['classical_total_fixed']:.0f}x)")
+    overhead_x = overhead_b / wires["classical_total_fixed"]
+    print(
+        f"  Wire overhead vs classical: +{overhead_b} B ({overhead_x:.0f}x)"
+    )
 
     print()
     return {
@@ -420,8 +430,9 @@ def save_results(results: dict) -> None:
     lines = [
         "# py-libp2p Noise PQ Benchmark Results",
         "",
-        f"> Generated by `benchmarks/bench_noise_pq.py`  ",
-        f"> Iterations: KEM={N_KEM}, handshake={N_HANDSHAKES}, throughput={N_THROUGHPUT}",
+        "> Generated by `benchmarks/bench_noise_pq.py`  ",
+        f"> Iterations: KEM={N_KEM}, handshake={N_HANDSHAKES},"
+        f" throughput={N_THROUGHPUT}",
         "",
         "## X-Wing KEM Micro-benchmarks",
         "",
@@ -459,10 +470,24 @@ def save_results(results: dict) -> None:
         "",
         "| Pattern | Msg 1 | Msg 2 | Msg 3 | Total |",
         "|---------|-------|-------|-------|-------|",
-        f"| Classical XX | {ws['classical_msg1']} B | {ws['classical_msg2_fixed']} B + payload | {ws['classical_msg3_fixed']} B + payload | {ws['classical_total_fixed']} B |",
-        f"| XXhfs | {ws['xxhfs_msg_a']} B | {ws['xxhfs_msg_b_fixed']} B + payload | {ws['xxhfs_msg_c_fixed']} B + payload | {ws['xxhfs_total_fixed']} B |",
-        f"",
-        f"KEM ciphertext overhead vs classical: +{overhead_b} B (+{overhead_b / ws['classical_total_fixed']:.0f}x fixed bytes)",
+        (
+            f"| Classical XX | {ws['classical_msg1']} B"
+            f" | {ws['classical_msg2_fixed']} B + payload"
+            f" | {ws['classical_msg3_fixed']} B + payload"
+            f" | {ws['classical_total_fixed']} B |"
+        ),
+        (
+            f"| XXhfs | {ws['xxhfs_msg_a']} B"
+            f" | {ws['xxhfs_msg_b_fixed']} B + payload"
+            f" | {ws['xxhfs_msg_c_fixed']} B + payload"
+            f" | {ws['xxhfs_total_fixed']} B |"
+        ),
+        "",
+        (
+            f"KEM ciphertext overhead vs classical:"
+            f" +{overhead_b} B"
+            f" (+{overhead_b / ws['classical_total_fixed']:.0f}x fixed bytes)"
+        ),
         "",
         "## Comparison with js-libp2p-noise",
         "",

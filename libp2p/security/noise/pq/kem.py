@@ -11,14 +11,11 @@ Reference: draft-connolly-cfrg-xwing-kem
 """
 
 import hashlib
-import os
 from typing import Protocol, runtime_checkable
 
-import nacl.utils
-from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
-
 from kyber_py.ml_kem import ML_KEM_768
-
+from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
+import nacl.utils
 
 # X-Wing domain separation label: ASCII bytes for "\.//^\"
 _XWING_LABEL = bytes([0x5C, 0x2E, 0x2F, 0x2F, 0x5E, 0x5C])
@@ -29,9 +26,9 @@ _ML_KEM_SK_SIZE = 2400
 _ML_KEM_CT_SIZE = 1088
 _X25519_KEY_SIZE = 32
 
-XWING_PK_SIZE = _ML_KEM_PK_SIZE + _X25519_KEY_SIZE   # 1216
-XWING_SK_SIZE = _ML_KEM_SK_SIZE + _X25519_KEY_SIZE   # 2432
-XWING_CT_SIZE = _ML_KEM_CT_SIZE + _X25519_KEY_SIZE   # 1120
+XWING_PK_SIZE = _ML_KEM_PK_SIZE + _X25519_KEY_SIZE  # 1216
+XWING_SK_SIZE = _ML_KEM_SK_SIZE + _X25519_KEY_SIZE  # 2432
+XWING_CT_SIZE = _ML_KEM_CT_SIZE + _X25519_KEY_SIZE  # 1120
 
 
 @runtime_checkable
@@ -82,7 +79,7 @@ def _xwing_combine(
     ct_x25519: bytes,
     pk_x25519: bytes,
 ) -> bytes:
-    """
+    r"""
     Combine ML-KEM and X25519 shared secrets per @noble/post-quantum 0.6.0.
 
     SHA3-256(ss_mlkem || ss_x25519 || ct_x25519 || pk_x25519 || label)
