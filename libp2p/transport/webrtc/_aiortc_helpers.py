@@ -86,7 +86,7 @@ async def wait_for_connected(
     connected = asyncio.Event()
     failed = asyncio.Event()
 
-    @pc.on("connectionstatechange")
+    @pc.on("connectionstatechange")  # type: ignore[misc,untyped-decorator]
     def _on_state_change() -> None:
         state = pc.connectionState
         logger.debug("ICE connection state: %s", state)
@@ -184,7 +184,7 @@ def wire_pc_to_connection(
     conn._send_on_channel_cb = _send_on_channel
     conn._close_pc_cb = _close_pc
 
-    @pc.on("datachannel")
+    @pc.on("datachannel")  # type: ignore[misc,untyped-decorator]
     def _on_datachannel(channel: Any) -> None:
         ch_id = channel.id if channel.id is not None else len(channels)
         channels[ch_id] = channel
