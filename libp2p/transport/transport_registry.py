@@ -1,5 +1,9 @@
 """
 Transport registry for dynamic transport selection based on multiaddr protocols.
+
+The registry also exposes capability-aware queries that let callers discover
+which registered transports bundle their own security or multiplexing, so the
+upgrade pipeline can decide at runtime whether to skip certain steps.
 """
 
 from collections.abc import Callable
@@ -130,6 +134,82 @@ class TransportRegistry:
     def get_supported_protocols(self) -> list[str]:
         """Get list of supported transport protocols."""
         return list(self._transports.keys())
+
+    @staticmethod
+    def _class_has_capability(transport_class: type, attr: str) -> bool:
+        """
+        Check whether *transport_class* declares a boolean capability.
+
+        Works correctly both for concrete attributes and ``@property``
+        descriptors on the class — we inspect the descriptor to see if
+        the getter returns ``True`` on a best-effort basis.
+        """
+        obj = getattr(transport_class, attr, None)
+        if obj is None:
+            return False
+        if isinstance(obj, bool):
+            return obj
+        if isinstance(obj, property) and obj.fget is not None:
+            try:
+                sentinel = object.__new__(transport_class)
+                return bool(obj.fget(sentinel))
+            except Exception:
+                return True
+        return False
+
+    def transport_provides_security(self, protocol: str) -> bool:
+        """
+        Return ``True`` if the transport registered for *protocol*
+        declares built-in security (``provides_security`` property).
+
+        Returns ``False`` for unknown protocols or transports that do not
+        declare the capability.
+        """
+        transport_class = self.get_transport(protocol)
+        if transport_class is None:
+            return False
+        return self._class_has_capability(transport_class, "provides_security")
+
+    def transport_provides_muxing(self, protocol: str) -> bool:
+        """
+        Return ``True`` if the transport registered for *protocol*
+        declares built-in multiplexing (``provides_muxing`` property).
+
+        Returns ``False`` for unknown protocols or transports that do not
+        declare the capability.
+        """
+        transport_class = self.get_transport(protocol)
+        if transport_class is None:
+            return False
+        return self._class_has_capability(transport_class, "provides_muxing")
+
+    def needs_security_upgrade(self, protocol: str) -> bool:
+        """
+        Return ``True`` if the transport for *protocol* does **not**
+        provide built-in security and therefore requires the standard
+        security upgrade step.
+        """
+        return not self.transport_provides_security(protocol)
+
+    def needs_muxer_upgrade(self, protocol: str) -> bool:
+        """
+        Return ``True`` if the transport for *protocol* does **not**
+        provide built-in multiplexing and therefore requires the standard
+        muxer upgrade step.
+        """
+        return not self.transport_provides_muxing(protocol)
+
+    def get_self_upgrading_protocols(self) -> list[str]:
+        """
+        Return protocols whose transports provide *both* security and
+        muxing — i.e. transports that need no additional upgrades.
+        """
+        return [
+            proto
+            for proto in self._transports
+            if self.transport_provides_security(proto)
+            and self.transport_provides_muxing(proto)
+        ]
 
     def create_transport(
         self, protocol: str, upgrader: TransportUpgrader | None = None, **kwargs: Any
@@ -285,3 +365,21 @@ def get_supported_transport_protocols() -> list[str]:
     """Get list of supported transport protocols from the global registry."""
     registry = get_transport_registry()
     return registry.get_supported_protocols()
+
+
+def transport_needs_security(protocol: str) -> bool:
+    """
+    Check whether the transport for *protocol* requires a security upgrade.
+
+    Convenience wrapper around the global registry.
+    """
+    return get_transport_registry().needs_security_upgrade(protocol)
+
+
+def transport_needs_muxer(protocol: str) -> bool:
+    """
+    Check whether the transport for *protocol* requires a muxer upgrade.
+
+    Convenience wrapper around the global registry.
+    """
+    return get_transport_registry().needs_muxer_upgrade(protocol)

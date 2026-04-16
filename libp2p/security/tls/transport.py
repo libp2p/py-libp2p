@@ -8,9 +8,11 @@ from cryptography.x509.oid import ExtensionOID
 
 import libp2p
 from libp2p.abc import IRawConnection, ISecureConn, ISecureTransport
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair, PrivateKey
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
+from libp2p.providers import SecurityProvider
 from libp2p.security.secure_session import SecureSession
 from libp2p.security.tls.certificate import (
     ALPN_PROTOCOL,
@@ -578,3 +580,20 @@ def create_tls_transport(
 
     """
     return TLSTransport(libp2p_keypair, early_data, muxers, identity_config)
+
+
+def _create_tls_provider() -> "SecurityProvider":
+    """
+    Entry-point factory for TLS security discovery.
+
+    Returns a :class:`~libp2p.providers.SecurityProvider` wrapping a
+    fresh TLS transport instance.
+
+    .. note::
+
+       An Ed25519 identity key is generated; callers needing a specific
+       key should construct the provider manually.
+    """
+    kp = create_new_key_pair()
+    transport = TLSTransport(kp)
+    return SecurityProvider(PROTOCOL_ID, transport)

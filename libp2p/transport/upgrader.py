@@ -1,3 +1,5 @@
+import logging
+
 from libp2p.abc import (
     IMuxedConn,
     IRawConnection,
@@ -17,6 +19,7 @@ from libp2p.protocol_muxer.exceptions import (
 from libp2p.protocol_muxer.multiselect import (
     DEFAULT_NEGOTIATE_TIMEOUT,
 )
+from libp2p.requirements import get_after_connections
 from libp2p.security.exceptions import (
     HandshakeFailure,
 )
@@ -30,6 +33,8 @@ from libp2p.transport.exceptions import (
     MuxerUpgradeFailure,
     SecurityUpgradeFailure,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TransportUpgrader:
@@ -81,10 +86,43 @@ class TransportUpgrader:
             ) from error
 
     async def upgrade_connection(self, conn: ISecureConn, peer_id: ID) -> IMuxedConn:
-        """Upgrade secured connection to a muxed connection."""
+        """
+        Upgrade secured connection to a muxed connection.
+
+        Before negotiating the muxer, this method verifies that the
+        connection satisfies any ordering requirements declared by the
+        registered muxer classes (via ``@after_connection``).
+        """
+        self._verify_muxer_ordering(conn)
+
         try:
             return await self.muxer_multistream.new_conn(conn, peer_id)
         except (MultiselectError, MultiselectClientError) as error:
             raise MuxerUpgradeFailure(
                 "failed to negotiate the multiplexer protocol"
             ) from error
+
+    def _verify_muxer_ordering(self, conn: ISecureConn) -> None:
+        """
+        Check that *conn* satisfies the ``@after_connection`` requirements
+        declared on every registered muxer class.
+
+        If a muxer declares ``@after_connection(ISecureConn)`` the
+        connection handed to it must be an ``ISecureConn`` instance.
+        A mismatch is logged as a warning (non-fatal) so that existing
+        code keeps working while giving operators clear diagnostics.
+        """
+        for protocol, muxer_class in self.muxer_multistream.transports.items():
+            after = get_after_connections(muxer_class)
+            if not after:
+                continue
+            for iface in after:
+                if not isinstance(conn, iface):
+                    logger.warning(
+                        "Muxer %s (protocol %s) declares @after_connection(%s) "
+                        "but the connection (%s) does not satisfy it",
+                        muxer_class.__name__,
+                        protocol,
+                        iface.__name__,
+                        type(conn).__name__,
+                    )

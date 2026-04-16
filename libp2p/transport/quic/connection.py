@@ -290,6 +290,18 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """Check if peer identity has been verified."""
         return self._peer_verified
 
+    # -- Capability declarations (see libp2p/capabilities.py) ----------------
+
+    @property
+    def is_secure(self) -> bool:
+        """QUIC connections are always secured via TLS 1.3."""
+        return True
+
+    @property
+    def is_muxed(self) -> bool:
+        """QUIC connections natively support stream multiplexing."""
+        return True
+
     def multiaddr(self) -> multiaddr.Multiaddr:
         """Get the multiaddr for this connection."""
         return self._maddr

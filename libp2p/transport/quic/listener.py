@@ -19,8 +19,8 @@ import trio
 from libp2p.abc import IListener
 from libp2p.custom_types import (
     TProtocol,
-    TQUICConnHandlerFn,
 )
+from libp2p.transport.quic.types import TQUICConnHandlerFn
 from libp2p.transport.quic.security import (
     LIBP2P_TLS_EXTENSION_OID,
     QUICTLSConfigManager,
