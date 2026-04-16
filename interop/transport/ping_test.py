@@ -172,7 +172,7 @@ class PingTest:
         if not self.transport:
             raise ValueError("TRANSPORT environment variable is required")
 
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
 
         self.muxer: str | None = None
         self.security: str | None = None
@@ -242,11 +242,11 @@ class PingTest:
 
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
-        valid_transports = ["tcp", "ws", "wss", "quic-v1"]
+        valid_transports = ["tcp", "ws", "wss", "quic-v1", "webrtc-direct"]
         valid_security = ["noise", "plaintext", "tls"]
         valid_muxers = ["mplex", "yamux"]
-        # Standalone transports don't use separate security/muxer
-        standalone_transports = ["quic-v1"]
+        # Standalone transports have security + muxing built-in
+        standalone_transports = ["quic-v1", "webrtc-direct"]
 
         if self.transport not in valid_transports:
             raise ValueError(
@@ -271,7 +271,7 @@ class PingTest:
         """Create security options based on configuration."""
         # Standalone transports (like quic-v1) have security built-in,
         # no separate security needed
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
         if self.transport in standalone_transports:
             # For standalone transports, return empty security options
             # The security is handled by the transport itself
@@ -310,7 +310,7 @@ class PingTest:
         """Create muxer options based on configuration."""
         # Standalone transports (like quic-v1) have muxing built-in,
         # no separate muxer needed
-        standalone_transports = ["quic-v1"]
+        standalone_transports = ["quic-v1", "webrtc-direct"]
         if self.transport in standalone_transports:
             # For standalone transports, return None (no separate muxer)
             # The muxing is handled by the transport itself
@@ -479,6 +479,17 @@ class PingTest:
             return addr.encapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
         return addr
 
+    def _build_webrtc_direct_addr(
+        self, ip_value: str, port: int
+    ) -> multiaddr.Multiaddr:
+        """Build WebRTC Direct address: /ip4|ip6/{ip}/udp/{port}/webrtc-direct."""
+        is_ipv6 = ":" in ip_value
+        if is_ipv6:
+            base = multiaddr.Multiaddr(f"/ip6/{ip_value}/udp/{port}")
+        else:
+            base = multiaddr.Multiaddr(f"/ip4/{ip_value}/udp/{port}")
+        return base.encapsulate(multiaddr.Multiaddr("/webrtc-direct"))
+
     def _build_quic_addr(self, ip_value: str, port: int) -> multiaddr.Multiaddr:
         """
         Build QUIC address from IP and port.
@@ -527,6 +538,31 @@ class PingTest:
             if quic_addrs:
                 return quic_addrs
             return [self._build_quic_addr("0.0.0.0", port)]
+
+        elif self.transport == "webrtc-direct":
+            # WebRTC Direct uses UDP like QUIC
+            webrtc_addrs = []
+            for addr in base_addrs:
+                try:
+                    ip_value = self._get_ip_value(addr)
+                    tcp_port = addr.value_for_protocol("tcp") or port
+                    if ip_value:
+                        wrtc_addr = self._build_webrtc_direct_addr(
+                            ip_value, tcp_port
+                        )
+                        _, p2p_value = self._extract_and_preserve_p2p(addr)
+                        wrtc_addr = self._encapsulate_with_p2p(
+                            wrtc_addr, p2p_value
+                        )
+                        webrtc_addrs.append(wrtc_addr)
+                except Exception as e:
+                    print(
+                        f"Error building webrtc-direct addr from {addr}: {e}",
+                        file=sys.stderr,
+                    )
+            if webrtc_addrs:
+                return webrtc_addrs
+            return [self._build_webrtc_direct_addr("0.0.0.0", port)]
 
         elif self.transport == "ws":
             # Add /ws protocol to TCP addresses
@@ -737,8 +773,14 @@ class PingTest:
                 filtered.append(addr)
             elif self.transport == "quic-v1" and "quic-v1" in protocols:
                 filtered.append(addr)
+            elif (
+                self.transport == "webrtc-direct"
+                and "webrtc-direct" in protocols
+            ):
+                filtered.append(addr)
             elif self.transport == "tcp" and not any(
-                p in protocols for p in ["ws", "wss", "quic-v1"]
+                p in protocols
+                for p in ["ws", "wss", "quic-v1", "webrtc-direct"]
             ):
                 filtered.append(addr)
         return filtered if filtered else addresses
@@ -859,6 +901,7 @@ class PingTest:
             muxer_opt=muxer_opt,
             listen_addrs=listen_addrs,
             enable_quic=(self.transport == "quic-v1"),
+            enable_webrtc=(self.transport == "webrtc-direct"),
             tls_client_config=tls_client_config,
             tls_server_config=tls_server_config,
         )
@@ -1191,6 +1234,7 @@ class PingTest:
                 "sec_opt": sec_opt,
                 "muxer_opt": muxer_opt,
                 "enable_quic": (self.transport == "quic-v1"),
+                "enable_webrtc": (self.transport == "webrtc-direct"),
                 "tls_client_config": tls_client_config,
                 "tls_server_config": tls_server_config,
             }
