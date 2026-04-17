@@ -18,6 +18,7 @@ import weakref
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
+from multiaddr.exceptions import ProtocolLookupError
 import trio
 
 import libp2p
@@ -94,9 +95,6 @@ from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.transport.quic.connection import QUICConnection
-from libp2p.utils.multiaddr_utils import (
-    join_multiaddrs,
-)
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -194,6 +192,7 @@ class BasicHost(IHost):
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
+        announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -209,6 +208,9 @@ class BasicHost(IHost):
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
+        :param announce_addrs: Optional addresses to advertise instead of
+            listen addresses.  ``None`` (default) uses listen addresses;
+            an empty list advertises no addresses.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -254,6 +256,11 @@ class BasicHost(IHost):
             )
         self.psk = psk
 
+        # Address announcement configuration (from #1268)
+        self._announce_addrs = (
+            list(announce_addrs) if announce_addrs is not None else None
+        )
+        # Observed-address tracking (from #1284, issue #1250)
         self._observed_addr_manager = ObservedAddrManager()
 
         # Cache a signed-record if the local-node in the PeerStore
@@ -352,21 +359,51 @@ class BasicHost(IHost):
 
     def get_addrs(self) -> list[multiaddr.Multiaddr]:
         """
-        Return all the multiaddr addresses this host is listening to.
+        Return the multiaddr addresses this host advertises to peers.
 
-        Note: This method appends the /p2p/{peer_id} suffix to the addresses.
-        Use get_transport_addrs() for raw transport addresses.
+        Behavior (mirrors go-libp2p's ``AddrsFactory`` pipeline):
+
+        * If ``announce_addrs`` was provided at construction time, that list
+          replaces everything — it is treated as a static ``AddrsFactory`` in
+          go-libp2p terms.  Observed (NAT) addresses are **still recorded**
+          by :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
+          (for ``get_nat_type`` and future AutoNAT consumers) but are not
+          emitted here, since the caller has explicitly chosen which
+          addresses to advertise.
+        * Otherwise the set of raw transport addresses is augmented with
+          externally observed addresses that have been confirmed by enough
+          distinct peer groups (see :data:`ACTIVATION_THRESHOLD`), then the
+          ``/p2p/{peer_id}`` suffix is appended to each.
+
+        Use :meth:`get_transport_addrs` for the raw transport addresses
+        without any observed-address augmentation or ``/p2p`` suffix.
         """
         p2p_part = multiaddr.Multiaddr(f"/p2p/{self.get_id()!s}")
-        # Append confirmed observed (NAT) addresses.
-        addrs = list(self.get_transport_addrs())
-        seen = {str(a) for a in addrs}
-        for obs_addr in self._observed_addr_manager.addrs():
-            key = str(obs_addr)
-            if key not in seen:
-                seen.add(key)
-                addrs.append(obs_addr)
-        return [join_multiaddrs(addr, p2p_part) for addr in addrs]
+
+        if self._announce_addrs is not None:
+            addrs = list(self._announce_addrs)
+        else:
+            addrs = list(self.get_transport_addrs())
+            seen = {str(a) for a in addrs}
+            for obs_addr in self._observed_addr_manager.addrs():
+                key = str(obs_addr)
+                if key not in seen:
+                    seen.add(key)
+                    addrs.append(obs_addr)
+
+        result = []
+        for addr in addrs:
+            # Strip any existing /p2p/ component, then always append our own.
+            # This avoids identity confusion when announce addrs contain a
+            # mismatched peer ID (mirrors js-libp2p behaviour).
+            try:
+                p2p_value = addr.value_for_protocol("p2p")
+            except ProtocolLookupError:
+                p2p_value = None
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+            result.append(addr.encapsulate(p2p_part))
+        return result
 
     def get_connected_peers(self) -> list[ID]:
         """
@@ -399,7 +436,7 @@ class BasicHost(IHost):
                     upnp_manager = self.upnp
                     logger.debug("Starting UPnP discovery and port mapping")
                     if await upnp_manager.discover():
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.add_port_mapping(int(port), "TCP")
                 if self.bootstrap is not None:
@@ -414,7 +451,7 @@ class BasicHost(IHost):
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
-                        for addr in self.get_addrs():
+                        for addr in self.get_transport_addrs():
                             if port := addr.value_for_protocol("tcp"):
                                 await upnp_manager.remove_port_mapping(int(port), "TCP")
                     if self.bootstrap is not None:
