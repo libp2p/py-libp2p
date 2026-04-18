@@ -49,6 +49,27 @@ This pattern is useful when:
 By announcing the correct external addresses, peers will successfully dial your
 node regardless of their network position.
 
+Automatic discovery vs. explicit announce addresses
+---------------------------------------------------
+
+py-libp2p also ships with an :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`
+that automatically discovers the host's externally observed addresses through
+the Identify protocol. Once enough distinct peer groups confirm the same
+external address, it is appended to the output of
+:meth:`~libp2p.host.basic_host.BasicHost.get_addrs` -- no manual configuration
+is required for the common NAT / EC2 case (see issue #1250).
+
+``announce_addrs`` takes priority over observed addresses: when it is set it
+acts as a static ``AddrsFactory`` (matching go-libp2p's
+``applyAddrsFactory`` behaviour), so only the explicitly announced list is
+advertised. Observations are still recorded internally -- for example to feed
+:meth:`~libp2p.host.basic_host.BasicHost.get_nat_type` -- but they are not
+emitted by ``get_addrs`` when a static list has been provided.
+
+Use ``announce_addrs`` when you already know the exact public address(es) you
+want peers to dial (e.g. a reverse proxy hostname such as ngrok). Rely on
+automatic observed-address discovery otherwise.
+
 The full source code for this example is below:
 
 .. literalinclude:: ../examples/announce_addrs/announce_addrs.py
