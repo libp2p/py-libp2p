@@ -463,26 +463,49 @@ async def test_initiate_autotls_procedure_supports_udp_only_public_ip_path(
 # ---------------------------------------------------------------------------
 
 
+class _BasicHostLogCollector(logging.Handler):
+    """Handler that simply collects records into a list."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
 @pytest.fixture
-def libp2p_log_propagate():
+def basic_host_log_records():
     """
-    ``libp2p/utils/logging.py`` sets ``libp2p.propagate = False`` and
-    ``level = WARNING`` at import time when ``LIBP2P_DEBUG`` is unset, which
-    prevents pytest's ``caplog`` handler (attached at root) from seeing any
-    ``libp2p.*`` log record, and also short-circuits DEBUG emissions at the
-    ``libp2p`` logger. For tests that assert on log messages we temporarily
-    re-enable propagation and lower the threshold to DEBUG.
+    Capture log records from the ``libp2p.host.basic_host`` logger directly.
+
+    We can't rely on pytest's ``caplog`` (attached at the root logger) because
+    ``libp2p/utils/logging.py`` reconfigures the ``libp2p`` hierarchy at
+    import time based on the ``LIBP2P_DEBUG`` env var: depending on its value
+    it may set ``propagate=False`` on the ``libp2p`` logger (or on specific
+    submodule loggers like ``libp2p.host.basic_host``), which breaks
+    propagation to root. xdist workers in CI occasionally hit a config where
+    propagation is broken by the time the test runs, even if it works under a
+    plain ``pytest`` invocation.
+
+    Attaching our own handler directly to the target logger sidesteps every
+    one of those failure modes: we don't care about propagation or parent
+    levels, only whether the logger itself is enabled for DEBUG — which we
+    force here.
     """
-    libp2p_logger = logging.getLogger("libp2p")
-    prev_propagate = libp2p_logger.propagate
-    prev_level = libp2p_logger.level
-    libp2p_logger.propagate = True
-    libp2p_logger.setLevel(logging.DEBUG)
+    target = logging.getLogger("libp2p.host.basic_host")
+    handler = _BasicHostLogCollector()
+    prev_level = target.level
+    prev_disabled = target.disabled
+    target.setLevel(logging.DEBUG)
+    target.disabled = False
+    target.addHandler(handler)
     try:
-        yield
+        yield handler.records
     finally:
-        libp2p_logger.propagate = prev_propagate
-        libp2p_logger.setLevel(prev_level)
+        target.removeHandler(handler)
+        target.setLevel(prev_level)
+        target.disabled = prev_disabled
 
 
 def _prepare_identify_host(
@@ -555,7 +578,7 @@ async def test_identify_peer_records_observation(monkeypatch):
 
 @pytest.mark.trio
 async def test_identify_peer_swallows_multiaddr_error(
-    monkeypatch, caplog, libp2p_log_propagate
+    monkeypatch, basic_host_log_records
 ):
     """
     Gap 2a: a ``MultiaddrError`` raised while recording the observation must
@@ -571,7 +594,6 @@ async def test_identify_peer_swallows_multiaddr_error(
         "malformed observed_addr"
     )
     host._observed_addr_manager = fake_manager
-    caplog.set_level(logging.DEBUG)
 
     # Should not raise.
     await host._identify_peer(peer_id, reason="test")
@@ -579,21 +601,18 @@ async def test_identify_peer_swallows_multiaddr_error(
     fake_manager.record_observation.assert_called_once()
     matching = [
         r
-        for r in caplog.records
-        if r.name == "libp2p.host.basic_host"
-        and "ignoring malformed observed_addr" in r.getMessage()
+        for r in basic_host_log_records
+        if "ignoring malformed observed_addr" in r.getMessage()
     ]
     assert matching, (
         f"expected a DEBUG log for MultiaddrError path; got "
-        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+        f"{[(r.levelname, r.getMessage()) for r in basic_host_log_records]}"
     )
     assert matching[0].levelno == logging.DEBUG
 
 
 @pytest.mark.trio
-async def test_identify_peer_swallows_value_error(
-    monkeypatch, caplog, libp2p_log_propagate
-):
+async def test_identify_peer_swallows_value_error(monkeypatch, basic_host_log_records):
     """
     Gap 2b: record_observation raising ValueError must be caught and logged at
     DEBUG. Nothing propagates out of _identify_peer.
@@ -603,27 +622,25 @@ async def test_identify_peer_swallows_value_error(
     fake_manager = MagicMock()
     fake_manager.record_observation.side_effect = ValueError("bogus bytes")
     host._observed_addr_manager = fake_manager
-    caplog.set_level(logging.DEBUG)
 
     await host._identify_peer(peer_id, reason="test")
 
     fake_manager.record_observation.assert_called_once()
     matching = [
         r
-        for r in caplog.records
-        if r.name == "libp2p.host.basic_host"
-        and "ignoring invalid observed_addr" in r.getMessage()
+        for r in basic_host_log_records
+        if "ignoring invalid observed_addr" in r.getMessage()
     ]
     assert matching, (
         f"expected a DEBUG log for ValueError path; got "
-        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+        f"{[(r.levelname, r.getMessage()) for r in basic_host_log_records]}"
     )
     assert matching[0].levelno == logging.DEBUG
 
 
 @pytest.mark.trio
 async def test_identify_peer_warns_on_unexpected_error(
-    monkeypatch, caplog, libp2p_log_propagate
+    monkeypatch, basic_host_log_records
 ):
     """
     Gap 2c: any other exception from record_observation must be caught and
@@ -634,20 +651,18 @@ async def test_identify_peer_warns_on_unexpected_error(
     fake_manager = MagicMock()
     fake_manager.record_observation.side_effect = RuntimeError("boom")
     host._observed_addr_manager = fake_manager
-    caplog.set_level(logging.DEBUG)
 
     await host._identify_peer(peer_id, reason="test")
 
     fake_manager.record_observation.assert_called_once()
     matching = [
         r
-        for r in caplog.records
-        if r.name == "libp2p.host.basic_host"
-        and "unexpected failure recording observation" in r.getMessage()
+        for r in basic_host_log_records
+        if "unexpected failure recording observation" in r.getMessage()
     ]
     assert matching, (
         f"expected a WARNING log for the generic exception path; got "
-        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+        f"{[(r.levelname, r.getMessage()) for r in basic_host_log_records]}"
     )
     assert matching[0].levelno == logging.WARNING
     # exc_info=True must have attached the RuntimeError traceback.
