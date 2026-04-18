@@ -18,7 +18,7 @@ import weakref
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
-from multiaddr.exceptions import ProtocolLookupError
+from multiaddr.exceptions import MultiaddrError, ProtocolLookupError
 import trio
 
 import libp2p
@@ -50,7 +50,10 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
-from libp2p.host.observed_addr_manager import ObservedAddrManager
+from libp2p.host.observed_addr_manager import (
+    NATDeviceType,
+    ObservedAddrManager,
+)
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
 )
@@ -209,8 +212,16 @@ class BasicHost(IHost):
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
         :param announce_addrs: Optional addresses to advertise instead of
-            listen addresses.  ``None`` (default) uses listen addresses;
-            an empty list advertises no addresses.
+            listen addresses.  ``None`` (default) uses listen addresses
+            augmented with confirmed observed addresses from
+            :class:`~libp2p.host.observed_addr_manager.ObservedAddrManager`.
+            An empty list advertises no addresses. When set, this list acts
+            as a static ``AddrsFactory`` (mirroring go-libp2p's
+            ``applyAddrsFactory``) and wins over observed addresses:
+            observations are still **recorded** by the manager (for
+            :meth:`get_nat_type` and future AutoNAT consumers) but are
+            **not** emitted by :meth:`get_addrs`. See also
+            :meth:`get_addrs` for the exact composition rules.
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
@@ -410,6 +421,26 @@ class BasicHost(IHost):
         :return: all the ids of peers this host is currently connected to
         """
         return list(self._network.connections.keys())
+
+    def get_nat_type(self) -> tuple[NATDeviceType, NATDeviceType]:
+        """
+        Return the classified NAT device type for TCP and UDP transports.
+
+        Thin pass-through to
+        :meth:`libp2p.host.observed_addr_manager.ObservedAddrManager.get_nat_type`,
+        which infers NAT behaviour from the distribution of externally
+        observed addresses reported through Identify. Matches go-libp2p's
+        ``host.getNATType()`` algorithm.
+
+        .. note::
+           Experimental API. Intended primarily for AutoNAT / hole-punch
+           consumers; the return values, thresholds, and method name may
+           evolve as those subsystems land in py-libp2p.
+
+        :return: ``(tcp_nat_type, udp_nat_type)``, each one of
+            :class:`~libp2p.host.observed_addr_manager.NATDeviceType`.
+        """
+        return self._observed_addr_manager.get_nat_type()
 
     def run(
         self,
@@ -1074,8 +1105,32 @@ class BasicHost(IHost):
                     self._observed_addr_manager.record_observation(
                         swarm_conn, our_observed, self.get_transport_addrs()
                     )
+                except MultiaddrError as exc:
+                    # Malformed observed_addr bytes or unknown protocols from a
+                    # misbehaving peer. Expected at low rates; log quietly.
+                    logger.debug(
+                        "ObservedAddrManager: ignoring malformed observed_addr "
+                        "from peer %s: %s",
+                        peer_id,
+                        exc,
+                    )
+                except ValueError as exc:
+                    logger.debug(
+                        "ObservedAddrManager: ignoring invalid observed_addr "
+                        "value from peer %s: %s",
+                        peer_id,
+                        exc,
+                    )
                 except Exception as exc:
-                    logger.debug("ObservedAddrManager: failed to record: %s", exc)
+                    # Unexpected failure: surface at warning with traceback so
+                    # regressions don't disappear into debug logs.
+                    logger.warning(
+                        "ObservedAddrManager: unexpected failure recording "
+                        "observation from peer %s: %s",
+                        peer_id,
+                        exc,
+                        exc_info=True,
+                    )
 
             logger.debug(
                 "Identify[%s]: cached %s protocols for peer %s",

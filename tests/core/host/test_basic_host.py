@@ -208,6 +208,75 @@ def test_announce_addrs_with_correct_peer_id():
     assert str(addrs[0]) == f"/ip4/1.2.3.4/tcp/4001/p2p/{peer_id_str}"
 
 
+def test_get_addrs_appends_observed_when_no_announce():
+    """Observed addresses are appended to get_addrs when announce_addrs is None."""
+    host = _make_host_with_listener(announce_addrs=None)
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    fake_manager = MagicMock()
+    fake_manager.addrs.return_value = [observed]
+    host._observed_addr_manager = fake_manager
+
+    addrs = host.get_addrs()
+    peer_id_str = str(host.get_id())
+
+    addr_strs = [str(a) for a in addrs]
+    assert f"/ip4/127.0.0.1/tcp/8000/p2p/{peer_id_str}" in addr_strs
+    assert f"/ip4/5.6.7.8/tcp/4001/p2p/{peer_id_str}" in addr_strs
+
+
+def test_get_addrs_skips_observed_when_announce_set():
+    """
+    announce_addrs acts as a static AddrsFactory (like go-libp2p): observed
+    addresses are still recorded but not advertised via get_addrs.
+    """
+    announce = [Multiaddr("/ip4/1.2.3.4/tcp/4001")]
+    host = _make_host_with_listener(announce_addrs=announce)
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    fake_manager = MagicMock()
+    fake_manager.addrs.return_value = [observed]
+    host._observed_addr_manager = fake_manager
+
+    addrs = host.get_addrs()
+    addr_strs = [str(a) for a in addrs]
+    assert len(addrs) == 1
+    assert "/ip4/1.2.3.4/tcp/4001" in addr_strs[0]
+    assert not any("5.6.7.8" in s for s in addr_strs)
+    # Observed manager's addrs() must not be consulted at all in this branch.
+    fake_manager.addrs.assert_not_called()
+
+
+def test_get_addrs_deduplicates_observed_matching_transport():
+    """If the observed address equals a listen addr it must not be duplicated."""
+    host = _make_host_with_listener(announce_addrs=None)
+    fake_manager = MagicMock()
+    fake_manager.addrs.return_value = [
+        Multiaddr("/ip4/127.0.0.1/tcp/8000"),
+    ]
+    host._observed_addr_manager = fake_manager
+
+    addrs = host.get_addrs()
+    assert len(addrs) == 1
+
+
+def test_get_nat_type_delegates_to_observed_addr_manager():
+    """BasicHost.get_nat_type() is a thin pass-through to ObservedAddrManager."""
+    from libp2p.host.observed_addr_manager import NATDeviceType
+
+    host = _make_host_with_listener()
+    fake_manager = MagicMock()
+    fake_manager.get_nat_type.return_value = (
+        NATDeviceType.ENDPOINT_INDEPENDENT,
+        NATDeviceType.UNKNOWN,
+    )
+    host._observed_addr_manager = fake_manager
+
+    tcp_nat, udp_nat = host.get_nat_type()
+
+    fake_manager.get_nat_type.assert_called_once_with()
+    assert tcp_nat == NATDeviceType.ENDPOINT_INDEPENDENT
+    assert udp_nat == NATDeviceType.UNKNOWN
+
+
 @pytest.mark.trio
 async def test_initiate_autotls_procedure_builds_transport_aware_broker_multiaddr(
     monkeypatch, tmp_path

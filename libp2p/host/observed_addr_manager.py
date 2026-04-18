@@ -341,10 +341,25 @@ class ObservedAddrManager:
         udp_counts: list[int] = []
 
         for _, ext_map in self._external_addrs.items():
-            # Determine TCP/UDP once per local TW from first key (matches Go).
+            # Invariant: every ``ext_tw_str`` key in a single ``ext_map`` shares
+            # the same transport (all ``/tcp/`` or all ``/udp/``), because the
+            # outer key (``local_tw_str``) is derived from a single local
+            # thin-waist in ``record_observation`` via ``_match_local_thin_waist``
+            # and only matches external thin waists with the same IP family +
+            # transport (see ``has_consistent_transport``). It is therefore
+            # enough to classify the bucket once from the first key — this
+            # matches go-libp2p's ``getNATType`` behaviour in
+            # ``p2p/host/basic/basic_host.go``.
             first_key = next(iter(ext_map), "")
             is_tcp = "/tcp/" in first_key
-            for _, observers in ext_map.items():
+            for ext_tw_str, observers in ext_map.items():
+                # Defensive skip: if a future refactor ever allows a mixed
+                # bucket, misclassifying as "other transport" is silently
+                # wrong — drop the stray entry instead.
+                if is_tcp and "/tcp/" not in ext_tw_str:
+                    continue
+                if not is_tcp and "/udp/" not in ext_tw_str:
+                    continue
                 count = len(observers)  # unique observer groups, not total connections
                 if is_tcp:
                     tcp_counts.append(count)
