@@ -175,6 +175,7 @@ class BitswapClient:
 
         Returns:
             Dict mapping cid_bytes -> block_data for all successfully fetched blocks
+
         """
         results: dict[bytes, bytes] = {}
         cid_objs = [parse_cid(c) for c in cids]
@@ -214,7 +215,8 @@ class BitswapClient:
                         if cid_obj in self._pending_requests:
                             await self._pending_requests[cid_obj].wait()
             except trio.TooSlowError:
-                logger.warning(f"Batch timeout: {len(batch)} blocks, got partial results")
+                msg = f"Batch timeout: {len(batch)} blocks, got partial results"
+                logger.warning(msg)
 
             # Collect results and clean up
             for cid_obj in batch:
@@ -222,7 +224,8 @@ class BitswapClient:
                 if data is not None:
                     results[cid_obj.buffer] = data
                 else:
-                    logger.warning(f"Block not received: {format_cid_for_display(cid_obj)}")
+                    cid_str = format_cid_for_display(cid_obj)
+                    logger.warning(f"Block not received: {cid_str}")
 
                 # Cleanup
                 if cid_obj in self._pending_requests:
