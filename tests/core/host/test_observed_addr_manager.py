@@ -438,6 +438,50 @@ def test_get_nat_type_dependent():
     assert udp_nat == NATDeviceType.UNKNOWN
 
 
+def test_get_nat_type_skips_mixed_transport_bucket():
+    """
+    White-box test for the defensive TCP/UDP skip guard in
+    ``ObservedAddrManager.get_nat_type``.
+
+    Normal flow cannot produce a mixed-transport bucket because
+    ``record_observation`` routes through ``_match_local_thin_waist`` +
+    ``has_consistent_transport``. We bypass that invariant by poking
+    ``_external_addrs`` directly to simulate a future refactor leaking a
+    stray entry of the opposite transport into a bucket.
+
+    This test is designed so the result *differs* between guarded and
+    unguarded implementations:
+
+    * Bucket is tagged TCP (first inserted key is ``/tcp/``).
+    * Real TCP observations are spread across 12 distinct external addresses
+      with 1 observer each → alone classifies as ``ENDPOINT_DEPENDENT``.
+    * A stray ``/udp/`` entry with 12 concentrated observers is inserted.
+    * Without the guard, the UDP count [12] would be absorbed into
+      ``tcp_counts`` and the 50% concentration rule would flip the result
+      to ``ENDPOINT_INDEPENDENT`` — a silent misclassification.
+    * With the guard, the stray UDP entry is skipped and TCP stays
+      ``ENDPOINT_DEPENDENT``.
+    """
+    mgr = ObservedAddrManager()
+
+    local_tw_str = "/ip4/0.0.0.0/tcp/4001"
+    bucket: dict[str, dict[str, int]] = {}
+    # 12 distinct TCP external addrs, 1 observer each → DEPENDENT on its own.
+    for i in range(12):
+        bucket[f"/ip4/1.2.3.{i}/tcp/4001"] = {f"10.0.0.{i + 1}": 1}
+    # Stray concentrated UDP entry — would flip classification without the
+    # guard.
+    bucket["/ip4/1.2.3.200/udp/4001"] = {f"10.99.0.{i + 1}": 1 for i in range(12)}
+    mgr._external_addrs[local_tw_str] = bucket
+
+    tcp_nat, udp_nat = mgr.get_nat_type()
+
+    # TCP: stays DEPENDENT because the guard filtered out the stray UDP entry.
+    assert tcp_nat == NATDeviceType.ENDPOINT_DEPENDENT
+    # UDP: no legitimate UDP bucket exists, so UDP stays UNKNOWN.
+    assert udp_nat == NATDeviceType.UNKNOWN
+
+
 # ---------------------------------------------------------------------------
 # Step 8: has_consistent_transport
 # ---------------------------------------------------------------------------

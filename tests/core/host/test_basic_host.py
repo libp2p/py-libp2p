@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import logging
 from unittest.mock import (
     AsyncMock,
     MagicMock,
@@ -6,6 +7,7 @@ from unittest.mock import (
 
 import pytest
 from multiaddr import Multiaddr
+from multiaddr.exceptions import MultiaddrError
 
 from libp2p import (
     new_swarm,
@@ -23,6 +25,10 @@ from libp2p.host.defaults import (
 from libp2p.host.exceptions import (
     StreamFailure,
 )
+from libp2p.identity.identify.pb.identify_pb2 import (
+    Identify as IdentifyMsg,
+)
+from libp2p.peer.id import ID
 
 
 def test_default_protocols():
@@ -447,3 +453,244 @@ async def test_initiate_autotls_procedure_supports_udp_only_public_ip_path(
     assert captured_addrs
     broker_addr = captured_addrs[-1]
     assert "/ip4/11.22.33.44/udp/4001/quic-v1" in str(broker_addr)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for ObservedAddrManager wiring into BasicHost:
+# * _identify_peer records observation on the manager (Gap 1)
+# * _identify_peer's narrow exception handling (Gap 2)
+# * _on_notifee_disconnected cleans up the manager's per-conn state (Gap 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def libp2p_log_propagate():
+    """
+    ``libp2p/utils/logging.py`` sets ``libp2p.propagate = False`` and
+    ``level = WARNING`` at import time when ``LIBP2P_DEBUG`` is unset, which
+    prevents pytest's ``caplog`` handler (attached at root) from seeing any
+    ``libp2p.*`` log record, and also short-circuits DEBUG emissions at the
+    ``libp2p`` logger. For tests that assert on log messages we temporarily
+    re-enable propagation and lower the threshold to DEBUG.
+    """
+    libp2p_logger = logging.getLogger("libp2p")
+    prev_propagate = libp2p_logger.propagate
+    prev_level = libp2p_logger.level
+    libp2p_logger.propagate = True
+    libp2p_logger.setLevel(logging.DEBUG)
+    try:
+        yield
+    finally:
+        libp2p_logger.propagate = prev_propagate
+        libp2p_logger.setLevel(prev_level)
+
+
+def _prepare_identify_host(
+    monkeypatch: pytest.MonkeyPatch, observed_addr_bytes: bytes
+) -> tuple[BasicHost, ID, MagicMock]:
+    """
+    Build a BasicHost wired up just enough to run ``_identify_peer`` against a
+    canned ``IdentifyMsg`` payload for a single fake connection.
+
+    Returns ``(host, peer_id, swarm_conn)``. ``host._observed_addr_manager`` is
+    left as the real instance — individual tests should replace it with a mock
+    if they want to assert on it.
+    """
+    host = _make_host_with_listener(announce_addrs=None)
+    peer_id = host.get_id()
+
+    swarm_conn = MagicMock()
+    swarm_conn.muxed_conn = MagicMock()
+    swarm_conn.muxed_conn.peer_id = peer_id
+    swarm_conn.muxed_conn.get_remote_address = MagicMock(
+        return_value=("10.0.0.1", 4001)
+    )
+    swarm_conn.is_closed = False
+    swarm_conn.event_started = None  # no gating on connect event in tests
+
+    monkeypatch.setattr(host._network, "get_connections", lambda pid: [swarm_conn])
+
+    fake_stream = MagicMock()
+    fake_stream.reset = AsyncMock()
+    fake_stream.close = AsyncMock()
+    host.new_stream = AsyncMock(return_value=fake_stream)
+
+    msg = IdentifyMsg(observed_addr=observed_addr_bytes)
+    msg_bytes = msg.SerializeToString()
+
+    async def fake_read(stream, use_varint_format=True):
+        return msg_bytes
+
+    async def fake_update(peerstore, peer_id, identify_msg):
+        return None
+
+    monkeypatch.setattr(
+        "libp2p.host.basic_host.read_length_prefixed_protobuf", fake_read
+    )
+    monkeypatch.setattr(
+        "libp2p.host.basic_host._update_peerstore_from_identify", fake_update
+    )
+
+    return host, peer_id, swarm_conn
+
+
+@pytest.mark.trio
+async def test_identify_peer_records_observation(monkeypatch):
+    """Gap 1: _identify_peer forwards the peer's observed_addr to the manager."""
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    host, peer_id, swarm_conn = _prepare_identify_host(monkeypatch, observed.to_bytes())
+    fake_manager = MagicMock()
+    host._observed_addr_manager = fake_manager
+
+    await host._identify_peer(peer_id, reason="test")
+
+    fake_manager.record_observation.assert_called_once()
+    args, _kwargs = fake_manager.record_observation.call_args
+    passed_conn, passed_observed, passed_locals = args
+    assert passed_conn is swarm_conn
+    assert str(passed_observed) == "/ip4/5.6.7.8/tcp/4001"
+    # Third arg must be the current list of transport addrs.
+    assert list(passed_locals) == host.get_transport_addrs()
+
+
+@pytest.mark.trio
+async def test_identify_peer_swallows_multiaddr_error(
+    monkeypatch, caplog, libp2p_log_propagate
+):
+    """
+    Gap 2a: a ``MultiaddrError`` raised while recording the observation must
+    be caught and logged at DEBUG; nothing propagates out of _identify_peer.
+    We use a well-formed multiaddr and make ``record_observation`` raise —
+    real-world malformed byte payloads surface the same exception class, but
+    the ``multiaddr`` library constructs lazily and only raises in ``str()``.
+    """
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    host, peer_id, _ = _prepare_identify_host(monkeypatch, observed.to_bytes())
+    fake_manager = MagicMock()
+    fake_manager.record_observation.side_effect = MultiaddrError(
+        "malformed observed_addr"
+    )
+    host._observed_addr_manager = fake_manager
+    caplog.set_level(logging.DEBUG)
+
+    # Should not raise.
+    await host._identify_peer(peer_id, reason="test")
+
+    fake_manager.record_observation.assert_called_once()
+    matching = [
+        r
+        for r in caplog.records
+        if r.name == "libp2p.host.basic_host"
+        and "ignoring malformed observed_addr" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected a DEBUG log for MultiaddrError path; got "
+        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
+    assert matching[0].levelno == logging.DEBUG
+
+
+@pytest.mark.trio
+async def test_identify_peer_swallows_value_error(
+    monkeypatch, caplog, libp2p_log_propagate
+):
+    """
+    Gap 2b: record_observation raising ValueError must be caught and logged at
+    DEBUG. Nothing propagates out of _identify_peer.
+    """
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    host, peer_id, _ = _prepare_identify_host(monkeypatch, observed.to_bytes())
+    fake_manager = MagicMock()
+    fake_manager.record_observation.side_effect = ValueError("bogus bytes")
+    host._observed_addr_manager = fake_manager
+    caplog.set_level(logging.DEBUG)
+
+    await host._identify_peer(peer_id, reason="test")
+
+    fake_manager.record_observation.assert_called_once()
+    matching = [
+        r
+        for r in caplog.records
+        if r.name == "libp2p.host.basic_host"
+        and "ignoring invalid observed_addr" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected a DEBUG log for ValueError path; got "
+        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
+    assert matching[0].levelno == logging.DEBUG
+
+
+@pytest.mark.trio
+async def test_identify_peer_warns_on_unexpected_error(
+    monkeypatch, caplog, libp2p_log_propagate
+):
+    """
+    Gap 2c: any other exception from record_observation must be caught and
+    surfaced at WARNING level with a traceback, not swallowed silently.
+    """
+    observed = Multiaddr("/ip4/5.6.7.8/tcp/4001")
+    host, peer_id, _ = _prepare_identify_host(monkeypatch, observed.to_bytes())
+    fake_manager = MagicMock()
+    fake_manager.record_observation.side_effect = RuntimeError("boom")
+    host._observed_addr_manager = fake_manager
+    caplog.set_level(logging.DEBUG)
+
+    await host._identify_peer(peer_id, reason="test")
+
+    fake_manager.record_observation.assert_called_once()
+    matching = [
+        r
+        for r in caplog.records
+        if r.name == "libp2p.host.basic_host"
+        and "unexpected failure recording observation" in r.getMessage()
+    ]
+    assert matching, (
+        f"expected a WARNING log for the generic exception path; got "
+        f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+    )
+    assert matching[0].levelno == logging.WARNING
+    # exc_info=True must have attached the RuntimeError traceback.
+    assert matching[0].exc_info is not None
+    assert matching[0].exc_info[0] is RuntimeError
+
+
+def test_on_notifee_disconnected_calls_remove_conn():
+    """
+    Gap 3: when a peer disconnects, ObservedAddrManager.remove_conn must be
+    invoked so per-conn observations are released.
+    """
+    host = _make_host_with_listener(announce_addrs=None)
+    fake_manager = MagicMock()
+    host._observed_addr_manager = fake_manager
+
+    peer_id = host.get_id()
+    conn = MagicMock()
+    conn.muxed_conn = MagicMock()
+    conn.muxed_conn.peer_id = peer_id
+
+    # Preload identified_peers so we can also verify the cleanup happens.
+    host._identified_peers.add(peer_id)
+
+    host._on_notifee_disconnected(conn)
+
+    fake_manager.remove_conn.assert_called_once_with(conn)
+    assert peer_id not in host._identified_peers
+
+
+def test_on_notifee_disconnected_without_peer_id_is_noop():
+    """
+    Defensive: if the muxed_conn has no peer_id attribute, the handler must
+    short-circuit without touching the manager.
+    """
+    host = _make_host_with_listener(announce_addrs=None)
+    fake_manager = MagicMock()
+    host._observed_addr_manager = fake_manager
+
+    conn = MagicMock()
+    conn.muxed_conn = MagicMock()
+    conn.muxed_conn.peer_id = None
+
+    host._on_notifee_disconnected(conn)
+
+    fake_manager.remove_conn.assert_not_called()
