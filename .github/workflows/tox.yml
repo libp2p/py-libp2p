@@ -43,6 +43,11 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install GMP headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev
+
       - name: Install Nim for interop testing
         if: matrix.toxenv == 'interop'
         run: |
