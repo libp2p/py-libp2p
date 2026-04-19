@@ -22,7 +22,6 @@ Usage (from repository root):
 import argparse
 import logging
 import random
-import time
 
 import multiaddr
 import trio
@@ -186,8 +185,8 @@ class GossipsubV10Demo:
                 for node in self.nodes:
                     nursery.start_soon(node.receive_messages)
 
-                # Run publishing loop
-                end_time = time.time() + duration
+                # Run publishing loop (trio clock matches the event loop / sleeps)
+                deadline = trio.current_time() + duration
                 message_counter = 0
 
                 print(f"\n{'=' * 60}")
@@ -199,10 +198,10 @@ class GossipsubV10Demo:
                 print("  (node_0 is fanout-only: publishes via fanout, not in mesh)")
                 print(f"{'=' * 60}\n")
 
-                while time.time() < end_time:
+                while trio.current_time() < deadline:
                     # Random node publishes (node_0 uses fanout when it publishes)
                     node = random.choice(self.nodes)
-                    message = f"msg_{message_counter}_{int(time.time())}"
+                    message = f"msg_{message_counter}"
                     await node.publish_message(message)
                     message_counter += 1
                     await trio.sleep(2)  # Publish every 2 seconds

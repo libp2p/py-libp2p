@@ -727,9 +727,7 @@ async def test_sparse_connect_degree_zero():
         degree = 0
 
         await sparse_connect(hosts, degree)
-        # Match test_sparse_connect / test_dense_connect_fallback: pubsub streams need
-        # time to settle; CI under pytest-xdist can exceed a short 0.1s window.
-        await trio.sleep(2)
+        await trio.sleep(0.1)  # Allow connections to establish
 
         # With degree=0, sparse_connect should still create neighbor connections
         # for connectivity (this is part of the algorithm design)

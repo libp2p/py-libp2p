@@ -230,7 +230,7 @@ class GossipsubV11Demo:
                 print("Protocol: /meshsub/1.1.0")
                 print(
                     "Features: Peer scoring (P1-P7), prune backoff, peer exchange (PX),"
-                    "optional app score"
+                    " optional app score"
                 )
                 print(f"{'=' * 60}\n")
 
