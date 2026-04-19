@@ -25,6 +25,7 @@ import logging
 import random
 import time
 
+import multiaddr
 import trio
 
 from libp2p import new_host
@@ -32,6 +33,7 @@ from libp2p.abc import IHost, ISubscriptionAPI
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.score import ScoreParams, TopicScoreParams
@@ -122,8 +124,6 @@ class GossipsubV20Node:
         self.pubsub = Pubsub(self.host, self.gossipsub)
 
         # Start services
-        import multiaddr
-
         listen_addrs = [multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{self.port}")]
 
         async with self.host.run(listen_addrs=listen_addrs):
@@ -191,10 +191,6 @@ class GossipsubV20Node:
         """Connect to another peer"""
         if self.host:
             try:
-                import multiaddr
-
-                from libp2p.peer.peerinfo import info_from_p2p_addr
-
                 maddr = multiaddr.Multiaddr(peer_addr)
                 info = info_from_p2p_addr(maddr)
                 await self.host.connect(info)

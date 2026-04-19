@@ -32,11 +32,13 @@ import logging
 import random
 import time
 
+import multiaddr
 import trio
 
 from libp2p import new_host
 from libp2p.abc import IHost, ISubscriptionAPI
 from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.extensions import PeerExtensions
 from libp2p.pubsub.gossipsub import PROTOCOL_ID_V14, GossipSub
 from libp2p.pubsub.pubsub import Pubsub
@@ -81,8 +83,6 @@ class GossipsubV14Node:
 
     async def start(self) -> None:
         """Initialise the libp2p host and GossipSub v1.4 router."""
-        import multiaddr
-
         key_pair = create_new_key_pair()
 
         host = new_host(
@@ -221,10 +221,6 @@ class GossipsubV14Node:
         if not self.host:
             return
         try:
-            import multiaddr
-
-            from libp2p.peer.peerinfo import info_from_p2p_addr
-
             maddr = multiaddr.Multiaddr(peer_addr)
             info = info_from_p2p_addr(maddr)
             await self.host.connect(info)
