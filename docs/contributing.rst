@@ -19,6 +19,10 @@ Next, install the development dependencies and set up the project. We recommend 
 virtual environment, such as `virtualenv <https://virtualenv.pypa.io/en/stable/>`_ or
 Python's built-in ``venv`` module. Instructions vary by platform:
 
+.. note::
+
+    py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
+
 Linux Setup
 ^^^^^^^^^^^
 
@@ -47,8 +51,6 @@ Install the development dependencies using a virtual environment:
 .. code:: sh
 
     cd py-libp2p
-    python3 -m venv .venv
-    . .venv/bin/activate
     ./scripts/setup_dev.sh
 
 .. note::

@@ -3,6 +3,10 @@ Install
 
 Follow the steps below to install `py-libp2p` on your platform.
 
+.. note::
+
+    py-libp2p installation is currently supported on Python versions ``<= 3.13``.
+
 Using uv (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~
 
