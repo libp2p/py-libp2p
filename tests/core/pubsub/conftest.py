@@ -58,17 +58,31 @@ async def gossipsub_nodes(n: int, **kwargs: Any) -> AsyncIterator[GossipSubHarne
 
 @asynccontextmanager
 async def connected_gossipsub_nodes(
-    n: int, **kwargs: Any
+    n: int, *, strict: bool = False, **kwargs: Any
 ) -> AsyncIterator[GossipSubHarness]:
-    """Create *n* GossipSub nodes with dense connectivity."""
+    """
+    Create *n* GossipSub nodes with dense connectivity.
+
+    By default this waits only until each node has observed one expected
+    neighbour (fast path). Pass ``strict=True`` to wait until every node
+    has observed every other expected peer — useful for topology-sensitive
+    tests that assert exact peer counts or full fanout behaviour.
+    """
     peer_wait_timeout = kwargs.pop("peer_wait_timeout", 5.0)
     async with gossipsub_nodes(n, **kwargs) as harness:
         await dense_connect(harness.hosts)
         if n > 1:
             with trio.fail_after(peer_wait_timeout):
-                for index, pubsub in enumerate(harness.pubsubs):
-                    target_host = harness.hosts[(index + 1) % n]
-                    await pubsub.wait_for_peer(target_host.get_id())
+                if strict:
+                    for index, pubsub in enumerate(harness.pubsubs):
+                        for other_index, other_host in enumerate(harness.hosts):
+                            if other_index == index:
+                                continue
+                            await pubsub.wait_for_peer(other_host.get_id())
+                else:
+                    for index, pubsub in enumerate(harness.pubsubs):
+                        target_host = harness.hosts[(index + 1) % n]
+                        await pubsub.wait_for_peer(target_host.get_id())
         yield harness
 
 
