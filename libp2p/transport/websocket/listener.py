@@ -104,6 +104,12 @@ class WebsocketListener(IListener):
         self._server: WebSocketServer | None = None
         self._shutdown_event = trio.Event()
 
+        # Internal nursery state for self-hosted background task.
+        self._nursery: trio.Nursery | None = None
+        self._started: trio.Event = trio.Event()
+        self._stopped: trio.Event = trio.Event()
+        self._start_error: BaseException | None = None
+
         # TLS configuration
         self._tls_config = self._config.tls_config
         self._is_wss = self._tls_config is not None
@@ -170,13 +176,16 @@ class WebsocketListener(IListener):
         # Fall back to legacy TLS configuration
         return self._tls_config
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening for connections.
 
+        The listener spawns its own internal nursery as a trio system task
+        so that ``serve_websocket`` keeps running after ``listen()`` returns.
+        The nursery is cancelled on :meth:`close`.
+
         Args:
             maddr: Multiaddr to listen on
-            nursery: Trio nursery for managing tasks
 
         :raises OpenConnectionError: If listening fails, listener is closed,
             invalid WebSocket multiaddr, or connection limit reached
@@ -226,16 +235,9 @@ class WebsocketListener(IListener):
             host = extract_ip_from_multiaddr(proto_info.rest_multiaddr) or "0.0.0.0"
             port = int(proto_info.rest_multiaddr.value_for_protocol("tcp") or "80")
 
-            # Create WebSocket server using nursery.start pattern
-            server_info = None
-
             async def websocket_server_task(task_status: TaskStatus[Any]) -> None:
                 """Run the WebSocket server."""
-                nonlocal server_info
                 try:
-                    # Use trio_websocket's serve_websocket
-
-                    # Create the server
                     await serve_websocket(
                         handler=self._handle_websocket_connection,
                         host=host,
@@ -254,11 +256,37 @@ class WebsocketListener(IListener):
                     logger.error(f"WebSocket server error: {e}")
                     raise
 
-            # Start the server in the nursery and capture the server info
-            server_info = await nursery.start(websocket_server_task)
+            # Reset state in case of a re-listen.
+            self._started = trio.Event()
+            self._stopped = trio.Event()
+            self._start_error = None
+            server_info: Any = None
 
-            # Store the server for later cleanup
-            self._server = server_info
+            async def _run_server() -> None:
+                nonlocal server_info
+                try:
+                    async with trio.open_nursery() as nursery:
+                        self._nursery = nursery
+                        try:
+                            server_info = await nursery.start(websocket_server_task)
+                            self._server = server_info
+                        except BaseException as error:
+                            self._start_error = error
+                        finally:
+                            self._started.set()
+                        # Nursery stays open serving connections until cancelled.
+                finally:
+                    self._stopped.set()
+                    self._nursery = None
+
+            trio.lowlevel.spawn_system_task(_run_server)
+            await self._started.wait()
+
+            if self._start_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to start WebSocket listener for {maddr}: "
+                    f"{self._start_error}"
+                ) from self._start_error
 
             # Extract the actual listening address and port from the server socket
             # This ensures we get the real bound address, especially for port 0 or DNS
@@ -369,6 +397,9 @@ class WebsocketListener(IListener):
         """
         Close the listener and all connections.
 
+        Cancels the internal nursery that hosts the WebSocket server and
+        waits for the background system task to finish.
+
         :raises WebSocketConnectionError: If closing connections fails
         """
         if self._closed:
@@ -396,6 +427,12 @@ class WebsocketListener(IListener):
                 getattr(self._server, "close", None)
             ):
                 await self._server.close()  # type: ignore
+
+        # Cancel internal nursery and wait for the background task to finish.
+        if self._nursery is not None:
+            self._nursery.cancel_scope.cancel()
+        if self._started.is_set():
+            await self._stopped.wait()
 
         logger.info("WebSocket listener closed")
 
