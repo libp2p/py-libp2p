@@ -63,6 +63,7 @@ from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
     _update_peerstore_from_identify,
 )
+from libp2p.network.resolver import ConnectionResolver
 from libp2p.peer.id import (
     ID,
 )
@@ -93,7 +94,6 @@ from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
-from libp2p.transport.quic.connection import QUICConnection
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -175,6 +175,7 @@ class BasicHost(IHost):
     mDNS: MDNSDiscovery | None
     upnp: UpnpManager | None
     bootstrap: BootstrapDiscovery | None
+    _resolver: ConnectionResolver | None
 
     def __init__(
         self,
@@ -187,11 +188,12 @@ class BasicHost(IHost):
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
         psk: str | None = None,
-        *,
+        resolver: ConnectionResolver | None = None,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
         bootstrap_dns_max_retries: int = 3,
         announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+        *,
     ) -> None:
         """
         Initialize a BasicHost instance.
@@ -204,16 +206,23 @@ class BasicHost(IHost):
         :param negotiate_timeout: Protocol negotiation timeout
         :param resource_manager: Optional resource manager instance
         :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
+        :param resolver: Optional pull-based connection resolver.
+            When set, :meth:`connect` can use the resolver to build the
+            connection stack dynamically instead of the fixed
+            ``TransportUpgrader`` pipeline.
         :param bootstrap_allow_ipv6: If True, bootstrap uses IPv6+TCP when available.
         :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt.
         :param bootstrap_dns_max_retries: Max DNS resolution retries (with backoff).
         :param announce_addrs: Optional addresses to advertise instead of
             listen addresses.  ``None`` (default) uses listen addresses;
             an empty list advertises no addresses.
+        :type resolver: :class:`libp2p.network.resolver.ConnectionResolver`
+            or None
         """
         self._network = network
         self._network.set_stream_handler(self._swarm_stream_handler)
         self.peerstore = self._network.peerstore
+        self._resolver = resolver
 
         # Coordinate negotiate_timeout with transport config if available
         # For QUIC transports, use the config value to ensure consistency
@@ -280,6 +289,11 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: set[ID] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+
+    @property
+    def resolver(self) -> ConnectionResolver | None:
+        """Return the pull-based connection resolver, if configured."""
+        return self._resolver
 
     def get_id(self) -> ID:
         """
@@ -1079,7 +1093,7 @@ class BasicHost(IHost):
         if not is_initiator:
             # Only the dialer (initiator) needs to actively run identify.
             return
-        if not self._is_quic_muxer(muxed_conn):
+        if not self._is_native_muxer(muxed_conn):
             return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
@@ -1101,15 +1115,16 @@ class BasicHost(IHost):
             return connections[0]
         return None
 
-    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
+    def _is_native_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
+        """Return True if the muxed connection is natively muxed (e.g. QUIC)."""
+        return getattr(muxed_conn, "is_muxed", False)
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         connection = self._get_first_connection(peer_id)
         if connection is None:
             return False
         muxed_conn = getattr(connection, "muxed_conn", None)
-        return self._is_quic_muxer(muxed_conn)
+        return self._is_native_muxer(muxed_conn)
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
@@ -1185,6 +1200,18 @@ class BasicHost(IHost):
             )
             await net_stream.reset()
             return
+
+        # Check handler connection requirements (if declared)
+        from libp2p.requirements import check_connection_requirements
+
+        underlying_conn = getattr(net_stream, "muxed_conn", None)
+        if not check_connection_requirements(handler, underlying_conn):
+            logger.warning(
+                "Handler for protocol %s has unmet connection requirements "
+                "on stream from peer %s — proceeding anyway",
+                protocol,
+                net_stream.muxed_conn.peer_id,
+            )
 
         await handler(net_stream)
 

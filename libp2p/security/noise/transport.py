@@ -12,16 +12,19 @@ from libp2p.abc import (
     ISecureConn,
     ISecureTransport,
 )
+from libp2p.crypto.ed25519 import create_new_key_pair as create_ed25519_kp
 from libp2p.crypto.keys import (
     KeyPair,
     PrivateKey,
 )
+from libp2p.crypto.x25519 import create_new_key_pair as create_x25519_kp
 from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.providers import SecurityProvider
 
 from .early_data import EarlyDataHandler, EarlyDataManager
 from .patterns import (
@@ -161,3 +164,22 @@ class Transport(ISecureTransport):
     def clear_static_key_cache(self) -> None:
         """Clear the static key cache."""
         self._static_key_cache.clear()
+
+
+def _create_noise_provider() -> "SecurityProvider":
+    """
+    Entry-point factory for Noise security discovery.
+
+    Returns a :class:`~libp2p.providers.SecurityProvider` wrapping a
+    fresh Noise transport instance.
+
+    .. note::
+
+       Both an Ed25519 identity key and an X25519 static key are
+       generated; callers needing specific keys should construct
+       the provider manually.
+    """
+    id_kp = create_ed25519_kp()
+    noise_kp = create_x25519_kp()
+    transport = Transport(id_kp, noise_privkey=noise_kp.private_key)
+    return SecurityProvider(PROTOCOL_ID, transport)

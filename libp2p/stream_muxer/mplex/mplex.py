@@ -33,6 +33,8 @@ from libp2p.network.connection.exceptions import (
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.providers import MuxerProvider
+from libp2p.requirements import after_connection
 from libp2p.utils import (
     decode_uvarint_from_stream,
     encode_uvarint,
@@ -60,6 +62,7 @@ MPLEX_MESSAGE_CHANNEL_SIZE = 8
 logger = logging.getLogger(__name__)
 
 
+@after_connection(ISecureConn)
 class Mplex(IMuxedConn):
     """
     reference: https://github.com/libp2p/go-mplex/blob/master/multiplex.go
@@ -437,3 +440,13 @@ class Mplex(IMuxedConn):
         Get connection type by delegating to secured_conn.
         """
         return self.secured_conn.get_connection_type()
+
+
+def _create_mplex_provider() -> "MuxerProvider":
+    """
+    Entry-point factory for Mplex muxer discovery.
+
+    Returns a :class:`~libp2p.providers.MuxerProvider` wrapping the
+    :class:`Mplex` class.
+    """
+    return MuxerProvider(MPLEX_PROTOCOL_ID, Mplex)
