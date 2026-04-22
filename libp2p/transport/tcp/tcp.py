@@ -45,15 +45,27 @@ class TCPListener(IListener):
     def __init__(self, handler_function: THandler) -> None:
         self.listeners = []
         self.handler = handler_function
+        # Internal concurrency state — see listen() / close().
+        self._nursery: trio.Nursery | None = None
+        self._nursery_ready: trio.Event = trio.Event()
+        self._stopped: trio.Event = trio.Event()
+        self._closed: bool = False
+        # Serializes listen()/close() so concurrent callers don't race the
+        # lazy system-task spawn.
+        self._lifecycle_lock: trio.Lock = trio.Lock()
 
-    # TODO: Get rid of `nursery`?
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Put listener in listening mode and wait for incoming connections.
 
+        On the first call, the listener spawns its own internal nursery as
+        a trio system task so that ``serve_tcp`` keeps running after
+        ``listen()`` returns. Subsequent calls add additional binds to the
+        same nursery. The nursery is cancelled on :meth:`close`.
+
         :param maddr: maddr of peer
         :raises OpenConnectionError: if listening fails (e.g. missing/invalid
-            port or failed start)
+            port, failed start, or listener already closed)
         """
 
         async def serve_tcp(
@@ -105,19 +117,51 @@ class TCPListener(IListener):
         # For trio.serve_tcp, host_str (as host argument) can be None,
         # which typically means listen on all available interfaces.
 
-        try:
-            started_listeners = await nursery.start(
-                serve_tcp,
-                handler,
-                tcp_port,
-                host_str,
-            )
-        except Exception as error:
-            error_msg = f"Failed to start TCP listener for {maddr}: {error}"
-            logger.error(error_msg)
-            raise OpenConnectionError(error_msg) from error
+        async with self._lifecycle_lock:
+            if self._closed:
+                raise OpenConnectionError(
+                    f"Cannot listen on {maddr}: listener is closed"
+                )
+            if self._nursery is None:
+                await self._spawn_background_task()
 
-        self.listeners.extend(started_listeners)
+            nursery = self._nursery
+            if nursery is None:
+                raise OpenConnectionError(
+                    f"Cannot listen on {maddr}: background task is not running"
+                )
+            try:
+                started_listeners = await nursery.start(
+                    serve_tcp,
+                    handler,
+                    tcp_port,
+                    host_str,
+                )
+            except BaseException as error:
+                error_msg = f"Failed to start TCP listener for {maddr}: {error}"
+                logger.error(error_msg)
+                raise OpenConnectionError(error_msg) from error
+            self.listeners.extend(started_listeners)
+
+    async def _spawn_background_task(self) -> None:
+        """Spawn the nursery-owning system task and await its readiness."""
+
+        async def _run_server() -> None:
+            try:
+                async with trio.open_nursery() as nursery:
+                    self._nursery = nursery
+                    self._nursery_ready.set()
+                    # Keep the nursery body alive so it stays open for
+                    # subsequent nursery.start(serve_tcp, ...) calls from
+                    # listen(). close() cancels the scope to unblock this;
+                    # the nursery's cancel scope consumes the Cancelled.
+                    await trio.sleep_forever()
+            finally:
+                self._nursery = None
+                self._stopped.set()
+
+        trio.lowlevel.spawn_system_task(_run_server)
+        await self._nursery_ready.wait()
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """
@@ -130,9 +174,31 @@ class TCPListener(IListener):
         )
 
     async def close(self) -> None:
+        """
+        Cancel the listener's internal nursery and close all sockets.
+
+        Safe to call multiple times. Once closed, further :meth:`listen`
+        calls raise ``OpenConnectionError``. Waits for the background
+        system task to finish before returning.
+        """
+        async with self._lifecycle_lock:
+            already_closed = self._closed
+            self._closed = True
+            if self._nursery is not None:
+                self._nursery.cancel_scope.cancel()
+
+        if already_closed:
+            # First call already tore everything down; nothing to do.
+            return
+
         async with trio.open_nursery() as nursery:
             for listener in self.listeners:
                 nursery.start_soon(listener.aclose)
+        self.listeners.clear()
+
+        # Wait for the background _run_server task to finish cleaning up.
+        if self._nursery_ready.is_set():
+            await self._stopped.wait()
 
 
 class TCP(ITransport):
