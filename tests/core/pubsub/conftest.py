@@ -15,6 +15,7 @@ from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pubsub import Pubsub
 from tests.utils.factories import PubsubFactory
 from tests.utils.pubsub.utils import dense_connect
+from tests.utils.pubsub.wait import wait_for
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -88,18 +89,43 @@ async def connected_gossipsub_nodes(
 
 @asynccontextmanager
 async def subscribed_mesh(
-    topic: str, n: int, *, settle_time: float = 1.0, **kwargs: Any
+    topic: str,
+    n: int,
+    *,
+    ready_timeout: float = 5.0,
+    poll_interval: float = 0.02,
+    **kwargs: Any,
 ) -> AsyncIterator[GossipSubHarness]:
     """
     Create *n* connected GossipSub nodes all subscribed to *topic*.
 
-    Waits *settle_time* seconds for mesh formation before yielding.
+    Waits (up to *ready_timeout* seconds) for every router's mesh for
+    *topic* to contain at least ``min(n - 1, router.degree_low)`` peers
+    before yielding. This replaces the previous fixed-sleep wait with a
+    deterministic, predicate-driven poll (see #1307).
     """
     async with connected_gossipsub_nodes(n, **kwargs) as harness:
         for ps in harness.pubsubs:
             await ps.subscribe(topic)
-        # TODO(#378): replace fixed sleep with predicate-based mesh-ready polling
-        await trio.sleep(settle_time)
+
+        routers = harness.routers
+
+        def _mesh_ready() -> bool:
+            for router in routers:
+                expected = min(n - 1, router.degree_low)
+                if len(router.mesh.get(topic, set())) < expected:
+                    return False
+            return True
+
+        await wait_for(
+            _mesh_ready,
+            timeout=ready_timeout,
+            poll_interval=poll_interval,
+            fail_msg=(
+                f"mesh for topic {topic!r} did not form on all {n} routers "
+                f"within {ready_timeout}s"
+            ),
+        )
         yield harness
 
 
