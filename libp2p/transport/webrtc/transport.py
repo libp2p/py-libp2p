@@ -61,7 +61,7 @@ class WebRTCDirectTransport(ITransport):
         )
         # Or create a listener
         listener = transport.create_listener(handler)
-        await listener.listen(Multiaddr("/ip4/0.0.0.0/udp/9090/webrtc-direct"), nursery)
+        await listener.listen(Multiaddr("/ip4/0.0.0.0/udp/9090/webrtc-direct"))
     """
 
     # The swarm checks this to skip the TransportUpgrader

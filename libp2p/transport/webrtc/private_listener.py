@@ -20,7 +20,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
-import trio
 
 from libp2p.abc import IListener, INetStream
 from libp2p.crypto.keys import PrivateKey
@@ -64,21 +63,17 @@ class WebRTCPrivateListener(IListener):
 
         self._listening_addrs: list[Multiaddr] = []
         self._closed = False
-        self._nursery: trio.Nursery | None = None
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening for WebRTC signaling.
 
         Registers a stream handler for ``/webrtc-signaling/0.0.1`` on
-        the host.  The multiaddr should be a relay address ending with
+        the host. The multiaddr should be a relay address ending with
         ``/webrtc``.
 
         :param maddr: A ``/p2p-circuit/webrtc`` multiaddr.
-        :param nursery: Trio nursery for spawning handler tasks.
         """
-        self._nursery = nursery
-
         # Register the signaling stream handler on the host
         if self._host is not None and hasattr(self._host, "set_stream_handler"):
             self._host.set_stream_handler(  # type: ignore[attr-defined]
