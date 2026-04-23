@@ -9,7 +9,14 @@ mesh state without an additional sleep.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
+
+# Python 3.10 doesn't have BaseExceptionGroup as a builtin; fall back to the
+# exceptiongroup backport the rest of this repo already depends on.
+if sys.version_info < (3, 11):  # pragma: no cover
+    from exceptiongroup import BaseExceptionGroup  # type: ignore[assignment]
 
 from tests.core.pubsub.conftest import subscribed_mesh
 
@@ -43,13 +50,30 @@ def _flatten(exc: BaseException) -> list[BaseException]:
 async def test_subscribed_mesh_rejects_unreachable_readiness() -> None:
     """A ready_timeout that's too short surfaces a TimeoutError, not a quiet sleep."""
     # Ask for an absurdly short timeout; the mesh can't form in 1ms.
-    # Trio's background service managers nest ExceptionGroups, so flatten
-    # the whole tree and confirm the TimeoutError is a leaf.
-    with pytest.raises(BaseExceptionGroup) as exc_info:
+    # Trio may or may not wrap the TimeoutError in an ExceptionGroup depending
+    # on the nursery strictness of upstream context managers, so catch broadly
+    # and then assert on the flattened leaves.
+    raised: BaseException | None = None
+    try:
         async with subscribed_mesh(TOPIC, 3, ready_timeout=0.001):
             pytest.fail("subscribed_mesh should have timed out before yielding")
+    except BaseException as exc:
+        raised = exc
 
-    leaves = _flatten(exc_info.value)
+    assert raised is not None, "expected subscribed_mesh to raise"
+    leaves = _flatten(raised)
     timeouts = [e for e in leaves if isinstance(e, TimeoutError)]
     assert timeouts, f"expected a TimeoutError leaf, got {leaves!r}"
     assert "mesh for topic" in str(timeouts[0])
+
+
+@pytest.mark.trio
+async def test_subscribed_mesh_rejects_non_positive_timing() -> None:
+    """ready_timeout and poll_interval must be strictly positive."""
+    for bad in (0, -0.5):
+        with pytest.raises(ValueError, match="ready_timeout"):
+            async with subscribed_mesh(TOPIC, 2, ready_timeout=bad):
+                pytest.fail("validation should have rejected the argument")
+        with pytest.raises(ValueError, match="poll_interval"):
+            async with subscribed_mesh(TOPIC, 2, poll_interval=bad):
+                pytest.fail("validation should have rejected the argument")

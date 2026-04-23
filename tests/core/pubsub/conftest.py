@@ -104,6 +104,11 @@ async def subscribed_mesh(
     before yielding. This replaces the previous fixed-sleep wait with a
     deterministic, predicate-driven poll (see #1307).
     """
+    if ready_timeout <= 0:
+        raise ValueError(f"ready_timeout must be > 0, got {ready_timeout!r}")
+    if poll_interval <= 0:
+        raise ValueError(f"poll_interval must be > 0, got {poll_interval!r}")
+
     async with connected_gossipsub_nodes(n, **kwargs) as harness:
         for ps in harness.pubsubs:
             await ps.subscribe(topic)
