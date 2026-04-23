@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_host_port_from_sockname(
-    sock_name: Any,
+    sock_name: object,
 ) -> tuple[str, int] | None:
     """
     Return ``(host, port)`` from a ``socket.getsockname()`` return value, or
@@ -322,6 +322,9 @@ class WebsocketListener(IListener):
                         if host_port is not None:
                             actual_host, actual_port = host_port
                         else:
+                            # Explicitly restore the requested host/port so the
+                            # fallback mentioned in the warning is self-contained.
+                            actual_host, actual_port = host, port
                             logger.warning(
                                 "Unexpected getsockname() result %r; "
                                 "falling back to requested host/port",
