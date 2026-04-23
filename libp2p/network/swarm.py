@@ -98,8 +98,11 @@ class Swarm(Service, INetworkService):
     connections: dict[ID, list[INetConn]]
     listeners: dict[str, IListener]
     common_stream_handler: StreamHandlerFn
-    listener_nursery: trio.Nursery | None
-    event_listener_nursery_created: trio.Event
+    # Background nursery used for transport-level background tasks (QUIC /
+    # WebSocket set_background_nursery, auto-connector).  Listeners no longer
+    # need a caller-supplied nursery — they manage their own internally.
+    background_nursery: trio.Nursery | None
+    event_background_nursery_created: trio.Event
 
     notifees: list[INotifee]
 
@@ -145,8 +148,8 @@ class Swarm(Service, INetworkService):
 
         self.common_stream_handler = create_default_stream_handler(self)
 
-        self.listener_nursery = None
-        self.event_listener_nursery_created = trio.Event()
+        self.background_nursery = None
+        self.event_background_nursery_created = trio.Event()
 
         # Load balancing state
         self._round_robin_index = {}
@@ -205,8 +208,10 @@ class Swarm(Service, INetworkService):
 
     async def run(self) -> None:
         async with trio.open_nursery() as nursery:
-            # Create a nursery for listener tasks.
-            self.listener_nursery = nursery
+            # This nursery hosts transport-level background tasks (QUIC /
+            # WebSocket) and the auto-connector.  Listeners own their own
+            # internal nurseries and no longer use this one.
+            self.background_nursery = nursery
 
             # Set background nursery BEFORE setting the event
             # This ensures transports have the nursery when they check
@@ -218,9 +223,8 @@ class Swarm(Service, INetworkService):
                 # for connection management
                 self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
 
-            # Set event after background nursery is configured
-            # This ensures transports have the nursery when they check the event
-            self.event_listener_nursery_created.set()
+            # Signal that the background nursery is available.
+            self.event_background_nursery_created.set()
 
             # Start connection management components (go-libp2p style)
             try:
@@ -244,10 +248,17 @@ class Swarm(Service, INetworkService):
                         f"Error stopping connection management components: {e}"
                     )
 
-                # The service ended. Cancel listener tasks.
+                # Close all listeners so their internal nurseries are
+                # cancelled and system tasks finish cleanly.
+                for listener in list(self.listeners.values()):
+                    try:
+                        await listener.close()
+                    except Exception as e:
+                        logger.debug("Error closing listener during shutdown: %s", e)
+
+                # Cancel the background nursery (transport / auto-connector).
                 nursery.cancel_scope.cancel()
-                # Indicate that the nursery has been cancelled.
-                self.listener_nursery = None
+                self.background_nursery = None
 
     def get_peer_id(self) -> ID:
         return self.self_id
@@ -1119,9 +1130,11 @@ class Swarm(Service, INetworkService):
               - Map multiaddr to listener
         """
         logger.debug(f"Swarm.listen called with multiaddrs: {multiaddrs}")
-        # We need to wait until `self.listener_nursery` is created.
+        # Wait until the background nursery is available so that transports
+        # which need it (QUIC, WebSocket) can reach it via their transport
+        # reference.  Listeners themselves no longer require a nursery.
         logger.debug("Starting to listen")
-        await self.event_listener_nursery_created.wait()
+        await self.event_background_nursery_created.wait()
 
         success_count = 0
         for maddr in multiaddrs:
@@ -1199,13 +1212,10 @@ class Swarm(Service, INetworkService):
                 listener = self.transport.create_listener(conn_handler)
                 logger.debug(f"Swarm.listen: listener created for {maddr}")
                 self.listeners[str(maddr)] = listener
-                # TODO: `listener.listen` is not bounded with nursery. If we want to be
-                #   I/O agnostic, we should change the API.
-                if self.listener_nursery is None:
+                if self.background_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
-                assert self.listener_nursery is not None  # For type checker
                 logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
-                await listener.listen(maddr, self.listener_nursery)
+                await listener.listen(maddr)
                 logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")
 
                 # Call notifiers since event occurred
