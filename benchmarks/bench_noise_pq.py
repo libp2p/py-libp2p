@@ -143,38 +143,35 @@ def _stats(samples_s: list[float]) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 
 
-def bench_kem() -> dict:
-    from libp2p.security.noise.pq.kem import XWingKem
+def _bench_one_kem(kem, n_warmup: int = None, n_iter: int = None) -> dict:
+    """Run keygen/encap/decap micro-benchmarks for any IKem backend."""
+    n_warmup = n_warmup or N_WARMUP
+    n_iter = n_iter or N_KEM
 
-    kem = XWingKem()
-
-    # --- keygen ---
-    for _ in range(N_WARMUP):
+    for _ in range(n_warmup):
         kem.keygen()
     samples: list[float] = []
-    for _ in range(N_KEM):
+    for _ in range(n_iter):
         t0 = time.perf_counter()
         pk, sk = kem.keygen()
         samples.append(time.perf_counter() - t0)
     keygen_ms, keygen_ops = _stats(samples)
 
-    # --- encapsulate ---
     pk, sk = kem.keygen()
-    for _ in range(N_WARMUP):
+    for _ in range(n_warmup):
         kem.encapsulate(pk)
     samples = []
-    for _ in range(N_KEM):
+    for _ in range(n_iter):
         t0 = time.perf_counter()
         ct, ss = kem.encapsulate(pk)
         samples.append(time.perf_counter() - t0)
     encap_ms, encap_ops = _stats(samples)
 
-    # --- decapsulate ---
     ct, _ = kem.encapsulate(pk)
-    for _ in range(N_WARMUP):
+    for _ in range(n_warmup):
         kem.decapsulate(ct, sk)
     samples = []
-    for _ in range(N_KEM):
+    for _ in range(n_iter):
         t0 = time.perf_counter()
         kem.decapsulate(ct, sk)
         samples.append(time.perf_counter() - t0)
@@ -188,6 +185,40 @@ def bench_kem() -> dict:
         "decap_ms": decap_ms,
         "decap_ops": decap_ops,
     }
+
+
+def bench_kem() -> dict:
+    from libp2p.security.noise.pq.kem import XWingKem
+
+    return _bench_one_kem(XWingKem())
+
+
+def bench_kem_backends() -> dict:
+    """
+    Compare all available KEM backends.
+
+    Returns a dict keyed by backend name, each value is a _bench_one_kem dict.
+    """
+    from libp2p.security.noise.pq.kem import XWingKem
+    from libp2p.security.noise.pq.kem_backends import LibOQSXWingKem
+
+    results: dict[str, dict] = {}
+
+    # kyber-py baseline (always available, pure Python)
+    print("  Benchmarking kyber-py (pure Python)…")
+    results["kyber-py"] = _bench_one_kem(XWingKem())
+
+    # liboqs C backend (available if liboqs shared library is installed)
+    try:
+        liboqs_kem = LibOQSXWingKem()
+        print("  Benchmarking liboqs (C library)…")
+        results["liboqs"] = _bench_one_kem(liboqs_kem)
+    except (ImportError, RuntimeError) as e:
+        print(f"  liboqs not available: {e}")
+        print("  Install the liboqs shared library to enable this backend.")
+        results["liboqs"] = None
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -368,13 +399,35 @@ async def run_all() -> dict:
     print(f"  Throughput rounds:    {N_THROUGHPUT}")
 
     kem = bench_kem()
+    backends = bench_kem_backends()
     handshakes = await bench_handshakes()
     throughput = await bench_throughput()
     wires = wire_sizes()
 
     # ---- print ----
 
-    print_section("X-Wing KEM micro-benchmarks")
+    print_section("X-Wing KEM backend comparison")
+    header = (
+        f"  {'Backend':<20} {'keygen':>10} {'encap':>10} {'decap':>10} {'speedup':>10}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    baseline_keygen = backends["kyber-py"]["keygen_ms"]
+    for name, b in backends.items():
+        if b is None:
+            print(f"  {name:<20} {'not available':>10}")
+            continue
+        speedup = (
+            baseline_keygen / b["keygen_ms"] if b["keygen_ms"] > 0 else float("inf")
+        )
+        print(
+            f"  {name:<20} {b['keygen_ms']:>9.2f}ms"
+            f" {b['encap_ms']:>9.2f}ms"
+            f" {b['decap_ms']:>9.2f}ms"
+            f"  {speedup:>6.1f}x"
+        )
+
+    print_section("X-Wing KEM micro-benchmarks (kyber-py baseline)")
     print(f"  keygen     : {_fmt(kem['keygen_ms'], kem['keygen_ops'])}")
     print(f"  encapsulate: {_fmt(kem['encap_ms'], kem['encap_ops'])}")
     print(f"  decapsulate: {_fmt(kem['decap_ms'], kem['decap_ops'])}")
@@ -407,9 +460,7 @@ async def run_all() -> dict:
     print(f"    Msg C: {wires['xxhfs_msg_c_fixed']} B (enc_s, fixed)")
     overhead_b = wires["xxhfs_total_fixed"] - wires["classical_total_fixed"]
     overhead_x = overhead_b / wires["classical_total_fixed"]
-    print(
-        f"  Wire overhead vs classical: +{overhead_b} B ({overhead_x:.0f}x)"
-    )
+    print(f"  Wire overhead vs classical: +{overhead_b} B ({overhead_x:.0f}x)")
 
     print()
     return {

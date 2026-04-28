@@ -17,9 +17,9 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 # Full protocol name -- cryptographically bound to every derived key
 PROTOCOL_NAME = b"Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256"
 
-_HASH_LEN = 32   # SHA-256 output length
-_KEY_LEN = 32    # ChaCha20 key length
-_TAG_LEN = 16    # Poly1305 tag length
+_HASH_LEN = 32  # SHA-256 output length
+_KEY_LEN = 32  # ChaCha20 key length
+_TAG_LEN = 16  # Poly1305 tag length
 
 
 def _hmac_sha256(key: bytes, data: bytes) -> bytes:
@@ -84,8 +84,8 @@ class SymmetricState:
     message tokens. Both are initialised to SHA-256(PROTOCOL_NAME).
     """
 
-    ck: bytes   # chaining key
-    h: bytes    # handshake hash (running transcript)
+    ck: bytes  # chaining key
+    h: bytes  # handshake hash (running transcript)
     _cs: CipherState | None
 
     def __init__(self) -> None:
@@ -96,7 +96,7 @@ class SymmetricState:
         self._cs = None
 
     def mix_hash(self, data: bytes) -> None:
-        """h = SHA-256(h || data)"""
+        """H = SHA-256(h || data)"""
         self.h = hashlib.sha256(self.h + data).digest()
 
     def mix_key(self, input_key_material: bytes) -> None:

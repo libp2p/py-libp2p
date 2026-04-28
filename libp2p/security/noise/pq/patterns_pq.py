@@ -24,11 +24,11 @@ Transport keys after split():
 import logging
 from typing import cast
 
-import nacl.utils
 from nacl.bindings import (
     crypto_scalarmult,
     crypto_scalarmult_base,
 )
+import nacl.utils
 
 from libp2p.abc import (
     IRawConnection,
@@ -54,11 +54,11 @@ from ..messages import (
     verify_handshake_payload_sig,
 )
 from .kem import (
-    IKem,
     XWING_CT_SIZE,
     XWING_PK_SIZE,
-    XWingKem,
+    IKem,
 )
+from .kem_backends import make_fast_kem
 from .noise_state import (
     CipherState,
     SymmetricState,
@@ -69,12 +69,13 @@ logger = logging.getLogger(__name__)
 # Size constants
 _X25519_SIZE = 32
 _AEAD_TAG = 16
-_KEM_CT_ENC_SIZE = XWING_CT_SIZE + _AEAD_TAG   # 1120 + 16 = 1136
-_S_ENC_SIZE = _X25519_SIZE + _AEAD_TAG           # 32   + 16 = 48
+_KEM_CT_ENC_SIZE = XWING_CT_SIZE + _AEAD_TAG  # 1120 + 16 = 1136
+_S_ENC_SIZE = _X25519_SIZE + _AEAD_TAG  # 32   + 16 = 48
 
 
 class PQTransportReadWriter(EncryptedMsgReadWriter):
-    """Post-handshake transport that encrypts/decrypts with PQC CipherStates.
+    """
+    Post-handshake transport that encrypts/decrypts with PQC CipherStates.
 
     Each direction uses its own CipherState with an independent nonce counter,
     matching the Noise spec for transport-phase messages.
@@ -108,7 +109,8 @@ class PQTransportReadWriter(EncryptedMsgReadWriter):
 
 
 class PatternXXhfs:
-    """Noise XXhfs handshake pattern with X-Wing hybrid KEM.
+    """
+    Noise XXhfs handshake pattern with X-Wing hybrid KEM.
 
     Provides mutual authentication (libp2p identity signatures) and
     hybrid post-quantum forward secrecy via the X-Wing KEM (ML-KEM-768
@@ -128,7 +130,7 @@ class PatternXXhfs:
         self.local_peer = local_peer
         self.libp2p_privkey = libp2p_privkey
         self.noise_static_key = noise_static_key
-        self.kem: IKem = kem if kem is not None else XWingKem()
+        self.kem: IKem = kem if kem is not None else make_fast_kem()
         self.early_data = early_data
 
     # ------------------------------------------------------------------
@@ -159,7 +161,8 @@ class PatternXXhfs:
     async def handshake_outbound(
         self, conn: IRawConnection, remote_peer: ID | None
     ) -> ISecureConn:
-        """Run the initiator side of the XXhfs handshake.
+        """
+        Run the initiator side of the XXhfs handshake.
 
         Args:
             conn:        Raw underlying connection.
@@ -180,7 +183,9 @@ class PatternXXhfs:
 
         """
         ss = SymmetricState()
-        ss.mix_hash(b"")  # MixHash(prologue=empty) — required by Noise spec even when empty
+        ss.mix_hash(
+            b""
+        )  # MixHash(prologue=empty) — required by Noise spec even when empty
         pkt = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
 
         # ---- Message A: e, e1 ----------------------------------------
@@ -217,7 +222,7 @@ class PatternXXhfs:
         # ekem1: decrypt KEM ciphertext, then mix KEM shared secret
         enc_ct = msg_b[offset : offset + _KEM_CT_ENC_SIZE]
         offset += _KEM_CT_ENC_SIZE
-        ct = ss.decrypt_and_hash(enc_ct)          # decrypt with ee-derived key
+        ct = ss.decrypt_and_hash(enc_ct)  # decrypt with ee-derived key
         ss_kem = self.kem.decapsulate(ct, e1_sk)  # recover KEM shared secret
         ss.mix_key(ss_kem)
 
@@ -274,7 +279,8 @@ class PatternXXhfs:
     # ------------------------------------------------------------------
 
     async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
-        """Run the responder side of the XXhfs handshake.
+        """
+        Run the responder side of the XXhfs handshake.
 
         Args:
             conn: Raw underlying connection.
@@ -287,7 +293,9 @@ class PatternXXhfs:
 
         """
         ss = SymmetricState()
-        ss.mix_hash(b"")  # MixHash(prologue=empty) — required by Noise spec even when empty
+        ss.mix_hash(
+            b""
+        )  # MixHash(prologue=empty) — required by Noise spec even when empty
         pkt = NoisePacketReadWriter(cast(ReadWriteCloser, conn))
 
         # ---- Message A: receive e, e1 --------------------------------
@@ -320,8 +328,8 @@ class PatternXXhfs:
 
         # ekem1: encapsulate to initiator's e1, encrypt ct, then mix ss_kem
         ct, ss_kem_bytes = self.kem.encapsulate(init_e1_pk)
-        enc_ct = ss.encrypt_and_hash(ct)   # encrypt with ee-derived key
-        ss.mix_key(ss_kem_bytes)           # now ss_kem strengthens key material
+        enc_ct = ss.encrypt_and_hash(ct)  # encrypt with ee-derived key
+        ss.mix_key(ss_kem_bytes)  # now ss_kem strengthens key material
 
         # s: encrypt our static public key
         enc_s = ss.encrypt_and_hash(self._static_pk_bytes())
