@@ -213,7 +213,7 @@ def bench_kem_backends() -> dict:
         liboqs_kem = LibOQSXWingKem()
         print("  Benchmarking liboqs (C library)…")
         results["liboqs"] = _bench_one_kem(liboqs_kem)
-    except (ImportError, RuntimeError) as e:
+    except (ImportError, RuntimeError, OSError) as e:
         print(f"  liboqs not available: {e}")
         print("  Install the liboqs shared library to enable this backend.")
         results["liboqs"] = None

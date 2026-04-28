@@ -47,6 +47,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cached result of the liboqs availability probe. None = not yet checked,
+# True = available, False = unavailable. Avoids re-running the 5-second
+# oqs auto-install wait on every make_fast_kem() / LibOQSXWingKem() call.
+_LIBOQS_AVAILABLE: bool | None = None
+
 _XWING_LABEL = bytes([0x5C, 0x2E, 0x2F, 0x2F, 0x5E, 0x5C])
 _ML_KEM_768_PK_SIZE = 1184
 _ML_KEM_768_CT_SIZE = 1088
@@ -82,14 +87,25 @@ class LibOQSXWingKem:
     SK_LEN = 2432  # 2400 ML-KEM-768 dk + 32 X25519 sk
 
     def __init__(self) -> None:
-        # liboqs-python may raise ImportError, RuntimeError, OR SystemExit(1)
-        # (sys.exit) when the C shared library is missing. Catch all three and
-        # convert to ImportError so callers can gracefully fall back.
+        global _LIBOQS_AVAILABLE
+        # Fast path: skip the 5-second auto-install wait if we already know
+        # the C library is absent.
+        if _LIBOQS_AVAILABLE is False:
+            raise ImportError(
+                "LibOQSXWingKem requires the liboqs C library (not available). "
+                "See: https://github.com/open-quantum-safe/liboqs-python"
+            )
+        # liboqs-python may raise ImportError, RuntimeError, SystemExit(1)
+        # (git-clone auto-install), or OSError (Windows temp-dir cleanup race).
+        # Catch all and convert to ImportError so callers can gracefully fall back.
         try:
             from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
             import nacl.utils
             import oqs
-        except (ImportError, RuntimeError, SystemExit) as e:
+
+            _LIBOQS_AVAILABLE = True
+        except (ImportError, RuntimeError, SystemExit, OSError) as e:
+            _LIBOQS_AVAILABLE = False
             raise ImportError(
                 "LibOQSXWingKem requires the liboqs C library and PyNaCl. "
                 "See: https://github.com/open-quantum-safe/liboqs-python. "
@@ -187,7 +203,7 @@ def make_fast_kem() -> IKem:
         kem = LibOQSXWingKem()
         logger.info("Using LibOQSXWingKem (liboqs C backend)")
         return kem
-    except (ImportError, RuntimeError) as e:
+    except (ImportError, RuntimeError, OSError) as e:
         logger.info("liboqs not available (%s), falling back to kyber-py", e)
         from .kem import XWingKem
 
