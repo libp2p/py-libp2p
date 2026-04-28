@@ -1,8 +1,6 @@
 """Tests for the Noise CipherState and SymmetricState."""
 
 import hashlib
-import hmac
-import struct
 
 import pytest
 
@@ -153,4 +151,6 @@ class TestSymmetricState:
         c2_init, c2_resp = ss2.split()
 
         # Same input → same output
-        assert c1_init.encrypt_with_ad(b"", b"msg") == c2_init.encrypt_with_ad(b"", b"msg")
+        ct1 = c1_init.encrypt_with_ad(b"", b"msg")
+        ct2 = c2_init.encrypt_with_ad(b"", b"msg")
+        assert ct1 == ct2

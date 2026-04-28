@@ -14,17 +14,17 @@ complete a Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256 handshake over a
 real TCP connection and exchange encrypted messages.
 """
 
-import asyncio
 import logging
 import sys
 
 import anyio
 import anyio.abc
+
 from libp2p.crypto.ed25519 import create_new_key_pair as ed25519_keypair
 from libp2p.crypto.x25519 import create_new_key_pair as x25519_keypair
 from libp2p.peer.id import ID
-from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
 from libp2p.security.noise.pq.kem import XWingKem
+from libp2p.security.noise.pq.patterns_pq import PatternXXhfs
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -38,7 +38,8 @@ logger = logging.getLogger("interop_dial")
 
 
 class RawTCPConn:
-    """Minimal IRawConnection wrapping an anyio SocketStream.
+    """
+    Minimal IRawConnection wrapping an anyio SocketStream.
 
     Adapts anyio's ByteStream to the read/write/close interface that
     NoisePacketReadWriter (and thus PatternXXhfs) expects.
@@ -127,7 +128,7 @@ async def main() -> None:
         print("=" * 60)
         print("INTEROP SUCCESS")
         print("Python <-> JavaScript NoiseHFS handshake complete.")
-        print(f"Protocol: Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256")
+        print("Protocol: Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256")
         print(f"Local peer:  {local_peer}")
         print(f"Remote peer: {secure_conn.get_remote_peer()}")
         print("=" * 60)

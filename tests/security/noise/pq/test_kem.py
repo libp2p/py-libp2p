@@ -1,7 +1,5 @@
 """Tests for the IKem interface and XWingKem implementation."""
 
-import pytest
-
 from libp2p.security.noise.pq.kem import XWingKem
 
 

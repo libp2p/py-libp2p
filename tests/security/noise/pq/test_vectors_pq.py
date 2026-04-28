@@ -27,13 +27,12 @@ import json
 from pathlib import Path
 
 import pytest
+from kyber_py.ml_kem import ML_KEM_768
 from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
 
-from kyber_py.ml_kem import ML_KEM_768
-
 from libp2p.security.noise.pq.kem import (
-    _ML_KEM_PK_SIZE,
     _ML_KEM_CT_SIZE,
+    _ML_KEM_PK_SIZE,
     _X25519_KEY_SIZE,
     _xwing_combine,
 )
@@ -54,7 +53,7 @@ _VECTORS_PATH = (
 # Size constants (mirror patterns_pq.py)
 _AEAD_TAG = 16
 _KEM_CT_ENC_SIZE = _ML_KEM_CT_SIZE + _X25519_KEY_SIZE + _AEAD_TAG  # 1136
-_S_ENC_SIZE = _X25519_KEY_SIZE + _AEAD_TAG                          # 48
+_S_ENC_SIZE = _X25519_KEY_SIZE + _AEAD_TAG  # 48
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +72,7 @@ def _xwing_encapsulate_seeded(pk: bytes, encap_seed: bytes) -> tuple[bytes, byte
 
     Returns:
         (ciphertext, shared_secret) — same layout as XWingKem.encapsulate()
+
     """
     assert len(pk) == _ML_KEM_PK_SIZE + _X25519_KEY_SIZE, f"bad pk len: {len(pk)}"
     assert len(encap_seed) == 64, f"seed must be 64 bytes, got {len(encap_seed)}"
@@ -112,6 +112,7 @@ def _xwing_sk_from_seed(seed: bytes) -> bytes:
 
     Returns:
         2432-byte X-Wing secret key (ml_kem_dk || x25519_sk)
+
     """
     assert len(seed) == 32, f"seed must be 32 bytes, got {len(seed)}"
     expanded = hashlib.shake_256(seed).digest(96)
@@ -133,6 +134,7 @@ def _run_vector_handshake(v: dict) -> dict:
 
     Returns:
         dict with keys: msg_a, msg_b, msg_c, handshake_hash, cs1_k, cs2_k
+
     """
     # Load fixed values
     e_i_sk = bytes.fromhex(v["ephemeral_dh_i_private"])
@@ -161,10 +163,10 @@ def _run_vector_handshake(v: dict) -> dict:
     # ======================================================================
     # Message A: initiator sends  e_pk || e1_pk  (no payload, no AEAD yet)
     # ======================================================================
-    ss_i.mix_hash(e_i_pk)    # writeE  token
-    ss_i.mix_hash(e1_pk)     # writeE1 token  (encryptAndHash = mixHash when no key)
-    enc_payload_a = ss_i.encrypt_and_hash(b"")   # empty payload → b""
-    msg_a = e_i_pk + e1_pk + enc_payload_a       # 32 + 1216 + 0 = 1248 B
+    ss_i.mix_hash(e_i_pk)  # writeE  token
+    ss_i.mix_hash(e1_pk)  # writeE1 token  (encryptAndHash = mixHash when no key)
+    enc_payload_a = ss_i.encrypt_and_hash(b"")  # empty payload → b""
+    msg_a = e_i_pk + e1_pk + enc_payload_a  # 32 + 1216 + 0 = 1248 B
 
     # Responder processes Message A
     ss_r.mix_hash(e_i_pk)
@@ -175,15 +177,15 @@ def _run_vector_handshake(v: dict) -> dict:
     # Message B: responder sends  e_pk || enc_ct || enc_s || enc_payload
     # Tokens: e, ee, ekem1, s, es
     # ======================================================================
-    ss_r.mix_hash(e_r_pk)                         # writeE
+    ss_r.mix_hash(e_r_pk)  # writeE
 
     dh_ee = bytes(crypto_scalarmult(e_r_sk, e_i_pk))
-    ss_r.mix_key(dh_ee)                           # writeEE
+    ss_r.mix_key(dh_ee)  # writeEE
 
     # writeEkem1: encapsulate, encrypt ct, then mix KEM ss
     ct, ss_kem_r = _xwing_encapsulate_seeded(e1_pk, encap_seed)
-    enc_ct = ss_r.encrypt_and_hash(ct)            # encrypted under ee-derived key
-    ss_r.mix_key(ss_kem_r)                        # then strengthen with KEM output
+    enc_ct = ss_r.encrypt_and_hash(ct)  # encrypted under ee-derived key
+    ss_r.mix_key(ss_kem_r)  # then strengthen with KEM output
 
     # writeS: encrypt responder static pubkey
     enc_s_r = ss_r.encrypt_and_hash(static_r_pk)
@@ -200,10 +202,11 @@ def _run_vector_handshake(v: dict) -> dict:
     ss_i.mix_hash(e_r_pk)
 
     dh_ee_i = bytes(crypto_scalarmult(e_i_sk, e_r_pk))
-    ss_i.mix_key(dh_ee_i)                         # ee token
+    ss_i.mix_key(dh_ee_i)  # ee token
 
     # readEkem1: decrypt ct, then decapsulate, then mix KEM ss
     from libp2p.security.noise.pq.kem import XWingKem
+
     ct_dec = ss_i.decrypt_and_hash(enc_ct)
     ss_kem_i = XWingKem().decapsulate(ct_dec, e1_sk)
     ss_i.mix_key(ss_kem_i)
@@ -371,9 +374,7 @@ class TestVectorHandshake:
         result = _run_vector_handshake(v)
         got = result["cs1_k"].hex()
         assert got == v["cs1_k"], (
-            f"Vector {idx}: cs1_k mismatch\n"
-            f"  got:      {got}\n"
-            f"  expected: {v['cs1_k']}"
+            f"Vector {idx}: cs1_k mismatch\n  got:      {got}\n  expected: {v['cs1_k']}"
         )
 
     @pytest.mark.parametrize("idx", range(5))
@@ -382,7 +383,5 @@ class TestVectorHandshake:
         result = _run_vector_handshake(v)
         got = result["cs2_k"].hex()
         assert got == v["cs2_k"], (
-            f"Vector {idx}: cs2_k mismatch\n"
-            f"  got:      {got}\n"
-            f"  expected: {v['cs2_k']}"
+            f"Vector {idx}: cs2_k mismatch\n  got:      {got}\n  expected: {v['cs2_k']}"
         )

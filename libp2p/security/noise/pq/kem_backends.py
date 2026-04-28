@@ -231,7 +231,7 @@ class KeypairPool:
         self._kem = kem
         self._min_size = min_size
         self._pool: deque[tuple[bytes, bytes]] = deque()
-        self._refill_task: asyncio.Task | None = None
+        self._refill_task: asyncio.Task[None] | None = None
 
     @classmethod
     async def create(cls, kem: IKem, min_size: int = 3) -> KeypairPool:
@@ -273,7 +273,7 @@ class KeypairPool:
         self._refill_task = loop.create_task(self._async_fill())
         self._refill_task.add_done_callback(self._on_refill_done)
 
-    def _on_refill_done(self, task: asyncio.Task) -> None:
+    def _on_refill_done(self, task: asyncio.Task[None]) -> None:
         self._refill_task = None
         if task.cancelled():
             return  # event loop shutting down — normal

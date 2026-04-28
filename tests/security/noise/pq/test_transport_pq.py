@@ -1,4 +1,5 @@
-"""Tests for TransportPQ: the ISecureTransport wrapper for XXhfs.
+"""
+Tests for TransportPQ: the ISecureTransport wrapper for XXhfs.
 
 Follows TDD: these tests are written before the implementation.
 """
@@ -13,7 +14,6 @@ from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import X25519PrivateKey
 from libp2p.peer.id import ID
 from libp2p.security.noise.pq.transport_pq import PROTOCOL_ID, TransportPQ
-
 
 # ---------------------------------------------------------------------------
 # Shared in-memory connection helpers (mirrors test_patterns_pq.py)
