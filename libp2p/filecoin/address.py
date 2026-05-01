@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 import varint
 
@@ -38,7 +38,7 @@ Protocol = Literal[0, 1, 2, 3, 4]
 EAM_NAMESPACE: Final = 10
 
 _BASE32_ALPHABET: Final = "abcdefghijklmnopqrstuvwxyz234567"
-_BASE32_DECODE_TABLE: Final = {
+_BASE32_DECODE_TABLE: Final[dict[str, int]] = {
     char: index for index, char in enumerate(_BASE32_ALPHABET)
 }
 
@@ -214,7 +214,8 @@ def _parse_prefix(addr_str: str) -> tuple[Protocol, bool]:
     found: tuple[Protocol, bool] | None = None
     for protocol, prefix in prefixes.items():
         if addr_str.startswith(prefix):
-            found = (protocol, is_testnet)
+            assert isinstance(protocol, int) and 0 <= protocol <= 4
+            found = (cast(Protocol, protocol), is_testnet)
             break
 
     if found is None:
@@ -256,8 +257,9 @@ def _base32_decode(b32_str: str) -> bytes:
     bits = 0
     value = 0
     for char in b32_str:
-        index = _BASE32_DECODE_TABLE.get(char)
-        if index is None:
+        try:
+            index = _BASE32_DECODE_TABLE[char]
+        except KeyError:
             raise ValueError(f"invalid base32 character: {char!r}")
         value = (value << 5) | index
         bits += 5

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import time
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 
 from libp2p.filecoin.address import DELEGATED, is_valid_address, parse_address
 
@@ -72,7 +72,7 @@ class _TaskRecord:
     quote: dict[str, object]
     task: dict[str, object]
     history: list[dict[str, object]] = field(default_factory=list)
-    _pending_completion: object = None
+    _pending_completion: Any = None
 
 
 class SimulatedStorageBackend:

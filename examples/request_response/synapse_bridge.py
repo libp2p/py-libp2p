@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
-from typing import Final
+from typing import Final, cast
 
 DEFAULT_NETWORK: Final = "calibration"
 DEFAULT_SOURCE: Final = "py-libp2p-a2a-demo"
@@ -115,7 +115,7 @@ class SynapseNodeBridgeBackend:
                 "baseQuote": dict(base_quote),
             },
         )
-        return result.get("prepareQuote")
+        return cast(Mapping[str, object] | None, result.get("prepareQuote"))
 
     def execute_storage(
         self,
