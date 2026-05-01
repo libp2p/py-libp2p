@@ -293,20 +293,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    trio.run(
-        run,
-        port=args.port,
-        destination=args.destination,
-        name=args.name,
-        size=args.size,
-        copies=args.copies,
-        with_cdn=args.with_cdn,
-        payer=args.payer,
-        max_lockup_usdfc=args.max_lockup_usdfc,
-        payment_rate_usdfc_per_epoch=args.payment_rate_usdfc_per_epoch,
-        lockup_epochs=args.lockup_epochs,
-        seed=args.seed,
-    )
+    try:
+        trio.run(
+            run,
+            args.port,
+            args.destination,
+            args.name,
+            args.size,
+            args.copies,
+            args.with_cdn,
+            args.payer,
+            args.max_lockup_usdfc,
+            args.payment_rate_usdfc_per_epoch,
+            args.lockup_epochs,
+            args.seed,
+        )
+    except BaseException as exc:
+        if _is_keyboard_interrupt_exit(exc):
+            return
+        raise
+
+
+def _is_keyboard_interrupt_exit(exc: BaseException) -> bool:
+    if isinstance(exc, KeyboardInterrupt):
+        return True
+
+    nested = getattr(exc, "exceptions", None)
+    if not isinstance(nested, tuple) or not nested:
+        return False
+
+    return all(_is_keyboard_interrupt_exit(child) for child in nested)
 
 
 if __name__ == "__main__":
