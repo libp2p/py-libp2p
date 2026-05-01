@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 from typing import Final
 
@@ -16,7 +17,47 @@ class SynapseBridgeError(RuntimeError):
 
 
 class SynapseNodeBridgeBackend:
-    """Storage backend that delegates real execution to a Node Synapse sidecar."""
+    """
+    Storage backend that delegates real execution to a Node.js Synapse sidecar.
+
+    Architecture::
+
+        py-libp2p A2A Agent  ──(trio.run_process)──>  Node.js Synapse Sidecar
+           (storage task)     stdin/stdout JSON IPC     (@filoz/synapse-sdk)
+                                                              │
+                                                              ▼
+                                                       Filecoin Synapse Node
+                                                       (on-chain storage/payment)
+
+    The sidecar (`synapse_bridge.mjs`) communicates with the Synapse network
+    using the official ``@filoz/synapse-sdk``.  The Python layer sends JSON
+    commands via stdin and reads JSON responses from stdout — a clean IPC
+    bridge that keeps the Python dependency surface minimal while still
+    connecting to real Synapse infrastructure.
+
+    The bridge runs as an asynchronous ``trio`` subprocess so it never blocks
+    the libp2p event loop.
+
+    Parameters
+    ----------
+    command : Sequence[str]
+        The Node.js command + script to invoke.  Defaults to
+        ``("node", "synapse_bridge.mjs")``.  Can be overridden via the
+        ``A2A_SYNAPSE_BRIDGE_COMMAND`` environment variable.
+    cwd : Path, optional
+        Working directory for the sidecar process.
+    network : str
+        Filecoin network name (``"mainnet"``, ``"calibration"``).
+    source : str
+        Source tag embedded in Synapse requests.
+    execute_transactions : bool
+        If ``True`` the sidecar submits on-chain transactions.
+    verify_download : bool
+        If ``True`` the sidecar verifies retrieved data integrity.
+    timeout : float
+        Maximum time (seconds) to wait for the sidecar to respond.
+
+    """
 
     name = "synapse"
 
@@ -29,6 +70,7 @@ class SynapseNodeBridgeBackend:
         source: str = DEFAULT_SOURCE,
         execute_transactions: bool = False,
         verify_download: bool = True,
+        timeout: float = 30.0,
     ) -> None:
         sidecar_dir = cwd or Path(__file__).with_name("synapse_sidecar")
         self._cwd = sidecar_dir
@@ -37,21 +79,25 @@ class SynapseNodeBridgeBackend:
         self._source = source
         self._execute_transactions = execute_transactions
         self._verify_download = verify_download
+        self._timeout = timeout
 
     @classmethod
-    def from_env(cls) -> "SynapseNodeBridgeBackend":
+    def from_env(cls) -> SynapseNodeBridgeBackend:
         command_env = os.getenv("A2A_SYNAPSE_BRIDGE_COMMAND")
-        command = tuple(command_env.split()) if command_env else None
+        command = tuple(shlex.split(command_env)) if command_env else None
         execute_transactions = os.getenv("A2A_SYNAPSE_EXECUTE_TRANSACTIONS") == "1"
         verify_download = os.getenv("A2A_SYNAPSE_VERIFY_DOWNLOAD", "1") != "0"
         network = os.getenv("A2A_SYNAPSE_NETWORK", DEFAULT_NETWORK)
         source = os.getenv("A2A_SYNAPSE_SOURCE", DEFAULT_SOURCE)
+        timeout_str = os.getenv("A2A_SYNAPSE_TIMEOUT")
+        timeout = float(timeout_str) if timeout_str else 30.0
         return cls(
             command=command,
             network=network,
             source=source,
             execute_transactions=execute_transactions,
             verify_download=verify_download,
+            timeout=timeout,
         )
 
     def prepare_quote(
@@ -104,15 +150,22 @@ class SynapseNodeBridgeBackend:
         env.setdefault("A2A_SYNAPSE_NETWORK", self._network)
         env.setdefault("A2A_SYNAPSE_SOURCE", self._source)
 
-        completed = subprocess.run(
-            self._command,
-            cwd=self._cwd,
-            env=env,
-            input=json.dumps(body),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                self._command,
+                cwd=self._cwd,
+                env=env,
+                input=json.dumps(body),
+                text=True,
+                capture_output=True,
+                timeout=self._timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise SynapseBridgeError(
+                f"Synapse sidecar timed out after {self._timeout}s"
+            )
+
         if completed.returncode != 0:
             stderr = completed.stderr.strip()
             stdout = completed.stdout.strip()

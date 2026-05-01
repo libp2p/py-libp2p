@@ -11,6 +11,7 @@ import trio
 
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.filecoin.address import DEMO_F410_PAYER
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.request_response import JSONCodec, RequestContext, RequestResponse
 from libp2p.utils.address_validation import (
@@ -78,6 +79,16 @@ def _extract_task_id(task: dict[str, object]) -> str:
     if not isinstance(task_id, str):
         raise ValueError("task is missing id")
     return task_id
+
+
+def _extract_state(task: dict[str, object]) -> str:
+    status = task.get("status")
+    if not isinstance(status, dict):
+        raise ValueError("task is missing status")
+    state = status.get("state")
+    if not isinstance(state, str):
+        raise ValueError("task status is missing state")
+    return state
 
 
 async def _handler(
@@ -207,17 +218,47 @@ async def run(
             ),
             codec=codec,
         )
-        final_task = _extract_task(followup_response)
-        _print_task(final_task, title="Task after payment authorization")
+        auth_task = _extract_task(followup_response)
+        _print_task(auth_task, title="Task after payment authorization")
 
-        fetched_task_response = await rr.send_request(
-            peer_id=info.peer_id,
-            protocol_ids=[PROTOCOL_ID],
-            request=build_get_task_request(request_id="get-task", task_id=task_id),
-            codec=codec,
-        )
-        fetched_task = _extract_task(fetched_task_response)
-        _print_task(fetched_task, title="Fetched task state")
+        task_state = _extract_state(auth_task)
+        print(f"\nWatching task progress ({task_state}):")
+        _STREAMING_INTERVAL = 0.5
+        _MAX_POLLS = 10
+
+        for poll_index in range(1, _MAX_POLLS + 1):
+            if task_state in (
+                "TASK_STATE_COMPLETED",
+                "TASK_STATE_FAILED",
+                "TASK_STATE_CANCELED",
+            ):
+                print("  (Task reached terminal state)")
+                break
+
+            await trio.sleep(_STREAMING_INTERVAL)
+            polled_response = await rr.send_request(
+                peer_id=info.peer_id,
+                protocol_ids=[PROTOCOL_ID],
+                request=build_get_task_request(
+                    request_id=f"poll-{poll_index}", task_id=task_id
+                ),
+                codec=codec,
+            )
+            polled_task = _extract_task(polled_response)
+            new_state = _extract_state(polled_task)
+            if new_state != task_state:
+                print(f"  State changed: {task_state} -> {new_state}")
+                task_state = new_state
+
+        if task_state != _extract_state(auth_task):
+            fetched_task_response = await rr.send_request(
+                peer_id=info.peer_id,
+                protocol_ids=[PROTOCOL_ID],
+                request=build_get_task_request(request_id="get-final", task_id=task_id),
+                codec=codec,
+            )
+            fetched_task = _extract_task(fetched_task_response)
+            _print_task(fetched_task, title="Final task state (streaming complete)")
         nursery.cancel_scope.cancel()
 
 
@@ -265,8 +306,9 @@ def main() -> None:
     parser.add_argument(
         "--payer",
         type=str,
-        default="f410-test-payer",
-        help="payer identifier to embed in the payment authorization follow-up",
+        default=DEMO_F410_PAYER,
+        help="payer identifier as a Filecoin address (f410 for delegated/EAM, "
+        "f0 for ID, f1 for SECP256K1)",
     )
     parser.add_argument(
         "--max-lockup-usdfc",

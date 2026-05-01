@@ -58,7 +58,7 @@ class A2APaymentDemoServer:
                             "libp2p://request-response/example/a2a-filecoin-payment"
                         ),
                         protocol_binding=CUSTOM_BINDING_URI,
-                        streaming=False,
+                        streaming=True,
                     ),
                 )
             if method == "SendMessage":
@@ -132,7 +132,7 @@ def build_agent_card() -> dict[str, object]:
     return service.build_agent_card(
         interface_url="libp2p://request-response/example/a2a-filecoin-payment",
         protocol_binding=CUSTOM_BINDING_URI,
-        streaming=False,
+        streaming=True,
     )
 
 

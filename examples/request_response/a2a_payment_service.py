@@ -7,6 +7,8 @@ import json
 import time
 from typing import Final, Protocol
 
+from libp2p.filecoin.address import DELEGATED, is_valid_address, parse_address
+
 CUSTOM_BINDING_URI: Final = "https://libp2p.io/bindings/libp2p-request-response/v1"
 DEFAULT_PAYMENT_TOKEN: Final = "USDFC"
 DEFAULT_PAYMENT_RATE_USDFC_PER_EPOCH: Final = 1
@@ -70,6 +72,7 @@ class _TaskRecord:
     quote: dict[str, object]
     task: dict[str, object]
     history: list[dict[str, object]] = field(default_factory=list)
+    _pending_completion: object = None
 
 
 class SimulatedStorageBackend:
@@ -104,6 +107,8 @@ class A2APaymentTaskService:
     ) -> None:
         self._tasks: dict[str, _TaskRecord] = {}
         self._execution_backend = execution_backend or SimulatedStorageBackend()
+        self._completion_deadlines: dict[str, float] = {}
+        self._streaming_delay: float = 0.5
 
     @property
     def execution_backend_name(self) -> str:
@@ -181,7 +186,69 @@ class A2APaymentTaskService:
         record = self._tasks.get(task_id)
         if record is None:
             return None
+        self._try_complete_pending(record)
         return _copy_message(record.task)
+
+    def _try_complete_pending(self, record: _TaskRecord) -> None:
+        """Auto-complete a task if its streaming deadline has passed."""
+        if (
+            record._pending_completion is None
+            or record.task["status"]["state"] != "TASK_STATE_WORKING"
+        ):
+            return
+
+        deadline = self._completion_deadlines.get(record.task_id)
+        if deadline is None or time.monotonic() < deadline:
+            return
+
+        self._force_complete(record)
+
+    def _force_complete(self, record: _TaskRecord) -> None:
+        """Immediately complete a pending WORKING task (bypasses the deadline)."""
+        if record._pending_completion is None:
+            return
+
+        (
+            storage_result,
+            payment_artifact,
+            storage_artifact,
+            piece_cid,
+            complete,
+            payment_authorization,
+        ) = record._pending_completion
+        record._pending_completion = None
+        self._completion_deadlines.pop(record.task_id, None)
+
+        record.task = {
+            "id": record.task_id,
+            "contextId": record.context_id,
+            "status": {
+                "state": "TASK_STATE_COMPLETED",
+                "message": _agent_text_message(
+                    text=(
+                        f"Payment rail approved and storage task "
+                        f"completed for {piece_cid}."
+                        if complete
+                        else (
+                            "Payment rail approved and storage task completed "
+                            "with partial provider fulfilment for "
+                            f"{piece_cid}."
+                        )
+                    ),
+                    context_id=record.context_id,
+                    task_id=record.task_id,
+                ),
+                "timestamp": _timestamp_now(),
+            },
+            "history": list(record.history),
+            "artifacts": [payment_artifact, storage_artifact],
+            "metadata": {
+                "quote": record.quote,
+                "paymentAuthorization": dict(payment_authorization),
+                "executionBackend": self._execution_backend.name,
+                "customBinding": CUSTOM_BINDING_URI,
+            },
+        }
 
     def list_tasks(
         self,
@@ -192,6 +259,7 @@ class A2APaymentTaskService:
     ) -> list[dict[str, object]]:
         tasks: list[dict[str, object]] = []
         for record in self._tasks.values():
+            self._try_complete_pending(record)
             task = record.task
             if context_id and task.get("contextId") != context_id:
                 continue
@@ -207,6 +275,19 @@ class A2APaymentTaskService:
             reverse=True,
         )
         return tasks
+
+    def complete_working_task(self, task_id: str) -> dict[str, object] | None:
+        """
+        Immediately complete a task in WORKING state, bypassing the deadline.
+
+        Used by streaming entrypoints (HTTP SSE, etc.) that want to finalise
+        the task synchronously after payment authorization.
+        """
+        record = self._tasks.get(task_id)
+        if record is None:
+            return None
+        self._force_complete(record)
+        return _copy_message(record.task)
 
     def cancel_task(self, task_id: str) -> dict[str, object] | None:
         record = self._tasks.get(task_id)
@@ -417,31 +498,33 @@ class A2APaymentTaskService:
         if not isinstance(complete, bool):
             raise TypeError("complete must be a boolean")
 
+        # Set to WORKING state with a completion deadline.
+        # The task will auto-complete on the next GetTask call after the deadline.
+        # This demonstrates the streaming/A2A task lifecycle with visible
+        # state transitions even in one-shot libp2p request-response mode.
+        self._completion_deadlines[record.task_id] = (
+            time.monotonic() + self._streaming_delay
+        )
+        _store_result = storage_result
+        _payment_artifact = payment_artifact
+        _storage_artifact = storage_artifact
+        _pce_cid = piece_cid
+        _is_complete = complete
+
         record.task = {
             "id": record.task_id,
             "contextId": record.context_id,
             "status": {
-                "state": "TASK_STATE_COMPLETED",
+                "state": "TASK_STATE_WORKING",
                 "message": _agent_text_message(
-                    text=(
-                        (
-                            "Payment rail approved and storage task "
-                            f"completed for {piece_cid}."
-                        )
-                        if complete
-                        else (
-                            "Payment rail approved and storage task completed "
-                            "with partial provider fulfilment for "
-                            f"{piece_cid}."
-                        )
-                    ),
+                    text="Payment rail approved. Storage task is in progress...",
                     context_id=record.context_id,
                     task_id=record.task_id,
                 ),
                 "timestamp": _timestamp_now(),
             },
             "history": list(record.history),
-            "artifacts": [payment_artifact, storage_artifact],
+            "artifacts": [],
             "metadata": {
                 "quote": record.quote,
                 "paymentAuthorization": dict(payment_authorization),
@@ -449,6 +532,15 @@ class A2APaymentTaskService:
                 "customBinding": CUSTOM_BINDING_URI,
             },
         }
+        # Store pending completion data for auto-finalisation
+        record._pending_completion = (
+            _store_result,
+            _payment_artifact,
+            _storage_artifact,
+            _pce_cid,
+            _is_complete,
+            payment_authorization,
+        )
         return _copy_message(record.task)
 
 
@@ -551,6 +643,15 @@ def build_payment_quote(
 def build_payment_artifact(
     quote: Mapping[str, object], authorization: Mapping[str, object]
 ) -> dict[str, object]:
+    payer = authorization.get("payer", "")
+    payer_protocol: str | None = None
+    payer_namespace: int | None = None
+    if isinstance(payer, str) and is_valid_address(payer):
+        addr = parse_address(payer)
+        payer_protocol = (
+            "DELEGATED" if addr.protocol == DELEGATED else f"PROTO_{addr.protocol}"
+        )
+        payer_namespace = addr.namespace
     return {
         "artifactId": "payment-authorization",
         "name": "Filecoin Pay authorization",
@@ -563,7 +664,12 @@ def build_payment_artifact(
                     "depositNeededUsdfc": quote["depositNeededUsdfc"],
                     "streamingLockupUsdfc": quote["streamingLockupUsdfc"],
                     "fixedLockupUsdfc": quote["fixedLockupUsdfc"],
-                    "payer": authorization["payer"],
+                    "payer": payer,
+                    "payerAddress": {
+                        "address": payer,
+                        "protocol": payer_protocol,
+                        "namespace": payer_namespace,
+                    },
                     "approved": authorization["approved"],
                 },
                 "mediaType": "application/json",
@@ -599,6 +705,10 @@ def validate_payment_authorization(
         errors.append("approved must be true")
     if not isinstance(payer, str) or not payer:
         errors.append("payer must be a non-empty string")
+    elif not is_valid_address(payer):
+        errors.append(
+            f"payer must be a valid Filecoin address (f1, f3, f4), got {payer!r}"
+        )
     if max_lockup_usdfc is None:
         errors.append("maxLockupUsdfc must be an integer")
     elif max_lockup_usdfc < quote["depositNeededUsdfc"]:

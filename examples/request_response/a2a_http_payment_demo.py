@@ -173,7 +173,10 @@ class A2APaymentRequestHandler(RequestHandler):
                     message="Payment authorization accepted. Executing storage task.",
                 )
                 yield _parse_proto(working, Task)
-                final_task = self._service.send_message(message)
+                self._service.send_message(message)
+                final_task = self._service.complete_working_task(task_id)
+                if final_task is None:
+                    raise TaskNotFoundError
                 for artifact in final_task.get("artifacts", []):
                     yield _build_artifact_update(
                         task_id=task_id,

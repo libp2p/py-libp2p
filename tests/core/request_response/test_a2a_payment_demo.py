@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 from typing import cast
 
 import pytest
+import trio
 
 from examples.request_response.a2a_payment_protocol import (
     CUSTOM_BINDING_URI,
@@ -12,6 +14,9 @@ from examples.request_response.a2a_payment_protocol import (
     build_get_agent_card_request,
     build_get_task_request,
     build_send_message_request,
+)
+from libp2p.filecoin.address import (
+    DEMO_F410_PAYER,
 )
 from libp2p.request_response import JSONCodec, RequestContext, RequestResponse
 from libp2p.tools.utils import connect
@@ -79,7 +84,7 @@ def test_authorization_followup_completes_task(server: A2APaymentDemoServer) -> 
             task_id=task_id,
             context_id=context_id,
             max_lockup_usdfc=quoted_lockup,
-            payer="f410-test-payer",
+            payer=DEMO_F410_PAYER,
         )
     )
 
@@ -87,12 +92,26 @@ def test_authorization_followup_completes_task(server: A2APaymentDemoServer) -> 
         dict[str, object], cast(dict[str, object], followup_response["result"])["task"]
     )
     status = cast(dict[str, object], task["status"])
-    artifacts = cast(list[dict[str, object]], task["artifacts"])
-    storage_part = cast(dict[str, object], artifacts[1]["parts"][0])
+    # After payment auth the task enters WORKING state (streaming lifecycle).
+    # Auto-completion happens on the next GetTask call.
+    assert status["state"] == "TASK_STATE_WORKING"
+    assert cast(list[dict[str, object]], task.get("artifacts", [])) == []
+
+    # GetTask triggers auto-completion after the streaming delay
+    time.sleep(0.6)
+    fetched_response = server.process_request(
+        build_get_task_request(request_id="get-final", task_id=task_id)
+    )
+    fetched_task = cast(
+        dict[str, object], cast(dict[str, object], fetched_response["result"])["task"]
+    )
+    fetched_status = cast(dict[str, object], fetched_task["status"])
+    fetched_artifacts = cast(list[dict[str, object]], fetched_task["artifacts"])
+    storage_part = cast(dict[str, object], fetched_artifacts[1]["parts"][0])
     storage_data = cast(dict[str, object], storage_part["data"])
-    assert status["state"] == "TASK_STATE_COMPLETED"
-    assert artifacts[0]["artifactId"] == "payment-authorization"
-    assert artifacts[1]["artifactId"] == "storage-receipt"
+    assert fetched_status["state"] == "TASK_STATE_COMPLETED"
+    assert fetched_artifacts[0]["artifactId"] == "payment-authorization"
+    assert fetched_artifacts[1]["artifactId"] == "storage-receipt"
     assert storage_data["complete"] is True
     assert len(cast(list[dict[str, object]], storage_data["copies"])) == 2
 
@@ -121,7 +140,7 @@ def test_underfunded_authorization_keeps_task_in_auth_required(
             task_id=task_id,
             context_id=context_id,
             max_lockup_usdfc=1,
-            payer="f410-test-payer",
+            payer=DEMO_F410_PAYER,
         )
     )
 
@@ -192,22 +211,41 @@ async def test_a2a_payment_round_trip_integration(security_protocol) -> None:
                 task_id=cast(str, initial_task["id"]),
                 context_id=cast(str, initial_task["contextId"]),
                 max_lockup_usdfc=cast(int, quote["depositNeededUsdfc"]),
-                payer="f410-test-payer",
+                payer=DEMO_F410_PAYER,
             ),
             codec=JSONCodec(),
         )
-        final_task = cast(
+        auth_task = cast(
             dict[str, object],
             cast(dict[str, object], followup_response["result"])["task"],
         )
-        status = cast(dict[str, object], final_task["status"])
-        storage_receipt = cast(list[dict[str, object]], final_task["artifacts"])[1]
+        auth_status = cast(dict[str, object], auth_task["status"])
+        assert auth_status["state"] == "TASK_STATE_WORKING"
+
+        # GetTask triggers auto-completion -> COMPLETED with artifacts
+        # Wait for streaming delay to expire
+        await trio.sleep(0.6)
+        fetched_response = await rr_client.send_request(
+            peer_id=hosts[1].get_id(),
+            protocol_ids=[PROTOCOL_ID],
+            request=build_get_task_request(
+                request_id="get-final",
+                task_id=cast(str, initial_task["id"]),
+            ),
+            codec=JSONCodec(),
+        )
+        fetched_task = cast(
+            dict[str, object],
+            cast(dict[str, object], fetched_response["result"])["task"],
+        )
+        fetched_status = cast(dict[str, object], fetched_task["status"])
+        storage_receipt = cast(list[dict[str, object]], fetched_task["artifacts"])[1]
         storage_data = cast(
             dict[str, object],
             cast(list[dict[str, object]], storage_receipt["parts"])[0]["data"],
         )
 
-        assert status["state"] == "TASK_STATE_COMPLETED"
+        assert fetched_status["state"] == "TASK_STATE_COMPLETED"
         assert storage_data["complete"] is False
         assert len(cast(list[dict[str, object]], storage_data["copies"])) == 2
         assert cast(list[dict[str, object]], storage_data["failedAttempts"]) == [
@@ -217,18 +255,3 @@ async def test_a2a_payment_round_trip_integration(security_protocol) -> None:
                 "error": "provider is unhealthy",
             }
         ]
-
-        fetched_response = await rr_client.send_request(
-            peer_id=hosts[1].get_id(),
-            protocol_ids=[PROTOCOL_ID],
-            request=build_get_task_request(
-                request_id="get-task", task_id=cast(str, initial_task["id"])
-            ),
-            codec=JSONCodec(),
-        )
-        fetched_task = cast(
-            dict[str, object],
-            cast(dict[str, object], fetched_response["result"])["task"],
-        )
-        fetched_status = cast(dict[str, object], fetched_task["status"])
-        assert fetched_status["state"] == "TASK_STATE_COMPLETED"

@@ -5,6 +5,8 @@ from typing import Any, cast
 
 import pytest
 
+from libp2p.filecoin.address import DEMO_F410_PAYER
+
 a2a_http_demo = pytest.importorskip("examples.request_response.a2a_http_payment_demo")
 httpx = pytest.importorskip("httpx")
 
@@ -136,7 +138,7 @@ async def test_streaming_followup_emits_working_artifacts_and_completion() -> No
                                 "data": {
                                     "paymentAuthorization": {
                                         "approved": True,
-                                        "payer": "f410-test-payer",
+                                        "payer": DEMO_F410_PAYER,
                                         "maxLockupUsdfc": quote["depositNeededUsdfc"],
                                         "paymentToken": quote["paymentToken"],
                                     }
