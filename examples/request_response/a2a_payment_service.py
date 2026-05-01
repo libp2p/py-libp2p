@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import time
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 
 from libp2p.filecoin.address import DELEGATED, is_valid_address, parse_address
 
@@ -193,7 +193,8 @@ class A2APaymentTaskService:
         """Auto-complete a task if its streaming deadline has passed."""
         if (
             record._pending_completion is None
-            or record.task["status"]["state"] != "TASK_STATE_WORKING"
+            or cast(dict[str, object], record.task["status"])["state"]
+            != "TASK_STATE_WORKING"
         ):
             return
 
@@ -263,7 +264,7 @@ class A2APaymentTaskService:
             task = record.task
             if context_id and task.get("contextId") != context_id:
                 continue
-            task_state = task.get("status", {}).get("state")
+            task_state = cast(dict[str, object], task.get("status", {})).get("state")
             if state and task_state != state:
                 continue
             task_copy = _copy_message(task)
@@ -294,7 +295,7 @@ class A2APaymentTaskService:
         if record is None:
             return None
 
-        state = record.task["status"]["state"]
+        state = cast(dict[str, object], record.task["status"])["state"]
         if state in (
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -429,7 +430,7 @@ class A2APaymentTaskService:
             context_id=context_id,
             request_payload=request_payload,
             quote=quote,
-            task=task,
+            task=cast(dict[str, object], task),
             history=[_copy_message(message)],
         )
         return _copy_message(task)
@@ -444,7 +445,7 @@ class A2APaymentTaskService:
         if record is None:
             raise KeyError("Task not found")
 
-        state = record.task["status"]["state"]
+        state = cast(dict[str, object], record.task["status"])["state"]
         if state in (
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -711,7 +712,7 @@ def validate_payment_authorization(
         )
     if max_lockup_usdfc is None:
         errors.append("maxLockupUsdfc must be an integer")
-    elif max_lockup_usdfc < quote["depositNeededUsdfc"]:
+    elif cast(int, max_lockup_usdfc) < cast(int, quote["depositNeededUsdfc"]):
         errors.append(f"maxLockupUsdfc must be at least {quote['depositNeededUsdfc']}")
     if payment_token != quote["paymentToken"]:
         errors.append("paymentToken must match the quoted token")

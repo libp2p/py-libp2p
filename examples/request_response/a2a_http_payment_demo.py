@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import AsyncGenerator, Mapping
-from typing import Any
+from typing import Any, cast  # noqa: E402
 
 try:
     from a2a.server.context import ServerCallContext
@@ -40,8 +40,8 @@ try:
     from google.protobuf.json_format import MessageToDict, ParseDict
     from starlette.applications import Starlette
 except ImportError:  # pragma: no cover - optional runtime dependency
-    AgentCard = None
-    Starlette = None
+    AgentCard: Any = None  # type: ignore[assignment]
+    Starlette: Any = None  # type: ignore[assignment]
 
 from .a2a_payment_service import (
     A2APaymentTaskService,
@@ -177,11 +177,11 @@ class A2APaymentRequestHandler(RequestHandler):
                 final_task = self._service.complete_working_task(task_id)
                 if final_task is None:
                     raise TaskNotFoundError
-                for artifact in final_task.get("artifacts", []):
+                for artifact in cast(list[object], final_task.get("artifacts", [])):
                     yield _build_artifact_update(
                         task_id=task_id,
                         context_id=str(final_task["contextId"]),
-                        artifact_dict=artifact,
+                        artifact_dict=cast(Mapping[str, object], artifact),
                     )
                 yield _build_status_update(
                     task_id=task_id,
@@ -223,7 +223,7 @@ class A2APaymentRequestHandler(RequestHandler):
         task = self._service.get_task(params.id)
         if task is None:
             raise TaskNotFoundError
-        state = str(task.get("status", {}).get("state", ""))
+        state = str(cast(dict[str, object], task.get("status", {})).get("state", ""))
         if state in {
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -255,7 +255,7 @@ class A2APaymentRequestHandler(RequestHandler):
         self,
         params: GetExtendedAgentCardRequest,
         context: ServerCallContext,
-    ) -> AgentCard:
+    ) -> Any:
         del params, context
         raise UnsupportedOperationError(
             message="This demo does not provide an extended agent card"
@@ -291,7 +291,7 @@ def create_a2a_http_app(
         *create_agent_card_routes(agent_card),
         *create_jsonrpc_routes(handler, rpc_path),
     ]
-    return Starlette(routes=routes)
+    return cast(Any, Starlette)(routes=routes)
 
 
 def _parse_proto(payload: Mapping[str, object], proto_cls: Any) -> Any:
@@ -353,7 +353,7 @@ def main() -> None:
     )
 
     try:
-        import uvicorn
+        import uvicorn  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover - optional runtime dependency
         raise SystemExit("Install `uvicorn` to run the HTTP A2A demo server.") from exc
 
