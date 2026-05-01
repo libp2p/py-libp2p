@@ -64,7 +64,7 @@ class StorageExecutionBackend(Protocol):
     ) -> dict[str, object]: ...
 
 
-@dataclass(slots=True)
+@dataclass
 class _TaskRecord:
     task_id: str
     context_id: str
@@ -264,7 +264,7 @@ class A2APaymentTaskService:
             task = record.task
             if context_id and task.get("contextId") != context_id:
                 continue
-            task_state = cast(dict[str, object], task.get("status", {})).get("state")
+            task_state = _task_state(task)
             if state and task_state != state:
                 continue
             task_copy = _copy_message(task)
@@ -272,7 +272,7 @@ class A2APaymentTaskService:
                 task_copy.pop("artifacts", None)
             tasks.append(task_copy)
         tasks.sort(
-            key=lambda task: str(task.get("status", {}).get("timestamp", "")),
+            key=lambda task: str(_task_status(task).get("timestamp", "")),
             reverse=True,
         )
         return tasks
@@ -295,7 +295,7 @@ class A2APaymentTaskService:
         if record is None:
             return None
 
-        state = cast(dict[str, object], record.task["status"])["state"]
+        state = _task_state(record.task)
         if state in (
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -445,7 +445,7 @@ class A2APaymentTaskService:
         if record is None:
             raise KeyError("Task not found")
 
-        state = cast(dict[str, object], record.task["status"])["state"]
+        state = _task_state(record.task)
         if state in (
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -701,6 +701,7 @@ def validate_payment_authorization(
     payer = authorization.get("payer")
     max_lockup_usdfc = _coerce_json_int(authorization.get("maxLockupUsdfc"))
     payment_token = authorization.get("paymentToken")
+    deposit_needed_usdfc = _coerce_json_int(quote.get("depositNeededUsdfc"))
 
     if approved is not True:
         errors.append("approved must be true")
@@ -712,7 +713,9 @@ def validate_payment_authorization(
         )
     if max_lockup_usdfc is None:
         errors.append("maxLockupUsdfc must be an integer")
-    elif cast(int, max_lockup_usdfc) < cast(int, quote["depositNeededUsdfc"]):
+    elif deposit_needed_usdfc is None:
+        errors.append("quoted depositNeededUsdfc must be an integer")
+    elif max_lockup_usdfc < deposit_needed_usdfc:
         errors.append(f"maxLockupUsdfc must be at least {quote['depositNeededUsdfc']}")
     if payment_token != quote["paymentToken"]:
         errors.append("paymentToken must match the quoted token")
@@ -743,6 +746,17 @@ def stable_digest(*parts: object, separators: bool = False) -> str:
 
 def timestamp_now() -> str:
     return _timestamp_now()
+
+
+def _task_status(task: Mapping[str, object]) -> Mapping[str, object]:
+    status = task.get("status")
+    if isinstance(status, Mapping):
+        return status
+    return {}
+
+
+def _task_state(task: Mapping[str, object]) -> object:
+    return _task_status(task).get("state")
 
 
 def _build_simulated_storage_result(

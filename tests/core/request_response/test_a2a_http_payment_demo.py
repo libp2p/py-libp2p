@@ -7,7 +7,7 @@ import pytest
 
 from libp2p.filecoin.address import DEMO_F410_PAYER
 
-a2a_http_demo = pytest.importorskip("examples.request_response.a2a_http_payment_demo")
+a2a = pytest.importorskip("a2a")
 httpx = pytest.importorskip("httpx")
 
 from examples.request_response.a2a_http_payment_demo import (  # noqa: E402

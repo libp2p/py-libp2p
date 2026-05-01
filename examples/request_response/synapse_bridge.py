@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
-from typing import Final, cast
+from typing import Final
 
 DEFAULT_NETWORK: Final = "calibration"
 DEFAULT_SOURCE: Final = "py-libp2p-a2a-demo"
@@ -115,7 +115,12 @@ class SynapseNodeBridgeBackend:
                 "baseQuote": dict(base_quote),
             },
         )
-        return cast(Mapping[str, object] | None, result.get("prepareQuote"))
+        prepare_quote = result.get("prepareQuote")
+        if prepare_quote is None:
+            return None
+        if not isinstance(prepare_quote, Mapping):
+            raise SynapseBridgeError("sidecar response is missing prepareQuote")
+        return dict(prepare_quote)
 
     def execute_storage(
         self,

@@ -2,46 +2,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import AsyncGenerator, Mapping
-from typing import Any, cast  # noqa: E402
-
-try:
-    from a2a.server.context import ServerCallContext
-    from a2a.server.events import Event
-    from a2a.server.request_handlers.request_handler import RequestHandler
-    from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
-    from a2a.types.a2a_pb2 import (
-        AgentCard,
-        Artifact,
-        CancelTaskRequest,
-        DeleteTaskPushNotificationConfigRequest,
-        GetExtendedAgentCardRequest,
-        GetTaskPushNotificationConfigRequest,
-        GetTaskRequest,
-        ListTaskPushNotificationConfigsRequest,
-        ListTaskPushNotificationConfigsResponse,
-        ListTasksRequest,
-        ListTasksResponse,
-        Message,
-        SendMessageRequest,
-        SubscribeToTaskRequest,
-        Task,
-        TaskArtifactUpdateEvent,
-        TaskPushNotificationConfig,
-        TaskState,
-        TaskStatusUpdateEvent,
-    )
-    from a2a.utils.errors import (
-        InvalidParamsError,
-        PushNotificationNotSupportedError,
-        TaskNotCancelableError,
-        TaskNotFoundError,
-        UnsupportedOperationError,
-    )
-    from google.protobuf.json_format import MessageToDict, ParseDict
-    from starlette.applications import Starlette
-except ImportError:  # pragma: no cover - optional runtime dependency
-    AgentCard: Any = None  # type: ignore[assignment]
-    Starlette: Any = None  # type: ignore[assignment]
+import importlib
+from typing import TYPE_CHECKING, Any, cast
 
 from .a2a_payment_service import (
     A2APaymentTaskService,
@@ -50,13 +12,208 @@ from .a2a_payment_service import (
 )
 from .synapse_bridge import SynapseNodeBridgeBackend
 
+A2A_HTTP_DEPS_AVAILABLE = True
+
+if TYPE_CHECKING:
+
+    class _ProtoField:
+        def CopyFrom(self, other: Any) -> None: ...
+
+    class _ProtoMessage:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+    class _TaskState:
+        TASK_STATE_UNSPECIFIED = 0
+
+        @staticmethod
+        def Name(value: object) -> str: ...
+
+    class _GetTaskRequest:
+        id: str
+
+    class _CancelTaskRequest:
+        id: str
+
+    class _ListTasksRequest:
+        status: int
+        context_id: str
+        include_artifacts: bool
+
+        def HasField(self, field_name: str) -> bool: ...
+
+    class _SendMessageRequest:
+        message: Any
+
+    class _SubscribeToTaskRequest:
+        id: str
+
+    class _TaskArtifactUpdateEvent(_ProtoMessage):
+        artifact: _ProtoField
+        last_chunk: bool
+
+    class _TaskStatusUpdateEvent(_ProtoMessage):
+        status: _ProtoField
+
+    class _Starlette:
+        def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+    ServerCallContext = Any
+    Event = Any
+    RequestHandler = object
+    AgentCard = _ProtoMessage
+    Artifact = _ProtoMessage
+    CancelTaskRequest = _CancelTaskRequest
+    DeleteTaskPushNotificationConfigRequest = _ProtoMessage
+    GetExtendedAgentCardRequest = _ProtoMessage
+    GetTaskPushNotificationConfigRequest = _ProtoMessage
+    GetTaskRequest = _GetTaskRequest
+    ListTaskPushNotificationConfigsRequest = _ProtoMessage
+    ListTaskPushNotificationConfigsResponse = _ProtoMessage
+    ListTasksRequest = _ListTasksRequest
+    ListTasksResponse = _ProtoMessage
+    Message = _ProtoMessage
+    SendMessageRequest = _SendMessageRequest
+    SubscribeToTaskRequest = _SubscribeToTaskRequest
+    Task = _ProtoMessage
+    TaskArtifactUpdateEvent = _TaskArtifactUpdateEvent
+    TaskPushNotificationConfig = _ProtoMessage
+    TaskState = _TaskState
+    TaskStatusUpdateEvent = _TaskStatusUpdateEvent
+    Starlette = _Starlette
+
+    class InvalidParamsError(RuntimeError):
+        def __init__(self, *, message: str | None = None) -> None: ...
+
+    class PushNotificationNotSupportedError(RuntimeError):
+        def __init__(self, *, message: str | None = None) -> None: ...
+
+    class TaskNotCancelableError(RuntimeError):
+        def __init__(self, *, message: str | None = None) -> None: ...
+
+    class TaskNotFoundError(RuntimeError):
+        def __init__(self, *, message: str | None = None) -> None: ...
+
+    class UnsupportedOperationError(RuntimeError):
+        def __init__(self, *, message: str | None = None) -> None: ...
+
+    def create_agent_card_routes(*args: Any, **kwargs: Any) -> list[Any]: ...
+
+    def create_jsonrpc_routes(*args: Any, **kwargs: Any) -> list[Any]: ...
+
+    def MessageToDict(*args: Any, **kwargs: Any) -> dict[str, object]: ...
+
+    def ParseDict(*args: Any, **kwargs: Any) -> Any: ...
+else:
+    try:
+        from a2a.server.context import ServerCallContext
+        from a2a.server.events import Event
+        from a2a.server.request_handlers.request_handler import RequestHandler
+        from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
+        from a2a.types.a2a_pb2 import (
+            AgentCard,
+            Artifact,
+            CancelTaskRequest,
+            DeleteTaskPushNotificationConfigRequest,
+            GetExtendedAgentCardRequest,
+            GetTaskPushNotificationConfigRequest,
+            GetTaskRequest,
+            ListTaskPushNotificationConfigsRequest,
+            ListTaskPushNotificationConfigsResponse,
+            ListTasksRequest,
+            ListTasksResponse,
+            Message,
+            SendMessageRequest,
+            SubscribeToTaskRequest,
+            Task,
+            TaskArtifactUpdateEvent,
+            TaskPushNotificationConfig,
+            TaskState,
+            TaskStatusUpdateEvent,
+        )
+        from a2a.utils.errors import (
+            InvalidParamsError,
+            PushNotificationNotSupportedError,
+            TaskNotCancelableError,
+            TaskNotFoundError,
+            UnsupportedOperationError,
+        )
+        from google.protobuf.json_format import MessageToDict, ParseDict
+        from starlette.applications import Starlette
+    except ImportError:  # pragma: no cover - optional runtime dependency
+        A2A_HTTP_DEPS_AVAILABLE = False
+        ServerCallContext = cast(Any, object)
+        Event = cast(Any, object)
+
+        class RequestHandler:
+            pass
+
+        def create_agent_card_routes(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("A2A HTTP dependencies are not installed")
+
+        def create_jsonrpc_routes(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("A2A HTTP dependencies are not installed")
+
+        AgentCard = cast(Any, None)
+        Artifact = cast(Any, None)
+        CancelTaskRequest = cast(Any, None)
+        DeleteTaskPushNotificationConfigRequest = cast(Any, None)
+        GetExtendedAgentCardRequest = cast(Any, None)
+        GetTaskPushNotificationConfigRequest = cast(Any, None)
+        GetTaskRequest = cast(Any, None)
+        ListTaskPushNotificationConfigsRequest = cast(Any, None)
+        ListTaskPushNotificationConfigsResponse = cast(Any, None)
+        ListTasksRequest = cast(Any, None)
+        ListTasksResponse = cast(Any, None)
+        Message = cast(Any, None)
+        SendMessageRequest = cast(Any, None)
+        SubscribeToTaskRequest = cast(Any, None)
+        Task = cast(Any, None)
+        TaskArtifactUpdateEvent = cast(Any, None)
+        TaskPushNotificationConfig = cast(Any, None)
+        TaskState = cast(Any, None)
+        TaskStatusUpdateEvent = cast(Any, None)
+
+        class _OptionalA2AError(RuntimeError):
+            def __init__(self, *, message: str | None = None) -> None:
+                super().__init__(message or "A2A HTTP dependencies are not installed")
+
+        class InvalidParamsError(_OptionalA2AError):
+            pass
+
+        class PushNotificationNotSupportedError(_OptionalA2AError):
+            pass
+
+        class TaskNotCancelableError(_OptionalA2AError):
+            pass
+
+        class TaskNotFoundError(_OptionalA2AError):
+            pass
+
+        class UnsupportedOperationError(_OptionalA2AError):
+            pass
+
+        def MessageToDict(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("A2A HTTP dependencies are not installed")
+
+        def ParseDict(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("A2A HTTP dependencies are not installed")
+
+        Starlette = cast(Any, None)
+
 
 def _require_a2a_sdk() -> None:
-    if AgentCard is None or Starlette is None:
+    if not A2A_HTTP_DEPS_AVAILABLE or AgentCard is None or Starlette is None:
         raise RuntimeError(
             "This demo requires the optional A2A HTTP dependencies. "
             "Install `a2a-sdk[http-server]` and `uvicorn` to run it."
         )
+
+
+def _status_dict(task: Mapping[str, object]) -> Mapping[str, object]:
+    status = task.get("status")
+    if isinstance(status, Mapping):
+        return status
+    return {}
 
 
 class A2APaymentRequestHandler(RequestHandler):
@@ -177,12 +334,16 @@ class A2APaymentRequestHandler(RequestHandler):
                 final_task = self._service.complete_working_task(task_id)
                 if final_task is None:
                     raise TaskNotFoundError
-                for artifact in cast(list[object], final_task.get("artifacts", [])):
-                    yield _build_artifact_update(
-                        task_id=task_id,
-                        context_id=str(final_task["contextId"]),
-                        artifact_dict=cast(Mapping[str, object], artifact),
-                    )
+                artifacts = final_task.get("artifacts")
+                if isinstance(artifacts, list):
+                    for artifact in artifacts:
+                        if not isinstance(artifact, Mapping):
+                            continue
+                        yield _build_artifact_update(
+                            task_id=task_id,
+                            context_id=str(final_task["contextId"]),
+                            artifact_dict=artifact,
+                        )
                 yield _build_status_update(
                     task_id=task_id,
                     context_id=str(final_task["contextId"]),
@@ -223,7 +384,7 @@ class A2APaymentRequestHandler(RequestHandler):
         task = self._service.get_task(params.id)
         if task is None:
             raise TaskNotFoundError
-        state = str(cast(dict[str, object], task.get("status", {})).get("state", ""))
+        state = str(_status_dict(task).get("state", ""))
         if state in {
             "TASK_STATE_COMPLETED",
             "TASK_STATE_FAILED",
@@ -353,7 +514,7 @@ def main() -> None:
     )
 
     try:
-        import uvicorn  # type: ignore[import-untyped]
+        uvicorn = importlib.import_module("uvicorn")
     except ImportError as exc:  # pragma: no cover - optional runtime dependency
         raise SystemExit("Install `uvicorn` to run the HTTP A2A demo server.") from exc
 
