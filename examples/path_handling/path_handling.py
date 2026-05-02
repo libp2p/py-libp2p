@@ -70,9 +70,9 @@ def main() -> None:
     except Exception as e:
         logging.error(f"Failed to create or use temp file: {e}")
 
-    # Resolve a relative path from the script directory
+    # Resolve a relative path from the script directory (repo root README)
     try:
-        rel_path: Path = resolve_relative_path(script_dir, "../README.md")
+        rel_path: Path = resolve_relative_path(script_dir, "../../README.md")
         if rel_path.exists():
             logging.info(f"Resolved README.md path: {rel_path}")
         else:

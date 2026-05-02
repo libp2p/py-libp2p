@@ -1,0 +1,5 @@
+GossipSub v1.3 Extensions and Topic Observation support.
+
+- Added Extensions Control Message mechanism per GossipSub v1.3 spec; extensions are advertised in the first message on the stream and gated to v1.3+ protocol negotiation.
+- Added Topic Observation extension: peers can observe topics without full subscription via ``start_observing_topic()`` and ``stop_observing_topic()``, receiving IHAVE notifications for presence awareness.
+- Added test extension for cross-implementation interop (go-libp2p, rust-libp2p, py-libp2p).

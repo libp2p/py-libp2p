@@ -224,6 +224,15 @@ class IMuxedConn(ABC):
 
     @property
     @abstractmethod
+    def is_established(self) -> bool:
+        """
+        Check if the connection is fully established and ready for streams.
+
+        :return: True if the connection is established, otherwise False.
+        """
+
+    @property
+    @abstractmethod
     def is_closed(self) -> bool:
         """
         Check if the connection is fully closed.
@@ -1412,16 +1421,18 @@ class IListener(ABC):
     """
 
     @abstractmethod
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: Multiaddr) -> None:
         """
         Start listening on the specified multiaddress.
+
+        The listener manages its own background tasks internally and keeps
+        them alive until :meth:`close` is called.  Callers do not need to
+        supply a nursery.
 
         Parameters
         ----------
         maddr : Multiaddr
             The multiaddress on which to listen.
-        nursery : trio.Nursery
-            The nursery for spawning listening tasks.
 
         Raises
         ------
@@ -1993,12 +2004,16 @@ class IHost(ABC):
     @abstractmethod
     def get_addrs(self) -> list[Multiaddr]:
         """
-        Retrieve all multiaddresses on which the host is listening.
+        Return the addresses this host advertises to other peers.
+
+        These may differ from the actual listen addresses when
+        ``announce_addrs`` is configured. Each address includes a
+        ``/p2p/{peer_id}`` suffix.
 
         Returns
         -------
         list[Multiaddr]
-            A list of multiaddresses.
+            A list of advertised multiaddresses, each with a ``/p2p/{peer_id}`` suffix.
 
         """
 

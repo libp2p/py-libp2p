@@ -249,18 +249,25 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
-    listening_maddr = listener.get_addrs()[0]
-    conn_0 = await tcp_transport.dial(listening_maddr)
-    await event.wait()
-    assert conn_0 is not None and conn_1 is not None
-    yield conn_0, conn_1
+    try:
+        await listener.listen(LISTEN_MADDR)
+        listening_maddr = listener.get_addrs()[0]
+        conn_0 = await tcp_transport.dial(listening_maddr)
+        await event.wait()
+        assert conn_0 is not None and conn_1 is not None
+        yield conn_0, conn_1
+    finally:
+        await listener.close()
 
 
 @asynccontextmanager
 async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    # create_ed25519_key_pair() supplies the libp2p identity KeyPair only.
+    # The Noise static private key is not taken from that argument:
+    # noise_transport_factory always sets noise_privkey=noise_static_key_factory()
+    # (X25519). See noise_transport_factory above.
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )

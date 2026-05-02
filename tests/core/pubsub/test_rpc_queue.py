@@ -23,7 +23,7 @@ from libp2p.pubsub.rpc_queue import (
     _varint_size,
 )
 from libp2p.tools.utils import connect
-from tests.utils.factories import PubsubFactory
+from tests.utils.factories import IDFactory, PubsubFactory
 
 
 def _make_rpc(payload_size: int = 0) -> rpc_pb2.RPC:
@@ -510,32 +510,36 @@ class TestSplitRpcSenderRecord:
 class TestSplitRpcExtensions:
     def test_fast_path(self) -> None:
         rpc = rpc_pb2.RPC()
-        ext = rpc.control.extensions.add()
-        ext.name = "test-ext"
-        ext.data = b"ext-data"
+        rpc.control.extensions.topicObservation = True
 
         parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
         assert len(parts) == 1
-        assert parts[0].control.extensions[0].name == "test-ext"
+        assert parts[0].control.HasField("extensions")
+        assert parts[0].control.extensions.topicObservation is True
 
     def test_slow_path_split(self) -> None:
         rpc = rpc_pb2.RPC()
         for i in range(20):
             rpc.control.graft.add().topicID = f"topic-{i}" * 10
-        for i in range(10):
-            ext = rpc.control.extensions.add()
-            ext.name = f"ext-{i}"
-            ext.data = b"x" * 50
+        rpc.control.extensions.topicObservation = True
 
         parts = RpcQueue(max_message_size=100).split_rpc(rpc)
-        all_exts = [
-            e for p in parts if p.HasField("control") for e in p.control.extensions
-        ]
-        assert len(all_exts) == 10
+        assert len(parts) > 1
+        ext_count = sum(
+            1
+            for p in parts
+            if p.HasField("control") and p.control.HasField("extensions")
+        )
+        assert ext_count == 1
+        assert any(
+            p.control.extensions.topicObservation
+            for p in parts
+            if p.HasField("control") and p.control.HasField("extensions")
+        )
 
     def test_extension_only_not_filtered(self) -> None:
         rpc = rpc_pb2.RPC()
-        rpc.control.extensions.add().name = "only"
+        rpc.control.extensions.topicObservation = True
         assert _rpc_has_data(rpc) is True
 
         parts = RpcQueue(max_message_size=10000).split_rpc(rpc)
@@ -669,3 +673,219 @@ async def test_sender_record_reaches_peer():
 
         # At least one RPC received by node 1 carried a senderRecord.
         assert any(len(sr) > 0 for sr in captured)
+
+
+@pytest.mark.trio
+async def test_send_rpc_defers_and_piggybacks_control_on_queue_full() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        queue = pubsubs[0].peer_queues[peer1_id]
+
+        for _ in range(OutBoundQueueSize):
+            assert queue.push(_make_rpc(1))
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "deferred-topic"
+
+        router0.send_rpc(peer1_id, rpc, priority=True)
+
+        assert peer1_id in router0._pending_control
+        assert [p.topicID for p in router0._pending_control[peer1_id].prune] == [
+            "deferred-topic"
+        ]
+
+        # Free queue capacity then send another RPC: deferred control should piggyback.
+        while len(queue) > 0:
+            assert await queue.pop() is not None
+        router0.send_rpc(peer1_id, _make_rpc(5))
+
+        assert peer1_id not in router0._pending_control
+        tail_rpc = queue._queue._non_priority[-1]
+        assert tail_rpc.HasField("control")
+        assert [p.topicID for p in tail_rpc.control.prune] == ["deferred-topic"]
+
+
+@pytest.mark.trio
+async def test_send_rpc_defers_and_piggybacks_graft_and_prune_on_queue_full() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        queue = pubsubs[0].peer_queues[peer1_id]
+
+        for _ in range(OutBoundQueueSize):
+            assert queue.push(_make_rpc(1))
+
+        router0.mesh["graft-topic"] = {peer1_id}
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.graft.add().topicID = "graft-topic"
+        rpc.control.prune.add().topicID = "prune-topic"
+
+        router0.send_rpc(peer1_id, rpc, priority=True)
+
+        assert peer1_id in router0._pending_control
+        assert [g.topicID for g in router0._pending_control[peer1_id].graft] == [
+            "graft-topic"
+        ]
+        assert [p.topicID for p in router0._pending_control[peer1_id].prune] == [
+            "prune-topic"
+        ]
+
+        while len(queue) > 0:
+            assert await queue.pop() is not None
+        router0.send_rpc(peer1_id, _make_rpc(5))
+
+        assert peer1_id not in router0._pending_control
+        tail_rpc = queue._queue._non_priority[-1]
+        assert [g.topicID for g in tail_rpc.control.graft] == ["graft-topic"]
+        assert [p.topicID for p in tail_rpc.control.prune] == ["prune-topic"]
+
+
+@pytest.mark.trio
+async def test_send_rpc_defers_control_on_oversized_chunk() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+        queue = pubsubs[0].peer_queues[peer1_id]
+        queue.max_message_size = 64
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "x" * 300
+
+        router0.send_rpc(peer1_id, rpc, priority=True)
+
+        assert peer1_id in router0._pending_control
+        assert len(router0._pending_control[peer1_id].prune) == 1
+        assert len(router0._pending_control[peer1_id].prune[0].topicID) == 300
+
+
+@pytest.mark.trio
+async def test_remove_peer_clears_pending_control_retry() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(2) as pubsubs:
+        await connect(pubsubs[0].host, pubsubs[1].host)
+
+        peer1_id = pubsubs[1].host.get_id()
+        with trio.fail_after(5):
+            await pubsubs[0].wait_for_peer(peer1_id)
+
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        rpc = rpc_pb2.RPC()
+        rpc.control.prune.add().topicID = "drop-me"
+        router0._push_control_retry(peer1_id, rpc.control)
+        assert peer1_id in router0._pending_control
+
+        router0.remove_peer(peer1_id)
+        assert peer1_id not in router0._pending_control
+
+
+@pytest.mark.trio
+async def test_push_control_retry_ignores_non_retriable_control() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        peer_id = IDFactory()
+        control = rpc_pb2.ControlMessage()
+        control.ihave.add().topicID = "topic-a"
+        control.iwant.add().messageIDs.extend(["mid-a"])
+        control.idontwant.add().messageIDs.extend([b"mid-b"])
+
+        router0._push_control_retry(peer_id, control)
+
+        assert peer_id not in router0._pending_control
+
+
+@pytest.mark.trio
+async def test_push_control_retry_caps_entries_and_coalesces() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        peer_id = IDFactory()
+        for index in range(80):
+            control = rpc_pb2.ControlMessage()
+            control.prune.add().topicID = f"topic-{index}"
+            router0._push_control_retry(peer_id, control)
+
+        pending = router0._pending_control[peer_id]
+        assert len(pending.prune) == 64
+        assert pending.prune[0].topicID == "topic-16"
+        assert pending.prune[-1].topicID == "topic-79"
+
+        extra = rpc_pb2.ControlMessage()
+        extra.prune.add().topicID = "topic-extra"
+        router0._push_control_retry(peer_id, extra)
+
+        topics = [p.topicID for p in router0._pending_control[peer_id].prune]
+        assert "topic-79" in topics
+        assert "topic-extra" in topics
+
+
+@pytest.mark.trio
+async def test_filter_retriable_control_drops_stale_entries() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        peer_id = IDFactory()
+        router0.mesh["graft-keep"] = {peer_id}
+        router0.mesh["graft-drop"] = set()
+        router0.mesh["prune-drop"] = {peer_id}
+        router0.mesh["prune-keep"] = set()
+
+        control = rpc_pb2.ControlMessage()
+        control.graft.add().topicID = "graft-keep"
+        control.graft.add().topicID = "graft-drop"
+        control.prune.add().topicID = "prune-drop"
+        control.prune.add().topicID = "prune-keep"
+        control.prune.add().topicID = "prune-unknown"
+
+        filtered = router0._filter_retriable_control(peer_id, control)
+
+        assert [g.topicID for g in filtered.graft] == ["graft-keep"]
+        assert [p.topicID for p in filtered.prune] == ["prune-keep", "prune-unknown"]
+
+
+@pytest.mark.trio
+async def test_piggyback_control_retry_cleans_all_stale_pending_entry() -> None:
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+        router0 = pubsubs[0].router
+        assert isinstance(router0, GossipSub)
+
+        peer_id = IDFactory()
+        router0.mesh["graft-stale"] = set()
+        router0.mesh["prune-stale"] = {peer_id}
+
+        control = rpc_pb2.ControlMessage()
+        control.graft.add().topicID = "graft-stale"
+        control.prune.add().topicID = "prune-stale"
+
+        router0._push_control_retry(peer_id, control)
+        assert peer_id in router0._pending_control
+
+        outbound = rpc_pb2.RPC()
+        router0._piggyback_control_retry(peer_id, outbound)
+
+        assert peer_id not in router0._pending_control
+        assert not outbound.HasField("control")

@@ -479,7 +479,8 @@ def new_host(
     bootstrap_allow_ipv6: bool = False,
     bootstrap_dns_timeout: float = 10.0,
     bootstrap_dns_max_retries: int = 3,
-    connection_config: ConnectionConfig | None = None
+    connection_config: ConnectionConfig | None = None,
+    announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -505,6 +506,7 @@ def new_host(
     :param bootstrap_dns_timeout: DNS resolution timeout in seconds per attempt
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
+    :param announce_addrs: if set, these replace listen addrs in get_addrs()
     :return: return a host instance
     """
 
@@ -557,6 +559,7 @@ def new_host(
             bootstrap_allow_ipv6=bootstrap_allow_ipv6,
             bootstrap_dns_timeout=bootstrap_dns_timeout,
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+            announce_addrs=announce_addrs,
         )
     return BasicHost(
         network=swarm,
@@ -568,6 +571,7 @@ def new_host(
         bootstrap_allow_ipv6=bootstrap_allow_ipv6,
         bootstrap_dns_timeout=bootstrap_dns_timeout,
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+        announce_addrs=announce_addrs,
     )
 
 __version__ = __version("libp2p")

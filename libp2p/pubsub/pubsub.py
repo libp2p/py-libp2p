@@ -10,9 +10,11 @@ from collections.abc import (
 import functools
 import hashlib
 import logging
+import random
 import time
 from typing import (
     NamedTuple,
+    Protocol,
     cast,
 )
 
@@ -35,6 +37,7 @@ from libp2p.custom_types import (
     TProtocol,
     ValidatorFn,
 )
+from libp2p.encoding_config import get_default_encoding
 from libp2p.exceptions import (
     ParseError,
     ValidationError,
@@ -58,6 +61,9 @@ from libp2p.peer.peerdata import (
     PeerDataError,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.pubsub.extensions import (
+    ExtensionsState,
+)
 from libp2p.pubsub.utils import maybe_consume_signed_record
 from libp2p.tools.anyio_service import (
     Service,
@@ -89,8 +95,28 @@ from .validators import (
     signature_validator,
 )
 
+# GossipSub v1.3+ protocol IDs. Extensions Control Message is only sent when
+# negotiating one of these protocols (per spec: extensions in first message).
+_MESHSUB_V13_PLUS = frozenset(
+    (
+        TProtocol("/meshsub/1.3.0"),
+        TProtocol("/meshsub/1.4.0"),
+        TProtocol("/meshsub/2.0.0"),
+    )
+)
+
+
+class _RouterWithExtensions(Protocol):
+    """Protocol for a router that supports GossipSub v1.3 extensions."""
+
+    extensions_state: ExtensionsState
+
+
 # Ref: https://github.com/libp2p/go-libp2p-pubsub/blob/40e1c94708658b155f30cf99e4574f384756d83c/topic.go#L97  # noqa: E501
 SUBSCRIPTION_CHANNEL_SIZE = 32
+_ANNOUNCE_RETRY_MIN_DELAY_MS = 1
+_ANNOUNCE_RETRY_JITTER_MS = 1000
+_ANNOUNCE_RETRY_MAX_ATTEMPTS = 10
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +137,6 @@ def get_content_addressed_msg_id(
         from :mod:`libp2p.encoding_config` is used.
     :return: Multibase-encoded message ID
     """
-    from libp2p.encoding_config import get_default_encoding
-
     if encoding is None:
         encoding = get_default_encoding()
     digest = hashlib.sha256(msg.data).digest()
@@ -312,6 +336,7 @@ class Pubsub(Service, IPubsub):
     event_handle_dead_peer_queue_started: trio.Event
 
     _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
+    _pending_announce_retries: set[tuple[ID, str, bool]]
 
     def __init__(
         self,
@@ -413,6 +438,7 @@ class Pubsub(Service, IPubsub):
         # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
         self._peer_added_events: dict[ID, trio.Event] = {}
         self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
+        self._pending_announce_retries = set()
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -727,15 +753,35 @@ class Pubsub(Service, IPubsub):
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
 
-        # Send hello packet
+        # Build hello packet.
         hello = self.get_hello_packet()
+
+        # GossipSub v1.3 – Extensions Control Message injection.
+        # Per spec: "If a peer supports any extension, the Extensions control
+        # message MUST be included in the first message on the stream."
+        # Only inject when we negotiated v1.3+; peers on v1.1/v1.2 must not
+        # receive extension fields.
+        negotiated_protocol = stream.get_protocol()
+        router = self.router
+        if (
+            negotiated_protocol in _MESHSUB_V13_PLUS
+            and hasattr(router, "extensions_state")
+            and hasattr(router, "supports_v13_features")
+        ):
+            # We pass the peer_id because extensions_state needs to track
+            # "sent_extensions" per peer for the at-most-once rule.
+            # cast() tells static type-checkers the narrowed type without
+            # creating a runtime dependency on gossipsub.py from pubsub.py.
+            v13_router = cast(_RouterWithExtensions, router)
+            hello = v13_router.extensions_state.build_hello_extensions(peer_id, hello)
+
         try:
             await stream.write(encode_varint_prefixed(hello.SerializeToString()))
         except StreamClosed:
             logger.debug("Fail to add new peer %s: stream closed", peer_id)
             return
         try:
-            self.router.add_peer(peer_id, stream.get_protocol())
+            self.router.add_peer(peer_id, negotiated_protocol)
         except Exception as error:
             logger.debug("fail to add new peer %s, error %s", peer_id, error)
             return
@@ -782,6 +828,8 @@ class Pubsub(Service, IPubsub):
             return
         del self.peers[peer_id]
 
+        self._clear_pending_announce_retries_for_peer(peer_id)
+
         # Close the outbound queue so the sending task exits
         if peer_id in self.peer_queues:
             self.peer_queues.pop(peer_id).close()
@@ -793,6 +841,13 @@ class Pubsub(Service, IPubsub):
         self.router.remove_peer(peer_id)
 
         logger.debug("removed dead peer %s", peer_id)
+
+    def _clear_pending_announce_retries_for_peer(self, peer_id: ID) -> None:
+        # This is O(n) over pending retry keys. Keep this representation because
+        # retries are bounded and deduplicated per (peer, topic, subscribe).
+        self._pending_announce_retries = {
+            key for key in self._pending_announce_retries if key[0] != peer_id
+        }
 
     async def handle_peer_queue(self) -> None:
         """
@@ -931,6 +986,20 @@ class Pubsub(Service, IPubsub):
                         "fail to deliver message to subscription for topic %s", topic
                     )
 
+    def _build_announce_rpc(
+        self, topic_id: str, subscribe: bool
+    ) -> tuple[rpc_pb2.RPC, rpc_pb2.RPC.SubOpts]:
+        packet = rpc_pb2.RPC()
+        subopt = rpc_pb2.RPC.SubOpts(subscribe=subscribe, topicid=topic_id)
+        packet.subscriptions.extend([subopt])
+        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+        packet.senderRecord = envelope_bytes
+        return packet, subopt
+
+    def _announce_state_matches(self, topic_id: str, subscribe: bool) -> bool:
+        is_currently_subscribed = topic_id in self.subscribed_topics_receive
+        return subscribe == is_currently_subscribed
+
     async def subscribe(self, topic_id: str) -> ISubscriptionAPI:
         """
         Subscribe ourself to a topic.
@@ -954,17 +1023,10 @@ class Pubsub(Service, IPubsub):
         self.subscribed_topics_send[topic_id] = send_channel
         self.subscribed_topics_receive[topic_id] = subscription
 
-        # Create subscribe message
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=True, topicid=topic_id)]
-        )
-
-        # Add the senderRecord of the peer in the RPC msg
-        envelope_bytes, _ = env_to_send_in_RPC(self.host)
-        packet.senderRecord = envelope_bytes
+        # Create subscribe announcement
+        packet, subopt = self._build_announce_rpc(topic_id, subscribe=True)
         # Send out subscribe message to all peers
-        await self.message_all_peers(packet.SerializeToString())
+        await self.message_all_peers(packet.SerializeToString(), announce=subopt)
 
         # Tell router we are joining this topic
         await self.router.join(topic_id)
@@ -990,22 +1052,18 @@ class Pubsub(Service, IPubsub):
         # Only close the send side
         await send_channel.aclose()
 
-        # Create unsubscribe message
-        packet: rpc_pb2.RPC = rpc_pb2.RPC()
-        packet.subscriptions.extend(
-            [rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic_id)]
-        )
-        # Add the senderRecord of the peer in the RPC msg
-        envelope_bytes, _ = env_to_send_in_RPC(self.host)
-        packet.senderRecord = envelope_bytes
+        # Create unsubscribe announcement
+        packet, subopt = self._build_announce_rpc(topic_id, subscribe=False)
 
         # Send out unsubscribe message to all peers
-        await self.message_all_peers(packet.SerializeToString())
+        await self.message_all_peers(packet.SerializeToString(), announce=subopt)
 
         # Tell router we are leaving this topic
         await self.router.leave(topic_id)
 
-    async def message_all_peers(self, raw_msg: bytes) -> None:
+    async def message_all_peers(
+        self, raw_msg: bytes, announce: rpc_pb2.RPC.SubOpts | None = None
+    ) -> None:
         """
         Broadcast a message to peers.
 
@@ -1027,9 +1085,7 @@ class Pubsub(Service, IPubsub):
                 if rpc_msg is None:
                     rpc_msg = rpc_pb2.RPC()
                     rpc_msg.ParseFromString(raw_msg)
-                ok = queue.push(rpc_msg)
-                if not ok:
-                    drop_rpc(peer_id, rpc_msg)
+                self._enqueue_or_retry_announce(peer_id, queue, rpc_msg, announce)
                 continue
 
             if rpc_msg is None:
@@ -1038,13 +1094,86 @@ class Pubsub(Service, IPubsub):
 
             for part in queue.split_rpc(rpc_msg):
                 if part.ByteSize() > queue.max_message_size:
+                    # Intentional asymmetry: only queue-full drops schedule
+                    # announce retries. Oversized chunks are terminal here,
+                    # matching _run_announce_retry, which also bails out when
+                    # the announce RPC itself exceeds max_message_size.
                     drop_rpc(peer_id, part)
                     continue
 
                 ok = queue.push(part)
                 if not ok:
                     drop_rpc(peer_id, part)
+                    if announce is not None:
+                        self._schedule_announce_retry(peer_id, announce)
                     break
+
+    def _enqueue_or_retry_announce(
+        self,
+        peer_id: ID,
+        queue: RpcQueue,
+        rpc_msg: rpc_pb2.RPC,
+        announce: rpc_pb2.RPC.SubOpts | None,
+    ) -> None:
+        ok = queue.push(rpc_msg)
+        if ok:
+            return
+
+        drop_rpc(peer_id, rpc_msg)
+        if announce is not None:
+            self._schedule_announce_retry(peer_id, announce)
+
+    def _schedule_announce_retry(
+        self, peer_id: ID, announce: rpc_pb2.RPC.SubOpts
+    ) -> None:
+        if not self.manager.is_running:
+            return
+
+        key = (peer_id, announce.topicid, announce.subscribe)
+        if key in self._pending_announce_retries:
+            return
+        self._pending_announce_retries.add(key)
+        self.manager.run_task(
+            self._run_announce_retry, peer_id, announce.topicid, announce.subscribe
+        )
+
+    async def _run_announce_retry(
+        self, peer_id: ID, topic_id: str, subscribe: bool
+    ) -> None:
+        key = (peer_id, topic_id, subscribe)
+        try:
+            for _ in range(_ANNOUNCE_RETRY_MAX_ATTEMPTS):
+                if not self.manager.is_running:
+                    return
+
+                delay_ms = _ANNOUNCE_RETRY_MIN_DELAY_MS + random.randint(
+                    0, _ANNOUNCE_RETRY_JITTER_MS - 1
+                )
+                await trio.sleep(delay_ms / 1000)
+
+                if not self._announce_state_matches(topic_id, subscribe):
+                    return
+
+                queue = self.peer_queues.get(peer_id)
+                if queue is None:
+                    return
+
+                # Rebuild the announce RPC on every attempt so senderRecord and
+                # any host-address-derived record data stays fresh if listen
+                # addresses changed since the previous attempt.
+                retry_rpc, _ = self._build_announce_rpc(topic_id, subscribe)
+
+                if retry_rpc.ByteSize() > queue.max_message_size:
+                    drop_rpc(peer_id, retry_rpc)
+                    return
+
+                ok = queue.push(retry_rpc)
+                if ok:
+                    return
+
+                drop_rpc(peer_id, retry_rpc)
+        finally:
+            self._pending_announce_retries.discard(key)
 
     async def publish(self, topic_id: str | list[str], data: bytes) -> None:
         """

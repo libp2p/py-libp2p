@@ -486,14 +486,14 @@ class TestIPNSSpecTestVectors:
     # IPNS names (CIDv1 with libp2p-key multicodec) from the spec
     from typing import Any, TypedDict
 
-    class TestVector(TypedDict, total=False):
+    class SpecVector(TypedDict, total=False):
         file: str
         name: str
         valid: bool
         error: str
         value: str
 
-    TEST_VECTORS: dict[str, TestVector] = {
+    TEST_VECTORS: dict[str, SpecVector] = {
         # V1-only record -> invalid (missing signatureV2)
         "v1_only": {
             "file": "v1_only.ipns-record",

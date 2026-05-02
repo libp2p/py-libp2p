@@ -1,0 +1,2 @@
+Noise handshake payloads now require X25519 static keys and raise a clear
+error when given an invalid key type.

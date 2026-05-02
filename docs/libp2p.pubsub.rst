@@ -3,7 +3,9 @@ libp2p.pubsub package
 
 Py-libp2p provides a comprehensive PubSub implementation with support for both FloodSub and GossipSub protocols, including the latest GossipSub 1.2 specification with IDONTWANT control messages for improved bandwidth efficiency.
 
-For detailed information about GossipSub 1.2 features and configuration, see :doc:`gossipsub-1.2`.
+For detailed information about GossipSub features and configuration, see
+:doc:`gossipsub-1.2` (IDONTWANT, etc.) and :doc:`gossipsub-1.3` (v1.3 extensions,
+Topic Observation).
 
 Subpackages
 -----------

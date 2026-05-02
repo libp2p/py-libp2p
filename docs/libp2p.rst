@@ -10,6 +10,7 @@ Subpackages
    libp2p.bitswap
    libp2p.crypto
    libp2p.discovery
+   libp2p.filecoin
    libp2p.host
    libp2p.identity
    libp2p.io
@@ -56,14 +57,6 @@ libp2p.custom_types module
    :undoc-members:
    :show-inheritance:
    :exclude-members: INetStream, IMuxedConn, ISecureTransport
-
-libp2p.utils module
--------------------
-
-.. automodule:: libp2p.utils
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 Module contents
 ---------------

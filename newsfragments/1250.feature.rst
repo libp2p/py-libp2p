@@ -1,0 +1,3 @@
+Added ``announce_addrs`` support to ``BasicHost`` so nodes behind NAT or
+reverse proxies can advertise their publicly reachable addresses instead of
+local listen addresses.

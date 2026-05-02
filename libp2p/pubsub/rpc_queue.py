@@ -367,15 +367,15 @@ class RpcQueue:
                             )
                         )
 
-            # EXTENSIONS
-            for ext in ctrl.extensions:
-                current.control.extensions.append(ext)
+            # EXTENSIONS (optional singular message)
+            if ctrl.HasField("extensions"):
+                current.control.extensions.CopyFrom(ctrl.extensions)
                 if current.ByteSize() > limit:
-                    del current.control.extensions[-1]
+                    current.control.ClearField("extensions")
                     out.append(current)
                     current = rpc_pb2.RPC()
                     current.control.SetInParent()
-                    current.control.extensions.append(ext)
+                    current.control.extensions.CopyFrom(ctrl.extensions)
 
         # ── Flush remaining ──
         if current.ByteSize() > 0:

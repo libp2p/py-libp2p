@@ -1,0 +1,1 @@
+Consolidated the ``libp2p.utils`` package documentation into a single page, removing the duplicate module entry and adding missing ``address_validation`` and ``dns_utils`` submodule docs.

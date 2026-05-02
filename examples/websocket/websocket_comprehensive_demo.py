@@ -8,6 +8,13 @@ This example demonstrates all the advanced WebSocket transport features:
 - Browser integration
 - Production-ready configuration
 - Real-world use cases
+
+Usage:
+    python examples/websocket/websocket_comprehensive_demo.py
+    python examples/websocket/websocket_comprehensive_demo.py -c <addr>
+    python examples/websocket/websocket_comprehensive_demo.py -c <addr> --wss
+    python examples/websocket/websocket_comprehensive_demo.py -c <addr>
+        --proxy <proxy_url>
 """
 
 import argparse
@@ -292,16 +299,18 @@ async def run_server(port: int, use_wss: bool = False, proxy_url: str | None = N
             logger.info("📋 To test the connection, run:")
             if use_wss:
                 logger.info(
-                    f"   python websocket_comprehensive_demo.py -c {client_addr} --wss"
+                    "   python examples/websocket/websocket_comprehensive_demo.py "
+                    f"-c {client_addr} --wss"
                 )
             else:
                 logger.info(
-                    f"   python websocket_comprehensive_demo.py -c {client_addr}"
+                    "   python examples/websocket/websocket_comprehensive_demo.py "
+                    f"-c {client_addr}"
                 )
             if proxy_url:
                 logger.info(
-                    f"   python websocket_comprehensive_demo.py -c {client_addr} "
-                    f"--proxy {proxy_url}"
+                    "   python examples/websocket/websocket_comprehensive_demo.py "
+                    f"-c {client_addr} --proxy {proxy_url}"
                 )
             logger.info("")
             logger.info("⏳ Waiting for connections...")
