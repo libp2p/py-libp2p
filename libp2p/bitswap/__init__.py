@@ -31,7 +31,7 @@ These byte-returning helpers remain to avoid breaking existing callers.
 New code should prefer the object-returning variants above.
 """
 
-from .block_store import BlockStore, MemoryBlockStore
+from .block_store import BlockStore, FilesystemBlockStore, MemoryBlockStore
 from .cid import (
     CID_V0,
     CID_V1,
@@ -71,6 +71,7 @@ __all__ = [
     "BitswapClient",
     "BlockStore",
     "MemoryBlockStore",
+    "FilesystemBlockStore",
     # CID types
     "CIDInput",
     "CIDObject",

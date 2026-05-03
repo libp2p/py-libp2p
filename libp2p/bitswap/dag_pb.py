@@ -10,10 +10,20 @@ from dataclasses import dataclass, field
 import logging
 
 from .cid import CIDInput, cid_to_bytes
-from .pb.dag_pb_pb2 import PBNode
+from .pb.dag_pb_pb2 import PBLink, PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_varint(value: int) -> bytes:
+    """Encode an unsigned integer as a protobuf varint."""
+    buf = []
+    while value > 0x7F:
+        buf.append((value & 0x7F) | 0x80)
+        value >>= 7
+    buf.append(value & 0x7F)
+    return bytes(buf)
 
 
 def _normalize_link_cid(cid: CIDInput) -> bytes:
@@ -103,38 +113,39 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
         >>> encoded = encode_dag_pb(links, data)
 
     """
-    # Create PBNode
-    pb_node = PBNode()
+    # DAG-PB canonical format requires Links (field 2) BEFORE Data (field 1).
+    # Standard protobuf SerializeToString() emits fields in field-number order
+    # (Data=1 first, Links=2 second), producing different bytes and a different
+    # CID than Kubo for the same logical content.
+    # We manually construct the wire format to enforce the correct ordering.
 
-    # Add links
+    result = b""
+
+    # 1. Serialize each Link first — field 2, wire type 2 (length-delimited) = tag 0x12
     for link in links:
-        pb_link = pb_node.Links.add()
+        pb_link = PBLink()
         pb_link.Hash = link.cid
         pb_link.Name = link.name
         pb_link.Tsize = link.size
+        link_bytes = pb_link.SerializeToString()
+        result += b"\x12" + _encode_varint(len(link_bytes)) + link_bytes
 
-    # Add UnixFS data if provided
-    if unixfs_data:
-        # Create UnixFS data structure
+    # 2. Serialize Data after Links — field 1, wire type 2 = tag 0x0a
+    if unixfs_data is not None:
         pb_unixfs = PBUnixFSData()
         pb_unixfs.Type = UnixFSData.TYPE_MAP[unixfs_data.type]  # type: ignore[assignment]
         pb_unixfs.Data = unixfs_data.data
         pb_unixfs.filesize = unixfs_data.filesize
-
-        # Add blocksizes
         for blocksize in unixfs_data.blocksizes:
             pb_unixfs.blocksizes.append(blocksize)
-
         if unixfs_data.hash_type:
             pb_unixfs.hashType = unixfs_data.hash_type
         if unixfs_data.fanout:
             pb_unixfs.fanout = unixfs_data.fanout
+        data_bytes = pb_unixfs.SerializeToString()
+        result += b"\x0a" + _encode_varint(len(data_bytes)) + data_bytes
 
-        # Serialize UnixFS data and add to PBNode
-        pb_node.Data = pb_unixfs.SerializeToString()
-
-    # Serialize PBNode
-    return pb_node.SerializeToString()
+    return result
 
 
 def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
