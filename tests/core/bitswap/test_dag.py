@@ -349,7 +349,8 @@ class TestFetchFile:
         assert filename is None  # File node without directory wrapper
 
         # root fetch (1) + tree-level batch fallback (3) = 4
-        # Leaves are already fetched during tree traversal, no separate leaf fetch needed
+        # Leaves are already fetched during tree traversal,
+        # no separate leaf fetch needed
         assert mock_client.get_block.call_count == 4
 
     @pytest.mark.trio

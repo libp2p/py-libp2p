@@ -184,7 +184,9 @@ class MerkleDag:
 
             cid_bytes = cid_to_bytes(cid)
             try:
-                data = await self._get_block(cid_bytes, peer_id=peer_id, timeout=timeout)
+                data = await self._get_block(
+                    cid_bytes, peer_id=peer_id, timeout=timeout
+                )
                 results[cid_bytes] = data
             except Exception:
                 pass
@@ -753,7 +755,7 @@ class MerkleDag:
             f"(batch_size=32, timeout={timeout}s)"
         )
         print(msg2, flush=True)
-        
+
         # First try to get blocks from the already-fetched tree
         block_map: dict[bytes, bytes] = {}
         missing_cids: list[bytes] = []
@@ -763,7 +765,7 @@ class MerkleDag:
                 block_map[leaf_cid] = leaf_data
             else:
                 missing_cids.append(leaf_cid)
-        
+
         # If some leaves weren't in the tree fetch, fetch them now
         if missing_cids:
             logger.info(f"[DAG] Fetching {len(missing_cids)} missing leaves")
@@ -771,7 +773,7 @@ class MerkleDag:
                 missing_cids, peer_id=peer_id, timeout=timeout, batch_size=32
             )
             block_map.update(missing_blocks)
-        
+
         logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
         print(f"[FETCH] ✓ Batch fetch complete: {len(block_map)} blocks", flush=True)
 

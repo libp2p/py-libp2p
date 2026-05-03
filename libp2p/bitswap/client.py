@@ -757,13 +757,13 @@ class BitswapClient:
         # Noise protocol limit is 65535 bytes per message
         # Reserve some space for protobuf overhead
         MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
-        
+
         batch = []
         batch_size = 0
-        
+
         for block_data in blocks:
             block_size = len(block_data)
-            
+
             # If adding this block would exceed limit, send current batch first
             if batch and (batch_size + block_size > MAX_BATCH_SIZE):
                 msg = create_message(blocks_v100=batch)
@@ -771,10 +771,10 @@ class BitswapClient:
                 logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
                 batch = []
                 batch_size = 0
-            
+
             batch.append(block_data)
             batch_size += block_size
-        
+
         # Send remaining blocks
         if batch:
             msg = create_message(blocks_v100=batch)
@@ -791,13 +791,13 @@ class BitswapClient:
         # Noise protocol limit is 65535 bytes per message
         # Reserve some space for protobuf overhead
         MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
-        
+
         batch = []
         batch_size = 0
-        
+
         for prefix, block_data in blocks:
             block_size = len(prefix) + len(block_data)
-            
+
             # If adding this block would exceed limit, send current batch first
             if batch and (batch_size + block_size > MAX_BATCH_SIZE):
                 msg = create_message(blocks_v110=batch)
@@ -805,10 +805,10 @@ class BitswapClient:
                 logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
                 batch = []
                 batch_size = 0
-            
+
             batch.append((prefix, block_data))
             batch_size += block_size
-        
+
         # Send remaining blocks
         if batch:
             msg = create_message(blocks_v110=batch)
