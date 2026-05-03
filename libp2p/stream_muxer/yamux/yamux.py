@@ -808,26 +808,59 @@ class Yamux(IMuxedConn):
                             self.stream_buffers[stream_id] = bytearray()
                             self.stream_events[stream_id] = trio.Event()
 
-                            # Read any data that came with the SYN frame
-                            if length > 0:
-                                try:
-                                    data = await read_exactly(self.secured_conn, length)
-                                    self.stream_buffers[stream_id].extend(data)
-                                    self.stream_events[stream_id].set()
-                                    logger.debug(
-                                        f"Read {length} bytes with SYN "
-                                        f"for stream {stream_id}"
-                                    )
-                                except IncompleteReadError as e:
-                                    logger.error(
-                                        "Incomplete read for SYN data on stream "
-                                        f"{stream_id}: {e}"
-                                    )
-                                    # Mark stream as closed
-                                    stream.recv_closed = True
-                                    stream.closed = True
-                                    if stream_id in self.stream_events:
+                            if typ == TYPE_DATA:
+                                # Read any data that came with the SYN frame
+                                if length > 0:
+                                    try:
+                                        data = await read_exactly(self.secured_conn, length)
+                                        self.stream_buffers[stream_id].extend(data)
                                         self.stream_events[stream_id].set()
+                                        logger.debug(
+                                            f"Read {length} bytes with SYN "
+                                            f"for stream {stream_id}"
+                                        )
+                                    except IncompleteReadError as e:
+                                        logger.error(
+                                            "Incomplete read for SYN data on stream "
+                                            f"{stream_id}: {e}"
+                                        )
+                                        # Mark stream as closed
+                                        stream.recv_closed = True
+                                        stream.closed = True
+                                        if stream_id in self.stream_events:
+                                            self.stream_events[stream_id].set()
+                            elif typ == TYPE_WINDOW_UPDATE:
+                                # For WINDOW_UPDATE, length is window increment, not payload
+                                increment = length
+                                async with stream.window_lock:
+                                    logger.debug(
+                                        f"Received window update with SYN for stream"
+                                        f"{self.peer_id}:{stream_id},"
+                                        f" increment: {increment}"
+                                    )
+                                    stream.send_window += increment
+
+                            # FIN and RST flags may be sent with SYN frames
+                            if flags & FLAG_FIN:
+                                logger.debug(
+                                    f"Received FIN for stream {self.peer_id}:"
+                                    f"{stream_id} with SYN, marking recv_closed"
+                                )
+                                stream.recv_closed = True
+                                if stream.send_closed:
+                                    stream.closed = True
+                                # Wake up reader
+                                self.stream_events[stream_id].set()
+
+                            if flags & FLAG_RST:
+                                logger.debug(
+                                    f"Resetting stream {stream_id} for peer"
+                                    f"{self.peer_id} with SYN"
+                                )
+                                stream.closed = True
+                                stream.reset_received = True
+                                # Wake up reader
+                                self.stream_events[stream_id].set()
 
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
