@@ -15,6 +15,7 @@ from unittest.mock import (
 
 import pytest
 
+from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.kad_dht.value_store import (
     DEFAULT_TTL,
     ValueStore,
@@ -24,8 +25,11 @@ from libp2p.peer.id import (
 )
 from libp2p.records.record import make_put_record
 
+# Create a real key pair for signing
+key_pair = create_new_key_pair()
 mock_host = Mock()
-peer_id = ID.from_base58("QmTest123")
+mock_host.get_private_key.return_value = key_pair.private_key
+peer_id = ID.from_pubkey(key_pair.public_key)
 
 
 class TestValueStore:

@@ -9,6 +9,8 @@ Tests:
 
 Run with:
     python test_filesystem_blockstore.py
+    or
+    pytest test_filesystem_blockstore.py
 """
 
 from pathlib import Path

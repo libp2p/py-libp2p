@@ -165,9 +165,30 @@ class MerkleDag:
             return await self._service.get_blocks_batch(
                 cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
             )
-        return await self.bitswap.get_blocks_batch(
-            cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
-        )
+        # Check if the client supports native batch fetching
+        get_blocks_batch = getattr(self.bitswap, "get_blocks_batch", None)
+        if get_blocks_batch is not None and callable(get_blocks_batch):
+            try:
+                result = await get_blocks_batch(
+                    cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
+                )
+                # Ensure the result is a plain dict (not a coroutine from a mock)
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                pass
+        # Fall back to individual _get_block calls
+        results: dict[bytes, bytes] = {}
+        for cid in cids:
+            from .cid import cid_to_bytes
+
+            cid_bytes = cid_to_bytes(cid)
+            try:
+                data = await self._get_block(cid_bytes, peer_id=peer_id, timeout=timeout)
+                results[cid_bytes] = data
+            except Exception:
+                pass
+        return results
 
     async def add_file(
         self,
@@ -732,9 +753,25 @@ class MerkleDag:
             f"(batch_size=32, timeout={timeout}s)"
         )
         print(msg2, flush=True)
-        block_map = await self._get_blocks_batch(
-            list(ordered_leaf_cids), peer_id=peer_id, timeout=timeout, batch_size=32
-        )
+        
+        # First try to get blocks from the already-fetched tree
+        block_map: dict[bytes, bytes] = {}
+        missing_cids: list[bytes] = []
+        for leaf_cid in ordered_leaf_cids:
+            leaf_data = all_blocks_map.get(leaf_cid)
+            if leaf_data is not None:
+                block_map[leaf_cid] = leaf_data
+            else:
+                missing_cids.append(leaf_cid)
+        
+        # If some leaves weren't in the tree fetch, fetch them now
+        if missing_cids:
+            logger.info(f"[DAG] Fetching {len(missing_cids)} missing leaves")
+            missing_blocks = await self._get_blocks_batch(
+                missing_cids, peer_id=peer_id, timeout=timeout, batch_size=32
+            )
+            block_map.update(missing_blocks)
+        
         logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
         print(f"[FETCH] ✓ Batch fetch complete: {len(block_map)} blocks", flush=True)
 

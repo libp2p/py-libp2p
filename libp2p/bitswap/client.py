@@ -730,24 +730,90 @@ class BitswapClient:
                         # Send DontHave (v1.2.0)
                         presences_to_send.append((entry_cid, False))
 
-        # Send responses
+        # Send responses in batches to stay under MAX_MESSAGE_SIZE
+        # and Noise protocol limit (65535 bytes)
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
-            response_msg = create_message(
-                blocks_v100=blocks_to_send_v100 if blocks_to_send_v100 else None,
-                blocks_v110=blocks_to_send_v110 if blocks_to_send_v110 else None,
-                block_presences=presences_to_send if presences_to_send else None,
-            )
-            logger.debug(f"Sending response message to {peer_id} on stream {stream}")
-            await self._write_message(stream, response_msg)
-            logger.debug(f"Response message sent to {peer_id}")
-
-            if blocks_to_send_v100 or blocks_to_send_v110:
-                count = len(blocks_to_send_v100) + len(blocks_to_send_v110)
-                logger.debug(f"Sent {count} blocks to peer {peer_id}")
+            # Send blocks in batches
+            if blocks_to_send_v100:
+                await self._send_blocks_in_batches_v100(
+                    blocks_to_send_v100, peer_id, stream
+                )
+            if blocks_to_send_v110:
+                await self._send_blocks_in_batches_v110(
+                    blocks_to_send_v110, peer_id, stream
+                )
+            # Send presences (usually small, can send all at once)
             if presences_to_send:
+                presence_msg = create_message(block_presences=presences_to_send)
+                await self._write_message(stream, presence_msg)
                 logger.debug(
                     f"Sent {len(presences_to_send)} block presences to peer {peer_id}"
                 )
+
+    async def _send_blocks_in_batches_v100(
+        self, blocks: list[bytes], peer_id: PeerID, stream: INetStream
+    ) -> None:
+        """Send blocks in batches to stay under message size limit."""
+        # Noise protocol limit is 65535 bytes per message
+        # Reserve some space for protobuf overhead
+        MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
+        
+        batch = []
+        batch_size = 0
+        
+        for block_data in blocks:
+            block_size = len(block_data)
+            
+            # If adding this block would exceed limit, send current batch first
+            if batch and (batch_size + block_size > MAX_BATCH_SIZE):
+                msg = create_message(blocks_v100=batch)
+                await self._write_message(stream, msg)
+                logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
+                batch = []
+                batch_size = 0
+            
+            batch.append(block_data)
+            batch_size += block_size
+        
+        # Send remaining blocks
+        if batch:
+            msg = create_message(blocks_v100=batch)
+            await self._write_message(stream, msg)
+            logger.debug(f"Sent final batch of {len(batch)} blocks to peer {peer_id}")
+
+    async def _send_blocks_in_batches_v110(
+        self,
+        blocks: list[tuple[bytes, bytes]],
+        peer_id: PeerID,
+        stream: INetStream,
+    ) -> None:
+        """Send blocks (v1.1.0+ format) in batches to stay under message size limit."""
+        # Noise protocol limit is 65535 bytes per message
+        # Reserve some space for protobuf overhead
+        MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
+        
+        batch = []
+        batch_size = 0
+        
+        for prefix, block_data in blocks:
+            block_size = len(prefix) + len(block_data)
+            
+            # If adding this block would exceed limit, send current batch first
+            if batch and (batch_size + block_size > MAX_BATCH_SIZE):
+                msg = create_message(blocks_v110=batch)
+                await self._write_message(stream, msg)
+                logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
+                batch = []
+                batch_size = 0
+            
+            batch.append((prefix, block_data))
+            batch_size += block_size
+        
+        # Send remaining blocks
+        if batch:
+            msg = create_message(blocks_v110=batch)
+            await self._write_message(stream, msg)
+            logger.debug(f"Sent final batch of {len(batch)} blocks to peer {peer_id}")
 
     async def _process_blocks_v100(self, blocks: list[bytes], peer_id: PeerID) -> None:
         """

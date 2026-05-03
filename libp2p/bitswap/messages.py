@@ -40,9 +40,12 @@ def create_wantlist_entry(
     entry.block = cid_to_bytes(block_cid)
     entry.priority = priority
     entry.cancel = cancel
-    # Accept both plain int and WantType enum (extract .value for enum)
-    want_type_int = want_type.value if hasattr(want_type, "value") else int(want_type)
-    entry.wantType = want_type_int  # type: ignore[assignment]  # v1.2.0 field
+    # Handle both int and WantType enum
+    if isinstance(want_type, int):
+        entry.wantType = want_type  # type: ignore[assignment]
+    else:
+        # Extract .value from WantType enum
+        entry.wantType = want_type.value  # type: ignore[assignment]
     entry.sendDontHave = send_dont_have  # v1.2.0 field
     return entry
 
