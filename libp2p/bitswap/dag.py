@@ -14,6 +14,7 @@ from typing import Union
 
 from libp2p.peer.id import ID as PeerID
 
+from .block_service import BlockService
 from .block_store import BlockStore
 from .chunker import (
     DEFAULT_CHUNK_SIZE,
@@ -100,17 +101,71 @@ class MerkleDag:
 
     """
 
-    def __init__(self, bitswap: BitswapClient, block_store: BlockStore | None = None):
+    def __init__(
+        self,
+        bitswap: BitswapClient,
+        block_store: BlockStore | None = None,
+        block_service: BlockService | None = None,
+    ):
         """
         Initialize Merkle DAG manager.
 
         Args:
             bitswap: Bitswap client for block exchange
             block_store: Optional block store (uses bitswap's store if None)
+            block_service: Optional BlockService for transparent local→network
+                           fallback with auto-caching. When provided, all block
+                           reads/writes go through it instead of bitswap directly.
+                           Construct with: BlockService(your_store, bitswap)
 
         """
         self.bitswap = bitswap
         self.block_store = block_store or bitswap.block_store
+        # If a BlockService is provided use it; otherwise fall back to
+        # calling bitswap directly (existing behaviour, no regression).
+        self._service: BlockService | None = block_service
+
+    # ── private routing helpers ───────────────────────────────────────────────
+
+    async def _put_block(self, cid: CIDInput, data: bytes) -> None:
+        """Store a block. Routes through BlockService when available."""
+        if self._service is not None:
+            await self._service.put_block(cid, data)
+        else:
+            await self.bitswap.add_block(cid, data)
+
+    async def _get_block(
+        self,
+        cid: CIDInput,
+        peer_id: PeerID | None = None,
+        timeout: float = 30.0,
+    ) -> bytes:
+        """Fetch a block. Routes through BlockService when available."""
+        if self._service is not None:
+            data = await self._service.get_block(cid, peer_id=peer_id, timeout=timeout)
+            if data is None:
+                from .cid import format_cid_for_display, cid_to_bytes
+                raise BlockNotFoundError(
+                    f"Block not found: {format_cid_for_display(cid_to_bytes(cid))}"
+                )
+            return data
+        return await self.bitswap.get_block(cid, peer_id, timeout)
+
+    async def _get_blocks_batch(
+        self,
+        cids: list[CIDInput],
+        peer_id: PeerID | None = None,
+        timeout: float = 30.0,
+        batch_size: int = 32,
+    ) -> dict[bytes, bytes]:
+        """Batch-fetch blocks. Routes through BlockService when available."""
+        if self._service is not None:
+            return await self._service.get_blocks_batch(
+                cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
+            )
+        return await self.bitswap.get_blocks_batch(
+            cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
+        )
 
     async def add_file(
         self,
@@ -166,7 +221,7 @@ class MerkleDag:
             leaf_block = create_leaf_node(data)
             cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
 
-            await self.bitswap.add_block(cid, leaf_block)
+            await self._put_block(cid, leaf_block)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -190,7 +245,7 @@ class MerkleDag:
 
                 dir_data = create_directory_node([(filename, cid, file_size)])
                 dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
-                await self.bitswap.add_block(dir_cid, dir_data)
+                await self._put_block(dir_cid, dir_data)
 
                 logger.info(
                     f"Created directory wrapper. Directory CID: "
@@ -215,7 +270,7 @@ class MerkleDag:
             leaf_block = create_leaf_node(chunk_data)
             chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
 
-            await self.bitswap.add_block(chunk_cid, leaf_block)
+            await self._put_block(chunk_cid, leaf_block)
             leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
@@ -245,7 +300,7 @@ class MerkleDag:
             )
 
         root_cid, root_data = balanced_layout(leaf_triples)
-        await self.bitswap.add_block(root_cid, root_data)
+        await self._put_block(root_cid, root_data)
 
         # Enhanced logging for root CID
         logger.info("=== File chunking completed ===")
@@ -278,7 +333,7 @@ class MerkleDag:
             # Create directory node with single entry pointing to the file
             dir_data = create_directory_node([(filename, root_cid, file_size)])
             dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
-            await self.bitswap.add_block(dir_cid, dir_data)
+            await self._put_block(dir_cid, dir_data)
 
             logger.info(
                 "Created directory wrapper. Directory CID: "
@@ -321,7 +376,7 @@ class MerkleDag:
         if file_size <= chunk_size:
             leaf_block = create_leaf_node(data)
             cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self.bitswap.add_block(cid, leaf_block)
+            await self._put_block(cid, leaf_block)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -337,7 +392,7 @@ class MerkleDag:
         for i, chunk_data in enumerate(chunks):
             leaf_block = create_leaf_node(chunk_data)
             chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self.bitswap.add_block(chunk_cid, leaf_block)
+            await self._put_block(chunk_cid, leaf_block)
             leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
 
             if progress_callback:
@@ -351,7 +406,7 @@ class MerkleDag:
 
         # Build balanced DAG tree
         root_cid, root_data = balanced_layout(leaf_triples)
-        await self.bitswap.add_block(root_cid, root_data)
+        await self._put_block(root_cid, root_data)
 
         if progress_callback:
             await _call_progress_callback(
@@ -416,7 +471,7 @@ class MerkleDag:
         logger.info(f"Fetching file: {format_cid_for_display(root_cid_bytes)}")
 
         # Step 1: Fetch the root block
-        root_data = await self.bitswap.get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
         if not verify_cid(root_cid_bytes, root_data):
             root_cid_str = format_cid_for_display(root_cid_bytes)
             raise ValueError(f"Root block CID verification failed: {root_cid_str}")
@@ -435,7 +490,7 @@ class MerkleDag:
                 filename = first_link.name or None
                 actual_file_cid = first_link.cid
                 logger.info(f"Filename from directory: {filename!r}")
-                actual_file_data = await self.bitswap.get_block(
+                actual_file_data = await self._get_block(
                     actual_file_cid, peer_id, timeout
                 )
                 if not verify_cid(actual_file_cid, actual_file_data):
@@ -491,7 +546,7 @@ class MerkleDag:
             print(msg2, flush=True)
 
             # Batch-fetch this level's blocks
-            level_blocks = await self.bitswap.get_blocks_batch(
+            level_blocks = await self._get_blocks_batch(
                 list(cid_list), peer_id=peer_id, timeout=timeout, batch_size=32
             )
             logger.info(f"[DAG] Depth {depth}: ✓ received {len(level_blocks)} blocks")
@@ -587,7 +642,7 @@ class MerkleDag:
             f"(batch_size=32, timeout={timeout}s)"
         )
         print(msg2, flush=True)
-        block_map = await self.bitswap.get_blocks_batch(
+        block_map = await self._get_blocks_batch(
             list(ordered_leaf_cids), peer_id=peer_id, timeout=timeout, batch_size=32
         )
         logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
@@ -682,7 +737,7 @@ class MerkleDag:
         """
         # Get root block
         root_cid_bytes = cid_to_bytes(root_cid)
-        root_data = await self.bitswap.get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
 
         # Check if it's a DAG-PB file node
         if is_file_node(root_data):

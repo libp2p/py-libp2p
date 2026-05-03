@@ -31,6 +31,7 @@ These byte-returning helpers remain to avoid breaking existing callers.
 New code should prefer the object-returning variants above.
 """
 
+from .block_service import BlockService
 from .block_store import BlockStore, FilesystemBlockStore, MemoryBlockStore
 from .cid import (
     CID_V0,
@@ -69,6 +70,7 @@ from .errors import (
 __all__ = [
     # Core
     "BitswapClient",
+    "BlockService",
     "BlockStore",
     "MemoryBlockStore",
     "FilesystemBlockStore",
