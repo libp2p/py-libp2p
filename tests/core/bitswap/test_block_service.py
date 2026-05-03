@@ -27,7 +27,7 @@ def ok(label):
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def make_service(network_blocks: dict = None):
+def make_service(network_blocks: dict | None = None):
     """
     Build a BlockService with a real MemoryBlockStore and a mock BitswapClient.
     network_blocks: cid_bytes -> data that the mock 'network' can return.
@@ -137,7 +137,7 @@ async def test_get_blocks_batch_local_hits_skip_network():
     for cid, data in blocks:
         await store.put_block(cid, data)
 
-    cids = [cid for cid, _ in blocks]
+    cids: list[bytes] = [cid for cid, _ in blocks]
     results = await service.get_blocks_batch(cids)
 
     assert len(results) == 5
@@ -158,7 +158,7 @@ async def test_get_blocks_batch_partial_local():
     for cid, data in local_blocks:
         await store.put_block(cid, data)
 
-    all_cids = [cid for cid, _ in local_blocks + net_blocks]
+    all_cids: list[bytes] = [cid for cid, _ in local_blocks + net_blocks]
     results = await service.get_blocks_batch(all_cids)
 
     assert len(results) == 5

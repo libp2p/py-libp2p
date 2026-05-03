@@ -169,6 +169,7 @@ def test_bitswap_message_cancel_want():
     msg = BitswapMessage()
     msg.cancel_want(cid)
     assert msg.is_want
+    assert msg.wantlist is not None
     assert msg.wantlist.entries[0].cancel
     ok("cancel_want() adds cancel entry")
 

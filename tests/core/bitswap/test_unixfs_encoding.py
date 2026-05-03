@@ -57,6 +57,7 @@ def test_create_leaf_node():
     # Empty leaf
     empty_leaf = create_leaf_node(b"")
     _, empty_unixfs = decode_dag_pb(empty_leaf)
+    assert empty_unixfs is not None
     assert empty_unixfs.filesize == 0
     ok("empty leaf node is valid")
 
@@ -90,6 +91,7 @@ def test_balanced_layout_two_leaves():
     assert is_file_node(root_block)
     links, unixfs = decode_dag_pb(root_block)
     assert len(links) == 2, f"expected 2 links, got {len(links)}"
+    assert unixfs is not None
     assert unixfs.filesize == sum(s for _, _, s in leaves)
     assert len(unixfs.blocksizes) == 2
     ok(f"root has 2 links, filesize={unixfs.filesize}, blocksizes={unixfs.blocksizes}")
@@ -112,6 +114,7 @@ def test_balanced_layout_two_levels():
 
     # Root should link to 2 internal nodes (174 + 1)
     assert len(links) == 2, f"expected 2 top-level links, got {len(links)}"
+    assert unixfs is not None
     assert unixfs.filesize == n * chunk_size
     ok("175 leaves → root has 2 links (174-leaf node + 1-leaf node)")
     ok(f"root filesize = {unixfs.filesize} = 175 * {chunk_size}")
@@ -180,6 +183,7 @@ async def test_add_file_produces_dag_pb_leaves():
     root_block = stored[bytes(root_cid)]
     links, unixfs = decode_dag_pb(root_block)
     assert len(links) == 3, f"expected 3 links on root, got {len(links)}"
+    assert unixfs is not None
     assert unixfs.filesize == len(content)
     ok(f"root has 3 links, filesize={unixfs.filesize}")
 
@@ -221,6 +225,7 @@ async def test_add_bytes_produces_dag_pb_leaves():
     root_block = stored[bytes(root_cid)]
     links, unixfs = decode_dag_pb(root_block)
     assert len(links) == 3
+    assert unixfs is not None
     assert unixfs.filesize == len(content)
     ok(f"root has 3 links, filesize={unixfs.filesize}")
 

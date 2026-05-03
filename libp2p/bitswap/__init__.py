@@ -66,6 +66,14 @@ from .errors import (
     MessageTooLargeError,
     TimeoutError,
 )
+from .wantlist import (
+    BitswapMessage,
+    BlockPresence,
+    BlockPresenceType,
+    Wantlist,
+    WantlistEntry,
+    WantType,
+)
 
 __all__ = [
     # Core
@@ -74,6 +82,13 @@ __all__ = [
     "BlockStore",
     "MemoryBlockStore",
     "FilesystemBlockStore",
+    # Messages
+    "BitswapMessage",
+    "BlockPresence",
+    "BlockPresenceType",
+    "Wantlist",
+    "WantlistEntry",
+    "WantType",
     # CID types
     "CIDInput",
     "CIDObject",

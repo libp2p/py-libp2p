@@ -1,0 +1,544 @@
+2026-05-03T08:50:39.1652278Z Current runner version: '2.334.0'
+2026-05-03T08:50:39.1670799Z ##[group]Runner Image Provisioner
+2026-05-03T08:50:39.1671487Z Hosted Compute Agent
+2026-05-03T08:50:39.1671885Z Version: 20260213.493
+2026-05-03T08:50:39.1672360Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-05-03T08:50:39.1672899Z Build Date: 2026-02-13T00:28:41Z
+2026-05-03T08:50:39.1673585Z Worker ID: {6bdef167-2765-47d3-be27-c534a59125f5}
+2026-05-03T08:50:39.1674159Z Azure Region: westcentralus
+2026-05-03T08:50:39.1674611Z ##[endgroup]
+2026-05-03T08:50:39.1675886Z ##[group]Operating System
+2026-05-03T08:50:39.1676329Z Ubuntu
+2026-05-03T08:50:39.1676754Z 24.04.4
+2026-05-03T08:50:39.1677106Z LTS
+2026-05-03T08:50:39.1677514Z ##[endgroup]
+2026-05-03T08:50:39.1677886Z ##[group]Runner Image
+2026-05-03T08:50:39.1678386Z Image: ubuntu-24.04
+2026-05-03T08:50:39.1678799Z Version: 20260413.86.1
+2026-05-03T08:50:39.1679737Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260413.86/images/ubuntu/Ubuntu2404-Readme.md
+2026-05-03T08:50:39.1680838Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260413.86
+2026-05-03T08:50:39.1681544Z ##[endgroup]
+2026-05-03T08:50:39.1683863Z ##[group]GITHUB_TOKEN Permissions
+2026-05-03T08:50:39.1685352Z Actions: read
+2026-05-03T08:50:39.1685843Z ArtifactMetadata: read
+2026-05-03T08:50:39.1686316Z Attestations: read
+2026-05-03T08:50:39.1686742Z Checks: read
+2026-05-03T08:50:39.1687161Z Contents: read
+2026-05-03T08:50:39.1687566Z Deployments: read
+2026-05-03T08:50:39.1687939Z Discussions: read
+2026-05-03T08:50:39.1688398Z Issues: read
+2026-05-03T08:50:39.1688753Z Metadata: read
+2026-05-03T08:50:39.1689144Z Models: read
+2026-05-03T08:50:39.1689517Z Packages: read
+2026-05-03T08:50:39.1689937Z Pages: read
+2026-05-03T08:50:39.1690388Z PullRequests: read
+2026-05-03T08:50:39.1690811Z RepositoryProjects: read
+2026-05-03T08:50:39.1691299Z SecurityEvents: read
+2026-05-03T08:50:39.1691685Z Statuses: read
+2026-05-03T08:50:39.1692128Z VulnerabilityAlerts: read
+2026-05-03T08:50:39.1692593Z ##[endgroup]
+2026-05-03T08:50:39.1694465Z Secret source: None
+2026-05-03T08:50:39.1695044Z Prepare workflow directory
+2026-05-03T08:50:39.2012185Z Prepare all required actions
+2026-05-03T08:50:39.2054775Z Getting action download info
+2026-05-03T08:50:39.6250067Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-05-03T08:50:39.7960802Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+2026-05-03T08:50:40.0799901Z Download action repository 'astral-sh/setup-uv@v4' (SHA:38f3f104447c67c051c4a08e39b64a148898af3a)
+2026-05-03T08:50:41.1424247Z Download action repository 'actions/cache@v4' (SHA:0057852bfaa89a56745cba8c7296529d2fc39830)
+2026-05-03T08:50:41.5475363Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-05-03T08:50:42.0285390Z Complete job name: tox (3.10, lint)
+2026-05-03T08:50:42.0909652Z ##[group]Run if [[ "$toxenv" == 'docs' ]]; then
+2026-05-03T08:50:42.0910618Z [36;1mif [[ "$toxenv" == 'docs' ]]; then[0m
+2026-05-03T08:50:42.0911474Z [36;1m  echo 'TOXENV=docs' | tee -a $GITHUB_ENV[0m
+2026-05-03T08:50:42.0912286Z [36;1melse[0m
+2026-05-03T08:50:42.0913122Z [36;1m  echo "TOXENV=py${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV[0m
+2026-05-03T08:50:42.0914306Z [36;1mfi[0m
+2026-05-03T08:50:42.0937059Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-05-03T08:50:42.0938114Z env:
+2026-05-03T08:50:42.0938606Z   python: 3.10
+2026-05-03T08:50:42.0939145Z   toxenv: lint
+2026-05-03T08:50:42.0939680Z ##[endgroup]
+2026-05-03T08:50:42.1045953Z TOXENV=py310-lint
+2026-05-03T08:50:42.1242272Z ##[group]Run actions/checkout@v4
+2026-05-03T08:50:42.1243023Z with:
+2026-05-03T08:50:42.1243820Z   repository: libp2p/py-libp2p
+2026-05-03T08:50:42.1244733Z   token: ***
+2026-05-03T08:50:42.1245260Z   ssh-strict: true
+2026-05-03T08:50:42.1245828Z   ssh-user: git
+2026-05-03T08:50:42.1246401Z   persist-credentials: true
+2026-05-03T08:50:42.1247270Z   clean: true
+2026-05-03T08:50:42.1247848Z   sparse-checkout-cone-mode: true
+2026-05-03T08:50:42.1248556Z   fetch-depth: 1
+2026-05-03T08:50:42.1249122Z   fetch-tags: false
+2026-05-03T08:50:42.1249712Z   show-progress: true
+2026-05-03T08:50:42.1250297Z   lfs: false
+2026-05-03T08:50:42.1250828Z   submodules: false
+2026-05-03T08:50:42.1251426Z   set-safe-directory: true
+2026-05-03T08:50:42.1252067Z env:
+2026-05-03T08:50:42.1252570Z   TOXENV: py310-lint
+2026-05-03T08:50:42.1253147Z ##[endgroup]
+2026-05-03T08:50:42.2189958Z Syncing repository: libp2p/py-libp2p
+2026-05-03T08:50:42.2192771Z ##[group]Getting Git version info
+2026-05-03T08:50:42.2194470Z Working directory is '/home/runner/work/py-libp2p/py-libp2p'
+2026-05-03T08:50:42.2196501Z [command]/usr/bin/git version
+2026-05-03T08:50:42.2769151Z git version 2.53.0
+2026-05-03T08:50:42.2788313Z ##[endgroup]
+2026-05-03T08:50:42.2800674Z Temporarily overriding HOME='/home/runner/work/_temp/280f354b-3234-4524-abbb-4bf3e2f57d2d' before making global git config changes
+2026-05-03T08:50:42.2803212Z Adding repository directory to the temporary git global config as a safe directory
+2026-05-03T08:50:42.2805476Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/py-libp2p/py-libp2p
+2026-05-03T08:50:42.2831018Z Deleting the contents of '/home/runner/work/py-libp2p/py-libp2p'
+2026-05-03T08:50:42.2833973Z ##[group]Initializing the repository
+2026-05-03T08:50:42.2837052Z [command]/usr/bin/git init /home/runner/work/py-libp2p/py-libp2p
+2026-05-03T08:50:42.2997621Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-05-03T08:50:42.2999318Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-05-03T08:50:42.3000789Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-05-03T08:50:42.3002234Z hint: call:
+2026-05-03T08:50:42.3002900Z hint:
+2026-05-03T08:50:42.3003888Z hint: 	git config --global init.defaultBranch <name>
+2026-05-03T08:50:42.3004879Z hint:
+2026-05-03T08:50:42.3005833Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-05-03T08:50:42.3007603Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-05-03T08:50:42.3009009Z hint:
+2026-05-03T08:50:42.3009721Z hint: 	git branch -m <name>
+2026-05-03T08:50:42.3010559Z hint:
+2026-05-03T08:50:42.3011975Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-05-03T08:50:42.3013886Z Initialized empty Git repository in /home/runner/work/py-libp2p/py-libp2p/.git/
+2026-05-03T08:50:42.3016138Z [command]/usr/bin/git remote add origin https://github.com/libp2p/py-libp2p
+2026-05-03T08:50:42.3035030Z ##[endgroup]
+2026-05-03T08:50:42.3036478Z ##[group]Disabling automatic garbage collection
+2026-05-03T08:50:42.3037981Z [command]/usr/bin/git config --local gc.auto 0
+2026-05-03T08:50:42.3061996Z ##[endgroup]
+2026-05-03T08:50:42.3063521Z ##[group]Setting up auth
+2026-05-03T08:50:42.3068223Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-05-03T08:50:42.3092887Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-05-03T08:50:42.3331807Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-05-03T08:50:42.3361911Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-05-03T08:50:42.3543069Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-05-03T08:50:42.3567245Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-05-03T08:50:42.3749227Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-05-03T08:50:42.3777229Z ##[endgroup]
+2026-05-03T08:50:42.3783576Z ##[group]Fetching the repository
+2026-05-03T08:50:42.3785524Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +79fa6a4965dd094f1168364b06f70f446048452d:refs/remotes/pull/1321/merge
+2026-05-03T08:50:43.8242606Z From https://github.com/libp2p/py-libp2p
+2026-05-03T08:50:43.8243185Z  * [new ref]         79fa6a4965dd094f1168364b06f70f446048452d -> pull/1321/merge
+2026-05-03T08:50:43.8265852Z ##[endgroup]
+2026-05-03T08:50:43.8266310Z ##[group]Determining the checkout info
+2026-05-03T08:50:43.8268290Z ##[endgroup]
+2026-05-03T08:50:43.8273080Z [command]/usr/bin/git sparse-checkout disable
+2026-05-03T08:50:43.8303282Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-05-03T08:50:43.8323260Z ##[group]Checking out the ref
+2026-05-03T08:50:43.8326267Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/1321/merge
+2026-05-03T08:50:43.8851236Z Note: switching to 'refs/remotes/pull/1321/merge'.
+2026-05-03T08:50:43.8851608Z 
+2026-05-03T08:50:43.8851869Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-05-03T08:50:43.8852442Z changes and commit them, and you can discard any commits you make in this
+2026-05-03T08:50:43.8852995Z state without impacting any branches by switching back to a branch.
+2026-05-03T08:50:43.8853500Z 
+2026-05-03T08:50:43.8853789Z If you want to create a new branch to retain commits you create, you may
+2026-05-03T08:50:43.8854348Z do so (now or later) by using -c with the switch command. Example:
+2026-05-03T08:50:43.8854551Z 
+2026-05-03T08:50:43.8854651Z   git switch -c <new-branch-name>
+2026-05-03T08:50:43.8854803Z 
+2026-05-03T08:50:43.8854888Z Or undo this operation with:
+2026-05-03T08:50:43.8855021Z 
+2026-05-03T08:50:43.8855095Z   git switch -
+2026-05-03T08:50:43.8855229Z 
+2026-05-03T08:50:43.8855393Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-05-03T08:50:43.8855623Z 
+2026-05-03T08:50:43.8855896Z HEAD is now at 79fa6a4 Merge 58719a78ba64fd512991937d190a90bc45d748b5 into d9c50c0bec064e097a01ccafbb452e5b78c434e7
+2026-05-03T08:50:43.8858240Z ##[endgroup]
+2026-05-03T08:50:43.8890211Z [command]/usr/bin/git log -1 --format=%H
+2026-05-03T08:50:43.8908299Z 79fa6a4965dd094f1168364b06f70f446048452d
+2026-05-03T08:50:43.9060008Z ##[group]Run actions/setup-python@v5
+2026-05-03T08:50:43.9060230Z with:
+2026-05-03T08:50:43.9060397Z   python-version: 3.10
+2026-05-03T08:50:43.9060575Z   check-latest: false
+2026-05-03T08:50:43.9060849Z   token: ***
+2026-05-03T08:50:43.9061019Z   update-environment: true
+2026-05-03T08:50:43.9061211Z   allow-prereleases: false
+2026-05-03T08:50:43.9061425Z   freethreaded: false
+2026-05-03T08:50:43.9061583Z env:
+2026-05-03T08:50:43.9061738Z   TOXENV: py310-lint
+2026-05-03T08:50:43.9061893Z ##[endgroup]
+2026-05-03T08:50:44.0434859Z ##[group]Installed versions
+2026-05-03T08:50:44.0534645Z Successfully set up CPython (3.10.20)
+2026-05-03T08:50:44.0539173Z ##[endgroup]
+2026-05-03T08:50:44.0684971Z ##[group]Run astral-sh/setup-uv@v4
+2026-05-03T08:50:44.0685167Z with:
+2026-05-03T08:50:44.0685310Z   version: latest
+2026-05-03T08:50:44.0685570Z   github-token: ***
+2026-05-03T08:50:44.0685732Z   enable-cache: false
+2026-05-03T08:50:44.0685897Z   cache-dependency-glob: **/uv.lock
+2026-05-03T08:50:44.0686094Z   prune-cache: true
+2026-05-03T08:50:44.0686258Z   ignore-nothing-to-cache: false
+2026-05-03T08:50:44.0686437Z env:
+2026-05-03T08:50:44.0686577Z   TOXENV: py310-lint
+2026-05-03T08:50:44.0686781Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:44.0687107Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-05-03T08:50:44.0687417Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:44.0687694Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:44.0687958Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:44.0688266Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-05-03T08:50:44.0688631Z ##[endgroup]
+2026-05-03T08:50:44.5566543Z Downloading uv from "https://github.com/astral-sh/uv/releases/download/0.11.8/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-05-03T08:50:45.1270603Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/eb456ef0-5fd2-4cca-80a6-59d4cc913925 -f /home/runner/work/_temp/425368e2-6920-4da8-9c29-e2eb033fc778
+2026-05-03T08:50:45.8868294Z Added /opt/hostedtoolcache/uv/0.11.8/x86_64 to the path
+2026-05-03T08:50:45.8869251Z Added /home/runner/.local/bin to the path
+2026-05-03T08:50:45.8878341Z Set UV_CACHE_DIR to /home/runner/work/_temp/setup-uv-cache
+2026-05-03T08:50:45.8878773Z Successfully installed uv version 0.11.8
+2026-05-03T08:50:45.8964694Z ##[group]Run sudo apt-get update
+2026-05-03T08:50:45.8964943Z [36;1msudo apt-get update[0m
+2026-05-03T08:50:45.8965146Z [36;1msudo apt-get install -y libgmp-dev[0m
+2026-05-03T08:50:45.9186725Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-05-03T08:50:45.9187010Z env:
+2026-05-03T08:50:45.9187185Z   TOXENV: py310-lint
+2026-05-03T08:50:45.9187400Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:45.9187715Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-05-03T08:50:45.9188020Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:45.9188291Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:45.9188573Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:45.9188862Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-05-03T08:50:45.9189133Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-05-03T08:50:45.9189384Z ##[endgroup]
+2026-05-03T08:50:46.0201616Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2026-05-03T08:50:46.0559674Z Hit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease
+2026-05-03T08:50:46.0573271Z Get:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+2026-05-03T08:50:46.0611129Z Get:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+2026-05-03T08:50:46.0644610Z Get:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+2026-05-03T08:50:46.0734115Z Hit:6 https://packages.microsoft.com/repos/azure-cli noble InRelease
+2026-05-03T08:50:46.0954101Z Get:7 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]
+2026-05-03T08:50:46.1492561Z Get:8 https://dl.google.com/linux/chrome-stable/deb stable InRelease [1825 B]
+2026-05-03T08:50:46.2162179Z Get:9 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1946 kB]
+2026-05-03T08:50:46.2311865Z Get:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [348 kB]
+2026-05-03T08:50:46.2335550Z Get:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [177 kB]
+2026-05-03T08:50:46.2356328Z Get:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 c-n-f Metadata [17.1 kB]
+2026-05-03T08:50:46.2374633Z Get:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1685 kB]
+2026-05-03T08:50:46.2439427Z Get:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [324 kB]
+2026-05-03T08:50:46.2460309Z Get:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [386 kB]
+2026-05-03T08:50:46.2490312Z Get:16 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 c-n-f Metadata [34.5 kB]
+2026-05-03T08:50:46.2524149Z Get:17 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [3095 kB]
+2026-05-03T08:50:46.2620778Z Get:18 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [715 kB]
+2026-05-03T08:50:46.3066836Z Get:19 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Components [212 B]
+2026-05-03T08:50:46.3078519Z Get:20 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 c-n-f Metadata [480 B]
+2026-05-03T08:50:46.3091347Z Get:21 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages [44.4 kB]
+2026-05-03T08:50:46.3105067Z Get:22 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse Translation-en [10.2 kB]
+2026-05-03T08:50:46.3114449Z Get:23 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+2026-05-03T08:50:46.3126258Z Get:24 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 c-n-f Metadata [656 B]
+2026-05-03T08:50:46.3139181Z Get:25 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [64.5 kB]
+2026-05-03T08:50:46.3153707Z Get:26 http://azure.archive.ubuntu.com/ubuntu noble-backports/main Translation-en [9172 B]
+2026-05-03T08:50:46.3164013Z Get:27 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [7368 B]
+2026-05-03T08:50:46.3176514Z Get:28 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 c-n-f Metadata [368 B]
+2026-05-03T08:50:46.3187200Z Get:29 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [34.1 kB]
+2026-05-03T08:50:46.3195820Z Get:30 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe Translation-en [18.2 kB]
+2026-05-03T08:50:46.3204977Z Get:31 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [10.5 kB]
+2026-05-03T08:50:46.3214686Z Get:32 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 c-n-f Metadata [1484 B]
+2026-05-03T08:50:46.3670235Z Get:33 http://azure.archive.ubuntu.com/ubuntu noble-backports/restricted amd64 Components [212 B]
+2026-05-03T08:50:46.3680882Z Get:34 http://azure.archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Packages [748 B]
+2026-05-03T08:50:46.3695651Z Get:35 http://azure.archive.ubuntu.com/ubuntu noble-backports/multiverse amd64 Components [212 B]
+2026-05-03T08:50:46.3710818Z Get:36 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [1625 kB]
+2026-05-03T08:50:46.3796468Z Get:37 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [259 kB]
+2026-05-03T08:50:46.3812984Z Get:38 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [21.9 kB]
+2026-05-03T08:50:46.3824854Z Get:39 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 c-n-f Metadata [11.0 kB]
+2026-05-03T08:50:46.3835830Z Get:40 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1182 kB]
+2026-05-03T08:50:46.3893992Z Get:41 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [227 kB]
+2026-05-03T08:50:46.3915962Z Get:42 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [74.2 kB]
+2026-05-03T08:50:46.3926311Z Get:43 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 c-n-f Metadata [23.1 kB]
+2026-05-03T08:50:46.3938181Z Get:44 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [2844 kB]
+2026-05-03T08:50:46.4058462Z Get:45 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [666 kB]
+2026-05-03T08:50:46.4069280Z Get:50 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [107 kB]
+2026-05-03T08:50:46.4093580Z Get:46 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Components [212 B]
+2026-05-03T08:50:46.4103090Z Get:47 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse amd64 Packages [28.8 kB]
+2026-05-03T08:50:46.4117081Z Get:51 https://packages.microsoft.com/ubuntu/24.04/prod noble/main armhf Packages [11.6 kB]
+2026-05-03T08:50:46.4145608Z Get:52 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [132 kB]
+2026-05-03T08:50:46.4548104Z Get:48 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse Translation-en [7172 B]
+2026-05-03T08:50:46.4558458Z Get:49 http://azure.archive.ubuntu.com/ubuntu noble-security/multiverse amd64 Components [208 B]
+2026-05-03T08:50:46.4951182Z Get:53 https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages [1216 B]
+2026-05-03T08:50:56.0749376Z Fetched 16.5 MB in 2s (10.6 MB/s)
+2026-05-03T08:50:56.6803818Z Reading package lists...
+2026-05-03T08:50:56.7978051Z Reading package lists...
+2026-05-03T08:50:56.9602716Z Building dependency tree...
+2026-05-03T08:50:56.9609431Z Reading state information...
+2026-05-03T08:50:57.1250664Z libgmp-dev is already the newest version (2:6.3.0+dfsg-2ubuntu6.1).
+2026-05-03T08:50:57.1251258Z 0 upgraded, 0 newly installed, 0 to remove and 53 not upgraded.
+2026-05-03T08:50:57.1331388Z ##[group]Run uv venv venv
+2026-05-03T08:50:57.1331614Z [36;1muv venv venv[0m
+2026-05-03T08:50:57.1331780Z [36;1msource venv/bin/activate[0m
+2026-05-03T08:50:57.1331994Z [36;1muv pip install --upgrade pip[0m
+2026-05-03T08:50:57.1332196Z [36;1muv pip install tox[0m
+2026-05-03T08:50:57.1351181Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-05-03T08:50:57.1351413Z env:
+2026-05-03T08:50:57.1351553Z   TOXENV: py310-lint
+2026-05-03T08:50:57.1351758Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:57.1352072Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-05-03T08:50:57.1352388Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:57.1352658Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:57.1352928Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:57.1353193Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-05-03T08:50:57.1353645Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-05-03T08:50:57.1353861Z ##[endgroup]
+2026-05-03T08:50:58.5508259Z Using CPython 3.10.20 interpreter at: /opt/hostedtoolcache/Python/3.10.20/x64/bin/python3
+2026-05-03T08:50:58.5508833Z Creating virtual environment at: venv
+2026-05-03T08:50:58.5512459Z Activate with: venv/bin/activate
+2026-05-03T08:50:58.6254497Z Using Python 3.10.20 environment at: venv
+2026-05-03T08:50:58.7900612Z Resolved 1 package in 164ms
+2026-05-03T08:50:58.8077019Z Downloading pip (1.7MiB)
+2026-05-03T08:50:58.9464109Z  Downloaded pip
+2026-05-03T08:50:58.9466143Z Prepared 1 package in 156ms
+2026-05-03T08:50:58.9565192Z Installed 1 package in 9ms
+2026-05-03T08:50:58.9565667Z  + pip==26.1
+2026-05-03T08:50:58.9634712Z Using Python 3.10.20 environment at: venv
+2026-05-03T08:50:59.2420869Z Resolved 14 packages in 278ms
+2026-05-03T08:50:59.2865079Z Downloading virtualenv (7.2MiB)
+2026-05-03T08:50:59.4887062Z  Downloaded virtualenv
+2026-05-03T08:50:59.4889022Z Prepared 14 packages in 246ms
+2026-05-03T08:50:59.4966270Z Installed 14 packages in 7ms
+2026-05-03T08:50:59.4966562Z  + cachetools==7.1.0
+2026-05-03T08:50:59.4966804Z  + colorama==0.4.6
+2026-05-03T08:50:59.4967020Z  + distlib==0.4.0
+2026-05-03T08:50:59.4967244Z  + filelock==3.29.0
+2026-05-03T08:50:59.4967461Z  + packaging==26.2
+2026-05-03T08:50:59.4967692Z  + platformdirs==4.9.6
+2026-05-03T08:50:59.4968036Z  + pluggy==1.6.0
+2026-05-03T08:50:59.4968363Z  + pyproject-api==1.10.0
+2026-05-03T08:50:59.4968707Z  + python-discovery==1.2.2
+2026-05-03T08:50:59.4968996Z  + tomli==2.4.1
+2026-05-03T08:50:59.4969332Z  + tomli-w==1.2.0
+2026-05-03T08:50:59.4969687Z  + tox==4.53.1
+2026-05-03T08:50:59.4970049Z  + typing-extensions==4.15.0
+2026-05-03T08:50:59.4970362Z  + virtualenv==21.3.0
+2026-05-03T08:50:59.5036958Z ##[group]Run source venv/bin/activate
+2026-05-03T08:50:59.5037223Z [36;1msource venv/bin/activate[0m
+2026-05-03T08:50:59.5037428Z [36;1mif [[ "lint" == 'docs' ]]; then[0m
+2026-05-03T08:50:59.5037632Z [36;1m  export TOXENV=docs[0m
+2026-05-03T08:50:59.5037810Z [36;1melse[0m
+2026-05-03T08:50:59.5038013Z [36;1m  export TOXENV=$(echo "py3.10-lint" | tr -d '.')[0m
+2026-05-03T08:50:59.5038240Z [36;1mfi[0m
+2026-05-03T08:50:59.5038413Z [36;1m# Set PATH for nim commands during tox[0m
+2026-05-03T08:50:59.5038638Z [36;1mif [[ "lint" == 'interop' ]]; then[0m
+2026-05-03T08:50:59.5038965Z [36;1m  export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"[0m
+2026-05-03T08:50:59.5039290Z [36;1mfi[0m
+2026-05-03T08:50:59.5039603Z [36;1mpython -m tox run -r[0m
+2026-05-03T08:50:59.5058565Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-05-03T08:50:59.5058820Z env:
+2026-05-03T08:50:59.5058968Z   TOXENV: py310-lint
+2026-05-03T08:50:59.5059224Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:59.5059536Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+2026-05-03T08:50:59.5059846Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:59.5060119Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:59.5060391Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+2026-05-03T08:50:59.5060686Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+2026-05-03T08:50:59.5060960Z   UV_CACHE_DIR: /home/runner/work/_temp/setup-uv-cache
+2026-05-03T08:50:59.5061188Z ##[endgroup]
+2026-05-03T08:51:02.3471735Z .pkg: remove tox env folder /home/runner/work/py-libp2p/py-libp2p/.tox/.pkg
+2026-05-03T08:51:02.6301868Z py310-lint: install_deps> python -I -m pip install pre-commit
+2026-05-03T08:51:05.9671352Z .pkg: install_requires> python -I -m pip install 'setuptools>=42' wheel
+2026-05-03T08:51:07.1268925Z .pkg: _optional_hooks> python /home/runner/work/py-libp2p/py-libp2p/venv/lib/python3.10/site-packages/pyproject_api/_backend.py True setuptools.build_meta
+2026-05-03T08:51:07.4136028Z .pkg: get_requires_for_build_editable> python /home/runner/work/py-libp2p/py-libp2p/venv/lib/python3.10/site-packages/pyproject_api/_backend.py True setuptools.build_meta
+2026-05-03T08:51:07.8991783Z .pkg: freeze> python -m pip freeze --all
+2026-05-03T08:51:08.0790106Z .pkg: packaging==26.2,pip==26.1,setuptools==82.0.1,wheel==0.47.0
+2026-05-03T08:51:08.0794350Z .pkg: build_editable> python /home/runner/work/py-libp2p/py-libp2p/venv/lib/python3.10/site-packages/pyproject_api/_backend.py True setuptools.build_meta
+2026-05-03T08:51:08.8517413Z py310-lint: install_package_deps> python -I -m pip install 'aioquic>=1.2.0' 'anyio>=4.0' 'base58>=1.0.3' 'cbor2>=5.4.0' coincurve==21.0.0 'exceptiongroup>=1.2.0; python_version < "3.11"' 'fastecdsa==2.3.2; sys_platform != "win32"' 'grpcio>=1.41.0' 'httpx>=0.25.0' 'lru-dict>=1.1.6' 'miniupnpc<3.0,>=2.3' multiaddr==0.0.11 'mypy-protobuf>=3.0.0' 'noiseprotocol>=0.3.0' 'protobuf<7.0.0,>=4.25.0' 'py-cid>=0.5.0' 'py-multibase>=2.0.0' 'py-multicodec>=1.0.0' 'py-multihash>=3.0.0' 'pycryptodome>=3.9.2' 'pynacl>=1.3.0' 'requests>=2.28.0' 'rpcudp>=3.0.0' 'trio-typing>=0.0.4' 'trio-websocket>=0.11.0' 'trio>=0.26.0' types-requests 'zeroconf<0.148.0,>=0.147.0'
+2026-05-03T08:51:32.5705371Z py310-lint: install_package> python -I -m pip install --force-reinstall --no-deps /home/runner/work/py-libp2p/py-libp2p/.tox/.tmp/package/1/libp2p-0.6.0-0.editable-py3-none-any.whl
+2026-05-03T08:51:32.9081407Z py310-lint: freeze> python -m pip freeze --all
+2026-05-03T08:51:33.1369371Z py310-lint: aioquic==1.3.0,anyio==4.13.0,async-generator==1.10,attrs==26.1.0,base58==2.1.1,blake3==1.0.8,cbor2==6.0.1,certifi==2026.4.22,cffi==2.0.0,cfgv==3.5.0,charset-normalizer==3.4.7,coincurve==21.0.0,cryptography==47.0.0,distlib==0.4.0,dnspython==2.8.0,exceptiongroup==1.3.1,fastecdsa==2.3.2,filelock==3.29.0,grpcio==1.80.0,h11==0.16.0,httpcore==1.0.9,httpx==0.28.1,identify==2.6.19,idna==3.13,ifaddr==0.2.0,importlib_metadata==9.0.0,libp2p @ file:///home/runner/work/py-libp2p/py-libp2p/.tox/.tmp/package/1/libp2p-0.6.0-0.editable-py3-none-any.whl#sha256=6f0fe388ecd3df637e7630940338cbf3d3eb067e9792e9fcbd17064693405a1b,lru-dict==1.4.1,miniupnpc==2.3.3,mmh3==5.2.1,morphys==1.0,multiaddr==0.0.11,mypy-protobuf==5.1.0,mypy_extensions==1.1.0,netaddr==1.3.0,nodeenv==1.10.0,noiseprotocol==0.3.1,outcome==1.3.0.post0,packaging==26.2,pip==26.1,platformdirs==4.9.6,pre_commit==4.6.0,protobuf==6.33.6,psutil==7.2.2,py-cid==0.5.0,py-multibase==2.0.0,py-multicodec==1.0.0,py-multihash==3.0.0,pyasn1==0.6.3,pyasn1_modules==0.4.2,pycparser==3.0,pycryptodome==3.23.0,pylsqpack==0.3.24,PyNaCl==1.6.2,pyOpenSSL==26.1.0,python-baseconv==1.2.2,python-discovery==1.2.2,PyYAML==6.0.3,requests==2.33.1,rpcudp==5.0.1,service-identity==24.2.0,setuptools==82.0.1,six==1.17.0,sniffio==1.3.1,sortedcontainers==2.4.0,trio==0.33.0,trio-typing==0.10.0,trio-websocket==0.12.2,types-protobuf==7.34.1.20260503,types-requests==2.33.0.20260503,typing_extensions==4.15.0,u-msgpack-python==2.8.0,urllib3==2.6.3,varint==1.0.2,virtualenv==21.3.0,wsproto==1.3.2,zeroconf==0.147.3,zipp==3.23.1
+2026-05-03T08:51:33.1374547Z py310-lint: commands_pre[0]> uv pip install --upgrade pip
+2026-05-03T08:51:33.1900042Z Using Python 3.10.20 environment at: .tox/py310-lint
+2026-05-03T08:51:33.2954857Z Resolved 1 package in 103ms
+2026-05-03T08:51:33.2955970Z Checked 1 package in 0.06ms
+2026-05-03T08:51:33.2972424Z py310-lint: commands_pre[1]> uv pip install --group dev -e .
+2026-05-03T08:51:33.3514785Z Using Python 3.10.20 environment at: .tox/py310-lint
+2026-05-03T08:51:34.0461313Z Resolved 166 packages in 693ms
+2026-05-03T08:51:34.0500055Z    Building libp2p @ file:///home/runner/work/py-libp2p/py-libp2p
+2026-05-03T08:51:34.0662910Z Downloading babel (9.7MiB)
+2026-05-03T08:51:34.1167498Z Downloading jedi (4.7MiB)
+2026-05-03T08:51:34.1177079Z Downloading pygments (1.2MiB)
+2026-05-03T08:51:34.1182166Z Downloading sphinx-rtd-theme (7.3MiB)
+2026-05-03T08:51:34.1184711Z Downloading pyrefly (5.5MiB)
+2026-05-03T08:51:34.1186040Z Downloading faker (1.9MiB)
+2026-05-03T08:51:34.1190040Z Downloading ruff (10.8MiB)
+2026-05-03T08:51:34.1191694Z Downloading mypy (14.0MiB)
+2026-05-03T08:51:34.1197431Z Downloading pydantic-core (2.0MiB)
+2026-05-03T08:51:34.1201466Z Downloading sphinx (3.3MiB)
+2026-05-03T08:51:34.5484924Z  Downloaded pydantic-core
+2026-05-03T08:51:34.5491558Z  Downloaded pygments
+2026-05-03T08:51:35.1384876Z  Downloaded sphinx
+2026-05-03T08:51:35.2074896Z  Downloaded pyrefly
+2026-05-03T08:51:35.2793799Z  Downloaded sphinx-rtd-theme
+2026-05-03T08:51:35.2849741Z  Downloaded faker
+2026-05-03T08:51:35.3720244Z  Downloaded ruff
+2026-05-03T08:51:35.3824326Z  Downloaded babel
+2026-05-03T08:51:35.6597558Z  Downloaded mypy
+2026-05-03T08:51:35.9119524Z  Downloaded jedi
+2026-05-03T08:51:36.8250305Z       Built libp2p @ file:///home/runner/work/py-libp2p/py-libp2p
+2026-05-03T08:51:36.8377725Z Prepared 90 packages in 2.78s
+2026-05-03T08:51:36.8388198Z Uninstalled 1 package in 0.96ms
+2026-05-03T08:51:37.6322126Z Installed 90 packages in 793ms
+2026-05-03T08:51:37.6322945Z  + alabaster==1.0.0
+2026-05-03T08:51:37.6323192Z  + annotated-types==0.7.0
+2026-05-03T08:51:37.6323607Z  + asttokens==3.0.1
+2026-05-03T08:51:37.6323933Z  + async-exit-stack==1.0.1
+2026-05-03T08:51:37.6324180Z  + babel==2.18.0
+2026-05-03T08:51:37.6324642Z  + backports-tarfile==1.2.0
+2026-05-03T08:51:37.6325045Z  + bracex==2.6
+2026-05-03T08:51:37.6325252Z  + build==1.5.0
+2026-05-03T08:51:37.6325450Z  + bump-my-version==1.3.0
+2026-05-03T08:51:37.6325690Z  + cachetools==7.1.0
+2026-05-03T08:51:37.6325892Z  + click==8.3.3
+2026-05-03T08:51:37.6326099Z  + colorama==0.4.6
+2026-05-03T08:51:37.6326317Z  + decorator==5.2.1
+2026-05-03T08:51:37.6326536Z  + docutils==0.21.2
+2026-05-03T08:51:37.6326747Z  + execnet==2.1.2
+2026-05-03T08:51:37.6326981Z  + executing==2.2.1
+2026-05-03T08:51:37.6327184Z  + factory-boy==2.12.0
+2026-05-03T08:51:37.6327397Z  + faker==40.15.0
+2026-05-03T08:51:37.6327585Z  + id==1.6.1
+2026-05-03T08:51:37.6328039Z  + imagesize==2.0.0
+2026-05-03T08:51:37.6328276Z  + iniconfig==2.3.0
+2026-05-03T08:51:37.6328531Z  + ipython==8.39.0
+2026-05-03T08:51:37.6328772Z  + jaraco-classes==3.4.0
+2026-05-03T08:51:37.6330166Z  + jaraco-context==6.1.2
+2026-05-03T08:51:37.6330457Z  + jaraco-functools==4.4.0
+2026-05-03T08:51:37.6330721Z  + jedi==0.20.0
+2026-05-03T08:51:37.6330932Z  + jeepney==0.9.0
+2026-05-03T08:51:37.6331133Z  + jinja2==3.1.6
+2026-05-03T08:51:37.6331341Z  + keyring==25.7.0
+2026-05-03T08:51:37.6331938Z  - libp2p==0.6.0 (from file:///home/runner/work/py-libp2p/py-libp2p/.tox/.tmp/package/1/libp2p-0.6.0-0.editable-py3-none-any.whl)
+2026-05-03T08:51:37.6332709Z  + libp2p==0.6.0 (from file:///home/runner/work/py-libp2p/py-libp2p)
+2026-05-03T08:51:37.6333071Z  + librt==0.9.0
+2026-05-03T08:51:37.6333697Z  + markdown-it-py==4.0.0
+2026-05-03T08:51:37.6333943Z  + markupsafe==3.0.3
+2026-05-03T08:51:37.6334182Z  + matplotlib-inline==0.2.1
+2026-05-03T08:51:37.6334439Z  + mdurl==0.1.2
+2026-05-03T08:51:37.6334648Z  + more-itertools==11.0.2
+2026-05-03T08:51:37.6334893Z  + mypy==1.20.2
+2026-05-03T08:51:37.6335079Z  + nh3==0.3.5
+2026-05-03T08:51:37.6335281Z  + p2pclient==0.2.1
+2026-05-03T08:51:37.6335491Z  + parso==0.8.7
+2026-05-03T08:51:37.6335698Z  + pathspec==1.1.1
+2026-05-03T08:51:37.6335905Z  + pexpect==4.9.0
+2026-05-03T08:51:37.6336110Z  + pluggy==1.6.0
+2026-05-03T08:51:37.6336325Z  + prompt-toolkit==3.0.52
+2026-05-03T08:51:37.6336541Z  + ptyprocess==0.7.0
+2026-05-03T08:51:37.6336735Z  + pure-eval==0.2.3
+2026-05-03T08:51:37.6336915Z  + pydantic==2.13.3
+2026-05-03T08:51:37.6337155Z  + pydantic-core==2.46.3
+2026-05-03T08:51:37.6337401Z  + pydantic-settings==2.14.0
+2026-05-03T08:51:37.6337624Z  + pygments==2.20.0
+2026-05-03T08:51:37.6337807Z  + pyproject-api==1.10.0
+2026-05-03T08:51:37.6338052Z  + pyproject-hooks==1.2.0
+2026-05-03T08:51:37.6338267Z  + pyrefly==0.17.1
+2026-05-03T08:51:37.6338469Z  + pytest==9.0.3
+2026-05-03T08:51:37.6338687Z  + pytest-mock==3.15.1
+2026-05-03T08:51:37.6338930Z  + pytest-rerunfailures==16.1
+2026-05-03T08:51:37.6339179Z  + pytest-timeout==2.4.0
+2026-05-03T08:51:37.6339390Z  + pytest-trio==0.8.0
+2026-05-03T08:51:37.6339602Z  + pytest-xdist==3.8.0
+2026-05-03T08:51:37.6339794Z  + python-dotenv==1.2.2
+2026-05-03T08:51:37.6340003Z  + questionary==2.1.1
+2026-05-03T08:51:37.6340195Z  + readme-renderer==44.0
+2026-05-03T08:51:37.6340412Z  + requests-toolbelt==1.0.0
+2026-05-03T08:51:37.6340766Z  + rfc3986==2.0.0
+2026-05-03T08:51:37.6340979Z  + rich==15.0.0
+2026-05-03T08:51:37.6341170Z  + rich-click==1.9.7
+2026-05-03T08:51:37.6341350Z  + ruff==0.15.12
+2026-05-03T08:51:37.6341550Z  + secretstorage==3.5.0
+2026-05-03T08:51:37.6341855Z  + snowballstemmer==3.0.1
+2026-05-03T08:51:37.6342111Z  + sphinx==8.1.3
+2026-05-03T08:51:37.6342342Z  + sphinx-rtd-theme==3.1.0
+2026-05-03T08:51:37.6342645Z  + sphinxcontrib-applehelp==2.0.0
+2026-05-03T08:51:37.6343043Z  + sphinxcontrib-devhelp==2.0.0
+2026-05-03T08:51:37.6343579Z  + sphinxcontrib-htmlhelp==2.1.0
+2026-05-03T08:51:37.6343989Z  + sphinxcontrib-jquery==4.1
+2026-05-03T08:51:37.6344237Z  + sphinxcontrib-jsmath==1.0.1
+2026-05-03T08:51:37.6344492Z  + sphinxcontrib-qthelp==2.0.0
+2026-05-03T08:51:37.6344754Z  + sphinxcontrib-serializinghtml==2.0.0
+2026-05-03T08:51:37.6345177Z  + stack-data==0.6.3
+2026-05-03T08:51:37.6345402Z  + tomli==2.4.1
+2026-05-03T08:51:37.6345602Z  + tomli-w==1.2.0
+2026-05-03T08:51:37.6345795Z  + tomlkit==0.14.0
+2026-05-03T08:51:37.6345987Z  + towncrier==25.8.0
+2026-05-03T08:51:37.6346222Z  + tox==4.53.1
+2026-05-03T08:51:37.6346423Z  + traitlets==5.14.3
+2026-05-03T08:51:37.6346625Z  + twine==6.2.0
+2026-05-03T08:51:37.6346821Z  + typing-inspection==0.4.2
+2026-05-03T08:51:37.6347029Z  + wcmatch==10.1
+2026-05-03T08:51:37.6347214Z  + wcwidth==0.7.0
+2026-05-03T08:51:37.6347386Z  + wheel==0.47.0
+2026-05-03T08:51:37.6463895Z py310-lint: commands[0]> pre-commit install
+2026-05-03T08:51:38.5706338Z pre-commit installed at .git/hooks/pre-commit
+2026-05-03T08:51:38.5843977Z py310-lint: commands[1]> pre-commit run --all-files --show-diff-on-failure
+2026-05-03T08:51:38.6811482Z [INFO] Initializing environment for https://github.com/pre-commit/pre-commit-hooks.
+2026-05-03T08:51:39.4189459Z [INFO] Initializing environment for https://github.com/asottile/pyupgrade.
+2026-05-03T08:51:40.4277806Z [INFO] Initializing environment for https://github.com/astral-sh/ruff-pre-commit.
+2026-05-03T08:51:40.9532681Z [INFO] Initializing environment for https://github.com/executablebooks/mdformat.
+2026-05-03T08:51:41.5220706Z [INFO] Initializing environment for https://github.com/executablebooks/mdformat:mdformat-gfm.
+2026-05-03T08:51:42.0485756Z [INFO] Installing environment for https://github.com/pre-commit/pre-commit-hooks.
+2026-05-03T08:51:42.0486348Z [INFO] Once installed this environment will be reused.
+2026-05-03T08:51:42.0486678Z [INFO] This may take a few minutes...
+2026-05-03T08:51:46.2720141Z [INFO] Installing environment for https://github.com/asottile/pyupgrade.
+2026-05-03T08:51:46.2720708Z [INFO] Once installed this environment will be reused.
+2026-05-03T08:51:46.2721128Z [INFO] This may take a few minutes...
+2026-05-03T08:51:49.1167487Z [INFO] Installing environment for https://github.com/astral-sh/ruff-pre-commit.
+2026-05-03T08:51:49.1168075Z [INFO] Once installed this environment will be reused.
+2026-05-03T08:51:49.1168471Z [INFO] This may take a few minutes...
+2026-05-03T08:51:52.4952081Z [INFO] Installing environment for https://github.com/executablebooks/mdformat.
+2026-05-03T08:51:52.4952599Z [INFO] Once installed this environment will be reused.
+2026-05-03T08:51:52.4952856Z [INFO] This may take a few minutes...
+2026-05-03T08:51:55.7988540Z check yaml...............................................................Passed
+2026-05-03T08:51:55.8606936Z check toml...............................................................Passed
+2026-05-03T08:51:55.9314584Z fix end of files.........................................................Passed
+2026-05-03T08:51:56.0326423Z trim trailing whitespace.................................................Passed
+2026-05-03T08:51:58.5665786Z pyupgrade................................................................Passed
+2026-05-03T08:51:58.6946122Z ruff (legacy alias)......................................................Passed
+2026-05-03T08:51:58.8404559Z ruff format..............................................................Passed
+2026-05-03T08:51:59.9613232Z mdformat.................................................................Passed
+2026-05-03T08:52:07.6623116Z run mypy with all dev dependencies present...............................Failed
+2026-05-03T08:52:07.6623813Z - hook id: mypy-local
+2026-05-03T08:52:07.6624064Z - exit code: 1
+2026-05-03T08:52:07.6624161Z 
+2026-05-03T08:52:07.6624401Z libp2p/kad_dht/pb/kademlia_pb2.pyi:74: error: Missing type arguments for generic type "Mapping"  [type-arg]
+2026-05-03T08:52:07.6624809Z Found 1 error in 1 file (checked 335 source files)
+2026-05-03T08:52:07.6625014Z 
+2026-05-03T08:52:08.7611656Z run pyrefly typecheck locally............................................Failed
+2026-05-03T08:52:08.7612177Z - hook id: pyrefly-local
+2026-05-03T08:52:08.7612392Z - exit code: 1
+2026-05-03T08:52:08.7612484Z 
+2026-05-03T08:52:08.7612961Z WARN PYTHONPATH environment variable is set to `/home/runner/work/py-libp2p/py-libp2p/.tox/py310-lint/lib/python3.10/site-packages:`. Checks in other environments may not include these paths.
+2026-05-03T08:52:08.7613892Z  INFO Checking project configured at `/home/runner/work/py-libp2p/py-libp2p/pyproject.toml`
+2026-05-03T08:52:08.7614582Z  WARN PYTHONPATH environment variable is set to `/home/runner/work/py-libp2p/py-libp2p/.tox/py310-lint/lib/python3.10/site-packages:`. Checks in other environments may not include these paths.
+2026-05-03T08:52:08.7615585Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_block_service.py:30:41-45: Default `None` is not assignable to parameter `network_blocks` with type `dict[Unknown, Unknown]` [bad-function-definition]
+2026-05-03T08:52:08.7617189Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_block_service.py:141:46-50: Argument `list[bytes]` is not assignable to parameter `cids` with type `list[CIDv0 | CIDv1 | bytes | str]` in function `libp2p.bitswap.block_service.BlockService.get_blocks_batch` [bad-argument-type]
+2026-05-03T08:52:08.7618588Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_block_service.py:162:46-54: Argument `list[bytes]` is not assignable to parameter `cids` with type `list[CIDv0 | CIDv1 | bytes | str]` in function `libp2p.bitswap.block_service.BlockService.get_blocks_batch` [bad-argument-type]
+2026-05-03T08:52:08.7619958Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_io_stream.py:145:12-27: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7621000Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_io_stream.py:173:12-23: Object of class `NoneType` has no attribute `data` [missing-attribute]
+2026-05-03T08:52:08.7621920Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_io_stream.py:214:24-40: Object of class `NoneType` has no attribute `data` [missing-attribute]
+2026-05-03T08:52:08.7622682Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:60:12-33: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7623567Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:93:12-27: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7624342Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:94:16-33: Object of class `NoneType` has no attribute `blocksizes` [missing-attribute]
+2026-05-03T08:52:08.7625119Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:115:12-27: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7625897Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:183:12-27: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7626664Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_unixfs_encoding.py:224:12-27: Object of class `NoneType` has no attribute `filesize` [missing-attribute]
+2026-05-03T08:52:08.7627415Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_wantlist.py:172:12-32: Object of class `NoneType` has no attribute `entries` [missing-attribute]
+2026-05-03T08:52:08.7628396Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_wantlist.py:234:51-65: Argument `Literal[WantType.Block]` is not assignable to parameter `want_type` with type `int` in function `libp2p.bitswap.messages.create_wantlist_entry` [bad-argument-type]
+2026-05-03T08:52:08.7629607Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_wantlist.py:238:52-65: Argument `Literal[WantType.Have]` is not assignable to parameter `want_type` with type `int` in function `libp2p.bitswap.messages.create_wantlist_entry` [bad-argument-type]
+2026-05-03T08:52:08.7630595Z ERROR /home/runner/work/py-libp2p/py-libp2p/tests/core/bitswap/test_wantlist.py:249:9-17: Could not import `WantType` from `libp2p.bitswap` [missing-module-attribute]
+2026-05-03T08:52:08.7631305Z  INFO 16 errors shown, 184 errors ignored, 734 modules, 1,662 transitive dependencies, 657,839 lines, took 1.04s, peak memory physical 204.9 MiB
+2026-05-03T08:52:08.7631662Z 
+2026-05-03T08:52:08.8142574Z Check for .rst files in the top-level directory..........................Passed
+2026-05-03T08:52:09.5667299Z Cross-platform path handling audit (P0/P1)...............................Passed
+2026-05-03T08:52:09.5821611Z py310-lint: exit 1 (31.00 seconds) /home/runner/work/py-libp2p/py-libp2p> pre-commit run --all-files --show-diff-on-failure pid=3010
+2026-05-03T08:52:09.5848132Z   py310-lint: FAIL code 1 (67.24=setup[30.80]+cmd[0.16,4.35,0.94,31.00] seconds)
+2026-05-03T08:52:09.5848539Z   evaluation failed :( (69.20 seconds)
+2026-05-03T08:52:09.6166338Z ##[error]Process completed with exit code 1.
+2026-05-03T08:52:09.6249957Z Post job cleanup.
+2026-05-03T08:52:09.7055343Z [command]/usr/bin/git version
+2026-05-03T08:52:09.7085377Z git version 2.53.0
+2026-05-03T08:52:09.7117444Z Temporarily overriding HOME='/home/runner/work/_temp/5d400f3f-c4d4-4ba4-ab16-52bd147b9418' before making global git config changes
+2026-05-03T08:52:09.7118330Z Adding repository directory to the temporary git global config as a safe directory
+2026-05-03T08:52:09.7121633Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/py-libp2p/py-libp2p
+2026-05-03T08:52:09.8851499Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-05-03T08:52:09.8882670Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-05-03T08:52:09.9066439Z fatal: No url found for submodule path 'extra/multihash-spec' in .gitmodules
+2026-05-03T08:52:10.0343154Z ##[warning]The process '/usr/bin/git' failed with exit code 128
+2026-05-03T08:52:10.0429730Z Cleaning up orphan processes
+2026-05-03T08:52:10.0667254Z ##[warning]Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-python@v5, astral-sh/setup-uv@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

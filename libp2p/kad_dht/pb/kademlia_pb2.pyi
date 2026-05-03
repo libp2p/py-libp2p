@@ -2,7 +2,7 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
+from typing import Any, ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -71,4 +71,4 @@ class Message(_message.Message):
     closerPeers: _containers.RepeatedCompositeFieldContainer[Message.Peer]
     providerPeers: _containers.RepeatedCompositeFieldContainer[Message.Peer]
     senderRecord: bytes
-    def __init__(self, type: _Optional[_Union[Message.MessageType, str]] = ..., clusterLevelRaw: _Optional[int] = ..., key: _Optional[bytes] = ..., record: _Optional[_Union[Record, _Mapping]] = ..., closerPeers: _Optional[_Iterable[_Union[Message.Peer, _Mapping]]] = ..., providerPeers: _Optional[_Iterable[_Union[Message.Peer, _Mapping]]] = ..., senderRecord: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, type: _Optional[_Union[Message.MessageType, str]] = ..., clusterLevelRaw: _Optional[int] = ..., key: _Optional[bytes] = ..., record: _Optional[_Union[Record, _Mapping[str, Any]]] = ..., closerPeers: _Optional[_Iterable[_Union[Message.Peer, _Mapping[str, Any]]]] = ..., providerPeers: _Optional[_Iterable[_Union[Message.Peer, _Mapping[str, Any]]]] = ..., senderRecord: _Optional[bytes] = ...) -> None: ...

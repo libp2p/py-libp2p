@@ -142,6 +142,7 @@ async def test_add_stream_empty():
     block = list(stored.values())[0]
     assert is_file_node(block)
     _, unixfs = decode_dag_pb(block)
+    assert unixfs is not None
     assert unixfs.filesize == 0
     ok("empty stream → 1 empty dag-pb leaf block stored")
 
@@ -170,6 +171,7 @@ async def test_add_stream_single_chunk():
     assert len(stored) == 1, f"expected 1 block, got {len(stored)}"
     block = stored[bytes(root_cid)]
     _, unixfs = decode_dag_pb(block)
+    assert unixfs is not None
     assert unixfs.data == data
     ok("single chunk: leaf CID returned directly, inline data correct")
 
@@ -211,6 +213,7 @@ async def test_add_stream_gzip():
     for link in links:
         leaf = stored[bytes(link.cid)]
         _, leaf_unixfs = decode_dag_pb(leaf)
+        assert leaf_unixfs is not None
         reassembled += leaf_unixfs.data
 
     assert reassembled == original

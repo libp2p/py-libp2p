@@ -10,6 +10,7 @@ Sits between MerkleDag and BitswapClient, providing:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import logging
 from typing import TYPE_CHECKING
 
@@ -133,7 +134,7 @@ class BlockService:
 
     async def get_blocks_batch(
         self,
-        cids: list[CIDInput],
+        cids: Sequence[CIDInput],
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
         batch_size: int = 32,
