@@ -9,6 +9,7 @@ multi-block resolution.
 
 from collections.abc import Awaitable, Callable
 import inspect
+import io
 import logging
 from typing import Union
 
@@ -20,6 +21,7 @@ from .chunker import (
     DEFAULT_CHUNK_SIZE,
     chunk_bytes,
     chunk_file,
+    chunk_stream,
     estimate_chunk_count,
     get_file_size,
 )
@@ -411,6 +413,93 @@ class MerkleDag:
         if progress_callback:
             await _call_progress_callback(
                 progress_callback, file_size, file_size, "completed"
+            )
+
+        return root_cid
+
+    async def add_stream(
+        self,
+        stream: io.IOBase,
+        chunk_size: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> bytes:
+        """
+        Add data from any io.IOBase stream to the DAG.
+
+        More flexible than add_file() (accepts any stream, not just file paths)
+        and more memory efficient than add_bytes() (reads one chunk at a time,
+        so total memory usage is O(chunk_size) regardless of file size).
+
+        Args:
+            stream: Any readable io.IOBase — open() handles, BytesIO,
+                    GzipFile, BZ2File, network streams, pipes, etc.
+            chunk_size: Optional chunk size in bytes (auto-selected if None)
+            progress_callback: Optional callback(current, total, status).
+                               Note: total is unknown for streams, so current
+                               is reported as bytes processed so far.
+
+        Returns:
+            Root CID bytes of the stored DAG
+
+        Example:
+            >>> import io
+            >>> root_cid = await dag.add_stream(io.BytesIO(b"hello world"))
+
+            >>> # Memory-efficient large file (no full read into RAM)
+            >>> with open("movie.mp4", "rb") as f:
+            ...     root_cid = await dag.add_stream(f)
+
+            >>> # Decompress and add in one pass
+            >>> import gzip
+            >>> with gzip.open("archive.gz", "rb") as f:
+            ...     root_cid = await dag.add_stream(f)
+
+            >>> # With BlockService for persistent caching
+            >>> service = BlockService(FilesystemBlockStore("./blocks"), bitswap)
+            >>> dag = MerkleDag(bitswap, block_service=service)
+            >>> with open("large.bin", "rb") as f:
+            ...     root_cid = await dag.add_stream(f)  # cached to disk
+        """
+        if chunk_size is None:
+            chunk_size = DEFAULT_CHUNK_SIZE
+
+        leaf_triples: list[tuple[bytes, bytes, int]] = []
+        bytes_processed = 0
+
+        for i, chunk_data in enumerate(chunk_stream(stream, chunk_size)):
+            leaf_block = create_leaf_node(chunk_data)
+            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            await self._put_block(chunk_cid, leaf_block)
+            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
+            bytes_processed += len(chunk_data)
+
+            if progress_callback:
+                # total is unknown for streams — report bytes processed so far
+                await _call_progress_callback(
+                    progress_callback,
+                    bytes_processed,
+                    bytes_processed,
+                    f"chunking ({i + 1} chunks, {bytes_processed} bytes)",
+                )
+
+        # Empty stream — store a single empty leaf
+        if not leaf_triples:
+            leaf_block = create_leaf_node(b"")
+            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            await self._put_block(cid, leaf_block)
+            return cid
+
+        # Single chunk — return the leaf CID directly (no root node needed)
+        if len(leaf_triples) == 1:
+            return leaf_triples[0][0]
+
+        # Multiple chunks — build balanced DAG tree
+        root_cid, root_data = balanced_layout(leaf_triples)
+        await self._put_block(root_cid, root_data)
+
+        if progress_callback:
+            await _call_progress_callback(
+                progress_callback, bytes_processed, bytes_processed, "completed"
             )
 
         return root_cid

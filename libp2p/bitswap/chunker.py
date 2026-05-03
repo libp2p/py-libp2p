@@ -7,6 +7,7 @@ large files.
 """
 
 from collections.abc import Callable, Iterator
+import io
 from pathlib import Path
 
 # Default chunk size: 63 KB (py-libp2p accepts less than 64 KB)
@@ -80,6 +81,48 @@ def chunk_file(file_path: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterator
             if not chunk:
                 break
             yield chunk
+
+
+def chunk_stream(
+    stream: io.IOBase, chunk_size: int = DEFAULT_CHUNK_SIZE
+) -> Iterator[bytes]:
+    """
+    Stream chunks from any readable io.IOBase object.
+
+    Memory efficient — reads one chunk at a time without loading the
+    entire content into memory. Works with any Python stream:
+    open() file handles, BytesIO, GzipFile, BZ2File, network sockets,
+    or any object that implements io.IOBase.read().
+
+    Args:
+        stream: Any readable io.IOBase (open(), BytesIO, GzipFile, etc.)
+        chunk_size: Size of each chunk in bytes
+
+    Yields:
+        Chunks of up to chunk_size bytes. The final chunk may be smaller.
+
+    Example:
+        >>> import io
+        >>> data = b"hello world " * 100000
+        >>> chunks = list(chunk_stream(io.BytesIO(data), chunk_size=256*1024))
+        >>> print(f"Split into {len(chunks)} chunks")
+
+        >>> # From a real file handle
+        >>> with open("movie.mp4", "rb") as f:
+        ...     for chunk in chunk_stream(f):
+        ...         process(chunk)
+
+        >>> # From a gzip stream (decompress on-the-fly)
+        >>> import gzip
+        >>> with gzip.open("archive.gz", "rb") as f:
+        ...     for chunk in chunk_stream(f):
+        ...         process(chunk)
+    """
+    while True:
+        chunk = stream.read(chunk_size)
+        if not chunk:
+            break
+        yield chunk
 
 
 def estimate_chunk_count(file_size: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> int:
