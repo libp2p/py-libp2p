@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
+import pytest
 import trio
 
 from libp2p.bitswap.block_store import FilesystemBlockStore, MemoryBlockStore
@@ -36,9 +37,19 @@ def pass_fail(label: str, ok: bool) -> None:
         raise AssertionError(f"FAILED: {label}")
 
 
+# ── pytest fixtures ───────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def store_path(tmp_path):
+    """Provide a fresh temporary directory path for each test."""
+    return str(tmp_path)
+
+
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.trio
 async def test_basic_round_trip(store_path: str) -> None:
     print("\n[1] Basic put / get / has / delete")
     store = FilesystemBlockStore(store_path)
@@ -65,6 +76,7 @@ async def test_basic_round_trip(store_path: str) -> None:
     pass_fail("get_block returns None after delete", await store.get_block(cid) is None)
 
 
+@pytest.mark.trio
 async def test_persistence(store_path: str) -> None:
     print("\n[2] Persistence across store re-creation (simulates process restart)")
 
@@ -92,6 +104,7 @@ async def test_persistence(store_path: str) -> None:
     print(f"    CID2: {cid_to_text(cid2)}")
 
 
+@pytest.mark.trio
 async def test_get_all_cids(store_path: str) -> None:
     print("\n[3] get_all_cids scans directory tree")
     store = FilesystemBlockStore(store_path)
@@ -111,6 +124,7 @@ async def test_get_all_cids(store_path: str) -> None:
         )
 
 
+@pytest.mark.trio
 async def test_get_missing_returns_none(store_path: str) -> None:
     print("\n[4] get_block returns None for missing CID")
     store = FilesystemBlockStore(store_path)
@@ -119,6 +133,7 @@ async def test_get_missing_returns_none(store_path: str) -> None:
     pass_fail("get_block returns None for unknown CID", result is None)
 
 
+@pytest.mark.trio
 async def test_drop_in_for_memory_store(store_path: str) -> None:
     print("\n[5] Drop-in replacement for MemoryBlockStore")
 
@@ -137,6 +152,7 @@ async def test_drop_in_for_memory_store(store_path: str) -> None:
     )
 
 
+@pytest.mark.trio
 async def test_directory_structure(store_path: str) -> None:
     print("\n[6] 2-char prefix directory structure")
     store = FilesystemBlockStore(store_path)

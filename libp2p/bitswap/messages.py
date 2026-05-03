@@ -40,8 +40,9 @@ def create_wantlist_entry(
     entry.block = cid_to_bytes(block_cid)
     entry.priority = priority
     entry.cancel = cancel
-    # Type checkers don't like int assignment to enum, but protobuf accepts it
-    entry.wantType = want_type  # type: ignore[assignment]  # v1.2.0 field
+    # Accept both plain int and WantType enum (extract .value for enum)
+    want_type_int = want_type.value if hasattr(want_type, "value") else int(want_type)
+    entry.wantType = want_type_int  # type: ignore[assignment]  # v1.2.0 field
     entry.sendDontHave = send_dont_have  # v1.2.0 field
     return entry
 

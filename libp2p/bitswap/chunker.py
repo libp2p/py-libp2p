@@ -11,7 +11,9 @@ import io
 from pathlib import Path
 
 # Default chunk size: 63 KB (py-libp2p accepts less than 64 KB)
-DEFAULT_CHUNK_SIZE = 63 * 1024
+# 63 KB minus 32 bytes to leave room for the dag-pb leaf envelope overhead,
+# ensuring wrapped blocks never exceed MAX_BLOCK_SIZE (63 * 1024).
+DEFAULT_CHUNK_SIZE = 63 * 1024 - 32
 
 
 def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[bytes]:

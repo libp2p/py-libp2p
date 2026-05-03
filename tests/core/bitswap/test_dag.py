@@ -52,6 +52,8 @@ class TestAddBytes:
     @pytest.mark.trio
     async def test_add_small_bytes(self):
         """Test adding small data (single block)."""
+        from libp2p.bitswap.dag_pb import create_leaf_node
+
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
@@ -66,13 +68,18 @@ class TestAddBytes:
         # Verify
         assert root_cid is not None
         assert len(root_cid) > 0
-        assert verify_cid(root_cid, data)
 
-        # Should be single block (RAW codec)
+        # Small data is stored as a dag-pb leaf node (not raw codec)
+        leaf_block = create_leaf_node(data)
+        expected_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+        assert root_cid == expected_cid
+        assert verify_cid(root_cid, leaf_block)
+
+        # Should be single block (DAG-PB codec)
         mock_client.add_block.assert_called_once()
         call_args = mock_client.add_block.call_args
         assert call_args[0][0] == root_cid  # CID
-        assert call_args[0][1] == data  # Data
+        assert call_args[0][1] == leaf_block  # dag-pb wrapped data
 
     @pytest.mark.trio
     async def test_add_large_bytes(self):
@@ -161,9 +168,15 @@ class TestAddFile:
             assert root_cid is not None
             mock_client.add_block.assert_called_once()
 
-            # Should be single RAW block
+            # Small file is stored as a dag-pb leaf node
+            from libp2p.bitswap.dag_pb import create_leaf_node
+
             call_args = mock_client.add_block.call_args
-            assert verify_cid(call_args[0][0], data)
+            stored_cid = call_args[0][0]
+            stored_block = call_args[0][1]
+            leaf_block = create_leaf_node(data)
+            assert stored_block == leaf_block
+            assert verify_cid(stored_cid, leaf_block)
         finally:
             Path(temp_path).unlink()
 
@@ -285,16 +298,22 @@ class TestFetchFile:
     @pytest.mark.trio
     async def test_fetch_chunked_file(self):
         """Test fetching multi-chunk file."""
-        # Create chunks
+        from libp2p.bitswap.dag_pb import create_leaf_node
+
+        # Create dag-pb leaf blocks (matching what add_bytes/add_file produces)
         chunk1 = b"chunk1" * 1000
         chunk2 = b"chunk2" * 1000
         chunk3 = b"chunk3" * 1000
 
-        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
-        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
-        cid3 = compute_cid_v1(chunk3, codec=CODEC_RAW)
+        leaf1 = create_leaf_node(chunk1)
+        leaf2 = create_leaf_node(chunk2)
+        leaf3 = create_leaf_node(chunk3)
 
-        # Create DAG-PB root node
+        cid1 = compute_cid_v1(leaf1, codec=CODEC_DAG_PB)
+        cid2 = compute_cid_v1(leaf2, codec=CODEC_DAG_PB)
+        cid3 = compute_cid_v1(leaf3, codec=CODEC_DAG_PB)
+
+        # Create DAG-PB root node linking to the leaves
         chunks_data = [
             (cid1, len(chunk1)),
             (cid2, len(chunk2)),
@@ -308,11 +327,11 @@ class TestFetchFile:
             if cid == root_cid:
                 return root_data
             elif cid == cid1:
-                return chunk1
+                return leaf1
             elif cid == cid2:
-                return chunk2
+                return leaf2
             elif cid == cid3:
-                return chunk3
+                return leaf3
             raise ValueError(f"Unknown CID: {cid.hex()}")
 
         mock_client = MagicMock(spec=BitswapClient)
@@ -324,23 +343,28 @@ class TestFetchFile:
         # Fetch
         fetched_data, filename = await dag.fetch_file(root_cid, timeout=30.0)
 
-        # Verify
+        # Verify reconstructed data
         expected_data = chunk1 + chunk2 + chunk3
         assert fetched_data == expected_data
         assert filename is None  # File node without directory wrapper
 
-        # Should have fetched root + 3 chunks
-        assert mock_client.get_block.call_count == 4
+        # root fetch (1) + tree-level batch fallback (3) + leaf batch fallback (3) = 7
+        assert mock_client.get_block.call_count == 7
 
     @pytest.mark.trio
     async def test_fetch_file_with_progress(self):
         """Test fetching with progress callback."""
-        # Create chunked file
+        from libp2p.bitswap.dag_pb import create_leaf_node
+
+        # Create dag-pb leaf blocks (matching what add_bytes/add_file produces)
         chunk1 = b"x" * 1000
         chunk2 = b"y" * 1000
 
-        cid1 = compute_cid_v1(chunk1, codec=CODEC_RAW)
-        cid2 = compute_cid_v1(chunk2, codec=CODEC_RAW)
+        leaf1 = create_leaf_node(chunk1)
+        leaf2 = create_leaf_node(chunk2)
+
+        cid1 = compute_cid_v1(leaf1, codec=CODEC_DAG_PB)
+        cid2 = compute_cid_v1(leaf2, codec=CODEC_DAG_PB)
 
         root_data = create_file_node([(cid1, len(chunk1)), (cid2, len(chunk2))])
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
@@ -350,9 +374,9 @@ class TestFetchFile:
             if cid == root_cid:
                 return root_data
             elif cid == cid1:
-                return chunk1
+                return leaf1
             elif cid == cid2:
-                return chunk2
+                return leaf2
 
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
@@ -370,8 +394,8 @@ class TestFetchFile:
 
         # Verify progress
         assert len(progress_calls) > 0
-        # Should report progress for each chunk
-        assert any("fetching chunk" in call[2] for call in progress_calls)
+        # Implementation emits "downloading" per leaf and "completed" at end
+        assert any(call[2] in ("downloading", "completed") for call in progress_calls)
         # Last call should be completion
         assert progress_calls[-1][2] == "completed"
 

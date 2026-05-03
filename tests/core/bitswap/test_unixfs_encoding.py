@@ -166,7 +166,9 @@ async def test_add_file_produces_dag_pb_leaves():
         tmp = f.name
 
     try:
-        root_cid = await dag.add_file(tmp, wrap_with_directory=False)
+        root_cid = await dag.add_file(
+            tmp, chunk_size=chunk_size, wrap_with_directory=False
+        )
     finally:
         os.unlink(tmp)
 
