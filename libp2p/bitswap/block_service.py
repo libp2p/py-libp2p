@@ -7,6 +7,7 @@ Sits between MerkleDag and BitswapClient, providing:
   - Peer announcement when new blocks are stored locally
   - A clean abstraction so MerkleDag is not hardwired to BitswapClient
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,6 +18,7 @@ from .cid import CIDInput, cid_to_bytes, format_cid_for_display, parse_cid
 
 if TYPE_CHECKING:
     from libp2p.peer.id import ID as PeerID
+
     from .client import BitswapClient
 
 logger = logging.getLogger(__name__)
@@ -44,16 +46,17 @@ class BlockService:
         >>> store = FilesystemBlockStore("./blocks")
         >>> service = BlockService(store, bitswap)
         >>> dag = MerkleDag(bitswap, block_service=service)
+
     """
 
-    def __init__(self, store: BlockStore, bitswap: "BitswapClient") -> None:
+    def __init__(self, store: BlockStore, bitswap: BitswapClient) -> None:
         self.store = store
         self.bitswap = bitswap
 
     async def get_block(
         self,
         cid: CIDInput,
-        peer_id: "PeerID | None" = None,
+        peer_id: PeerID | None = None,
         timeout: float = 30.0,
     ) -> bytes | None:
         """
@@ -67,6 +70,7 @@ class BlockService:
 
         Returns:
             Block data bytes, or None if not found anywhere
+
         """
         cid_bytes = cid_to_bytes(cid)
         cid_obj = parse_cid(cid_bytes)
@@ -111,6 +115,7 @@ class BlockService:
         Args:
             cid: The CID of the block
             data: The block data bytes
+
         """
         cid_obj = parse_cid(cid_to_bytes(cid))
 
@@ -129,7 +134,7 @@ class BlockService:
     async def get_blocks_batch(
         self,
         cids: list[CIDInput],
-        peer_id: "PeerID | None" = None,
+        peer_id: PeerID | None = None,
         timeout: float = 30.0,
         batch_size: int = 32,
     ) -> dict[bytes, bytes]:
@@ -146,6 +151,7 @@ class BlockService:
 
         Returns:
             Dict mapping cid_bytes -> block_data for all found blocks
+
         """
         results: dict[bytes, bytes] = {}
         missing_cids: list[CIDInput] = []

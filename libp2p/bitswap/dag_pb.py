@@ -312,6 +312,7 @@ def create_leaf_node(data: bytes) -> bytes:
 
     Returns:
         Encoded DAG-PB bytes, suitable for storage as a dag-pb block
+
     """
     unixfs_data = UnixFSData(type="file", data=data, filesize=len(data))
     return encode_dag_pb([], unixfs_data)
@@ -341,6 +342,7 @@ def balanced_layout(
 
     Raises:
         ValueError: If leaves is empty
+
     """
     if not leaves:
         raise ValueError("Cannot build balanced layout from empty leaf list")
@@ -379,11 +381,9 @@ def balanced_layout(
             )
             internal_block = encode_dag_pb(internal_links, unixfs_data)
             internal_cid = compute_cid_v1(internal_block, codec=CODEC_DAG_PB)
-            # This node's cumulative size = its own block + sum of children's cumulative sizes
+            # cumulative size = own block + sum of children's cumulative sizes
             cum_size = len(internal_block) + total_cum
-            next_level.append(
-                (internal_cid, internal_block, total_filesize, cum_size)
-            )
+            next_level.append((internal_cid, internal_block, total_filesize, cum_size))
         level = next_level
 
     return level[0][0], level[0][1]

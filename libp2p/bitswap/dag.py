@@ -27,7 +27,6 @@ from .chunker import (
 )
 from .cid import (
     CODEC_DAG_PB,
-    CODEC_RAW,
     CIDInput,
     cid_to_bytes,
     compute_cid_v1,
@@ -146,7 +145,8 @@ class MerkleDag:
         if self._service is not None:
             data = await self._service.get_block(cid, peer_id=peer_id, timeout=timeout)
             if data is None:
-                from .cid import format_cid_for_display, cid_to_bytes
+                from .cid import cid_to_bytes, format_cid_for_display
+
                 raise BlockNotFoundError(
                     f"Block not found: {format_cid_for_display(cid_to_bytes(cid))}"
                 )
@@ -459,6 +459,7 @@ class MerkleDag:
             >>> dag = MerkleDag(bitswap, block_service=service)
             >>> with open("large.bin", "rb") as f:
             ...     root_cid = await dag.add_stream(f)  # cached to disk
+
         """
         if chunk_size is None:
             chunk_size = DEFAULT_CHUNK_SIZE

@@ -117,6 +117,7 @@ def chunk_stream(
         >>> with gzip.open("archive.gz", "rb") as f:
         ...     for chunk in chunk_stream(f):
         ...         process(chunk)
+
     """
     while True:
         chunk = stream.read(chunk_size)

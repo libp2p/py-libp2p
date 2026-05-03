@@ -144,6 +144,7 @@ class FilesystemBlockStore(BlockStore):
         >>> # Drop-in replacement for MemoryBlockStore:
         >>> # store = MemoryBlockStore()       # before
         >>> store = FilesystemBlockStore("./blocks")  # after — persistent
+
     """
 
     def __init__(self, base_path: str | Path) -> None:
@@ -184,7 +185,7 @@ class FilesystemBlockStore(BlockStore):
 
     def get_all_cids(self) -> list[bytes]:
         """Return all stored CIDs as bytes by scanning the directory tree."""
-        cids = []
+        cids: list[bytes] = []
         if not self._path.exists():
             return cids
         for subdir in self._path.iterdir():
