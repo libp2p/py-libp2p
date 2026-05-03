@@ -11,17 +11,17 @@ Run with:
     python test_filesystem_blockstore.py
 """
 
+from pathlib import Path
 import shutil
 import tempfile
-from pathlib import Path
 
 import trio
 
 from libp2p.bitswap.block_store import FilesystemBlockStore, MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1, CODEC_RAW, cid_to_text
-
+from libp2p.bitswap.cid import CODEC_RAW, cid_to_text, compute_cid_v1
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def make_block(content: bytes) -> tuple[bytes, bytes]:
     """Return (cid_bytes, data) for a raw block."""
@@ -38,6 +38,7 @@ def pass_fail(label: str, ok: bool) -> None:
 
 # ── tests ─────────────────────────────────────────────────────────────────────
 
+
 async def test_basic_round_trip(store_path: str) -> None:
     print("\n[1] Basic put / get / has / delete")
     store = FilesystemBlockStore(store_path)
@@ -45,28 +46,23 @@ async def test_basic_round_trip(store_path: str) -> None:
     cid, data = make_block(b"hello filesystem blockstore")
 
     # has_block → False before put
-    pass_fail("has_block returns False before put",
-              not await store.has_block(cid))
+    pass_fail("has_block returns False before put", not await store.has_block(cid))
 
     # put_block
     await store.put_block(cid, data)
-    pass_fail("block file exists on disk after put",
-              store._cid_to_path(cid).exists())
+    pass_fail("block file exists on disk after put", store._cid_to_path(cid).exists())
 
     # get_block
     fetched = await store.get_block(cid)
     pass_fail("get_block returns correct data", fetched == data)
 
     # has_block → True after put
-    pass_fail("has_block returns True after put",
-              await store.has_block(cid))
+    pass_fail("has_block returns True after put", await store.has_block(cid))
 
     # delete_block
     await store.delete_block(cid)
-    pass_fail("block file gone after delete",
-              not store._cid_to_path(cid).exists())
-    pass_fail("get_block returns None after delete",
-              await store.get_block(cid) is None)
+    pass_fail("block file gone after delete", not store._cid_to_path(cid).exists())
+    pass_fail("get_block returns None after delete", await store.get_block(cid) is None)
 
 
 async def test_persistence(store_path: str) -> None:
@@ -78,18 +74,18 @@ async def test_persistence(store_path: str) -> None:
     cid2, data2 = make_block(b"another persistent block")
     await store1.put_block(cid1, data1)
     await store1.put_block(cid2, data2)
-    pass_fail("2 blocks written by store1",
-              store1.size() == 2)
+    pass_fail("2 blocks written by store1", store1.size() == 2)
 
     # Create a brand-new store object pointing to the same path
     # (simulates a process restart)
     store2 = FilesystemBlockStore(store_path)
-    pass_fail("store2 sees block1 written by store1",
-              await store2.get_block(cid1) == data1)
-    pass_fail("store2 sees block2 written by store1",
-              await store2.get_block(cid2) == data2)
-    pass_fail("store2.size() == 2",
-              store2.size() == 2)
+    pass_fail(
+        "store2 sees block1 written by store1", await store2.get_block(cid1) == data1
+    )
+    pass_fail(
+        "store2 sees block2 written by store1", await store2.get_block(cid2) == data2
+    )
+    pass_fail("store2.size() == 2", store2.size() == 2)
 
     print(f"    Block directory: {store2.base_path()}")
     print(f"    CID1: {cid_to_text(cid1)}")
@@ -105,13 +101,14 @@ async def test_get_all_cids(store_path: str) -> None:
         await store.put_block(cid, data)
 
     all_cids = store.get_all_cids()
-    pass_fail(f"get_all_cids returns {len(blocks)} CIDs",
-              len(all_cids) == len(blocks))
+    pass_fail(f"get_all_cids returns {len(blocks)} CIDs", len(all_cids) == len(blocks))
 
     stored_set = {bytes(c) for c in all_cids}
     for cid, _ in blocks:
-        pass_fail(f"CID {cid_to_text(cid)[:20]}... is in get_all_cids",
-                  bytes(cid) in stored_set)
+        pass_fail(
+            f"CID {cid_to_text(cid)[:20]}... is in get_all_cids",
+            bytes(cid) in stored_set,
+        )
 
 
 async def test_get_missing_returns_none(store_path: str) -> None:
@@ -132,10 +129,12 @@ async def test_drop_in_for_memory_store(store_path: str) -> None:
         return await store.get_block(cid)
 
     mem_result = await use_store(MemoryBlockStore())
-    fs_result  = await use_store(FilesystemBlockStore(store_path))
+    fs_result = await use_store(FilesystemBlockStore(store_path))
 
-    pass_fail("MemoryBlockStore and FilesystemBlockStore return same data",
-              mem_result == fs_result)
+    pass_fail(
+        "MemoryBlockStore and FilesystemBlockStore return same data",
+        mem_result == fs_result,
+    )
 
 
 async def test_directory_structure(store_path: str) -> None:
@@ -145,20 +144,21 @@ async def test_directory_structure(store_path: str) -> None:
     await store.put_block(cid, data)
 
     cid_str = cid_to_text(cid)
-    expected_dir  = Path(store_path) / cid_str[:2]
+    expected_dir = Path(store_path) / cid_str[:2]
     expected_file = expected_dir / cid_str[2:]
 
-    pass_fail(f"2-char prefix dir '{cid_str[:2]}' exists",
-              expected_dir.is_dir())
-    pass_fail(f"block file '{cid_str[2:8]}...' exists inside prefix dir",
-              expected_file.exists())
-    pass_fail("file contents match original data",
-              expected_file.read_bytes() == data)
+    pass_fail(f"2-char prefix dir '{cid_str[:2]}' exists", expected_dir.is_dir())
+    pass_fail(
+        f"block file '{cid_str[2:8]}...' exists inside prefix dir",
+        expected_file.exists(),
+    )
+    pass_fail("file contents match original data", expected_file.read_bytes() == data)
 
     print(f"    Path: {expected_file}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 async def main() -> None:
     print("=" * 60)

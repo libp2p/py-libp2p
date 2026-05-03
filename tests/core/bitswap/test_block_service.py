@@ -4,12 +4,14 @@ Test BlockService — transparent local→network fallback with auto-caching.
 Run with:
     python test_block_service.py
 """
+
+from unittest.mock import AsyncMock, MagicMock
+
 import trio
-from unittest.mock import AsyncMock, MagicMock, call
 
 from libp2p.bitswap.block_service import BlockService
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1, CODEC_RAW, cid_to_text
+from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
 from libp2p.bitswap.client import BitswapClient
 
 
@@ -18,10 +20,12 @@ def make_block(content: bytes):
     return cid, content
 
 
-def ok(label): print(f"  OK  {label}")
+def ok(label):
+    print(f"  OK  {label}")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def make_service(network_blocks: dict = None):
     """
@@ -40,8 +44,11 @@ def make_service(network_blocks: dict = None):
         pass  # just accept it
 
     async def fake_get_blocks_batch(cids, peer_id=None, timeout=30.0, batch_size=32):
-        return {bytes(c): network_blocks[bytes(c)]
-                for c in cids if bytes(c) in network_blocks}
+        return {
+            bytes(c): network_blocks[bytes(c)]
+            for c in cids
+            if bytes(c) in network_blocks
+        }
 
     mock_bitswap.get_block = AsyncMock(side_effect=fake_get_block)
     mock_bitswap.add_block = AsyncMock(side_effect=fake_add_block)
@@ -52,6 +59,7 @@ def make_service(network_blocks: dict = None):
 
 
 # ── tests ─────────────────────────────────────────────────────────────────────
+
 
 async def test_local_hit_no_network():
     print("\n[1] Local hit — network is never called")
@@ -141,7 +149,7 @@ async def test_get_blocks_batch_local_hits_skip_network():
 async def test_get_blocks_batch_partial_local():
     print("\n[6] get_blocks_batch — partial local, rest from network")
     local_blocks = [make_block(f"local {i}".encode()) for i in range(3)]
-    net_blocks   = [make_block(f"remote {i}".encode()) for i in range(2)]
+    net_blocks = [make_block(f"remote {i}".encode()) for i in range(2)]
     network_dict = {bytes(cid): data for cid, data in net_blocks}
 
     service, store, mock_bitswap = make_service(network_blocks=network_dict)
@@ -178,7 +186,6 @@ async def test_missing_block_returns_none():
 async def test_merkledag_uses_block_service():
     print("\n[8] MerkleDag.add_bytes routes through BlockService")
     from libp2p.bitswap.dag import MerkleDag
-    from libp2p.bitswap.dag_pb import is_file_node
 
     service, store, mock_bitswap = make_service()
     dag = MerkleDag(mock_bitswap, block_service=service)
@@ -204,6 +211,7 @@ async def test_merkledag_uses_block_service():
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 async def main():
     print("=" * 60)

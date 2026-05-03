@@ -5,23 +5,20 @@ and that balanced_layout builds the correct tree structure.
 Run with:
     python test_unixfs_encoding.py
 """
-import hashlib
-import tempfile
+
 import os
+import tempfile
 
 import trio
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1, CODEC_DAG_PB, CODEC_RAW, cid_to_text
+from libp2p.bitswap.cid import CODEC_DAG_PB, CODEC_RAW, cid_to_text, compute_cid_v1
 from libp2p.bitswap.dag_pb import (
-    create_leaf_node,
+    MAX_LINKS_PER_NODE,
     balanced_layout,
+    create_leaf_node,
     decode_dag_pb,
     is_file_node,
-    UnixFSData,
-    Link,
-    encode_dag_pb,
-    MAX_LINKS_PER_NODE,
 )
 
 
@@ -116,7 +113,7 @@ def test_balanced_layout_two_levels():
     # Root should link to 2 internal nodes (174 + 1)
     assert len(links) == 2, f"expected 2 top-level links, got {len(links)}"
     assert unixfs.filesize == n * chunk_size
-    ok(f"175 leaves → root has 2 links (174-leaf node + 1-leaf node)")
+    ok("175 leaves → root has 2 links (174-leaf node + 1-leaf node)")
     ok(f"root filesize = {unixfs.filesize} = 175 * {chunk_size}")
 
 
@@ -135,13 +132,14 @@ def test_balanced_layout_flat():
     links, unixfs = decode_dag_pb(root_block)
 
     assert len(links) == 174, f"expected 174 direct links, got {len(links)}"
-    ok(f"174 leaves → flat root with 174 direct links")
+    ok("174 leaves → flat root with 174 direct links")
 
 
 # ── 6. add_file produces dag-pb leaves (not raw) via MerkleDag ───────────────
 async def test_add_file_produces_dag_pb_leaves():
     print("\n[6] MerkleDag.add_file produces dag-pb leaf blocks")
     from unittest.mock import AsyncMock, MagicMock
+
     from libp2p.bitswap.client import BitswapClient
     from libp2p.bitswap.dag import MerkleDag
 
@@ -152,6 +150,7 @@ async def test_add_file_produces_dag_pb_leaves():
 
     async def add_block_impl(cid, data):
         stored[bytes(cid)] = data
+
     mock_client.add_block = AsyncMock(side_effect=add_block_impl)
 
     dag = MerkleDag(mock_client)
@@ -197,6 +196,7 @@ async def test_add_file_produces_dag_pb_leaves():
 async def test_add_bytes_produces_dag_pb_leaves():
     print("\n[7] MerkleDag.add_bytes produces dag-pb leaf blocks")
     from unittest.mock import AsyncMock, MagicMock
+
     from libp2p.bitswap.client import BitswapClient
     from libp2p.bitswap.dag import MerkleDag
 
@@ -207,15 +207,14 @@ async def test_add_bytes_produces_dag_pb_leaves():
 
     async def add_block_impl(cid, data):
         stored[bytes(cid)] = data
+
     mock_client.add_block = AsyncMock(side_effect=add_block_impl)
 
     dag = MerkleDag(mock_client)
     content = b"y" * (63 * 1024 * 2 + 500)  # 3 chunks
     root_cid = await dag.add_bytes(content)
 
-    raw_blocks = [
-        cid_to_text(c)[:20] for c, d in stored.items() if not is_file_node(d)
-    ]
+    raw_blocks = [cid_to_text(c)[:20] for c, d in stored.items() if not is_file_node(d)]
     assert raw_blocks == [], f"Found non-dag-pb blocks: {raw_blocks}"
     ok(f"All {len(stored)} stored blocks are dag-pb file nodes")
 

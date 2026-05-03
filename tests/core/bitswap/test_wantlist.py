@@ -4,23 +4,29 @@ Test Wantlist / Message dataclasses.
 Run with:
     python test_wantlist.py
 """
-from libp2p.bitswap.cid import compute_cid_v1, CODEC_RAW, cid_to_bytes
-from libp2p.bitswap.wantlist import (
-    WantType, BlockPresenceType,
-    WantlistEntry, Wantlist,
-    BlockPresence, BitswapMessage,
-)
+
+from libp2p.bitswap.cid import CODEC_RAW, cid_to_bytes, compute_cid_v1
 from libp2p.bitswap.messages import create_wantlist_entry
+from libp2p.bitswap.wantlist import (
+    BitswapMessage,
+    BlockPresence,
+    BlockPresenceType,
+    Wantlist,
+    WantlistEntry,
+    WantType,
+)
 
 
 def make_cid(content: bytes) -> bytes:
     return cid_to_bytes(compute_cid_v1(content, codec=CODEC_RAW))
 
 
-def ok(label): print(f"  OK  {label}")
+def ok(label):
+    print(f"  OK  {label}")
 
 
 # ── WantType enum ─────────────────────────────────────────────────────────────
+
 
 def test_want_type_values():
     print("\n[1] WantType enum values match protobuf")
@@ -30,6 +36,7 @@ def test_want_type_values():
 
 
 # ── WantlistEntry ─────────────────────────────────────────────────────────────
+
 
 def test_wantlist_entry_from_cid():
     print("\n[2] WantlistEntry.from_cid normalises any CIDInput")
@@ -58,6 +65,7 @@ def test_wantlist_entry_from_cid():
 
 # ── Wantlist ──────────────────────────────────────────────────────────────────
 
+
 def test_wantlist_add_cancel_contains():
     print("\n[3] Wantlist.add / cancel / contains")
     cid1 = make_cid(b"block 1")
@@ -78,7 +86,7 @@ def test_wantlist_add_cancel_contains():
 
     assert wl.contains(cid1)
     assert wl.contains(cid2)
-    assert not wl.contains(cid3)   # cancel entry → not "contained"
+    assert not wl.contains(cid3)  # cancel entry → not "contained"
     ok("contains() returns True for non-cancel entries only")
 
     # Check entry fields
@@ -101,6 +109,7 @@ def test_wantlist_full_flag():
 
 # ── BlockPresence ─────────────────────────────────────────────────────────────
 
+
 def test_block_presence():
     print("\n[5] BlockPresence constructors")
     cid = make_cid(b"presence test")
@@ -121,6 +130,7 @@ def test_block_presence():
 
 
 # ── BitswapMessage ────────────────────────────────────────────────────────────
+
 
 def test_bitswap_message_properties():
     print("\n[6] BitswapMessage builder + properties")
@@ -165,6 +175,7 @@ def test_bitswap_message_cancel_want():
 
 # ── to_proto / from_proto round-trip ─────────────────────────────────────────
 
+
 def test_to_proto_from_proto_roundtrip():
     print("\n[8] BitswapMessage to_proto() / from_proto() round-trip")
     cid1 = make_cid(b"want block")
@@ -205,6 +216,7 @@ def test_to_proto_from_proto_roundtrip():
 
 # ── backward compat: create_wantlist_entry accepts int OR WantType ────────────
 
+
 def test_create_wantlist_entry_backward_compat():
     print("\n[9] create_wantlist_entry — backward compat (int OR WantType)")
     cid = make_cid(b"compat test")
@@ -230,16 +242,19 @@ def test_create_wantlist_entry_backward_compat():
 
 # ── public API exports ────────────────────────────────────────────────────────
 
+
 def test_public_exports():
     print("\n[10] All types exported from libp2p.bitswap")
     from libp2p.bitswap import (
-        WantType, WantlistEntry, Wantlist,
-        BlockPresence, BlockPresenceType, BitswapMessage,
+        WantType,
     )
+
     assert WantType.Block.value == 0
     assert WantType.Have.value == 1
-    ok("WantType, WantlistEntry, Wantlist, BlockPresence, BlockPresenceType, "
-       "BitswapMessage all importable from libp2p.bitswap")
+    ok(
+        "WantType, WantlistEntry, Wantlist, BlockPresence, BlockPresenceType, "
+        "BitswapMessage all importable from libp2p.bitswap"
+    )
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

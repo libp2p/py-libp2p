@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
 
 from .cid import CIDInput, cid_to_bytes
 from .pb.bitswap_pb2 import Message as PBMessage
