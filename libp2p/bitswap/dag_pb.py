@@ -9,9 +9,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 import logging
 
-from .cid import CIDInput, cid_to_bytes
+from .cid import CODEC_DAG_PB, CIDInput, cid_to_bytes, compute_cid_v1
 from .pb.dag_pb_pb2 import PBLink, PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
+
+# Maximum links per internal DAG-PB node — matches Go's balanced.Layout default
+MAX_LINKS_PER_NODE = 174
 
 logger = logging.getLogger(__name__)
 
@@ -293,3 +296,94 @@ def get_file_size(data: bytes) -> int:
     if unixfs_data and unixfs_data.type == "file":
         return unixfs_data.filesize
     return 0
+
+
+def create_leaf_node(data: bytes) -> bytes:
+    """
+    Create a DAG-PB leaf node for a single file chunk.
+
+    Wraps raw bytes in UnixFS Data(type=File, data=chunk, filesize=len(chunk))
+    inside a PBNode with no links. This matches Kubo's default behaviour
+    (RawLeaves=false), ensuring leaf CIDs are byte-identical to those
+    produced by `ipfs add`.
+
+    Args:
+        data: Raw chunk bytes (may be empty for an empty file)
+
+    Returns:
+        Encoded DAG-PB bytes, suitable for storage as a dag-pb block
+    """
+    unixfs_data = UnixFSData(type="file", data=data, filesize=len(data))
+    return encode_dag_pb([], unixfs_data)
+
+
+def balanced_layout(
+    leaves: list[tuple[bytes, bytes, int]],
+    max_links: int = MAX_LINKS_PER_NODE,
+) -> tuple[bytes, bytes]:
+    """
+    Build a balanced Merkle DAG from a flat list of leaf blocks.
+
+    Groups leaves into batches of `max_links` (default 174), creates an
+    internal DAG-PB node for each batch, then repeats level by level until
+    a single root remains. Matches Go's balanced.Layout exactly.
+
+    Args:
+        leaves: List of (cid_bytes, block_bytes, file_data_size) tuples where
+                - cid_bytes:      CID of the leaf block as raw bytes
+                - block_bytes:    The encoded dag-pb leaf block bytes
+                - file_data_size: Size of the raw file data inside this leaf
+                                  (i.e. len(original chunk), NOT len(block))
+        max_links: Max links per internal node (default 174, matches Kubo)
+
+    Returns:
+        (root_cid_bytes, root_block_bytes)
+
+    Raises:
+        ValueError: If leaves is empty
+    """
+    if not leaves:
+        raise ValueError("Cannot build balanced layout from empty leaf list")
+
+    if len(leaves) == 1:
+        return leaves[0][0], leaves[0][1]
+
+    # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
+    # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
+    level: list[tuple[bytes, bytes, int, int]] = [
+        (cid, blk, fsize, len(blk)) for cid, blk, fsize in leaves
+    ]
+
+    while len(level) > 1:
+        next_level: list[tuple[bytes, bytes, int, int]] = []
+        for i in range(0, len(level), max_links):
+            batch = level[i : i + max_links]
+            if len(batch) == 1:
+                next_level.append(batch[0])
+                continue
+
+            # Build internal node: links to each child, UnixFS blocksizes
+            internal_links: list[Link] = []
+            blocksizes: list[int] = []
+            total_filesize = 0
+            total_cum = 0
+            for cid_b, _, fsize, cum in batch:
+                # Tsize = cumulative block size of the subtree rooted at this child
+                internal_links.append(Link(cid=cid_b, name="", size=cum))
+                blocksizes.append(fsize)
+                total_filesize += fsize
+                total_cum += cum
+
+            unixfs_data = UnixFSData(
+                type="file", filesize=total_filesize, blocksizes=blocksizes
+            )
+            internal_block = encode_dag_pb(internal_links, unixfs_data)
+            internal_cid = compute_cid_v1(internal_block, codec=CODEC_DAG_PB)
+            # This node's cumulative size = its own block + sum of children's cumulative sizes
+            cum_size = len(internal_block) + total_cum
+            next_level.append(
+                (internal_cid, internal_block, total_filesize, cum_size)
+            )
+        level = next_level
+
+    return level[0][0], level[0][1]

@@ -33,7 +33,8 @@ from .cid import (
 )
 from .client import BitswapClient
 from .dag_pb import (
-    create_file_node,
+    balanced_layout,
+    create_leaf_node,
     decode_dag_pb,
     is_directory_node,
     is_file_node,
@@ -155,16 +156,17 @@ class MerkleDag:
 
         logger.debug(f"Using chunk size: {chunk_size} bytes")
 
-        # If file is small enough, store as single RAW block
+        # If file is small enough, store as single dag-pb leaf block
         if file_size <= chunk_size:
             logger.debug("File fits in single block")
 
             with open(file_path, "rb") as f:
                 data = f.read()
 
-            cid = compute_cid_v1(data, codec=CODEC_RAW)
+            leaf_block = create_leaf_node(data)
+            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
 
-            await self.bitswap.add_block(cid, data)
+            await self.bitswap.add_block(cid, leaf_block)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -203,19 +205,18 @@ class MerkleDag:
         logger.debug(f"Chunking file into ~{estimated_chunks} chunks")
         logger.info("=== Starting file chunking process ===")
 
-        chunks_data: list[tuple[bytes, int]] = []
+        # leaf_triples: (cid_bytes, leaf_block_bytes, raw_data_size)
+        leaf_triples: list[tuple[bytes, bytes, int]] = []
         bytes_processed = 0
 
         # Process file in chunks (memory efficient)
         for i, chunk_data in enumerate(chunk_file(file_path, chunk_size)):
-            # Compute CID for chunk
-            chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
+            # Wrap chunk in UnixFS dag-pb leaf (matches Kubo's RawLeaves=false)
+            leaf_block = create_leaf_node(chunk_data)
+            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
 
-            # Store chunk
-            await self.bitswap.add_block(chunk_cid, chunk_data)
-
-            # Track chunk info
-            chunks_data.append((chunk_cid, len(chunk_data)))
+            await self.bitswap.add_block(chunk_cid, leaf_block)
+            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
             # Progress callback
@@ -227,43 +228,36 @@ class MerkleDag:
                     f"chunking ({i + 1} chunks)",
                 )
 
-            # Enhanced logging with full CID
             logger.info(
                 f"Chunk {i + 1}: CID={format_cid_for_display(chunk_cid)}, "
                 f"Size={len(chunk_data)} bytes, "
                 f"Progress={bytes_processed}/{file_size}"
             )
             logger.debug(
-                f"Stored chunk {i}: {format_cid_for_display(chunk_cid, max_len=16)} "
+                f"Stored leaf {i}: {format_cid_for_display(chunk_cid, max_len=16)} "
                 f"({len(chunk_data)} bytes)"
             )
 
-        # Create root node with links to all chunks
+        # Build balanced DAG tree (max 174 links/node, matches Kubo)
         if progress_callback:
             await _call_progress_callback(
                 progress_callback, file_size, file_size, "creating root node"
             )
 
-        root_data = create_file_node(chunks_data)
-        root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
+        root_cid, root_data = balanced_layout(leaf_triples)
         await self.bitswap.add_block(root_cid, root_data)
 
         # Enhanced logging for root CID
         logger.info("=== File chunking completed ===")
         logger.info(
             f"Root CID: {format_cid_for_display(root_cid)} "
-            f"(Links to {len(chunks_data)} chunks)"
+            f"(Balanced DAG over {len(leaf_triples)} leaves)"
         )
         logger.info(f"Total file size: {file_size} bytes")
-        logger.info("=== Chunk CIDs ===")
-        for i, (chunk_cid, chunk_size) in enumerate(chunks_data):
-            logger.info(
-                f"  Chunk {i}: {format_cid_for_display(chunk_cid)} ({chunk_size} bytes)"
-            )
         logger.info("=" * 50)
 
         logger.info(
-            f"Added file with {len(chunks_data)} chunks. "
+            f"Added file with {len(leaf_triples)} leaves. "
             f"Root CID: {format_cid_for_display(root_cid, max_len=16)}"
         )
 
@@ -323,10 +317,11 @@ class MerkleDag:
         if chunk_size is None:
             chunk_size = DEFAULT_CHUNK_SIZE
 
-        # If data is small, store as single block
+        # If data is small, store as single dag-pb leaf block
         if file_size <= chunk_size:
-            cid = compute_cid_v1(data, codec=CODEC_RAW)
-            await self.bitswap.add_block(cid, data)
+            leaf_block = create_leaf_node(data)
+            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            await self.bitswap.add_block(cid, leaf_block)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -335,17 +330,18 @@ class MerkleDag:
 
             return cid
 
-        # Chunk the data
+        # Chunk the data and wrap each chunk as a dag-pb leaf
         chunks = chunk_bytes(data, chunk_size)
-        chunks_data: list[tuple[bytes, int]] = []
+        leaf_triples: list[tuple[bytes, bytes, int]] = []
 
         for i, chunk_data in enumerate(chunks):
-            chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
-            await self.bitswap.add_block(chunk_cid, chunk_data)
-            chunks_data.append((chunk_cid, len(chunk_data)))
+            leaf_block = create_leaf_node(chunk_data)
+            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            await self.bitswap.add_block(chunk_cid, leaf_block)
+            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
 
             if progress_callback:
-                bytes_processed = sum(size for _, size in chunks_data)
+                bytes_processed = sum(s for _, _, s in leaf_triples)
                 await _call_progress_callback(
                     progress_callback,
                     bytes_processed,
@@ -353,9 +349,8 @@ class MerkleDag:
                     f"chunking ({i + 1}/{len(chunks)})",
                 )
 
-        # Create root node
-        root_data = create_file_node(chunks_data)
-        root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
+        # Build balanced DAG tree
+        root_cid, root_data = balanced_layout(leaf_triples)
         await self.bitswap.add_block(root_cid, root_data)
 
         if progress_callback:
