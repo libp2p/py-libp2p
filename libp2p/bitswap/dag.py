@@ -166,7 +166,9 @@ class MerkleDag:
                 cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
             )
         # Check if the client supports native batch fetching
-        get_blocks_batch = getattr(self.bitswap, "get_blocks_batch", None)
+        get_blocks_batch: Callable[..., Awaitable[dict[bytes, bytes]]] | None = getattr(
+            self.bitswap, "get_blocks_batch", None
+        )
         if get_blocks_batch is not None and callable(get_blocks_batch):
             try:
                 result = await get_blocks_batch(
@@ -758,7 +760,7 @@ class MerkleDag:
 
         # First try to get blocks from the already-fetched tree
         block_map: dict[bytes, bytes] = {}
-        missing_cids: list[bytes] = []
+        missing_cids: list[CIDInput] = []
         for leaf_cid in ordered_leaf_cids:
             leaf_data = all_blocks_map.get(leaf_cid)
             if leaf_data is not None:
@@ -769,10 +771,10 @@ class MerkleDag:
         # If some leaves weren't in the tree fetch, fetch them now
         if missing_cids:
             logger.info(f"[DAG] Fetching {len(missing_cids)} missing leaves")
-            missing_blocks = await self._get_blocks_batch(
+            fetched_blocks = await self._get_blocks_batch(
                 missing_cids, peer_id=peer_id, timeout=timeout, batch_size=32
             )
-            block_map.update(missing_blocks)
+            block_map.update(fetched_blocks)
 
         logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
         print(f"[FETCH] ✓ Batch fetch complete: {len(block_map)} blocks", flush=True)
@@ -781,7 +783,7 @@ class MerkleDag:
         # extracting UnixFS inline data from leaf nodes
         file_data = b""
         bytes_fetched = 0
-        missing_blocks = []
+        missing_blocks: list[bytes] = []
         for idx, leaf_cid in enumerate(ordered_leaf_cids):
             leaf_raw = block_map.get(bytes(leaf_cid))
             if leaf_raw is None:

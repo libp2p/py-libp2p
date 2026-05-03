@@ -758,7 +758,7 @@ class BitswapClient:
         # Reserve some space for protobuf overhead
         MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
 
-        batch = []
+        batch: list[bytes] = []
         batch_size = 0
 
         for block_data in blocks:
@@ -792,7 +792,7 @@ class BitswapClient:
         # Reserve some space for protobuf overhead
         MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
 
-        batch = []
+        batch: list[tuple[bytes, bytes]] = []
         batch_size = 0
 
         for prefix, block_data in blocks:
