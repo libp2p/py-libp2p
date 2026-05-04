@@ -16,7 +16,6 @@ from unittest.mock import Mock
 import pytest
 import trio
 
-from libp2p.peer.id import ID
 from libp2p.pubsub.gossipsub import PROTOCOL_ID_V20, GossipSub
 from libp2p.pubsub.pb import rpc_pb2
 from libp2p.pubsub.pubsub import ValidationCache, ValidationResult
@@ -467,7 +466,7 @@ class TestOpportunisticGrafting:
 
         # Candidates from different IPs
 
-        candidates: list[tuple[ID, float]] = [
+        candidates = [
             (IDFactory(), 5.0),  # Different IP
             (IDFactory(), 4.0),  # Same IP as mesh
         ]

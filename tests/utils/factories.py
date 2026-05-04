@@ -447,7 +447,7 @@ async def tls_conn_factory(
 
 
 class SwarmFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = Swarm
 
     class Params:
@@ -511,7 +511,7 @@ class SwarmFactory(factory.Factory):
 
 
 class HostFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = BasicHost
 
     class Params:
@@ -555,7 +555,7 @@ class DummyRouter(IPeerRouting):
 
 
 class RoutedHostFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = RoutedHost
 
     class Params:
@@ -591,14 +591,14 @@ class RoutedHostFactory(factory.Factory):
 
 
 class FloodsubFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = FloodSub
 
     protocols = (FLOODSUB_PROTOCOL_ID,)
 
 
 class GossipsubFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = GossipSub
 
     protocols = (GOSSIPSUB_PROTOCOL_ID,)
@@ -623,7 +623,7 @@ class GossipsubFactory(factory.Factory):
 
 
 class PubsubFactory(factory.Factory):
-    class Meta:  # type: ignore[override]
+    class Meta:
         model = Pubsub
 
     host = factory.SubFactory(HostFactory)

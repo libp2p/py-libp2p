@@ -200,5 +200,3 @@ libp2p-forge
 # OSO health report generated outputs
 reports/*.json
 reports/*.md
-
-my_blocks/

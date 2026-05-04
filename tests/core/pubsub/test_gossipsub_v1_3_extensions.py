@@ -286,7 +286,7 @@ async def test_handle_observe_and_unobserve_manage_observers() -> None:
 
     topic = "obs-topic"
 
-    observer_peer: ID = IDFactory()
+    observer_peer = IDFactory()
 
     # Simulate that the peer advertised topicObservation support via extensions.
     router.extensions_state._peer_extensions[observer_peer] = PeerExtensions(
@@ -311,7 +311,7 @@ async def test_handle_observe_ignored_when_peer_did_not_advertise_extension() ->
     assert isinstance(router, GossipSub)
 
     topic = "obs-topic"
-    observer_peer: ID = IDFactory()
+    observer_peer = IDFactory()
 
     # Peer exists, but its advertised extensions do NOT include topicObservation.
     router.extensions_state._peer_extensions[observer_peer] = PeerExtensions(
@@ -363,7 +363,7 @@ async def test_notify_observers_sends_ihave_to_each_observer() -> None:
     assert isinstance(router, GossipSub)
 
     topic = "obs-topic"
-    observer_peer: ID = IDFactory()
+    observer_peer = IDFactory()
     msg_id = b"message-id"
 
     # Configure TopicObservationState with a single observer.
