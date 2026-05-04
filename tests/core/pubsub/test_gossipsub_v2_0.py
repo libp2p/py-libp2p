@@ -465,7 +465,6 @@ class TestOpportunisticGrafting:
             scorer.ip_by_peer[peer] = "192.168.1.1"
 
         # Candidates from different IPs
-
         candidates = [
             (IDFactory(), 5.0),  # Different IP
             (IDFactory(), 4.0),  # Same IP as mesh

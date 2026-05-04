@@ -285,7 +285,6 @@ async def test_handle_observe_and_unobserve_manage_observers() -> None:
     assert isinstance(router, GossipSub)
 
     topic = "obs-topic"
-
     observer_peer = IDFactory()
 
     # Simulate that the peer advertised topicObservation support via extensions.
@@ -331,7 +330,7 @@ async def test_emit_observe_and_unobserve_update_observing_state() -> None:
     assert isinstance(router, GossipSub)
 
     topic = "obs-topic"
-    subscriber_peer: ID = IDFactory()
+    subscriber_peer = IDFactory()
 
     # Stub pubsub.peers so emit_control_message sees the peer as connected.
     class DummyPubsub:
@@ -396,7 +395,7 @@ async def test_start_and_stop_observing_topic_high_level_api() -> None:
     assert isinstance(router, GossipSub)
 
     topic = "obs-topic"
-    subscriber_peer: ID = IDFactory()
+    subscriber_peer = IDFactory()
 
     # Simulate pubsub state: subscriber_peer is subscribed to topic.
     class DummyPubsub:
