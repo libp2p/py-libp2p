@@ -262,8 +262,7 @@ class BitswapClient:
 
         Args:
             cid: The CID of the block to fetch
-            peer_id: Optional specific peer to request from.  When given,
-                DHT discovery is skipped.
+            peer_id: Optional specific peer to request from. When given, DHT discovery is skipped.
             timeout: Timeout in seconds
 
         Returns:
