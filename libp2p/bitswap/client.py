@@ -15,6 +15,7 @@ from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.id import ID as PeerID
+from libp2p.peer.peerinfo import PeerInfo  # noqa: F401
 
 from .block_store import BlockStore, MemoryBlockStore
 from .cid import (
@@ -43,6 +44,7 @@ from .errors import (
 )
 from .messages import create_message, create_wantlist_entry
 from .pb.bitswap_pb2 import Message
+from .provider_query import ProviderQueryManager
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,7 @@ class BitswapClient:
         host: IHost,
         block_store: BlockStore | None = None,
         protocol_version: str = BITSWAP_PROTOCOL_V120,
+        provider_query_manager: ProviderQueryManager | None = None,
     ):
         """
         Initialize Bitswap client.
@@ -68,11 +71,18 @@ class BitswapClient:
             host: The libp2p host
             block_store: Block storage backend (defaults to in-memory)
             protocol_version: Preferred protocol version (defaults to v1.2.0)
+            provider_query_manager: Optional ProviderQueryManager for automatic
+                DHT-based provider discovery.  When supplied,
+                ``get_block()`` will query the DHT for providers before
+                broadcasting to all connected peers.
 
         """
         self.host = host
         self.block_store = block_store or MemoryBlockStore()
         self.protocol_version = protocol_version
+        self.provider_query_manager: ProviderQueryManager | None = (
+            provider_query_manager
+        )
         self._wantlist: dict[
             CIDObject, dict[str, Any]
         ] = {}  # CID -> {priority, want_type, send_dont_have}
@@ -244,9 +254,16 @@ class BitswapClient:
         """
         Get a block, fetching from peers if not available locally.
 
+        If a ``ProviderQueryManager`` was supplied at construction time and no
+        explicit ``peer_id`` is given, the manager is consulted first to
+        discover which peers have the block via the DHT.  The first discovered
+        provider is used; if none is found the request falls back to
+        broadcasting to all connected peers.
+
         Args:
             cid: The CID of the block to fetch
-            peer_id: Optional specific peer to request from
+            peer_id: Optional specific peer to request from.  When given,
+                DHT discovery is skipped.
             timeout: Timeout in seconds
 
         Returns:
@@ -259,12 +276,31 @@ class BitswapClient:
         """
         cid_obj = parse_cid(cid)
 
-        # Check local store first
+        # 1. Check local store first
         data = await self.block_store.get_block(cid_obj)
         if data is not None:
             return data
 
-        # Request from network
+        # 2. If no explicit peer given, try DHT provider discovery
+        if peer_id is None and self.provider_query_manager is not None:
+            try:
+                providers = await self.provider_query_manager.find_providers_single(
+                    cid, timeout=min(5.0, timeout / 2)
+                )
+                if providers:
+                    peer_id = providers[0]
+                    logger.debug(
+                        "DHT discovered provider %s for %s",
+                        peer_id,
+                        format_cid_for_display(cid_obj, max_len=12),
+                    )
+            except Exception as exc:
+                logger.debug(
+                    "Provider query failed, falling back to broadcast: %s",
+                    exc,
+                )
+
+        # 3. Request from network (specific peer or broadcast)
         return await self._request_block(cid_obj, peer_id, timeout)
 
     async def want_block(
