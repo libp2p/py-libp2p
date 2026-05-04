@@ -1,0 +1,10 @@
+Comprehensive Bitswap overhaul for Kubo compatibility and performance:
+
+- **Batch block fetching** — send multiple CIDs in a single wantlist message.
+- **Kubo-compatible DAG-PB encoding** — produce identical CIDs to Kubo's ``ipfs add``.
+- **FilesystemBlockStore** — persistent storage surviving process restarts.
+- **BlockService** — local-first lookup with automatic block caching and announcement.
+- **Streaming support** — ``chunk_stream`` and ``MerkleDag.add_stream`` for efficient DAG building.
+- **Bitswap 1.2.0 wantlist API** — ``WantType``, ``BlockPresence``, ``WantlistEntry``, ``BitswapMessage``.
+- **DHT record signing/verification** — Kubo-compatible provider and value record signing.
+- **ProviderQueryManager** — automatic DHT-based peer discovery in ``BitswapClient.get_block()`` with LRU caching.
