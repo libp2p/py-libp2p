@@ -1,9 +1,35 @@
 from libp2p.crypto.ed25519 import Ed25519PublicKey
-from libp2p.crypto.keys import PrivateKey
+from libp2p.crypto.keys import PrivateKey, PublicKey
+from libp2p.crypto.pb import crypto_pb2
+from libp2p.crypto.rsa import RSAPublicKey
+from libp2p.crypto.secp256k1 import Secp256k1PublicKey
 
 
 class InvalidRecordType(Exception):
     pass
+
+
+def _unmarshal_public_key(data: bytes) -> PublicKey:
+    """
+    Deserialize a ``crypto_pb2.PublicKey`` protobuf into a concrete
+    ``PublicKey`` instance.
+
+    Kept private to this module to avoid the circular import that arises
+    when importing from ``libp2p.records.pubkey`` (which itself imports
+    from this module).
+    """
+    proto_key = crypto_pb2.PublicKey.FromString(data)
+    key_type = proto_key.key_type
+    key_data = proto_key.data
+
+    if key_type == crypto_pb2.KeyType.RSA:
+        return RSAPublicKey.from_bytes(key_data)
+    elif key_type == crypto_pb2.KeyType.Ed25519:
+        return Ed25519PublicKey.from_bytes(key_data)
+    elif key_type == crypto_pb2.KeyType.Secp256k1:
+        return Secp256k1PublicKey.from_bytes(key_data)
+    else:
+        raise ValueError(f"Unsupported key type: {key_type}")
 
 
 def sign_record(
@@ -26,7 +52,9 @@ def sign_record(
     signing_payload = b"libp2p-record:" + key + value
     signature = private_key.sign(signing_payload)
     public_key = private_key.get_public_key()
-    author_bytes = public_key.to_bytes()
+    # Serialize as a protobuf-wrapped PublicKey so that verify_record (and
+    # remote peers) can reconstruct the key without knowing its type in advance.
+    author_bytes = public_key.serialize()
     return signature, author_bytes
 
 
@@ -36,9 +64,16 @@ def verify_record(
     """
     Verify a signed DHT record.
 
+    Supports all key types that libp2p serialises in a protobuf PublicKey
+    envelope (Ed25519, RSA, Secp256k1).  The author field is treated as a
+    serialised ``crypto_pb2.PublicKey`` message and dispatched through
+    ``unmarshal_public_key`` so that non-Ed25519 peers are not silently
+    rejected.
+
     Args:
         signature: The record signature
         author_public_key: The serialized public key of the author
+            (``crypto_pb2.PublicKey`` protobuf bytes)
         key: The record key
         value: The record value
 
@@ -47,7 +82,7 @@ def verify_record(
 
     """
     try:
-        public_key = Ed25519PublicKey.from_bytes(author_public_key)
+        public_key = _unmarshal_public_key(author_public_key)
         signing_payload = b"libp2p-record:" + key + value
         return public_key.verify(signing_payload, signature)
     except Exception:
