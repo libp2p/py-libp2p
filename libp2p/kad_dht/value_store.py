@@ -127,11 +127,20 @@ class ValueStore:
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
-            # Set message fields
+            # Build the outbound record from the locally-stored signed record when
+            # available (normal put() path), otherwise sign the record now so the
+            # outbound message always carries signature and author fields.
+            local_entry = self.store.get(key)
+            if local_entry is not None:
+                signed_record, _ = local_entry
+                message.record.CopyFrom(signed_record)
+            else:
+                private_key = self.host.get_private_key()
+                signed_record = make_signed_put_record(key, value, private_key)
+                message.record.CopyFrom(signed_record)
             message.key = key
-            message.record.key = key
-            message.record.value = value
             # Note: timeReceived will be set by the receiving peer when storing
+            message.record.ClearField("timeReceived")
 
             # Serialize and send the protobuf message with length prefix
             proto_bytes = message.SerializeToString()

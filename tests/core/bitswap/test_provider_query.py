@@ -45,11 +45,20 @@ SAMPLE_CIDS = [CID_1, CID_2, CID_3]
 
 
 def _mock_dht(return_peers: list[PeerID] | None = None) -> Mock:
-    """Return a minimal mock DHT whose provider_store returns *return_peers*."""
+    """
+    Return a mock DHT whose provider_store.find_providers returns *return_peers*.
+
+    find_providers is the async network lookup path; get_providers is the
+    local-store read that ProviderQueryManager no longer calls directly.
+    """
     dht = Mock()
     dht.provider_store = Mock()
     peer_infos = [PeerInfo(p, []) for p in (return_peers or [])]
-    dht.provider_store.get_providers = Mock(return_value=peer_infos)
+
+    async def _async_find_providers(key: bytes, count: int = 20) -> list[PeerInfo]:
+        return peer_infos[:count]
+
+    dht.provider_store.find_providers = Mock(side_effect=_async_find_providers)
     return dht
 
 
@@ -153,6 +162,8 @@ class TestProviderQueryManager:
         assert stats["cache_misses"] == 1
         assert stats["cache_hits"] == 0
         assert stats["providers_found"] == 1
+        # Verify the async network path was used, not the local store read
+        dht.provider_store.find_providers.assert_called_once()
 
     @pytest.mark.trio
     async def test_cache_hit_skips_dht(self) -> None:
@@ -163,7 +174,7 @@ class TestProviderQueryManager:
         providers = await mgr.find_providers_single(CID_1)
 
         assert providers == [PEER_B]
-        dht.provider_store.get_providers.assert_not_called()
+        dht.provider_store.find_providers.assert_not_called()
         assert mgr.get_stats()["cache_hits"] == 1
 
     @pytest.mark.trio
@@ -196,7 +207,11 @@ class TestProviderQueryManager:
     @pytest.mark.trio
     async def test_dht_error_increments_errors(self) -> None:
         dht = _mock_dht()
-        dht.provider_store.get_providers = Mock(side_effect=RuntimeError("dht down"))
+
+        async def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("dht down")
+
+        dht.provider_store.find_providers = Mock(side_effect=_raise)
         mgr = ProviderQueryManager(dht)
 
         providers = await mgr.find_providers_single(CID_1, timeout=5.0)
@@ -214,7 +229,7 @@ class TestProviderQueryManager:
         results = await mgr.find_providers(SAMPLE_CIDS)
 
         assert len(results) == 3
-        dht.provider_store.get_providers.assert_not_called()
+        dht.provider_store.find_providers.assert_not_called()
 
     @pytest.mark.trio
     async def test_batch_partial_cache(self) -> None:
@@ -227,7 +242,7 @@ class TestProviderQueryManager:
 
         assert len(results) == 3
         # Only 2 DHT calls (CID_2 and CID_3 are cache misses)
-        assert dht.provider_store.get_providers.call_count == 2
+        assert dht.provider_store.find_providers.call_count == 2
 
     @pytest.mark.trio
     async def test_use_cache_false_always_queries_dht(self) -> None:
@@ -238,7 +253,7 @@ class TestProviderQueryManager:
         providers = await mgr.find_providers_single(CID_1, use_cache=False)
 
         # DHT was queried despite cache having an entry
-        dht.provider_store.get_providers.assert_called_once()
+        dht.provider_store.find_providers.assert_called_once()
         assert providers == [PEER_A]
 
     @pytest.mark.trio
@@ -252,7 +267,7 @@ class TestProviderQueryManager:
         await mgr.find_providers_single(CID_1)  # miss again
 
         assert mgr.get_stats()["cache_misses"] == 2
-        assert dht.provider_store.get_providers.call_count == 2
+        assert dht.provider_store.find_providers.call_count == 2
 
     @pytest.mark.trio
     async def test_cleanup_expired_cache(self) -> None:
@@ -322,7 +337,7 @@ class TestBitswapClientProviderQueryIntegration:
         result = await client.block_store.get_block(cid)
         assert result == block_data
         # DHT must not have been consulted
-        dht.provider_store.get_providers.assert_not_called()
+        dht.provider_store.find_providers.assert_not_called()
 
     @pytest.mark.trio
     async def test_get_block_uses_pqm_to_pick_peer(self, mock_host: Mock) -> None:
@@ -410,9 +425,11 @@ class TestBitswapClientProviderQueryIntegration:
     async def test_pqm_error_falls_back_gracefully(self, mock_host: Mock) -> None:
         """A crashing PQM must not prevent the block fetch from proceeding."""
         dht = _mock_dht()
-        dht.provider_store.get_providers = Mock(
-            side_effect=RuntimeError("dht exploded")
-        )
+
+        async def _raise(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("dht exploded")
+
+        dht.provider_store.find_providers = Mock(side_effect=_raise)
         pqm = ProviderQueryManager(dht)
         client = self._make_client(mock_host, pqm)
 

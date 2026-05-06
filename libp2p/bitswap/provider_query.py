@@ -347,8 +347,10 @@ class ProviderQueryManager:
 
             try:
                 with trio.fail_after(timeout):
-                    # Query DHT provider store
-                    provider_infos = self.dht.provider_store.get_providers(cid_bytes)
+                    # Perform a network DHT provider lookup (not a local-store read)
+                    provider_infos = await self.dht.provider_store.find_providers(
+                        cid_bytes, self.max_providers
+                    )
 
                     # Extract peer IDs from PeerInfo objects
                     providers = [info.peer_id for info in provider_infos]
@@ -361,7 +363,7 @@ class ProviderQueryManager:
                         # Update results
                         results[cid_bytes] = providers
 
-                        # Update cache
+                        # Update cache with remote results
                         self.cache.put(cid_bytes, providers)
 
                         # Update stats
