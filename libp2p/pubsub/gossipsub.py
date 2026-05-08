@@ -56,7 +56,9 @@ from .extensions import (
 from .segmentation import (
     DEFAULT_MAX_MESSAGE_SIZE,
     DEFAULT_SEGMENT_SIZE,
+    DEFAULT_REASSEMBLY_TIMEOUT,
     ReassemblyBuffer,
+    compute_message_id,
     segment_message,
     should_segment,
 )
@@ -206,6 +208,7 @@ class GossipSub(IPubsubRouter, Service):
         # receiving side.  Set to 0 to disable segmentation entirely.
         max_msg_size: int = DEFAULT_MAX_MESSAGE_SIZE,
         segment_size: int = DEFAULT_SEGMENT_SIZE,
+        reassembly_timeout: float = DEFAULT_REASSEMBLY_TIMEOUT,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -273,8 +276,9 @@ class GossipSub(IPubsubRouter, Service):
         # --- Large Message Segmentation ----------------------------------
         self.max_msg_size = max_msg_size
         self.segment_size = segment_size
+        self.reassembly_timeout = reassembly_timeout
         self.reassembly_buffer = ReassemblyBuffer(
-            timeout=120.0,
+            timeout=reassembly_timeout,
             on_complete=self._on_segments_reassembled,
         )
 
@@ -975,7 +979,11 @@ class GossipSub(IPubsubRouter, Service):
         if needs_segmentation:
             from .segmentation import segment_message
             import uuid
-            seg_msg_id = pubsub_msg.seqno or uuid.uuid4().bytes
+            nonce = pubsub_msg.seqno or uuid.uuid4().bytes
+            topic = pubsub_msg.topicIDs[0] if pubsub_msg.topicIDs else ""
+            seg_msg_id = compute_message_id(
+                pubsub_msg.from_id, topic, nonce
+            )
             segments = segment_message(seg_msg_id, pubsub_bytes, self.segment_size)
 
         for peer_id in peers_gen:

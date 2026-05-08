@@ -14,8 +14,20 @@ DEFAULT_REASSEMBLY_TIMEOUT = 120.0          # seconds before an incomplete set i
 MAX_BUFFERED_MESSAGE_IDS = 1024             # bound total incomplete sets to prevent memory DoS
 
 
+def compute_message_id(
+    publisher_id: bytes,
+    topic: str,
+    nonce: bytes,
+) -> bytes:
+    """Derive a MessageID following the spec draft recommendation.
+
+    ``SHA-256(publisherPeerID || topic || nonce)[:16]`` avoids cross-publisher
+    and cross-topic collisions while keeping the wire overhead small (16 bytes).
+    """
+    return sha256(publisher_id + topic.encode("utf-8") + nonce).digest()[:16]
+
+
 def should_segment(data_size: int, threshold: int = DEFAULT_MAX_MESSAGE_SIZE) -> bool:
-    """Return True if *data_size* exceeds the segmentation threshold."""
     return data_size > threshold
 
 

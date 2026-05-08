@@ -258,6 +258,9 @@ class TopicObservationState:
     def get_observers(self, topic: str) -> set[ID]:
         return self._observers.get(topic, set())
 
+    def get_subscriber_peers_for_topic(self, topic: str) -> set[ID]:
+        return self._observers.get(topic, set())
+
     def clear_peer(self, peer_id: ID) -> None:
         for topic in list(self._observing.keys()):
             self._observing[topic].discard(peer_id)
