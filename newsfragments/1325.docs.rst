@@ -1,0 +1,1 @@
+Polished contributor setup documentation for Discord support, Python version support, and Windows virtual environment activation.
