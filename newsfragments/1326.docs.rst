@@ -1,0 +1,1 @@
+Replaced install guide placeholders with links to existing configuration and resource management documentation.

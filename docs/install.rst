@@ -1,11 +1,12 @@
 Install
 ================
 
-Follow the steps below to install `py-libp2p` on your platform.
+Follow the steps below to install ``py-libp2p`` on your platform.
 
 .. note::
 
-    py-libp2p installation is currently supported on Python versions ``<= 3.13``.
+    py-libp2p installation is currently supported on Python versions ``3.10``
+    through ``3.13``.
 
 Using uv (recommended)
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -13,7 +14,7 @@ Using uv (recommended)
 `uv <https://docs.astral.sh/uv/>`_ is a fast Python package manager.
 It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
-1. Install `uv` if you haven't already:
+1. Install ``uv`` if you haven't already:
 
    .. code:: sh
 
@@ -25,7 +26,7 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 
        pip install uv
 
-2. Create a virtual environment and install `py-libp2p`:
+2. Create a virtual environment and install ``py-libp2p``:
 
    .. code:: sh
 
@@ -49,7 +50,7 @@ It is used in py-libp2p's CI/CD pipeline and is the recommended way to install.
 Using pip
 ~~~~~~~~~
 
-If you prefer pip, you can install `py-libp2p` the traditional way:
+If you prefer pip, you can install ``py-libp2p`` the traditional way:
 
 1. Create a Python virtual environment:
 
@@ -99,16 +100,23 @@ Usage
 -----
 Configuration
 ~~~~~~~~~~~~~~
-For all the information on how you can configure `py-libp2p`, TODO.
+For a guided walkthrough of the required transport, security, and stream
+multiplexer configuration, see :doc:`getting_started`. That guide also covers
+listen address environment variables such as ``LIBP2P_BIND`` and
+``LIBP2P_BIND_V6``.
 
 Limits
 ~~~~~~~~~~~~~~
-For help configuring your node to resist malicious network peers, TODO.
+For help configuring your node to resist malicious network peers, start with the
+resource management section in :doc:`getting_started`. The resource manager API
+reference is available at :doc:`libp2p.rcmgr`.
 
 Getting started
 ~~~~~~~~~~~~~~~~
-If you are starting your journey with `py-libp2p`, read the :doc:`getting_started` guide.
+If you are starting your journey with ``py-libp2p``, read the
+:doc:`getting_started` guide.
 
 Tutorials and Examples
 ~~~~~~~~~~~~~~~~~~~~~~~
-You can find multiple examples in the :doc:`examples` guide that will help you understand how to use `py-libp2p` for various scenarios.
+You can find multiple examples in the :doc:`examples` guide that will help you
+understand how to use ``py-libp2p`` for various scenarios.
