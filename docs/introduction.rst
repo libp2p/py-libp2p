@@ -1,26 +1,32 @@
 Introduction
 ============
 
-What is Py-libp2p?
+What is py-libp2p?
 ------------------
 
-Py-libp2p is the Python implementation of the libp2p networking stack, a modular peer-to-peer networking framework. It provides a robust foundation for building decentralized applications and protocols in Python, enabling developers to create resilient, secure, and efficient peer-to-peer networks.
+py-libp2p is the Python implementation of the libp2p networking stack, a
+modular peer-to-peer networking framework. It provides a foundation for building
+decentralized applications and protocols in Python, enabling developers to
+create resilient, secure, and efficient peer-to-peer networks.
 
-The Libp2p Ecosystem
+The libp2p Ecosystem
 --------------------
 
-Libp2p is a collection of networking protocols and specifications that form the foundation of many decentralized systems. Py-libp2p is part of this broader ecosystem, which includes implementations in various languages:
+libp2p is a collection of networking protocols and specifications that form the
+foundation of many decentralized systems. py-libp2p is part of this broader
+ecosystem, which includes implementations in various languages:
 
 * `js-libp2p <https://github.com/libp2p/js-libp2p>`_ - JavaScript implementation
 * `go-libp2p <https://github.com/libp2p/go-libp2p>`_ - Go implementation
 * `rust-libp2p <https://github.com/libp2p/rust-libp2p>`_ - Rust implementation
 
-While each implementation has its strengths, Py-libp2p offers unique advantages for Python developers and researchers.
+While each implementation has its strengths, py-libp2p offers familiar tools and
+workflows for Python developers and researchers.
 
-Why Choose Py-libp2p?
+Why Choose py-libp2p?
 ---------------------
 
-Py-libp2p is particularly well-suited for:
+py-libp2p is particularly well-suited for:
 
 * **Protocol Research and Development**: Python's simplicity and readability make it ideal for experimenting with new protocols and network topologies.
 * **Rapid Prototyping**: Quickly build and test peer-to-peer applications with Python's extensive ecosystem.
@@ -30,29 +36,28 @@ Py-libp2p is particularly well-suited for:
 Current Capabilities
 --------------------
 
-Py-libp2p currently supports these core libp2p features:
+py-libp2p currently supports these core libp2p features:
 
-* **Transports**: TCP, QUIC (near completion, in final testing phase)
-* **Protocols**: Gossipsub v1.1 and v1.2, Identify, Ping
-* **Security**: Noise protocol framework
-* **Connection Management**: Connection multiplexing
+* **Transports**: TCP, QUIC, and WebSocket
+* **Protocols**: Gossipsub, FloodSub, Identify, Identify Push, Ping, Bitswap,
+  and Kademlia DHT
+* **Security**: Noise, TLS, SECIO, and private network support
+* **Connection Management**: Stream multiplexing with Yamux and mplex, plus
+  resource management for connections and streams
+* **Discovery**: Bootstrap, mDNS, random-walk, and rendezvous discovery
+* **NAT traversal**: AutoNAT, Circuit Relay v2, and DCUtR support
 
 Features in Development
 -----------------------
 
-Several important features are currently being actively developed:
-
-* **NAT Traversal**: AutoNAT and relay-based hole punching under development
-* **WebSocket Transport**: Design and scoping discussions underway
-* **Peer Discovery**:
-
-  * **mDNS**: Implementation planned for upcoming sprints
-  * **Bootstrap**: Modular bootstrap system planned after mDNS implementation
+Several areas continue to evolve, including protocol interoperability, transport
+coverage, Filecoin-focused compatibility work, and production-hardening for
+larger deployments.
 
 Use Cases
 ---------
 
-Py-libp2p can be used to build various decentralized applications:
+py-libp2p can be used to build various decentralized applications:
 
 * Distributed file storage systems
 * Decentralized social networks
@@ -64,7 +69,10 @@ Py-libp2p can be used to build various decentralized applications:
 Getting Started
 ---------------
 
-Ready to start building with Py-libp2p? Check out our :doc:`getting_started` guide to begin your journey. For more detailed information about specific features and APIs, explore our :doc:`examples` and :doc:`API documentation <libp2p>`.
+Ready to start building with py-libp2p? Check out our :doc:`getting_started`
+guide to begin your journey. For more detailed information about specific
+features and APIs, explore our :doc:`examples` and
+:doc:`API documentation <libp2p>`.
 
 Contributing
 ------------

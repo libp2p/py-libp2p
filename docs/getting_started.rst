@@ -1,7 +1,7 @@
 Getting Started
 ===============
 
-Welcome to py-libp2p! This guide will walk you through setting up a fully functional libp2p node in Python 🚀
+Welcome to py-libp2p! This guide will walk you through setting up a fully functional libp2p node in Python.
 
 Install
 -------
@@ -71,7 +71,7 @@ For Python, we can use mplex as our multiplexer:
 .. literalinclude:: ../examples/doc-examples/example_multiplexer.py
    :language: python
 
-Running Libp2p
+Running libp2p
 ^^^^^^^^^^^^^^
 
 Now that you have configured a **Transport**, **Crypto** and **Stream Multiplexer** module, you can start your libp2p node:

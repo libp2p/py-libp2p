@@ -3,7 +3,7 @@ Contributing
 
 Thank you for your interest in contributing! We welcome all contributions no matter
 their size. Please read along to learn how to get started. If you get stuck, feel free
-to ask for help in `Libp2p Discover Server <https://discord.gg/GK8TxRNh2s>`_.
+to ask for help in the `libp2p Discord server <https://discord.gg/GK8TxRNh2s>`_.
 
 Setting the stage
 ~~~~~~~~~~~~~~~~~
@@ -21,7 +21,8 @@ Python's built-in ``venv`` module. Instructions vary by platform:
 
 .. note::
 
-    py-libp2p contributor setup is currently supported on Python versions ``<= 3.13``.
+    py-libp2p contributor setup is currently supported on Python versions
+    ``3.10`` through ``3.13``.
 
 Linux Setup
 ^^^^^^^^^^^
@@ -247,8 +248,8 @@ Setup Steps
 
    .. code:: powershell
 
-        python -m venv venv
-        .\venv\Scripts\activate
+        python -m venv .venv
+        .\.venv\Scripts\Activate.ps1
 
 3. **Install Dependencies**
 
@@ -312,7 +313,13 @@ Running the tests
 
 A great way to explore the code base is to run the tests.
 
-We can run all tests with:
+For a quick feedback loop, run the smallest test target that covers your change:
+
+.. code:: sh
+
+    pytest tests/core/tools/test_bind_address_config.py
+
+Run the full test suite before larger changes:
 
 .. code:: sh
 
