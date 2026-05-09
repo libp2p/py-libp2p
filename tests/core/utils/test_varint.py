@@ -3,7 +3,9 @@ import pytest
 from libp2p.exceptions import ParseError
 from libp2p.io.abc import Reader
 from libp2p.utils.varint import (
+    decode_uvarint,
     decode_varint_from_bytes,
+    decode_varint_with_size,
     encode_uvarint,
     encode_varint_prefixed,
     read_varint_prefixed_bytes,
@@ -77,8 +79,31 @@ def test_decode_varint_from_bytes_invalid():
     with pytest.raises(ParseError, match="Unexpected end of data"):
         decode_varint_from_bytes(b"")
 
-    # Incomplete varint (should not raise, but should handle gracefully)
-    # This depends on the implementation - some might raise, others might return partial
+    # Incomplete varints must not be accepted as partial values.
+    for data in (b"\x80", b"\x81", b"\xff\xff"):
+        with pytest.raises(ParseError, match="Unexpected end of data"):
+            decode_varint_from_bytes(data)
+
+
+def test_decode_varint_with_size_invalid():
+    """Test varint-with-size decoding with invalid data."""
+    with pytest.raises(ParseError, match="Unexpected end of data"):
+        decode_varint_with_size(b"")
+
+    for data in (b"\x80", b"\x81", b"\xff\xff"):
+        with pytest.raises(ParseError, match="Unexpected end of data"):
+            decode_varint_with_size(data)
+
+
+def test_decode_varint_rejects_too_long_values():
+    """Test varint decoding rejects values that exceed 64 bits."""
+    too_long = b"\x80" * 10 + b"\x00"
+
+    with pytest.raises(ValueError, match="Varint too long"):
+        decode_uvarint(too_long)
+
+    with pytest.raises(ValueError, match="Varint too long"):
+        decode_varint_with_size(too_long)
 
 
 def test_encode_varint_prefixed():

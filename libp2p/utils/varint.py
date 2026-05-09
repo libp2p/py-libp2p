@@ -55,6 +55,8 @@ def decode_uvarint(data: bytes) -> int:
         shift += 7
         if shift >= 64:
             raise ValueError("Varint too long")
+    else:
+        raise ParseError("Unexpected end of data while decoding varint")
 
     return result
 
@@ -92,6 +94,9 @@ def decode_varint_with_size(data: bytes) -> tuple[int, int]:
         Tuple[int, int]: (value, bytes_consumed)
 
     """
+    if not data:
+        raise ParseError("Unexpected end of data")
+
     result = 0
     shift = 0
     bytes_consumed = 0
@@ -104,6 +109,8 @@ def decode_varint_with_size(data: bytes) -> tuple[int, int]:
         shift += 7
         if shift >= 64:
             raise ValueError("Varint too long")
+    else:
+        raise ParseError("Unexpected end of data while decoding varint")
 
     return result, bytes_consumed
 
