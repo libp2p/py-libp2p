@@ -8,8 +8,10 @@ from unittest.mock import (
 import pytest
 from multiaddr import Multiaddr
 from multiaddr.exceptions import MultiaddrError
+import trio
 
 from libp2p import (
+    generate_peer_id_from,
     new_swarm,
 )
 from libp2p.crypto.rsa import (
@@ -141,6 +143,69 @@ def _make_host_with_listener(
     mock_transport.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
     swarm.listeners = {"tcp": mock_transport}
     return host
+
+
+def test_should_identify_peer_true_for_open_non_quic_muxer(monkeypatch):
+    """Outbound Identify is scheduled for any open muxed swarm conn (not QUIC-only)."""
+    host = _make_host_with_listener(announce_addrs=None)
+    remote = generate_peer_id_from(create_new_key_pair())
+    swarm_conn = MagicMock()
+    swarm_conn.is_closed = False
+    muxed = MagicMock()
+    muxed.is_closed = False
+    muxed.peer_id = remote
+    swarm_conn.muxed_conn = muxed
+    monkeypatch.setattr(
+        host._network,
+        "get_connections",
+        lambda pid: [swarm_conn] if pid == remote else [],
+    )
+    assert host._should_identify_peer(remote) is True
+
+
+def test_should_identify_peer_false_when_net_conn_closed(monkeypatch):
+    host = _make_host_with_listener(announce_addrs=None)
+    remote = generate_peer_id_from(create_new_key_pair())
+    swarm_conn = MagicMock()
+    swarm_conn.is_closed = True
+    muxed = MagicMock()
+    muxed.is_closed = False
+    swarm_conn.muxed_conn = muxed
+    monkeypatch.setattr(host._network, "get_connections", lambda pid: [swarm_conn])
+    assert host._should_identify_peer(remote) is False
+
+
+def test_should_identify_peer_false_when_muxer_closed(monkeypatch):
+    host = _make_host_with_listener(announce_addrs=None)
+    remote = generate_peer_id_from(create_new_key_pair())
+    swarm_conn = MagicMock()
+    swarm_conn.is_closed = False
+    muxed = MagicMock()
+    muxed.is_closed = True
+    swarm_conn.muxed_conn = muxed
+    monkeypatch.setattr(host._network, "get_connections", lambda pid: [swarm_conn])
+    assert host._should_identify_peer(remote) is False
+
+
+@pytest.mark.trio
+async def test_on_notifee_connected_schedules_identify_for_inbound(monkeypatch):
+    """Listeners run outbound Identify too (go-libp2p Connected parity)."""
+    host = _make_host_with_listener(announce_addrs=None)
+    remote = generate_peer_id_from(create_new_key_pair())
+    scheduled: list[tuple[ID, str]] = []
+
+    def capture_schedule(pid: ID, *, reason: str) -> None:
+        scheduled.append((pid, reason))
+
+    monkeypatch.setattr(host, "_schedule_identify", capture_schedule)
+    ev = trio.Event()
+    ev.set()
+    conn = MagicMock()
+    conn.muxed_conn = MagicMock()
+    conn.muxed_conn.peer_id = remote
+    conn.event_started = ev
+    await host._on_notifee_connected(conn)
+    assert scheduled == [(remote, "notifee-connected")]
 
 
 def test_announce_addrs_replaces_listen_addrs():

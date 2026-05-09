@@ -97,7 +97,6 @@ from libp2p.security.tls.autotls.broker import BrokerClient
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
-from libp2p.transport.quic.connection import QUICConnection
 import libp2p.utils.paths
 from libp2p.utils.varint import (
     read_length_prefixed_protobuf,
@@ -130,7 +129,9 @@ _IDENTIFY_PROTOCOLS: set[TProtocol] = {
 
 class _IdentifyNotifee(INotifee):
     """
-    Network notifee that triggers automatic identify when new connections arrive.
+    Network notifee that triggers automatic outbound Identify when new
+    connections arrive (all muxers, inbound and outbound), matching go-libp2p
+    ``Connected`` → ``IdentifyWait`` behavior.
     """
 
     def __init__(self, host: BasicHost):
@@ -1154,18 +1155,6 @@ class BasicHost(IHost):
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
         if peer_id is None:
             return
-        muxed_conn = getattr(conn, "muxed_conn", None)
-        is_initiator = False
-        if muxed_conn is not None and hasattr(muxed_conn, "is_initiator"):
-            try:
-                is_initiator = bool(muxed_conn.is_initiator())
-            except Exception:
-                is_initiator = False
-        if not is_initiator:
-            # Only the dialer (initiator) needs to actively run identify.
-            return
-        if not self._is_quic_muxer(muxed_conn):
-            return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
             try:
@@ -1187,15 +1176,22 @@ class BasicHost(IHost):
             return connections[0]
         return None
 
-    def _is_quic_muxer(self, muxed_conn: IMuxedConn | None) -> bool:
-        return isinstance(muxed_conn, QUICConnection)
-
     def _should_identify_peer(self, peer_id: ID) -> bool:
+        """
+        True if we can run outbound Identify on the first connection to this peer.
+
+        Any stream muxer registered with the swarm (TCP/yamux, QUIC, WebSocket,
+        etc.) qualifies; go-libp2p runs Identify on every ``Connected`` conn.
+        """
         connection = self._get_first_connection(peer_id)
         if connection is None:
             return False
+        if connection.is_closed:
+            return False
         muxed_conn = getattr(connection, "muxed_conn", None)
-        return self._is_quic_muxer(muxed_conn)
+        if muxed_conn is None:
+            return False
+        return not muxed_conn.is_closed
 
     # Reference: `BasicHost.newStreamHandler` in Go.
     async def _swarm_stream_handler(self, net_stream: INetStream) -> None:
