@@ -1,0 +1,1 @@
+Rejected truncated byte-buffer varints instead of decoding them as partial values.
