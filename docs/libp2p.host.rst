@@ -39,6 +39,11 @@ libp2p.host.exceptions module
 libp2p.host.observed\_addr\_manager module
 -------------------------------------------
 
+.. seealso::
+
+   Conceptual overview (inferred Identify observations vs ``announce_addrs``):
+   :doc:`advertising_addresses`.
+
 Automatic NAT address discovery. Remote peers report the address they see
 us on via the Identify protocol; once enough *distinct observer groups*
 (``ACTIVATION_THRESHOLD``, currently ``4``) report the same external

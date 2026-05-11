@@ -1,6 +1,10 @@
 Announce Addresses
 ==================
 
+.. seealso::
+
+   Same topic, without the step-by-step example: :doc:`advertising_addresses`.
+
 This example demonstrates how to use announce addresses so that a node behind
 NAT or a reverse proxy (e.g., ngrok) advertises its publicly reachable address
 instead of its local listen address.
