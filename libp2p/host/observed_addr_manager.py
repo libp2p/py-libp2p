@@ -477,12 +477,17 @@ def has_consistent_transport(tw_a: Multiaddr, tw_b: Multiaddr) -> bool:
 
 
 def _get_remote_addr(conn: INetConn) -> tuple[str, int] | None:
-    """Extract the remote (IP, port) from a connection."""
+    """
+    Extract the remote (IP, port) from a connection for observer grouping.
+
+    Expects ``conn.muxed_conn.get_remote_address()`` (Mplex, Yamux, QUIC
+    :class:`~libp2p.transport.quic.connection.QUICConnection`, etc.).
+    """
     muxed = getattr(conn, "muxed_conn", None)
     if muxed is None:
         return None
     get_remote = getattr(muxed, "get_remote_address", None)
-    if get_remote is None:
+    if not callable(get_remote):
         return None
     result = get_remote()
     if result is not None and isinstance(result, tuple) and len(result) == 2:
