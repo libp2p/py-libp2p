@@ -233,6 +233,23 @@ class ObservedAddrManager:
             obs_group,
         )
 
+        distinct_observers = len(observers)
+        logger.debug(
+            "ObservedAddrManager: peer reports us as %s (local thin waist %s); "
+            "observer group=%r; %d distinct observer group(s) for this external addr",
+            external_tw_str,
+            local_tw_str,
+            obs_group,
+            distinct_observers,
+        )
+        if distinct_observers >= ACTIVATION_THRESHOLD:
+            logger.debug(
+                "ObservedAddrManager: activation threshold (%s) reached for "
+                "%s — address is now eligible via addrs()/host.get_addrs()",
+                ACTIVATION_THRESHOLD,
+                external_tw_str,
+            )
+
         # Update rest suffixes from local addresses for address inference.
         self._update_local_addr_rests(local_addrs)
 
