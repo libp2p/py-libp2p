@@ -189,25 +189,45 @@ class ObservedAddrManager:
 
         """
         if getattr(conn, "is_closed", False):
+            logger.debug("ObservedAddrManager: skip record_observation (conn closed)")
             return
 
         if not is_valid_observation(observed_addr):
+            logger.debug(
+                "ObservedAddrManager: skip record_observation "
+                "(invalid observation): %s",
+                observed_addr,
+            )
             return
 
         obs_result = extract_thin_waist(observed_addr)
         if obs_result is None:
+            logger.debug(
+                "ObservedAddrManager: skip record_observation (no thin waist): %s",
+                observed_addr,
+            )
             return
         external_tw, _ = obs_result
 
         # Get remote address from connection for observer grouping.
         remote = _get_remote_addr(conn)
         if remote is None:
+            logger.debug(
+                "ObservedAddrManager: skip record_observation "
+                "(conn has no remote address for observer grouping)"
+            )
             return
         obs_group = observer_group(remote)
 
         # Match observed address to a local thin waist.
         local_tw_str = _match_local_thin_waist(external_tw, local_addrs)
         if local_tw_str is None:
+            logger.debug(
+                "ObservedAddrManager: skip record_observation "
+                "(no local thin waist matches external %s; transport_addrs=%s)",
+                external_tw,
+                [str(a) for a in local_addrs],
+            )
             return
 
         external_tw_str = str(external_tw)
@@ -217,7 +237,12 @@ class ObservedAddrManager:
         if conn_id in self._conn_observations:
             old_local, old_ext, old_obs = self._conn_observations[conn_id]
             if old_local == local_tw_str and old_ext == external_tw_str:
-                return  # Same observation, nothing to do
+                logger.debug(
+                    "ObservedAddrManager: skip record_observation "
+                    "(duplicate observation on same connection for %s)",
+                    external_tw_str,
+                )
+                return
             self._remove_observation(old_local, old_ext, old_obs)
 
         # Store the observation.

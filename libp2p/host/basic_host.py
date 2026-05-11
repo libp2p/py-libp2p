@@ -1103,6 +1103,12 @@ class BasicHost(IHost):
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
                 try:
                     our_observed = multiaddr.Multiaddr(identify_msg.observed_addr)
+                    logger.debug(
+                        "Identify[%s]: recording observed_addr %s from peer %s",
+                        reason,
+                        our_observed,
+                        peer_id,
+                    )
                     self._observed_addr_manager.record_observation(
                         swarm_conn, our_observed, self.get_transport_addrs()
                     )
@@ -1132,6 +1138,13 @@ class BasicHost(IHost):
                         exc,
                         exc_info=True,
                     )
+            else:
+                logger.debug(
+                    "Identify[%s]: peer %s returned no observed_addr; "
+                    "ObservedAddrManager not updated on this exchange",
+                    reason,
+                    peer_id,
+                )
 
             logger.debug(
                 "Identify[%s]: cached %s protocols for peer %s",
