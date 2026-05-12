@@ -1,0 +1,1 @@
+Fixed ``BasicHost.get_addrs()`` not announcing externally observed NAT addresses, which previously caused peers behind NAT (e.g. AWS/EC2) to advertise only private/loopback addresses. Added ``ObservedAddrManager`` that collects observed addresses reported by peers via the Identify protocol and advertises them once enough distinct observer groups confirm the same address.

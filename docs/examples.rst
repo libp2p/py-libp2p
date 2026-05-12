@@ -24,6 +24,7 @@ Examples
    examples.mDNS
    examples.nat
    examples.filecoin
+   advertising_addresses
    examples.announce_addrs
    examples.rendezvous
    examples.random_walk

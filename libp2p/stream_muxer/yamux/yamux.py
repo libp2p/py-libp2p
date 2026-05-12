@@ -394,26 +394,8 @@ class YamuxStream(IMuxedStream):
         raise NotImplementedError("Yamux does not support setting read deadlines")
 
     def get_remote_address(self) -> tuple[str, int] | None:
-        """
-        Returns the remote address of the underlying connection.
-        """
-        # Delegate to the secured_conn's get_remote_address method
-        if hasattr(self.conn.secured_conn, "get_remote_address"):
-            remote_addr = self.conn.secured_conn.get_remote_address()
-            # Ensure the return value matches tuple[str, int] | None
-            if (
-                remote_addr is None
-                or isinstance(remote_addr, tuple)
-                and len(remote_addr) == 2
-            ):
-                return remote_addr
-            else:
-                raise ValueError(
-                    "Underlying connection returned an unexpected address format"
-                )
-        else:
-            # Return None if the underlying connection doesn't provide this info
-            return None
+        """Return the transport remote endpoint via the muxed connection."""
+        return self.conn.get_remote_address()
 
 
 class Yamux(IMuxedConn):
@@ -558,6 +540,16 @@ class Yamux(IMuxedConn):
         Get connection type by delegating to secured_conn.
         """
         return self.secured_conn.get_connection_type()
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        """
+        Return the transport-level remote endpoint, same as :class:`Mplex`.
+
+        Delegates to ``secured_conn`` so callers (e.g. host subsystems) can
+        resolve the peer address without opening a stream — matching
+        :meth:`~libp2p.stream_muxer.mplex.mplex.Mplex.get_remote_address`.
+        """
+        return self.secured_conn.get_remote_address()
 
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot
