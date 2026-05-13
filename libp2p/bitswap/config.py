@@ -8,9 +8,11 @@ from libp2p.custom_types import TProtocol
 BITSWAP_PROTOCOL_V100 = TProtocol("/ipfs/bitswap/1.0.0")
 BITSWAP_PROTOCOL_V110 = TProtocol("/ipfs/bitswap/1.1.0")
 BITSWAP_PROTOCOL_V120 = TProtocol("/ipfs/bitswap/1.2.0")
+BITSWAP_PROTOCOL_V130 = TProtocol("/ipfs/bitswap/1.3.0")
 
 # All supported protocols (ordered from newest to oldest for negotiation)
 BITSWAP_PROTOCOLS = [
+    BITSWAP_PROTOCOL_V130,
     BITSWAP_PROTOCOL_V120,
     BITSWAP_PROTOCOL_V110,
     BITSWAP_PROTOCOL_V100,
@@ -28,7 +30,7 @@ MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 MAX_BLOCK_SIZE = 63 * 1024
 
 # Default timeout for operations (in seconds)
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 90
 
 # Maximum number of concurrent block requests
 MAX_CONCURRENT_REQUESTS = 100

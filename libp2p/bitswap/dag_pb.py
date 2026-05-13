@@ -5,7 +5,7 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import logging
 
@@ -321,6 +321,7 @@ def create_leaf_node(data: bytes) -> bytes:
 def balanced_layout(
     leaves: list[tuple[bytes, bytes, int]],
     max_links: int = MAX_LINKS_PER_NODE,
+    put_block_callback: Callable[[bytes, bytes], None] | None = None,
 ) -> tuple[bytes, bytes]:
     """
     Build a balanced Merkle DAG from a flat list of leaf blocks.
@@ -336,7 +337,8 @@ def balanced_layout(
                 - file_data_size: Size of the raw file data inside this leaf
                                   (i.e. len(original chunk), NOT len(block))
         max_links: Max links per internal node (default 174, matches Kubo)
-
+        put_block_callback: Optional async callback to store each internal node
+                           Signature: callback(cid_bytes, block_bytes)
     Returns:
         (root_cid_bytes, root_block_bytes)
 
@@ -381,6 +383,10 @@ def balanced_layout(
             )
             internal_block = encode_dag_pb(internal_links, unixfs_data)
             internal_cid = compute_cid_v1(internal_block, codec=CODEC_DAG_PB)
+
+            # Store internal node if callback provided
+            if put_block_callback is not None:
+                put_block_callback(internal_cid, internal_block)
             # cumulative size = own block + sum of children's cumulative sizes
             cum_size = len(internal_block) + total_cum
             next_level.append((internal_cid, internal_block, total_filesize, cum_size))

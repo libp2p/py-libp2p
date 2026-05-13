@@ -1,6 +1,6 @@
 """
 Bitswap client implementation for block exchange.
-Supports v1.0.0, v1.1.0, and v1.2.0 protocols.
+Supports v1.0.0, v1.1.0, v1.2.0, and v1.3.0 protocols.
 """
 
 from collections.abc import Sequence
@@ -30,6 +30,7 @@ from .cid import (
 from .config import (
     BITSWAP_PROTOCOL_V100,
     BITSWAP_PROTOCOL_V120,
+    BITSWAP_PROTOCOL_V130,
     BITSWAP_PROTOCOLS,
     DEFAULT_PRIORITY,
     DEFAULT_TIMEOUT,
@@ -43,6 +44,7 @@ from .errors import (
     TimeoutError as BitswapTimeoutError,
 )
 from .messages import create_message, create_wantlist_entry
+from .pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 from .pb.bitswap_pb2 import Message
 from .provider_query import ProviderQueryManager
 
@@ -53,8 +55,10 @@ class BitswapClient:
     """
     Bitswap client for exchanging blocks with other peers.
 
-    Supports Bitswap protocol versions 1.0.0, 1.1.0, and 1.2.0 for content
-    discovery and file sharing in a peer-to-peer network.
+    Supports Bitswap protocol versions 1.0.0, 1.1.0, 1.2.0, and 1.3.0 for
+    content discovery and file sharing in a peer-to-peer network.
+
+    For 1.3.0 payment support, pass a payment_client and payment_engine.
     """
 
     def __init__(
@@ -63,6 +67,8 @@ class BitswapClient:
         block_store: BlockStore | None = None,
         protocol_version: str = BITSWAP_PROTOCOL_V120,
         provider_query_manager: ProviderQueryManager | None = None,
+        payment_client: Any = None,   # BitswapPaymentClient_1_3 (optional)
+        payment_engine: Any = None,   # PaymentGatedDecisionEngine (optional)
     ):
         """
         Initialize Bitswap client.
@@ -75,6 +81,10 @@ class BitswapClient:
                 DHT-based provider discovery.  When supplied,
                 ``get_block()`` will query the DHT for providers before
                 broadcasting to all connected peers.
+            payment_client: Optional BitswapPaymentClient_1_3 for client-side
+                payment handling (auto-pays for blocks in 1.3.0 mode).
+            payment_engine: Optional PaymentGatedDecisionEngine for server-side
+                payment gating (gates block serving behind payment in 1.3.0 mode).
 
         """
         self.host = host
@@ -83,6 +93,10 @@ class BitswapClient:
         self.provider_query_manager: ProviderQueryManager | None = (
             provider_query_manager
         )
+        # 1.3.0 payment components (optional)
+        self.payment_client = payment_client
+        self.payment_engine = payment_engine
+
         self._wantlist: dict[
             CIDObject, dict[str, Any]
         ] = {}  # CID -> {priority, want_type, send_dont_have}
@@ -234,8 +248,23 @@ class BitswapClient:
                 if data is not None:
                     results[cid_obj.buffer] = data
                 else:
-                    cid_str = format_cid_for_display(cid_obj)
-                    logger.warning(f"Block not received: {cid_str}")
+                    # Block may have arrived late (e.g. after payment round-trip).
+                    # Check if the pending event was set after the timeout fired.
+                    event = self._pending_requests.get(cid_obj)
+                    if event and event.is_set():
+                        data = await self.block_store.get_block(cid_obj)
+                        if data is not None:
+                            results[cid_obj.buffer] = data
+                            logger.info(
+                                f"Late block received (post-timeout): "
+                                f"{format_cid_for_display(cid_obj)}"
+                            )
+                        else:
+                            cid_str = format_cid_for_display(cid_obj)
+                            logger.warning(f"Block not received: {cid_str}")
+                    else:
+                        cid_str = format_cid_for_display(cid_obj)
+                        logger.warning(f"Block not received: {cid_str}")
 
                 # Cleanup
                 if cid_obj in self._pending_requests:
@@ -687,11 +716,78 @@ class BitswapClient:
         self, msg: Message, peer_id: PeerID, stream: INetStream
     ) -> None:
         """Process a received Bitswap message."""
+        peer_id_str = str(peer_id)[:16]
+        if msg.HasField("wantlist"):
+            logger.warning("=" * 70)
+            logger.warning(f"📥 RECEIVED WANTLIST from peer {peer_id_str}")
+            logger.warning(f"   Entries: {len(msg.wantlist.entries)}")
+            logger.warning(f"   Full: {msg.wantlist.full}")
+            logger.warning("=" * 70)
+            print(f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with {len(msg.wantlist.entries)} entries", flush=True)
+        
         # Detect peer protocol version from stream
         protocol = stream.get_protocol()
         if protocol:
             self._peer_protocols[peer_id] = str(protocol)
 
+        peer_protocol = str(protocol) if protocol else BITSWAP_PROTOCOL_V100
+
+        # ── Bitswap 1.3.0 payment message handling ───────────────────────
+        if peer_protocol == str(BITSWAP_PROTOCOL_V130):
+            # Re-parse as 1.3.0 message to access payment fields
+            msg_1_3 = Message_1_3()
+            try:
+                msg_1_3.ParseFromString(msg.SerializeToString())
+            except Exception:
+                msg_1_3 = None
+
+            if msg_1_3 is not None:
+                # Client-side: handle PaymentTerms / PaymentReceipts / PaymentRejections
+                if self.payment_client and (
+                    msg_1_3.payment_terms
+                    or msg_1_3.payment_receipts
+                    or msg_1_3.payment_rejections
+                ):
+                    response = await self.payment_client.process_incoming_message(
+                        str(peer_id), msg_1_3
+                    )
+                    if response is not None:
+                        await self._write_message_bytes(
+                            stream, response.SerializeToString()
+                        )
+
+                # Process any blocks delivered alongside a payment receipt
+                if msg_1_3.payload:
+                    await self._process_blocks_v110(msg_1_3.payload)
+                if msg_1_3.blocks:
+                    await self._process_blocks_v100(list(msg_1_3.blocks), peer_id)
+
+                # Server-side: handle PaymentAuthorizations
+                if self.payment_engine and msg_1_3.payment_authorizations:
+                    response = await self.payment_engine.process_incoming_1_3_message(
+                        str(peer_id), msg_1_3
+                    )
+                    if response is not None:
+                        await self._write_message_bytes(
+                            stream, response.SerializeToString()
+                        )
+
+                # Handle PaymentRequired block presences specially
+                if msg_1_3.blockPresences:
+                    await self._process_block_presences_1_3(
+                        msg_1_3.blockPresences, peer_id
+                    )
+                    # Don't fall through to normal presence processing
+                    # (already handled above)
+                    if msg.HasField("wantlist"):
+                        await self._process_wantlist(msg.wantlist, peer_id, stream)
+                    if msg.blocks:
+                        await self._process_blocks_v100(list(msg.blocks), peer_id)
+                    if msg.payload:
+                        await self._process_blocks_v110(msg.payload)
+                    return
+
+        # ── Standard 1.0.0–1.2.0 message handling ────────────────────────
         # Process wantlist
         if msg.HasField("wantlist"):
             await self._process_wantlist(msg.wantlist, peer_id, stream)
@@ -725,6 +821,35 @@ class BitswapClient:
         # Get peer protocol for response format
         peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
 
+        # ── 1.3.0 payment-gated wantlist handling ──────────────────────────
+        if str(peer_protocol) == str(BITSWAP_PROTOCOL_V130) and self.payment_engine:
+            for entry in wantlist.entries:
+                entry_cid = parse_cid(entry.block)
+                if entry.cancel:
+                    if entry_cid in peer_wantlist:
+                        del peer_wantlist[entry_cid]
+                    continue
+
+                peer_wantlist[entry_cid] = {
+                    "priority": entry.priority,
+                    "want_type": entry.wantType,
+                    "send_dont_have": entry.sendDontHave,
+                }
+
+                response_msg = await self.payment_engine.handle_want(
+                    peer_id=str(peer_id),
+                    cid=entry.block,
+                    want_type=entry.wantType,
+                    send_dont_have=entry.sendDontHave,
+                    peer_protocol=str(BITSWAP_PROTOCOL_V130),
+                )
+                if response_msg is not None:
+                    await self._write_message_bytes(
+                        stream, response_msg.SerializeToString()
+                    )
+            return
+
+        # ── Standard 1.0.0–1.2.0 wantlist handling ────────────────────────
         # Process entries
         blocks_to_send_v100 = []  # For v1.0.0
         blocks_to_send_v110 = []  # For v1.1.0+
@@ -1086,3 +1211,59 @@ class BitswapClient:
         # Write length prefix and message
         length_prefix = varint.encode(len(msg_bytes))
         await stream.write(length_prefix + msg_bytes)
+
+    async def _write_message_bytes(
+        self, stream: INetStream, msg_bytes: bytes
+    ) -> None:
+        """
+        Write pre-serialized message bytes (for 1.3.0 Message_1_3 objects).
+        """
+        if len(msg_bytes) > MAX_MESSAGE_SIZE:
+            raise MessageTooLargeError(
+                f"Message size {len(msg_bytes)} exceeds maximum {MAX_MESSAGE_SIZE}"
+            )
+        length_prefix = varint.encode(len(msg_bytes))
+        await stream.write(length_prefix + msg_bytes)
+
+    async def _process_block_presences_1_3(
+        self, presences: Any, peer_id: PeerID
+    ) -> None:
+        """
+        Process block presences from a 1.3.0 message.
+        Handles PaymentRequired (type=2) in addition to Have/DontHave.
+        """
+        for presence in presences:
+            cid_bytes = bytes(presence.cid)
+            try:
+                cid = parse_cid(cid_bytes)
+            except Exception:
+                continue
+
+            presence_type = presence.type
+
+            if presence_type == 0:  # Have
+                if peer_id not in self._expected_blocks:
+                    self._expected_blocks[peer_id] = set()
+                self._expected_blocks[peer_id].add(cid)
+                logger.debug(
+                    f"[1.3.0] Peer {peer_id} has block "
+                    f"{format_cid_for_display(cid, max_len=16)}"
+                )
+            elif presence_type == 1:  # DontHave
+                if cid not in self._dont_have_responses:
+                    self._dont_have_responses[cid] = set()
+                self._dont_have_responses[cid].add(peer_id)
+                logger.info(
+                    f"[1.3.0] Peer {peer_id} doesn't have block "
+                    f"{format_cid_for_display(cid, max_len=16)}"
+                )
+            elif presence_type == 2:  # PaymentRequired
+                logger.info(
+                    f"[1.3.0] Peer {peer_id} requires payment for block "
+                    f"{format_cid_for_display(cid, max_len=16)} "
+                    f"(PaymentTerms will follow in same message)"
+                )
+                # The payment_client will handle PaymentTerms
+                # in process_incoming_message
+
+

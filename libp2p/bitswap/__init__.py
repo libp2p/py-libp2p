@@ -33,6 +33,8 @@ New code should prefer the object-returning variants above.
 
 from .block_service import BlockService
 from .block_store import BlockStore, FilesystemBlockStore, MemoryBlockStore
+from .gated_decision_engine import PaymentGatedDecisionEngine
+from .payment_client_1_3 import BitswapPaymentClient_1_3
 from .cid import (
     CID_V0,
     CID_V1,
@@ -78,6 +80,8 @@ from .wantlist import (
 __all__ = [
     # Core
     "BitswapClient",
+    "BitswapPaymentClient_1_3",
+    "PaymentGatedDecisionEngine",
     "BlockService",
     "BlockStore",
     "MemoryBlockStore",

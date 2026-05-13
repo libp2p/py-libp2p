@@ -327,6 +327,22 @@ class MerkleDag:
             )
 
         root_cid, root_data = balanced_layout(leaf_triples)
+        # Create a sync wrapper for the async _put_block method
+        # We'll collect (cid, data) pairs and store them after
+        internal_nodes: list[tuple[bytes, bytes]] = []
+        
+        def store_internal_node(cid: bytes, data: bytes) -> None:
+            """Callback to collect internal nodes for storage."""
+            internal_nodes.append((cid, data))
+        
+        root_cid, root_data = balanced_layout(leaf_triples, put_block_callback=store_internal_node)
+        
+        # Store all internal nodes
+        logger.info(f"Storing {len(internal_nodes)} internal DAG nodes...")
+        for cid, data in internal_nodes:
+            await self._put_block(cid, data)
+        
+        # Store the root node
         await self._put_block(root_cid, root_data)
 
         # Enhanced logging for root CID
