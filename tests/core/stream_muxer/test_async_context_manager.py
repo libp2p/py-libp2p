@@ -39,7 +39,7 @@ class DummySecuredConn(ISecureConn):
     async def close(self) -> None:
         pass
 
-    def get_remote_address(self):
+    def get_remote_address(self) -> tuple[str, int] | None:
         return None
 
     def get_local_address(self):
@@ -64,6 +64,18 @@ class DummySecuredConn(ISecureConn):
     def get_connection_type(self) -> ConnectionType:
         """Mock implementation of get_connection_type."""
         return ConnectionType.DIRECT
+
+
+class DummySecuredConnWithRemote(DummySecuredConn):
+    """Secured conn stub that reports a fixed transport remote endpoint."""
+
+    def get_remote_address(self) -> tuple[str, int] | None:
+        return ("203.0.113.7", 4001)
+
+
+def test_yamux_mux_get_remote_address_delegates_to_secured_conn() -> None:
+    mux = Yamux(DummySecuredConnWithRemote(), DUMMY_PEER_ID)
+    assert mux.get_remote_address() == ("203.0.113.7", 4001)
 
 
 class MockMuxedConn:

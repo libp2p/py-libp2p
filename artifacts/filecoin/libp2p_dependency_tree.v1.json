@@ -313,7 +313,7 @@
       "kind": "config",
       "file": "libp2p/filecoin/__init__.py",
       "line_start": 37,
-      "line_end": 63,
+      "line_end": 89,
       "version": "feat/filecoin-dx-and-tooling"
     },
     {
@@ -545,6 +545,146 @@
       "line_start": 1,
       "line_end": 150,
       "version": "feat/filecoin-dx-and-tooling"
+    },
+    {
+      "id": "py_FilecoinAddress",
+      "project": "py-libp2p",
+      "symbol": "FilecoinAddress",
+      "kind": "type",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 58,
+      "line_end": 97,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_parse_address",
+      "project": "py-libp2p",
+      "symbol": "parse_address",
+      "kind": "fn",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 81,
+      "line_end": 134,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_is_valid_address",
+      "project": "py-libp2p",
+      "symbol": "is_valid_address",
+      "kind": "fn",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 148,
+      "line_end": 155,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_make_delegated_address",
+      "project": "py-libp2p",
+      "symbol": "make_delegated_address",
+      "kind": "fn",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 158,
+      "line_end": 175,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_make_id_address",
+      "project": "py-libp2p",
+      "symbol": "make_id_address",
+      "kind": "fn",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 178,
+      "line_end": 183,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_address_protocol",
+      "project": "py-libp2p",
+      "symbol": "address_protocol",
+      "kind": "fn",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 186,
+      "line_end": 188,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_ID",
+      "project": "py-libp2p",
+      "symbol": "ID",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 30,
+      "line_end": 30,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_SECP256K1",
+      "project": "py-libp2p",
+      "symbol": "SECP256K1",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 31,
+      "line_end": 31,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_DELEGATED",
+      "project": "py-libp2p",
+      "symbol": "DELEGATED",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 33,
+      "line_end": 33,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_BLS",
+      "project": "py-libp2p",
+      "symbol": "BLS",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 32,
+      "line_end": 32,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_EAM_NAMESPACE",
+      "project": "py-libp2p",
+      "symbol": "EAM_NAMESPACE",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 36,
+      "line_end": 36,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_DEMO_F410_PAYER",
+      "project": "py-libp2p",
+      "symbol": "DEMO_F410_PAYER",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 275,
+      "line_end": 275,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_DEMO_F0_PAYER",
+      "project": "py-libp2p",
+      "symbol": "DEMO_F0_PAYER",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 278,
+      "line_end": 278,
+      "version": "feat/agentic-request-response-example"
+    },
+    {
+      "id": "py_DEMO_F410_PAYER_TESTNET",
+      "project": "py-libp2p",
+      "symbol": "DEMO_F410_PAYER_TESTNET",
+      "kind": "const",
+      "file": "libp2p/filecoin/address.py",
+      "line_start": 280,
+      "line_end": 280,
+      "version": "feat/agentic-request-response-example"
     }
   ],
   "edges": [
@@ -927,6 +1067,76 @@
       "from": "forest_mainnet_network_name",
       "to": "py_filecoin_architecture_positioning",
       "relation": "derived_from"
+    },
+    {
+      "from": "py_FilecoinAddress",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_parse_address",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_is_valid_address",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_make_delegated_address",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_make_id_address",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_address_protocol",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_ID",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_SECP256K1",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_DELEGATED",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_BLS",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_EAM_NAMESPACE",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_DEMO_F410_PAYER",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_DEMO_F0_PAYER",
+      "relation": "defines",
+      "to": "py_public_exports"
+    },
+    {
+      "from": "py_DEMO_F410_PAYER_TESTNET",
+      "relation": "defines",
+      "to": "py_public_exports"
     }
   ]
 }

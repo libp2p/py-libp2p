@@ -20,10 +20,13 @@ from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
 
-# Configure minimal logging
-logging.basicConfig(level=logging.WARNING)
-logging.getLogger("multiaddr").setLevel(logging.WARNING)
-logging.getLogger("libp2p").setLevel(logging.WARNING)
+# Logging: libp2p configures the ``libp2p`` hierarchy at import from ``LIBP2P_DEBUG``
+# / ``LIBP2P_DEBUG_FILE``. Do not cap ``libp2p`` to WARNING here or module DEBUG
+# (e.g. ``host.observed_addr_manager:DEBUG``) will never appear.
+# For a quiet default without env vars, uncomment:
+# logging.basicConfig(level=logging.WARNING)
+# logging.getLogger("multiaddr").setLevel(logging.WARNING)
+# logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 logger = logging.getLogger("libp2p.identity.identify-example")
 
