@@ -71,6 +71,10 @@ autotls-demo = "examples.autotls.autotls:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
+request-response-demo = "examples.request_response.request_response_demo:main"
+agentic-request-response-demo = "examples.request_response.agentic_request_response_demo:main"
+a2a-payment-demo = "examples.request_response.a2a_payment_demo:main"
+a2a-http-payment-demo = "examples.request_response.a2a_http_payment_demo:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
 floodsub-demo = "examples.pubsub.floodsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
@@ -95,6 +99,7 @@ dev = [
     "tox>=4.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
+    "uvicorn>=0.30.0",
 ]
 docs = [
     "sphinx>=6.0.0",
@@ -111,6 +116,10 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
     "pytest-rerunfailures>=12.0",
+]
+a2a-demo = [
+    "a2a-sdk[http-server]>=1.0.0",
+    "uvicorn>=0.30.0",
 ]
 release = [
     "build>=0.9.0",

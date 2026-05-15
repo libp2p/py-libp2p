@@ -1108,7 +1108,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1116,8 +1116,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         maddr : multiaddr.Multiaddr
             The multiaddr to listen on
-        nursery : trio.Nursery
-            The nursery to run tasks in
 
         """
         # Convert string to Multiaddr if needed
