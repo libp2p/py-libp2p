@@ -131,5 +131,7 @@ jobs:
           if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
             python -m tox run -e windows-wheel
           else
-            python -m tox run -e $(echo "py${{ matrix.python-version }}-${{ matrix.toxenv }}" | tr -d '.')
+            tox_python="py${{ matrix.python-version }}"
+            tox_python="${tox_python//./}"
+            python -m tox run -e "${tox_python}-${{ matrix.toxenv }}"
           fi
