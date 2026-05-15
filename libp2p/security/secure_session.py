@@ -112,6 +112,12 @@ class SecureSession(BaseSession):
 
         result = bytearray(data_from_buffer)
         while len(result) < n:
+            needed = n - len(result)
+            drained = self._drain(needed)
+            if drained:
+                result.extend(drained)
+                continue
+
             msg = await self.conn.read_msg()
 
             # If the connection closes after a partial read, return the bytes
@@ -122,12 +128,11 @@ class SecureSession(BaseSession):
                     return bytes(result)
                 raise Exception("Connection closed")
 
-            remaining = n - len(result)
-            if len(msg) <= remaining:
+            if len(msg) <= needed:
                 result.extend(msg)
             else:
-                result.extend(msg[:remaining])
-                self._fill(msg[remaining:])
+                result.extend(msg[:needed])
+                self._fill(msg[needed:])
 
         return bytes(result)
 

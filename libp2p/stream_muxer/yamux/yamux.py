@@ -114,59 +114,58 @@ class YamuxStream(IMuxedStream):
         await self.close()
 
     async def write(self, data: bytes) -> None:
-        async with self.rw_lock.write_lock():
-            if self.send_closed:
-                raise MuxedStreamError("Stream is closed for sending")
+        if self.send_closed:
+            raise MuxedStreamError("Stream is closed for sending")
 
-            # Flow control: Check if we have enough send window
-            total_len = len(data)
-            sent = 0
-            logger.debug(f"Stream {self.stream_id}: Starts writing {total_len} bytes ")
-            while sent < total_len:
-                # Wait for available window with timeout
-                timeout = False
-                async with self.window_lock:
-                    if self.send_window == 0:
-                        logger.debug(
-                            f"Stream {self.stream_id}: "
-                            "Window is zero, waiting for update"
-                        )
-                        # Release lock and wait with timeout
-                        self.window_lock.release()
-                        # To avoid re-acquiring the lock immediately,
-                        with trio.move_on_after(5.0) as cancel_scope:
-                            while self.send_window == 0 and not self.closed:
-                                await trio.sleep(0.01)
-                            # If we timed out, cancel the scope
-                            timeout = cancel_scope.cancelled_caught
-                        # Re-acquire lock
-                        await self.window_lock.acquire()
+        total_len = len(data)
+        sent = 0
+        logger.debug(f"Stream {self.stream_id}: Starts writing {total_len} bytes ")
+        while sent < total_len:
+            frame: bytes | None = None
+            while frame is None:
+                async with self.rw_lock.write_lock():
+                    if self.send_closed:
+                        raise MuxedStreamError("Stream is closed for sending")
+                    async with self.window_lock:
+                        if self.closed:
+                            raise MuxedStreamError("Stream is closed")
+                        if self.send_window > 0:
+                            to_send = min(
+                                self.send_window,
+                                MAX_MESSAGE_SIZE - HEADER_SIZE,
+                                total_len - sent,
+                            )
+                            chunk = data[sent : sent + to_send]
+                            self.send_window -= to_send
+                            header = struct.pack(
+                                YAMUX_HEADER_FORMAT,
+                                0,
+                                TYPE_DATA,
+                                0,
+                                self.stream_id,
+                                len(chunk),
+                            )
+                            frame = header + chunk
 
-                    # If we timed out waiting for window update, raise an error
-                    if timeout:
-                        raise MuxedStreamError(
-                            "Timed out waiting for window update after 5 seconds."
-                        )
+                if frame is not None:
+                    break
 
-                    if self.closed:
-                        raise MuxedStreamError("Stream is closed")
-
-                    # Calculate how much we can send now (cap at MaxMessageSize
-                    # minus header, matching go-yamux's per-frame limit)
-                    to_send = min(
-                        self.send_window,
-                        MAX_MESSAGE_SIZE - HEADER_SIZE,
-                        total_len - sent,
+                logger.debug(
+                    f"Stream {self.stream_id}: Window is zero, waiting for update"
+                )
+                with trio.move_on_after(5.0) as cancel_scope:
+                    while True:
+                        async with self.window_lock:
+                            if self.send_window > 0 or self.closed:
+                                break
+                        await trio.sleep(0.01)
+                if cancel_scope.cancelled_caught:
+                    raise MuxedStreamError(
+                        "Timed out waiting for window update after 5 seconds."
                     )
-                    chunk = data[sent : sent + to_send]
-                    self.send_window -= to_send
 
-                    # Send the data
-                    header = struct.pack(
-                        YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, self.stream_id, len(chunk)
-                    )
-                    await self.conn._write_frame(header + chunk)
-                    sent += to_send
+            await self.conn._write_frame(frame)
+            sent += len(frame) - HEADER_SIZE
 
     async def send_window_update(self, increment: int, skip_lock: bool = False) -> None:
         """
@@ -175,9 +174,10 @@ class YamuxStream(IMuxedStream):
         param:increment: The amount to increment the window size by.
         If None, uses the difference between DEFAULT_WINDOW_SIZE
         and current receive window.
-        param:skip_lock (bool): If True, skips acquiring window_lock.
-        This should only be used when calling from a context
-        that already holds the lock.
+        param:skip_lock (bool): Unused (retained for API compatibility).
+
+        Never hold ``window_lock`` across this await — inbound WINDOW_UPDATE handling
+        also needs ``window_lock`` to adjust ``send_window`` concurrently.
 
         Note: This method gracefully handles connection closure errors.
         If the connection is closed (e.g., peer closed WebSocket immediately
@@ -241,11 +241,10 @@ class YamuxStream(IMuxedStream):
                 )
                 raise
 
-        if skip_lock:
-            await _do_window_update()
-        else:
-            async with self.window_lock:
-                await _do_window_update()
+        # Never hold window_lock across _write_frame: inbound WINDOW_UPDATE handlers
+        # need window_lock concurrently to adjust send_window.
+        _ = skip_lock
+        await _do_window_update()
 
     async def _auto_tune_and_send_window_update(self: "YamuxStream") -> None:
         """
@@ -257,6 +256,7 @@ class YamuxStream(IMuxedStream):
         - Pass 2: GrowTo(new_target, force=True) — grow to new target
         - Only the final delta is sent to the peer (matches go-yamux behavior)
         """
+        total_delta: int
         async with self.window_lock:
             # Match go-yamux GrowTo: currentWindow = cap + len
             buffered = len(self.conn.stream_buffers.get(self.stream_id, b""))
@@ -292,7 +292,9 @@ class YamuxStream(IMuxedStream):
                 f"Stream {self.stream_id}: Auto-tune window update "
                 f"delta={delta}, target={self.target_recv_window}"
             )
-            await self.send_window_update(delta, skip_lock=True)
+            total_delta = delta
+
+        await self.send_window_update(total_delta, skip_lock=True)
 
     async def read(self, n: int | None = -1) -> bytes:
         """
@@ -678,6 +680,7 @@ class Yamux(IMuxedConn):
             )
         async with self._write_lock:
             await self.secured_conn.write(data)
+        await trio.lowlevel.checkpoint()
 
     async def open_stream(self) -> YamuxStream:
         # Wait for backlog slot
@@ -942,6 +945,21 @@ class Yamux(IMuxedConn):
                     f"is_initiator={self.is_initiator_value}"
                 )
                 if (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_SYN:
+                    syn_payload: bytes = b""
+                    syn_payload_err: IncompleteReadError | None = None
+                    if typ == TYPE_DATA and length > 0:
+                        try:
+                            syn_payload = await read_exactly(self.secured_conn, length)
+                        except IncompleteReadError as e:
+                            syn_payload_err = e
+                            logger.error(
+                                "Incomplete read for SYN data on "
+                                f"stream {stream_id}: {e}"
+                            )
+
+                    rst_header: bytes | None = None
+                    ack_header: bytes | None = None
+                    new_stream_notify: YamuxStream | None = None
                     async with self.streams_lock:
                         if stream_id not in self.streams:
                             stream = YamuxStream(stream_id, self, False)
@@ -949,9 +967,12 @@ class Yamux(IMuxedConn):
                             self.stream_buffers[stream_id] = bytearray()
                             self.stream_events[stream_id] = trio.Event()
 
-                            if typ == TYPE_WINDOW_UPDATE and length > 0:
+                            if syn_payload_err is not None:
+                                stream.recv_closed = True
+                                stream.closed = True
+                                self.stream_events[stream_id].set()
+                            elif typ == TYPE_WINDOW_UPDATE and length > 0:
                                 # Window update SYN: length is a delta
-                                # to add to the initial send window
                                 async with stream.window_lock:
                                     stream.send_window += length
                                 logger.debug(
@@ -959,32 +980,20 @@ class Yamux(IMuxedConn):
                                     f"{stream_id}: window={length}"
                                 )
                             elif typ == TYPE_DATA and length > 0:
-                                # Data SYN: length is payload bytes
-                                try:
-                                    data = await read_exactly(self.secured_conn, length)
-                                    self.stream_buffers[stream_id].extend(data)
-                                    stream.recv_window -= len(data)
-                                    if stream.recv_window < 0:
-                                        logger.warning(
-                                            f"Stream {stream_id}: peer exceeded "
-                                            f"receive window by "
-                                            f"{-stream.recv_window} bytes"
-                                        )
-                                        stream.recv_window = 0
-                                    self.stream_events[stream_id].set()
-                                    logger.debug(
-                                        f"Read {length} bytes with SYN "
-                                        f"for stream {stream_id}"
+                                self.stream_buffers[stream_id].extend(syn_payload)
+                                stream.recv_window -= len(syn_payload)
+                                if stream.recv_window < 0:
+                                    logger.warning(
+                                        f"Stream {stream_id}: peer exceeded "
+                                        f"receive window by "
+                                        f"{-stream.recv_window} bytes"
                                     )
-                                except IncompleteReadError as e:
-                                    logger.error(
-                                        "Incomplete read for SYN data on "
-                                        f"stream {stream_id}: {e}"
-                                    )
-                                    stream.recv_closed = True
-                                    stream.closed = True
-                                    if stream_id in self.stream_events:
-                                        self.stream_events[stream_id].set()
+                                    stream.recv_window = 0
+                                self.stream_events[stream_id].set()
+                                logger.debug(
+                                    f"Read {length} bytes with SYN "
+                                    f"for stream {stream_id}"
+                                )
 
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
@@ -994,12 +1003,7 @@ class Yamux(IMuxedConn):
                                 stream_id,
                                 0,
                             )
-                            await self._write_frame(ack_header)
-                            logger.debug(
-                                f"Sending stream {stream_id}"
-                                f"to channel for peer {self.peer_id}"
-                            )
-                            await self.new_stream_send_channel.send(stream)
+                            new_stream_notify = stream
                         else:
                             rst_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
@@ -1009,10 +1013,31 @@ class Yamux(IMuxedConn):
                                 stream_id,
                                 0,
                             )
-                            await self._write_frame(rst_header)
+
+                    if rst_header is not None:
+                        await self._write_frame(rst_header)
+                    elif ack_header is not None:
+                        await self._write_frame(ack_header)
+                        logger.debug(
+                            f"Sending stream {stream_id}"
+                            f"to channel for peer {self.peer_id}"
+                        )
+                        if new_stream_notify is not None:
+                            await self.new_stream_send_channel.send(new_stream_notify)
                 elif (
                     typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE
                 ) and flags & FLAG_ACK:
+                    ack_payload: bytes = b""
+                    ack_payload_err: IncompleteReadError | None = None
+                    if typ == TYPE_DATA and length > 0:
+                        try:
+                            ack_payload = await read_exactly(self.secured_conn, length)
+                        except IncompleteReadError as e:
+                            ack_payload_err = e
+                            logger.error(
+                                "Incomplete read for ACK data on "
+                                f"stream {stream_id}: {e}"
+                            )
                     async with self.streams_lock:
                         if stream_id in self.streams:
                             stream = self.streams[stream_id]
@@ -1028,11 +1053,16 @@ class Yamux(IMuxedConn):
                                     f"for peer {self.peer_id}"
                                 )
                             elif typ == TYPE_DATA and length > 0:
-                                # Data ACK: length is payload bytes
-                                try:
-                                    data = await read_exactly(self.secured_conn, length)
-                                    self.stream_buffers[stream_id].extend(data)
-                                    self.streams[stream_id].recv_window -= len(data)
+                                if ack_payload_err is not None:
+                                    stream.recv_closed = True
+                                    stream.closed = True
+                                    if stream_id in self.stream_events:
+                                        self.stream_events[stream_id].set()
+                                else:
+                                    self.stream_buffers[stream_id].extend(ack_payload)
+                                    self.streams[stream_id].recv_window -= len(
+                                        ack_payload
+                                    )
                                     if self.streams[stream_id].recv_window < 0:
                                         logger.warning(
                                             f"Stream {stream_id}: peer exceeded "
@@ -1047,15 +1077,6 @@ class Yamux(IMuxedConn):
                                         f"for stream {stream_id} "
                                         f"for peer {self.peer_id}"
                                     )
-                                except IncompleteReadError as e:
-                                    logger.error(
-                                        "Incomplete read for ACK data on "
-                                        f"stream {stream_id}: {e}"
-                                    )
-                                    stream.recv_closed = True
-                                    stream.closed = True
-                                    if stream_id in self.stream_events:
-                                        self.stream_events[stream_id].set()
                             else:
                                 logger.debug(
                                     f"Received ACK (no data) for stream "
