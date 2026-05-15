@@ -1,0 +1,9 @@
+{
+  "name": "py-libp2p-a2a-synapse-sidecar",
+  "private": true,
+  "type": "module",
+  "description": "Node sidecar for real Synapse-backed storage execution in the py-libp2p A2A payment demo.",
+  "dependencies": {
+    "@filoz/synapse-sdk": "^0.12.0"
+  }
+}
