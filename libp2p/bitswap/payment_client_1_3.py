@@ -43,13 +43,15 @@ class BitswapPaymentClient_1_3:
         want_manager: Any,         # has retry_want_block(peer_id, cid) method
         max_auto_pay_usdc: float = 0.001,
         send_callback: Optional[Callable] = None,
+        ledger: Any = None,        # gooseswarm.payments.ledger.PaymentLedger (optional)
     ):
         self.signer = signer
         self.want_manager = want_manager
         self.max_auto_pay_units = int(max_auto_pay_usdc * 1_000_000)
         self.send_callback = send_callback
+        self.ledger = ledger
 
-        # Pending payments: nonce_hex → {peer_id, cid, terms}
+        # Pending payments: nonce_hex → {peer_id, cid, amount}
         self._pending_payments: dict[str, dict] = {}
 
     async def process_incoming_message(
@@ -173,6 +175,18 @@ class BitswapPaymentClient_1_3:
             "cid": bytes(terms.cid).hex(),
             "amount": amount,
         }
+
+        # Persist spent payment to ledger
+        if self.ledger is not None:
+            try:
+                self.ledger.record_spent_payment(
+                    peer_id=peer_id,
+                    cid=bytes(terms.cid),
+                    amount=amount,
+                    nonce=bytes(terms.nonce),
+                )
+            except Exception as _e:
+                logger.warning(f"Failed to persist spent payment: {_e}")
 
         logger.info(
             f"Sending PaymentAuthorization to {peer_id[:20]}... "
