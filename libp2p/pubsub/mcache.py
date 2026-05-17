@@ -1,3 +1,4 @@
+from collections import deque
 from collections.abc import (
     Sequence,
 )
@@ -44,7 +45,14 @@ class MessageCache:
 
     msgs: dict[bytes, rpc_pb2.Message]
 
-    history: list[list[CacheEntry]]
+    # deque(maxlen=history_size) gives O(1) slot rotation via appendleft,
+    # replacing the previous O(history_size) manual list shift.
+    history: deque[list[CacheEntry]]
+
+    # Parallel topic index: one dict[topic, list[mid]] per history slot.
+    # Lets window(topic) resolve in O(window_size + results) instead of the
+    # previous O(window_size × entries_per_slot × topics_per_message).
+    _topic_index: deque[dict[str, list[bytes]]]
 
     def __init__(self, window_size: int, history_size: int) -> None:
         """
@@ -60,9 +68,13 @@ class MessageCache:
         # msg_id (from_id + seqno) -> rpc message
         self.msgs = dict()
 
-        # max length of history_size. each item is a list of CacheEntry.
-        # messages lost upon shift().
-        self.history = [[] for _ in range(history_size)]
+        # maxlen ensures appendleft() auto-drops the oldest slot — O(1) rotation.
+        self.history = deque(
+            [[] for _ in range(history_size)], maxlen=history_size
+        )
+        self._topic_index = deque(
+            [{} for _ in range(history_size)], maxlen=history_size
+        )
 
     def put(self, msg: rpc_pb2.Message) -> None:
         """
@@ -77,6 +89,13 @@ class MessageCache:
 
         self.history[0].append(CacheEntry(mid, msg.topicIDs))
 
+        # Keep _topic_index in sync so window() never scans CacheEntry lists.
+        slot = self._topic_index[0]
+        for topic in msg.topicIDs:
+            if topic not in slot:
+                slot[topic] = []
+            slot[topic].append(mid)
+
     def get(self, mid: bytes) -> rpc_pb2.Message | None:
         """
         Get a message from the mcache.
@@ -84,41 +103,39 @@ class MessageCache:
         :param mid: message ID as bytes (from_id + seqno).
         :return: The rpc message associated with this mid
         """
-        if mid in self.msgs:
-            return self.msgs[mid]
-
-        return None
+        return self.msgs.get(mid)
 
     def window(self, topic: str) -> list[bytes]:
         """
-        Get the window for this topic.
+        Get the message IDs in the gossip window for *topic*.
+
+        Complexity: O(window_size + results) via topic index.
+        Previous complexity was O(window_size × entries_per_slot × topics_per_message).
 
         :param topic: Topic whose message ids we desire.
-        :return: List of mids in the current window.
+        :return: List of mids in the current window, newest slot first.
         """
         mids: list[bytes] = []
-
-        for entries_list in self.history[: self.window_size]:
-            for entry in entries_list:
-                for entry_topic in entry.topics:
-                    if entry_topic == topic:
-                        mids.append(entry.mid)
-
+        for i, slot in enumerate(self._topic_index):
+            if i >= self.window_size:
+                break
+            topic_mids = slot.get(topic)
+            if topic_mids:
+                mids.extend(topic_mids)
         return mids
 
     def shift(self) -> None:
         """
-        Shift the window over by 1 position, dropping the last element of the history.
-        """
-        last_entries: list[CacheEntry] = self.history[len(self.history) - 1]
+        Shift the window forward by one slot, evicting the oldest slot.
 
-        for entry in last_entries:
+        Complexity: O(evicted_messages).
+        Previous complexity was O(history_size) due to manual list rotation.
+        """
+        # Evict messages that are about to be dropped from the oldest slot.
+        for entry in self.history[-1]:
             self.msgs.pop(entry.mid, None)
 
-        i: int = len(self.history) - 2
-
-        while i >= 0:
-            self.history[i + 1] = self.history[i]
-            i -= 1
-
-        self.history[0] = []
+        # appendleft pushes a fresh empty slot to the front; because both
+        # deques have maxlen=history_size, the oldest slot is dropped in O(1).
+        self.history.appendleft([])
+        self._topic_index.appendleft({})

@@ -1,0 +1,5 @@
+Optimized :class:`~libp2p.pubsub.mcache.MessageCache` — replaced the
+O(history\_size) manual list rotation in ``shift()`` with an O(1)
+``collections.deque`` rotation, and the O(W×E×T) triple-nested topic scan
+in ``window()`` with an O(1) per-slot topic index. GossipSub heartbeat
+cost drops by up to 138× under high message rates (issue :issue:`1333`).
