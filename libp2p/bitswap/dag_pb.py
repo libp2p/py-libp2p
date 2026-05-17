@@ -30,10 +30,18 @@ def _encode_varint(value: int) -> bytes:
 
 
 def _normalize_link_cid(cid: CIDInput) -> bytes:
-    """Normalize CID input for DAG links while preserving raw-bytes compatibility."""
-    if isinstance(cid, bytes):
-        return cid
-    return cid_to_bytes(cid)
+    """
+    Normalize CID input for DAG links while preserving raw-bytes compatibility.
+
+    DAG-PB links store only the multihash (not the full CID with version/codec).
+    This matches Kubo's behavior and the DAG-PB specification.
+    """
+    from .cid import parse_cid
+
+    # Always parse the CID and extract the multihash
+    # This handles both CID objects and raw bytes (whether CIDv0, CIDv1, or already a multihash)
+    cid_obj = parse_cid(cid)
+    return cid_obj.multihash
 
 
 @dataclass(init=False)
@@ -137,8 +145,11 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
     if unixfs_data is not None:
         pb_unixfs = PBUnixFSData()
         pb_unixfs.Type = UnixFSData.TYPE_MAP[unixfs_data.type]  # type: ignore[assignment]
-        pb_unixfs.Data = unixfs_data.data
-        pb_unixfs.filesize = unixfs_data.filesize
+        # Only set fields with non-default values to match Kubo's encoding
+        if unixfs_data.data:
+            pb_unixfs.Data = unixfs_data.data
+        if unixfs_data.filesize:
+            pb_unixfs.filesize = unixfs_data.filesize
         for blocksize in unixfs_data.blocksizes:
             pb_unixfs.blocksizes.append(blocksize)
         if unixfs_data.hash_type:
@@ -339,6 +350,7 @@ def balanced_layout(
         max_links: Max links per internal node (default 174, matches Kubo)
         put_block_callback: Optional async callback to store each internal node
                            Signature: callback(cid_bytes, block_bytes)
+
     Returns:
         (root_cid_bytes, root_block_bytes)
 

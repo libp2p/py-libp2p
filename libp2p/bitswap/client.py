@@ -67,8 +67,8 @@ class BitswapClient:
         block_store: BlockStore | None = None,
         protocol_version: str = BITSWAP_PROTOCOL_V120,
         provider_query_manager: ProviderQueryManager | None = None,
-        payment_client: Any = None,   # BitswapPaymentClient_1_3 (optional)
-        payment_engine: Any = None,   # PaymentGatedDecisionEngine (optional)
+        payment_client: Any = None,  # BitswapPaymentClient_1_3 (optional)
+        payment_engine: Any = None,  # PaymentGatedDecisionEngine (optional)
     ):
         """
         Initialize Bitswap client.
@@ -723,8 +723,12 @@ class BitswapClient:
             logger.warning(f"   Entries: {len(msg.wantlist.entries)}")
             logger.warning(f"   Full: {msg.wantlist.full}")
             logger.warning("=" * 70)
-            print(f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with {len(msg.wantlist.entries)} entries", flush=True)
-        
+            print(
+                f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with "
+                f"{len(msg.wantlist.entries)} entries",
+                flush=True,
+            )
+
         # Detect peer protocol version from stream
         protocol = stream.get_protocol()
         if protocol:
@@ -735,9 +739,11 @@ class BitswapClient:
         # ── Bitswap 1.3.0 payment message handling ───────────────────────
         if peer_protocol == str(BITSWAP_PROTOCOL_V130):
             # Re-parse as 1.3.0 message to access payment fields
-            msg_1_3 = Message_1_3()
+            msg_1_3: Message_1_3 | None
             try:
-                msg_1_3.ParseFromString(msg.SerializeToString())
+                _tmp = Message_1_3()
+                _tmp.ParseFromString(msg.SerializeToString())
+                msg_1_3 = _tmp
             except Exception:
                 msg_1_3 = None
 
@@ -1212,9 +1218,7 @@ class BitswapClient:
         length_prefix = varint.encode(len(msg_bytes))
         await stream.write(length_prefix + msg_bytes)
 
-    async def _write_message_bytes(
-        self, stream: INetStream, msg_bytes: bytes
-    ) -> None:
+    async def _write_message_bytes(self, stream: INetStream, msg_bytes: bytes) -> None:
         """
         Write pre-serialized message bytes (for 1.3.0 Message_1_3 objects).
         """
@@ -1265,5 +1269,3 @@ class BitswapClient:
                 )
                 # The payment_client will handle PaymentTerms
                 # in process_incoming_message
-
-

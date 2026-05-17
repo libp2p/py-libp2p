@@ -14,7 +14,7 @@ This module lives in py-libp2p so it's importable as libp2p.bitswap.
 import logging
 import os
 import time
-from typing import Any, Optional
+from typing import Any
 
 from libp2p.bitswap.block_store import BlockStore
 from libp2p.bitswap.cid import parse_cid
@@ -50,9 +50,9 @@ class PaymentGatedDecisionEngine:
     def __init__(
         self,
         blockstore: BlockStore,
-        ledger: Any,          # gooseswarm.payments.ledger.PaymentLedger
-        pricing: Any,         # gooseswarm.payments.pricing.BlockPricingEngine
-        facilitator: Any,     # gooseswarm.payments.facilitator.FacilitatorClient
+        ledger: Any,  # gooseswarm.payments.ledger.PaymentLedger
+        pricing: Any,  # gooseswarm.payments.pricing.BlockPricingEngine
+        facilitator: Any,  # gooseswarm.payments.facilitator.FacilitatorClient
         server_wallet: str = "",
         host: Any = None,
     ):
@@ -66,7 +66,7 @@ class PaymentGatedDecisionEngine:
         self.host = host
 
         # Pending payment offers: nonce_bytes → offer_dict
-        self._pending_offers: dict[bytes, dict] = {}
+        self._pending_offers: dict[bytes, dict[str, Any]] = {}
 
         # Callbacks for sending messages back to peers
         # Set externally: engine.send_message_callback = async_fn(peer_id, msg_bytes)
@@ -76,10 +76,10 @@ class PaymentGatedDecisionEngine:
         self,
         peer_id: str,
         cid: str | bytes,
-        want_type: int,           # 0 = WANT_BLOCK, 1 = WANT_HAVE
+        want_type: int,  # 0 = WANT_BLOCK, 1 = WANT_HAVE
         send_dont_have: bool,
         peer_protocol: str = BITSWAP_PROTOCOL_V120,
-    ) -> Optional[Message_1_3 | Message_1_2]:
+    ) -> Message_1_3 | Message_1_2 | None:
         """
         Process a WANT request from a peer.
 
@@ -135,7 +135,10 @@ class PaymentGatedDecisionEngine:
         # Validate against pending offer
         offer = self._pending_offers.pop(nonce, None)
         if offer is None:
-            logger.warning(f"No pending offer for nonce {nonce.hex()[:10]}... from {peer_id[:20]}...")
+            logger.warning(
+                f"No pending offer for nonce {nonce.hex()[:10]}... "
+                f"from {peer_id[:20]}..."
+            )
             return self._make_payment_rejection(auth.cid, "NO_PENDING_OFFER")
 
         if offer["peer_id"] != peer_id:
@@ -213,7 +216,7 @@ class PaymentGatedDecisionEngine:
 
     async def process_incoming_1_3_message(
         self, peer_id: str, msg: Message_1_3
-    ) -> Optional[Message_1_3]:
+    ) -> Message_1_3 | None:
         """
         Process an incoming 1.3.0 message that may contain PaymentAuthorizations.
         Returns a response message or None.
@@ -250,7 +253,7 @@ class PaymentGatedDecisionEngine:
         # BlockPresence with type=2 (PaymentRequired)
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
-        presence.type = Message_1_3.PaymentRequired  # = 2
+        presence.type = Message_1_3.BlockPresenceType.PaymentRequired  # = 2
 
         # PaymentTerms in field 6
         terms = msg.payment_terms.add()
@@ -262,9 +265,7 @@ class PaymentGatedDecisionEngine:
         terms.nonce = nonce
         terms.valid_before = valid_before
         terms.block_size = block_size
-        terms.description = (
-            f"Block {cid_bytes.hex()[:20]}... ({block_size // 1024}KB)"
-        )
+        terms.description = f"Block {cid_bytes.hex()[:20]}... ({block_size // 1024}KB)"
         terms.scheme = "exact"
 
         logger.info(
@@ -278,15 +279,23 @@ class PaymentGatedDecisionEngine:
         msg = MsgClass()
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
-        presence.type = MsgClass.Have  # = 0
+        if protocol == BITSWAP_PROTOCOL_V130:
+            presence.type = Message_1_3.BlockPresenceType.Have  # = 0
+        else:
+            presence.type = Message_1_2.BlockPresenceType.Have  # = 0
         return msg
 
-    def _make_dont_have(self, cid_bytes: bytes, protocol: str) -> Message_1_3 | Message_1_2:
+    def _make_dont_have(
+        self, cid_bytes: bytes, protocol: str
+    ) -> Message_1_3 | Message_1_2:
         MsgClass = Message_1_3 if protocol == BITSWAP_PROTOCOL_V130 else Message_1_2
         msg = MsgClass()
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
-        presence.type = MsgClass.DontHave  # = 1
+        if protocol == BITSWAP_PROTOCOL_V130:
+            presence.type = Message_1_3.BlockPresenceType.DontHave  # = 1
+        else:
+            presence.type = Message_1_2.BlockPresenceType.DontHave  # = 1
         return msg
 
     def _make_block_response(
@@ -300,14 +309,14 @@ class PaymentGatedDecisionEngine:
         block.prefix = cid_bytes[:4] if len(cid_bytes) >= 4 else cid_bytes
         return msg
 
-    def _make_payment_rejection(
-        self, cid_bytes: bytes, reason: str
-    ) -> Message_1_3:
+    def _make_payment_rejection(self, cid_bytes: bytes, reason: str) -> Message_1_3:
         msg = Message_1_3()
         rej = msg.payment_rejections.add()
         rej.cid = bytes(cid_bytes)
         rej.reason = reason
-        logger.warning(f"Payment rejected: cid={bytes(cid_bytes).hex()[:20]}... reason={reason}")
+        logger.warning(
+            f"Payment rejected: cid={bytes(cid_bytes).hex()[:20]}... reason={reason}"
+        )
         return msg
 
 

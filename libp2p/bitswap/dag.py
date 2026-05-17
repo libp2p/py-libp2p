@@ -270,7 +270,8 @@ class MerkleDag:
                     f"Wrapping single-block file in directory with name: {filename}"
                 )
 
-                dir_data = create_directory_node([(filename, cid, file_size)])
+                # Tsize should be the block size, not the file data size
+                dir_data = create_directory_node([(filename, cid, len(leaf_block))])
                 dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
                 await self._put_block(dir_cid, dir_data)
 
@@ -330,18 +331,20 @@ class MerkleDag:
         # Create a sync wrapper for the async _put_block method
         # We'll collect (cid, data) pairs and store them after
         internal_nodes: list[tuple[bytes, bytes]] = []
-        
+
         def store_internal_node(cid: bytes, data: bytes) -> None:
             """Callback to collect internal nodes for storage."""
             internal_nodes.append((cid, data))
-        
-        root_cid, root_data = balanced_layout(leaf_triples, put_block_callback=store_internal_node)
-        
+
+        root_cid, root_data = balanced_layout(
+            leaf_triples, put_block_callback=store_internal_node
+        )
+
         # Store all internal nodes
         logger.info(f"Storing {len(internal_nodes)} internal DAG nodes...")
         for cid, data in internal_nodes:
             await self._put_block(cid, data)
-        
+
         # Store the root node
         await self._put_block(root_cid, root_data)
 
@@ -374,7 +377,8 @@ class MerkleDag:
             logger.info(f"Wrapping file in directory with name: {filename}")
 
             # Create directory node with single entry pointing to the file
-            dir_data = create_directory_node([(filename, root_cid, file_size)])
+            # Tsize should be the block size, not the file data size
+            dir_data = create_directory_node([(filename, root_cid, len(root_data))])
             dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
             await self._put_block(dir_cid, dir_data)
 
@@ -619,7 +623,10 @@ class MerkleDag:
             if dir_links:
                 first_link = dir_links[0]
                 filename = first_link.name or None
-                actual_file_cid = first_link.cid
+                # Links contain multihashes, need to reconstruct CIDv1
+                # Assume dag-pb codec (0x70) for file blocks
+                multihash = first_link.cid
+                actual_file_cid = b'\x01\x70' + multihash  # CIDv1 + dag-pb codec + multihash
                 logger.info(f"Filename from directory: {filename!r}")
                 actual_file_data = await self._get_block(
                     actual_file_cid, peer_id, timeout
@@ -699,7 +706,9 @@ class MerkleDag:
                     msg = f"[DAG] Depth {depth}: {cid_str} has {len(node_links)}"
                     logger.debug(f"{msg} children")
                     for link in node_links:
-                        child_cids.append(link.cid)
+                        # Links contain multihashes, reconstruct CIDv1 with dag-pb codec
+                        child_cid = b'\x01\x70' + link.cid
+                        child_cids.append(child_cid)
 
             # Recursively fetch next level if there are children
             if child_cids:
@@ -709,7 +718,9 @@ class MerkleDag:
                 await _batch_fetch_tree(child_cids, depth + 1)
 
         # Starting from the top-level links
-        await _batch_fetch_tree([top_link.cid for top_link in top_links], depth=1)
+        # Links contain multihashes, reconstruct CIDv1 with dag-pb codec
+        top_cids = [b'\x01\x70' + top_link.cid for top_link in top_links]
+        await _batch_fetch_tree(top_cids, depth=1)
         blocks_count = len(all_blocks_map)
         logger.info(f"[DAG] ✓ Tree fetch complete: {blocks_count} total blocks")
         print(f"[FETCH] ✓ Tree fetch complete: {blocks_count} total blocks", flush=True)
@@ -746,12 +757,16 @@ class MerkleDag:
                 c_tot = len(node_links)
                 msg = f"[DAG] Depth {depth}: processing child {c_idx}/{c_tot}"
                 logger.debug(msg)
-                _collect_leaves_local(child_link.cid, depth + 1)
+                # Links contain multihashes, reconstruct CIDv1
+                child_cid = b'\x01\x70' + child_link.cid
+                _collect_leaves_local(child_cid, depth + 1)
 
         # Traverse each top-level block
         for i, top_link in enumerate(top_links):
             logger.info(f"[DAG] Traversing top-level {i + 1}/{len(top_links)}...")
-            _collect_leaves_local(top_link.cid, depth=1)
+            # Links contain multihashes, reconstruct CIDv1
+            top_cid = b'\x01\x70' + top_link.cid
+            _collect_leaves_local(top_cid, depth=1)
 
         logger.info(f"[DAG] ✓ Collected {len(ordered_leaf_cids)} leaf blocks")
 

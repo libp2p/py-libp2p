@@ -11,8 +11,9 @@ a PAYMENT_REQUIRED response with PaymentTerms, this client:
 This module lives in py-libp2p so it's importable as libp2p.bitswap.
 """
 
+from collections.abc import Callable
 import logging
-from typing import Any, Callable, Optional
+from typing import Any
 
 from libp2p.bitswap.pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 
@@ -39,11 +40,11 @@ class BitswapPaymentClient_1_3:
 
     def __init__(
         self,
-        signer: Any,               # gooseswarm.payments.eip3009_signer.EIP3009Signer
-        want_manager: Any,         # has retry_want_block(peer_id, cid) method
+        signer: Any,  # gooseswarm.payments.eip3009_signer.EIP3009Signer
+        want_manager: Any,  # has retry_want_block(peer_id, cid) method
         max_auto_pay_usdc: float = 0.001,
-        send_callback: Optional[Callable] = None,
-        ledger: Any = None,        # gooseswarm.payments.ledger.PaymentLedger (optional)
+        send_callback: Callable[..., Any] | None = None,
+        ledger: Any = None,  # gooseswarm.payments.ledger.PaymentLedger (optional)
     ):
         self.signer = signer
         self.want_manager = want_manager
@@ -52,11 +53,11 @@ class BitswapPaymentClient_1_3:
         self.ledger = ledger
 
         # Pending payments: nonce_hex → {peer_id, cid, amount}
-        self._pending_payments: dict[str, dict] = {}
+        self._pending_payments: dict[str, dict[str, Any]] = {}
 
     async def process_incoming_message(
         self, peer_id: str, msg: Message_1_3
-    ) -> Optional[Message_1_3]:
+    ) -> Message_1_3 | None:
         """
         Called by the Bitswap dispatcher for every incoming 1.3.0 message.
 
@@ -85,7 +86,8 @@ class BitswapPaymentClient_1_3:
         return None
 
     async def build_payment_auth_msg(
-        self, terms: Any  # Message_1_3.PaymentTerms
+        self,
+        terms: Any,  # Message_1_3.PaymentTerms
     ) -> Message_1_3:
         """
         Build a PaymentAuthorization message for the given PaymentTerms.
@@ -117,7 +119,7 @@ class BitswapPaymentClient_1_3:
 
     async def _handle_payment_terms(
         self, peer_id: str, terms: Any
-    ) -> Optional[Message_1_3]:
+    ) -> Message_1_3 | None:
         """
         Server sent us PaymentTerms alongside a PaymentRequired BlockPresence.
         Decide whether to pay and send back a PaymentAuthorization.
@@ -127,7 +129,8 @@ class BitswapPaymentClient_1_3:
         # Reject if too expensive
         if amount > self.max_auto_pay_units:
             logger.info(
-                f"Block too expensive: {amount} units > max {self.max_auto_pay_units} units. "
+                f"Block too expensive: {amount} units > "
+                f"max {self.max_auto_pay_units} units. "
                 f"Skipping — will seek block elsewhere."
             )
             return None
@@ -195,18 +198,15 @@ class BitswapPaymentClient_1_3:
         )
         return response
 
-    async def _handle_payment_receipt(
-        self, peer_id: str, receipt: Any
-    ) -> None:
+    async def _handle_payment_receipt(self, peer_id: str, receipt: Any) -> None:
         """Server confirmed payment. Retry the WANT_BLOCK immediately."""
         cid_hex = (
-            bytes(receipt.cid).hex()
-            if isinstance(receipt.cid, bytes)
-            else receipt.cid
+            bytes(receipt.cid).hex() if isinstance(receipt.cid, bytes) else receipt.cid
         )
         logger.info(
             f"Payment receipt received from {peer_id[:20]}... "
-            f"cid={cid_hex[:20]}... tx={receipt.tx_hash[:20] if receipt.tx_hash else 'optimistic'}..."
+            f"cid={cid_hex[:20]}... "
+            f"tx={receipt.tx_hash[:20] if receipt.tx_hash else 'optimistic'}..."
         )
         # Trigger want manager to retry
         if self.want_manager:

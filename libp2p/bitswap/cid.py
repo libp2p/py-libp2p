@@ -243,8 +243,13 @@ def cid_to_bytes(value: CIDInput) -> bytes:
 
 
 def cid_to_text(value: CIDInput) -> str:
-    """Convert CID input to canonical CID string form."""
-    return str(parse_cid(value))
+    """Convert CID input to canonical CID string form (base32 for CIDv1, base58btc for CIDv0)."""
+    cid_obj = parse_cid(value)
+    # Use base32 for CIDv1 (matches Kubo's default output)
+    if cid_obj.version == 1:
+        return cid_obj.encode('base32').decode()
+    # Use base58btc for CIDv0 (legacy format)
+    return str(cid_obj)
 
 
 def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:

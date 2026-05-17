@@ -2,7 +2,7 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
+from typing import Any as _Any, ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
@@ -41,7 +41,7 @@ class Message(_message.Message):
         FULL_FIELD_NUMBER: _ClassVar[int]
         entries: _containers.RepeatedCompositeFieldContainer[Message.Wantlist.Entry]
         full: bool
-        def __init__(self, entries: _Optional[_Iterable[_Union[Message.Wantlist.Entry, _Mapping]]] = ..., full: bool = ...) -> None: ...
+        def __init__(self, entries: _Optional[_Iterable[_Union[Message.Wantlist.Entry, _Mapping[str, _Any]]]] = ..., full: bool = ...) -> None: ...
     class Block(_message.Message):
         __slots__ = ("prefix", "data")
         PREFIX_FIELD_NUMBER: _ClassVar[int]
@@ -138,4 +138,4 @@ class Message(_message.Message):
     payment_authorizations: _containers.RepeatedCompositeFieldContainer[Message.PaymentAuthorization]
     payment_receipts: _containers.RepeatedCompositeFieldContainer[Message.PaymentReceipt]
     payment_rejections: _containers.RepeatedCompositeFieldContainer[Message.PaymentRejection]
-    def __init__(self, wantlist: _Optional[_Union[Message.Wantlist, _Mapping]] = ..., blocks: _Optional[_Iterable[bytes]] = ..., payload: _Optional[_Iterable[_Union[Message.Block, _Mapping]]] = ..., blockPresences: _Optional[_Iterable[_Union[Message.BlockPresence, _Mapping]]] = ..., pendingBytes: _Optional[int] = ..., payment_terms: _Optional[_Iterable[_Union[Message.PaymentTerms, _Mapping]]] = ..., payment_authorizations: _Optional[_Iterable[_Union[Message.PaymentAuthorization, _Mapping]]] = ..., payment_receipts: _Optional[_Iterable[_Union[Message.PaymentReceipt, _Mapping]]] = ..., payment_rejections: _Optional[_Iterable[_Union[Message.PaymentRejection, _Mapping]]] = ...) -> None: ...
+    def __init__(self, wantlist: _Optional[_Union[Message.Wantlist, _Mapping[str, _Any]]] = ..., blocks: _Optional[_Iterable[bytes]] = ..., payload: _Optional[_Iterable[_Union[Message.Block, _Mapping[str, _Any]]]] = ..., blockPresences: _Optional[_Iterable[_Union[Message.BlockPresence, _Mapping[str, _Any]]]] = ..., pendingBytes: _Optional[int] = ..., payment_terms: _Optional[_Iterable[_Union[Message.PaymentTerms, _Mapping[str, _Any]]]] = ..., payment_authorizations: _Optional[_Iterable[_Union[Message.PaymentAuthorization, _Mapping[str, _Any]]]] = ..., payment_receipts: _Optional[_Iterable[_Union[Message.PaymentReceipt, _Mapping[str, _Any]]]] = ..., payment_rejections: _Optional[_Iterable[_Union[Message.PaymentRejection, _Mapping[str, _Any]]]] = ...) -> None: ...
