@@ -34,6 +34,8 @@ New code should prefer the object-returning variants above.
 from .block_service import BlockService
 from .block_store import BlockStore, FilesystemBlockStore, MemoryBlockStore
 from .gated_decision_engine import PaymentGatedDecisionEngine
+from .payment_ledger import PaymentLedger
+from .pricing_engine import BlockPricingEngine
 from .payment_client_1_3 import BitswapPaymentClient_1_3
 from .cid import (
     CID_V0,
@@ -82,6 +84,8 @@ __all__ = [
     "BitswapClient",
     "BitswapPaymentClient_1_3",
     "PaymentGatedDecisionEngine",
+    "PaymentLedger",
+    "BlockPricingEngine",
     "BlockService",
     "BlockStore",
     "MemoryBlockStore",

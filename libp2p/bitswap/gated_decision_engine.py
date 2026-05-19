@@ -2,17 +2,22 @@
 Payment-Gated Decision Engine for Bitswap 1.3.0.
 
 Extends the standard Bitswap block serving logic with payment gating:
-- If a block is free (small), serve it directly.
+- If a block is free, serve it directly.
 - If a block requires payment and the peer has NOT paid, respond with
-  PaymentRequired (type=2) + PaymentTerms in-band (1.3.0 path) or
-  DONT_HAVE + side-channel (1.2.0 fallback path).
-- If the peer HAS paid, serve the block normally.
+  PaymentRequired (type=2) + PaymentTerms in-band (1.3.0 path).
+- If the peer sends a TxReceipt (on-chain payment proof), verify it
+  and serve the block.
+
+Proto alignment:
+  PaymentTerms  → fields: cid, asset, pay_to, amount, network, block_size, description
+  TxReceipt     → fields: cid, tx_hash, from_address, to_address, amount, asset, network
+  PaymentReceipt → fields: cid, tx_hash, expires
+  PaymentRejection → fields: cid, reason
 
 This module lives in py-libp2p so it's importable as libp2p.bitswap.
 """
 
 import logging
-import os
 import time
 from typing import Any
 
@@ -32,79 +37,159 @@ class PaymentGatedDecisionEngine:
     Decides whether to serve a block or gate it behind payment.
 
     Integrates with:
-    - gooseswarm.payments.ledger.PaymentLedger — tracks paid (peer, cid) pairs
-    - gooseswarm.payments.pricing.BlockPricingEngine — computes prices
-    - gooseswarm.payments.facilitator.FacilitatorClient — verifies EIP-712 sigs
+    - payments.ledger.PaymentLedger         — tracks paid (peer, cid) pairs
+    - payments.pricing.BlockPricingEngine   — computes prices
+    - payments.tx_verifier.TxVerifier       — verifies on-chain TxReceipts
 
-    Usage:
-        engine = PaymentGatedDecisionEngine(
-            blockstore=my_blockstore,
-            ledger=my_ledger,
-            pricing=my_pricing,
-            facilitator=my_facilitator,
-            server_wallet="0x...",
-        )
-        # Wire into BitswapClient as a message handler
+    Payment flow (1.3.0):
+      1. Client sends WANT_BLOCK
+      2. Server → PaymentRequired + PaymentTerms (price offer)
+      3. Client pays on-chain, sends TxReceipt with tx_hash
+      4. Server verifies tx on-chain → PaymentReceipt + block data
     """
 
     def __init__(
         self,
         blockstore: BlockStore,
-        ledger: Any,  # gooseswarm.payments.ledger.PaymentLedger
-        pricing: Any,  # gooseswarm.payments.pricing.BlockPricingEngine
-        facilitator: Any,  # gooseswarm.payments.facilitator.FacilitatorClient
+        ledger: Any,        # payments.ledger.PaymentLedger
+        pricing: Any,       # payments.pricing.BlockPricingEngine
+        tx_verifier: Any,   # payments.tx_verifier.TxVerifier (or None)
         server_wallet: str = "",
-        host: Any = None,
+        network: str = "sepolia",
+        asset: str = "ETH",
     ):
         self.blockstore = blockstore
         self.ledger = ledger
         self.pricing = pricing
-        self.facilitator = facilitator
-        self.server_wallet = server_wallet or (
-            facilitator.server_wallet if facilitator else ""
-        )
-        self.host = host
+        self.tx_verifier = tx_verifier
+        self.server_wallet = server_wallet
+        self.network = network
+        self.asset = asset
 
-        # Pending payment offers: nonce_bytes → offer_dict
-        self._pending_offers: dict[bytes, dict[str, Any]] = {}
+        # Track pending payment offers: cid_hex → (peer_id, terms)
+        self._pending_offers: dict[str, tuple[str, Any]] = {}
 
         # Callbacks for sending messages back to peers
-        # Set externally: engine.send_message_callback = async_fn(peer_id, msg_bytes)
         self.send_message_callback = None
+        
+        # Root CID tracking: cid_hex → {root_cid, total_size, child_count}
+        # Used to compute total file size for pricing
+        self._dag_info: dict[str, dict[str, Any]] = {}
+        
+        # Root CID tracking: cid_hex → {root_cid, total_size, child_count}
+        # Used to compute total file size for pricing
+        self._dag_info: dict[str, dict[str, Any]] = {}
+
+    async def register_dag(
+        self,
+        root_cid: str | bytes,
+        child_cids: list[str | bytes],
+        total_size: int,
+    ) -> None:
+        """
+        Register a DAG structure for root CID payment tracking.
+        
+        Call this after chunking a file to register the relationship between
+        the root CID and its child blocks, along with the total file size.
+        
+        Args:
+            root_cid: The root CID of the DAG
+            child_cids: List of child/chunk CIDs
+            total_size: Total size of all blocks combined (bytes)
+            
+        Example:
+            >>> # After adding a large file to Bitswap
+            >>> await engine.register_dag(
+            ...     root_cid=root_cid,
+            ...     child_cids=[chunk1, chunk2, ...],
+            ...     total_size=5_000_000,  # 5 MB
+            ... )
+        """
+        root_hex = _cid_to_str(root_cid)
+        
+        # Store DAG metadata
+        self._dag_info[root_hex] = {
+            "root_cid": root_hex,
+            "total_size": total_size,
+            "child_count": len(child_cids),
+        }
+        
+        # Register in ledger so child blocks inherit root payment status
+        await self.ledger.register_dag(root_cid, child_cids)
+        
+        logger.info(
+            f"📋 Registered DAG: root={root_hex[:20]}... "
+            f"size={total_size}B children={len(child_cids)}"
+        )
+
+    def mark_free(self, cid: str | bytes) -> None:
+        """
+        Mark a CID as free (no payment required).
+        
+        Args:
+            cid: The CID to mark as free (root or child)
+        """
+        self.ledger.mark_free(cid)
+        self.pricing.set_free(cid)
+        logger.info(f"Marked as FREE: {_cid_to_str(cid)[:20]}...")
 
     async def handle_want(
         self,
         peer_id: str,
         cid: str | bytes,
-        want_type: int,  # 0 = WANT_BLOCK, 1 = WANT_HAVE
+        want_type: int,       # 0 = WANT_BLOCK, 1 = WANT_HAVE
         send_dont_have: bool,
         peer_protocol: str = BITSWAP_PROTOCOL_V120,
     ) -> Message_1_3 | Message_1_2 | None:
         """
         Process a WANT request from a peer.
-
         Returns a Message to send back, or None if nothing should be sent.
         """
         cid_str = _cid_to_str(cid)
         cid_bytes = _cid_to_bytes(cid)
         cid_obj = parse_cid(cid_bytes)
 
+        logger.info(
+            f"🔍 handle_want: peer={peer_id[:20]}... cid={cid_str[:20]}... "
+            f"want_type={want_type} protocol={peer_protocol}"
+        )
+
         # Check blockstore
+        logger.info("All CIDs in blockstore: " + ", ".join([c.hex() for c in self.blockstore.get_all_cids()]))
         block_data = await self.blockstore.get_block(cid_obj)
 
         if block_data is None:
-            # We don't have the block
+            logger.warning(f"❌ Block not in store: {cid_str[:20]}...")
             if send_dont_have:
                 return self._make_dont_have(cid_bytes, peer_protocol)
             return None
 
         block_size = len(block_data)
+        logger.info(f"✅ Block found: {cid_str[:20]}... size={block_size}")
 
-        # Compute price
-        price = self.pricing.compute_price(cid_str, block_size)
+        # Get pricing size (use total DAG size if this is part of a DAG)
+        pricing_size = self._get_pricing_size(cid_str, block_size)
+        
+        # Compute price (at root CID level, not per-block)
+        price = self.pricing.compute_price(cid_str, pricing_size)
+        logger.info(
+            f"💰 Price: {price} units for {cid_str[:20]}... "
+            f"(block={block_size}B, pricing_size={pricing_size}B)"
+        )
 
-        if price == 0 or self.ledger.is_paid(peer_id, cid_str, block_size):
-            # Free block or already paid — serve it
+        # Check if free or already paid (ledger resolves child → root automatically)
+        is_paid = self.ledger.is_paid(peer_id, cid_str)
+        
+        if price == 0:
+            # Free block — serve it
+            logger.info(f"✅ Serving block (FREE): {cid_str[:20]}...")
+            if want_type == 1:  # WANT_HAVE
+                return self._make_have(cid_bytes, peer_protocol)
+            else:  # WANT_BLOCK
+                return self._make_block_response(cid_bytes, block_data, peer_protocol)
+        elif is_paid:
+            # Already paid with sufficient amount — serve it
+            logger.info(f"✅ Serving block (ALREADY PAID): {cid_str[:20]}... price={price} units")
             if want_type == 1:  # WANT_HAVE
                 return self._make_have(cid_bytes, peer_protocol)
             else:  # WANT_BLOCK
@@ -112,11 +197,16 @@ class PaymentGatedDecisionEngine:
         else:
             # Payment required
             if peer_protocol == BITSWAP_PROTOCOL_V130:
-                return await self._make_payment_required_1_3(
-                    peer_id, cid_bytes, block_size, price
+                logger.info(
+                    f"💳 Payment required: {price} units for {cid_str[:20]}..."
+                )
+                return self._make_payment_required_1_3(
+                    peer_id, cid_bytes, pricing_size, price
                 )
             else:
-                # 1.2.0 fallback: send DONT_HAVE (side-channel is handled separately)
+                logger.warning(
+                    f"⚠️  Payment required but peer on {peer_protocol}, sending DONT_HAVE"
+                )
                 if send_dont_have:
                     return self._make_dont_have(cid_bytes, peer_protocol)
                 return None
@@ -124,95 +214,115 @@ class PaymentGatedDecisionEngine:
     async def handle_payment_authorization(
         self,
         peer_id: str,
-        auth: Any,  # pb_1_3.Message.PaymentAuthorization
+        auth: Any,  # Message_1_3.PaymentAuthorization
     ) -> Message_1_3:
         """
-        Process a PaymentAuthorization from a client.
-        Returns a PaymentReceipt or PaymentRejection message.
+        Process a PaymentAuthorization from a client (EIP-3009 signed payment).
+        Verifies the signature and serves the block if valid.
         """
-        nonce = bytes(auth.nonce)
+        cid_bytes = bytes(auth.cid)
+        cid_str = cid_bytes.hex()
+        from_address = auth.from_address
 
-        # Validate against pending offer
-        offer = self._pending_offers.pop(nonce, None)
-        if offer is None:
-            logger.warning(
-                f"No pending offer for nonce {nonce.hex()[:10]}... "
-                f"from {peer_id[:20]}..."
-            )
-            return self._make_payment_rejection(auth.cid, "NO_PENDING_OFFER")
-
-        if offer["peer_id"] != peer_id:
-            return self._make_payment_rejection(auth.cid, "PEER_MISMATCH")
-
-        # Check nonce replay
-        if self.ledger.is_nonce_used(nonce):
-            return self._make_payment_rejection(auth.cid, "NONCE_USED")
-
-        # Check amount
-        if auth.value < offer["amount"]:
-            reason = f"WRONG_AMOUNT:need={offer['amount']},got={auth.value}"
-            return self._make_payment_rejection(auth.cid, reason)
-
-        # Check expiry
-        if offer["valid_before"] < int(time.time()):
-            return self._make_payment_rejection(auth.cid, "EXPIRED")
-
-        # Verify EIP-712 signature
-        result = await self.facilitator.verify(
-            from_address=auth.from_address,
-            to_address=auth.to_address,
-            value=auth.value,
-            valid_after=auth.valid_after,
-            valid_before=auth.valid_before,
-            nonce=nonce,
-            v=auth.v,
-            r=bytes(auth.r),
-            s=bytes(auth.s),
+        logger.warning("=" * 70)
+        logger.warning(
+            f"[STEP 6b] SERVER handle_payment_authorization: peer={peer_id[:20]}... "
+            f"cid={cid_str[:20]}... from={from_address[:12]}... value={auth.value}"
         )
+        logger.warning("=" * 70)
 
-        if not result.valid:
-            return self._make_payment_rejection(auth.cid, result.error)
+        # Check if already paid (ledger hit — no need to re-verify)
+        cid_obj = parse_cid(cid_bytes)
+        block_data = await self.blockstore.get_block(cid_obj)
+
+        if block_data is None:
+            return self._make_payment_rejection(cid_bytes, "BLOCK_NOT_FOUND")
+
+        block_size = len(block_data)
+        pricing_size = self._get_pricing_size(cid_str, block_size)
+        expected_price = self.pricing.compute_price(cid_str, pricing_size)
+
+        # Check if already paid (ledger resolves child → root automatically)
+        if self.ledger.is_paid(peer_id, cid_str):
+            # Already in ledger with sufficient payment — serve immediately
+            logger.info(
+                f"✅ Already paid (ledger hit): {cid_str[:20]}... "
+                f"block_size={block_size}B expected_price={expected_price}"
+            )
+            return self._make_receipt_and_block(cid_bytes, "", block_data)
+
+        # Validate payment amount matches expected price
+        if auth.value < expected_price:
+            error_msg = (
+                f"INSUFFICIENT_PAYMENT: paid={auth.value}, "
+                f"expected={expected_price} for {block_size}B block"
+            )
+            logger.warning(f"❌ {error_msg}")
+            return self._make_payment_rejection(cid_bytes, error_msg)
+        
+        # Verify EIP-3009 signature
+        logger.warning("=" * 70)
+        logger.warning(f"[STEP 7] SERVER VERIFYING EIP-3009 SIGNATURE")
+        logger.warning(f"   from={from_address[:20]}...")
+        logger.warning(f"   to={auth.to_address[:20]}...")
+        logger.warning(f"   value={auth.value}  expected={expected_price}")
+        logger.warning(f"   verifier={'configured' if self.tx_verifier is not None else 'NOT CONFIGURED (optimistic mode)'}")
+        logger.warning("=" * 70)
+        if self.tx_verifier is not None:
+            try:
+                # The tx_verifier is actually a FacilitatorClient for EIP-3009
+                result = await self.tx_verifier.verify(
+                    from_address=from_address,
+                    to_address=auth.to_address,
+                    value=auth.value,
+                    valid_after=auth.valid_after,
+                    valid_before=auth.valid_before,
+                    nonce=bytes(auth.nonce),
+                    v=auth.v,
+                    r=bytes(auth.r),
+                    s=bytes(auth.s),
+                )
+                valid = result.valid
+                error = result.error
+            except Exception as e:
+                logger.error(f"[STEP 7] VERIFICATION EXCEPTION: {e}", exc_info=True)
+                valid, error = False, str(e)
+
+            if not valid:
+                logger.warning("=" * 70)
+                logger.warning(f"[STEP 7] ❌ EIP-3009 VERIFICATION FAILED: {error}")
+                logger.warning("=" * 70)
+                return self._make_payment_rejection(cid_bytes, error or "INVALID_SIGNATURE")
+            else:
+                logger.warning(f"[STEP 7] ✅ EIP-3009 VERIFICATION PASSED")
+        else:
+            # No verifier configured — optimistic mode: trust the authorization
+            logger.warning(
+                "[STEP 7] ⚠️  No payment verifier configured — accepting PaymentAuthorization optimistically"
+            )
 
         # Record payment in ledger
         try:
             await self.ledger.record_payment(
                 peer_id=peer_id,
-                cid=bytes(auth.cid),
-                tx_hash=result.tx_hash,
+                cid=cid_bytes,
+                tx_hash="",  # No on-chain tx for EIP-3009
                 amount=auth.value,
-                nonce=nonce,
+                nonce=bytes(auth.nonce),
             )
         except ValueError as e:
-            return self._make_payment_rejection(auth.cid, str(e))
+            # Duplicate nonce — already recorded
+            logger.info(f"Payment already recorded: {e}")
 
-        # Send PaymentReceipt + the block data
-        msg = Message_1_3()
-        receipt = msg.payment_receipts.add()
-        receipt.cid = bytes(auth.cid)
-        receipt.tx_hash = result.tx_hash
-        receipt.expires = int(time.time()) + 86400 * 7  # 7 days
-
-        # Include the paid block in the response
-        block_data = await self.blockstore.get_block(parse_cid(bytes(auth.cid)))
-        if block_data is not None:
-            block_entry = msg.payload.add()
-            block_entry.prefix = bytes(auth.cid)[:4]
-            block_entry.data = block_data
-            logger.info(
-                f"Payment accepted + block sent to {peer_id[:20]}... "
-                f"cid={bytes(auth.cid).hex()[:20]}... amount={auth.value} "
-                f"size={len(block_data)} bytes"
-            )
-        else:
-            logger.warning(
-                f"Payment accepted but block not found locally: "
-                f"cid={bytes(auth.cid).hex()[:20]}..."
-            )
-            logger.info(
-                f"Payment accepted from {peer_id[:20]}... "
-                f"cid={bytes(auth.cid).hex()[:20]}... amount={auth.value}"
-            )
-        return msg
+        logger.warning("=" * 70)
+        logger.warning(
+            f"[STEP 8b] ✅ SERVER PAYMENT ACCEPTED — SENDING BLOCK TO CLIENT"
+        )
+        logger.warning(
+            f"   cid={cid_str[:20]}... value={auth.value} expected={expected_price} block_size={block_size}B (EIP-3009)"
+        )
+        logger.warning("=" * 70)
+        return self._make_receipt_and_block(cid_bytes, "", block_data)
 
     async def process_incoming_1_3_message(
         self, peer_id: str, msg: Message_1_3
@@ -222,14 +332,46 @@ class PaymentGatedDecisionEngine:
         Returns a response message or None.
         """
         if msg.payment_authorizations:
-            # Process the first authorization (typically one per message)
             for auth in msg.payment_authorizations:
                 return await self.handle_payment_authorization(peer_id, auth)
         return None
 
     # ── Internal helpers ──────────────────────────────────────────────────
 
-    async def _make_payment_required_1_3(
+    def _get_pricing_size(self, cid_str: str, block_size: int) -> int:
+        """
+        Get the size to use for pricing calculation.
+        
+        NEW PAYMENT MODEL: For root CIDs, use total DAG size.
+        For child CIDs, pricing is N/A (they inherit root payment).
+        
+        Args:
+            cid_str: The CID (hex string)
+            block_size: The actual block size
+            
+        Returns:
+            Size in bytes to use for pricing
+        """
+        # Check if this is a registered DAG root
+        dag_info = self._dag_info.get(cid_str)
+        if dag_info:
+            # This is a root CID - use total DAG size for pricing
+            total_size = dag_info["total_size"]
+            logger.info(
+                f"💡 CID {cid_str[:20]}... is DAG root: "
+                f"block_size={block_size}B, total_size={total_size}B"
+            )
+            return total_size
+        
+        # Not a registered root CID - use block size (backward compatibility)
+        # This handles: old files, single-block files, or child blocks
+        logger.debug(
+            f"CID {cid_str[:20]}... not a registered DAG root, "
+            f"using block_size={block_size}B for pricing"
+        )
+        return block_size
+
+    def _make_payment_required_1_3(
         self,
         peer_id: str,
         cid_bytes: bytes,
@@ -237,17 +379,9 @@ class PaymentGatedDecisionEngine:
         amount: int,
     ) -> Message_1_3:
         """Build a 1.3.0 PaymentRequired message with embedded PaymentTerms."""
-        nonce = os.urandom(32)
-        valid_before = int(time.time()) + 120  # 2 minute window
-
-        # Store pending offer for when PaymentAuthorization arrives
-        self._pending_offers[nonce] = {
-            "peer_id": peer_id,
-            "cid": cid_bytes,
-            "amount": amount,
-            "valid_before": valid_before,
-        }
-
+        import secrets
+        import time
+        
         msg = Message_1_3()
 
         # BlockPresence with type=2 (PaymentRequired)
@@ -255,23 +389,50 @@ class PaymentGatedDecisionEngine:
         presence.cid = cid_bytes
         presence.type = Message_1_3.BlockPresenceType.PaymentRequired  # = 2
 
-        # PaymentTerms in field 6
+        # PaymentTerms — all fields including nonce, valid_before, scheme
         terms = msg.payment_terms.add()
         terms.cid = cid_bytes
-        terms.asset = self.facilitator.usdc_address if self.facilitator else ""
+        terms.asset = self.asset
         terms.pay_to = self.server_wallet
         terms.amount = amount
-        terms.network = getattr(self.facilitator, "network", "base-sepolia")
-        terms.nonce = nonce
-        terms.valid_before = valid_before
+        terms.network = self.network
+        terms.nonce = secrets.token_bytes(32)  # Server generates nonce
+        terms.valid_before = int(time.time()) + 3600  # 1 hour expiry
         terms.block_size = block_size
-        terms.description = f"Block {cid_bytes.hex()[:20]}... ({block_size // 1024}KB)"
-        terms.scheme = "exact"
+        terms.description = (
+            f"Block {cid_bytes.hex()[:20]}... ({block_size // 1024}KB) — "
+            f"pay {amount} wei to {self.server_wallet[:10]}..."
+        )
+        terms.scheme = "EIP3009"  # Payment scheme
 
         logger.info(
-            f"Sending PaymentRequired to {peer_id[:20]}... "
-            f"cid={cid_bytes.hex()[:20]}... amount={amount} units"
+            f"📤 PaymentRequired → {peer_id[:20]}... "
+            f"cid={cid_bytes.hex()[:20]}... amount={amount} asset={self.asset}"
         )
+        return msg
+
+    def _make_receipt_and_block(
+        self, cid_bytes: bytes, tx_hash: str, block_data: bytes
+    ) -> Message_1_3:
+        """Build a PaymentReceipt + block payload message."""
+        msg = Message_1_3()
+
+        receipt = msg.payment_receipts.add()
+        receipt.cid = cid_bytes
+        receipt.tx_hash = tx_hash or ""
+        receipt.expires = int(time.time()) + 86400 * 7  # 7 days
+
+        block_entry = msg.payload.add()
+        block_entry.prefix = cid_bytes[:4]
+        block_entry.data = block_data
+
+        return msg
+
+    def _make_payment_rejection(self, cid_bytes: bytes, reason: str) -> Message_1_3:
+        msg = Message_1_3()
+        rejection = msg.payment_rejections.add()
+        rejection.cid = cid_bytes
+        rejection.reason = reason
         return msg
 
     def _make_have(self, cid_bytes: bytes, protocol: str) -> Message_1_3 | Message_1_2:
@@ -280,9 +441,9 @@ class PaymentGatedDecisionEngine:
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
         if protocol == BITSWAP_PROTOCOL_V130:
-            presence.type = Message_1_3.BlockPresenceType.Have  # = 0
+            presence.type = Message_1_3.BlockPresenceType.Have
         else:
-            presence.type = Message_1_2.BlockPresenceType.Have  # = 0
+            presence.type = Message_1_2.BlockPresenceType.Have
         return msg
 
     def _make_dont_have(
@@ -293,9 +454,9 @@ class PaymentGatedDecisionEngine:
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
         if protocol == BITSWAP_PROTOCOL_V130:
-            presence.type = Message_1_3.BlockPresenceType.DontHave  # = 1
+            presence.type = Message_1_3.BlockPresenceType.DontHave
         else:
-            presence.type = Message_1_2.BlockPresenceType.DontHave  # = 1
+            presence.type = Message_1_2.BlockPresenceType.DontHave
         return msg
 
     def _make_block_response(
@@ -304,21 +465,38 @@ class PaymentGatedDecisionEngine:
         MsgClass = Message_1_3 if protocol == BITSWAP_PROTOCOL_V130 else Message_1_2
         msg = MsgClass()
         block = msg.payload.add()
+        block.prefix = cid_bytes[:4]
         block.data = block_data
-        # CID prefix: first 4 bytes of CID bytes (version + codec)
-        block.prefix = cid_bytes[:4] if len(cid_bytes) >= 4 else cid_bytes
         return msg
 
-    def _make_payment_rejection(self, cid_bytes: bytes, reason: str) -> Message_1_3:
-        msg = Message_1_3()
-        rej = msg.payment_rejections.add()
-        rej.cid = bytes(cid_bytes)
-        rej.reason = reason
-        logger.warning(
-            f"Payment rejected: cid={bytes(cid_bytes).hex()[:20]}... reason={reason}"
-        )
-        return msg
+    def _get_pricing_size(self, cid_str: str, block_size: int) -> int:
+        """
+        Get the size to use for pricing calculations.
+        
+        If this CID is part of a registered DAG, return the total DAG size.
+        Otherwise, return the individual block size.
+        
+        Args:
+            cid_str: The CID being priced
+            block_size: The individual block size
+            
+        Returns:
+            Size in bytes to use for pricing
+        """
+        # Check if this is a registered root CID
+        if cid_str in self._dag_info:
+            total_size = self._dag_info[cid_str]["total_size"]
+            logger.debug(
+                f"Using DAG total size for pricing: {cid_str[:20]}... "
+                f"total={total_size}B (not block={block_size}B)"
+            )
+            return total_size
+        
+        # Not a registered DAG, use individual block size
+        return block_size
 
+
+# ── CID helpers ───────────────────────────────────────────────────────────────
 
 def _cid_to_str(cid: str | bytes) -> str:
     if isinstance(cid, bytes):
@@ -328,9 +506,8 @@ def _cid_to_str(cid: str | bytes) -> str:
 
 def _cid_to_bytes(cid: str | bytes) -> bytes:
     if isinstance(cid, str):
-        # Try hex decode first
         try:
-            return bytes.fromhex(cid.lstrip("0x"))
+            return bytes.fromhex(cid)
         except ValueError:
             return cid.encode()
     return cid

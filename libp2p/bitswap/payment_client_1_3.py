@@ -13,6 +13,7 @@ This module lives in py-libp2p so it's importable as libp2p.bitswap.
 
 from collections.abc import Callable
 import logging
+import time
 from typing import Any
 
 from libp2p.bitswap.pb.bitswap_1_3_0_pb2 import Message as Message_1_3
@@ -20,7 +21,7 @@ from libp2p.bitswap.pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 logger = logging.getLogger(__name__)
 
 # Default maximum auto-pay threshold: $0.001 USDC = 1000 micro-units
-DEFAULT_MAX_AUTO_PAY_UNITS = 1000
+DEFAULT_MAX_AUTO_PAY_UNITS = 1000000
 
 
 class BitswapPaymentClient_1_3:
@@ -33,7 +34,7 @@ class BitswapPaymentClient_1_3:
     Args:
         signer: An EIP3009Signer instance (gooseswarm.payments.eip3009_signer)
         want_manager: Object with retry_want_block(peer_id, cid) async method
-        max_auto_pay_usdc: Maximum amount to auto-pay in USDC (default $0.001)
+        max_auto_pay_usdc: Maximum amount to auto-pay in USDC (default $1.00)
         send_callback: Async function(peer_id, msg_bytes) to send responses
 
     """
@@ -42,18 +43,22 @@ class BitswapPaymentClient_1_3:
         self,
         signer: Any,  # gooseswarm.payments.eip3009_signer.EIP3009Signer
         want_manager: Any,  # has retry_want_block(peer_id, cid) method
-        max_auto_pay_usdc: float = 0.001,
+        max_auto_pay_usdc: float = 1.0,
         send_callback: Callable[..., Any] | None = None,
         ledger: Any = None,  # gooseswarm.payments.ledger.PaymentLedger (optional)
     ):
         self.signer = signer
         self.want_manager = want_manager
-        self.max_auto_pay_units = int(max_auto_pay_usdc * 1_000_000)
+        self.max_auto_pay_units = int(max_auto_pay_usdc * 1000000)
         self.send_callback = send_callback
         self.ledger = ledger
 
         # Pending payments: nonce_hex → {peer_id, cid, amount}
         self._pending_payments: dict[str, dict[str, Any]] = {}
+        
+        # Server pricing config: peer_id → {units_per_kb, last_updated}
+        # This is learned from PaymentTerms messages
+        self._server_pricing: dict[str, dict[str, Any]] = {}
 
     async def process_incoming_message(
         self, peer_id: str, msg: Message_1_3
@@ -125,26 +130,46 @@ class BitswapPaymentClient_1_3:
         Decide whether to pay and send back a PaymentAuthorization.
         """
         amount = terms.amount
+        block_size = terms.block_size
+        
+        logger.warning("=" * 70)
+        logger.warning(f"[STEP 3b] CLIENT EVALUATING PAYMENT TERMS from {peer_id[:20]}...")
+        logger.warning(f"   amount={amount} units  max_auto_pay={self.max_auto_pay_units} units")
+        logger.warning(f"   block_size={block_size}B  asset={terms.asset}  scheme={terms.scheme}")
+        logger.warning("=" * 70)
+
+        # Learn server's pricing from the PaymentTerms
+        # The server includes its units_per_kb in the pricing calculation
+        self._update_server_pricing(peer_id, amount, block_size)
 
         # Reject if too expensive
         if amount > self.max_auto_pay_units:
-            logger.info(
-                f"Block too expensive: {amount} units > "
+            logger.warning(
+                f"[STEP 3b] ❌ PAYMENT REJECTED (too expensive): {amount} units > "
                 f"max {self.max_auto_pay_units} units. "
                 f"Skipping — will seek block elsewhere."
             )
             return None
 
-        # Validate pricing isn't a lie (10% tolerance)
-        expected_amount = self._expected_price(terms.block_size)
-        if expected_amount > 0 and amount > expected_amount * 1.1:
+        # Validate pricing consistency using learned server config
+        if not self._validate_pricing(peer_id, amount, block_size):
             logger.warning(
-                f"Server overcharging: asked {amount}, expected ~{expected_amount}. "
-                f"Skipping payment."
+                f"[STEP 3b] ❌ PAYMENT REJECTED (pricing validation failed) for {block_size}B block from {peer_id[:20]}... "
+                f"Server asked {amount} units. Skipping payment."
             )
             return None
+        
+        logger.warning(f"[STEP 3b] ✅ Payment terms accepted — proceeding to sign EIP-3009")
 
         # Sign EIP-3009 authorization
+        logger.warning("=" * 70)
+        logger.warning(f"[STEP 4] CLIENT SIGNING EIP-3009 AUTHORIZATION")
+        logger.warning(f"   to={terms.pay_to[:20]}...")
+        logger.warning(f"   value={amount} units")
+        logger.warning(f"   nonce={bytes(terms.nonce).hex()[:20]}...")
+        logger.warning(f"   valid_before={terms.valid_before}")
+        logger.warning(f"   signer_address={getattr(self.signer, 'address', 'N/A')}")
+        logger.warning("=" * 70)
         try:
             v, r, s = self.signer.sign_transfer_authorization(
                 to=terms.pay_to,
@@ -152,8 +177,9 @@ class BitswapPaymentClient_1_3:
                 nonce=bytes(terms.nonce),
                 valid_before=terms.valid_before,
             )
+            logger.warning(f"[STEP 4] EIP-3009 SIGNATURE CREATED: v={v} r_len={len(r)} s_len={len(s)}")
         except Exception as e:
-            logger.error(f"Failed to sign payment authorization: {e}")
+            logger.error(f"[STEP 4] FAILED TO SIGN EIP-3009 AUTHORIZATION: {e}", exc_info=True)
             return None
 
         # Build PaymentAuthorization message
@@ -193,8 +219,9 @@ class BitswapPaymentClient_1_3:
 
         logger.info(
             f"Sending PaymentAuthorization to {peer_id[:20]}... "
-            f"cid={bytes(terms.cid).hex()[:20]}... amount={amount} units "
-            f"(${amount / 1_000_000:.6f} USDC)"
+            f"cid={bytes(terms.cid).hex()[:20]}... "
+            f"amount={amount} units (${amount / 1_000_000:.6f} USDC) "
+            f"for {terms.block_size}B block"
         )
         return response
 
@@ -227,12 +254,90 @@ class BitswapPaymentClient_1_3:
             f"cid={cid_hex[:20]}... reason={rejection.reason}"
         )
 
-    def _expected_price(self, block_size_bytes: int) -> int:
+    def _update_server_pricing(self, peer_id: str, amount: int, block_size: int) -> None:
         """
-        Client-side price oracle — must roughly match server pricing.
-        Used to detect overcharging.
+        Learn the server's pricing configuration from PaymentTerms.
+        
+        The server calculates: price = max(1, int(block_size_kb * units_per_kb))
+        We can reverse-engineer units_per_kb from the amount and block_size.
         """
-        if block_size_bytes <= 4096:
-            return 0
-        kb = block_size_bytes / 1024
-        return int(kb * 10)  # 10 units per KB baseline
+        if amount == 0 or block_size == 0:
+            return  # Free block, no pricing info to learn
+        
+        # Calculate implied units_per_kb from this payment request
+        kb = block_size / 1024
+        if kb > 0:
+            implied_units_per_kb = amount / kb
+            
+            # Store or update the pricing config for this peer
+            if peer_id not in self._server_pricing:
+                self._server_pricing[peer_id] = {
+                    "units_per_kb": implied_units_per_kb,
+                    "last_updated": time.time(),
+                    "sample_count": 1,
+                }
+                logger.info(
+                    f"Learned pricing from {peer_id[:20]}...: "
+                    f"{implied_units_per_kb:.2f} units/KB"
+                )
+            else:
+                # Average with existing samples for stability
+                config = self._server_pricing[peer_id]
+                old_rate = config["units_per_kb"]
+                sample_count = config["sample_count"]
+                new_rate = (old_rate * sample_count + implied_units_per_kb) / (sample_count + 1)
+                config["units_per_kb"] = new_rate
+                config["sample_count"] = sample_count + 1
+                config["last_updated"] = time.time()
+                
+                # Warn if pricing changed significantly (>20%)
+                if abs(new_rate - old_rate) / old_rate > 0.2:
+                    logger.warning(
+                        f"Server {peer_id[:20]}... pricing changed: "
+                        f"{old_rate:.2f} → {new_rate:.2f} units/KB"
+                    )
+    
+    def _validate_pricing(self, peer_id: str, amount: int, block_size: int) -> bool:
+        """
+        Validate that the server's price request is consistent with its learned pricing.
+        
+        Returns True if pricing is acceptable, False if suspicious.
+        """
+        if amount == 0:
+            return True  # Free blocks are always acceptable
+        
+        # If we haven't learned pricing yet, accept this first payment
+        if peer_id not in self._server_pricing:
+            return True
+        
+        config = self._server_pricing[peer_id]
+        units_per_kb = config["units_per_kb"]
+        
+        # Calculate expected price using learned pricing
+        kb = block_size / 1024
+        expected = max(1, int(kb * units_per_kb))
+        
+        # Allow 20% tolerance for rounding and small variations
+        tolerance = 0.2
+        min_acceptable = expected * (1 - tolerance)
+        max_acceptable = expected * (1 + tolerance)
+        
+        if amount < min_acceptable or amount > max_acceptable:
+            logger.warning(
+                f"Pricing inconsistency detected: "
+                f"expected {expected} units (±{tolerance*100}%), got {amount} units "
+                f"for {block_size}B block ({kb:.3f} KB) "
+                f"using learned rate {units_per_kb:.2f} units/KB"
+            )
+            return False
+        
+        return True
+    
+    def get_server_pricing(self, peer_id: str) -> dict[str, Any] | None:
+        """
+        Get the learned pricing configuration for a peer.
+        
+        Returns:
+            Dict with units_per_kb, last_updated, sample_count, or None if not learned yet.
+        """
+        return self._server_pricing.get(peer_id)
