@@ -1,3 +1,5 @@
+import logging
+
 from prompt_toolkit import PromptSession
 import trio
 
@@ -5,6 +7,21 @@ from examples.metrics.coordinator import COMMANDS, Node
 from libp2p.metrics.metrics import Metrics
 from libp2p.tools.anyio_service.context import background_trio_service
 from libp2p.utils.address_validation import get_available_interfaces
+
+# Configure logging to show debug logs
+root = logging.getLogger()
+root.handlers.clear()
+root.setLevel(logging.WARNING)
+
+handler = logging.StreamHandler()
+handler.setLevel(logging.DEBUG)
+handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
+
+for name in ["root", "libp2p.network.basic_host", "libp2p.metrics"]:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.propagate = False
 
 
 async def main() -> None:

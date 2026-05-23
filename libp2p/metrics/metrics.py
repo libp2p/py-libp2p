@@ -1,3 +1,4 @@
+import logging
 import socket
 from typing import Any
 
@@ -11,6 +12,8 @@ from libp2p.metrics.kad_dht import KadDhtMetrics
 from libp2p.metrics.ping import PingMetrics
 from libp2p.metrics.swarm import SwarmEvent, SwarmMetrics
 from libp2p.pubsub.pubsub import GossipsubEvent
+
+logger = logging.getLogger("libp2p.metrics")
 
 
 def find_available_port(start_port: int = 8000, host: str = "127.0.0.1") -> int:
@@ -49,10 +52,10 @@ class Metrics:
 
         start_http_server(metrics)
 
-        print(f"\nPrometheus metrics visible at: http://localhost:{metrics}")
+        logger.info(f"Prometheus metrics visible at: http://localhost:{metrics}")
 
-        print(
-            "\nTo start prometheus and grafana dashboards, from another terminal: \n"
+        logger.info(
+            "To start prometheus and grafana dashboards, from another terminal: \n"
             f"PROMETHEUS_PORT={prometheus} GRAFANA_PORT={grafana} docker compose up\n"
             "\nAfter this:\n"
             f"Prometheus dashboard will be visible at: http://localhost:{prometheus}\n"
