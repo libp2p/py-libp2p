@@ -75,7 +75,7 @@ async def main() -> None:
                             print(f"Error in the interactive shell: {e}")
                             await trio.sleep(1)
 
-    print("Shutdown complete, Goodbye!")
+    print("Shutdown complete!")
 
 
 def cli() -> None:
