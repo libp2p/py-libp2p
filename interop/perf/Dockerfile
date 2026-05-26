@@ -2,16 +2,14 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install system dependencies (contributing.rst + transport Dockerfile)
-RUN apt-get update && apt-get install -y \
-    redis-tools \
+# Install only the toolchain needed to build/install py-libp2p.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     pkg-config \
     libgmp-dev \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /var/cache/apt/*.bin
 
 # Install uv (docs/contributing.rst Option 2: same as CI)
 RUN pip install --no-cache-dir uv
