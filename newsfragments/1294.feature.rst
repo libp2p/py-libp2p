@@ -1,0 +1,4 @@
+Added an ``agentic-request-response-demo`` example that uses
+``libp2p.request_response`` to model Filecoin-aligned capability discovery and
+storage-style task submission with simulated complete, partial, and rejected
+results.
