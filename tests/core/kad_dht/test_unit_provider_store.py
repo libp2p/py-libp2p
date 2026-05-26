@@ -565,6 +565,23 @@ class TestProviderStore:
             assert mock_send.call_count == 1
 
     @pytest.mark.trio
+    async def test_send_add_provider_new_stream_failure(self):
+        """Test _send_add_provider when new_stream fails before stream is opened."""
+        mock_host = Mock()
+        local_peer_id = ID.from_base58("QmTest123")
+        remote_peer_id = ID.from_base58("QmPeer1")
+
+        mock_host.get_id.return_value = local_peer_id
+        mock_host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+        mock_host.new_stream = AsyncMock(side_effect=Exception("Stream failed"))
+
+        store = ProviderStore(host=mock_host)
+        result = await store._send_add_provider(remote_peer_id, b"test_key")
+
+        assert result is False
+        mock_host.new_stream.assert_awaited_once()
+
+    @pytest.mark.trio
     async def test_find_providers_no_host(self):
         """Test find_providers() returns empty list when no host."""
         store = ProviderStore(host=mock_host)
