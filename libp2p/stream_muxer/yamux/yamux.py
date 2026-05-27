@@ -995,6 +995,26 @@ class Yamux(IMuxedConn):
                                     f"for stream {stream_id}"
                                 )
 
+                            # FIN and RST flags may be sent with SYN frames
+                            if flags & FLAG_FIN:
+                                logger.debug(
+                                    f"Received FIN for stream {self.peer_id}:"
+                                    f"{stream_id} with SYN, marking recv_closed"
+                                )
+                                stream.recv_closed = True
+                                if stream.send_closed:
+                                    stream.closed = True
+                                self.stream_events[stream_id].set()
+
+                            if flags & FLAG_RST:
+                                logger.debug(
+                                    f"Resetting stream {stream_id} for peer"
+                                    f"{self.peer_id} with SYN"
+                                )
+                                stream.closed = True
+                                stream.reset_received = True
+                                self.stream_events[stream_id].set()
+
                             ack_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
                                 0,

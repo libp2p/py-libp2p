@@ -1,0 +1,1 @@
+Fixed yamux handling of WINDOW_UPDATE frames with SYN so the length field is treated as a window increment rather than payload size, improving interop with other libp2p implementations. Also handle FIN and RST flags on SYN stream-open frames.

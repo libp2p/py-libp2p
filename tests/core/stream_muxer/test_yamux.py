@@ -26,11 +26,15 @@ from libp2p.stream_muxer.exceptions import (
     MuxedConnUnavailable,
 )
 from libp2p.stream_muxer.yamux.yamux import (
+    DEFAULT_WINDOW_SIZE,
     FLAG_ACK,
     FLAG_FIN,
     FLAG_RST,
     FLAG_SYN,
     GO_AWAY_PROTOCOL_ERROR,
+    HEADER_SIZE,
+    MAX_MESSAGE_SIZE,
+    MAX_WINDOW_SIZE,
     TYPE_DATA,
     TYPE_PING,
     TYPE_WINDOW_UPDATE,
@@ -848,3 +852,402 @@ async def test_incomplete_read_error_clean_close_detection():
     assert legacy_error.received_bytes == 0
 
     logging.debug("test_incomplete_read_error_clean_close_detection complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update(yamux_pair):
+    """
+    Test that WINDOW_UPDATE|SYN frame is properly handled without reading payload.
+    This regression test ensures that WINDOW_UPDATE|SYN frames are NOT treated
+    as carrying payload bytes, fixing interop issues.
+    """
+    logging.debug("Starting test_yamux_syn_with_window_update")
+    client_yamux, server_yamux = yamux_pair
+
+    # Manually construct a WINDOW_UPDATE|SYN frame
+    window_increment = 1024
+    stream_id = 11  # Client stream ID (odd number)
+
+    # Create WINDOW_UPDATE header with SYN flag
+    # length is window increment, NOT payload length
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,  # version
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN,
+        stream_id,
+        window_increment,
+    )
+
+    # Send header directly
+    await client_yamux.secured_conn.write(header)
+    logging.debug(f"Sent WINDOW_UPDATE|SYN with increment {window_increment}")
+
+    # Server should accept the stream and NOT hang trying to read payload
+    with trio.move_on_after(2) as cancel_scope:
+        server_stream = await server_yamux.accept_stream()
+
+    assert not cancel_scope.cancelled_caught, (
+        "Server should have accepted the stream without hanging"
+    )
+    assert server_stream.stream_id == stream_id
+
+    # Check if window increment was applied
+    # Initial window is 256KB by default
+    assert server_stream.send_window == 256 * 1024 + window_increment
+
+    logging.debug("test_yamux_syn_with_window_update complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_fin(yamux_pair):
+    """
+    Test that DATA|SYN|FIN frame is properly handled (opens and half-closes).
+    """
+    logging.debug("Starting test_yamux_syn_with_fin")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 13
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        FLAG_SYN | FLAG_FIN,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Should be recv_closed because of FIN
+    assert server_stream.recv_closed
+
+    # Should be able to read 0 bytes (EOF)
+    with pytest.raises(MuxedStreamEOF):
+        await server_stream.read(1)
+
+    logging.debug("test_yamux_syn_with_fin complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_rst(yamux_pair):
+    """
+    Test that DATA|SYN|RST frame is properly handled (opens and resets).
+    """
+    logging.debug("Starting test_yamux_syn_with_rst")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 15
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_DATA,
+        FLAG_SYN | FLAG_RST,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+
+    # Should be closed and reset_received set
+    assert server_stream.closed
+    assert server_stream.reset_received
+
+    logging.debug("test_yamux_syn_with_rst complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update_and_fin(yamux_pair):
+    """WINDOW_UPDATE|SYN|FIN opens a stream and half-closes it."""
+    logging.debug("Starting test_yamux_syn_with_window_update_and_fin")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 17
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN | FLAG_FIN,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+    assert server_stream.recv_closed
+
+    with pytest.raises(MuxedStreamEOF):
+        await server_stream.read(1)
+
+    logging.debug("test_yamux_syn_with_window_update_and_fin complete")
+
+
+@pytest.mark.trio
+async def test_yamux_syn_with_window_update_and_rst(yamux_pair):
+    """WINDOW_UPDATE|SYN|RST opens a stream and resets it."""
+    logging.debug("Starting test_yamux_syn_with_window_update_and_rst")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 19
+    header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_SYN | FLAG_RST,
+        stream_id,
+        0,
+    )
+
+    await client_yamux.secured_conn.write(header)
+
+    server_stream = await server_yamux.accept_stream()
+    assert server_stream.stream_id == stream_id
+    assert server_stream.closed
+    assert server_stream.reset_received
+
+    logging.debug("test_yamux_syn_with_window_update_and_rst complete")
+
+
+@pytest.mark.trio
+async def test_yamux_window_update_ack_increments_send_window(yamux_pair):
+    """WINDOW_UPDATE|ACK applies length as send_window delta (#1271)."""
+    logging.debug("Starting test_yamux_window_update_ack_increments_send_window")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    await server_yamux.accept_stream()
+
+    ack_delta = 4096
+    ack_header = struct.pack(
+        YAMUX_HEADER_FORMAT,
+        0,
+        TYPE_WINDOW_UPDATE,
+        FLAG_ACK,
+        client_stream.stream_id,
+        ack_delta,
+    )
+    await server_yamux.secured_conn.write(ack_header)
+    await trio.sleep(0.1)
+
+    assert client_stream.send_window == DEFAULT_WINDOW_SIZE + ack_delta
+    logging.debug("test_yamux_window_update_ack_increments_send_window complete")
+
+
+@pytest.mark.trio
+async def test_yamux_write_respects_max_message_size(yamux_pair):
+    """Large writes are split into frames capped at MAX_MESSAGE_SIZE (#1269)."""
+    logging.debug("Starting test_yamux_write_respects_max_message_size")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    payload = b"Z" * (100 * 1024)
+    max_payload = MAX_MESSAGE_SIZE - HEADER_SIZE
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    client_yamux._write_frame = capture_write_frame
+    try:
+        await client_stream.write(payload)
+    finally:
+        client_yamux._write_frame = original_write_frame
+
+    data_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1] == TYPE_DATA
+    ]
+    assert len(data_frames) >= 2
+    for frame in data_frames:
+        assert len(frame) - HEADER_SIZE <= max_payload
+
+    received = b""
+    while len(received) < len(payload):
+        chunk = await server_stream.read(len(payload) - len(received))
+        received += chunk
+    assert received == payload
+    logging.debug("test_yamux_write_respects_max_message_size complete")
+
+
+@pytest.mark.trio
+async def test_yamux_auto_tune_increases_target_recv_window(yamux_pair):
+    """Auto-tune doubles target_recv_window within RTT epoch (#1270)."""
+    logging.debug("Starting test_yamux_auto_tune_increases_target_recv_window")
+    client_yamux, server_yamux = yamux_pair
+
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+
+    server_stream.recv_window = 0
+    server_stream.target_recv_window = DEFAULT_WINDOW_SIZE
+    server_stream.epoch_start = trio.current_time() - 0.01
+    server_yamux._rtt = 0.05
+
+    captured_frames: list[bytes] = []
+    original_write_frame = server_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    server_yamux._write_frame = capture_write_frame
+    try:
+        await server_stream._auto_tune_and_send_window_update()
+    finally:
+        server_yamux._write_frame = original_write_frame
+
+    assert server_stream.target_recv_window == DEFAULT_WINDOW_SIZE * 2
+    assert server_stream.target_recv_window <= MAX_WINDOW_SIZE
+    assert server_stream.recv_window > 0
+    assert any(
+        len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1]
+        == TYPE_WINDOW_UPDATE
+        for frame in captured_frames
+    )
+    await client_stream.close()
+    await server_stream.close()
+    logging.debug("test_yamux_auto_tune_increases_target_recv_window complete")
+
+
+@pytest.mark.trio
+async def test_yamux_open_stream_sends_window_update_syn(yamux_pair):
+    """Outbound stream open sends TYPE_WINDOW_UPDATE|SYN (#1271)."""
+    logging.debug("Starting test_yamux_open_stream_sends_window_update_syn")
+    client_yamux, _server_yamux = yamux_pair
+
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    client_yamux._write_frame = capture_write_frame
+    try:
+        stream = await client_yamux.open_stream()
+    finally:
+        client_yamux._write_frame = original_write_frame
+
+    syn_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1]
+        == TYPE_WINDOW_UPDATE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[2] & FLAG_SYN
+    ]
+    assert len(syn_frames) >= 1
+    _, typ, flags, sid, length = struct.unpack(
+        YAMUX_HEADER_FORMAT, syn_frames[0][:HEADER_SIZE]
+    )
+    assert typ == TYPE_WINDOW_UPDATE
+    assert flags & FLAG_SYN
+    assert length == 0
+    assert sid == stream.stream_id
+    await stream.close()
+    logging.debug("test_yamux_open_stream_sends_window_update_syn complete")
+
+
+@pytest.mark.trio
+async def test_yamux_inbound_syn_replies_with_window_update_ack(yamux_pair):
+    """Inbound SYN is accepted with TYPE_WINDOW_UPDATE|ACK (#1271)."""
+    logging.debug("Starting test_yamux_inbound_syn_replies_with_window_update_ack")
+    client_yamux, server_yamux = yamux_pair
+
+    stream_id = 21
+    captured_frames: list[bytes] = []
+    original_write_frame = server_yamux._write_frame
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        await original_write_frame(data)
+
+    server_yamux._write_frame = capture_write_frame
+    try:
+        syn_header = struct.pack(
+            YAMUX_HEADER_FORMAT,
+            0,
+            TYPE_WINDOW_UPDATE,
+            FLAG_SYN,
+            stream_id,
+            0,
+        )
+        await client_yamux.secured_conn.write(syn_header)
+        server_stream = await server_yamux.accept_stream()
+    finally:
+        server_yamux._write_frame = original_write_frame
+
+    ack_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) == HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame)[1] == TYPE_WINDOW_UPDATE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame)[2] & FLAG_ACK
+    ]
+    assert len(ack_frames) >= 1
+    assert server_stream.stream_id == stream_id
+    logging.debug("test_yamux_inbound_syn_replies_with_window_update_ack complete")
+
+
+@pytest.mark.trio
+async def test_yamux_ping_uses_write_frame(yamux_pair):
+    """RTT PING frames are sent via _write_frame, not direct secured_conn.write."""
+    logging.debug("Starting test_yamux_ping_uses_write_frame")
+    client_yamux, _server_yamux = yamux_pair
+
+    captured_frames: list[bytes] = []
+    original_write_frame = client_yamux._write_frame
+    direct_ping_writes: list[bytes] = []
+    original_secured_write = client_yamux.secured_conn.write
+    write_frame_depth = [0]
+
+    async def capture_write_frame(data: bytes) -> None:
+        captured_frames.append(data)
+        write_frame_depth[0] += 1
+        try:
+            await original_write_frame(data)
+        finally:
+            write_frame_depth[0] -= 1
+
+    async def track_secured_write(data: bytes) -> None:
+        if (
+            write_frame_depth[0] == 0
+            and len(data) >= HEADER_SIZE
+            and struct.unpack(YAMUX_HEADER_FORMAT, data[:HEADER_SIZE])[1] == TYPE_PING
+        ):
+            direct_ping_writes.append(data)
+        await original_secured_write(data)
+
+    client_yamux._write_frame = capture_write_frame
+    client_yamux.secured_conn.write = track_secured_write
+    try:
+        await trio.sleep(0.6)
+    finally:
+        client_yamux._write_frame = original_write_frame
+        client_yamux.secured_conn.write = original_secured_write
+
+    ping_frames = [
+        frame
+        for frame in captured_frames
+        if len(frame) >= HEADER_SIZE
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[1] == TYPE_PING
+        and struct.unpack(YAMUX_HEADER_FORMAT, frame[:HEADER_SIZE])[2] & FLAG_SYN
+    ]
+    assert len(ping_frames) >= 1
+    assert not direct_ping_writes
+    logging.debug("test_yamux_ping_uses_write_frame complete")
