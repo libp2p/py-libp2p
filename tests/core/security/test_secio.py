@@ -12,9 +12,6 @@ from libp2p.security.secio.transport import (
     NONCE_SIZE,
     create_secure_session,
 )
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
-)
 from tests.utils.factories import (
     raw_conn_factory,
 )
@@ -61,5 +58,7 @@ async def test_create_secure_session(nursery):
 
         msg = b"abc"
         await local_secure_conn.write(msg)
-        received_msg = await remote_secure_conn.read(MAX_READ_LEN)
+        # SecureSession.read(n) aggregates until it has exactly n decrypted bytes;
+        # reading a large fixed cap would block forever after a tiny write.
+        received_msg = await remote_secure_conn.read(len(msg))
         assert received_msg == msg
