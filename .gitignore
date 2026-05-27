@@ -189,6 +189,7 @@ tests/interop/js_libp2p/js_node/node_modules/
 tests/interop/js_libp2p/js_node/package-lock.json
 tests/interop/js_libp2p/js_node/src/node_modules/
 tests/interop/js_libp2p/js_node/src/package-lock.json
+examples/request_response/synapse_sidecar/node_modules/
 
 # Sphinx documentation build
 _build/
