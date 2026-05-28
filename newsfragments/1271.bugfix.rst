@@ -1,0 +1,1 @@
+Fixed yamux interoperability with go-yamux: SYN/ACK/FIN/RST frames are now sent as TYPE_WINDOW_UPDATE (not TYPE_DATA), writes are serialized with a lock to prevent frame interleaving, and SYN/ACK window values match go-yamux conventions so peers no longer get an inflated send window.
