@@ -1,0 +1,1 @@
+Added yamux receive window auto-tuning: the per-stream receive window starts at 256 KB and doubles each RTT epoch up to 16 MB, matching go-yamux behavior for improved throughput on high-bandwidth connections.
