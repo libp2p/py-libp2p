@@ -27,7 +27,7 @@ MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 # Maximum block size (63 KB - after DAG-PB/UnixFS encoding)
 # py-libp2p stream limit is ~64 KB, so we use 63 KB to be safe
 # Note: Raw chunk data should be smaller to account for DAG-PB overhead (~14 bytes)
-MAX_BLOCK_SIZE = 63 * 1024
+MAX_BLOCK_SIZE = 512 * 1024
 
 # Default timeout for operations (in seconds)
 DEFAULT_TIMEOUT = 90

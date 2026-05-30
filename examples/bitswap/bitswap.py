@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import logging
 from pathlib import Path
 import sys
@@ -14,6 +15,7 @@ from multiaddr import Multiaddr
 
 from libp2p import new_host
 from libp2p.bitswap import BitswapClient
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.bitswap.cid import cid_to_bytes, format_cid_for_display
 from libp2p.bitswap.dag import MerkleDag
 from libp2p.peer.peerinfo import info_from_p2p_addr
@@ -46,13 +48,14 @@ def format_size(size_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
-async def run_provider(file_path: str, port: int = 0):
+async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
     """
     Run the provider node to share a file.
 
     Args:
         file_path: Path to the file to share
         port: TCP port to listen on (0 for auto)
+        seed: Optional seed string for deterministic peer ID generation
 
     """
     file_path_obj = Path(file_path)
@@ -73,8 +76,16 @@ async def run_provider(file_path: str, port: int = 0):
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
-    # Create host
-    host = new_host()
+
+    # Create host with optional seed for deterministic peer ID
+    key_pair = None
+    if seed:
+        # Convert seed string to bytes (must be 32 bytes for Ed25519)
+        seed_bytes = hashlib.sha256(seed.encode()).digest()
+        key_pair = create_new_key_pair(seed=seed_bytes)
+        logger.info(f"Using deterministic peer ID from seed")
+
+    host = new_host(key_pair=key_pair)
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         logger.info(f"Peer ID: {host.get_id()}")
@@ -109,7 +120,7 @@ async def run_provider(file_path: str, port: int = 0):
         # Add file with directory wrapper for filename preservation
         # Always uses Merkle DAG regardless of file size
         root_cid = await dag.add_file(
-            file_path, progress_callback=progress_callback, wrap_with_directory=True
+            file_path, progress_callback=progress_callback, wrap_with_directory=False
         )
 
         # Get all blocks that were stored
@@ -161,6 +172,7 @@ async def run_client(
     root_cid_input: str,
     output_dir: str = "/tmp",
     port: int = 0,
+    seed: str | None = None,
 ):
     """
     Run the client node to fetch a file.
@@ -170,6 +182,7 @@ async def run_client(
         root_cid_input: Root CID (canonical text, /ipfs/... path, or hex string)
         output_dir: Directory to save the file
         port: TCP port to listen on (0 for auto)
+        seed: Optional seed string for deterministic peer ID generation
 
     """
     output_path = Path(output_dir)
@@ -195,8 +208,15 @@ async def run_client(
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
 
-    # Create host
-    host = new_host()
+    # Create host with optional seed for deterministic peer ID
+    key_pair = None
+    if seed:
+        # Convert seed string to bytes (must be 32 bytes for Ed25519)
+        seed_bytes = hashlib.sha256(seed.encode()).digest()
+        key_pair = create_new_key_pair(seed=seed_bytes)
+        logger.info(f"Using deterministic peer ID from seed")
+
+    host = new_host(key_pair=key_pair)
 
     async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         logger.info(f"Client Peer ID: {host.get_id()}")
@@ -367,6 +387,11 @@ def parse_args():
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--seed",
+        type=str,
+        help="Seed string for deterministic peer ID generation (same seed = same peer ID)",
+    )
 
     args = parser.parse_args()
 
@@ -397,9 +422,9 @@ def main():
         )
 
         if args.mode == "provider":
-            trio.run(run_provider, args.file, args.port)
+            trio.run(run_provider, args.file, args.port, args.seed)
         elif args.mode == "client":
-            trio.run(run_client, args.provider, args.cid, args.output, args.port)
+            trio.run(run_client, args.provider, args.cid, args.output, args.port, args.seed)
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)

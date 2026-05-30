@@ -10,10 +10,9 @@ from collections.abc import Callable, Iterator
 import io
 from pathlib import Path
 
-# Default chunk size: 63 KB (py-libp2p accepts less than 64 KB)
-# 63 KB minus 32 bytes to leave room for the dag-pb leaf envelope overhead,
-# ensuring wrapped blocks never exceed MAX_BLOCK_SIZE (63 * 1024).
-DEFAULT_CHUNK_SIZE = 63 * 1024 - 32
+# Default chunk size: 256 KiB — matches Kubo's default chunker (size-262144).
+# Raw leaves are stored directly without dag-pb wrapping, so no overhead needed.
+DEFAULT_CHUNK_SIZE = 256 * 1024
 
 
 def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[bytes]:

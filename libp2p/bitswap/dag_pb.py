@@ -31,17 +31,19 @@ def _encode_varint(value: int) -> bytes:
 
 def _normalize_link_cid(cid: CIDInput) -> bytes:
     """
-    Normalize CID input for DAG links while preserving raw-bytes compatibility.
+    Normalize CID input for DAG links.
 
-    DAG-PB links store only the multihash (not the full CID with version/codec).
-    This matches Kubo's behavior and the DAG-PB specification.
+    DAG-PB links store the full CID bytes in the Hash field.
+    For CIDv0 (legacy), this is the 34-byte multihash.
+    For CIDv1 (e.g. raw-leaf blocks), this is the full CIDv1 buffer
+    (version varint + codec varint + multihash), matching Kubo's behavior.
     """
     from .cid import parse_cid
 
-    # Always parse the CID and extract the multihash
-    # This handles both CID objects and raw bytes (whether CIDv0, CIDv1, or already a multihash)
     cid_obj = parse_cid(cid)
-    return cid_obj.multihash
+    # CIDv0: buffer IS the multihash — no change in behavior.
+    # CIDv1: buffer includes version + codec + multihash — store the full CID.
+    return cid_obj.buffer
 
 
 @dataclass(init=False)
@@ -238,7 +240,7 @@ def create_file_node(chunks: Sequence[tuple[CIDInput, int]]) -> bytes:
     blocksizes = []
 
     for i, (cid, size) in enumerate(chunks):
-        links.append(Link(cid=cid, name=f"chunk{i}", size=size))
+        links.append(Link(cid=cid, name="", size=size))
         blocksizes.append(size)
         total_size += size
 
@@ -333,7 +335,7 @@ def balanced_layout(
     leaves: list[tuple[bytes, bytes, int]],
     max_links: int = MAX_LINKS_PER_NODE,
     put_block_callback: Callable[[bytes, bytes], None] | None = None,
-) -> tuple[bytes, bytes]:
+) -> tuple[bytes, bytes, int]:
     """
     Build a balanced Merkle DAG from a flat list of leaf blocks.
 
@@ -352,7 +354,10 @@ def balanced_layout(
                            Signature: callback(cid_bytes, block_bytes)
 
     Returns:
-        (root_cid_bytes, root_block_bytes)
+        (root_cid_bytes, root_block_bytes, cumulative_tsize)
+        where cumulative_tsize = len(root_block) + sum of all descendant block sizes.
+        This matches the Tsize value Kubo stores in directory links pointing to
+        the root of a multi-block file.
 
     Raises:
         ValueError: If leaves is empty
@@ -362,7 +367,7 @@ def balanced_layout(
         raise ValueError("Cannot build balanced layout from empty leaf list")
 
     if len(leaves) == 1:
-        return leaves[0][0], leaves[0][1]
+        return leaves[0][0], leaves[0][1], len(leaves[0][1])
 
     # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
     # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
@@ -404,4 +409,4 @@ def balanced_layout(
             next_level.append((internal_cid, internal_block, total_filesize, cum_size))
         level = next_level
 
-    return level[0][0], level[0][1]
+    return level[0][0], level[0][1], level[0][3]

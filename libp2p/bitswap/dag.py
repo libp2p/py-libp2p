@@ -27,6 +27,7 @@ from .chunker import (
 )
 from .cid import (
     CODEC_DAG_PB,
+    CODEC_RAW,
     CIDInput,
     cid_to_bytes,
     compute_cid_v1,
@@ -238,17 +239,17 @@ class MerkleDag:
 
         logger.debug(f"Using chunk size: {chunk_size} bytes")
 
-        # If file is small enough, store as single dag-pb leaf block
+        # If file is small enough, store as single raw leaf block (Kubo default: RawLeaves=true)
         if file_size <= chunk_size:
             logger.debug("File fits in single block")
 
             with open(file_path, "rb") as f:
                 data = f.read()
 
-            leaf_block = create_leaf_node(data)
-            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            # Raw leaf: store file bytes directly with raw codec CID
+            cid = compute_cid_v1(data, codec=CODEC_RAW)
 
-            await self._put_block(cid, leaf_block)
+            await self._put_block(cid, data)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -256,7 +257,7 @@ class MerkleDag:
                 )
 
             logger.info(
-                f"Added file as single block: {format_cid_for_display(cid, max_len=16)}"
+                f"Added file as single raw block: {format_cid_for_display(cid, max_len=16)}"
             )
 
             # Wrap in directory if requested
@@ -270,8 +271,8 @@ class MerkleDag:
                     f"Wrapping single-block file in directory with name: {filename}"
                 )
 
-                # Tsize should be the block size, not the file data size
-                dir_data = create_directory_node([(filename, cid, len(leaf_block))])
+                # Tsize for raw leaf = raw file size (no block overhead)
+                dir_data = create_directory_node([(filename, cid, file_size)])
                 dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
                 await self._put_block(dir_cid, dir_data)
 
@@ -289,17 +290,19 @@ class MerkleDag:
         logger.info("=== Starting file chunking process ===")
 
         # leaf_triples: (cid_bytes, leaf_block_bytes, raw_data_size)
+        # For raw leaves (Kubo default): leaf_block = raw chunk bytes,
+        # CID uses CODEC_RAW. This matches Kubo's RawLeaves=true behavior
+        # for multi-chunk files, producing identical CIDs.
         leaf_triples: list[tuple[bytes, bytes, int]] = []
         bytes_processed = 0
 
         # Process file in chunks (memory efficient)
         for i, chunk_data in enumerate(chunk_file(file_path, chunk_size)):
-            # Wrap chunk in UnixFS dag-pb leaf (matches Kubo's RawLeaves=false)
-            leaf_block = create_leaf_node(chunk_data)
-            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+            # Raw leaf: store chunk bytes directly with raw codec CID (Kubo default)
+            chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
 
-            await self._put_block(chunk_cid, leaf_block)
-            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
+            await self._put_block(chunk_cid, chunk_data)
+            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
             # Progress callback
@@ -327,7 +330,6 @@ class MerkleDag:
                 progress_callback, file_size, file_size, "creating root node"
             )
 
-        root_cid, root_data = balanced_layout(leaf_triples)
         # Create a sync wrapper for the async _put_block method
         # We'll collect (cid, data) pairs and store them after
         internal_nodes: list[tuple[bytes, bytes]] = []
@@ -336,7 +338,7 @@ class MerkleDag:
             """Callback to collect internal nodes for storage."""
             internal_nodes.append((cid, data))
 
-        root_cid, root_data = balanced_layout(
+        root_cid, root_data, root_tsize = balanced_layout(
             leaf_triples, put_block_callback=store_internal_node
         )
 
@@ -376,9 +378,9 @@ class MerkleDag:
             filename = os.path.basename(file_path)
             logger.info(f"Wrapping file in directory with name: {filename}")
 
-            # Create directory node with single entry pointing to the file
-            # Tsize should be the block size, not the file data size
-            dir_data = create_directory_node([(filename, root_cid, len(root_data))])
+            # Tsize = cumulative block size (root block + all descendant blocks),
+            # matching Kubo's behavior for directory link Tsize.
+            dir_data = create_directory_node([(filename, root_cid, root_tsize)])
             dir_cid = compute_cid_v1(dir_data, codec=CODEC_DAG_PB)
             await self._put_block(dir_cid, dir_data)
 
@@ -419,11 +421,10 @@ class MerkleDag:
         if chunk_size is None:
             chunk_size = DEFAULT_CHUNK_SIZE
 
-        # If data is small, store as single dag-pb leaf block
+        # If data is small, store as single raw leaf block (Kubo default: RawLeaves=true)
         if file_size <= chunk_size:
-            leaf_block = create_leaf_node(data)
-            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self._put_block(cid, leaf_block)
+            cid = compute_cid_v1(data, codec=CODEC_RAW)
+            await self._put_block(cid, data)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -432,15 +433,14 @@ class MerkleDag:
 
             return cid
 
-        # Chunk the data and wrap each chunk as a dag-pb leaf
+        # Chunk the data using raw leaves (Kubo default: RawLeaves=true)
         chunks = chunk_bytes(data, chunk_size)
         leaf_triples: list[tuple[bytes, bytes, int]] = []
 
         for i, chunk_data in enumerate(chunks):
-            leaf_block = create_leaf_node(chunk_data)
-            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self._put_block(chunk_cid, leaf_block)
-            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
+            chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
+            await self._put_block(chunk_cid, chunk_data)
+            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
 
             if progress_callback:
                 bytes_processed = sum(s for _, _, s in leaf_triples)
@@ -452,7 +452,7 @@ class MerkleDag:
                 )
 
         # Build balanced DAG tree
-        root_cid, root_data = balanced_layout(leaf_triples)
+        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:
@@ -513,10 +513,10 @@ class MerkleDag:
         bytes_processed = 0
 
         for i, chunk_data in enumerate(chunk_stream(stream, chunk_size)):
-            leaf_block = create_leaf_node(chunk_data)
-            chunk_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self._put_block(chunk_cid, leaf_block)
-            leaf_triples.append((chunk_cid, leaf_block, len(chunk_data)))
+            # Raw leaf: store chunk bytes directly (Kubo default: RawLeaves=true)
+            chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
+            await self._put_block(chunk_cid, chunk_data)
+            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
             if progress_callback:
@@ -528,11 +528,10 @@ class MerkleDag:
                     f"chunking ({i + 1} chunks, {bytes_processed} bytes)",
                 )
 
-        # Empty stream — store a single empty leaf
+        # Empty stream — store a single empty raw block
         if not leaf_triples:
-            leaf_block = create_leaf_node(b"")
-            cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
-            await self._put_block(cid, leaf_block)
+            cid = compute_cid_v1(b"", codec=CODEC_RAW)
+            await self._put_block(cid, b"")
             return cid
 
         # Single chunk — return the leaf CID directly (no root node needed)
@@ -540,7 +539,7 @@ class MerkleDag:
             return leaf_triples[0][0]
 
         # Multiple chunks — build balanced DAG tree
-        root_cid, root_data = balanced_layout(leaf_triples)
+        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:
@@ -623,10 +622,8 @@ class MerkleDag:
             if dir_links:
                 first_link = dir_links[0]
                 filename = first_link.name or None
-                # Links contain multihashes, need to reconstruct CIDv1
-                # Assume dag-pb codec (0x70) for file blocks
-                multihash = first_link.cid
-                actual_file_cid = b'\x01\x70' + multihash  # CIDv1 + dag-pb codec + multihash
+                # Links now store the full CID bytes (CIDv1 buffer or CIDv0 multihash)
+                actual_file_cid = first_link.cid
                 logger.info(f"Filename from directory: {filename!r}")
                 actual_file_data = await self._get_block(
                     actual_file_cid, peer_id, timeout
@@ -706,9 +703,8 @@ class MerkleDag:
                     msg = f"[DAG] Depth {depth}: {cid_str} has {len(node_links)}"
                     logger.debug(f"{msg} children")
                     for link in node_links:
-                        # Links contain multihashes, reconstruct CIDv1 with dag-pb codec
-                        child_cid = b'\x01\x70' + link.cid
-                        child_cids.append(child_cid)
+                        # Links now store full CID bytes directly
+                        child_cids.append(link.cid)
 
             # Recursively fetch next level if there are children
             if child_cids:
@@ -717,9 +713,8 @@ class MerkleDag:
                 logger.info(f"{msg}, fetching next level...")
                 await _batch_fetch_tree(child_cids, depth + 1)
 
-        # Starting from the top-level links
-        # Links contain multihashes, reconstruct CIDv1 with dag-pb codec
-        top_cids = [b'\x01\x70' + top_link.cid for top_link in top_links]
+        # Starting from the top-level links (full CID bytes stored in links)
+        top_cids = [top_link.cid for top_link in top_links]
         await _batch_fetch_tree(top_cids, depth=1)
         blocks_count = len(all_blocks_map)
         logger.info(f"[DAG] ✓ Tree fetch complete: {blocks_count} total blocks")
@@ -757,15 +752,15 @@ class MerkleDag:
                 c_tot = len(node_links)
                 msg = f"[DAG] Depth {depth}: processing child {c_idx}/{c_tot}"
                 logger.debug(msg)
-                # Links contain multihashes, reconstruct CIDv1
-                child_cid = b'\x01\x70' + child_link.cid
+                # Links store full CID bytes directly
+                child_cid = child_link.cid
                 _collect_leaves_local(child_cid, depth + 1)
 
         # Traverse each top-level block
         for i, top_link in enumerate(top_links):
             logger.info(f"[DAG] Traversing top-level {i + 1}/{len(top_links)}...")
-            # Links contain multihashes, reconstruct CIDv1
-            top_cid = b'\x01\x70' + top_link.cid
+            # Links store full CID bytes directly
+            top_cid = top_link.cid
             _collect_leaves_local(top_cid, depth=1)
 
         logger.info(f"[DAG] ✓ Collected {len(ordered_leaf_cids)} leaf blocks")
