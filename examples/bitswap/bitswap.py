@@ -37,6 +37,25 @@ logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LISTEN_PORT = 4013
+
+
+def select_preferred_listen_addr(
+    addrs: list[Multiaddr], port: int
+) -> Multiaddr:
+    """Pick a stable, local-friendly address for copy/paste commands."""
+    preferred_v4 = f"/ip4/127.0.0.1/tcp/{port}"
+    for addr in addrs:
+        if str(addr) == preferred_v4:
+            return addr
+
+    preferred_v6 = f"/ip6/::1/tcp/{port}"
+    for addr in addrs:
+        if str(addr) == preferred_v6:
+            return addr
+
+    return addrs[0]
+
 
 def format_size(size_bytes: int) -> str:
     """Format size in human-readable form."""
@@ -142,8 +161,12 @@ async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
         logger.info("FILE READY TO SHARE!")
         logger.info("=" * 70)
 
-        # Get the first address (clean multiaddr without duplicate /p2p/)
-        provider_addr = host.get_addrs()[0]
+        # Prefer a deterministic local address for copy/paste commands.
+        transport_addrs = host.get_transport_addrs()
+        provider_addr = select_preferred_listen_addr(transport_addrs, port)
+        provider_addr = provider_addr.encapsulate(
+            Multiaddr(f"/p2p/{host.get_id()}")
+        )
         root_cid_text = format_cid_for_display(root_cid)
         logger.info(f"Root CID:  {root_cid_text}")
         logger.info("")
@@ -355,8 +378,11 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=int,
-        default=0,
-        help="Port to listen on (0 for random, provider mode only)",
+        default=DEFAULT_LISTEN_PORT,
+        help=(
+            "Port to listen on (default: 4012). "
+            "Use 0 to auto-select a random port."
+        ),
     )
     parser.add_argument(
         "--file",
