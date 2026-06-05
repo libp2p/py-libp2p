@@ -10,6 +10,7 @@ from collections.abc import (
 )
 import inspect
 import logging
+import os
 import struct
 from types import (
     TracebackType,
@@ -57,6 +58,102 @@ from libp2p.stream_muxer.rw_lock import ReadWriteLock
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
+_PERF_YAMUX_DEBUG_LOG_INTERVAL = 500
+_DEFAULT_ASSUME_RTT_MS = 1.0
+
+# Python-only yamux tuning (PY_YAMUX_*).
+#
+# Set in the environment before the process starts. The unified-testing perf
+# harness forwards these to python-v0.x listener/dialer containers only; the
+# local runner (`scripts/perf/run_local_perf.py`) passes them through as well.
+# Helpers below read os.environ at call time (no reload).
+#
+#   PY_YAMUX_RELEASE_ON_READ (default: on)
+#       When hysteresis defers GrowTo, release recv-window credit on read via
+#       WINDOW_UPDATE instead of waiting for the next GrowTo batch.
+#   PY_YAMUX_ASSUME_RTT_MS (default: 1 ms when unset and ping RTT is 0)
+#       Bootstrap RTT in milliseconds for send-window autotune before the first
+#       measured ping RTT is available.
+#   PY_YAMUX_BATCH_THRESHOLD_DIV (default: 2, minimum: 1)
+#       GrowTo / pending-batch threshold = target_recv_window // divisor.
+#   PY_YAMUX_DISABLE_HYSTERESIS (default: off)
+#       Debug escape hatch: any positive window delta triggers a full GrowTo.
+#   PY_YAMUX_DEBUG (default: off)
+#       Emit targeted [YAMUX_PERF] logs. Not the same as LIBP2P_DEBUG, which
+#       enables full py-libp2p module logging via libp2p.utils.logging.
+#
+# Example scenarios (local runner from py-libp2p root; Docker: use ./perf/run.sh
+# with the same PY_YAMUX_* exports on the host — forwarded to python-v0.x only):
+#
+#   # Default autotune + hysteresis (baseline throughput)
+#   ./scripts/perf/run_local_perf.py --quick -t tcp -s noise -m yamux
+#
+#   # A/B: disable hysteresis (every positive delta → full GrowTo)
+#   PY_YAMUX_DISABLE_HYSTERESIS=1 ./scripts/perf/run_local_perf.py --quick
+#
+#   # Higher assumed RTT before first ping (slow-start / WAN-like bootstrap)
+#   PY_YAMUX_ASSUME_RTT_MS=50 ./scripts/perf/run_local_perf.py --quick
+#
+#   # More aggressive GrowTo batches (threshold = target // 1 vs default // 2)
+#   PY_YAMUX_BATCH_THRESHOLD_DIV=1 ./scripts/perf/run_local_perf.py --quick
+#
+#   # Hysteresis on but no WINDOW_UPDATE on read (credit release deferred)
+#   PY_YAMUX_RELEASE_ON_READ=0 ./scripts/perf/run_local_perf.py --quick
+#
+#   # Targeted window/autotune traces ([YAMUX_PERF], low overhead)
+#   PY_YAMUX_DEBUG=1 ./scripts/perf/run_local_perf.py --quick
+#   ./scripts/perf/run_local_perf.py --debug   # same + broader perf_test loggers
+#
+#   # Full module trace (very verbose; not for 1 GiB benchmarks)
+#   LIBP2P_DEBUG=stream_muxer.yamux:DEBUG ./scripts/perf/run_local_perf.py --quick
+
+
+def _py_yamux_env(name: str, default: str = "") -> str:
+    """Read PY_YAMUX_* tuning env (perf harness or local runner)."""
+    return os.getenv(f"PY_YAMUX_{name}", default)
+
+
+def _py_yamux_env_set(name: str) -> bool:
+    return f"PY_YAMUX_{name}" in os.environ
+
+
+def _perf_yamux_debug_enabled() -> bool:
+    return _py_yamux_env("DEBUG", "").upper() in ("1", "TRUE", "YES")
+
+
+def _yamux_disable_hysteresis() -> bool:
+    """Debug escape hatch: treat any positive delta as a full GrowTo."""
+    return _py_yamux_env("DISABLE_HYSTERESIS", "").upper() in (
+        "1",
+        "TRUE",
+        "YES",
+    )
+
+
+def _yamux_release_on_read() -> bool:
+    """When true, send WINDOW_UPDATE for bytes_read if hysteresis defers GrowTo."""
+    return _py_yamux_env("RELEASE_ON_READ", "1").upper() not in (
+        "0",
+        "FALSE",
+        "NO",
+    )
+
+
+def _yamux_batch_threshold_divisor() -> int:
+    """GrowTo / pending batch threshold = target_recv_window // divisor (default 2)."""
+    raw = _py_yamux_env("BATCH_THRESHOLD_DIV", "2")
+    try:
+        div = int(raw)
+    except ValueError:
+        div = 2
+    return max(div, 1)
+
+
+def _perf_yamux_log(msg: str) -> None:
+    if _perf_yamux_debug_enabled():
+        print(f"[YAMUX_PERF] {msg}", flush=True)
+
+
 PROTOCOL_ID = "/yamux/1.0.0"
 TYPE_DATA = 0x0
 TYPE_WINDOW_UPDATE = 0x1
@@ -99,6 +196,31 @@ class YamuxStream(IMuxedStream):
         self.epoch_start = 0.0  # trio.current_time() of last window update
         self.rw_lock = ReadWriteLock()
         self.close_lock = trio.Lock()
+        self._zero_window_waits = 0
+        self._window_update_hysteresis_skips = 0
+        self._window_update_bytes_read_only = 0
+        self._window_update_full_grow = 0
+        self._window_update_pending_flush = 0
+        self._window_update_partial_slack = 0
+        self._pending_recv_release = 0
+
+    def _effective_rtt(self) -> float:
+        """Measured RTT, or PY_YAMUX_ASSUME_RTT_MS / default when ping RTT is 0."""
+        rtt = self.conn.rtt()
+        if rtt > 0:
+            return rtt
+        if _py_yamux_env_set("ASSUME_RTT_MS"):
+            raw = _py_yamux_env("ASSUME_RTT_MS", "").strip()
+            try:
+                return max(float(raw), 0.0) / 1000.0
+            except ValueError:
+                return 0.0
+        return _DEFAULT_ASSUME_RTT_MS / 1000.0
+
+    def _grow_threshold(self) -> int:
+        if _yamux_disable_hysteresis():
+            return 0
+        return self.target_recv_window // _yamux_batch_threshold_divisor()
 
     async def __aenter__(self) -> "YamuxStream":
         """Enter the async context manager."""
@@ -150,6 +272,17 @@ class YamuxStream(IMuxedStream):
                 if frame is not None:
                     break
 
+                self._zero_window_waits += 1
+                if (
+                    _perf_yamux_debug_enabled()
+                    and self._zero_window_waits % _PERF_YAMUX_DEBUG_LOG_INTERVAL == 1
+                ):
+                    _perf_yamux_log(
+                        f"stream={self.stream_id} zero_window_waits="
+                        f"{self._zero_window_waits} send_window={self.send_window} "
+                        f"recv_window={self.recv_window} "
+                        f"target={self.target_recv_window}"
+                    )
                 logger.debug(
                     f"Stream {self.stream_id}: Window is zero, waiting for update"
                 )
@@ -246,55 +379,106 @@ class YamuxStream(IMuxedStream):
         _ = skip_lock
         await _do_window_update()
 
-    async def _auto_tune_and_send_window_update(self: "YamuxStream") -> None:
-        """
-        Auto-tune receive window size based on RTT and send window update.
+    def _grow_to_delta(self, buffered: int) -> int:
+        """Apply GrowTo slack (caller checks hysteresis threshold)."""
+        delta = self.target_recv_window - (self.recv_window + buffered)
+        if delta <= 0:
+            return 0
+        self.recv_window += delta
+        return delta
 
-        Ports go-yamux's two-pass GrowTo + sendWindowUpdate logic:
-        - Pass 1: GrowTo(current_target) — restore window to current target
-        - Auto-tune: if within 4x RTT of last epoch, double the target
-        - Pass 2: GrowTo(new_target, force=True) — grow to new target
-        - Only the final delta is sent to the peer (matches go-yamux behavior)
-        """
-        total_delta: int
-        async with self.window_lock:
-            # Match go-yamux GrowTo: currentWindow = cap + len
-            buffered = len(self.conn.stream_buffers.get(self.stream_id, b""))
-            current_window = self.recv_window + buffered
-
-            # Pass 1: GrowTo(target_recv_window) — like go's first GrowTo call
-            delta = self.target_recv_window - current_window
-            if delta <= 0:
-                return
-            # Hysteresis: skip if delta < 50% of target (matches go-yamux GrowTo)
-            if delta < self.target_recv_window // 2:
-                return
-            # Apply first pass growth to recv_window (like go's cap += delta)
-            self.recv_window += delta
-
-            # Auto-tune: if within 4x RTT of last epoch, double the target
-            now = trio.current_time()
-            rtt = self.conn.rtt()
-            if rtt > 0 and self.epoch_start > 0 and (now - self.epoch_start) < rtt * 4:
-                new_target = min(self.target_recv_window * 2, MAX_WINDOW_SIZE)
-                if new_target > self.target_recv_window:
-                    self.target_recv_window = new_target
-                    # Pass 2: GrowTo(new_target, force=True) — incremental
-                    # Recompute current_window after pass 1 growth
-                    new_current = self.recv_window + buffered
-                    extra_delta = self.target_recv_window - new_current
-                    if extra_delta > 0:
-                        self.recv_window += extra_delta
-                        delta += extra_delta  # Send total delta (pass 1 + pass 2)
-
+    def _apply_autotune_epoch(self, buffered: int) -> int:
+        """Double target within 4×RTT when sending an update; return extra increment."""
+        rtt = self._effective_rtt()
+        now = trio.current_time()
+        if rtt <= 0:
             self.epoch_start = now
-            logger.debug(
-                f"Stream {self.stream_id}: Auto-tune window update "
-                f"delta={delta}, target={self.target_recv_window}"
-            )
-            total_delta = delta
+            return 0
 
-        await self.send_window_update(total_delta, skip_lock=True)
+        if self.epoch_start > 0 and (now - self.epoch_start) >= rtt * 4:
+            self.epoch_start = now
+            return 0
+
+        extra_delta = 0
+        new_target = min(self.target_recv_window * 2, MAX_WINDOW_SIZE)
+        if new_target > self.target_recv_window:
+            self.target_recv_window = new_target
+            new_current = self.recv_window + buffered
+            grow = self.target_recv_window - new_current
+            if grow > 0:
+                self.recv_window += grow
+                extra_delta = grow
+
+        self.epoch_start = now
+        logger.debug(
+            f"Stream {self.stream_id}: Auto-tune extra_delta={extra_delta}, "
+            f"target={self.target_recv_window}"
+        )
+        return extra_delta
+
+    async def _auto_tune_and_send_window_update(
+        self: "YamuxStream", *, bytes_read: int = 0
+    ) -> None:
+        """
+        Auto-tune receive window size and send WINDOW_UPDATE (go-yamux semantics).
+
+        Mirrors go-yamux ``sendWindowUpdate`` + ``GrowTo`` hysteresis (half window),
+        with ``_pending_recv_release`` so several smaller reads batch into one
+        large update like repeated ``Read()`` calls in Go.
+        """
+        total_delta = 0
+        async with self.window_lock:
+            if bytes_read > 0:
+                self._pending_recv_release += bytes_read
+
+            buffered = len(self.conn.stream_buffers.get(self.stream_id, b""))
+            delta = self.target_recv_window - (self.recv_window + buffered)
+            threshold = self._grow_threshold()
+            pending = self._pending_recv_release
+
+            if delta >= threshold and delta > 0:
+                self._window_update_full_grow += 1
+                total_delta = self._grow_to_delta(buffered)
+                total_delta += self._apply_autotune_epoch(buffered)
+                self._pending_recv_release = 0
+            elif pending >= threshold:
+                self.recv_window += pending
+                total_delta = pending
+                self._pending_recv_release = 0
+                self._window_update_pending_flush += 1
+                total_delta += self._apply_autotune_epoch(buffered)
+            elif 0 < delta < threshold and bytes_read > 0:
+                self._window_update_partial_slack += 1
+                self.recv_window += delta + bytes_read
+                total_delta = delta + bytes_read
+                self._pending_recv_release -= bytes_read
+                total_delta += self._apply_autotune_epoch(buffered)
+            elif _yamux_release_on_read() and bytes_read > 0:
+                self.recv_window += bytes_read
+                total_delta = bytes_read
+                self._pending_recv_release -= bytes_read
+                self._window_update_bytes_read_only += 1
+                total_delta += self._apply_autotune_epoch(buffered)
+            elif delta < threshold and bytes_read == 0:
+                if _perf_yamux_debug_enabled():
+                    self._window_update_hysteresis_skips += 1
+
+        if total_delta > 0:
+            await self.send_window_update(total_delta, skip_lock=True)
+
+    def _log_perf_yamux_summary(self) -> None:
+        if not _perf_yamux_debug_enabled():
+            return
+        _perf_yamux_log(
+            f"stream={self.stream_id} summary "
+            f"zero_window_waits={self._zero_window_waits} "
+            f"hysteresis_skips={self._window_update_hysteresis_skips} "
+            f"bytes_read_updates={self._window_update_bytes_read_only} "
+            f"partial_slack={self._window_update_partial_slack} "
+            f"full_grow_updates={self._window_update_full_grow} "
+            f"pending_flush={self._window_update_pending_flush} "
+            f"target={self.target_recv_window}"
+        )
 
     async def read(self, n: int | None = -1) -> bytes:
         """
@@ -344,14 +528,14 @@ class YamuxStream(IMuxedStream):
                         return data
                     raise MuxedStreamEOF("Stream buffer closed")
 
-                # If we have data in buffer, process it
-                if len(buffer) > 0:
-                    chunk = bytes(buffer)
-                    buffer.clear()
+                # If we have data in buffer, process in MAX_MESSAGE_SIZE slices
+                # (like bounded Read in go-yamux) so hysteresis can batch credit.
+                while len(buffer) > 0:
+                    take = min(len(buffer), MAX_MESSAGE_SIZE)
+                    chunk = bytes(buffer[:take])
+                    del buffer[:take]
                     data += chunk
-
-                    # Auto-tune and send window update for the chunk we just read
-                    await self._auto_tune_and_send_window_update()
+                    await self._auto_tune_and_send_window_update(bytes_read=len(chunk))
 
                 # Check for reset
                 if self.reset_received:
@@ -396,10 +580,11 @@ class YamuxStream(IMuxedStream):
             return b""
         else:
             data = await self.conn.read_stream(self.stream_id, n)
-            await self._auto_tune_and_send_window_update()
+            await self._auto_tune_and_send_window_update(bytes_read=len(data))
             return data
 
     async def close(self) -> None:
+        self._log_perf_yamux_summary()
         async with self.close_lock:
             if not self.send_closed:
                 logger.debug(f"Half-closing stream {self.stream_id} (local end)")
