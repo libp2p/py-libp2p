@@ -203,6 +203,10 @@ _DIALER_DISCONNECT_GRACE_SECS = 0.5
 # teardown (avoids false disconnect during slow muxer/transport stacks).
 _LISTENER_EMPTY_PEER_POLLS_REQUIRED = 3
 _LISTENER_PEER_POLL_INTERVAL_SECS = 0.5
+# ws+mplex can report no live peers for seconds while the perf stream is active.
+_LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS = 30.0
+# Perf runs are 1:1; do not auto-dial extra peers or retry loopback from Identify.
+_PERF_LOOPBACK_DENY_LIST = ("127.0.0.0/8", "::1/128")
 
 
 def _is_connection_closed_error(exc: BaseException | None) -> bool:
@@ -394,6 +398,12 @@ class PerfTest:
             return _DIALER_DISCONNECT_GRACE_TLS_MPLEX_SECS
         return _DIALER_DISCONNECT_GRACE_SECS
 
+    def _listener_teardown_idle_secs(self) -> float:
+        """Seconds without live peers before listener treats dialer as gone."""
+        if self.transport in ("ws", "wss") and self.muxer == "mplex":
+            return _LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS
+        return _LISTENER_EMPTY_PEER_POLLS_REQUIRED * _LISTENER_PEER_POLL_INTERVAL_SECS
+
     def _should_ignore_shutdown_error(self, exc: BaseException) -> bool:
         """Swallow connection-closed errors only during post-benchmark cleanup."""
         if not _is_connection_closed_error(exc):
@@ -446,7 +456,60 @@ class PerfTest:
             inbound_stream_protocol_negotiation_timeout=(
                 self.stream_negotiate_timeout_seconds
             ),
+            # Single peer benchmark: no connmgr background dials.
+            min_connections=0,
+            low_watermark=0,
+            max_connections_per_peer=2,
+            deny_list=list(_PERF_LOOPBACK_DENY_LIST),
         )
+
+    def _without_loopback_listen_addrs(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
+        """Drop loopback binds so Identify does not advertise 127.0.0.1/::1."""
+        filtered: list[multiaddr.Multiaddr] = []
+        for addr in addresses:
+            ip_value = self._get_ip_value(addr)
+            if ip_value in ("127.0.0.1", "::1"):
+                continue
+            filtered.append(addr)
+        return filtered
+
+    def _fallback_listen_addr(self) -> multiaddr.Multiaddr:
+        if self.transport == "ws":
+            return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0/ws")
+        if self.transport == "wss":
+            return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0/wss")
+        if self.transport == "quic-v1":
+            return self._build_quic_addr("0.0.0.0", 0)
+        return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
+
+    def _perf_listen_addresses(self, port: int = 0) -> list[multiaddr.Multiaddr]:
+        addrs = self._without_loopback_listen_addrs(self.create_listen_addresses(port))
+        return addrs if addrs else [self._fallback_listen_addr()]
+
+    def _dialer_ws_listen_addrs(self) -> list[multiaddr.Multiaddr]:
+        """WS dialer binds for transport registration (no loopback Identify)."""
+        return self._perf_listen_addresses(0)
+
+    def _install_listener_perf_lifecycle_handler(self) -> None:
+        """Mark peer connected on first inbound perf stream (ws+mplex polls lie)."""
+        assert self.perf_service is not None
+        original = self.perf_service._handle_message
+
+        async def marking_handler(stream: Any) -> None:
+            if not self._listener_served_peer:
+                self._listener_served_peer = True
+                _log_perf_phase("listener", "perf_stream_connected")
+            await original(stream)
+
+        self.host.set_stream_handler(self.perf_service._protocol, marking_handler)
+
+    def _listener_peer_present(self) -> bool:
+        """True when dialer opened perf or swarm lists a live peer (connect detect)."""
+        if self._listener_served_peer:
+            return True
+        return bool(self.host.get_live_peers())
 
     def _quic_transport_config(self) -> QUICTransportConfig:
         return QUICTransportConfig(
@@ -749,7 +812,7 @@ class PerfTest:
 
         sec_opt, key_pair = self.create_security_options()
         muxer_opt = self.create_muxer_options()
-        listen_addrs = self.create_listen_addresses(0)
+        listen_addrs = self._perf_listen_addresses(0)
         tls_client = self.create_tls_client_config()
         tls_server = self.create_tls_server_config()
 
@@ -771,6 +834,7 @@ class PerfTest:
             self.host, {"write_block_size": self.write_block_size}
         )
         await self.perf_service.start()
+        self._install_listener_perf_lifecycle_handler()
         print(f"Perf service started (protocol {PROTOCOL_NAME})", file=sys.stderr)
 
         listener_ready = False
@@ -801,27 +865,40 @@ class PerfTest:
                 connect_deadline = time.monotonic() + self.test_timeout_seconds
                 saw_peer = False
                 empty_peer_polls = 0
+                last_peer_seen_at = time.monotonic()
+                teardown_idle_secs = self._listener_teardown_idle_secs()
                 while True:
-                    peers = self.host.get_live_peers()
-                    if peers:
-                        saw_peer = True
-                        self._listener_served_peer = True
+                    if not saw_peer:
+                        if self._listener_peer_present():
+                            saw_peer = True
+                            empty_peer_polls = 0
+                            last_peer_seen_at = time.monotonic()
+                        elif time.monotonic() >= connect_deadline:
+                            raise RuntimeError(
+                                f"Timeout: dialer never connected within "
+                                f"{self.test_timeout_seconds}s"
+                            )
+                    elif self.host.get_live_peers():
                         empty_peer_polls = 0
-                    elif saw_peer:
+                        last_peer_seen_at = time.monotonic()
+                    else:
                         empty_peer_polls += 1
-                        if empty_peer_polls >= _LISTENER_EMPTY_PEER_POLLS_REQUIRED:
+                        peer_idle_secs = time.monotonic() - last_peer_seen_at
+                        if (
+                            empty_peer_polls >= _LISTENER_EMPTY_PEER_POLLS_REQUIRED
+                            and peer_idle_secs >= teardown_idle_secs
+                        ):
                             print(
                                 "Listener: peer disconnected, shutting down",
                                 file=sys.stderr,
                             )
-                            _log_perf_phase("listener", "teardown_start")
+                            _log_perf_phase(
+                                "listener",
+                                "teardown_start",
+                                peer_idle_secs=f"{peer_idle_secs:.1f}",
+                            )
                             await trio.sleep(self._listener_shutdown_grace_secs())
                             break
-                    elif time.monotonic() >= connect_deadline:
-                        raise RuntimeError(
-                            f"Timeout: dialer never connected within "
-                            f"{self.test_timeout_seconds}s"
-                        )
 
                     await trio.sleep(_LISTENER_PEER_POLL_INTERVAL_SECS)
 
@@ -891,7 +968,7 @@ class PerfTest:
         # Dialer needs listen_addrs for ws/wss so transport is registered;
         # for quic/tcp pass [] (host.run still starts swarm/nursery)
         dialer_listen_addrs = (
-            self.create_listen_addresses(0) if self.transport in ["ws", "wss"] else None
+            self._dialer_ws_listen_addrs() if self.transport in ["ws", "wss"] else None
         )
         tls_client = self.create_tls_client_config()
         tls_server = None
