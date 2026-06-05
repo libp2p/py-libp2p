@@ -56,6 +56,10 @@ The test app (`perf_test.py`) implements the [libp2p perf protocol](https://gith
 - Dialer runs upload/download/latency iterations and outputs YAML results to stdout
 - All logging goes to stderr (stdout is reserved for results)
 
+**Listener lifecycle:** The listener polls `get_live_peers()` and exits after consecutive empty polls once a peer has connected (replacing an indefinite wait). The connect deadline (`TEST_TIMEOUT_SECS`) applies only until the first peer is seen, so slow ws+yamux benchmarks are not cut off mid-transfer.
+
+**Local runs without Redis:** Set `PERF_LOCAL_ADDR_FILE` to a path; the listener writes its multiaddr there and the dialer polls the file. Use [`scripts/perf/run_local_perf.py`](../scripts/perf/run_local_perf.py) and [`scripts/perf/README.md`](../scripts/perf/README.md) for Docker-free matrix runs and `PY_YAMUX_*` throughput tuning.
+
 ### Transport Tests (`interop/transport/`)
 
 Transport tests verify that py-libp2p can establish connections and exchange protocols with other implementations over various transport, secure channel, and muxer combinations (TCP, QUIC, WebSocket, Noise, TLS, yamux, mplex).

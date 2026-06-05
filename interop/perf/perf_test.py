@@ -1043,7 +1043,6 @@ class PerfTest:
 
     async def run(self) -> None:
         try:
-            await self._connect_redis_with_retry()
             if self.is_dialer:
                 await self.run_dialer()
             else:
