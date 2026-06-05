@@ -61,51 +61,10 @@ logger = logging.getLogger(__name__)
 _PERF_YAMUX_DEBUG_LOG_INTERVAL = 500
 _DEFAULT_ASSUME_RTT_MS = 1.0
 
-# Python-only yamux tuning (PY_YAMUX_*).
-#
-# Set in the environment before the process starts. The unified-testing perf
-# harness forwards these to python-v0.x listener/dialer containers only; the
-# local runner (`scripts/perf/run_local_perf.py`) passes them through as well.
-# Helpers below read os.environ at call time (no reload).
-#
-#   PY_YAMUX_RELEASE_ON_READ (default: on)
-#       When hysteresis defers GrowTo, release recv-window credit on read via
-#       WINDOW_UPDATE instead of waiting for the next GrowTo batch.
-#   PY_YAMUX_ASSUME_RTT_MS (default: 1 ms when unset and ping RTT is 0)
-#       Bootstrap RTT in milliseconds for send-window autotune before the first
-#       measured ping RTT is available.
-#   PY_YAMUX_BATCH_THRESHOLD_DIV (default: 2, minimum: 1)
-#       GrowTo / pending-batch threshold = target_recv_window // divisor.
-#   PY_YAMUX_DISABLE_HYSTERESIS (default: off)
-#       Debug escape hatch: any positive window delta triggers a full GrowTo.
-#   PY_YAMUX_DEBUG (default: off)
-#       Emit targeted [YAMUX_PERF] logs. Not the same as LIBP2P_DEBUG, which
-#       enables full py-libp2p module logging via libp2p.utils.logging.
-#
-# Example scenarios (local runner from py-libp2p root; Docker: use ./perf/run.sh
-# with the same PY_YAMUX_* exports on the host — forwarded to python-v0.x only):
-#
-#   # Default autotune + hysteresis (baseline throughput)
-#   ./scripts/perf/run_local_perf.py --quick -t tcp -s noise -m yamux
-#
-#   # A/B: disable hysteresis (every positive delta → full GrowTo)
-#   PY_YAMUX_DISABLE_HYSTERESIS=1 ./scripts/perf/run_local_perf.py --quick
-#
-#   # Higher assumed RTT before first ping (slow-start / WAN-like bootstrap)
-#   PY_YAMUX_ASSUME_RTT_MS=50 ./scripts/perf/run_local_perf.py --quick
-#
-#   # More aggressive GrowTo batches (threshold = target // 1 vs default // 2)
-#   PY_YAMUX_BATCH_THRESHOLD_DIV=1 ./scripts/perf/run_local_perf.py --quick
-#
-#   # Hysteresis on but no WINDOW_UPDATE on read (credit release deferred)
-#   PY_YAMUX_RELEASE_ON_READ=0 ./scripts/perf/run_local_perf.py --quick
-#
-#   # Targeted window/autotune traces ([YAMUX_PERF], low overhead)
-#   PY_YAMUX_DEBUG=1 ./scripts/perf/run_local_perf.py --quick
-#   ./scripts/perf/run_local_perf.py --debug   # same + broader perf_test loggers
-#
-#   # Full module trace (very verbose; not for 1 GiB benchmarks)
-#   LIBP2P_DEBUG=stream_muxer.yamux:DEBUG ./scripts/perf/run_local_perf.py --quick
+# Optional perf tuning via PY_YAMUX_* environment variables (read at call time).
+# RELEASE_ON_READ defaults on for go-yamux-like credit release on partial reads.
+# Unified-testing and scripts/perf/run_local_perf.py forward these to perf
+# containers. Full variable list and examples: scripts/perf/README.md
 
 
 def _py_yamux_env(name: str, default: str = "") -> str:
@@ -151,7 +110,7 @@ def _yamux_batch_threshold_divisor() -> int:
 
 def _perf_yamux_log(msg: str) -> None:
     if _perf_yamux_debug_enabled():
-        print(f"[YAMUX_PERF] {msg}", flush=True)
+        logger.debug("[YAMUX_PERF] %s", msg)
 
 
 PROTOCOL_ID = "/yamux/1.0.0"
