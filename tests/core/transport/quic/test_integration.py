@@ -154,7 +154,7 @@ class TestBasicQUICFlow:
 
             async with trio.open_nursery() as nursery:
                 # Start server listener
-                await listener.listen(listen_addr, nursery)
+                await listener.listen(listen_addr)
 
                 # Get server address
                 server_addrs = listener.get_addrs()
@@ -293,7 +293,7 @@ class TestBasicQUICFlow:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
-                await listener.listen(listen_addr, nursery)
+                await listener.listen(listen_addr)
 
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -719,7 +719,7 @@ async def test_quic_concurrent_streams():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -878,7 +878,7 @@ async def test_quic_yamux_integration():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -986,7 +986,7 @@ async def test_quic_cid_retirement_integration():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 
@@ -1053,7 +1053,7 @@ async def test_connection_migration_scenario():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 
@@ -1132,7 +1132,7 @@ async def test_cid_retirement_under_load():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 
