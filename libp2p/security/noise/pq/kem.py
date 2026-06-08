@@ -10,14 +10,12 @@ X-Wing is a hybrid KEM combining ML-KEM-768 and X25519:
 Reference: draft-connolly-cfrg-xwing-kem
 """
 
-import hashlib
 from typing import Protocol, runtime_checkable
 
 from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
 import nacl.utils
 
-# X-Wing domain separation label: ASCII bytes for "\.//^\"
-_XWING_LABEL = bytes([0x5C, 0x2E, 0x2F, 0x2F, 0x5E, 0x5C])
+from ._xwing import _xwing_combine
 
 # Key and ciphertext size constants
 _ML_KEM_PK_SIZE = 1184
@@ -70,26 +68,6 @@ class IKem(Protocol):
 
         """
         ...
-
-
-def _xwing_combine(
-    ss_mlkem: bytes,
-    ss_x25519: bytes,
-    ct_x25519: bytes,
-    pk_x25519: bytes,
-) -> bytes:
-    r"""
-    Combine ML-KEM and X25519 shared secrets per @noble/post-quantum 0.6.0.
-
-    SHA3-256(ss_mlkem || ss_x25519 || ct_x25519 || pk_x25519 || label)
-    where label = b'\\.//' + b'^\\' (6 bytes, domain separation).
-
-    Note: label is appended LAST to match @noble/post-quantum 0.6.0 combiner:
-    sha3_256(concatBytes(ss[0], ss[1], ct[1], pk[1], asciiToBytes('\\.//^\\')))
-    """
-    return hashlib.sha3_256(
-        ss_mlkem + ss_x25519 + ct_x25519 + pk_x25519 + _XWING_LABEL
-    ).digest()
 
 
 class XWingKem:

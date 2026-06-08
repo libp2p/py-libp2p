@@ -38,9 +38,10 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-import hashlib
 import logging
 from typing import TYPE_CHECKING
+
+from ._xwing import _xwing_combine
 
 if TYPE_CHECKING:
     from .kem import IKem
@@ -52,21 +53,9 @@ logger = logging.getLogger(__name__)
 # oqs auto-install wait on every make_fast_kem() / LibOQSXWingKem() call.
 _LIBOQS_AVAILABLE: bool | None = None
 
-_XWING_LABEL = bytes([0x5C, 0x2E, 0x2F, 0x2F, 0x5E, 0x5C])
 _ML_KEM_768_PK_SIZE = 1184
 _ML_KEM_768_CT_SIZE = 1088
 _X25519_KEY_SIZE = 32
-
-
-def _xwing_combine(
-    ss_mlkem: bytes,
-    ss_x25519: bytes,
-    ct_x25519: bytes,
-    pk_x25519: bytes,
-) -> bytes:
-    return hashlib.sha3_256(
-        ss_mlkem + ss_x25519 + ct_x25519 + pk_x25519 + _XWING_LABEL
-    ).digest()
 
 
 class LibOQSXWingKem:
