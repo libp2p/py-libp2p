@@ -4,38 +4,32 @@
 # Run: python -m pytest tests/test_p2pcalc.py -v
 # No network or Redis needed — all tests are pure logic.
 
+from pathlib import Path
 import sys
 import time
 import unittest
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from p2pcalc.operation import (
-    HLC, Operation, OpType, OperationFactory, receive_operation
-)
-from p2pcalc.crdt import (
-    MultiValueRegister, StructuralCRDT, SheetCRDT,
-    ConflictPolicy, CellVersion
-)
-from p2pcalc.state_sync import SnapshotCandidate, OpLogPersistence
-
+from p2pcalc.crdt import ConflictPolicy, MultiValueRegister, SheetCRDT, StructuralCRDT
+from p2pcalc.operation import HLC, Operation, OperationFactory, OpType
+from p2pcalc.state_sync import SnapshotCandidate
 
 # ---------------------------------------------------------------------------
 # HLC Tests
 # ---------------------------------------------------------------------------
 
-class TestHLC(unittest.TestCase):
 
+class TestHLC(unittest.TestCase):
     def test_monotonically_increasing(self):
         clock = HLC()
         timestamps = [clock.now() for _ in range(100)]
         for i in range(1, len(timestamps)):
-            a, b = timestamps[i-1], timestamps[i]
+            a, b = timestamps[i - 1], timestamps[i]
             # b must be strictly greater than a
             self.assertTrue(
                 b[0] > a[0] or (b[0] == a[0] and b[1] > a[1]),
-                f"HLC not monotonic: {a} -> {b}"
+                f"HLC not monotonic: {a} -> {b}",
             )
 
     def test_update_advances_past_remote(self):
@@ -70,8 +64,8 @@ class TestHLC(unittest.TestCase):
 # Operation Tests
 # ---------------------------------------------------------------------------
 
-class TestOperationFactory(unittest.TestCase):
 
+class TestOperationFactory(unittest.TestCase):
     def setUp(self):
         self.factory = OperationFactory(peer_id="peer-A")
 
@@ -92,9 +86,7 @@ class TestOperationFactory(unittest.TestCase):
         self.assertEqual(op.payload["formula"], "=SUM(A1:A5)")
 
     def test_parse_set_cell_format(self):
-        op = self.factory.from_socialcalc_command(
-            "set C3 bgcolor #ff0000", "sheet1"
-        )
+        op = self.factory.from_socialcalc_command("set C3 bgcolor #ff0000", "sheet1")
         self.assertEqual(op.op_type, OpType.SET_CELL_FORMAT)
         self.assertEqual(op.payload["attr"], "bgcolor")
 
@@ -115,9 +107,7 @@ class TestOperationFactory(unittest.TestCase):
         self.assertEqual(op.payload["col"], "C")
 
     def test_parse_range_format(self):
-        op = self.factory.from_socialcalc_command(
-            "set A1:B5 bgcolor blue", "sheet1"
-        )
+        op = self.factory.from_socialcalc_command("set A1:B5 bgcolor blue", "sheet1")
         self.assertEqual(op.op_type, OpType.SET_RANGE_FORMAT)
 
     def test_serialisation_roundtrip(self):
@@ -144,8 +134,7 @@ class TestOperationFactory(unittest.TestCase):
 
     def test_snapshot_chunk(self):
         op = self.factory.make_snapshot_chunk(
-            "sheet1", chunk_index=0, total_chunks=2,
-            data=b"hello", op_log_from=42
+            "sheet1", chunk_index=0, total_chunks=2, data=b"hello", op_log_from=42
         )
         self.assertEqual(op.op_type, OpType.SNAPSHOT_CHUNK)
         self.assertEqual(op.payload["idx"], 0)
@@ -162,9 +151,7 @@ class TestOperationFactory(unittest.TestCase):
         op2 = self.factory.from_socialcalc_command("set A2 value 2", "s")
         t1 = op1.hlc
         t2 = op2.hlc
-        self.assertTrue(
-            t2[0] > t1[0] or (t2[0] == t1[0] and t2[1] > t1[1])
-        )
+        self.assertTrue(t2[0] > t1[0] or (t2[0] == t1[0] and t2[1] > t1[1]))
 
     def test_depends_on_propagated(self):
         op = self.factory.from_socialcalc_command(
@@ -177,8 +164,8 @@ class TestOperationFactory(unittest.TestCase):
 # CRDT — MultiValueRegister Tests
 # ---------------------------------------------------------------------------
 
-class TestMultiValueRegister(unittest.TestCase):
 
+class TestMultiValueRegister(unittest.TestCase):
     def _make_op(self, peer_id, cell, value, hlc_p, hlc_l):
         factory = OperationFactory(peer_id=peer_id)
         op = factory.from_socialcalc_command(f"set {cell} value {value}", "s")
@@ -268,8 +255,8 @@ class TestMultiValueRegister(unittest.TestCase):
 # CRDT — StructuralCRDT Tests
 # ---------------------------------------------------------------------------
 
-class TestStructuralCRDT(unittest.TestCase):
 
+class TestStructuralCRDT(unittest.TestCase):
     def _make_row_op(self, op_type, row, peer_id="peer-A", hlc=(1000, 0)):
         factory = OperationFactory(peer_id=peer_id)
         op = factory.from_socialcalc_command(f"insertrow {row} 1", "s")
@@ -320,8 +307,8 @@ class TestStructuralCRDT(unittest.TestCase):
 # SheetCRDT Tests
 # ---------------------------------------------------------------------------
 
-class TestSheetCRDT(unittest.TestCase):
 
+class TestSheetCRDT(unittest.TestCase):
     def test_apply_and_dedup(self):
         sheet = SheetCRDT("test-sheet")
         factory = OperationFactory("peer-X")
@@ -335,7 +322,9 @@ class TestSheetCRDT(unittest.TestCase):
         sheet = SheetCRDT("test-sheet")
         factory = OperationFactory("peer-X")
         for i in range(5):
-            op = factory.from_socialcalc_command(f"set A{i+1} value {i}", "test-sheet")
+            op = factory.from_socialcalc_command(
+                f"set A{i + 1} value {i}", "test-sheet"
+            )
             sheet.apply(op)
         self.assertEqual(sheet.op_log_length(), 5)
 
@@ -343,7 +332,9 @@ class TestSheetCRDT(unittest.TestCase):
         sheet = SheetCRDT("test-sheet")
         factory = OperationFactory("peer-X")
         for i in range(5):
-            op = factory.from_socialcalc_command(f"set A{i+1} value {i}", "test-sheet")
+            op = factory.from_socialcalc_command(
+                f"set A{i + 1} value {i}", "test-sheet"
+            )
             sheet.apply(op)
         recent = sheet.op_log_since(3)
         self.assertEqual(len(recent), 2)
@@ -363,12 +354,10 @@ class TestSheetCRDT(unittest.TestCase):
 # Snapshot Candidate Tests
 # ---------------------------------------------------------------------------
 
-class TestSnapshotCandidate(unittest.TestCase):
 
+class TestSnapshotCandidate(unittest.TestCase):
     def test_completeness_detection(self):
-        candidate = SnapshotCandidate(
-            peer_id="peer-A", total_chunks=3, op_log_from=10
-        )
+        candidate = SnapshotCandidate(peer_id="peer-A", total_chunks=3, op_log_from=10)
         self.assertFalse(candidate.is_complete)
         candidate.chunks[0] = b"chunk0"
         candidate.chunks[1] = b"chunk1"
@@ -376,17 +365,13 @@ class TestSnapshotCandidate(unittest.TestCase):
         self.assertTrue(candidate.is_complete)
 
     def test_data_assembly(self):
-        candidate = SnapshotCandidate(
-            peer_id="peer-A", total_chunks=2, op_log_from=0
-        )
+        candidate = SnapshotCandidate(peer_id="peer-A", total_chunks=2, op_log_from=0)
         candidate.chunks[0] = b"hello "
         candidate.chunks[1] = b"world"
         self.assertEqual(candidate.data, b"hello world")
 
     def test_content_hash_deterministic(self):
-        candidate = SnapshotCandidate(
-            peer_id="peer-A", total_chunks=1, op_log_from=0
-        )
+        candidate = SnapshotCandidate(peer_id="peer-A", total_chunks=1, op_log_from=0)
         candidate.chunks[0] = b"test data"
         h1 = candidate.content_hash
         h2 = candidate.content_hash
@@ -396,6 +381,7 @@ class TestSnapshotCandidate(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Integration: multi-peer convergence simulation
 # ---------------------------------------------------------------------------
+
 
 class TestConvergence(unittest.TestCase):
     """Simulate two peers editing concurrently and verify convergence."""
@@ -435,17 +421,16 @@ class TestConvergence(unittest.TestCase):
 
     def test_three_peers_distinct_cells_no_conflict(self):
         sheets = [
-            SheetCRDT("shared", policy=ConflictPolicy.MULTI_VALUE)
-            for _ in range(3)
+            SheetCRDT("shared", policy=ConflictPolicy.MULTI_VALUE) for _ in range(3)
         ]
         factories = [OperationFactory(f"peer-{i}") for i in range(3)]
 
         ops = []
         for i, (factory, sheet) in enumerate(zip(factories, sheets)):
             op = factory.from_socialcalc_command(
-                f"set {chr(65+i)}1 value peer_{i}", "shared"
+                f"set {chr(65 + i)}1 value peer_{i}", "shared"
             )
-            op.payload = {"cell": f"{chr(65+i)}1", "value": f"peer_{i}"}
+            op.payload = {"cell": f"{chr(65 + i)}1", "value": f"peer_{i}"}
             ops.append(op)
 
         # All peers receive all ops
@@ -461,7 +446,7 @@ class TestConvergence(unittest.TestCase):
         for sheet in sheets:
             snap = sheet.snapshot()
             for i in range(3):
-                coord = f"{chr(65+i)}1"
+                coord = f"{chr(65 + i)}1"
                 self.assertIn(coord, snap["cells"])
 
 

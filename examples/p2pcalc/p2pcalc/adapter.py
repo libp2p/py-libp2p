@@ -34,17 +34,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
-import time
 from collections import defaultdict
-from typing import Optional
+import logging
 
 import redis.asyncio as aioredis
 
-from .operation import Operation, OpType, OperationFactory
-from .p2p_node import P2PCalcNode
 from .crdt import ConflictPolicy
+from .operation import Operation
+from .p2p_node import P2PCalcNode
 
 logger = logging.getLogger("p2pcalc.adapter")
 
@@ -57,7 +54,8 @@ ECHO_TAG_PREFIX = "p2pcalc_injected:"
 
 
 class EtherCalcAdapter:
-    """Bridges EtherCalc's Redis pub-sub with the P2PCalc GossipSub network.
+    """
+    Bridges EtherCalc's Redis pub-sub with the P2PCalc GossipSub network.
 
     One adapter instance handles one EtherCalc room (sheet).
     Multiple adapters can run in the same process for multiple rooms.
@@ -76,8 +74,8 @@ class EtherCalcAdapter:
         self._sheet_id = room_name
 
         # Redis clients — separate for pub and sub
-        self._redis_pub: Optional[aioredis.Redis] = None
-        self._redis_sub: Optional[aioredis.client.PubSub] = None
+        self._redis_pub: aioredis.Redis | None = None
+        self._redis_sub: aioredis.client.PubSub | None = None
 
         # Dedup: track op_ids we injected so we don't re-broadcast them
         self._injected_op_ids: set[str] = set()
@@ -107,9 +105,7 @@ class EtherCalcAdapter:
         self._redis_pub = await aioredis.from_url(
             self._redis_url, decode_responses=True
         )
-        redis_client = await aioredis.from_url(
-            self._redis_url, decode_responses=True
-        )
+        redis_client = await aioredis.from_url(self._redis_url, decode_responses=True)
         self._redis_sub = redis_client.pubsub()
 
         # Subscribe to EtherCalc's Redis channel for this room
@@ -192,10 +188,7 @@ class EtherCalcAdapter:
                     seen_ids.add(past_op.op_id)
                 unmet = [dep for dep in op.depends_on if dep not in seen_ids]
                 if unmet:
-                    logger.debug(
-                        "Op %s buffered — waiting for %s",
-                        op.op_id[:8], unmet
-                    )
+                    logger.debug("Op %s buffered — waiting for %s", op.op_id[:8], unmet)
                     for dep in unmet:
                         self._causal_buffer[dep].append(op)
                     self._stats["causal_buffered"] += 1
@@ -229,7 +222,8 @@ class EtherCalcAdapter:
 
         logger.debug(
             "P2P -> Redis: peer=%s cmd=%r",
-            op.peer_id[:8], op.raw_command[:60],
+            op.peer_id[:8],
+            op.raw_command[:60],
         )
 
     async def _flush_causal_buffer(self, arrived_op_id: str) -> None:
@@ -238,7 +232,8 @@ class EtherCalcAdapter:
         for op in waiting:
             logger.debug(
                 "Flushing buffered op %s (dependency %s arrived)",
-                op.op_id[:8], arrived_op_id[:8],
+                op.op_id[:8],
+                arrived_op_id[:8],
             )
             await self._inject_to_redis(op)
             await self._flush_causal_buffer(op.op_id)
@@ -248,7 +243,8 @@ class EtherCalcAdapter:
     # ------------------------------------------------------------------
 
     async def _inject_conflict_marker(self, conflict_cell) -> None:
-        """Inject a conflict marker into EtherCalc as a comment cell.
+        """
+        Inject a conflict marker into EtherCalc as a comment cell.
 
         When MVR detects concurrent conflicting edits, we inject a
         special comment into the cell adjacent to the conflict so users
@@ -305,8 +301,10 @@ class EtherCalcAdapter:
 # Multi-room adapter manager
 # ---------------------------------------------------------------------------
 
+
 class AdapterManager:
-    """Manages multiple EtherCalc room adapters on a single P2P node.
+    """
+    Manages multiple EtherCalc room adapters on a single P2P node.
 
     One P2P node, many rooms — each room gets its own GossipSub topic
     and Redis channel subscription.
@@ -316,7 +314,7 @@ class AdapterManager:
         self,
         redis_url: str = "redis://localhost:6379",
         p2p_port: int = 0,
-        known_peers: Optional[list[str]] = None,
+        known_peers: list[str] | None = None,
         conflict_policy: ConflictPolicy = ConflictPolicy.MULTI_VALUE,
     ):
         self._redis_url = redis_url
@@ -360,8 +358,7 @@ class AdapterManager:
             "peer_id": self._node.peer_id,
             "listen_addrs": self._node.get_listen_addrs(),
             "rooms": {
-                name: adapter.stats()
-                for name, adapter in self._adapters.items()
+                name: adapter.stats() for name, adapter in self._adapters.items()
             },
         }
 

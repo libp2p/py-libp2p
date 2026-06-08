@@ -1,4 +1,3 @@
-
 # P2PCalc : Decentralised EtherCalc over py-libp2p GossipSub
 
 **Author:** Dashpreet Singh
@@ -9,7 +8,7 @@
 
 **Issue:** [DMP 2026 #34](https://github.com/seetadev/py-libp2p/issues/34)
 
----
+______________________________________________________________________
 
 ## What this is
 
@@ -23,7 +22,7 @@ untouched. P2PCalc intercepts at the Redis pub-sub layer, the only place
 where EtherCalc's components talk to each other. Everything else stays the
 same.
 
----
+______________________________________________________________________
 
 ## The problem with EtherCalc's current architecture
 
@@ -47,7 +46,7 @@ diverged states.
 disaster response, or low-connectivity rural deployments, this is a
 fundamental constraint not an incidental one.
 
----
+______________________________________________________________________
 
 ## The approach
 
@@ -89,7 +88,7 @@ After (P2PCalc):
 
 The browser never knows the difference.
 
----
+______________________________________________________________________
 
 ## Innovations
 
@@ -139,9 +138,9 @@ conflict before writing.
 
 Three conflict policies are available:
 
-* `mvr` (default): Multi-Value Register, explicit conflict markers
-* `lww`: Last-Write-Wins using HLC, no conflict markers, fast
-* `peer`: Deterministic peer-priority (lowest peer_id always wins), useful
+- `mvr` (default): Multi-Value Register, explicit conflict markers
+- `lww`: Last-Write-Wins using HLC, no conflict markers, fast
+- `peer`: Deterministic peer-priority (lowest peer_id always wins), useful
   for testing and offline-first workflows where one device is authoritative
 
 ### 3. Replicated Growable Array for structural operations
@@ -245,7 +244,7 @@ integrity checks at the pub-sub layer, before they are delivered to the
 application. This prevents malformed operations from being forwarded to
 other peers in the mesh.
 
----
+______________________________________________________________________
 
 ## Architecture
 
@@ -287,7 +286,7 @@ other peers in the mesh.
     [Remote P2PCalc peers — same stack]
 ```
 
----
+______________________________________________________________________
 
 ## File structure
 
@@ -308,15 +307,15 @@ examples/p2pcalc/
     └── test_p2pcalc.py     42 unit tests (no network or Redis required)
 ```
 
----
+______________________________________________________________________
 
 ## Quick start
 
 ### Prerequisites
 
-* Python 3.10+
-* Redis running locally: `redis-server`
-* EtherCalc running locally: `npm install -g ethercalc && ethercalc`
+- Python 3.10+
+- Redis running locally: `redis-server`
+- EtherCalc running locally: `npm install -g ethercalc && ethercalc`
 
 ### Install
 
@@ -374,7 +373,7 @@ python -m p2pcalc.main --room my-sheet --conflict-policy lww
 python -m p2pcalc.main --room my-sheet --debug
 ```
 
----
+______________________________________________________________________
 
 ## Run tests
 
@@ -393,26 +392,26 @@ RGA concurrent structural operation merging, SheetCRDT deduplication and
 op-log, snapshot assembly and race resolution, and multi-peer convergence
 simulation.
 
----
+______________________________________________________________________
 
 ## What is not yet implemented
 
-* DHT-based WAN peer discovery (mDNS only covers LAN today)
-* IPFS snapshot storage for durable shared state
-* Benchmarking harness comparing latency against centralised EtherCalc
-* WebRTC transport for browser-to-browser operation (no Python needed)
+- DHT-based WAN peer discovery (mDNS only covers LAN today)
+- IPFS snapshot storage for durable shared state
+- Benchmarking harness comparing latency against centralised EtherCalc
+- WebRTC transport for browser-to-browser operation (no Python needed)
 
 These are planned for subsequent PRs in the DMP 2026 timeline.
 
----
+______________________________________________________________________
 
 ## References
 
-* Kulkarni et al., "Logical Physical Clocks and Consistent Snapshots in
+- Kulkarni et al., "Logical Physical Clocks and Consistent Snapshots in
   Globally Distributed Databases", 2014 (HLC)
-* Shapiro et al., "Conflict-Free Replicated Data Types", INRIA 2011 (CRDT)
-* Roh et al., "Replicated Abstract Data Types: Building Blocks for
+- Shapiro et al., "Conflict-Free Replicated Data Types", INRIA 2011 (CRDT)
+- Roh et al., "Replicated Abstract Data Types: Building Blocks for
   Collaborative Applications", 2011 (RGA)
-* Tan et al., "From SocialCalc to EtherCalc", AOSA Volume 2, 2012
+- Tan et al., "From SocialCalc to EtherCalc", AOSA Volume 2, 2012
   (EtherCalc internals and Redis pub-sub architecture)
-* libp2p GossipSub v1.1 spec: https://github.com/libp2p/specs/tree/master/pubsub/gossipsub
+- libp2p GossipSub v1.1 spec: https://github.com/libp2p/specs/tree/master/pubsub/gossipsub

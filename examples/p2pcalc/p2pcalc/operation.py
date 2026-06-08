@@ -21,22 +21,22 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import IntEnum
 import hashlib
-import struct
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from enum import IntEnum
-from typing import Optional
-import msgpack
 
+import msgpack
 
 # ---------------------------------------------------------------------------
 # Hybrid Logical Clock
 # ---------------------------------------------------------------------------
 
+
 class HLC:
-    """Hybrid Logical Clock for causal ordering without clock sync.
+    """
+    Hybrid Logical Clock for causal ordering without clock sync.
 
     HLC combines physical time (for human readability) with a logical
     counter (for causal ordering when physical clocks agree). This gives
@@ -47,7 +47,7 @@ class HLC:
     """
 
     def __init__(self):
-        self._physical: int = 0   # milliseconds
+        self._physical: int = 0  # milliseconds
         self._logical: int = 0
 
     def now(self) -> tuple[int, int]:
@@ -95,41 +95,44 @@ _clock = HLC()
 # Operation types
 # ---------------------------------------------------------------------------
 
+
 class OpType(IntEnum):
     # Cell operations (mapped from SocialCalc command strings)
-    SET_CELL_VALUE    = 0x01
-    SET_CELL_FORMULA  = 0x02
-    SET_CELL_FORMAT   = 0x03
-    CLEAR_CELL        = 0x04
+    SET_CELL_VALUE = 0x01
+    SET_CELL_FORMULA = 0x02
+    SET_CELL_FORMAT = 0x03
+    CLEAR_CELL = 0x04
 
     # Range operations
-    SET_RANGE_FORMAT  = 0x10
-    COPY_RANGE        = 0x11
-    MOVE_RANGE        = 0x12
+    SET_RANGE_FORMAT = 0x10
+    COPY_RANGE = 0x11
+    MOVE_RANGE = 0x12
 
     # Structural operations
-    INSERT_ROW        = 0x20
-    DELETE_ROW        = 0x21
-    INSERT_COL        = 0x22
-    DELETE_COL        = 0x23
+    INSERT_ROW = 0x20
+    DELETE_ROW = 0x21
+    INSERT_COL = 0x22
+    DELETE_COL = 0x23
 
     # Sheet operations
-    SORT_SHEET        = 0x30
-    RENAME_SHEET      = 0x31
+    SORT_SHEET = 0x30
+    RENAME_SHEET = 0x31
 
     # Control
-    SNAPSHOT_REQUEST  = 0xF0   # late joiner asks for current state
-    SNAPSHOT_CHUNK    = 0xF1   # response: one chunk of snapshot
-    HEARTBEAT         = 0xFF   # peer presence signal
+    SNAPSHOT_REQUEST = 0xF0  # late joiner asks for current state
+    SNAPSHOT_CHUNK = 0xF1  # response: one chunk of snapshot
+    HEARTBEAT = 0xFF  # peer presence signal
 
 
 # ---------------------------------------------------------------------------
 # Core Operation dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Operation:
-    """A single spreadsheet operation in the P2PCalc protocol.
+    """
+    A single spreadsheet operation in the P2PCalc protocol.
 
     Every mutation flowing through the GossipSub topic is an Operation.
     Operations are:
@@ -140,18 +143,18 @@ class Operation:
     """
 
     # Identity
-    op_id: str              # UUID4 — globally unique, used for dedup
-    peer_id: str            # libp2p peer ID of originating peer
-    sheet_id: str           # EtherCalc room name (e.g. "my-spreadsheet")
+    op_id: str  # UUID4 — globally unique, used for dedup
+    peer_id: str  # libp2p peer ID of originating peer
+    sheet_id: str  # EtherCalc room name (e.g. "my-spreadsheet")
 
     # Causality
-    hlc_physical: int       # HLC physical component (ms)
-    hlc_logical: int        # HLC logical component
+    hlc_physical: int  # HLC physical component (ms)
+    hlc_logical: int  # HLC logical component
 
     # Content
-    op_type: int            # OpType enum value
-    raw_command: str        # Original SocialCalc command string (audit trail)
-    payload: dict           # Structured payload (type-specific fields)
+    op_type: int  # OpType enum value
+    raw_command: str  # Original SocialCalc command string (audit trail)
+    payload: dict  # Structured payload (type-specific fields)
 
     # Integrity
     content_hash: str = ""  # SHA-256 of (sheet_id + raw_command + peer_id)
@@ -188,7 +191,7 @@ class Operation:
         return msgpack.packb(d, use_bin_type=True)
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "Operation":
+    def from_bytes(cls, data: bytes) -> Operation:
         """Deserialise from MessagePack bytes."""
         d = msgpack.unpackb(data, raw=False)
         return cls(
@@ -212,8 +215,10 @@ class Operation:
 # Operation factory — parse SocialCalc command strings into Operations
 # ---------------------------------------------------------------------------
 
+
 class OperationFactory:
-    """Parse EtherCalc/SocialCalc command strings into Operation objects.
+    """
+    Parse EtherCalc/SocialCalc command strings into Operation objects.
 
     SocialCalc sends human-readable command strings over its channel.
     We parse these, classify them, extract structured payload, and wrap
@@ -230,7 +235,7 @@ class OperationFactory:
         self,
         command: str,
         sheet_id: str,
-        depends_on: Optional[list[str]] = None,
+        depends_on: list[str] | None = None,
     ) -> Operation:
         """Parse a raw SocialCalc command string into a typed Operation."""
         command = command.strip()
@@ -268,19 +273,19 @@ class OperationFactory:
             value = " ".join(parts[3:])
 
             if attr == "value":
-                return OpType.SET_CELL_VALUE, {
-                    "cell": cell_or_range, "value": value
-                }
+                return OpType.SET_CELL_VALUE, {"cell": cell_or_range, "value": value}
             elif attr == "formula":
                 return OpType.SET_CELL_FORMULA, {
-                    "cell": cell_or_range, "formula": value
+                    "cell": cell_or_range,
+                    "formula": value,
                 }
             else:
-                op = (OpType.SET_RANGE_FORMAT
-                      if ":" in cell_or_range else OpType.SET_CELL_FORMAT)
-                return op, {
-                    "cell": cell_or_range, "attr": attr, "value": value
-                }
+                op = (
+                    OpType.SET_RANGE_FORMAT
+                    if ":" in cell_or_range
+                    else OpType.SET_CELL_FORMAT
+                )
+                return op, {"cell": cell_or_range, "attr": attr, "value": value}
 
         # "erase A1"
         if verb == "erase" and len(parts) >= 2:
@@ -362,7 +367,7 @@ class OperationFactory:
             payload={
                 "idx": chunk_index,
                 "total": total_chunks,
-                "data": data.hex(),   # bytes as hex string for msgpack compat
+                "data": data.hex(),  # bytes as hex string for msgpack compat
                 "op_log_from": op_log_from,
             },
         )
@@ -385,8 +390,10 @@ class OperationFactory:
 # Receive-side: update HLC from incoming operation
 # ---------------------------------------------------------------------------
 
+
 def receive_operation(op: Operation) -> Operation:
-    """Update local HLC from an incoming operation's timestamp.
+    """
+    Update local HLC from an incoming operation's timestamp.
 
     Must be called for every received operation to maintain
     causal consistency guarantees.

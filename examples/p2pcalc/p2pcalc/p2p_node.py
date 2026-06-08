@@ -15,23 +15,22 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import logging
-import os
-from typing import Callable, Awaitable, Optional
 
-import trio
+from multiaddr import Multiaddr
+
 from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.host.basic_host import BasicHost
 from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
-from libp2p.pubsub.pubsub import Pubsub
 from libp2p.pubsub.pb import rpc_pb2
-from multiaddr import Multiaddr
+from libp2p.pubsub.pubsub import Pubsub
 
-from .operation import Operation, OpType, OperationFactory, receive_operation
-from .crdt import SheetCRDT, ConflictPolicy
+from .crdt import ConflictPolicy, SheetCRDT
+from .operation import Operation, OperationFactory, OpType, receive_operation
 
 logger = logging.getLogger("p2pcalc.node")
 
@@ -47,11 +46,11 @@ GOSSIPSUB_PARAMS = dict(
     degree=6,
     degree_low=4,
     degree_high=8,
-    heartbeat_interval=1,           # 1s heartbeat for fast convergence
+    heartbeat_interval=1,  # 1s heartbeat for fast convergence
     gossip_window=3,
     gossip_history=5,
     time_to_live=60,
-    adaptive_gossip_enabled=True,   # GossipSub v2.0 adaptive features
+    adaptive_gossip_enabled=True,  # GossipSub v2.0 adaptive features
     spam_protection_enabled=True,
 )
 
@@ -61,7 +60,8 @@ def _topic(sheet_id: str) -> str:
 
 
 class P2PCalcNode:
-    """A P2PCalc peer node.
+    """
+    A P2PCalc peer node.
 
     Lifecycle:
       1. __init__     — configure keys and sheet state
@@ -78,7 +78,7 @@ class P2PCalcNode:
     def __init__(
         self,
         port: int = 0,
-        known_peers: Optional[list[str]] = None,
+        known_peers: list[str] | None = None,
         conflict_policy: ConflictPolicy = ConflictPolicy.MULTI_VALUE,
     ):
         self._port = port
@@ -91,10 +91,10 @@ class P2PCalcNode:
         self._presence: dict[str, dict[str, str]] = {}  # sheet_id -> peer_id -> cursor
 
         # Set during start()
-        self._host: Optional[BasicHost] = None
-        self._pubsub: Optional[Pubsub] = None
-        self._gossipsub: Optional[GossipSub] = None
-        self._factory: Optional[OperationFactory] = None
+        self._host: BasicHost | None = None
+        self._pubsub: Pubsub | None = None
+        self._gossipsub: GossipSub | None = None
+        self._factory: OperationFactory | None = None
         self._peer_id_str: str = ""
 
     # ------------------------------------------------------------------
@@ -117,11 +117,12 @@ class P2PCalcNode:
 
         # Boot GossipSub v2.0
         from libp2p.pubsub.gossipsub import (
-            PROTOCOL_ID_V20,
-            PROTOCOL_ID_V13,
-            PROTOCOL_ID_V11,
             PROTOCOL_ID,
+            PROTOCOL_ID_V11,
+            PROTOCOL_ID_V13,
+            PROTOCOL_ID_V20,
         )
+
         self._gossipsub = GossipSub(
             protocols=[
                 PROTOCOL_ID_V20,
@@ -293,9 +294,7 @@ class P2PCalcNode:
         if cb:
             await cb(op)
 
-    async def _validate_message(
-        self, peer_id: str, msg: rpc_pb2.Message
-    ) -> bool:
+    async def _validate_message(self, peer_id: str, msg: rpc_pb2.Message) -> bool:
         """GossipSub message validator — reject malformed operations."""
         try:
             op = Operation.from_bytes(msg.data)
@@ -315,6 +314,7 @@ class P2PCalcNode:
             return
 
         import json
+
         snapshot_data = json.dumps(sheet.snapshot()).encode()
 
         # Chunk into 64KB pieces for libp2p stream compatibility
@@ -341,7 +341,9 @@ class P2PCalcNode:
 
         logger.info(
             "Served snapshot for %s in %d chunks to %s",
-            sheet_id, len(chunks), request_op.peer_id[:8],
+            sheet_id,
+            len(chunks),
+            request_op.peer_id[:8],
         )
 
     async def _handle_sync_stream(self, stream: INetStream) -> None:
@@ -352,6 +354,7 @@ class P2PCalcNode:
             sheet = self._sheets.get(sheet_id)
             if sheet:
                 import json
+
                 payload = json.dumps(sheet.snapshot()).encode()
                 await stream.write(len(payload).to_bytes(4, "big") + payload)
             await stream.close()
@@ -384,11 +387,10 @@ class P2PCalcNode:
         if not self._host:
             return []
         return [
-            str(addr) + "/p2p/" + self._peer_id_str
-            for addr in self._host.get_addrs()
+            str(addr) + "/p2p/" + self._peer_id_str for addr in self._host.get_addrs()
         ]
 
-    def get_sheet_state(self, sheet_id: str) -> Optional[SheetCRDT]:
+    def get_sheet_state(self, sheet_id: str) -> SheetCRDT | None:
         return self._sheets.get(sheet_id)
 
     def get_conflicts(self, sheet_id: str) -> list:

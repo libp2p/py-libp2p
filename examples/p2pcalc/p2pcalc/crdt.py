@@ -22,12 +22,11 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+import logging
 
-from .operation import Operation, OpType, HLC
+from .operation import HLC, Operation, OpType
 
 logger = logging.getLogger("p2pcalc.crdt")
 
@@ -38,18 +37,20 @@ _clock = HLC()
 # Cell state
 # ---------------------------------------------------------------------------
 
+
 class ConflictPolicy(Enum):
-    LAST_WRITE_WINS = "lww"     # Phase 1 baseline — fast, simple
-    MULTI_VALUE     = "mvr"     # Phase 2 — safe, surfaced to user
-    PEER_PRIORITY   = "peer"    # Deterministic: lowest peer_id wins
+    LAST_WRITE_WINS = "lww"  # Phase 1 baseline — fast, simple
+    MULTI_VALUE = "mvr"  # Phase 2 — safe, surfaced to user
+    PEER_PRIORITY = "peer"  # Deterministic: lowest peer_id wins
 
 
 @dataclass
 class CellVersion:
     """A single versioned value for a cell."""
+
     value: str
     formula: str
-    formats: dict        # attr -> value
+    formats: dict  # attr -> value
     hlc: tuple[int, int]
     peer_id: str
     op_id: str
@@ -57,15 +58,17 @@ class CellVersion:
 
 @dataclass
 class CellState:
-    """CRDT state for a single cell.
+    """
+    CRDT state for a single cell.
 
     In Phase 1 (LWW): only the winning version is kept.
     In Phase 2 (MVR): all concurrent versions are kept as candidates.
     A cell is in "conflict" when len(candidates) > 1.
     """
-    coord: str                              # e.g. "A1"
+
+    coord: str  # e.g. "A1"
     candidates: list[CellVersion] = field(default_factory=list)
-    resolved_value: Optional[str] = None   # set by user during conflict resolution
+    resolved_value: str | None = None  # set by user during conflict resolution
     is_conflict: bool = False
 
     @property
@@ -87,8 +90,10 @@ class CellState:
 # Multi-Value Register (cell-level CRDT)
 # ---------------------------------------------------------------------------
 
+
 class MultiValueRegister:
-    """Cell-level CRDT using Multi-Value Register semantics.
+    """
+    Cell-level CRDT using Multi-Value Register semantics.
 
     A write dominates another if it causally follows it (HLC comparison).
     Concurrent writes (neither dominates the other) produce a conflict.
@@ -114,7 +119,8 @@ class MultiValueRegister:
             value=op.payload.get("value", ""),
             formula=op.payload.get("formula", ""),
             formats={op.payload.get("attr", ""): op.payload.get("value", "")}
-                    if op.op_type == OpType.SET_CELL_FORMAT else {},
+            if op.op_type == OpType.SET_CELL_FORMAT
+            else {},
             hlc=op.hlc,
             peer_id=op.peer_id,
             op_id=op.op_id,
@@ -187,9 +193,7 @@ class MultiValueRegister:
             )
         return state
 
-    def _apply_peer_priority(
-        self, state: CellState, new_ver: CellVersion
-    ) -> CellState:
+    def _apply_peer_priority(self, state: CellState, new_ver: CellVersion) -> CellState:
         """Deterministic: lexicographically smallest peer_id always wins."""
         if not state.candidates:
             state.candidates = [new_ver]
@@ -205,9 +209,7 @@ class MultiValueRegister:
         state = self._cells.get(coord)
         if not state:
             return CellState(coord=coord)
-        chosen = next(
-            (v for v in state.candidates if v.op_id == chosen_op_id), None
-        )
+        chosen = next((v for v in state.candidates if v.op_id == chosen_op_id), None)
         if chosen:
             state.resolved_value = chosen.value
             state.is_conflict = False
@@ -217,7 +219,7 @@ class MultiValueRegister:
     def get_conflicts(self) -> list[CellState]:
         return [s for s in self._cells.values() if s.is_conflict]
 
-    def get_cell(self, coord: str) -> Optional[CellState]:
+    def get_cell(self, coord: str) -> CellState | None:
         return self._cells.get(coord)
 
     def snapshot(self) -> dict[str, dict]:
@@ -240,17 +242,20 @@ class MultiValueRegister:
 # RGA for structural operations (row/column insertions + deletions)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class RGANode:
     """A node in the Replicated Growable Array."""
-    index: int          # Original row or column index at insertion time
-    peer_id: str        # Peer that inserted this
+
+    index: int  # Original row or column index at insertion time
+    peer_id: str  # Peer that inserted this
     hlc: tuple[int, int]
-    is_tombstone: bool = False   # Soft delete — never remove from array
+    is_tombstone: bool = False  # Soft delete — never remove from array
 
 
 class StructuralCRDT:
-    """RGA-based CRDT for row/column insertions and deletions.
+    """
+    RGA-based CRDT for row/column insertions and deletions.
 
     Key innovation: we track the INTENT of structural operations
     (insert row 3) rather than their absolute effect (rows 4..N shift down).
@@ -267,15 +272,11 @@ class StructuralCRDT:
 
     def apply(self, op: Operation) -> None:
         if op.op_type == OpType.INSERT_ROW:
-            self._insert(
-                self._rows, op.payload["row"], op.peer_id, op.hlc
-            )
+            self._insert(self._rows, op.payload["row"], op.peer_id, op.hlc)
         elif op.op_type == OpType.DELETE_ROW:
             self._delete(self._rows, op.payload["row"])
         elif op.op_type == OpType.INSERT_COL:
-            self._insert(
-                self._cols, op.payload.get("col_index", 0), op.peer_id, op.hlc
-            )
+            self._insert(self._cols, op.payload.get("col_index", 0), op.peer_id, op.hlc)
         elif op.op_type == OpType.DELETE_COL:
             self._delete(self._cols, op.payload.get("col_index", 0))
 
@@ -331,8 +332,10 @@ class StructuralCRDT:
 # Unified sheet CRDT state
 # ---------------------------------------------------------------------------
 
+
 class SheetCRDT:
-    """Complete CRDT state for a single spreadsheet sheet.
+    """
+    Complete CRDT state for a single spreadsheet sheet.
 
     Combines:
       - MultiValueRegister for all cell mutations
@@ -367,8 +370,10 @@ class SheetCRDT:
         ):
             self.cells.apply(op)
         elif op.op_type in (
-            OpType.INSERT_ROW, OpType.DELETE_ROW,
-            OpType.INSERT_COL, OpType.DELETE_COL,
+            OpType.INSERT_ROW,
+            OpType.DELETE_ROW,
+            OpType.INSERT_COL,
+            OpType.DELETE_COL,
         ):
             self.structure.apply(op)
 

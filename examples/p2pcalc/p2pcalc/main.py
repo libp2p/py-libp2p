@@ -46,7 +46,7 @@ async def run(args: argparse.Namespace) -> None:
     )
 
     peer_id = await manager.start()
-    print(f"\nP2PCalc node started")
+    print("\nP2PCalc node started")
     print(f"Peer ID : {peer_id}")
     print(f"Addrs   : {manager._node.get_listen_addrs()}")
     print(f"Redis   : {args.redis}")
@@ -90,14 +90,16 @@ def main():
         description="P2PCalc — Decentralised EtherCalc via py-libp2p GossipSub"
     )
     parser.add_argument(
-        "--room", "-r",
+        "--room",
+        "-r",
         action="append",
         default=[],
         metavar="ROOM_NAME",
         help="EtherCalc room name(s) to bridge (can repeat)",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         type=int,
         default=0,
         help="TCP port for libp2p (0 = random)",

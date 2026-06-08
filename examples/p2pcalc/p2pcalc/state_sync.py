@@ -22,14 +22,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import hashlib
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
 
-from .operation import Operation, OpType
 from .crdt import SheetCRDT
+from .operation import Operation
 
 logger = logging.getLogger("p2pcalc.sync")
 
@@ -43,11 +42,12 @@ MAX_SNAPSHOT_BYTES = 10 * 1024 * 1024
 @dataclass
 class SnapshotCandidate:
     """A snapshot being assembled from chunk operations."""
+
     peer_id: str
     total_chunks: int
-    op_log_from: int              # replay ops from this index
+    op_log_from: int  # replay ops from this index
     chunks: dict[int, bytes] = field(default_factory=dict)
-    received_at: float = field(default_factory=lambda: __import__('time').time())
+    received_at: float = field(default_factory=lambda: __import__("time").time())
 
     @property
     def is_complete(self) -> bool:
@@ -63,7 +63,8 @@ class SnapshotCandidate:
 
 
 class StateSyncManager:
-    """Manages late-joiner state synchronisation for a single sheet.
+    """
+    Manages late-joiner state synchronisation for a single sheet.
 
     Used by P2PCalcNode internally when a new peer joins a sheet and
     requests a snapshot.
@@ -76,13 +77,14 @@ class StateSyncManager:
         self._sync_event = asyncio.Event()
 
     def handle_snapshot_chunk(self, op: Operation) -> bool:
-        """Process an incoming SNAPSHOT_CHUNK operation.
+        """
+        Process an incoming SNAPSHOT_CHUNK operation.
 
         Returns True when a complete, valid snapshot has been assembled
         and applied.
         """
         if self._synced:
-            return True  
+            return True
 
         payload = op.payload
         peer_id = op.peer_id
@@ -111,7 +113,9 @@ class StateSyncManager:
         if not candidate.is_complete:
             logger.debug(
                 "Snapshot from %s: %d/%d chunks received",
-                peer_id[:8], len(candidate.chunks), total,
+                peer_id[:8],
+                len(candidate.chunks),
+                total,
             )
             return False
 
@@ -124,7 +128,8 @@ class StateSyncManager:
         if len(data) > MAX_SNAPSHOT_BYTES:
             logger.warning(
                 "Snapshot from %s too large (%d bytes) — rejected",
-                candidate.peer_id[:8], len(data),
+                candidate.peer_id[:8],
+                len(data),
             )
             return False
 
@@ -142,7 +147,8 @@ class StateSyncManager:
             if best.op_log_from > candidate.op_log_from:
                 logger.debug(
                     "Ignoring snapshot from %s — peer %s has more history",
-                    candidate.peer_id[:8], best.peer_id[:8],
+                    candidate.peer_id[:8],
+                    best.peer_id[:8],
                 )
                 return False
 
@@ -159,7 +165,7 @@ class StateSyncManager:
         )
         return True
 
-    def _best_candidate(self) -> Optional[SnapshotCandidate]:
+    def _best_candidate(self) -> SnapshotCandidate | None:
         """Return the candidate with the most op history."""
         complete = [c for c in self._candidates.values() if c.is_complete]
         if not complete:
@@ -172,9 +178,8 @@ class StateSyncManager:
     def _apply_snapshot_dict(self, snapshot: dict) -> None:
         """Reconstruct sheet cell state from a snapshot dict."""
         cells = snapshot.get("cells", {})
-        from .operation import Operation, OpType, OperationFactory, _clock
-        import uuid
-        import time
+
+        from .operation import OperationFactory
 
         factory = OperationFactory(peer_id="__snapshot__")
 
@@ -204,7 +209,7 @@ class StateSyncManager:
                 "Snapshot sync timed out after %.1fs — starting from empty state",
                 timeout,
             )
-            self._synced = True   
+            self._synced = True
             return False
 
     @property
@@ -213,7 +218,8 @@ class StateSyncManager:
 
 
 class OpLogPersistence:
-    """Persists the operation log to local disk for crash recovery.
+    """
+    Persists the operation log to local disk for crash recovery.
 
     INNOVATION: On restart, a peer replays its own op-log to recover
     its last known state before requesting a network snapshot. This
@@ -225,6 +231,7 @@ class OpLogPersistence:
 
     def __init__(self, sheet_id: str, data_dir: str = "./p2pcalc_data"):
         from pathlib import Path
+
         _dir = Path(data_dir)
         _dir.mkdir(parents=True, exist_ok=True)
         self._path = str(_dir / f"{sheet_id}.oplog")
@@ -240,6 +247,7 @@ class OpLogPersistence:
         data = op.to_bytes()
         # Write: 4-byte length prefix + msgpack bytes
         import struct
+
         self._file.write(struct.pack(">I", len(data)) + data)
         self._file.flush()
 
@@ -247,6 +255,7 @@ class OpLogPersistence:
         """Read all operations from the log file."""
         ops = []
         import struct
+
         try:
             with open(self._path, "rb") as f:
                 while True:
