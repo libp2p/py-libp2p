@@ -115,9 +115,9 @@ class LibOQSXWingKem:
                            sk = ml_kem_dk || x25519_sk (2432 B).
 
         """
-        with self._oqs.KeyEncapsulation("ML-KEM-768") as kem:
-            ml_pk = kem.generate_keypair()
-            ml_sk = kem.export_secret_key()
+        with self._oqs.KeyEncapsulation("ML-KEM-768") as kem:  # type: ignore[arg-type]
+            ml_pk = kem.generate_keypair()  # type: ignore[union-attr]
+            ml_sk = kem.export_secret_key()  # type: ignore[union-attr]
 
         x_sk = self._nacl_random(_X25519_KEY_SIZE)
         x_pk = bytes(self._scalarmult_base(x_sk))
@@ -141,8 +141,8 @@ class LibOQSXWingKem:
         ml_pk = pk[:_ML_KEM_768_PK_SIZE]
         x_pk_r = pk[_ML_KEM_768_PK_SIZE:]
 
-        with self._oqs.KeyEncapsulation("ML-KEM-768") as kem:
-            ml_ct, ss_mlkem = kem.encap_secret(ml_pk)
+        with self._oqs.KeyEncapsulation("ML-KEM-768") as kem:  # type: ignore[arg-type]
+            ml_ct, ss_mlkem = kem.encap_secret(ml_pk)  # type: ignore[union-attr]
 
         x_eph_sk = self._nacl_random(_X25519_KEY_SIZE)
         x_eph_pk = bytes(self._scalarmult_base(x_eph_sk))
@@ -173,8 +173,8 @@ class LibOQSXWingKem:
         ml_ct = ct[:_ML_KEM_768_CT_SIZE]
         x_eph_pk = ct[_ML_KEM_768_CT_SIZE:]
 
-        with self._oqs.KeyEncapsulation("ML-KEM-768", secret_key=ml_sk) as kem:
-            ss_mlkem = kem.decap_secret(ml_ct)
+        with self._oqs.KeyEncapsulation("ML-KEM-768", secret_key=ml_sk) as kem:  # type: ignore[arg-type]
+            ss_mlkem = kem.decap_secret(ml_ct)  # type: ignore[union-attr]
 
         ss_x25519 = bytes(self._scalarmult(x_sk_r, x_eph_pk))
         x_pk_r = bytes(self._scalarmult_base(x_sk_r))
@@ -276,6 +276,6 @@ class KeypairPool:
             return
         loop = asyncio.get_running_loop()
         keypairs = await asyncio.gather(
-            *(loop.run_in_executor(None, self._kem.keygen) for _ in range(needed))
+            *(loop.run_in_executor(None, self._kem.keygen) for _ in range(needed))  # type: ignore[arg-type]
         )
         self._pool.extend(keypairs)

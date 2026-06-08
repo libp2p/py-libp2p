@@ -9,6 +9,10 @@ import math
 import pytest
 import trio
 
+from multiaddr import Multiaddr
+
+from libp2p.abc import IRawConnection
+from libp2p.connection_types import ConnectionType
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import X25519PrivateKey
@@ -20,7 +24,9 @@ from libp2p.security.noise.pq.transport_pq import PROTOCOL_ID, TransportPQ
 # ---------------------------------------------------------------------------
 
 
-class _MemoryConn:
+class _MemoryConn(IRawConnection):
+    is_initiator: bool = False
+
     def __init__(self, send_chan, recv_chan) -> None:
         self._send = send_chan
         self._recv = recv_chan
@@ -47,15 +53,13 @@ class _MemoryConn:
     async def close(self) -> None:
         await self._send.aclose()
 
-    def get_remote_address(self) -> None:
+    def get_remote_address(self) -> tuple[str, int] | None:
         return None
 
-    def get_transport_addresses(self) -> list:
+    def get_transport_addresses(self) -> list[Multiaddr]:
         return []
 
-    def get_connection_type(self):
-        from libp2p.connection_types import ConnectionType
-
+    def get_connection_type(self) -> ConnectionType:
         return ConnectionType.UNKNOWN
 
 

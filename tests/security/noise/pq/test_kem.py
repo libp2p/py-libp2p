@@ -6,6 +6,8 @@ from libp2p.security.noise.pq.kem import XWingKem
 class TestXWingKemKeySizes:
     """Verify X-Wing key and ciphertext sizes match the spec."""
 
+    kem: XWingKem
+
     def setup_method(self) -> None:
         self.kem = XWingKem()
 
@@ -40,6 +42,8 @@ class TestXWingKemKeySizes:
 class TestXWingKemRoundTrip:
     """Verify encapsulate and decapsulate produce the same shared secret."""
 
+    kem: XWingKem
+
     def setup_method(self) -> None:
         self.kem = XWingKem()
 
@@ -73,6 +77,8 @@ class TestXWingKemRoundTrip:
 
 class TestXWingKemCombiner:
     """Verify the X-Wing combiner produces deterministic output."""
+
+    kem: XWingKem
 
     def setup_method(self) -> None:
         self.kem = XWingKem()
