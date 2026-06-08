@@ -171,6 +171,14 @@ class PatternXXhfs:
         ``remote_peer`` is ``None`` the peer ID check is skipped, which is
         useful for interop tests where the remote ID is not known in advance.
 
+        .. warning::
+
+            Passing ``remote_peer=None`` disables peer-identity binding.
+            The responder's signature is still verified (proving key
+            ownership), but the caller cannot confirm which peer they
+            connected to. Only use ``None`` in interop tests or when
+            peer discovery happens out-of-band.
+
         Args:
             conn: Raw underlying connection.
             remote_peer: Expected responder peer ID, or ``None`` to skip check.
