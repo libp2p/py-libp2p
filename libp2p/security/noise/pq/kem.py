@@ -13,7 +13,6 @@ Reference: draft-connolly-cfrg-xwing-kem
 import hashlib
 from typing import Protocol, runtime_checkable
 
-from kyber_py.ml_kem import ML_KEM_768
 from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
 import nacl.utils
 
@@ -99,7 +98,21 @@ class XWingKem:
 
     Uses kyber-py as the ML-KEM-768 backend and PyNaCl for X25519.
     Implements the IKem protocol.
+
+    Requires the ``kyber-py`` package (``pip install 'libp2p[pq]'``).
+    The import is deferred to construction time so that modules importing
+    this class do not require kyber-py to be installed.
     """
+
+    def __init__(self) -> None:
+        try:
+            from kyber_py.ml_kem import ML_KEM_768
+        except ImportError as exc:
+            raise ImportError(
+                "XWingKem requires the 'kyber-py' package. "
+                "Install it with: pip install 'libp2p[pq]'"
+            ) from exc
+        self._ml_kem = ML_KEM_768
 
     def keygen(self) -> tuple[bytes, bytes]:
         """
@@ -111,7 +124,7 @@ class XWingKem:
               sk = ml_kem_dk (2400 B) || x25519_sk (32 B)  -- 2432 bytes total
 
         """
-        ml_kem_pk, ml_kem_sk = ML_KEM_768.keygen()
+        ml_kem_pk, ml_kem_sk = self._ml_kem.keygen()
 
         x25519_sk = nacl.utils.random(_X25519_KEY_SIZE)
         x25519_pk = bytes(crypto_scalarmult_base(x25519_sk))
@@ -147,7 +160,7 @@ class XWingKem:
         x25519_pk_r = pk[_ML_KEM_PK_SIZE:]
 
         # ML-KEM-768 encapsulation
-        ss_mlkem, ml_kem_ct = ML_KEM_768.encaps(ml_kem_pk)
+        ss_mlkem, ml_kem_ct = self._ml_kem.encaps(ml_kem_pk)
 
         # X25519 ephemeral key exchange
         x25519_eph_sk = nacl.utils.random(_X25519_KEY_SIZE)
@@ -189,7 +202,7 @@ class XWingKem:
         x25519_eph_pk = ct[_ML_KEM_CT_SIZE:]
 
         # ML-KEM-768 decapsulation
-        ss_mlkem = ML_KEM_768.decaps(ml_kem_sk, ml_kem_ct)
+        ss_mlkem = self._ml_kem.decaps(ml_kem_sk, ml_kem_ct)
 
         # X25519 DH using our static private key and the ephemeral public key
         ss_x25519 = bytes(crypto_scalarmult(x25519_sk_r, x25519_eph_pk))

@@ -14,9 +14,6 @@ Public API::
     pool = await KeypairPool.create(kem, min_size=3) # pre-compute keypairs
 """
 
-from .transport_pq import PROTOCOL_ID, TransportPQ
-from .kem_backends import KeypairPool, LibOQSXWingKem, make_fast_kem
-
 __all__ = [
     "PROTOCOL_ID",
     "TransportPQ",
@@ -24,3 +21,20 @@ __all__ = [
     "LibOQSXWingKem",
     "make_fast_kem",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in ("PROTOCOL_ID", "TransportPQ"):
+        from .transport_pq import PROTOCOL_ID, TransportPQ
+
+        globals()["PROTOCOL_ID"] = PROTOCOL_ID
+        globals()["TransportPQ"] = TransportPQ
+        return globals()[name]
+    if name in ("KeypairPool", "LibOQSXWingKem", "make_fast_kem"):
+        from .kem_backends import KeypairPool, LibOQSXWingKem, make_fast_kem
+
+        globals()["KeypairPool"] = KeypairPool
+        globals()["LibOQSXWingKem"] = LibOQSXWingKem
+        globals()["make_fast_kem"] = make_fast_kem
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
