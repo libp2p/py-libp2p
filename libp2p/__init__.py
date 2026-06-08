@@ -279,6 +279,132 @@ def get_default_muxer_options() -> TMuxerOptions:
     else:  # YAMUX is default
         return create_yamux_muxer_option()
 
+def _build_transports_for_swarm(
+    key_pair: "KeyPair",
+    listen_addrs: "Sequence[multiaddr.Multiaddr] | None",
+    transports: "Sequence[ITransport] | None",
+    enable_quic: bool,
+    enable_tcp: bool,
+    enable_websocket: bool,
+    enable_autotls: bool,
+    upgrader: "TransportUpgrader",
+    quic_config: "QUICTransportConfig | None",
+    tls_client_config: "ssl.SSLContext | None",
+    tls_server_config: "ssl.SSLContext | None",
+    # Pass QUICTransport class from module scope so monkeypatching in tests works.
+    quic_class: type | None = None,
+) -> "list[ITransport]":
+    """
+    Build the ordered list of transports for the Swarm's TransportManager.
+
+    Priority:
+    1. Explicit ``transports`` list — used as-is (highest priority).
+    2. ``listen_addrs`` inspection — auto-detects which transports are needed
+       by inspecting **every** address (not just the first one).
+    3. ``enable_*`` flags — coarse-grained control when no addresses given.
+    4. Default fallback: TCP only.
+
+    :param key_pair: The host's key pair (needed by QUIC for TLS).
+    :param listen_addrs: The multiaddrs the host will listen on.
+    :param transports: Explicit transport list, or ``None`` to auto-build.
+    :param enable_quic: Whether to create a QUIC transport when auto-building.
+    :param enable_tcp: Whether to include a TCP transport when auto-building.
+    :param enable_websocket: Whether to include a WebSocket transport.
+    :param enable_autotls: Whether to enable AutoTLS in QUIC/WebSocket transports.
+    :param upgrader: The upgrader passed to WebSocket transport at construction.
+    :param quic_config: Optional QUIC transport configuration.
+    :param tls_client_config: TLS client context for WebSocket.
+    :param tls_server_config: TLS server context for WebSocket.
+    :returns: Ordered list of :class:`~libp2p.abc.ITransport` instances.
+    """
+    # Highest priority: user-supplied explicit list.
+    if transports is not None:
+        return list(transports)
+
+    # Use the provided class (patchable by tests) or fall back to module-level import.
+    _QUICTransport = quic_class if quic_class is not None else QUICTransport
+
+    result: list[ITransport] = []
+
+    if listen_addrs:
+        # Use the transport registry to create transports for each address type,
+        # matching the original new_swarm() behavior so monkeypatching the registry
+        # in tests still works correctly.
+        # NOTE: import the module (not the function) so tests can monkeypatch
+        # `transport_registry.create_transport_for_multiaddr` and have it respected.
+        from libp2p.transport import transport_registry as _tr
+
+        # Build a temporary upgrader for registry lookup (the real upgrader is wired
+        # in after the Swarm is created; the registry uses it mainly for WebSocket).
+        from libp2p.transport.upgrader import TransportUpgrader as _TU
+
+        temp_upgrader = _TU(
+            secure_transports_by_protocol={},
+            muxer_transports_by_protocol={},
+        )
+
+        seen_classes: set[type] = set()
+        for addr in listen_addrs:
+            transport_obj = _tr.create_transport_for_multiaddr(
+                addr,
+                temp_upgrader,
+                private_key=key_pair.private_key,
+                config=quic_config,
+                enable_autotls=enable_autotls,
+                tls_client_config=tls_client_config,
+                tls_server_config=tls_server_config,
+            )
+            cls = type(transport_obj)
+            if cls not in seen_classes:
+                seen_classes.add(cls)
+                # For WebSocket, re-create with the real upgrader so the transport
+                # gets the actual security/muxer config.
+                from libp2p.transport.websocket.transport import WebsocketTransport
+                if isinstance(transport_obj, WebsocketTransport):
+                    transport_obj = WebsocketTransport(
+                        upgrader,
+                        tls_client_config=tls_client_config,
+                        tls_server_config=tls_server_config,
+                    )
+                result.append(transport_obj)
+
+        # If enable_quic=True is requested but no QUIC was detected in listen_addrs,
+        # replace the result with only the QUIC transport (mirrors original new_swarm()
+        # behavior where the transport was replaced rather than appended).
+        if enable_quic and not any(isinstance(t, _QUICTransport) for t in result):
+            result = [
+                _QUICTransport(
+                    key_pair.private_key,
+                    config=quic_config,
+                    enable_autotls=enable_autotls,
+                )
+            ]
+
+    # Fall through to flags if nothing was auto-detected.
+    if not result:
+        if enable_quic:
+            result.append(
+                _QUICTransport(
+                    key_pair.private_key,
+                    config=quic_config,
+                    enable_autotls=enable_autotls,
+                )
+            )
+        if enable_websocket:
+            from libp2p.transport.websocket.transport import WebsocketTransport
+            result.append(
+                WebsocketTransport(
+                    upgrader,
+                    tls_client_config=tls_client_config,
+                    tls_server_config=tls_server_config,
+                )
+            )
+        if enable_tcp or not result:
+            result.append(TCP())
+
+    return result
+
+
 def new_swarm(
     key_pair: KeyPair | None = None,
     muxer_opt: TMuxerOptions | None = None,
@@ -286,115 +412,110 @@ def new_swarm(
     peerstore_opt: IPeerStore | None = None,
     muxer_preference: Literal["YAMUX", "MPLEX"] | None = None,
     listen_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    # NEW: explicit transport list — highest priority
+    transports: Sequence[ITransport] | None = None,
+    # Backward-compat flags
     enable_quic: bool = False,
     enable_autotls: bool = False,
+    # NEW: convenience flags for auto-building transports
+    enable_tcp: bool = True,
+    enable_websocket: bool = False,
     retry_config: RetryConfig | None = None,
     connection_config: ConnectionConfig | QUICTransportConfig | None = None,
     tls_client_config: ssl.SSLContext | None = None,
     tls_server_config: ssl.SSLContext | None = None,
     resource_manager: ResourceManager | None = None,
-    psk: str | None = None
+    psk: str | None = None,
 ) -> INetworkService:
-    logger.debug(f"new_swarm: enable_quic={enable_quic}, listen_addrs={listen_addrs}")
     """
-    Create a swarm instance based on the parameters.
+    Create a swarm instance with multi-transport support.
+
+    The swarm can listen on and dial over multiple transports simultaneously
+    (TCP, WebSocket, QUIC), mirroring go-libp2p's architecture.
+
+    Transport selection priority (highest to lowest):
+
+    1. **Explicit ``transports`` list** — used as-is; all other transport
+       parameters are ignored.
+    2. **``listen_addrs`` inspection** — each address is inspected to determine
+       which transports are needed (TCP, WebSocket, QUIC).  All detected
+       transport types are created and registered.
+    3. **``enable_*`` flags** — coarse-grained control when no addresses are
+       provided (``enable_quic``, ``enable_websocket``, ``enable_tcp``).
+    4. **Default fallback** — TCP only.
 
     :param key_pair: optional choice of the ``KeyPair``
     :param muxer_opt: optional choice of stream muxer
     :param sec_opt: optional choice of security upgrade
     :param peerstore_opt: optional peerstore
-    :param muxer_preference: optional explicit muxer preference
-    :param listen_addrs: optional list of multiaddrs to listen on
-    :param enable_quic: enable quic for transport
-    :param enable_autotls: enable autotls for security
-    :param quic_transport_opt: options for transport
-    :param resource_manager: optional resource manager for connection/stream limits
-    :type resource_manager: :class:`libp2p.rcmgr.ResourceManager` or None
-    :param psk: optional pre-shared key for PSK encryption in transport
-    :return: return a default swarm instance
+    :param muxer_preference: optional explicit muxer preference (``"YAMUX"`` or
+        ``"MPLEX"``)
+    :param listen_addrs: optional list of multiaddrs to listen on.  **All**
+        addresses are inspected to determine which transports to create.
+    :param transports: explicit list of transport instances to register.  When
+        provided, all ``enable_*`` flags and ``listen_addrs``-based detection
+        are bypassed.
+    :param enable_quic: include a QUIC transport when auto-building (deprecated;
+        prefer passing ``listen_addrs`` with QUIC addresses or ``transports``).
+    :param enable_autotls: enable AutoTLS for QUIC / WebSocket transports.
+    :param enable_tcp: include a TCP transport when auto-building (default True).
+    :param enable_websocket: include a WebSocket transport when auto-building.
+    :param retry_config: optional connection retry configuration.
+    :param connection_config: optional connection configuration.
+    :param tls_client_config: TLS client context for WebSocket transport.
+    :param tls_server_config: TLS server context for WebSocket transport.
+    :param resource_manager: optional resource manager for connection/stream limits.
+    :param psk: optional pre-shared key for PSK encryption.
+    :return: a Swarm instance implementing INetworkService.
 
-    Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
-          due to its improved performance and features.
-          Mplex (/mplex/6.7.0) is retained for backward compatibility
-          but may be deprecated in the future.
+    Examples::
 
-    Note: Ed25519 keys are used by default for better interoperability with
-          other libp2p implementations (Rust, Go) which often disable RSA support.
+        # TCP only (default)
+        swarm = new_swarm()
+
+        # TCP + WebSocket + QUIC auto-detected from listen_addrs
+        swarm = new_swarm(listen_addrs=[
+            Multiaddr("/ip4/0.0.0.0/tcp/4001"),
+            Multiaddr("/ip4/0.0.0.0/tcp/4002/ws"),
+            Multiaddr("/ip4/0.0.0.0/udp/4003/quic-v1"),
+        ])
+
+        # Explicit transport list
+        swarm = new_swarm(transports=[TCP(), QUICTransport(kp.private_key)])
+
+    Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer due to
+          improved performance and features. Mplex is retained for backward
+          compatibility but may be deprecated in the future.
     """
+    logger.debug(
+        "new_swarm: enable_quic=%s, enable_websocket=%s, listen_addrs=%s, "
+        "transports=%s",
+        enable_quic,
+        enable_websocket,
+        listen_addrs,
+        [type(t).__name__ for t in transports] if transports is not None else None,
+    )
+
     if key_pair is None:
         # Use Ed25519 by default for better interoperability with Rust/Go libp2p
-        # which often compile without RSA support
         key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
-
-    transport: TCP | QUICTransport | ITransport
-    quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
-
-    if listen_addrs is None:
-        if enable_quic:
-            transport = QUICTransport(
-                key_pair.private_key,
-                config=quic_transport_opt,
-                enable_autotls=enable_autotls,
-            )
-        else:
-            transport = TCP()
-    else:
-        # Use transport registry to select the appropriate transport
-        from libp2p.transport.transport_registry import create_transport_for_multiaddr
-
-        # Create a temporary upgrader for transport selection
-        # We'll create the real upgrader later with the proper configuration
-        temp_upgrader = TransportUpgrader(
-            secure_transports_by_protocol={},
-            muxer_transports_by_protocol={}
-        )
-
-        addr = listen_addrs[0]
-        logger.debug(f"new_swarm: Creating transport for address: {addr}")
-        transport_maybe = create_transport_for_multiaddr(
-            addr,
-            temp_upgrader,
-            private_key=key_pair.private_key,
-            config=quic_transport_opt,
-            enable_autotls=enable_autotls,
-            tls_client_config=tls_client_config,
-            tls_server_config=tls_server_config
-        )
-
-        if transport_maybe is None:
-            raise ValueError(f"Unsupported transport for listen_addrs: {listen_addrs}")
-
-        transport = transport_maybe
-        logger.debug(f"new_swarm: Created transport: {type(transport)}")
-
-    # If enable_quic is True but we didn't get a QUIC transport, force QUIC
-    if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
-        transport = QUICTransport(
-            key_pair.private_key,
-            config=quic_transport_opt,
-            enable_autotls=enable_autotls,
-        )
-
-    logger.debug(f"new_swarm: Final transport type: {type(transport)}")
+    quic_transport_opt = (
+        connection_config
+        if isinstance(connection_config, QUICTransportConfig)
+        else None
+    )
 
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()
 
     # Default security transports
-    # NOTE: Using Noise as primary for now because Python's ssl module has limitations
-    # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
-    # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
-        # TLS_PROTOCOL_ID: TLSTransport(key_pair),
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
-        TLS_PROTOCOL_ID: TLSTransport (
-            key_pair, enable_autotls = enable_autotls
-        ),
+        TLS_PROTOCOL_ID: TLSTransport(key_pair, enable_autotls=enable_autotls),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
             key_pair, peerstore=peerstore_opt
@@ -421,11 +542,32 @@ def new_swarm(
         else:  # YAMUX is default
             muxer_transports_by_protocol = create_yamux_muxer_option()
 
+    # Build the real upgrader first (WebSocket transport needs it at construction).
     upgrader = TransportUpgrader(
         secure_transports_by_protocol=secure_transports_by_protocol,
         muxer_transports_by_protocol=muxer_transports_by_protocol,
     )
 
+    # Build the transport list using the helper.
+    # Pass QUICTransport as a module-level reference so tests can monkeypatch it.
+    transport_list = _build_transports_for_swarm(
+        key_pair=key_pair,
+        listen_addrs=listen_addrs,
+        transports=transports,
+        enable_quic=enable_quic,
+        enable_tcp=enable_tcp,
+        enable_websocket=enable_websocket,
+        enable_autotls=enable_autotls,
+        upgrader=upgrader,
+        quic_config=quic_transport_opt,
+        tls_client_config=tls_client_config,
+        tls_server_config=tls_server_config,
+        quic_class=QUICTransport,  # module-level ref; monkeypatching libp2p.QUICTransport works
+    )
+    logger.debug(
+        "new_swarm: using transports: %s",
+        [type(t).__name__ for t in transport_list],
+    )
 
     peerstore = peerstore_opt or PeerStore()
     # Store our key pair in peerstore
@@ -435,10 +577,10 @@ def new_swarm(
         id_opt,
         peerstore,
         upgrader,
-        transport,
+        transports=transport_list,  # NEW: list instead of single transport
         retry_config=retry_config,
         connection_config=connection_config,
-        psk=psk
+        psk=psk,
     )
 
     # Set resource manager if provided
@@ -481,9 +623,24 @@ def new_host(
     bootstrap_dns_max_retries: int = 3,
     connection_config: ConnectionConfig | None = None,
     announce_addrs: Sequence[multiaddr.Multiaddr] | None = None,
+    # NEW: explicit transport list — highest priority
+    transports: Sequence[ITransport] | None = None,
+    # NEW: convenience flags
+    enable_tcp: bool = True,
+    enable_websocket: bool = False,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
+
+    The host can listen on and dial over multiple transports simultaneously
+    (TCP, WebSocket, QUIC), mirroring go-libp2p's architecture.
+
+    Transport selection priority (highest to lowest):
+
+    1. ``transports`` — explicit list, used as-is.
+    2. ``listen_addrs`` inspection — all addresses are inspected.
+    3. ``enable_*`` flags.
+    4. Default: TCP only.
 
     :param key_pair: optional choice of the ``KeyPair``
     :param muxer_opt: optional choice of stream muxer
@@ -491,11 +648,12 @@ def new_host(
     :param peerstore_opt: optional peerstore
     :param disc_opt: optional discovery
     :param muxer_preference: optional explicit muxer preference
-    :param listen_addrs: optional list of multiaddrs to listen on
+    :param listen_addrs: optional list of multiaddrs to listen on.  **All**
+        addresses are inspected to determine which transports to create.
     :param enable_mDNS: whether to enable mDNS discovery
     :param bootstrap: optional list of bootstrap peer addresses as strings
-    :param enable_quic: optinal choice to use QUIC for transport
-    :param enable_autotls: optinal choice to use AutoTLS for security
+    :param enable_quic: optional choice to use QUIC for transport
+    :param enable_autotls: optional choice to use AutoTLS for security
     :param quic_transport_opt: optional configuration for quic transport
     :param tls_client_config: optional TLS client configuration for WebSocket transport
     :param tls_server_config: optional TLS server configuration for WebSocket transport
@@ -507,11 +665,16 @@ def new_host(
     :param bootstrap_dns_max_retries: max DNS resolution retries with backoff
     :param connection_config: optional connection configuration for connection manager
     :param announce_addrs: if set, these replace listen addrs in get_addrs()
+    :param transports: explicit list of transport instances to register.  When
+        provided, all ``enable_*`` flags and ``listen_addrs``-based detection
+        are bypassed.
+    :param enable_tcp: include a TCP transport when auto-building (default True).
+    :param enable_websocket: include a WebSocket transport when auto-building.
     :return: return a host instance
     """
 
     if not enable_quic and quic_transport_opt is not None:
-        logger.warning(f"QUIC config provided but QUIC not enabled, ignoring QUIC config")
+        logger.warning("QUIC config provided but QUIC not enabled, ignoring QUIC config")
 
     # Enable automatic protection by default: if no resource manager is supplied,
     # create a default instance so connections/streams are guarded out of the box.
@@ -524,8 +687,8 @@ def new_host(
             # Fallback to leaving it None if creation fails for any reason.
             resource_manager = None
 
-    # Determine the connection config to use
-    # QUIC transport config takes precedence if QUIC is enabled
+    # Determine the connection config to use.
+    # QUIC transport config takes precedence if QUIC is enabled.
     effective_config: ConnectionConfig | QUICTransportConfig | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
@@ -545,7 +708,11 @@ def new_host(
         tls_client_config=tls_client_config,
         tls_server_config=tls_server_config,
         resource_manager=resource_manager,
-        psk=psk
+        psk=psk,
+        # NEW: forward multi-transport params
+        transports=transports,
+        enable_tcp=enable_tcp,
+        enable_websocket=enable_websocket,
     )
 
     if disc_opt is not None:
@@ -573,5 +740,6 @@ def new_host(
         bootstrap_dns_max_retries=bootstrap_dns_max_retries,
         announce_addrs=announce_addrs,
     )
+
 
 __version__ = __version("libp2p")

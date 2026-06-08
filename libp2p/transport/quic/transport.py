@@ -398,29 +398,43 @@ class QUICTransport(ITransport):
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
         """
-        Check if this transport can dial the given multiaddr.
+        Return True if this QUIC transport can dial the given multiaddr.
 
         Args:
-            maddr: Multiaddr to check
+            maddr: Multiaddr to check (e.g. ``/ip4/1.2.3.4/udp/4001/quic-v1``)
 
         Returns:
-            True if this transport can dial the address
+            True if the multiaddr contains a QUIC protocol component.
 
         """
         return is_quic_multiaddr(maddr)
 
-    def protocols(self) -> list[TProtocol]:
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
         """
-        Get supported protocol identifiers.
+        Return True if this QUIC transport can listen on the given multiaddr.
+
+        Args:
+            maddr: Multiaddr to check.
 
         Returns:
-            List of supported protocol strings
+            True if the multiaddr contains a QUIC protocol component.
 
         """
-        protocols = [QUIC_V1_PROTOCOL]
+        return is_quic_multiaddr(maddr)
+
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names handled by QUIC transport.
+
+        Returns:
+            List of supported QUIC protocol strings (e.g. ``["quic-v1"]`` or
+            ``["quic-v1", "quic"]`` when draft-29 is enabled).
+
+        """
+        protos: list[str] = [str(QUIC_V1_PROTOCOL)]
         if self._config.enable_draft29:
-            protocols.append(QUIC_DRAFT29_PROTOCOL)
-        return protocols
+            protos.append(str(QUIC_DRAFT29_PROTOCOL))
+        return protos
 
     def listen_order(self) -> int:
         """

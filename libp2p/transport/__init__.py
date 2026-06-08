@@ -9,6 +9,7 @@ from .transport_registry import (
     register_transport,
     get_supported_transport_protocols,
 )
+from .manager import TransportManager
 from .upgrader import TransportUpgrader
 from libp2p.abc import ITransport
 
@@ -48,6 +49,7 @@ def create_transport(protocol: str, upgrader: TransportUpgrader | None = None, *
 
 __all__ = [
     "TCP",
+    "TransportManager",
     "WebsocketTransport",
     "TransportRegistry",
     "create_transport_for_multiaddr",

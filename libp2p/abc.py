@@ -3038,6 +3038,70 @@ class ITransport(ABC):
 
         """
 
+    @abstractmethod
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this transport can dial the given multiaddr.
+
+        The TransportManager calls this method before attempting a dial
+        to route the connection to the correct transport.
+
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress to check.
+
+        Returns
+        -------
+        bool
+            True if this transport can dial maddr, False otherwise.
+
+        Examples
+        --------
+        - TCP returns True for ``/ip4/127.0.0.1/tcp/4001``
+        - WebSocket returns True for ``/ip4/127.0.0.1/tcp/8080/ws``
+        - QUIC returns True for ``/ip4/127.0.0.1/udp/4001/quic-v1``
+
+        """
+
+    @abstractmethod
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this transport can listen on the given multiaddr.
+
+        Often identical to :meth:`can_dial` but may differ — e.g. a
+        relay transport can dial outbound but cannot accept inbound
+        connections.
+
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress to check.
+
+        Returns
+        -------
+        bool
+            True if this transport can listen on maddr, False otherwise.
+
+        """
+
+    @abstractmethod
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names this transport handles.
+
+        Used by :class:`~libp2p.transport.manager.TransportManager` as a
+        fast pre-filter: if the multiaddr contains none of the listed
+        protocol names, ``can_dial`` / ``can_listen`` are not called.
+
+        Returns
+        -------
+        list[str]
+            Protocol name strings, e.g. ``["tcp"]``, ``["ws", "wss"]``,
+            or ``["quic", "quic-v1"]``.
+
+        """
+
 
 # -------------------------- pubsub abc.py --------------------------
 
