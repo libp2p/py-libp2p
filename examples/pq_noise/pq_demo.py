@@ -15,9 +15,6 @@ import time
 import multiaddr
 import trio
 
-# liboqs auto-installer uses print() internally so cannot be suppressed via logging,
-# but it falls back to kyber-py automatically once the install countdown finishes.
-
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
@@ -25,8 +22,10 @@ from libp2p.crypto.x25519 import X25519PrivateKey
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.security.noise.pq.transport_pq import PROTOCOL_ID as PQ_PROTOCOL_ID
-from libp2p.security.noise.pq.transport_pq import TransportPQ
+from libp2p.security.noise.pq.transport_pq import (
+    PROTOCOL_ID as PQ_PROTOCOL_ID,
+    TransportPQ,
+)
 from libp2p.utils.address_validation import find_free_port
 
 logging.basicConfig(level=logging.WARNING)
@@ -67,7 +66,8 @@ async def run() -> None:
 
     t_start = time.perf_counter()
 
-    async with listener.run(listen_addrs=[multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")]):
+    addr = multiaddr.Multiaddr(f"/ip4/127.0.0.1/tcp/{port}")
+    async with listener.run(listen_addrs=[addr]):
         listener.set_stream_handler(STREAM_PROTO, handle_stream)
         listener_id = listener.get_id().to_string()
         listener_addr = f"/ip4/127.0.0.1/tcp/{port}/p2p/{listener_id}"
@@ -88,7 +88,7 @@ async def run() -> None:
             t_connect = time.perf_counter()
             await dialer.connect(info)
             t_connected = time.perf_counter()
-            print(f"[dialer]   Connected in {(t_connected - t_connect)*1000:.1f} ms")
+            print(f"[dialer]   Connected in {(t_connected - t_connect) * 1000:.1f} ms")
 
             stream = await dialer.new_stream(info.peer_id, [STREAM_PROTO])
             await stream.write(MSG)
