@@ -5,20 +5,23 @@ Implements Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256: a three-message
 handshake that adds X-Wing KEM tokens to the classical Noise XX pattern
 for hybrid post-quantum forward secrecy.
 
-Message layout (wire bytes, inside 2-byte length-prefixed frames):
-  A (initiator -> responder): e_pk(32) || e1_pk(1216)         = 1248 B
-  B (responder -> initiator): e_pk(32) || enc_ct(1136)
-                               || enc_s(48) || enc_payload
-  C (initiator -> responder): enc_s(48) || enc_payload
+Message layout (wire bytes, inside 2-byte length-prefixed frames)::
 
-Token sequence:
-  A: e, e1                       (no symmetric key yet, plain mix_hash)
-  B: e, ee, ekem1, s, es         (ekem1 = encrypt(ct) then mix_key(ss_kem))
-  C: s, se
+    A (initiator -> responder): e_pk(32) || e1_pk(1216)         = 1248 B
+    B (responder -> initiator): e_pk(32) || enc_ct(1136)
+                                 || enc_s(48) || enc_payload
+    C (initiator -> responder): enc_s(48) || enc_payload
 
-Transport keys after split():
-  Initiator:  encrypt=cs1, decrypt=cs2
-  Responder:  encrypt=cs2, decrypt=cs1
+Token sequence::
+
+    A: e, e1                       (no symmetric key yet, plain mix_hash)
+    B: e, ee, ekem1, s, es         (ekem1 = encrypt(ct) then mix_key(ss_kem))
+    C: s, se
+
+Transport keys after ``split()``::
+
+    Initiator:  encrypt=cs1, decrypt=cs2
+    Responder:  encrypt=cs2, decrypt=cs1
 """
 
 import logging
@@ -164,22 +167,20 @@ class PatternXXhfs:
         """
         Run the initiator side of the XXhfs handshake.
 
+        The responder's libp2p identity signature is always verified. When
+        ``remote_peer`` is ``None`` the peer ID check is skipped, which is
+        useful for interop tests where the remote ID is not known in advance.
+
         Args:
-            conn:        Raw underlying connection.
-            remote_peer: Expected peer ID of the responder (verified against
-                         the responder's libp2p identity signature).
-                         Pass ``None`` to accept any peer identity (useful
-                         for interop tests where the remote peer ID is
-                         not known in advance).
+            conn: Raw underlying connection.
+            remote_peer: Expected responder peer ID, or ``None`` to skip check.
 
         Returns:
             SecureSession ready for post-handshake transport.
 
         Raises:
-            PeerIDMismatchesPubkey: If the responder's peer ID does not match
-                                    ``remote_peer`` (only raised when non-None).
-            InvalidSignature:       If the responder's identity signature
-                                    is invalid.
+            PeerIDMismatchesPubkey: Responder peer ID mismatch (non-None only).
+            InvalidSignature: Responder identity signature is invalid.
 
         """
         ss = SymmetricState()
