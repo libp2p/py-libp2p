@@ -118,7 +118,10 @@ def main():
         "--conflict-policy",
         choices=["lww", "mvr", "peer"],
         default="mvr",
-        help="Conflict resolution: lww=last-write-wins, mvr=multi-value (default), peer=peer-priority",
+        help=(
+            "Conflict resolution: lww=last-write-wins, "
+            "mvr=multi-value (default), peer=peer-priority"
+        ),
     )
     parser.add_argument(
         "--debug",

@@ -165,7 +165,7 @@ class EtherCalcAdapter:
             self._stats["redis_received"] += 1
             logger.debug("Redis -> P2P: %r", raw[:80])
 
-            op = await self._node.publish_command(self._sheet_id, raw)
+            await self._node.publish_command(self._sheet_id, raw)
             self._stats["p2p_published"] += 1
 
             # Check for conflicts after apply

@@ -224,9 +224,10 @@ class OpLogPersistence:
     """
 
     def __init__(self, sheet_id: str, data_dir: str = "./p2pcalc_data"):
-        import os
-        self._path = os.path.join(data_dir, f"{sheet_id}.oplog")
-        os.makedirs(data_dir, exist_ok=True)
+        from pathlib import Path
+        _dir = Path(data_dir)
+        _dir.mkdir(parents=True, exist_ok=True)
+        self._path = str(_dir / f"{sheet_id}.oplog")
         self._file = None
 
     async def open(self) -> None:

@@ -5,11 +5,11 @@
 # No network or Redis needed — all tests are pure logic.
 
 import sys
-import os
 import time
 import unittest
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from p2pcalc.operation import (
     HLC, Operation, OpType, OperationFactory, receive_operation
