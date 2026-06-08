@@ -106,10 +106,19 @@ class SymmetricState:
 
     def mix_key_and_hash(self, input_key_material: bytes) -> None:
         """
-        3-output HKDF for HFS tokens (used with KEM shared secret).
+        3-output HKDF for ``psk`` tokens (Noise spec section 5.2).
 
-        ck, temp_h, temp_k = HKDF(ck, ss, 3)
+        ck, temp_h, temp_k = HKDF(ck, ikm, 3)
         MixHash(temp_h)
+
+        The extra ``temp_h`` output folds the pre-shared key into the
+        handshake transcript hash, binding it to all prior messages.
+
+        **Not used by the XXhfs token sequence.**  The ``ekem1`` KEM token
+        uses ``mix_key`` (2-output HKDF), identical to how DH tokens are
+        processed.  This method is present for full Noise spec API
+        completeness and would be needed if a ``psk`` modifier were added
+        to the pattern (e.g., ``XXhfs+psk2``).
         """
         self.ck, temp_h, temp_k = _hkdf(self.ck, input_key_material, 3)
         self.mix_hash(temp_h)

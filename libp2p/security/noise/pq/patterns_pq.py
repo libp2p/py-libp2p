@@ -225,6 +225,8 @@ class PatternXXhfs:
         offset += _KEM_CT_ENC_SIZE
         ct = ss.decrypt_and_hash(enc_ct)  # decrypt with ee-derived key
         ss_kem = self.kem.decapsulate(ct, e1_sk)  # recover KEM shared secret
+        # ekem1 uses mix_key (2-output HKDF), same as DH tokens per the XXhfs spec.
+        # mix_key_and_hash (3-output) is only for psk tokens and is not used here.
         ss.mix_key(ss_kem)
 
         # s: decrypt responder's static public key
@@ -330,7 +332,9 @@ class PatternXXhfs:
         # ekem1: encapsulate to initiator's e1, encrypt ct, then mix ss_kem
         ct, ss_kem_bytes = self.kem.encapsulate(init_e1_pk)
         enc_ct = ss.encrypt_and_hash(ct)  # encrypt with ee-derived key
-        ss.mix_key(ss_kem_bytes)  # now ss_kem strengthens key material
+        # ekem1 uses mix_key (2-output HKDF), same as DH tokens per the XXhfs spec.
+        # mix_key_and_hash (3-output) is only for psk tokens and is not used here.
+        ss.mix_key(ss_kem_bytes)
 
         # s: encrypt our static public key
         enc_s = ss.encrypt_and_hash(self._static_pk_bytes())
