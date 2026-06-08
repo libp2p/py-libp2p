@@ -66,7 +66,7 @@ Quick Start
 
     trio.run(main)
 
-**Client** — the transport is chosen automatically from the destination multiaddr:
+**Client** — detect the required transport from the destination multiaddr and enable it:
 
 .. code-block:: python
 
@@ -79,8 +79,19 @@ Quick Start
     ECHO_PROTO = TProtocol("/echo/1.0.0")
 
     async def main(destination: str):
-        host = new_host(key_pair=create_new_key_pair())
-        info = info_from_p2p_addr(multiaddr.Multiaddr(destination))
+        maddr = multiaddr.Multiaddr(destination)
+        info = info_from_p2p_addr(maddr)
+
+        # Enable the right transport based on the destination address.
+        # new_host() must know which transports to register at construction time.
+        enable_quic = "/quic" in destination
+        enable_websocket = "/ws" in destination
+
+        host = new_host(
+            key_pair=create_new_key_pair(),
+            enable_quic=enable_quic,
+            enable_websocket=enable_websocket,
+        )
 
         async with host.run(listen_addrs=[]):   # client needs no listener
             await host.connect(info)
@@ -89,10 +100,10 @@ Quick Start
             print(await stream.read())
             await stream.close()
 
-    # Works identically for all three transports — just change the address:
-    trio.run(main, "/ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>")
-    # trio.run(main, "/ip4/127.0.0.1/tcp/4002/ws/p2p/<PEER_ID>")
-    # trio.run(main, "/ip4/127.0.0.1/udp/4003/quic/p2p/<PEER_ID>")
+    # Works for all three transports — just change the address:
+    trio.run(main, "/ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>")          # TCP
+    # trio.run(main, "/ip4/127.0.0.1/tcp/4002/ws/p2p/<PEER_ID>")     # WebSocket
+    # trio.run(main, "/ip4/127.0.0.1/udp/4003/quic/p2p/<PEER_ID>")   # QUIC
 
 Running the Example
 -------------------

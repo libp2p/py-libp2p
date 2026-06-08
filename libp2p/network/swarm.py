@@ -126,7 +126,8 @@ class Swarm(Service, INetworkService):
         peer_id: ID,
         peerstore: IPeerStore,
         upgrader: TransportUpgrader,
-        # New multi-transport API: accepts a list of transports OR a single legacy transport.
+        # New multi-transport API: accepts a list of transports OR a single
+        # legacy transport.
         # When a single (non-list) value is passed positionally, it is treated as the
         # deprecated single-transport argument so old call sites still work:
         #   Swarm(peer_id, ps, upgrader, transport, retry_config, conn_config)
@@ -156,6 +157,7 @@ class Swarm(Service, INetworkService):
         elif transports is not None:
             # Single-transport positional arg (deprecated but still supported).
             import warnings
+
             warnings.warn(
                 "Passing a single transport as the 4th positional argument to "
                 "Swarm() is deprecated; use Swarm(transports=[...]) instead.",
@@ -165,6 +167,7 @@ class Swarm(Service, INetworkService):
             self.transport_manager.add_transport(transports)
         elif transport is not None:
             import warnings
+
             warnings.warn(
                 "Swarm(transport=...) is deprecated; "
                 "use Swarm(transports=[...]) instead.",
@@ -213,9 +216,9 @@ class Swarm(Service, INetworkService):
         New code should use :attr:`transport_manager` instead.
         """
         import warnings
+
         warnings.warn(
-            "swarm.transport is deprecated; "
-            "use swarm.transport_manager instead.",
+            "swarm.transport is deprecated; use swarm.transport_manager instead.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -233,6 +236,7 @@ class Swarm(Service, INetworkService):
         New code should use :meth:`transport_manager.add_transport` instead.
         """
         import warnings
+
         warnings.warn(
             "Setting swarm.transport is deprecated; "
             "use swarm.transport_manager.add_transport() instead.",
@@ -769,8 +773,7 @@ class Swarm(Service, INetworkService):
         # multiplexing (e.g. WebTransport).
         if isinstance(raw_conn, IMuxedConn):
             logger.info(
-                "Skipping upgrade: connection is already multiplexed "
-                "(transport=%s)",
+                "Skipping upgrade: connection is already multiplexed (transport=%s)",
                 type(transport).__name__,
             )
             try:
@@ -1254,9 +1257,12 @@ class Swarm(Service, INetworkService):
             ) -> None:
                 await self._handle_inbound_connection(read_write_closer, maddr)
 
+            # Delegate to TransportManager to create the listener (handles CMUX)
             try:
                 logger.debug(f"Swarm.listen: creating listener for {maddr}")
-                listener = transport.create_listener(conn_handler)
+                listener = self.transport_manager.listen_on(maddr, conn_handler)
+                if listener is None:
+                    continue
                 logger.debug(f"Swarm.listen: listener created for {maddr}")
                 self.listeners[str(maddr)] = listener
                 if self.background_nursery is None:
@@ -1300,7 +1306,9 @@ class Swarm(Service, INetworkService):
 
         # Enforce connection gate on inbound connections.
         remote_maddr = self._build_remote_multiaddr(read_write_closer)
-        logger.debug("[_handle_inbound_connection] Built remote_maddr: %s", remote_maddr)
+        logger.debug(
+            "[_handle_inbound_connection] Built remote_maddr: %s", remote_maddr
+        )
 
         if remote_maddr is not None:
             if not await self.connection_gate.is_allowed(remote_maddr):
@@ -1323,8 +1331,7 @@ class Swarm(Service, INetworkService):
                 await self.add_conn(muxed_conn, direction="inbound")
                 peer_id = getattr(muxed_conn, "peer_id", None)
                 logger.debug(
-                    "successfully opened pre-multiplexed inbound connection "
-                    "(peer=%s)",
+                    "successfully opened pre-multiplexed inbound connection (peer=%s)",
                     peer_id,
                 )
                 # Intentional barrier: keep handler alive so the connection
@@ -1351,7 +1358,6 @@ class Swarm(Service, INetworkService):
                     await read_write_closer.close()
             except Exception:
                 pass
-
 
     async def upgrade_inbound_raw_conn(
         self, raw_conn: IRawConnection, maddr: Multiaddr

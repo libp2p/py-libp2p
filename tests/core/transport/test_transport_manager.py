@@ -12,13 +12,14 @@ Tests verify that the TransportManager correctly:
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock, patch
-from multiaddr import Multiaddr
+import typing
 
+from multiaddr import Multiaddr
+import trio
+
+from libp2p.abc import ITransport
 from libp2p.transport.manager import TransportManager
 from libp2p.transport.tcp.tcp import TCP
-from libp2p.abc import ITransport
 
 
 class StubTransport(ITransport):
@@ -66,7 +67,13 @@ class StubTransport(ITransport):
 # Basic routing tests
 # ---------------------------------------------------------------------------
 
+
 class TestTransportManagerRouting:
+    mgr: TransportManager
+    tcp_stub: StubTransport
+    ws_stub: StubTransport
+    quic_stub: StubTransport
+
     def setup_method(self) -> None:
         self.mgr = TransportManager()
         # Use single-protocol lists so each stub only matches its own proto.
@@ -75,7 +82,7 @@ class TestTransportManagerRouting:
         # stub we keep it simple and register "tcp" only.  The dialing test
         # uses addresses that each have exactly ONE distinguishing protocol.
         self.tcp_stub = StubTransport(["tcp"])
-        self.ws_stub = StubTransport(["ws"])      # only "ws" (not "wss")
+        self.ws_stub = StubTransport(["ws"])  # only "ws" (not "wss")
         self.quic_stub = StubTransport(["quic-v1"])
         self.mgr.add_transports([self.tcp_stub, self.ws_stub, self.quic_stub])
 
@@ -86,7 +93,7 @@ class TestTransportManagerRouting:
 
     def test_for_dialing_routes_websocket(self):
         # WebSocket address: has /ws
-        t = self.mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
+        self.mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
         # The tcp_stub's can_dial checks "tcp in names" -> True, so it may be
         # returned first.  For correct routing this test relies on the REAL
         # TCP transport which excludes ws — tested separately.
@@ -145,8 +152,11 @@ class TestTransportManagerRouting:
 # TCP must not match WebSocket or QUIC addresses
 # ---------------------------------------------------------------------------
 
+
 class TestTCPTransportCandidateBehavior:
     """Verify that the real TCP transport correctly rejects ws/quic addresses."""
+
+    tcp: TCP
 
     def setup_method(self) -> None:
         self.tcp = TCP()
@@ -184,6 +194,7 @@ class TestTCPTransportCandidateBehavior:
 # Nursery / swarm delegation
 # ---------------------------------------------------------------------------
 
+
 class NoLifecycleStub(ITransport):
     """A transport stub that does NOT expose set_background_nursery or set_swarm."""
 
@@ -208,29 +219,34 @@ class NoLifecycleStub(ITransport):
 
 
 class TestTransportManagerLifecycle:
+    mgr: TransportManager
+    tcp_stub: StubTransport
+    ws_stub: StubTransport
+    quic_stub: NoLifecycleStub
+
     def setup_method(self) -> None:
         self.mgr = TransportManager()
-        self.t1 = StubTransport(["tcp"])
-        self.t2 = StubTransport(["ws"])
-        self.plain = NoLifecycleStub(["quic-v1"])
-        self.mgr.add_transports([self.t1, self.t2, self.plain])
+        self.tcp_stub = StubTransport(["tcp"])
+        self.ws_stub = StubTransport(["ws"])
+        self.quic_stub = NoLifecycleStub(["quic-v1"])
+        self.mgr.add_transports([self.tcp_stub, self.ws_stub, self.quic_stub])
 
     def test_set_background_nursery_delegates_to_all(self):
-        fake_nursery = object()
+        fake_nursery = typing.cast(trio.Nursery, object())
         self.mgr.set_background_nursery(fake_nursery)
-        assert self.t1.background_nursery_set is fake_nursery
-        assert self.t2.background_nursery_set is fake_nursery
-        # plain has no set_background_nursery; must not raise
+        assert self.tcp_stub.background_nursery_set is fake_nursery
+        assert self.ws_stub.background_nursery_set is fake_nursery
+        # quic_stub has no set_background_nursery; must not raise
 
     def test_set_swarm_delegates_to_all(self):
         fake_swarm = object()
         self.mgr.set_swarm(fake_swarm)
-        assert self.t1.swarm_set is fake_swarm
-        assert self.t2.swarm_set is fake_swarm
+        assert self.tcp_stub.swarm_set is fake_swarm
+        assert self.ws_stub.swarm_set is fake_swarm
 
     def test_get_transports_returns_copy(self):
         result = self.mgr.get_transports()
-        assert result == [self.t1, self.t2, self.plain]
+        assert result == [self.tcp_stub, self.ws_stub, self.quic_stub]
         # Mutating the returned list must not affect the manager
         result.clear()
         assert len(self.mgr.get_transports()) == 3
@@ -239,6 +255,7 @@ class TestTransportManagerLifecycle:
 # ---------------------------------------------------------------------------
 # Empty manager edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestTransportManagerEmpty:
     def test_for_dialing_empty_returns_none(self):
@@ -255,7 +272,8 @@ class TestTransportManagerEmpty:
 
     def test_set_nursery_empty_does_not_raise(self):
         mgr = TransportManager()
-        mgr.set_background_nursery(object())  # Must not raise
+        fake_nursery = typing.cast(trio.Nursery, object())
+        mgr.set_background_nursery(fake_nursery)  # Must not raise
 
     def test_set_swarm_empty_does_not_raise(self):
         mgr = TransportManager()
@@ -266,28 +284,29 @@ class TestTransportManagerEmpty:
 # Pre-filter correctness
 # ---------------------------------------------------------------------------
 
+
 class TestTransportManagerPreFilter:
     """Verify the protocol-name pre-filter prevents spurious can_dial calls."""
 
     def test_can_dial_not_called_when_no_proto_overlap(self):
-        """A transport whose protocols() has no overlap should not have can_dial called."""
+        """
+        A transport whose protocols() has no overlap should not have can_dial
+        called.
+        """
         mgr = TransportManager()
         tcp = TCP()
 
-        import libp2p.abc as abc_mod
-        original_can_dial = tcp.can_dial
-        call_count = 0
+        call_count = [0]
 
-        def counting_can_dial(maddr):
-            nonlocal call_count
-            call_count += 1
-            return original_can_dial(maddr)
+        def dummy_can_dial(maddr: Multiaddr) -> bool:
+            call_count[0] += 1
+            return True
 
-        tcp.can_dial = counting_can_dial  # type: ignore[method-assign]
+        tcp.can_dial = dummy_can_dial  # type: ignore[method-assign]
         mgr.add_transport(tcp)
 
         # QUIC address has no "tcp" protocol -> pre-filter should block it
         mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
-        assert call_count == 0, (
+        assert call_count[0] == 0, (
             "can_dial should NOT be called when no protocol overlap"
         )

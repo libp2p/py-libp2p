@@ -321,7 +321,9 @@ class TCP(ITransport):
         :return: True if this transport handles the multiaddr.
         """
         names = {p.name for p in maddr.protocols()}
-        return "tcp" in names and not names.intersection({"ws", "wss", "quic", "quic-v1"})
+        return "tcp" in names and not names.intersection(
+            {"ws", "wss", "quic", "quic-v1"}
+        )
 
     def can_listen(self, maddr: Multiaddr) -> bool:
         """

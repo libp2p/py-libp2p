@@ -26,11 +26,12 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from multiaddr import Multiaddr
 
-from libp2p.abc import ITransport
+from libp2p.abc import IListener, ITransport
+from libp2p.custom_types import THandler
 
 if TYPE_CHECKING:
     import trio
@@ -54,6 +55,7 @@ class TransportManager:
 
     def __init__(self) -> None:
         self._transports: list[ITransport] = []
+        self._shared_tcp_listeners: dict[tuple[str, int], IListener] = {}
 
     # ── Registration ──────────────────────────────────────────────────────────
 
@@ -105,7 +107,9 @@ class TransportManager:
             # Fast pre-filter: skip if no protocol name overlap at all.
             # Use getattr for compat with test fakes that don't implement protocols().
             _protocols = getattr(transport, "protocols", None)
-            if _protocols is not None and not proto_names.intersection(set(_protocols())):
+            if _protocols is not None and not proto_names.intersection(
+                set(_protocols())
+            ):
                 continue
             _can_dial = getattr(transport, "can_dial", None)
             if _can_dial is None or _can_dial(maddr):
@@ -117,8 +121,7 @@ class TransportManager:
                 return transport
 
         logger.warning(
-            "TransportManager.for_dialing: no transport found for %s "
-            "(registered: %s)",
+            "TransportManager.for_dialing: no transport found for %s (registered: %s)",
             maddr,
             [type(t).__name__ for t in self._transports],
         )
@@ -143,7 +146,9 @@ class TransportManager:
         for transport in self._transports:
             # Use getattr for compat with test fakes that don't implement protocols().
             _protocols = getattr(transport, "protocols", None)
-            if _protocols is not None and not proto_names.intersection(set(_protocols())):
+            if _protocols is not None and not proto_names.intersection(
+                set(_protocols())
+            ):
                 continue
             _can_listen = getattr(transport, "can_listen", None)
             if _can_listen is None or _can_listen(maddr):
@@ -181,9 +186,88 @@ class TransportManager:
         """
         return self.for_dialing(maddr) is not None
 
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def listen_on(self, maddr: Multiaddr, conn_handler: THandler) -> IListener | None:
+        """
+        Creates and manages a listener for the given multiaddress.
+        If a shared TCP port is required (e.g. for TCP and WS), it returns
+        the shared dispatcher.
+        """
+        transport = self.for_listening(maddr)
+        if transport is None:
+            return None
+
+        # Check if this is a TCP-based transport that can share a port
+        # For py-libp2p, standard TCP and WebSocket run on TCP.
+        protocols = [p.name for p in maddr.protocols()]
+        if "tcp" in protocols:
+            host_val = maddr.value_for_protocol("ip4") or maddr.value_for_protocol(
+                "ip6"
+            )
+            host = str(host_val) if host_val else ""
+            port_val = maddr.value_for_protocol("tcp")
+            port = int(port_val) if port_val else 0
+            key = (host, port)
+
+            if "ws" in protocols or "wss" in protocols:
+                is_ws = True
+            else:
+                is_ws = False
+
+            # If it's TCP-based, we use the SharedTCPDispatcher
+            # We lazy import it to avoid circular dependencies
+            from .cmux import SharedTCPDispatcher
+
+            if key not in self._shared_tcp_listeners:
+                dispatcher = SharedTCPDispatcher(host, port)
+                self._shared_tcp_listeners[key] = dispatcher
+            else:
+                dispatcher = cast(
+                    "SharedTCPDispatcher", self._shared_tcp_listeners[key]
+                )
+                if not isinstance(dispatcher, SharedTCPDispatcher):
+                    # Should not happen unless there's a port conflict with a
+                    # non-CMUX listener
+                    pass
+
+            if isinstance(dispatcher, SharedTCPDispatcher):
+                if is_ws:
+                    # Provide an adapter that matches what WebSocket listener does.
+                    # The WS connection handler expects a P2PWebSocketConnection,
+                    # but here we have a WebSocketRequest from cmux.
+                    # We need to wrap it using the same logic as WebsocketListener.
+                    from .websocket.transport import WebsocketTransport
+
+                    if isinstance(transport, WebsocketTransport):
+                        # WebsocketTransport creates a WebsocketListener
+                        # we can create one just to handle the connection wrapping!
+                        # Or better, we can register the WS handler directly:
+                        async def ws_cmux_handler(ws_request: Any) -> None:
+                            ws = await ws_request.accept()
+                            from .websocket.connection import P2PWebSocketConnection
+
+                            # is_wss should be detected from maddr, simplify to
+                            # False for now or detect:
+                            is_secure = "wss" in protocols
+                            conn = P2PWebSocketConnection(
+                                ws,
+                                is_secure=is_secure,
+                                max_buffered_amount=32 * 1024 * 1024,
+                            )
+                            await conn_handler(conn)
+
+                        dispatcher.ws_handler = ws_cmux_handler
+                else:
+                    dispatcher.tcp_handler = conn_handler
+                return dispatcher
+
+        # For non-TCP transports (e.g. QUIC), just let the transport create it
+        return transport.create_listener(conn_handler)
+
     # ── Lifecycle helpers (called by Swarm) ───────────────────────────────────
 
-    def set_background_nursery(self, nursery: "trio.Nursery") -> None:
+    def set_background_nursery(self, nursery: trio.Nursery) -> None:
         """
         Pass the Swarm's background nursery to all transports that need one.
 

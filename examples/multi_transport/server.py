@@ -9,17 +9,22 @@ Usage:
     # Start server (auto-detects free ports on all transports):
     python server.py
 
-    # Start server on specific ports:
-    python server.py --tcp-port 4001 --ws-port 4002 --quic-port 4003
+    # Start server on specific port:
+    python server.py --port 4001
 
     # Start client (copy one of the multiaddrs printed by the server):
     python client.py -d /ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>
-    python client.py -d /ip4/127.0.0.1/tcp/4002/ws/p2p/<PEER_ID>
-    python client.py -d /ip4/127.0.0.1/udp/4003/quic/p2p/<PEER_ID>
+    python client.py -d /ip4/127.0.0.1/tcp/4001/ws/p2p/<PEER_ID>
+    python client.py -d /ip4/127.0.0.1/udp/4001/quic/p2p/<PEER_ID>
 """
 
 import argparse
 import logging
+from pathlib import Path
+import sys
+
+# Ensure local libp2p is used
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import multiaddr
 import trio
@@ -30,7 +35,7 @@ from libp2p.custom_types import TProtocol
 from libp2p.network.stream.net_stream import INetStream
 from libp2p.utils.address_validation import find_free_port
 
-# Configure minimal logging — set to DEBUG to trace transport selection
+# Configure minimal logging
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
 
@@ -38,10 +43,12 @@ ECHO_PROTOCOL = TProtocol("/echo/1.0.0")
 
 
 async def _echo_handler(stream: INetStream) -> None:
-    """Echo handler: read the full message and write it back."""
+    """Echo handler: read up to 1024 bytes and write it back."""
     try:
         peer_id = stream.muxed_conn.peer_id
-        data = await stream.read()
+        # Read a chunk rather than wait for EOF, preventing deadlocks
+        # if the client keeps it open
+        data = await stream.read(1024)
         print(f"  [{peer_id!s:.20}...] echoing {len(data)} bytes")
         await stream.write(data)
         await stream.close()
@@ -53,38 +60,26 @@ async def _echo_handler(stream: INetStream) -> None:
             pass
 
 
-async def run_server(
-    tcp_port: int = 0,
-    ws_port: int = 0,
-    quic_port: int = 0,
-) -> None:
+async def run_server(port: int = 0) -> None:
     """
-    Listen simultaneously on TCP, WebSocket, and QUIC transports.
-
-    If a port is 0 the OS assigns a free ephemeral port.
+    Listen simultaneously on TCP, WebSocket, and QUIC using the EXACT SAME PORT.
+    This demonstrates py-libp2p's connection multiplexing (cmux) capabilities.
     """
-    if tcp_port == 0:
-        tcp_port = find_free_port()
-    if ws_port == 0:
-        ws_port = find_free_port()
-    if quic_port == 0:
-        quic_port = find_free_port()
+    if port == 0:
+        port = find_free_port()
 
-    # Build listen addresses for all three transports
+    # Build listen addresses for all three transports on the SAME port
     listen_addrs = [
-        multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{tcp_port}"),       # plain TCP
-        multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{ws_port}/ws"),      # WebSocket
-        multiaddr.Multiaddr(f"/ip4/0.0.0.0/udp/{quic_port}/quic"),  # QUIC
+        multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}"),  # plain TCP
+        multiaddr.Multiaddr(f"/ip4/0.0.0.0/tcp/{port}/ws"),  # WebSocket
+        multiaddr.Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic"),  # QUIC
     ]
 
-    # new_host / new_swarm auto-detects the required transports from listen_addrs.
-    # Pass listen_addrs here so the Swarm is built with TCP + WebSocket + QUIC
-    # transports pre-registered.  host.run(listen_addrs=...) then just binds
-    # the ports — it does not rebuild the transport list.
     host = new_host(key_pair=create_new_key_pair(), listen_addrs=listen_addrs)
     host.set_stream_handler(ECHO_PROTOCOL, _echo_handler)
 
-    print("=== Multi-Transport Echo Server ===\n")
+    print("=== Multi-Transport CMUX Echo Server ===\n")
+    print(f"Using shared port: {port}\n")
     print("Listening on:")
 
     async with host.run(listen_addrs=listen_addrs):
@@ -99,10 +94,13 @@ async def run_server(
             print(f"  {addr}")
 
         print(
-            f"\nConnect using any of the following (replace 0.0.0.0 with your IP):\n"
-            f"\n  TCP:       python client.py -d /ip4/127.0.0.1/tcp/{tcp_port}/p2p/{peer_id}"
-            f"\n  WebSocket: python client.py -d /ip4/127.0.0.1/tcp/{ws_port}/ws/p2p/{peer_id}"
-            f"\n  QUIC:      python client.py -d /ip4/127.0.0.1/udp/{quic_port}/quic/p2p/{peer_id}"
+            "\nConnect using any of the following (replace 0.0.0.0 with your IP):\n\n"
+            f"  TCP:       python client.py -d "
+            f"/ip4/127.0.0.1/tcp/{port}/p2p/{peer_id}\n"
+            f"  WebSocket: python client.py -d "
+            f"/ip4/127.0.0.1/tcp/{port}/ws/p2p/{peer_id}\n"
+            f"  QUIC:      python client.py -d "
+            f"/ip4/127.0.0.1/udp/{port}/quic/p2p/{peer_id}"
         )
         print("\nWaiting for connections… (Ctrl-C to stop)\n")
 
@@ -111,20 +109,14 @@ async def run_server(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Multi-transport echo server (TCP + WebSocket + QUIC)."
+        description="CMUX echo server (TCP + WebSocket + QUIC on SAME port)."
     )
     parser.add_argument(
-        "--tcp-port", type=int, default=0, help="TCP listen port (0 = auto)"
-    )
-    parser.add_argument(
-        "--ws-port", type=int, default=0, help="WebSocket listen port (0 = auto)"
-    )
-    parser.add_argument(
-        "--quic-port", type=int, default=0, help="QUIC listen port (0 = auto)"
+        "--port", type=int, default=0, help="Listen port for all transports (0 = auto)"
     )
     args = parser.parse_args()
     try:
-        trio.run(run_server, args.tcp_port, args.ws_port, args.quic_port)
+        trio.run(run_server, args.port)
     except KeyboardInterrupt:
         print("\nServer stopped.")
 

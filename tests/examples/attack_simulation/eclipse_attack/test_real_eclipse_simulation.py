@@ -46,7 +46,8 @@ class RealEclipseScenario(EclipseScenario):
         logger.info(f"Attack duration: {attack_duration} seconds")
 
         # Execute comprehensive attack measurement
-        results = await self.metrics.measure_real_eclipse(
+        real_metrics = cast(RealAttackMetrics, self.metrics)
+        results = await real_metrics.measure_complete_attack_cycle(
             self.honest_hosts, self.honest_dhts, self.malicious_peers, attack_duration
         )
 

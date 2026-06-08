@@ -4,21 +4,21 @@
 
 This document presents a deep architectural analysis of the transport layer in `py-libp2p` (cloned from https://github.com/libp2p/py-libp2p.git). The primary finding is that **the current swarm/network architecture is fundamentally designed around a single-transport model**, which prevents nodes from simultaneously using multiple transport protocols (e.g., TCP + QUIC + WebSocket). This is a significant architectural limitation compared to `go-libp2p`, `rust-libp2p`, and `js-libp2p`, all of which support multi-transport configurations natively.
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
 1. [Core Architectural Issues](#1-core-architectural-issues)
-2. [How the Single-Transport Model Manifests](#2-how-the-single-transport-model-manifests)
-3. [Transport Registry: Underutilized Potential](#3-transport-registry-underutilized-potential)
-4. [Special-Case Anti-Patterns](#4-special-case-anti-patterns)
-5. [Impact Analysis](#5-impact-analysis)
-6. [Comparison with Other Libp2p Implementations](#6-comparison-with-other-libp2p-implementations)
-7. [Proposed Solutions](#7-proposed-solutions)
-8. [Implementation Roadmap](#8-implementation-roadmap)
-9. [References](#9-references)
+1. [How the Single-Transport Model Manifests](#2-how-the-single-transport-model-manifests)
+1. [Transport Registry: Underutilized Potential](#3-transport-registry-underutilized-potential)
+1. [Special-Case Anti-Patterns](#4-special-case-anti-patterns)
+1. [Impact Analysis](#5-impact-analysis)
+1. [Comparison with Other Libp2p Implementations](#6-comparison-with-other-libp2p-implementations)
+1. [Proposed Solutions](#7-proposed-solutions)
+1. [Implementation Roadmap](#8-implementation-roadmap)
+1. [References](#9-references)
 
----
+______________________________________________________________________
 
 ## 1. Core Architectural Issues
 
@@ -39,6 +39,7 @@ class Swarm(Service, INetworkService):
 **Location**: `libp2p/network/swarm.py`, line 97
 
 This design decision means:
+
 - Each Swarm instance can only use **ONE** transport at a time
 - You cannot have a node that listens on both TCP and WebSocket simultaneously
 - You cannot have a node that dials using TCP for some peers and QUIC for others
@@ -49,6 +50,7 @@ This design decision means:
 Unlike `go-libp2p` and `rust-libp2p`, py-libp2p has no **Transport Manager** component. In go-libp2p, the swarm maintains a collection of transports and routes dials to the appropriate one based on multiaddr protocol matching:
 
 **go-libp2p pattern** (for reference):
+
 ```go
 // Swarm holds multiple transports
 type Swarm struct {
@@ -64,6 +66,7 @@ for _, addr := range addrs {
 ```
 
 **py-libp2p actual**:
+
 ```python
 # Swarm always uses the same transport regardless of address
 raw_conn = await self.transport.dial(addr)  # No transport selection!
@@ -91,6 +94,7 @@ def new_swarm(..., enable_quic: bool = False, ...):
 **Location**: `libp2p/__init__.py`, lines 282-457
 
 Problems:
+
 - Only the **first** address in `listen_addrs` is used to determine the transport type
 - If you pass `["/ip4/127.0.0.1/tcp/8080", "/ip4/127.0.0.1/tcp/8081/ws"]`, the WebSocket address is ignored
 - The `enable_quic` flag forcefully overrides the transport if True
@@ -132,7 +136,7 @@ async def dial_peer(self, peer_id: ID) -> list[INetConn]:
 
 This means if the swarm has a TCP transport but the peer only has QUIC addresses, it will attempt to dial them with TCP and fail, rather than gracefully detecting the mismatch.
 
----
+______________________________________________________________________
 
 ## 2. How the Single-Transport Model Manifests
 
@@ -160,9 +164,10 @@ raw_conn = await self.transport.dial(addr)
 ```
 
 There is no attempt to:
+
 1. Check if `self.transport` can actually handle `addr`
-2. Select a different transport if not
-3. Try multiple transports as fallback
+1. Select a different transport if not
+1. Try multiple transports as fallback
 
 ### 2.3 WebSocket Transport Workaround
 
@@ -176,17 +181,19 @@ if isinstance(swarm, Swarm):
 ```
 
 This is fragile because:
+
 - It replaces the transport entirely (losing TCP capability)
 - The WebSocket transport needs a reference to the upgrader, creating circular dependencies
 - It requires manual management that shouldn't be necessary
 
----
+______________________________________________________________________
 
 ## 3. Transport Registry: Underutilized Potential
 
 ### What's There
 
 The codebase actually has a `TransportRegistry` (`libp2p/transport/transport_registry.py`) that:
+
 - Maps protocol names to transport classes ("tcp" -> TCP, "ws" -> WebsocketTransport, "quic" -> QUICTransport)
 - Has a `create_transport_for_multiaddr()` function that can create the right transport based on multiaddr protocols
 - Supports custom transport registration
@@ -194,13 +201,14 @@ The codebase actually has a `TransportRegistry` (`libp2p/transport/transport_reg
 ### What's Missing
 
 The registry is **only used during initial swarm construction** and is completely ignored afterward. It should be:
+
 1. Integrated into the Swarm for multi-transport support
-2. Used during `dial()` to select the appropriate transport
-3. Used during `listen()` to create listeners for different address types
+1. Used during `dial()` to select the appropriate transport
+1. Used during `listen()` to create listeners for different address types
 
 **Location**: `libp2p/transport/transport_registry.py`, full file
 
----
+______________________________________________________________________
 
 ## 4. Special-Case Anti-Patterns
 
@@ -243,38 +251,38 @@ if isinstance(self.transport, QUICTransport) and isinstance(raw_conn, IMuxedConn
 
 **Location**: `libp2p/network/swarm.py`, lines 673-693
 
----
+______________________________________________________________________
 
 ## 5. Impact Analysis
 
 ### What Works (Single Transport Scenarios)
 
-| Scenario | TCP Only | QUIC Only | WebSocket Only | Status |
-|----------|----------|-----------|----------------|--------|
-| Listen on single address type | Yes | Yes | Yes | Working |
-| Dial to same transport type | Yes | Yes | Yes | Working |
-| Security upgrade (Noise/TLS) | Yes | Built-in | Yes | Working |
-| Stream multiplexing (Yamux/Mplex) | Yes | Built-in | Yes | Working |
+| Scenario                          | TCP Only | QUIC Only | WebSocket Only | Status  |
+| --------------------------------- | -------- | --------- | -------------- | ------- |
+| Listen on single address type     | Yes      | Yes       | Yes            | Working |
+| Dial to same transport type       | Yes      | Yes       | Yes            | Working |
+| Security upgrade (Noise/TLS)      | Yes      | Built-in  | Yes            | Working |
+| Stream multiplexing (Yamux/Mplex) | Yes      | Built-in  | Yes            | Working |
 
 ### What Doesn't Work (Multi-Transport Scenarios)
 
-| Scenario | Status | Root Cause |
-|----------|--------|------------|
-| Listen on TCP + WebSocket simultaneously | **BROKEN** | Single transport slot |
-| Listen on TCP + QUIC simultaneously | **BROKEN** | Single transport slot |
-| Dial TCP peer from QUIC node | **BROKEN** | No transport routing |
-| Dial QUIC peer from TCP node | **BROKEN** | No transport routing |
-| Fallback to alternative transport | **BROKEN** | No transport fallback |
-| Address-specific transport selection | **BROKEN** | Transport selected at construction |
+| Scenario                                 | Status     | Root Cause                         |
+| ---------------------------------------- | ---------- | ---------------------------------- |
+| Listen on TCP + WebSocket simultaneously | **BROKEN** | Single transport slot              |
+| Listen on TCP + QUIC simultaneously      | **BROKEN** | Single transport slot              |
+| Dial TCP peer from QUIC node             | **BROKEN** | No transport routing               |
+| Dial QUIC peer from TCP node             | **BROKEN** | No transport routing               |
+| Fallback to alternative transport        | **BROKEN** | No transport fallback              |
+| Address-specific transport selection     | **BROKEN** | Transport selected at construction |
 
 ### Consequences
 
 1. **Reduced Interoperability**: A py-libp2p node cannot communicate with TCP-only and QUIC-only peers simultaneously
-2. **Reduced Connectivity**: Nodes cannot leverage multiple transports for NAT traversal
-3. **Poor Browser Support**: WebSocket transport cannot coexist with TCP, making hybrid deployments impossible
-4. **Non-idiomatic API**: Unlike other libp2p implementations, py-libp2p requires workarounds for multi-transport
+1. **Reduced Connectivity**: Nodes cannot leverage multiple transports for NAT traversal
+1. **Poor Browser Support**: WebSocket transport cannot coexist with TCP, making hybrid deployments impossible
+1. **Non-idiomatic API**: Unlike other libp2p implementations, py-libp2p requires workarounds for multi-transport
 
----
+______________________________________________________________________
 
 ## 6. Comparison with Other Libp2p Implementations
 
@@ -328,7 +336,7 @@ swarm = new_swarm()                   # TCP only
 # No way to have both!
 ```
 
----
+______________________________________________________________________
 
 ## 7. Proposed Solutions
 
@@ -337,6 +345,7 @@ swarm = new_swarm()                   # TCP only
 **Architecture Changes**:
 
 1. **Change Swarm to hold multiple transports**:
+
 ```python
 class Swarm(Service, INetworkService):
     # Replace:
@@ -347,6 +356,7 @@ class Swarm(Service, INetworkService):
 ```
 
 2. **Add a TransportManager class**:
+
 ```python
 class TransportManager:
     """Manages multiple transports and routes dials/listens to the appropriate one."""
@@ -379,6 +389,7 @@ class TransportManager:
 ```
 
 3. **Update Swarm.dial() to use transport routing**:
+
 ```python
 async def _dial_addr_single_attempt(self, addr: Multiaddr, peer_id: ID) -> INetConn:
     # Replace: raw_conn = await self.transport.dial(addr)
@@ -391,6 +402,7 @@ async def _dial_addr_single_attempt(self, addr: Multiaddr, peer_id: ID) -> INetC
 ```
 
 4. **Update Swarm.listen() to route to correct transport**:
+
 ```python
 async def listen(self, *multiaddrs: Multiaddr) -> bool:
     for maddr in multiaddrs:
@@ -403,6 +415,7 @@ async def listen(self, *multiaddrs: Multiaddr) -> bool:
 ```
 
 5. **Update new_swarm() to accept multiple transports**:
+
 ```python
 def new_swarm(
     ...
@@ -458,7 +471,7 @@ Refactor the swarm to treat QUIC uniformly:
 
 1. **QUIC connections should go through the upgrade path**: Even though QUIC has built-in security and multiplexing, it should expose a standard `IRawConnection` interface that the swarm upgrades. The fact that QUIC internally handles security/muxing should be transparent to the swarm.
 
-2. **Move transport-specific logic into transports**: The swarm should not need `isinstance(self.transport, QUICTransport)` checks. Instead, transports should encapsulate their own behavior.
+1. **Move transport-specific logic into transports**: The swarm should not need `isinstance(self.transport, QUICTransport)` checks. Instead, transports should encapsulate their own behavior.
 
 ```python
 # Instead of this in swarm:
@@ -495,58 +508,58 @@ class Swarm(Service, INetworkService):
         return transport
 ```
 
----
+______________________________________________________________________
 
 ## 8. Implementation Roadmap
 
 ### Phase 1: Foundation (No Breaking Changes)
 
 1. **Add `can_dial()` and `can_listen()` to `ITransport` interface** with default implementations that return `True` for backward compatibility
-2. **Implement these methods** in `TCP`, `QUICTransport`, `WebsocketTransport`, and `CircuitV2Transport`
-3. **Add a `TransportManager` class** (new file: `libp2p/transport/manager.py`)
-4. **Add unit tests** for TransportManager
+1. **Implement these methods** in `TCP`, `QUICTransport`, `WebsocketTransport`, and `CircuitV2Transport`
+1. **Add a `TransportManager` class** (new file: `libp2p/transport/manager.py`)
+1. **Add unit tests** for TransportManager
 
 ### Phase 2: Swarm Integration (Minor Breaking Changes)
 
 1. **Add `transport_manager` field to Swarm** alongside existing `transport` field
-2. **Add a `transports` parameter** to `new_swarm()` and `new_host()` (default to None for backward compat)
-3. **Update `listen()`** to route addresses to the correct transport via TransportManager
-4. **Update `_dial_addr_single_attempt()`** to select transport via TransportManager
-5. **Deprecate** the single `transport` field with a migration path
+1. **Add a `transports` parameter** to `new_swarm()` and `new_host()` (default to None for backward compat)
+1. **Update `listen()`** to route addresses to the correct transport via TransportManager
+1. **Update `_dial_addr_single_attempt()`** to select transport via TransportManager
+1. **Deprecate** the single `transport` field with a migration path
 
 ### Phase 3: Refactoring (Breaking Changes)
 
 1. **Remove the single `transport` field** from Swarm
-2. **Remove all `isinstance(self.transport, QUICTransport)` special cases** from Swarm
-3. **Refactor QUIC** to use a clean abstraction that doesn't require swarm-level special casing
-4. **Update all examples** to use the new multi-transport API
-5. **Update documentation**
+1. **Remove all `isinstance(self.transport, QUICTransport)` special cases** from Swarm
+1. **Refactor QUIC** to use a clean abstraction that doesn't require swarm-level special casing
+1. **Update all examples** to use the new multi-transport API
+1. **Update documentation**
 
 ### Phase 4: Advanced Features
 
 1. **Transport fallback**: Try alternative transports if primary fails
-2. **Transport preference/priority**: Configurable priority for transport selection
-3. **Per-address transport binding**: Explicitly bind transports to address patterns
-4. **Transport metrics**: Track usage statistics per transport
+1. **Transport preference/priority**: Configurable priority for transport selection
+1. **Per-address transport binding**: Explicitly bind transports to address patterns
+1. **Transport metrics**: Track usage statistics per transport
 
----
+______________________________________________________________________
 
 ## 9. References
 
 ### Key Files Analyzed
 
-| File | Purpose |
-|------|---------|
-| `libp2p/network/swarm.py` | Main swarm implementation with single transport |
-| `libp2p/abc.py` | ITransport interface definition |
-| `libp2p/__init__.py` | `new_swarm()` and `new_host()` factory functions |
-| `libp2p/transport/transport_registry.py` | Transport registry (underutilized) |
-| `libp2p/transport/tcp/tcp.py` | TCP transport implementation |
-| `libp2p/transport/quic/transport.py` | QUIC transport implementation |
-| `libp2p/transport/websocket/transport.py` | WebSocket transport implementation |
-| `libp2p/transport/upgrader.py` | Transport upgrader (security + muxer) |
-| `libp2p/host/basic_host.py` | Host implementation |
-| `libp2p/network/connection/raw_connection.py` | Raw connection wrapper |
+| File                                          | Purpose                                          |
+| --------------------------------------------- | ------------------------------------------------ |
+| `libp2p/network/swarm.py`                     | Main swarm implementation with single transport  |
+| `libp2p/abc.py`                               | ITransport interface definition                  |
+| `libp2p/__init__.py`                          | `new_swarm()` and `new_host()` factory functions |
+| `libp2p/transport/transport_registry.py`      | Transport registry (underutilized)               |
+| `libp2p/transport/tcp/tcp.py`                 | TCP transport implementation                     |
+| `libp2p/transport/quic/transport.py`          | QUIC transport implementation                    |
+| `libp2p/transport/websocket/transport.py`     | WebSocket transport implementation               |
+| `libp2p/transport/upgrader.py`                | Transport upgrader (security + muxer)            |
+| `libp2p/host/basic_host.py`                   | Host implementation                              |
+| `libp2p/network/connection/raw_connection.py` | Raw connection wrapper                           |
 
 ### Other Libp2p Implementations Reference
 
@@ -559,17 +572,19 @@ class Swarm(Service, INetworkService):
 - https://docs.libp2p.io/concepts/transports/overview/
 - https://github.com/libp2p/specs/tree/master/connections
 
----
+______________________________________________________________________
 
 ## Appendix: Code Locations of Key Issues
 
 ### Single Transport Field
+
 ```
 libp2p/network/swarm.py:97
     transport: ITransport
 ```
 
 ### QUIC Special-Casing Instances
+
 ```
 libp2p/network/swarm.py:218-224   (run() method)
 libp2p/network/swarm.py:673-693   (_dial_addr_single_attempt())
@@ -578,18 +593,21 @@ libp2p/network/swarm.py:1171-1184 (listen() method)
 ```
 
 ### Transport Selection (Only First Address Used)
+
 ```
 libp2p/__init__.py:354
     addr = listen_addrs[0]  # Only first address considered!
 ```
 
 ### Dial Without Transport Capability Check
+
 ```
 libp2p/network/swarm.py:648
     raw_conn = await self.transport.dial(addr)  # No capability check
 ```
 
 ### ITransport Interface (Missing can_dial)
+
 ```
 libp2p/abc.py:2997-3039
     class ITransport(ABC):

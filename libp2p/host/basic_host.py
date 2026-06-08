@@ -337,9 +337,8 @@ class BasicHost(IHost):
                 tm = getattr(self._network, "transport_manager", None)
                 if tm is not None:
                     for transport in tm.get_transports():
-                        if (
-                            hasattr(transport, "_config")
-                            and hasattr(transport._config, "NEGOTIATE_TIMEOUT")
+                        if hasattr(transport, "_config") and hasattr(
+                            transport._config, "NEGOTIATE_TIMEOUT"
                         ):
                             timeout = getattr(
                                 transport._config, "NEGOTIATE_TIMEOUT", None
@@ -362,7 +361,7 @@ class BasicHost(IHost):
                     timeout = getattr(transport._config, "NEGOTIATE_TIMEOUT", None)  # type: ignore
                     if timeout is not None:
                         logger.debug(
-                            "Detected negotiate timeout %ss from legacy transport config",
+                            "Detected negotiate timeout %ss from legacy config",
                             timeout,
                         )
                         return float(timeout)

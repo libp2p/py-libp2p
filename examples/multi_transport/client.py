@@ -13,6 +13,12 @@ Usage:
 
 import argparse
 import logging
+from pathlib import Path
+import sys
+from time import sleep
+
+# Ensure local libp2p is used
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import multiaddr
 import trio
@@ -37,13 +43,15 @@ def _detect_transport(maddr_str: str) -> str:
     return "TCP"
 
 
-async def run_client(destination: str, message: bytes = b"hello from py-libp2p!\n") -> None:
+async def run_client(
+    destination: str, message: bytes = b"hello from py-libp2p!\n"
+) -> None:
     """
     Connect to *destination* (a full /p2p/… multiaddr), send *message*, and
     print the echoed reply.
 
-    The Swarm automatically selects the right transport based on the
-    protocols in the destination multiaddr.
+    The client inspects the destination multiaddr to enable the right transport
+    in the Swarm's TransportManager before dialing.
     """
     transport_name = _detect_transport(destination)
     print(f"=== Multi-Transport Echo Client ({transport_name}) ===\n")
@@ -51,9 +59,19 @@ async def run_client(destination: str, message: bytes = b"hello from py-libp2p!\
     maddr = multiaddr.Multiaddr(destination)
     info = info_from_p2p_addr(maddr)
 
-    host = new_host(key_pair=create_new_key_pair())
+    # Enable the transport that matches the destination address.
+    # new_host() must know which transports to register at construction time —
+    # the TransportManager is fixed after the Swarm is built.
+    enable_quic = transport_name == "QUIC"
+    enable_websocket = transport_name == "WebSocket"
 
-    # Client doesn't need to listen — pass an empty list.
+    host = new_host(
+        key_pair=create_new_key_pair(),
+        enable_quic=enable_quic,
+        enable_websocket=enable_websocket,
+    )
+
+    # Client doesn't listen — pass an empty list.
     async with host.run(listen_addrs=[]):
         print(f"My peer ID : {host.get_id().to_string()}")
         print(f"Connecting : {destination}\n")
@@ -63,7 +81,8 @@ async def run_client(destination: str, message: bytes = b"hello from py-libp2p!\
 
         stream = await host.new_stream(info.peer_id, [ECHO_PROTOCOL])
         await stream.write(message)
-        response = await stream.read()
+        # Read exactly the number of bytes we sent to avoid deadlocks
+        response = await stream.read(len(message))
         await stream.close()
 
         print(f"Sent : {message!r}")
@@ -73,6 +92,7 @@ async def run_client(destination: str, message: bytes = b"hello from py-libp2p!\
             print("\n✅  Echo verified — round-trip successful!")
         else:
             print("\n❌  Echo mismatch!")
+        sleep(30)
 
 
 def main() -> None:

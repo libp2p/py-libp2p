@@ -280,20 +280,20 @@ def get_default_muxer_options() -> TMuxerOptions:
         return create_yamux_muxer_option()
 
 def _build_transports_for_swarm(
-    key_pair: "KeyPair",
-    listen_addrs: "Sequence[multiaddr.Multiaddr] | None",
-    transports: "Sequence[ITransport] | None",
+    key_pair: KeyPair,
+    listen_addrs: Sequence[multiaddr.Multiaddr] | None,
+    transports: Sequence[ITransport] | None,
     enable_quic: bool,
     enable_tcp: bool,
     enable_websocket: bool,
     enable_autotls: bool,
-    upgrader: "TransportUpgrader",
-    quic_config: "QUICTransportConfig | None",
-    tls_client_config: "ssl.SSLContext | None",
-    tls_server_config: "ssl.SSLContext | None",
+    upgrader: TransportUpgrader,
+    quic_config: QUICTransportConfig | None,
+    tls_client_config: ssl.SSLContext | None,
+    tls_server_config: ssl.SSLContext | None,
     # Pass QUICTransport class from module scope so monkeypatching in tests works.
     quic_class: type | None = None,
-) -> "list[ITransport]":
+) -> list[ITransport]:
     """
     Build the ordered list of transports for the Swarm's TransportManager.
 
@@ -354,6 +354,9 @@ def _build_transports_for_swarm(
                 tls_client_config=tls_client_config,
                 tls_server_config=tls_server_config,
             )
+            if transport_obj is None:
+                continue
+
             cls = type(transport_obj)
             if cls not in seen_classes:
                 seen_classes.add(cls)
@@ -371,7 +374,7 @@ def _build_transports_for_swarm(
         # If enable_quic=True is requested but no QUIC was detected in listen_addrs,
         # replace the result with only the QUIC transport (mirrors original new_swarm()
         # behavior where the transport was replaced rather than appended).
-        if enable_quic and not any(isinstance(t, _QUICTransport) for t in result):
+        if enable_quic and not any(type(t).__name__ == "QUICTransport" for t in result):
             result = [
                 _QUICTransport(
                     key_pair.private_key,
