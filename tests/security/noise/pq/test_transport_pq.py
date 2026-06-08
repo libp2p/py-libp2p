@@ -7,9 +7,8 @@ Follows TDD: these tests are written before the implementation.
 import math
 
 import pytest
-import trio
-
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IRawConnection
 from libp2p.connection_types import ConnectionType

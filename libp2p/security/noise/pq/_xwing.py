@@ -1,4 +1,5 @@
-"""X-Wing combining function shared across KEM backends.
+"""
+X-Wing combining function shared across KEM backends.
 
 Single source of truth for the X-Wing domain separation label and the
 SHA3-256 combiner used by both XWingKem (kyber-py) and LibOQSXWingKem.
