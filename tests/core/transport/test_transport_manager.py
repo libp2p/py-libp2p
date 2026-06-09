@@ -88,46 +88,46 @@ class TestTransportManagerRouting:
 
     def test_for_dialing_routes_tcp(self):
         # Pure TCP address: no /ws, no /quic-v1
-        t = self.mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+        t = self.mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
         assert t is self.tcp_stub
 
     def test_for_dialing_routes_websocket(self):
         # WebSocket address: has /ws
-        self.mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
+        self.mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
         # The tcp_stub's can_dial checks "tcp in names" -> True, so it may be
         # returned first.  For correct routing this test relies on the REAL
         # TCP transport which excludes ws — tested separately.
         # For this stub-based test, register ws_stub BEFORE tcp_stub.
         mgr2 = TransportManager()
         mgr2.add_transports([self.ws_stub, self.tcp_stub])
-        t2 = mgr2.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
+        t2 = mgr2.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
         assert t2 is self.ws_stub
 
     def test_for_dialing_routes_quic_v1(self):
-        t = self.mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
+        t = self.mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
         assert t is self.quic_stub
 
     def test_for_dialing_returns_none_for_unknown(self):
         mgr = TransportManager()
         mgr.add_transport(self.tcp_stub)
         # No transport registered for QUIC-only
-        t = mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
+        t = mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
         assert t is None
 
     def test_for_listening_routes_tcp(self):
-        t = self.mgr.for_listening(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+        t = self.mgr.transport_for_listening(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
         assert t is self.tcp_stub
 
     def test_for_listening_routes_websocket(self):
         mgr2 = TransportManager()
         mgr2.add_transports([self.ws_stub, self.tcp_stub])
-        t = mgr2.for_listening(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
+        t = mgr2.transport_for_listening(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
         assert t is self.ws_stub
 
     def test_for_listening_returns_none_when_no_match(self):
         mgr = TransportManager()
         mgr.add_transport(self.tcp_stub)
-        t = mgr.for_listening(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
+        t = mgr.transport_for_listening(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
         assert t is None
 
     def test_first_registered_transport_wins(self):
@@ -136,7 +136,7 @@ class TestTransportManagerRouting:
         first = StubTransport(["tcp"])
         second = StubTransport(["tcp"])
         mgr.add_transports([first, second])
-        t = mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+        t = mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
         assert t is first
 
     def test_has_transport_for_true(self):
@@ -186,7 +186,7 @@ class TestTCPTransportCandidateBehavior:
         mgr.add_transport(self.tcp)  # TCP is registered first
         ws_stub = StubTransport(["ws", "wss"])
         mgr.add_transport(ws_stub)
-        t = mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
+        t = mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/8080/ws"))
         assert t is ws_stub
 
 
@@ -260,11 +260,11 @@ class TestTransportManagerLifecycle:
 class TestTransportManagerEmpty:
     def test_for_dialing_empty_returns_none(self):
         mgr = TransportManager()
-        assert mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001")) is None
+        assert mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001")) is None
 
     def test_for_listening_empty_returns_none(self):
         mgr = TransportManager()
-        assert mgr.for_listening(Multiaddr("/ip4/127.0.0.1/tcp/4001")) is None
+        assert mgr.transport_for_listening(Multiaddr("/ip4/127.0.0.1/tcp/4001")) is None
 
     def test_has_transport_for_empty(self):
         mgr = TransportManager()
@@ -306,7 +306,7 @@ class TestTransportManagerPreFilter:
         mgr.add_transport(tcp)
 
         # QUIC address has no "tcp" protocol -> pre-filter should block it
-        mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
+        mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
         assert call_count[0] == 0, (
             "can_dial should NOT be called when no protocol overlap"
         )

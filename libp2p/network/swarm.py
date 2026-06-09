@@ -138,14 +138,22 @@ class Swarm(Service, INetworkService):
         # Deprecated keyword-only single-transport arg for explicit callers.
         *,
         transport: ITransport | None = None,
+        # Optional pre-built TransportManager (e.g. with a PortDemultiplexer attached
+        # for shared-port TCP+WS demultiplexing).  When supplied, it is used as-is
+        # and transports are appended to it; when omitted a fresh one is created.
+        transport_manager: TransportManager | None = None,
     ):
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
         self.psk = psk
 
-        # Build the TransportManager from whichever argument was supplied.
-        self.transport_manager = TransportManager()
+        # Use the pre-built TransportManager when provided (e.g. from new_swarm()
+        # which wires in a PortDemultiplexer for shared-port TCP+WS).  Otherwise create
+        # a fresh one (preserves backward compatibility for direct Swarm() callers).
+        self.transport_manager = (
+            transport_manager if transport_manager is not None else TransportManager()
+        )
 
         # Backward-compat: callers that still pass a single ITransport
         # positionally (e.g. Swarm(peer_id, ps, upgrader, tcp_transport) or
@@ -715,8 +723,9 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
-        # Route to the correct transport for this address.
-        transport = self.transport_manager.for_dialing(addr)
+        # For the dial to be successful, there needs to be a registered transport
+        # that can dial the provided `maddr`
+        transport = self.transport_manager.transport_for_dialing(addr)
         if transport is None:
             raise SwarmException(
                 f"No registered transport can dial {addr}. "
@@ -1225,6 +1234,15 @@ class Swarm(Service, INetworkService):
           - Check if a listener for this multiaddr already exists.
           - Create a listener on the matched transport and start it.
           - Map multiaddr string to the listener for future reference.
+
+        When a :class:`~libp2p.transport.cmux.PortDemultiplexer` is attached to the
+        :attr:`transport_manager`, all TCP-based transports (TCP and WebSocket)
+        register :class:`~libp2p.transport.cmux.DemultiplexedListener` objects
+        instead of opening their own sockets.  After every address has been
+        processed, a single ``port_demux.listen()`` call binds the shared socket
+        and starts the 3-byte demultiplexing loop — mirroring the go-libp2p
+        pattern where the physical listener is created once by ``PortDemultiplexer`` and
+        each transport only receives a virtual channel.
         """
         logger.debug(f"Swarm.listen called with multiaddrs: {multiaddrs}")
         # Wait until the background nursery is available so that transports
@@ -1242,7 +1260,7 @@ class Swarm(Service, INetworkService):
                 continue
 
             # Route to the correct transport for this address.
-            transport = self.transport_manager.for_listening(maddr)
+            transport = self.transport_manager.transport_for_listening(maddr)
             if transport is None:
                 logger.warning(
                     "Swarm.listen: no registered transport can handle %s "
@@ -1260,7 +1278,7 @@ class Swarm(Service, INetworkService):
             # Delegate to TransportManager to create the listener (handles CMUX)
             try:
                 logger.debug(f"Swarm.listen: creating listener for {maddr}")
-                listener = self.transport_manager.listen_on(maddr, conn_handler)
+                listener = self.transport_manager.add_listen_addr(maddr, conn_handler)
                 if listener is None:
                     continue
                 logger.debug(f"Swarm.listen: listener created for {maddr}")
@@ -1279,6 +1297,32 @@ class Swarm(Service, INetworkService):
             except OSError:
                 # Failed. Continue looping.
                 logger.debug("fail to listen on: %s", maddr)
+
+        # ---- Start the shared PortDemultiplexer socket (if used) ----
+        # After all DemultiplexedListeners are registered, bind the single OS
+        # socket and start the 3-byte routing loop.  This is a no-op when no
+        # PortDemultiplexer is attached (plain TCP / QUIC / WS-only setups).
+        port_demux = getattr(self.transport_manager, "_port_demux", None)
+        if port_demux is not None and success_count > 0:
+            # Pick the TCP-only multiaddr (no /ws) as the bind address so the
+            # socket is created on the correct (host, port) without a /ws suffix.
+            tcp_maddr = None
+            for maddr in multiaddrs:
+                protos = {p.name for p in maddr.protocols()}
+                if "tcp" in protos and "ws" not in protos and "wss" not in protos:
+                    tcp_maddr = maddr
+                    break
+            if tcp_maddr is not None:
+                try:
+                    logger.debug(
+                        "Swarm.listen: starting PortDemultiplexer on %s", tcp_maddr
+                    )
+                    await port_demux.listen(tcp_maddr)
+                    logger.debug("Swarm.listen: PortDemultiplexer started")
+                except Exception as exc:
+                    logger.error(
+                        "Swarm.listen: PortDemultiplexer.listen failed: %s", exc
+                    )
 
         # Return true if at least one address succeeded
         return success_count > 0
@@ -1445,12 +1489,17 @@ class Swarm(Service, INetworkService):
             with trio.fail_after(inbound_timeout):
                 try:
                     secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
-                except SecurityUpgradeFailure as error:
-                    logger.error("failed to upgrade security for peer at %s", maddr)
+                except SecurityUpgradeFailure as exc:
+                    logger.error(
+                        "failed to upgrade security for peer at %s: %s",
+                        maddr,
+                        exc,
+                        exc_info=True,
+                    )
                     await _cleanup_inbound_upgrade()
                     raise SwarmException(
                         f"failed to upgrade security for peer at {maddr}"
-                    ) from error
+                    ) from exc
                 peer_id = secured_conn.get_remote_peer()
 
                 try:

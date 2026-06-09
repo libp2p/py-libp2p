@@ -15,26 +15,43 @@ Usage::
     mgr.add_transport(TCP())
     mgr.add_transport(QUICTransport(private_key))
 
-    transport = mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+    transport = mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
     # -> TCP instance
 
-    transport = mgr.for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
+    transport = mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
     # -> QUICTransport instance
+
+Port sharing (TCP + WebSocket on the same port)::
+
+    from libp2p.transport.cmux import PortDemultiplexer, DemultiplexedConnType
+
+    port_demux = PortDemultiplexer("0.0.0.0", 4001)
+    mgr = TransportManager(port_demux=port_demux)
+
+    mgr.add_transport(TCP())
+    mgr.add_transport(WebsocketTransport(...))
+
+    # TransportManager calls add_listen_addr() per multiaddr.
+    # add_listen_addr() detects TCP-based addrs and delegates to PortDemultiplexer so
+    # both transports share the same OS socket.
 
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
 
 if TYPE_CHECKING:
     import trio
+
+    from libp2p.transport.cmux import PortDemultiplexer
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +68,21 @@ class TransportManager:
 
     This is the Python equivalent of go-libp2p's ``Swarm.TransportForDialing``
     / ``Swarm.TransportForListening`` pair.
+
+    :param port_demux: Optional :class:`~libp2p.transport.cmux.PortDemultiplexer` for
+        sharing a single TCP port between multiple transports (TCP + WS).
+        Mirrors the ``sharedTCP *tcpreuse.PortDemultiplexer`` parameter passed to
+        ``NewTCPTransport`` / ``websocket.New`` in go-libp2p.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, port_demux: PortDemultiplexer | None = None) -> None:
         self._transports: list[ITransport] = []
-        self._shared_tcp_listeners: dict[tuple[str, int], IListener] = {}
+        # Shared PortDemultiplexer for TCP port reuse (optional).
+        # Mirrors go-libp2p: stored at construction, passed to transports
+        # that support it via add_listen_addr().
+        self._port_demux: PortDemultiplexer | None = port_demux
+        # Tracks per-(host, port) listeners for non-PortDemultiplexer paths.
+        self._listeners: dict[tuple[str, int], IListener] = {}
 
     # ── Registration ──────────────────────────────────────────────────────────
 
@@ -84,7 +111,7 @@ class TransportManager:
 
     # ── Routing ───────────────────────────────────────────────────────────────
 
-    def for_dialing(self, maddr: Multiaddr) -> ITransport | None:
+    def transport_for_dialing(self, maddr: Multiaddr) -> ITransport | None:
         """
         Return the first registered transport that can dial *maddr*, or ``None``.
 
@@ -105,7 +132,6 @@ class TransportManager:
 
         for transport in self._transports:
             # Fast pre-filter: skip if no protocol name overlap at all.
-            # Use getattr for compat with test fakes that don't implement protocols().
             _protocols = getattr(transport, "protocols", None)
             if _protocols is not None and not proto_names.intersection(
                 set(_protocols())
@@ -114,25 +140,26 @@ class TransportManager:
             _can_dial = getattr(transport, "can_dial", None)
             if _can_dial is None or _can_dial(maddr):
                 logger.debug(
-                    "TransportManager.for_dialing: %s => %s",
+                    "TransportManager.transport_for_dialing: %s => %s",
                     maddr,
                     type(transport).__name__,
                 )
                 return transport
 
         logger.warning(
-            "TransportManager.for_dialing: no transport found for %s (registered: %s)",
+            "TransportManager.transport_for_dialing: no transport found for %s "
+            "(registered: %s)",
             maddr,
             [type(t).__name__ for t in self._transports],
         )
         return None
 
-    def for_listening(self, maddr: Multiaddr) -> ITransport | None:
+    def transport_for_listening(self, maddr: Multiaddr) -> ITransport | None:
         """
         Return the first registered transport that can listen on *maddr*, or
         ``None``.
 
-        Uses the same two-step pre-filter logic as :meth:`for_dialing`.
+        Uses the same two-step pre-filter logic as :meth:`transport_for_dialing`.
 
         This is the Python equivalent of go-libp2p's
         ``Swarm.TransportForListening()``.
@@ -144,7 +171,6 @@ class TransportManager:
         proto_names = {p.name for p in maddr.protocols()}
 
         for transport in self._transports:
-            # Use getattr for compat with test fakes that don't implement protocols().
             _protocols = getattr(transport, "protocols", None)
             if _protocols is not None and not proto_names.intersection(
                 set(_protocols())
@@ -153,14 +179,14 @@ class TransportManager:
             _can_listen = getattr(transport, "can_listen", None)
             if _can_listen is None or _can_listen(maddr):
                 logger.debug(
-                    "TransportManager.for_listening: %s => %s",
+                    "TransportManager.transport_for_listening: %s => %s",
                     maddr,
                     type(transport).__name__,
                 )
                 return transport
 
         logger.warning(
-            "TransportManager.for_listening: no transport found for %s "
+            "TransportManager.transport_for_listening: no transport found for %s "
             "(registered: %s)",
             maddr,
             [type(t).__name__ for t in self._transports],
@@ -184,86 +210,151 @@ class TransportManager:
         :param maddr: The multiaddress to check.
         :returns: ``True`` if a matching transport exists, ``False`` otherwise.
         """
-        return self.for_dialing(maddr) is not None
+        return self.transport_for_dialing(maddr) is not None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    # ── Listening ─────────────────────────────────────────────────────────────
 
-    def listen_on(self, maddr: Multiaddr, conn_handler: THandler) -> IListener | None:
+    def add_listen_addr(
+        self, maddr: Multiaddr, conn_handler: THandler
+    ) -> IListener | None:
         """
-        Creates and manages a listener for the given multiaddress.
-        If a shared TCP port is required (e.g. for TCP and WS), it returns
-        the shared dispatcher.
+        Create and return a listener for *maddr*.
+
+        Mirrors ``Swarm.AddListenAddr()`` from go-libp2p.
+
+        When a :class:`~libp2p.transport.cmux.PortDemultiplexer` was supplied at
+        construction **and** the address is TCP-based, the manager calls
+        :meth:`~libp2p.transport.cmux.PortDemultiplexer.demultiplexed_listen` on the
+        appropriate :class:`~libp2p.transport.cmux.DemultiplexedConnType` so
+        that TCP and WebSocket transports can share the same OS socket.
+
+        For non-TCP transports (e.g. QUIC) the transport's own
+        :meth:`~libp2p.abc.ITransport.create_listener` is used directly.
+
+        :param maddr: The multiaddress to listen on.
+        :param conn_handler: Handler called for every accepted connection.
+        :returns: An :class:`~libp2p.abc.IListener`, or ``None`` if no
+            transport supports *maddr*.
         """
-        transport = self.for_listening(maddr)
+        transport = self.transport_for_listening(maddr)
         if transport is None:
             return None
 
-        # Check if this is a TCP-based transport that can share a port
-        # For py-libp2p, standard TCP and WebSocket run on TCP.
         protocols = [p.name for p in maddr.protocols()]
-        if "tcp" in protocols:
-            host_val = maddr.value_for_protocol("ip4") or maddr.value_for_protocol(
-                "ip6"
+
+        if "tcp" in protocols and self._port_demux is not None:
+            # ---- Shared-port path (mirrors go-libp2p TcpTransport.Listen /
+            #      WebsocketTransport.Listen with sharedTcp != nil) -----
+            return self._add_listen_addr_shared(
+                maddr, protocols, transport, conn_handler
             )
-            host = str(host_val) if host_val else ""
-            port_val = maddr.value_for_protocol("tcp")
-            port = int(port_val) if port_val else 0
-            key = (host, port)
 
-            if "ws" in protocols or "wss" in protocols:
-                is_ws = True
-            else:
-                is_ws = False
-
-            # If it's TCP-based, we use the SharedTCPDispatcher
-            # We lazy import it to avoid circular dependencies
-            from .cmux import SharedTCPDispatcher
-
-            if key not in self._shared_tcp_listeners:
-                dispatcher = SharedTCPDispatcher(host, port)
-                self._shared_tcp_listeners[key] = dispatcher
-            else:
-                dispatcher = cast(
-                    "SharedTCPDispatcher", self._shared_tcp_listeners[key]
-                )
-                if not isinstance(dispatcher, SharedTCPDispatcher):
-                    # Should not happen unless there's a port conflict with a
-                    # non-CMUX listener
-                    pass
-
-            if isinstance(dispatcher, SharedTCPDispatcher):
-                if is_ws:
-                    # Provide an adapter that matches what WebSocket listener does.
-                    # The WS connection handler expects a P2PWebSocketConnection,
-                    # but here we have a WebSocketRequest from cmux.
-                    # We need to wrap it using the same logic as WebsocketListener.
-                    from .websocket.transport import WebsocketTransport
-
-                    if isinstance(transport, WebsocketTransport):
-                        # WebsocketTransport creates a WebsocketListener
-                        # we can create one just to handle the connection wrapping!
-                        # Or better, we can register the WS handler directly:
-                        async def ws_cmux_handler(ws_request: Any) -> None:
-                            ws = await ws_request.accept()
-                            from .websocket.connection import P2PWebSocketConnection
-
-                            # is_wss should be detected from maddr, simplify to
-                            # False for now or detect:
-                            is_secure = "wss" in protocols
-                            conn = P2PWebSocketConnection(
-                                ws,
-                                is_secure=is_secure,
-                                max_buffered_amount=32 * 1024 * 1024,
-                            )
-                            await conn_handler(conn)
-
-                        dispatcher.ws_handler = ws_cmux_handler
-                else:
-                    dispatcher.tcp_handler = conn_handler
-                return dispatcher
-
-        # For non-TCP transports (e.g. QUIC), just let the transport create it
+        # ---- Non-TCP or no PortDemultiplexer: let the transport own its listener ----
         return transport.create_listener(conn_handler)
+
+    def _add_listen_addr_shared(
+        self,
+        maddr: Multiaddr,
+        protocols: list[str],
+        transport: ITransport,
+        conn_handler: THandler,
+    ) -> IListener | None:
+        """
+        Wire a TCP-based transport into the shared
+        :class:`~libp2p.transport.cmux.PortDemultiplexer`.
+
+        Determines the correct :class:`~libp2p.transport.cmux.DemultiplexedConnType`
+        for *transport*, registers a
+        :class:`~libp2p.transport.cmux.DemultiplexedListener`, and wires
+        *conn_handler* into the listener so that
+        :meth:`~libp2p.transport.cmux.DemultiplexedListener.listen` starts
+        the drain task automatically.
+
+        :returns: The :class:`~libp2p.transport.cmux.DemultiplexedListener`,
+            or ``None`` on failure.
+        """
+        from libp2p.transport.cmux import DemultiplexedConnType
+
+        port_demux = cast("PortDemultiplexer", self._port_demux)
+
+        # Determine connection type for this transport.
+        if "ws" in protocols or "wss" in protocols:
+            is_secure = "wss" in protocols
+            if is_secure:
+                conn_type = DemultiplexedConnType.TLS
+            else:
+                conn_type = DemultiplexedConnType.HTTP
+
+            from trio_websocket import (  # type: ignore
+                wrap_server_stream,
+            )
+
+            from libp2p.transport.websocket.connection import P2PWebSocketConnection
+
+            async def ws_wrapped_handler(stream: trio.abc.Stream) -> None:
+                try:
+                    async with trio.open_nursery() as ws_nursery:
+                        # Max message size defaults to 32MB to match WebsocketTransport
+                        request = await wrap_server_stream(
+                            ws_nursery, stream, max_message_size=32 * 1024 * 1024
+                        )
+                        ws = await request.accept()
+                        conn = P2PWebSocketConnection(
+                            ws,
+                            is_secure=is_secure,
+                            max_buffered_amount=4 * 1024 * 1024,
+                        )
+                        await conn_handler(conn)
+                except Exception as exc:
+                    logger.error(
+                        "WS upgrade failed on shared port: %s, cause: %s",
+                        exc,
+                        getattr(exc, "__cause__", None),
+                        exc_info=True,
+                    )
+
+            if conn_type in port_demux._send_channels:
+                logger.debug(
+                    "PortDemultiplexer already has a listener for %s; reusing",
+                    conn_type.name,
+                )
+                return port_demux._listeners.get(conn_type)
+
+            return port_demux.demultiplexed_listen(
+                maddr, conn_type, conn_handler=ws_wrapped_handler
+            )
+
+        else:
+            conn_type = DemultiplexedConnType.MULTISTREAM_SELECT
+
+            from libp2p.io.trio import TrioTCPStream
+
+            async def tcp_wrapped_handler(stream: trio.abc.Stream) -> None:
+                try:
+                    tcp_stream = TrioTCPStream(stream)
+                    await conn_handler(tcp_stream)
+                except Exception as exc:
+                    logger.debug("TCP handler failed on shared port: %s", exc)
+
+            # Check whether this conn_type is already registered — return the
+            # existing DemultiplexedListener so the swarm can call listen() on it
+            # and notify listeners without error.
+            if conn_type in port_demux._send_channels:
+                logger.debug(
+                    "PortDemultiplexer already has a listener for %s; reusing",
+                    conn_type.name,
+                )
+                return port_demux._listeners.get(conn_type)
+
+            # Register and wire the handler in one step.
+            return port_demux.demultiplexed_listen(
+                maddr, conn_type, conn_handler=tcp_wrapped_handler
+            )
+
+    # Backwards-compatible alias.
+    def listen_on(self, maddr: Multiaddr, conn_handler: THandler) -> IListener | None:
+        """Deprecated alias for :meth:`add_listen_addr`."""
+        return self.add_listen_addr(maddr, conn_handler)
 
     # ── Lifecycle helpers (called by Swarm) ───────────────────────────────────
 

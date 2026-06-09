@@ -576,6 +576,53 @@ def new_swarm(
     # Store our key pair in peerstore
     peerstore.add_key_pair(id_opt, key_pair)
 
+    # ---- Detect shared-port TCP+WS addresses and build PortDemultiplexer ----
+    # Mirrors go-libp2p: sharedTCP *tcpreuse.PortDemultiplexer is passed at transport
+    # construction time.  When the listen_addrs include both a plain TCP and a
+    # WebSocket address on the SAME port, we create one PortDemultiplexer so they share
+    # the OS socket (EADDRINUSE prevention).
+    port_demux = None
+    if listen_addrs:
+        from libp2p.transport.cmux import PortDemultiplexer as _ConnMgr
+
+        # Map (host, port) -> list of protocol-stacks that share that port.
+        port_protos: dict[tuple[str, int], list[set[str]]] = {}
+        for addr in listen_addrs:
+            try:
+                protos = {p.name for p in addr.protocols()}
+                if "tcp" not in protos:
+                    continue  # only TCP-based addrs can share
+                host_val = (
+                    addr.value_for_protocol("ip4")
+                    or addr.value_for_protocol("ip6")
+                )
+                port_val = addr.value_for_protocol("tcp")
+                if host_val is None or port_val is None:
+                    continue
+                key = (str(host_val), int(port_val))
+                port_protos.setdefault(key, []).append(protos)
+            except Exception:
+                continue
+
+        # A PortDemultiplexer is needed when a port has BOTH plain-TCP and WS/WSS addrs.
+        for (host, port), proto_sets in port_protos.items():
+            has_plain_tcp = any(
+                "ws" not in ps and "wss" not in ps for ps in proto_sets
+            )
+            has_ws = any("ws" in ps or "wss" in ps for ps in proto_sets)
+            if has_plain_tcp and has_ws:
+                port_demux = _ConnMgr(host, port)
+                logger.debug(
+                    "new_swarm: created PortDemultiplexer for shared port %s:%d",
+                    host,
+                    port,
+                )
+                break  # one PortDemultiplexer per swarm (extend later for multi-port)
+
+    from libp2p.transport.manager import TransportManager
+
+    transport_manager = TransportManager(port_demux=port_demux)
+
     swarm = Swarm(
         id_opt,
         peerstore,
@@ -584,6 +631,7 @@ def new_swarm(
         retry_config=retry_config,
         connection_config=connection_config,
         psk=psk,
+        transport_manager=transport_manager,
     )
 
     # Set resource manager if provided
