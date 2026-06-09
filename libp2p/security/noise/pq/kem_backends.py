@@ -90,7 +90,7 @@ class LibOQSXWingKem:
         try:
             from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
             import nacl.utils
-            import oqs
+            import oqs  # type: ignore[import-error]
 
             _LIBOQS_AVAILABLE = True
         except (ImportError, RuntimeError, SystemExit, OSError) as e:
