@@ -398,43 +398,40 @@ class QUICTransport(ITransport):
 
     def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
         """
-        Return True if this QUIC transport can dial the given multiaddr.
+        Check if this transport can dial the given multiaddr.
 
         Args:
-            maddr: Multiaddr to check (e.g. ``/ip4/1.2.3.4/udp/4001/quic-v1``)
+            maddr: Multiaddr to check
 
         Returns:
-            True if the multiaddr contains a QUIC protocol component.
-
-        """
-        return is_quic_multiaddr(maddr)
-
-    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
-        """
-        Return True if this QUIC transport can listen on the given multiaddr.
-
-        Args:
-            maddr: Multiaddr to check.
-
-        Returns:
-            True if the multiaddr contains a QUIC protocol component.
+            True if this transport can dial the address
 
         """
         return is_quic_multiaddr(maddr)
 
     def protocols(self) -> list[str]:
         """
-        Return the list of multiaddr protocol names handled by QUIC transport.
+        Get supported protocol identifiers.
 
         Returns:
-            List of supported QUIC protocol strings (e.g. ``["quic-v1"]`` or
-            ``["quic-v1", "quic"]`` when draft-29 is enabled).
+            List of supported protocol strings
 
         """
-        protos: list[str] = [str(QUIC_V1_PROTOCOL)]
+        protocols: list[str] = [str(QUIC_V1_PROTOCOL)]
         if self._config.enable_draft29:
-            protos.append(str(QUIC_DRAFT29_PROTOCOL))
-        return protos
+            protocols.append(str(QUIC_DRAFT29_PROTOCOL))
+        return protocols
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """
+        Get supported protocol identifiers.
+        Return True if this QUIC transport can listen on the given multiaddr.
+        Args:
+            maddr: Multiaddr to check.
+        Returns:
+            True if the multiaddr contains a QUIC protocol component.
+        """
+        return is_quic_multiaddr(maddr)
 
     def listen_order(self) -> int:
         """
