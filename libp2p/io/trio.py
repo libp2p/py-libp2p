@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class TrioTCPStream(ReadWriteCloser):
-    stream: trio.abc.Stream
+    stream: trio.SocketStream
     # NOTE: Add both read and write lock to avoid `trio.BusyResourceError`
     read_lock: trio.Lock
     write_lock: trio.Lock
@@ -21,7 +21,7 @@ class TrioTCPStream(ReadWriteCloser):
     # socket becomes unavailable after connection establishment
     _cached_remote_address: tuple[str, int] | None
 
-    def __init__(self, stream: trio.abc.Stream) -> None:
+    def __init__(self, stream: trio.SocketStream) -> None:
         self.stream = stream
         self.read_lock = trio.Lock()
         self.write_lock = trio.Lock()
@@ -92,7 +92,7 @@ class TrioTCPStream(ReadWriteCloser):
                 logger.debug("SocketStream has no 'socket' attribute")
                 return None
 
-            socket = getattr(self.stream, "socket")
+            socket = self.stream.socket
             if socket is None:
                 logger.debug("Socket is None")
                 return None

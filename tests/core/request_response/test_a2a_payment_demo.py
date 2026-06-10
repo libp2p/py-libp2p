@@ -107,8 +107,7 @@ def test_authorization_followup_completes_task(server: A2APaymentDemoServer) -> 
     )
     fetched_status = cast(dict[str, object], fetched_task["status"])
     fetched_artifacts = cast(list[dict[str, object]], fetched_task["artifacts"])
-    parts = cast(list[dict[str, object]], fetched_artifacts[1]["parts"])
-    storage_part = cast(dict[str, object], parts[0])
+    storage_part = cast(dict[str, object], fetched_artifacts[1]["parts"][0])
     storage_data = cast(dict[str, object], storage_part["data"])
     assert fetched_status["state"] == "TASK_STATE_COMPLETED"
     assert fetched_artifacts[0]["artifactId"] == "payment-authorization"
