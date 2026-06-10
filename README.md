@@ -38,36 +38,6 @@ ______________________________________________________________________
 | **`libp2p-webrtc-browser-to-server`**  |     🌱     |                                                                                     |
 | **`libp2p-webrtc-private-to-private`** |     🌱     |                                                                                     |
 
-#### Multi-Transport (go-libp2p parity)
-
-A single host can now listen on **all three transports simultaneously**, and the
-`Swarm` automatically selects the right transport when dialing a peer:
-
-```python
-from libp2p import new_host
-import multiaddr, trio
-
-listen_addrs = [
-    multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/4001"),       # TCP
-    multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/4002/ws"),     # WebSocket
-    multiaddr.Multiaddr("/ip4/0.0.0.0/udp/4003/quic"),   # QUIC
-]
-
-async def main():
-    # Pass listen_addrs so the host auto-detects and registers all three transports
-    host = new_host(listen_addrs=listen_addrs)
-    async with host.run(listen_addrs=listen_addrs):
-        for addr in host.get_addrs():
-            print(addr)   # all three transports printed
-        await trio.sleep_forever()
-
-trio.run(main)
-```
-
-See the [multi-transport example](examples/multi_transport/) and the
-[documentation](https://py-libp2p.readthedocs.io/en/latest/examples.multi_transport.html)
-for a full walk-through with a matching client.
-
 ______________________________________________________________________
 
 ### NAT Traversal

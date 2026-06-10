@@ -10,7 +10,6 @@ Examples
    examples.chat
    examples.echo
    examples.echo_quic
-   examples.multi_transport
    examples.ping
    examples.request_response
    examples.agentic_request_response
