@@ -188,7 +188,9 @@ class Operation:
             "h": self.content_hash,
             "x": self.depends_on,
         }
-        return msgpack.packb(d, use_bin_type=True)
+        result = msgpack.packb(d, use_bin_type=True)
+        assert result is not None
+        return result
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Operation:

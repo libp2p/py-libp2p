@@ -142,7 +142,7 @@ class EtherCalcAdapter:
 
     async def _redis_pump(self) -> None:
         """Read commands from EtherCalc Redis, publish to GossipSub."""
-        async for message in self._redis_sub.listen():
+        async for message in self._redis_sub.listen():  # type: ignore[union-attr]
             if not self._running:
                 break
             if message["type"] != "message":

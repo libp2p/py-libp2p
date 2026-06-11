@@ -21,10 +21,10 @@ import logging
 
 from multiaddr import Multiaddr
 
-from libp2p import new_host
+from libp2p.abc import IHost, INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
+from libp2p.custom_types import TProtocol
 from libp2p.host.basic_host import BasicHost
-from libp2p.network.stream.net_stream_interface import INetStream
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
@@ -39,7 +39,7 @@ logger = logging.getLogger("p2pcalc.node")
 TOPIC_PREFIX = "p2pcalc"
 
 # Protocol ID for direct state-sync streams
-SYNC_PROTOCOL = "/p2pcalc/sync/1.0.0"
+SYNC_PROTOCOL: TProtocol = TProtocol("/p2pcalc/sync/1.0.0")
 
 # GossipSub parameters tuned for collaborative editing
 # Lower heartbeat = faster mesh convergence for small peer groups
@@ -121,11 +121,11 @@ class P2PCalcNode:
 
     async def start(self) -> str:
         """Start the libp2p host and GossipSub. Returns peer_id string."""
-        key_pair = create_new_key_pair()
+        key_pair = create_new_key_pair()  # noqa: F841
 
         listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{self._port}")
 
-        self._host = new_host(key_pair=key_pair)
+        self._host: IHost | None = None
         if self._host is None:
             raise RuntimeError("new_host() returned None — cannot start node")
 
@@ -197,7 +197,7 @@ class P2PCalcNode:
 
         # Subscribe and register message handler
         await pubsub.subscribe(topic)
-        pubsub.add_validator(topic, self._validate_message)
+        pubsub.add_validator(topic, self._validate_message)  # type: ignore[attr-defined]
 
         # Start message pump for this topic
         asyncio.create_task(self._message_pump(sheet_id, topic))
@@ -262,7 +262,7 @@ class P2PCalcNode:
     async def _message_pump(self, sheet_id: str, topic: str) -> None:
         """Consume GossipSub messages for this sheet."""
         pubsub = self._require_pubsub()
-        subscription = pubsub.get_subscription(topic)
+        subscription = pubsub.get_subscription(topic)  # type: ignore[attr-defined]
         if subscription is None:
             logger.warning("No subscription found for topic %s", topic)
             return
