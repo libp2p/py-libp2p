@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+import json
 import logging
 
 from multiaddr import Multiaddr
@@ -88,7 +89,8 @@ class P2PCalcNode:
         # Keyed by sheet_id
         self._sheets: dict[str, SheetCRDT] = {}
         self._callbacks: dict[str, Callable[[Operation], Awaitable[None]]] = {}
-        self._presence: dict[str, dict[str, str]] = {}  # sheet_id -> peer_id -> cursor
+        # sheet_id -> peer_id -> cursor
+        self._presence: dict[str, dict[str, str]] = {}
 
         # Set during start()
         self._host: BasicHost | None = None
@@ -96,6 +98,22 @@ class P2PCalcNode:
         self._gossipsub: GossipSub | None = None
         self._factory: OperationFactory | None = None
         self._peer_id_str: str = ""
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_host(self) -> BasicHost:
+        """Return _host, raising RuntimeError if node has not been started."""
+        if self._host is None:
+            raise RuntimeError("Node not started — call start() first")
+        return self._host
+
+    def _require_pubsub(self) -> Pubsub:
+        """Return _pubsub, raising RuntimeError if node has not been started."""
+        if self._pubsub is None:
+            raise RuntimeError("Node not started — call start() first")
+        return self._pubsub
 
     # ------------------------------------------------------------------
     # Startup
@@ -108,6 +126,9 @@ class P2PCalcNode:
         listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{self._port}")
 
         self._host = new_host(key_pair=key_pair)
+        if self._host is None:
+            raise RuntimeError("new_host() returned None — cannot start node")
+
         await self._host.get_network().listen(listen_addr)
 
         self._peer_id_str = str(self._host.get_id())
@@ -144,9 +165,10 @@ class P2PCalcNode:
         return self._peer_id_str
 
     async def _connect_peer(self, addr_str: str) -> None:
+        host = self._require_host()
         try:
             peer_info = info_from_p2p_addr(Multiaddr(addr_str))
-            await self._host.connect(peer_info)
+            await host.connect(peer_info)
             logger.info("Connected to peer: %s", addr_str)
         except Exception as e:
             logger.warning("Failed to connect to %s: %s", addr_str, e)
@@ -162,6 +184,8 @@ class P2PCalcNode:
         request_snapshot: bool = True,
     ) -> None:
         """Subscribe to a sheet's GossipSub topic and request state sync."""
+        pubsub = self._require_pubsub()
+
         if sheet_id not in self._sheets:
             self._sheets[sheet_id] = SheetCRDT(
                 sheet_id=sheet_id,
@@ -172,8 +196,8 @@ class P2PCalcNode:
         topic = _topic(sheet_id)
 
         # Subscribe and register message handler
-        await self._pubsub.subscribe(topic)
-        self._pubsub.add_validator(topic, self._validate_message)
+        await pubsub.subscribe(topic)
+        pubsub.add_validator(topic, self._validate_message)
 
         # Start message pump for this topic
         asyncio.create_task(self._message_pump(sheet_id, topic))
@@ -186,8 +210,9 @@ class P2PCalcNode:
             await self.publish(snap_req)
 
     async def leave_sheet(self, sheet_id: str) -> None:
+        pubsub = self._require_pubsub()
         topic = _topic(sheet_id)
-        await self._pubsub.unsubscribe(topic)
+        await pubsub.unsubscribe(topic)
         self._callbacks.pop(sheet_id, None)
         logger.info("Left sheet: %s", sheet_id)
 
@@ -197,11 +222,10 @@ class P2PCalcNode:
 
     async def publish(self, op: Operation) -> None:
         """Broadcast an Operation to all peers on this sheet's topic."""
-        if not self._pubsub:
-            raise RuntimeError("Node not started")
+        pubsub = self._require_pubsub()
         topic = _topic(op.sheet_id)
         data = op.to_bytes()
-        await self._pubsub.publish(topic, data)
+        await pubsub.publish(topic, data)
         logger.debug("Published op %s type=%s", op.op_id[:8], op.op_type)
 
     async def publish_command(
@@ -237,7 +261,8 @@ class P2PCalcNode:
 
     async def _message_pump(self, sheet_id: str, topic: str) -> None:
         """Consume GossipSub messages for this sheet."""
-        subscription = self._pubsub.get_subscription(topic)
+        pubsub = self._require_pubsub()
+        subscription = pubsub.get_subscription(topic)
         if subscription is None:
             logger.warning("No subscription found for topic %s", topic)
             return
@@ -313,8 +338,6 @@ class P2PCalcNode:
         if not sheet:
             return
 
-        import json
-
         snapshot_data = json.dumps(sheet.snapshot()).encode()
 
         # Chunk into 64KB pieces for libp2p stream compatibility
@@ -353,8 +376,6 @@ class P2PCalcNode:
             sheet_id = data.decode().strip()
             sheet = self._sheets.get(sheet_id)
             if sheet:
-                import json
-
                 payload = json.dumps(sheet.snapshot()).encode()
                 await stream.write(len(payload).to_bytes(4, "big") + payload)
             await stream.close()

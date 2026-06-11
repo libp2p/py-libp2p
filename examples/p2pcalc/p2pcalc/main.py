@@ -59,22 +59,27 @@ async def run(args: argparse.Namespace) -> None:
     print("\nReady. Ctrl-C to stop.\n")
 
     # Periodic stats logging
-    async def stats_loop():
+    async def stats_loop() -> None:
         while True:
             await asyncio.sleep(30)
             stats = manager.all_stats()
             logger.info("Stats: %s", json.dumps(stats, indent=2))
 
-    # Signal handler
-    loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
-    def _signal_handler():
+    def _signal_handler() -> None:
         print("\nShutting down...")
         stop_event.set()
 
-    loop.add_signal_handler(signal.SIGINT, _signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, _signal_handler)
+    # asyncio.loop.add_signal_handler is not available on Windows;
+    # fall back to the stdlib signal module which works on all platforms.
+    if sys.platform != "win32":
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGINT, _signal_handler)
+        loop.add_signal_handler(signal.SIGTERM, _signal_handler)
+    else:
+        signal.signal(signal.SIGINT, lambda _s, _f: _signal_handler())
+        signal.signal(signal.SIGTERM, lambda _s, _f: _signal_handler())
 
     stats_task = asyncio.create_task(stats_loop())
 
@@ -85,7 +90,7 @@ async def run(args: argparse.Namespace) -> None:
     print("Stopped.")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="P2PCalc — Decentralised EtherCalc via py-libp2p GossipSub"
     )
