@@ -593,6 +593,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             await self._extract_peer_certificate()
 
             if not self._peer_certificate:
+                # Inbound (server-side) connections MUST present a peer
+                # certificate so the remote libp2p identity can be established.
+                # Accepting a connection without one would allow unauthenticated
+                # peers to reach the application callback — the libp2p QUIC
+                # trust boundary requires verified peer identity before promotion.
+                if not self._is_initiator:
+                    raise QUICPeerVerificationError(
+                        "Inbound QUIC connection has no peer certificate: "
+                        "remote peer identity cannot be established. "
+                        "Connection rejected."
+                    )
                 logger.debug("No peer certificate available for verification")
                 return None
 
@@ -674,8 +685,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
             The peer's X.509 certificate, or None if not available
 
         """
-        # If we don't have a certificate yet, try to extract it
-        if not self._peer_certificate and self._handshake_completed:
+        # Fast path: already extracted
+        if self._peer_certificate:
+            return self._peer_certificate
+
+        # If our high-level handshake flag is set, extract now
+        if self._handshake_completed:
+            await self._extract_peer_certificate()
+            return self._peer_certificate
+
+        # For server-side connections promoted before background tasks have
+        # processed the HandshakeCompleted event, the aioquic-level TLS
+        # handshake is already done (quic_conn._handshake_complete is True)
+        # but our _handshake_completed flag hasn't been set yet.  Read the
+        # certificate directly from the TLS context in that case.
+        if self._quic and getattr(self._quic, "_handshake_complete", False):
             await self._extract_peer_certificate()
 
         return self._peer_certificate

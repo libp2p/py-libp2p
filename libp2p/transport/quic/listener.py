@@ -51,6 +51,21 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+class ServerQuicConnection(QuicConnection):
+    """
+    A custom QuicConnection that ensures the server requests a client certificate.
+    aioquic's tls.Context defaults _request_client_certificate to False. Since
+    the ServerHello is generated synchronously inside receive_datagram, we must
+    override _initialize to set the flag immediately after the TLS context is created.
+    """
+
+    def _initialize(self, peer_cid: bytes) -> None:
+        super()._initialize(peer_cid)
+        if hasattr(self, "tls") and self.tls:
+            self.tls._request_client_certificate = True
+            logger.debug("ServerQuicConnection: Set _request_client_certificate=True")
+
+
 class QUICPacketInfo:
     """Information extracted from a QUIC packet header."""
 
@@ -587,7 +602,7 @@ class QUICListener(IListener):
                 f"{packet_info.destination_cid.hex()}"
             )
 
-            quic_conn = QuicConnection(
+            quic_conn = ServerQuicConnection(
                 configuration=server_config,
                 original_destination_connection_id=packet_info.destination_cid,
             )
@@ -636,17 +651,9 @@ class QUICListener(IListener):
                 initial_dcid, quic_conn, addr, sequence
             )
 
-            # Process initial packet
+            # Process initial packet. Since we use ServerQuicConnection, the
+            # TLS context will be initialized with _request_client_certificate=True
             quic_conn.receive_datagram(data, addr, now=time.time())
-            if quic_conn.tls:
-                if self._security_manager:
-                    try:
-                        quic_conn.tls._request_client_certificate = True
-                        logger.debug(
-                            "request_client_certificate set to True in server TLS"
-                        )
-                    except Exception as e:
-                        logger.error(f"FAILED to apply request_client_certificate: {e}")
 
             # Process events and send response
             await self._process_quic_events(quic_conn, addr, destination_connection_id)
@@ -1061,6 +1068,24 @@ class QUICListener(IListener):
                     if not getattr(connection, "_background_tasks_started", False):
                         await connection.connect(self._nursery)
 
+                # Belt-and-suspenders: reject inbound connections that have no
+                # peer certificate before we even attempt security verification.
+                # _verify_peer_identity_with_security already raises for this
+                # case, but checking here provides an early, explicit rejection
+                # that is independent of the security manager being configured.
+                if not connection._is_initiator:
+                    peer_cert = await connection.get_peer_certificate()
+                    if peer_cert is None:
+                        logger.error(
+                            f"Rejecting inbound connection "
+                            f"{destination_connection_id.hex()}: "
+                            f"no peer certificate presented — "
+                            f"remote libp2p identity cannot be verified."
+                        )
+                        self._stats["connections_rejected"] += 1
+                        await connection.close()
+                        return
+
                 if self._security_manager:
                     try:
                         peer_id = await connection._verify_peer_identity_with_security()
@@ -1075,6 +1100,7 @@ class QUICListener(IListener):
                             f"Security verification failed for "
                             f"{destination_connection_id.hex()}: {e}"
                         )
+                        self._stats["connections_rejected"] += 1
                         await connection.close()
                         return
 
