@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from libp2p.abc import INetStream
+from libp2p.bitswap.client import BitswapClient
 from libp2p.peer.id import ID as PeerID
+
+if not TYPE_CHECKING:
+    from libp2p.bitswap.client import BitswapClient
 
 
 class IBitswapExtension(ABC):
@@ -11,7 +15,9 @@ class IBitswapExtension(ABC):
     Extensions are registered for specific protocol versions to handle messages.
     """
 
-    def set_client(self, client: Any) -> None:
+    client: "BitswapClient"
+
+    def set_client(self, client: BitswapClient) -> None:
         """
         Set the parent BitswapClient instance.
         """

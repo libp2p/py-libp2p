@@ -20,7 +20,6 @@ class PaymentExtension(IBitswapExtension):
     def __init__(self, payment_client: Any = None, payment_engine: Any = None):
         self.payment_client = payment_client
         self.payment_engine = payment_engine
-        self.client = None
 
     async def process_message(
         self, peer_id: PeerID, msg_bytes: bytes, stream: INetStream
