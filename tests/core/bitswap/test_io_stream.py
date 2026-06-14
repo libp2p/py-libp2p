@@ -15,7 +15,6 @@ import trio
 from libp2p.bitswap.block_store import MemoryBlockStore
 from libp2p.bitswap.chunker import DEFAULT_CHUNK_SIZE, chunk_stream
 from libp2p.bitswap.cid import cid_to_text
-from libp2p.bitswap.dag_pb import decode_dag_pb, is_file_node
 
 
 def ok(label):
@@ -140,11 +139,8 @@ async def test_add_stream_empty():
 
     assert len(stored) == 1
     block = list(stored.values())[0]
-    assert is_file_node(block)
-    _, unixfs = decode_dag_pb(block)
-    assert unixfs is not None
-    assert unixfs.filesize == 0
-    ok("empty stream → 1 empty dag-pb leaf block stored")
+    assert block == b""
+    ok("empty stream → 1 empty raw leaf block stored")
 
 
 async def test_add_stream_single_chunk():
@@ -170,9 +166,7 @@ async def test_add_stream_single_chunk():
 
     assert len(stored) == 1, f"expected 1 block, got {len(stored)}"
     block = stored[bytes(root_cid)]
-    _, unixfs = decode_dag_pb(block)
-    assert unixfs is not None
-    assert unixfs.data == data
+    assert block == data
     ok("single chunk: leaf CID returned directly, inline data correct")
 
 
@@ -206,20 +200,12 @@ async def test_add_stream_gzip():
     with gzip.GzipFile(fileobj=buf, mode="rb") as gz:
         root_cid = await dag.add_stream(gz)
 
-    # Reassemble all leaf data
+    # Since it's < 256KB, it's a single raw chunk
     root_block = stored[bytes(root_cid)]
-    links, _ = decode_dag_pb(root_block)
-    reassembled = b""
-    for link in links:
-        leaf = stored[bytes(link.cid)]
-        _, leaf_unixfs = decode_dag_pb(leaf)
-        assert leaf_unixfs is not None
-        reassembled += leaf_unixfs.data
-
-    assert reassembled == original
+    assert root_block == original
     ok(
         f"gzip stream: {compressed_size} compressed → {len(original)} bytes added "
-        f"in {len(links)} chunks"
+        f"as a single chunk"
     )
 
 

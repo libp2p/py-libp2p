@@ -51,9 +51,9 @@ class PaymentGatedDecisionEngine:
     def __init__(
         self,
         blockstore: BlockStore,
-        ledger: Any,        # payments.ledger.PaymentLedger
-        pricing: Any,       # payments.pricing.BlockPricingEngine
-        tx_verifier: Any,   # payments.tx_verifier.TxVerifier (or None)
+        ledger: Any,  # payments.ledger.PaymentLedger
+        pricing: Any,  # payments.pricing.BlockPricingEngine
+        tx_verifier: Any,  # payments.tx_verifier.TxVerifier (or None)
         server_wallet: str = "",
         network: str = "sepolia",
         asset: str = "ETH",
@@ -71,11 +71,7 @@ class PaymentGatedDecisionEngine:
 
         # Callbacks for sending messages back to peers
         self.send_message_callback = None
-        
-        # Root CID tracking: cid_hex → {root_cid, total_size, child_count}
-        # Used to compute total file size for pricing
-        self._dag_info: dict[str, dict[str, Any]] = {}
-        
+
         # Root CID tracking: cid_hex → {root_cid, total_size, child_count}
         # Used to compute total file size for pricing
         self._dag_info: dict[str, dict[str, Any]] = {}
@@ -88,15 +84,15 @@ class PaymentGatedDecisionEngine:
     ) -> None:
         """
         Register a DAG structure for root CID payment tracking.
-        
+
         Call this after chunking a file to register the relationship between
         the root CID and its child blocks, along with the total file size.
-        
+
         Args:
             root_cid: The root CID of the DAG
             child_cids: List of child/chunk CIDs
             total_size: Total size of all blocks combined (bytes)
-            
+
         Example:
             >>> # After adding a large file to Bitswap
             >>> await engine.register_dag(
@@ -104,19 +100,20 @@ class PaymentGatedDecisionEngine:
             ...     child_cids=[chunk1, chunk2, ...],
             ...     total_size=5_000_000,  # 5 MB
             ... )
+
         """
         root_hex = _cid_to_str(root_cid)
-        
+
         # Store DAG metadata
         self._dag_info[root_hex] = {
             "root_cid": root_hex,
             "total_size": total_size,
             "child_count": len(child_cids),
         }
-        
+
         # Register in ledger so child blocks inherit root payment status
         await self.ledger.register_dag(root_cid, child_cids)
-        
+
         logger.info(
             f"📋 Registered DAG: root={root_hex[:20]}... "
             f"size={total_size}B children={len(child_cids)}"
@@ -125,9 +122,10 @@ class PaymentGatedDecisionEngine:
     def mark_free(self, cid: str | bytes) -> None:
         """
         Mark a CID as free (no payment required).
-        
+
         Args:
             cid: The CID to mark as free (root or child)
+
         """
         self.ledger.mark_free(cid)
         self.pricing.set_free(cid)
@@ -137,7 +135,7 @@ class PaymentGatedDecisionEngine:
         self,
         peer_id: str,
         cid: str | bytes,
-        want_type: int,       # 0 = WANT_BLOCK, 1 = WANT_HAVE
+        want_type: int,  # 0 = WANT_BLOCK, 1 = WANT_HAVE
         send_dont_have: bool,
         peer_protocol: str = BITSWAP_PROTOCOL_V120,
     ) -> Message_1_3 | Message_1_2 | None:
@@ -155,7 +153,10 @@ class PaymentGatedDecisionEngine:
         )
 
         # Check blockstore
-        logger.info("All CIDs in blockstore: " + ", ".join([c.hex() for c in self.blockstore.get_all_cids()]))
+        logger.info(
+            "All CIDs in blockstore: "
+            + ", ".join([c.hex() for c in self.blockstore.get_all_cids()])
+        )
         block_data = await self.blockstore.get_block(cid_obj)
 
         if block_data is None:
@@ -169,7 +170,7 @@ class PaymentGatedDecisionEngine:
 
         # Get pricing size (use total DAG size if this is part of a DAG)
         pricing_size = self._get_pricing_size(cid_str, block_size)
-        
+
         # Compute price (at root CID level, not per-block)
         price = self.pricing.compute_price(cid_str, pricing_size)
         logger.info(
@@ -179,7 +180,7 @@ class PaymentGatedDecisionEngine:
 
         # Check if free or already paid (ledger resolves child → root automatically)
         is_paid = self.ledger.is_paid(peer_id, cid_str)
-        
+
         if price == 0:
             # Free block — serve it
             logger.info(f"✅ Serving block (FREE): {cid_str[:20]}...")
@@ -189,7 +190,10 @@ class PaymentGatedDecisionEngine:
                 return self._make_block_response(cid_bytes, block_data, peer_protocol)
         elif is_paid:
             # Already paid with sufficient amount — serve it
-            logger.info(f"✅ Serving block (ALREADY PAID): {cid_str[:20]}... price={price} units")
+            logger.info(
+                f"✅ Serving block (ALREADY PAID): {cid_str[:20]}... "
+                f"price={price} units"
+            )
             if want_type == 1:  # WANT_HAVE
                 return self._make_have(cid_bytes, peer_protocol)
             else:  # WANT_BLOCK
@@ -197,15 +201,14 @@ class PaymentGatedDecisionEngine:
         else:
             # Payment required
             if peer_protocol == BITSWAP_PROTOCOL_V130:
-                logger.info(
-                    f"💳 Payment required: {price} units for {cid_str[:20]}..."
-                )
+                logger.info(f"💳 Payment required: {price} units for {cid_str[:20]}...")
                 return self._make_payment_required_1_3(
                     peer_id, cid_bytes, pricing_size, price
                 )
             else:
                 logger.warning(
-                    f"⚠️  Payment required but peer on {peer_protocol}, sending DONT_HAVE"
+                    f"⚠️  Payment required but peer on {peer_protocol}, "
+                    f"sending DONT_HAVE"
                 )
                 if send_dont_have:
                     return self._make_dont_have(cid_bytes, peer_protocol)
@@ -259,14 +262,19 @@ class PaymentGatedDecisionEngine:
             )
             logger.warning(f"❌ {error_msg}")
             return self._make_payment_rejection(cid_bytes, error_msg)
-        
+
         # Verify EIP-3009 signature
         logger.warning("=" * 70)
-        logger.warning(f"[STEP 7] SERVER VERIFYING EIP-3009 SIGNATURE")
+        logger.warning("[STEP 7] SERVER VERIFYING EIP-3009 SIGNATURE")
         logger.warning(f"   from={from_address[:20]}...")
         logger.warning(f"   to={auth.to_address[:20]}...")
         logger.warning(f"   value={auth.value}  expected={expected_price}")
-        logger.warning(f"   verifier={'configured' if self.tx_verifier is not None else 'NOT CONFIGURED (optimistic mode)'}")
+        verifier_status = (
+            "configured"
+            if self.tx_verifier is not None
+            else "NOT CONFIGURED (optimistic mode)"
+        )
+        logger.warning(f"   verifier={verifier_status}")
         logger.warning("=" * 70)
         if self.tx_verifier is not None:
             try:
@@ -292,13 +300,16 @@ class PaymentGatedDecisionEngine:
                 logger.warning("=" * 70)
                 logger.warning(f"[STEP 7] ❌ EIP-3009 VERIFICATION FAILED: {error}")
                 logger.warning("=" * 70)
-                return self._make_payment_rejection(cid_bytes, error or "INVALID_SIGNATURE")
+                return self._make_payment_rejection(
+                    cid_bytes, error or "INVALID_SIGNATURE"
+                )
             else:
-                logger.warning(f"[STEP 7] ✅ EIP-3009 VERIFICATION PASSED")
+                logger.warning("[STEP 7] ✅ EIP-3009 VERIFICATION PASSED")
         else:
             # No verifier configured — optimistic mode: trust the authorization
             logger.warning(
-                "[STEP 7] ⚠️  No payment verifier configured — accepting PaymentAuthorization optimistically"
+                "[STEP 7] ⚠️  No payment verifier configured — accepting "
+                "PaymentAuthorization optimistically"
             )
 
         # Record payment in ledger
@@ -315,11 +326,10 @@ class PaymentGatedDecisionEngine:
             logger.info(f"Payment already recorded: {e}")
 
         logger.warning("=" * 70)
+        logger.warning("[STEP 8b] ✅ SERVER PAYMENT ACCEPTED — SENDING BLOCK TO CLIENT")
         logger.warning(
-            f"[STEP 8b] ✅ SERVER PAYMENT ACCEPTED — SENDING BLOCK TO CLIENT"
-        )
-        logger.warning(
-            f"   cid={cid_str[:20]}... value={auth.value} expected={expected_price} block_size={block_size}B (EIP-3009)"
+            f"   cid={cid_str[:20]}... value={auth.value} expected={expected_price} "
+            f"block_size={block_size}B (EIP-3009)"
         )
         logger.warning("=" * 70)
         return self._make_receipt_and_block(cid_bytes, "", block_data)
@@ -331,8 +341,8 @@ class PaymentGatedDecisionEngine:
         Process an incoming 1.3.0 message that may contain PaymentAuthorizations.
         Returns a response message or None.
         """
-        if msg.payment_authorizations:
-            for auth in msg.payment_authorizations:
+        if msg.payment_authorizations:  # type: ignore[attr-defined]
+            for auth in msg.payment_authorizations:  # type: ignore[attr-defined]
                 return await self.handle_payment_authorization(peer_id, auth)
         return None
 
@@ -341,16 +351,17 @@ class PaymentGatedDecisionEngine:
     def _get_pricing_size(self, cid_str: str, block_size: int) -> int:
         """
         Get the size to use for pricing calculation.
-        
+
         NEW PAYMENT MODEL: For root CIDs, use total DAG size.
         For child CIDs, pricing is N/A (they inherit root payment).
-        
+
         Args:
             cid_str: The CID (hex string)
             block_size: The actual block size
-            
+
         Returns:
             Size in bytes to use for pricing
+
         """
         # Check if this is a registered DAG root
         dag_info = self._dag_info.get(cid_str)
@@ -362,7 +373,7 @@ class PaymentGatedDecisionEngine:
                 f"block_size={block_size}B, total_size={total_size}B"
             )
             return total_size
-        
+
         # Not a registered root CID - use block size (backward compatibility)
         # This handles: old files, single-block files, or child blocks
         logger.debug(
@@ -381,7 +392,7 @@ class PaymentGatedDecisionEngine:
         """Build a 1.3.0 PaymentRequired message with embedded PaymentTerms."""
         import secrets
         import time
-        
+
         msg = Message_1_3()
 
         # BlockPresence with type=2 (PaymentRequired)
@@ -396,14 +407,14 @@ class PaymentGatedDecisionEngine:
         terms.pay_to = self.server_wallet
         terms.amount = amount
         terms.network = self.network
-        terms.nonce = secrets.token_bytes(32)  # Server generates nonce
-        terms.valid_before = int(time.time()) + 3600  # 1 hour expiry
+        terms.nonce = secrets.token_bytes(32)  # type: ignore[attr-defined]
+        terms.valid_before = int(time.time()) + 3600  # type: ignore[attr-defined]
         terms.block_size = block_size
         terms.description = (
             f"Block {cid_bytes.hex()[:20]}... ({block_size // 1024}KB) — "
             f"pay {amount} wei to {self.server_wallet[:10]}..."
         )
-        terms.scheme = "EIP3009"  # Payment scheme
+        terms.scheme = "EIP3009"  # type: ignore[attr-defined]
 
         logger.info(
             f"📤 PaymentRequired → {peer_id[:20]}... "
@@ -441,9 +452,9 @@ class PaymentGatedDecisionEngine:
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
         if protocol == BITSWAP_PROTOCOL_V130:
-            presence.type = Message_1_3.BlockPresenceType.Have
+            presence.type = Message_1_3.BlockPresenceType.Have  # type: ignore
         else:
-            presence.type = Message_1_2.BlockPresenceType.Have
+            presence.type = Message_1_2.BlockPresenceType.Have  # type: ignore
         return msg
 
     def _make_dont_have(
@@ -454,9 +465,9 @@ class PaymentGatedDecisionEngine:
         presence = msg.blockPresences.add()
         presence.cid = cid_bytes
         if protocol == BITSWAP_PROTOCOL_V130:
-            presence.type = Message_1_3.BlockPresenceType.DontHave
+            presence.type = Message_1_3.BlockPresenceType.DontHave  # type: ignore
         else:
-            presence.type = Message_1_2.BlockPresenceType.DontHave
+            presence.type = Message_1_2.BlockPresenceType.DontHave  # type: ignore
         return msg
 
     def _make_block_response(
@@ -469,19 +480,20 @@ class PaymentGatedDecisionEngine:
         block.data = block_data
         return msg
 
-    def _get_pricing_size(self, cid_str: str, block_size: int) -> int:
+    def _get_pricing_size_fallback(self, cid_str: str, block_size: int) -> int:
         """
         Get the size to use for pricing calculations.
-        
+
         If this CID is part of a registered DAG, return the total DAG size.
         Otherwise, return the individual block size.
-        
+
         Args:
             cid_str: The CID being priced
             block_size: The individual block size
-            
+
         Returns:
             Size in bytes to use for pricing
+
         """
         # Check if this is a registered root CID
         if cid_str in self._dag_info:
@@ -491,12 +503,13 @@ class PaymentGatedDecisionEngine:
                 f"total={total_size}B (not block={block_size}B)"
             )
             return total_size
-        
+
         # Not a registered DAG, use individual block size
         return block_size
 
 
 # ── CID helpers ───────────────────────────────────────────────────────────────
+
 
 def _cid_to_str(cid: str | bytes) -> str:
     if isinstance(cid, bytes):

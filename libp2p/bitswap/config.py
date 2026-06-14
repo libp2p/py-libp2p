@@ -12,7 +12,6 @@ BITSWAP_PROTOCOL_V130 = TProtocol("/ipfs/bitswap/1.3.0")
 
 # All supported protocols (ordered from newest to oldest for negotiation)
 BITSWAP_PROTOCOLS = [
-    BITSWAP_PROTOCOL_V130,
     BITSWAP_PROTOCOL_V120,
     BITSWAP_PROTOCOL_V110,
     BITSWAP_PROTOCOL_V100,

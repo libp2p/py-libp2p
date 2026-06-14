@@ -6,7 +6,7 @@ Supports v1.0.0, v1.1.0, v1.2.0, and v1.3.0 protocols.
 from collections.abc import Sequence
 import hashlib
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import trio
 import varint
@@ -17,6 +17,8 @@ from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerinfo import PeerInfo  # noqa: F401
 
+if TYPE_CHECKING:
+    from .extension import IBitswapExtension
 from .block_store import BlockStore, MemoryBlockStore
 from .cid import (
     CIDInput,
@@ -30,7 +32,6 @@ from .cid import (
 from .config import (
     BITSWAP_PROTOCOL_V100,
     BITSWAP_PROTOCOL_V120,
-    BITSWAP_PROTOCOL_V130,
     BITSWAP_PROTOCOLS,
     DEFAULT_PRIORITY,
     DEFAULT_TIMEOUT,
@@ -44,7 +45,6 @@ from .errors import (
     TimeoutError as BitswapTimeoutError,
 )
 from .messages import create_message, create_wantlist_entry
-from .pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 from .pb.bitswap_pb2 import Message
 from .provider_query import ProviderQueryManager
 
@@ -58,7 +58,7 @@ class BitswapClient:
     Supports Bitswap protocol versions 1.0.0, 1.1.0, 1.2.0, and 1.3.0 for
     content discovery and file sharing in a peer-to-peer network.
 
-    For 1.3.0 payment support, pass a payment_client and payment_engine.
+    For 1.3.0 payment support, register a PaymentExtension.
     """
 
     def __init__(
@@ -67,8 +67,6 @@ class BitswapClient:
         block_store: BlockStore | None = None,
         protocol_version: str = BITSWAP_PROTOCOL_V120,
         provider_query_manager: ProviderQueryManager | None = None,
-        payment_client: Any = None,  # BitswapPaymentClient_1_3 (optional)
-        payment_engine: Any = None,  # PaymentGatedDecisionEngine (optional)
     ):
         """
         Initialize Bitswap client.
@@ -81,10 +79,6 @@ class BitswapClient:
                 DHT-based provider discovery.  When supplied,
                 ``get_block()`` will query the DHT for providers before
                 broadcasting to all connected peers.
-            payment_client: Optional BitswapPaymentClient_1_3 for client-side
-                payment handling (auto-pays for blocks in 1.3.0 mode).
-            payment_engine: Optional PaymentGatedDecisionEngine for server-side
-                payment gating (gates block serving behind payment in 1.3.0 mode).
 
         """
         self.host = host
@@ -93,9 +87,9 @@ class BitswapClient:
         self.provider_query_manager: ProviderQueryManager | None = (
             provider_query_manager
         )
-        # 1.3.0 payment components (optional)
-        self.payment_client = payment_client
-        self.payment_engine = payment_engine
+
+        self.protocol_handlers: dict[str, "IBitswapExtension"] = {}
+        self.supported_protocols: list[str] = list(BITSWAP_PROTOCOLS)
 
         self._wantlist: dict[
             CIDObject, dict[str, Any]
@@ -113,15 +107,22 @@ class BitswapClient:
         self._nursery: trio.Nursery | None = None
         self._started = False
 
+    def register_extension(self, protocol: str, extension: "IBitswapExtension") -> None:
+        """Register an extension for a specific protocol."""
+        extension.set_client(self)
+        self.protocol_handlers[protocol] = extension
+        if protocol not in self.supported_protocols:
+            self.supported_protocols.insert(0, protocol)
+
     async def start(self) -> None:
         """Start the Bitswap client."""
         if self._started:
             return
 
         # Set stream handler for all supported Bitswap protocols
-        for protocol in BITSWAP_PROTOCOLS:
+        for protocol in self.supported_protocols:
             self.host.set_stream_handler(
-                protocol,
+                TProtocol(protocol),
                 self._handle_stream,
             )
 
@@ -135,8 +136,8 @@ class BitswapClient:
 
         self._started = False
         # Unregister stream handlers for all supported Bitswap protocols
-        for protocol in BITSWAP_PROTOCOLS:
-            self.host.remove_stream_handler(protocol)
+        for protocol in self.supported_protocols:
+            self.host.remove_stream_handler(TProtocol(protocol))
         # Clear wantlists and pending requests
         self._wantlist.clear()
         self._peer_wantlists.clear()
@@ -520,16 +521,10 @@ class BitswapClient:
             msg = create_message(wantlist_entries=entries, full_wantlist=False)
 
             # Get negotiated protocol for this peer or use all protocols
-            # If payment client is configured, always prefer 1.3.0 to enable
-            # in-band payment messages regardless of any cached protocol.
-            if self.payment_client:
-                protocols = [BITSWAP_PROTOCOL_V130] + [
-                    p for p in BITSWAP_PROTOCOLS if p != BITSWAP_PROTOCOL_V130
-                ]
-            elif peer_id in self._peer_protocols:
+            if peer_id in self._peer_protocols:
                 protocols = [TProtocol(self._peer_protocols[peer_id])]
             else:
-                protocols = list(BITSWAP_PROTOCOLS)  # Try all
+                protocols = [TProtocol(p) for p in self.supported_protocols]  # Try all
 
             # Open stream and send message
             stream = await self.host.new_stream(
@@ -744,9 +739,11 @@ class BitswapClient:
             logger.warning(f"   Entries: {len(msg.wantlist.entries)}")
             logger.warning(f"   Full: {msg.wantlist.full}")
             for _i, _e in enumerate(msg.wantlist.entries):
-                _cid_hex = bytes(_e.block).hex()[:20] if _e.block else 'N/A'
-                _wt = 'WANT_HAVE' if _e.wantType == 1 else 'WANT_BLOCK'
-                logger.warning(f"   [{_i+1}] cid={_cid_hex}... type={_wt} cancel={_e.cancel}")
+                _cid_hex = bytes(_e.block).hex()[:20] if _e.block else "N/A"
+                _wt = "WANT_HAVE" if _e.wantType == 1 else "WANT_BLOCK"
+                logger.warning(
+                    f"   [{_i + 1}] cid={_cid_hex}... type={_wt} cancel={_e.cancel}"
+                )
             logger.warning("=" * 70)
             print(
                 f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with "
@@ -760,131 +757,28 @@ class BitswapClient:
             self._peer_protocols[peer_id] = str(protocol)
 
         peer_protocol = str(protocol) if protocol else BITSWAP_PROTOCOL_V100
-        logger.info(f"[FLOW] Negotiated protocol for peer {str(peer_id)[:20]}...: {peer_protocol}")
+        logger.info(
+            f"[FLOW] Negotiated protocol for peer {str(peer_id)[:20]}...: "
+            f"{peer_protocol}"
+        )
 
-        # ── Bitswap 1.3.0 payment message handling ───────────────────────
-        # Only enter the payment path when BOTH:
-        #   1. A payment component (client or engine) is configured, AND
-        #   2. The negotiated stream protocol is actually 1.3.0.
-        # A peer that opened a 1.2.0 (or lower) stream must NEVER be routed
-        # through payment logic — doing so caused wantlists to be silently
-        # dropped instead of being answered.
-        is_v130_stream = (peer_protocol == str(BITSWAP_PROTOCOL_V130))
-        if (self.payment_client or self.payment_engine) and is_v130_stream:
-            # Re-parse as 1.3.0 message to access payment-specific fields
-            # (payment_terms, payment_receipts, payment_authorizations, etc.)
-            msg_1_3: Message_1_3 | None
-            try:
-                _tmp = Message_1_3()
-                _tmp.ParseFromString(msg.SerializeToString())
-                msg_1_3 = _tmp
-            except Exception:
-                msg_1_3 = None
-
-            if msg_1_3 is not None:
-                # Client-side: handle PaymentTerms / PaymentReceipts / PaymentRejections
-                if self.payment_client and (
-                    msg_1_3.payment_terms
-                    or msg_1_3.payment_receipts
-                    or msg_1_3.payment_rejections
-                ):
-                    if msg_1_3.payment_terms:
-                        logger.warning("=" * 70)
-                        logger.warning(f"[STEP 3] CLIENT RECEIVED PAYMENT TERMS from {str(peer_id)[:20]}...")
-                        for _t in msg_1_3.payment_terms:
-                            logger.warning(f"   cid={bytes(_t.cid).hex()[:20]}...")
-                            logger.warning(f"   amount={_t.amount} units")
-                            logger.warning(f"   asset={_t.asset}  scheme={_t.scheme}")
-                            logger.warning(f"   pay_to={_t.pay_to[:20]}...")
-                            logger.warning(f"   block_size={_t.block_size}B")
-                            logger.warning(f"   valid_before={_t.valid_before}")
-                        logger.warning("=" * 70)
-                    if msg_1_3.payment_receipts:
-                        logger.warning("=" * 70)
-                        logger.warning(f"[STEP 8a] CLIENT RECEIVED PAYMENT RECEIPT from {str(peer_id)[:20]}...")
-                        for _r in msg_1_3.payment_receipts:
-                            logger.warning(f"   cid={bytes(_r.cid).hex()[:20]}...")
-                            logger.warning(f"   tx_hash={_r.tx_hash[:20] if _r.tx_hash else 'optimistic'}")
-                            logger.warning(f"   expires={_r.expires}")
-                        logger.warning("=" * 70)
-                    if msg_1_3.payment_rejections:
-                        logger.warning("=" * 70)
-                        logger.warning(f"[STEP 8a] CLIENT RECEIVED PAYMENT REJECTION from {str(peer_id)[:20]}...")
-                        for _rj in msg_1_3.payment_rejections:
-                            logger.warning(f"   cid={bytes(_rj.cid).hex()[:20]}...")
-                            logger.warning(f"   reason={_rj.reason}")
-                        logger.warning("=" * 70)
-                    response = await self.payment_client.process_incoming_message(
-                        str(peer_id), msg_1_3
-                    )
-                    if response is not None:
-                        logger.warning("=" * 70)
-                        logger.warning(f"[STEP 5] CLIENT SENDING PAYMENT AUTHORIZATION to {str(peer_id)[:20]}...")
-                        if response.payment_authorizations:
-                            for _a in response.payment_authorizations:
-                                logger.warning(f"   cid={bytes(_a.cid).hex()[:20]}...")
-                                logger.warning(f"   from={_a.from_address[:20]}...")
-                                logger.warning(f"   to={_a.to_address[:20]}...")
-                                logger.warning(f"   value={_a.value}")
-                                logger.warning(f"   scheme={_a.scheme}")
-                                logger.warning(f"   v={_a.v} r_len={len(bytes(_a.r))} s_len={len(bytes(_a.s))}")
-                        logger.warning("=" * 70)
-                        await self._write_message_bytes(
-                            stream, response.SerializeToString()
-                        )
-
-                # Server-side: handle PaymentAuthorizations (EIP-3009 signed payments)
-                if self.payment_engine and msg_1_3.payment_authorizations:
-                    try:
-                        logger.warning("=" * 70)
-                        logger.warning(f"[STEP 6] SERVER RECEIVED PAYMENT AUTHORIZATION from {str(peer_id)[:20]}...")
-                        for _a in msg_1_3.payment_authorizations:
-                            logger.warning(f"   cid={bytes(_a.cid).hex()[:20]}...")
-                            logger.warning(f"   from={_a.from_address[:20]}...")
-                            logger.warning(f"   to={_a.to_address[:20]}...")
-                            logger.warning(f"   value={_a.value}")
-                            logger.warning(f"   scheme={_a.scheme}")
-                            logger.warning(f"   v={_a.v} r_len={len(bytes(_a.r))} s_len={len(bytes(_a.s))}")
-                        logger.warning("=" * 70)
-                        response = await self.payment_engine.process_incoming_1_3_message(
-                            str(peer_id), msg_1_3
-                        )
-                        if response is not None:
-                            _has_receipt = bool(response.payment_receipts)
-                            _has_rejection = bool(response.payment_rejections)
-                            _has_blocks = bool(response.payload) or bool(response.blocks)
-                            logger.warning("=" * 70)
-                            logger.warning(f"[STEP 8] SERVER SENDING RESPONSE after PaymentAuthorization:")
-                            logger.warning(f"   has_receipt={_has_receipt}  has_rejection={_has_rejection}  has_blocks={_has_blocks}")
-                            if _has_rejection:
-                                for _rj in response.payment_rejections:
-                                    logger.warning(f"   ❌ REJECTION reason={_rj.reason}")
-                            if _has_blocks:
-                                _nb = len(response.payload) + len(response.blocks)
-                                logger.warning(f"   ✅ SENDING {_nb} block(s) to client — FILE TRANSFER STARTING")
-                            logger.warning("=" * 70)
-                            await self._write_message_bytes(
-                                stream, response.SerializeToString()
-                            )
-                        # Payment authorization handled — don't fall through to
-                        # standard wantlist handling for this message.
-                        return
-                    except Exception as e:
-                        logger.error(f"Error handling PaymentAuthorization: {e}", exc_info=True)
-
-                # Handle PaymentRequired block presences (1.3.0 type=2)
-                if msg_1_3.blockPresences:
-                    await self._process_block_presences_1_3(
-                        msg_1_3.blockPresences, peer_id
-                    )
-                    # Fall through below to also handle wantlist/blocks/payload
-                    # that may be bundled in the same message.
+        # ── Protocol Extension Handling ─────────────────────────────────────
+        if peer_protocol in self.protocol_handlers:
+            handled = await self.protocol_handlers[peer_protocol].process_message(
+                peer_id, msg.SerializeToString(), stream
+            )
+            if handled:
+                return
 
         # ── Standard 1.0.0–1.2.0 message handling (always runs) ─────────
-        # Also runs for 1.3.0 streams that don't carry payment-only content
-        # (e.g. a plain wantlist sent over a 1.3.0 stream).
         if msg.HasField("wantlist"):
-            await self._process_wantlist(msg.wantlist, peer_id, stream)
+            handled = False
+            if peer_protocol in self.protocol_handlers:
+                handled = await self.protocol_handlers[peer_protocol].process_wantlist(
+                    msg.wantlist, peer_id, stream
+                )
+            if not handled:
+                await self._process_wantlist(msg.wantlist, peer_id, stream)
 
         if msg.blocks:
             await self._process_blocks_v100(list(msg.blocks), peer_id)
@@ -904,69 +798,19 @@ class BitswapClient:
             self._peer_wantlists[peer_id] = {}
 
         peer_wantlist = self._peer_wantlists[peer_id]
-
         # Update based on full or incremental wantlist
         if wantlist.full:
             peer_wantlist.clear()
 
         # Get peer protocol for response format
         peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
-        
+
         logger.warning("=" * 70)
         logger.warning(
             f"[STEP 1] SERVER PROCESSING WANTLIST from {str(peer_id)[:20]}..."
         )
         logger.warning(f"   entries={len(wantlist.entries)}  protocol={peer_protocol}")
-        logger.warning(f"   payment_engine={'ENABLED' if self.payment_engine else 'DISABLED (free mode)'}")
-        logger.warning(f"   server_wallet={getattr(getattr(self, 'payment_engine', None), 'server_wallet', 'N/A')[:20] if self.payment_engine else 'N/A'}")
         logger.warning("=" * 70)
-
-        # ── Payment-gated wantlist handling ────────────────────────────────
-        # Apply payment gating whenever payment_engine is enabled.
-        # For 1.3.0 peers: send PaymentRequired + PaymentTerms in-band.
-        # For older peers: send DONT_HAVE (they cannot pay in-band).
-        is_v130_peer = str(peer_protocol) == str(BITSWAP_PROTOCOL_V130)
-        if self.payment_engine and is_v130_peer:
-            for entry in wantlist.entries:
-                entry_cid = parse_cid(entry.block)
-                if entry.cancel:
-                    if entry_cid in peer_wantlist:
-                        del peer_wantlist[entry_cid]
-                    continue
-
-                peer_wantlist[entry_cid] = {
-                    "priority": entry.priority,
-                    "want_type": entry.wantType,
-                    "send_dont_have": entry.sendDontHave,
-                }
-
-                response_msg = await self.payment_engine.handle_want(
-                    peer_id=str(peer_id),
-                    cid=entry.block,
-                    want_type=entry.wantType,
-                    send_dont_have=entry.sendDontHave,
-                    peer_protocol=str(peer_protocol),  # pass actual negotiated protocol
-                )
-                if response_msg is not None:
-                    _has_pr = bool(getattr(response_msg, 'blockPresences', []))
-                    _has_terms = bool(getattr(response_msg, 'payment_terms', []))
-                    _has_blocks = bool(getattr(response_msg, 'payload', [])) or bool(getattr(response_msg, 'blocks', []))
-                    logger.warning("=" * 70)
-                    logger.warning(f"[STEP 2] SERVER SENDING RESPONSE for cid={bytes(entry.block).hex()[:20]}...")
-                    logger.warning(f"   payment_required={_has_pr}  payment_terms={_has_terms}  has_blocks={_has_blocks}")
-                    if _has_pr:
-                        for _bp in response_msg.blockPresences:
-                            logger.warning(f"   BlockPresence type={_bp.type} (2=PaymentRequired)")
-                    if _has_terms:
-                        for _t in response_msg.payment_terms:
-                            logger.warning(f"   PaymentTerms: amount={_t.amount} asset={_t.asset} pay_to={_t.pay_to[:20]}... scheme={_t.scheme}")
-                    if _has_blocks:
-                        logger.warning(f"   ✅ Sending block(s) directly (free/already paid)")
-                    logger.warning("=" * 70)
-                    await self._write_message_bytes(
-                        stream, response_msg.SerializeToString()
-                    )
-            return
 
         # ── Standard 1.0.0–1.2.0 wantlist handling ────────────────────────
         # Process entries
@@ -975,7 +819,14 @@ class BitswapClient:
         presences_to_send = []  # For v1.2.0
 
         for entry in wantlist.entries:
-            entry_cid = parse_cid(entry.block)
+            try:
+                logger.warning(f"  -> Processing entry: {bytes(entry.block).hex()}")
+                entry_cid = parse_cid(entry.block)
+                logger.warning(f"  -> Parsed CID: {entry_cid}")
+            except Exception as e:
+                logger.warning(f"  -> EXCEPTION in parse_cid: {e}")
+                continue
+
             if entry.cancel:
                 # Remove from peer's wantlist
                 if entry_cid in peer_wantlist:
@@ -989,9 +840,17 @@ class BitswapClient:
                 }
 
                 # Check if we have this block
-                has_block = await self.block_store.has_block(entry_cid)
+                logger.warning(f"  -> Checking if we have block {entry_cid}")
+                try:
+                    has_block = await self.block_store.has_block(entry_cid)
+                    logger.warning(f"  -> has_block result: {has_block}")
+                except Exception as e:
+                    logger.warning(f"  -> EXCEPTION in has_block: {e}")
+                    has_block = False
+
                 logger.warning(
-                    f"[WANTLIST ENTRY] cid={format_cid_for_display(entry_cid, max_len=16)} "
+                    f"[WANTLIST ENTRY] "
+                    f"cid={format_cid_for_display(entry_cid, max_len=16)} "
                     f"wantType={entry.wantType} cancel={entry.cancel} "
                     f"has_block={has_block}"
                 )
@@ -1065,32 +924,80 @@ class BitswapClient:
         # Send responses in batches to stay under MAX_MESSAGE_SIZE
         # and Noise protocol limit (65535 bytes)
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
-            # We MUST open a new stream to the client to send the blocks.
-            # Writing to the inbound stream that the client opened for their WANTLIST
-            # is often ignored by the client (Kubo), as it expects the provider to dial back.
-            try:
-                outbound_stream = await self.host.new_stream(
-                    peer_id, [TProtocol(peer_protocol)]
+            if self._nursery is not None:
+                self._nursery.start_soon(
+                    self._send_wantlist_responses_bg,  # type: ignore
+                    peer_id,
+                    str(peer_protocol),
+                    blocks_to_send_v100,
+                    blocks_to_send_v110,
+                    presences_to_send,
                 )
-            except Exception as e:
-                logger.error(f"Failed to open outbound stream to send response: {e}")
-                return
+            else:
+                # Fallback to writing to the inbound stream if nursery is not available.
+                # This works for Python-to-Python tests, but may fail for
+                # Go-libp2p interop.
+                await self._send_wantlist_responses_inline(
+                    stream,
+                    peer_id,
+                    blocks_to_send_v100,
+                    blocks_to_send_v110,
+                    presences_to_send,
+                )
 
-            # Send blocks in batches
-            if blocks_to_send_v100:
-                await self._send_blocks_in_batches_v100(
-                    blocks_to_send_v100, peer_id, outbound_stream
-                )
-            if blocks_to_send_v110:
-                await self._send_blocks_in_batches_v110(
-                    blocks_to_send_v110, peer_id, outbound_stream
-                )
-            # Send presences (usually small, can send all at once)
-            if presences_to_send:
-                presence_msg = create_message(block_presences=presences_to_send)
-                await self._write_message(outbound_stream, presence_msg)
-            
+    async def _send_wantlist_responses_bg(
+        self,
+        peer_id: PeerID,
+        peer_protocol: str,
+        blocks_to_send_v100: list[bytes],
+        blocks_to_send_v110: list[tuple[bytes, bytes]],
+        presences_to_send: list[tuple[CIDObject, bool]],
+    ) -> None:
+        """Background task to send responses over a new outbound stream."""
+        # We MUST open a new stream to the client to send the blocks.
+        # Writing to the inbound stream that the client opened for their WANTLIST
+        # is often ignored by the client (Kubo), as it expects dial back.
+        try:
+            outbound_stream = await self.host.new_stream(
+                peer_id, [TProtocol(peer_protocol)]
+            )
+        except Exception as e:
+            logger.error(f"Failed to open outbound stream to send response: {e}")
+            return
+
+        try:
+            await self._send_wantlist_responses_inline(
+                outbound_stream,
+                peer_id,
+                blocks_to_send_v100,
+                blocks_to_send_v110,
+                presences_to_send,
+            )
+        finally:
             await outbound_stream.close()
+
+    async def _send_wantlist_responses_inline(
+        self,
+        stream: INetStream,
+        peer_id: PeerID,
+        blocks_to_send_v100: list[bytes],
+        blocks_to_send_v110: list[tuple[bytes, bytes]],
+        presences_to_send: list[tuple[CIDObject, bool]],
+    ) -> None:
+        """Helper to send blocks on a specific stream."""
+        # Send blocks in batches
+        if blocks_to_send_v100:
+            await self._send_blocks_in_batches_v100(
+                blocks_to_send_v100, peer_id, stream
+            )
+        if blocks_to_send_v110:
+            await self._send_blocks_in_batches_v110(
+                blocks_to_send_v110, peer_id, stream
+            )
+        # Send presences (usually small, can send all at once)
+        if presences_to_send:
+            presence_msg = create_message(block_presences=presences_to_send)
+            await self._write_message(stream, presence_msg)
 
     async def _send_blocks_in_batches_v100(
         self, blocks: list[bytes], peer_id: PeerID, stream: INetStream

@@ -15,9 +15,9 @@ from multiaddr import Multiaddr
 
 from libp2p import new_host
 from libp2p.bitswap import BitswapClient
-from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.bitswap.cid import cid_to_bytes, format_cid_for_display
 from libp2p.bitswap.dag import MerkleDag
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.utils.address_validation import (
     find_free_port,
@@ -40,9 +40,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_LISTEN_PORT = 4013
 
 
-def select_preferred_listen_addr(
-    addrs: list[Multiaddr], port: int
-) -> Multiaddr:
+def select_preferred_listen_addr(addrs: list[Multiaddr], port: int) -> Multiaddr:
     """Pick a stable, local-friendly address for copy/paste commands."""
     preferred_v4 = f"/ip4/127.0.0.1/tcp/{port}"
     for addr in addrs:
@@ -102,7 +100,7 @@ async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
         # Convert seed string to bytes (must be 32 bytes for Ed25519)
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         key_pair = create_new_key_pair(seed=seed_bytes)
-        logger.info(f"Using deterministic peer ID from seed")
+        logger.info("Using deterministic peer ID from seed")
 
     host = new_host(key_pair=key_pair)
 
@@ -164,9 +162,7 @@ async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
         # Prefer a deterministic local address for copy/paste commands.
         transport_addrs = host.get_transport_addrs()
         provider_addr = select_preferred_listen_addr(transport_addrs, port)
-        provider_addr = provider_addr.encapsulate(
-            Multiaddr(f"/p2p/{host.get_id()}")
-        )
+        provider_addr = provider_addr.encapsulate(Multiaddr(f"/p2p/{host.get_id()}"))
         root_cid_text = format_cid_for_display(root_cid)
         logger.info(f"Root CID:  {root_cid_text}")
         logger.info("")
@@ -237,7 +233,7 @@ async def run_client(
         # Convert seed string to bytes (must be 32 bytes for Ed25519)
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         key_pair = create_new_key_pair(seed=seed_bytes)
-        logger.info(f"Using deterministic peer ID from seed")
+        logger.info("Using deterministic peer ID from seed")
 
     host = new_host(key_pair=key_pair)
 
@@ -379,10 +375,7 @@ def parse_args():
         "--port",
         type=int,
         default=DEFAULT_LISTEN_PORT,
-        help=(
-            "Port to listen on (default: 4012). "
-            "Use 0 to auto-select a random port."
-        ),
+        help=("Port to listen on (default: 4012). Use 0 to auto-select a random port."),
     )
     parser.add_argument(
         "--file",
@@ -416,7 +409,10 @@ def parse_args():
     parser.add_argument(
         "--seed",
         type=str,
-        help="Seed string for deterministic peer ID generation (same seed = same peer ID)",
+        help=(
+            "Seed string for deterministic peer ID generation "
+            "(same seed = same peer ID)"
+        ),
     )
 
     args = parser.parse_args()
@@ -450,7 +446,9 @@ def main():
         if args.mode == "provider":
             trio.run(run_provider, args.file, args.port, args.seed)
         elif args.mode == "client":
-            trio.run(run_client, args.provider, args.cid, args.output, args.port, args.seed)
+            trio.run(
+                run_client, args.provider, args.cid, args.output, args.port, args.seed
+            )
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)

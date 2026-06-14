@@ -161,7 +161,9 @@ async def test_directory_structure(store_path: str) -> None:
     cid, data = make_block(b"check directory layout")
     await store.put_block(cid, data)
 
-    cid_str = cid_to_text(cid)
+    from cid import make_cid
+
+    cid_str = str(make_cid(cid))
     expected_dir = Path(store_path) / cid_str[:2]
     expected_file = expected_dir / cid_str[2:]
 

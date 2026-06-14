@@ -9,7 +9,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import logging
 
-from .cid import CODEC_DAG_PB, CIDInput, cid_to_bytes, compute_cid_v1
+from .cid import CODEC_DAG_PB, CIDInput, compute_cid_v1
 from .pb.dag_pb_pb2 import PBLink, PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
 

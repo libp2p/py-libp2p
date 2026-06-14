@@ -69,7 +69,7 @@ def test_balanced_layout_single():
     leaf = create_leaf_node(data)
     cid = compute_cid_v1(leaf, codec=CODEC_DAG_PB)
 
-    root_cid, root_block = balanced_layout([(cid, leaf, len(data))])
+    root_cid, root_block, _ = balanced_layout([(cid, leaf, len(data))])
     assert bytes(root_cid) == bytes(cid)
     assert root_block == leaf
     ok("single leaf: root_cid == leaf_cid")
@@ -85,7 +85,7 @@ def test_balanced_layout_two_leaves():
         cid = compute_cid_v1(leaf, codec=CODEC_DAG_PB)
         leaves.append((cid, leaf, len(data)))
 
-    root_cid, root_block = balanced_layout(leaves)
+    root_cid, root_block, _ = balanced_layout(leaves)
 
     # Root must be a dag-pb file node with 2 links
     assert is_file_node(root_block)
@@ -109,7 +109,7 @@ def test_balanced_layout_two_levels():
         cid = compute_cid_v1(leaf, codec=CODEC_DAG_PB)
         leaves.append((cid, leaf, chunk_size))
 
-    root_cid, root_block = balanced_layout(leaves)
+    root_cid, root_block, _ = balanced_layout(leaves)
     links, unixfs = decode_dag_pb(root_block)
 
     # Root should link to 2 internal nodes (174 + 1)
@@ -131,7 +131,7 @@ def test_balanced_layout_flat():
         cid = compute_cid_v1(leaf, codec=CODEC_DAG_PB)
         leaves.append((cid, leaf, 50))
 
-    root_cid, root_block = balanced_layout(leaves)
+    root_cid, root_block, _ = balanced_layout(leaves)
     links, unixfs = decode_dag_pb(root_block)
 
     assert len(links) == 174, f"expected 174 direct links, got {len(links)}"
@@ -172,14 +172,18 @@ async def test_add_file_produces_dag_pb_leaves():
     finally:
         os.unlink(tmp)
 
-    # Every stored block must be a dag-pb file node (no raw blocks)
+    # Root block must be dag-pb, but leaves must be raw blocks
     raw_blocks = []
+    dag_pb_blocks = []
     for cid_bytes, block_data in stored.items():
-        if not is_file_node(block_data):
-            raw_blocks.append(cid_to_text(cid_bytes)[:20])
+        if is_file_node(block_data):
+            dag_pb_blocks.append(cid_bytes)
+        else:
+            raw_blocks.append(cid_bytes)
 
-    assert raw_blocks == [], f"Found non-dag-pb blocks: {raw_blocks}"
-    ok(f"All {len(stored)} stored blocks are dag-pb file nodes (no raw blocks)")
+    assert len(dag_pb_blocks) == 1, f"Expected 1 root node, got {len(dag_pb_blocks)}"
+    assert len(raw_blocks) > 0, f"Expected raw leaves, got {len(raw_blocks)}"
+    ok("Root is dag-pb, and all leaves are raw blocks")
 
     # Root must link to 3 leaves
     root_block = stored[bytes(root_cid)]
@@ -189,18 +193,17 @@ async def test_add_file_produces_dag_pb_leaves():
     assert unixfs.filesize == len(content)
     ok(f"root has 3 links, filesize={unixfs.filesize}")
 
-    # Each leaf must contain inline UnixFS data
+    # Each leaf must be raw data
     for link in links:
         leaf_block = stored[bytes(link.cid)]
-        leaf_links, leaf_unixfs = decode_dag_pb(leaf_block)
-        assert leaf_links == [], "leaf must have no links"
-        assert leaf_unixfs is not None and leaf_unixfs.data != b""
-    ok("each leaf contains inline UnixFS data")
+        assert not is_file_node(leaf_block), "leaf must be raw data"
+        assert len(leaf_block) > 0
+    ok("each leaf contains raw data")
 
 
-# ── 7. add_bytes produces dag-pb leaves ──────────────────────────────────────
+# ── 7. add_bytes produces raw leaves ──────────────────────────────────────
 async def test_add_bytes_produces_dag_pb_leaves():
-    print("\n[7] MerkleDag.add_bytes produces dag-pb leaf blocks")
+    print("\n[7] MerkleDag.add_bytes produces raw leaf blocks")
     from unittest.mock import AsyncMock, MagicMock
 
     from libp2p.bitswap.client import BitswapClient
@@ -217,16 +220,24 @@ async def test_add_bytes_produces_dag_pb_leaves():
     mock_client.add_block = AsyncMock(side_effect=add_block_impl)
 
     dag = MerkleDag(mock_client)
-    content = b"y" * (63 * 1024 * 2 + 500)  # 3 chunks
-    root_cid = await dag.add_bytes(content)
+    content = b"y" * (256 * 1024 * 3 + 500)  # > 3 default chunks
+    await dag.add_bytes(content)
 
-    raw_blocks = [cid_to_text(c)[:20] for c, d in stored.items() if not is_file_node(d)]
-    assert raw_blocks == [], f"Found non-dag-pb blocks: {raw_blocks}"
-    ok(f"All {len(stored)} stored blocks are dag-pb file nodes")
+    raw_blocks = []
+    dag_pb_blocks = []
+    for c, d in stored.items():
+        if is_file_node(d):
+            dag_pb_blocks.append(c)
+        else:
+            raw_blocks.append(c)
 
-    root_block = stored[bytes(root_cid)]
+    assert len(dag_pb_blocks) == 1
+    assert len(raw_blocks) > 0
+    ok("Root is dag-pb, and all leaves are raw blocks")
+
+    root_block = stored[dag_pb_blocks[0]]
     links, unixfs = decode_dag_pb(root_block)
-    assert len(links) == 3
+    assert len(links) == 4
     assert unixfs is not None
     assert unixfs.filesize == len(content)
     ok(f"root has 3 links, filesize={unixfs.filesize}")

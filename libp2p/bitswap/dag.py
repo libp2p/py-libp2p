@@ -37,7 +37,6 @@ from .cid import (
 from .client import BitswapClient
 from .dag_pb import (
     balanced_layout,
-    create_leaf_node,
     decode_dag_pb,
     is_directory_node,
     is_file_node,
@@ -239,7 +238,8 @@ class MerkleDag:
 
         logger.debug(f"Using chunk size: {chunk_size} bytes")
 
-        # If file is small enough, store as single raw leaf block (Kubo default: RawLeaves=true)
+        # If file is small enough, store as single raw leaf block
+        # (Kubo default: RawLeaves=true)
         if file_size <= chunk_size:
             logger.debug("File fits in single block")
 
@@ -257,7 +257,8 @@ class MerkleDag:
                 )
 
             logger.info(
-                f"Added file as single raw block: {format_cid_for_display(cid, max_len=16)}"
+                f"Added file as single raw block: "
+                f"{format_cid_for_display(cid, max_len=16)}"
             )
 
             # Wrap in directory if requested
@@ -421,7 +422,8 @@ class MerkleDag:
         if chunk_size is None:
             chunk_size = DEFAULT_CHUNK_SIZE
 
-        # If data is small, store as single raw leaf block (Kubo default: RawLeaves=true)
+        # If data is small, store as single raw leaf block
+        # (Kubo default: RawLeaves=true)
         if file_size <= chunk_size:
             cid = compute_cid_v1(data, codec=CODEC_RAW)
             await self._put_block(cid, data)

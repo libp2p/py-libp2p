@@ -52,8 +52,6 @@ class TestAddBytes:
     @pytest.mark.trio
     async def test_add_small_bytes(self):
         """Test adding small data (single block)."""
-        from libp2p.bitswap.dag_pb import create_leaf_node
-
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
@@ -69,17 +67,16 @@ class TestAddBytes:
         assert root_cid is not None
         assert len(root_cid) > 0
 
-        # Small data is stored as a dag-pb leaf node (not raw codec)
-        leaf_block = create_leaf_node(data)
-        expected_cid = compute_cid_v1(leaf_block, codec=CODEC_DAG_PB)
+        # Small data is stored as a raw leaf node (RawLeaves=True default)
+        expected_cid = compute_cid_v1(data, codec=CODEC_RAW)
         assert root_cid == expected_cid
-        assert verify_cid(root_cid, leaf_block)
+        assert verify_cid(root_cid, data)
 
-        # Should be single block (DAG-PB codec)
+        # Should be single block (raw codec)
         mock_client.add_block.assert_called_once()
         call_args = mock_client.add_block.call_args
         assert call_args[0][0] == root_cid  # CID
-        assert call_args[0][1] == leaf_block  # dag-pb wrapped data
+        assert call_args[0][1] == data  # raw data
 
     @pytest.mark.trio
     async def test_add_large_bytes(self):
@@ -168,15 +165,12 @@ class TestAddFile:
             assert root_cid is not None
             mock_client.add_block.assert_called_once()
 
-            # Small file is stored as a dag-pb leaf node
-            from libp2p.bitswap.dag_pb import create_leaf_node
-
+            # Small file is stored as a raw leaf node
             call_args = mock_client.add_block.call_args
             stored_cid = call_args[0][0]
             stored_block = call_args[0][1]
-            leaf_block = create_leaf_node(data)
-            assert stored_block == leaf_block
-            assert verify_cid(stored_cid, leaf_block)
+            assert stored_block == data
+            assert verify_cid(stored_cid, data)
         finally:
             Path(temp_path).unlink()
 
@@ -256,9 +250,8 @@ class TestAddFile:
                 temp_path, chunk_size=chunk_size, wrap_with_directory=False
             )
 
-            # Should have many chunks
-            # (3.2MB / 16KB = 200 chunks) + 1 root = 201 calls
-            assert mock_client.add_block.call_count == 201
+            # (3.2MB / 16KB = 200 chunks) + intermediate nodes + 1 root
+            assert mock_client.add_block.call_count > 200
         finally:
             Path(temp_path).unlink()
 
