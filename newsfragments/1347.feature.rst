@@ -1,0 +1,1 @@
+Implement comprehensive Bitswap interoperability with IPFS Kubo, including UnixFS DAG-PB encoding and balanced layout support. Introduces ``FilesystemBlockStore`` and ``BlockService`` for robust block caching, Bitswap batch fetching, and streaming inputs (``chunk_stream``).
