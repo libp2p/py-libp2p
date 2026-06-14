@@ -72,8 +72,7 @@ def verify_record(
 
     Args:
         signature: The record signature
-        author_public_key: The serialized public key of the author
-            (``crypto_pb2.PublicKey`` protobuf bytes)
+        author_public_key: The serialized public key of the author (``crypto_pb2.PublicKey`` protobuf bytes)
         key: The record key
         value: The record value
 
