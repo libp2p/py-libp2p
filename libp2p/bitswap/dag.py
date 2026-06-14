@@ -199,7 +199,7 @@ class MerkleDag:
         file_path: str,
         chunk_size: int | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
-        wrap_with_directory: bool = True,
+        wrap_with_directory: bool = False,
     ) -> bytes:
         """
         Add a file to the DAG.
