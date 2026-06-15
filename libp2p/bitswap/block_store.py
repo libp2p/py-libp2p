@@ -171,12 +171,12 @@ class FilesystemBlockStore(BlockStore):
         await trio.to_thread.run_sync(
             lambda: path.parent.mkdir(parents=True, exist_ok=True)
         )
-        
+
         def _atomic_write() -> None:
             temp_path = path.with_suffix(".tmp")
             temp_path.write_bytes(data)
             temp_path.replace(path)
-            
+
         await trio.to_thread.run_sync(_atomic_write)
 
     async def has_block(self, cid: CIDInput) -> bool:

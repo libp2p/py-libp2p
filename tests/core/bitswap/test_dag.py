@@ -330,17 +330,26 @@ class TestFetchFile:
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
-        async def get_blocks_batch_side_effect(cids, peer_id=None, timeout=None, batch_size=None):
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
             from libp2p.bitswap.cid import cid_to_bytes
+
             results = {}
             for c in cids:
                 try:
-                    data = await mock_client.get_block(c, peer_id=peer_id, timeout=timeout)
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
                     results[cid_to_bytes(c)] = data
                 except Exception:
                     pass
             return results
-        mock_client.get_blocks_batch = AsyncMock(side_effect=get_blocks_batch_side_effect)
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
@@ -387,17 +396,26 @@ class TestFetchFile:
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
-        async def get_blocks_batch_side_effect(cids, peer_id=None, timeout=None, batch_size=None):
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
             from libp2p.bitswap.cid import cid_to_bytes
+
             results = {}
             for c in cids:
                 try:
-                    data = await mock_client.get_block(c, peer_id=peer_id, timeout=timeout)
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
                     results[cid_to_bytes(c)] = data
                 except Exception:
                     pass
             return results
-        mock_client.get_blocks_batch = AsyncMock(side_effect=get_blocks_batch_side_effect)
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
@@ -504,17 +522,26 @@ class TestEndToEnd:
                 raise KeyError(f"Block not found: {cid.hex()}")
 
             mock_client.get_block = AsyncMock(side_effect=get_block_impl)
-            async def get_blocks_batch_side_effect(cids, peer_id=None, timeout=None, batch_size=None):
+
+            async def get_blocks_batch_side_effect(
+                cids, peer_id=None, timeout=None, batch_size=None
+            ):
                 from libp2p.bitswap.cid import cid_to_bytes
+
                 results = {}
                 for c in cids:
                     try:
-                        data = await mock_client.get_block(c, peer_id=peer_id, timeout=timeout)
+                        data = await mock_client.get_block(
+                            c, peer_id=peer_id, timeout=timeout
+                        )
                         results[cid_to_bytes(c)] = data
                     except Exception:
                         pass
                 return results
-            mock_client.get_blocks_batch = AsyncMock(side_effect=get_blocks_batch_side_effect)
+
+            mock_client.get_blocks_batch = AsyncMock(
+                side_effect=get_blocks_batch_side_effect
+            )
 
             dag = MerkleDag(mock_client)
 
@@ -557,17 +584,26 @@ class TestEndToEnd:
 
         mock_client.add_block = AsyncMock(side_effect=add_block_impl)
         mock_client.get_block = AsyncMock(side_effect=get_block_impl)
-        async def get_blocks_batch_side_effect(cids, peer_id=None, timeout=None, batch_size=None):
+
+        async def get_blocks_batch_side_effect(
+            cids, peer_id=None, timeout=None, batch_size=None
+        ):
             from libp2p.bitswap.cid import cid_to_bytes
+
             results = {}
             for c in cids:
                 try:
-                    data = await mock_client.get_block(c, peer_id=peer_id, timeout=timeout)
+                    data = await mock_client.get_block(
+                        c, peer_id=peer_id, timeout=timeout
+                    )
                     results[cid_to_bytes(c)] = data
                 except Exception:
                     pass
             return results
-        mock_client.get_blocks_batch = AsyncMock(side_effect=get_blocks_batch_side_effect)
+
+        mock_client.get_blocks_batch = AsyncMock(
+            side_effect=get_blocks_batch_side_effect
+        )
 
         dag = MerkleDag(mock_client)
 
@@ -609,17 +645,26 @@ class TestEndToEnd:
 
             mock_client.add_block = AsyncMock(side_effect=add_block_impl)
             mock_client.get_block = AsyncMock(side_effect=get_block_impl)
-            async def get_blocks_batch_side_effect(cids, peer_id=None, timeout=None, batch_size=None):
+
+            async def get_blocks_batch_side_effect(
+                cids, peer_id=None, timeout=None, batch_size=None
+            ):
                 from libp2p.bitswap.cid import cid_to_bytes
+
                 results = {}
                 for c in cids:
                     try:
-                        data = await mock_client.get_block(c, peer_id=peer_id, timeout=timeout)
+                        data = await mock_client.get_block(
+                            c, peer_id=peer_id, timeout=timeout
+                        )
                         results[cid_to_bytes(c)] = data
                     except Exception:
                         pass
                 return results
-            mock_client.get_blocks_batch = AsyncMock(side_effect=get_blocks_batch_side_effect)
+
+            mock_client.get_blocks_batch = AsyncMock(
+                side_effect=get_blocks_batch_side_effect
+            )
 
             dag = MerkleDag(mock_client)
 

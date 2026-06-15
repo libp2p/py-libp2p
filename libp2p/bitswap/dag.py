@@ -624,14 +624,14 @@ class MerkleDag:
 
         # Step 5: Small file with inline data (no links)
         if not top_links:
-            file_data = top_unixfs.data if top_unixfs and top_unixfs.data else b""
-            logger.info(f"Inline file data: {len(file_data)} bytes")
+            inline_data = top_unixfs.data if top_unixfs and top_unixfs.data else b""
+            logger.info(f"Inline file data: {len(inline_data)} bytes")
             if progress_callback:
-                data_len = len(file_data)
+                data_len = len(inline_data)
                 await _call_progress_callback(
                     progress_callback, data_len, data_len, "completed"
                 )
-            return file_data, filename
+            return inline_data, filename
 
         # Step 6: Collect all leaf CIDs without opening streams
         # Strategy: Recursively batch-fetch all DAG nodes
