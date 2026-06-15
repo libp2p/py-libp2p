@@ -132,7 +132,7 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
     # CID than Kubo for the same logical content.
     # We manually construct the wire format to enforce the correct ordering.
 
-    result = b""
+    result = bytearray()
 
     # 1. Serialize each Link first — field 2, wire type 2 (length-delimited) = tag 0x12
     for link in links:
@@ -141,7 +141,7 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
         pb_link.Name = link.name
         pb_link.Tsize = link.size
         link_bytes = pb_link.SerializeToString()
-        result += b"\x12" + _encode_varint(len(link_bytes)) + link_bytes
+        result.extend(b"\x12" + _encode_varint(len(link_bytes)) + link_bytes)
 
     # 2. Serialize Data after Links — field 1, wire type 2 = tag 0x0a
     if unixfs_data is not None:
@@ -159,9 +159,9 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
         if unixfs_data.fanout:
             pb_unixfs.fanout = unixfs_data.fanout
         data_bytes = pb_unixfs.SerializeToString()
-        result += b"\x0a" + _encode_varint(len(data_bytes)) + data_bytes
+        result.extend(b"\x0a" + _encode_varint(len(data_bytes)) + data_bytes)
 
-    return result
+    return bytes(result)
 
 
 def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:

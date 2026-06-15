@@ -229,7 +229,12 @@ class BitswapClient:
 
             # Send all CIDs in a single wantlist to the peer
             if peer_id:
-                await self._send_wantlist_to_peer(peer_id, batch)
+                success = await self._send_wantlist_to_peer(peer_id, batch)
+                if not success:
+                    for cid_obj in batch:
+                        if cid_obj in self._pending_requests:
+                            del self._pending_requests[cid_obj]
+                    raise Exception(f"Failed to send wantlist to peer {peer_id}")
             else:
                 await self._broadcast_wantlist(batch)
 
@@ -433,7 +438,11 @@ class BitswapClient:
 
         # Send wantlist to peers
         if peer_id:
-            await self._send_wantlist_to_peer(peer_id, [cid])
+            success = await self._send_wantlist_to_peer(peer_id, [cid])
+            if not success:
+                if cid in self._pending_requests:
+                    del self._pending_requests[cid]
+                raise Exception(f"Failed to send wantlist to peer {peer_id}")
         else:
             await self._broadcast_wantlist([cid])
 
@@ -476,7 +485,7 @@ class BitswapClient:
 
     async def _send_wantlist_to_peer(
         self, peer_id: PeerID, cids: list[CIDObject]
-    ) -> None:
+    ) -> bool:
         """Send wantlist to a specific peer."""
         # Track expected blocks for this peer
         if peer_id not in self._expected_blocks:
@@ -548,9 +557,11 @@ class BitswapClient:
                 )
             else:
                 await self._read_responses_from_stream(stream, peer_id)
+            return True
 
         except Exception as e:
             logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
+            return False
 
     async def _broadcast_wantlist(self, cids: list[CIDObject]) -> None:
         """Broadcast wantlist to all connected peers."""

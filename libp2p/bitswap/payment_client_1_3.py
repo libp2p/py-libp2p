@@ -21,7 +21,7 @@ from libp2p.bitswap.pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 logger = logging.getLogger(__name__)
 
 # Default maximum auto-pay threshold: $0.001 USDC = 1000 micro-units
-DEFAULT_MAX_AUTO_PAY_UNITS = 1000000
+DEFAULT_MAX_AUTO_PAY_UNITS = 1000
 
 
 class BitswapPaymentClient_1_3:
@@ -34,7 +34,7 @@ class BitswapPaymentClient_1_3:
     Args:
         signer: An EIP3009Signer instance (gooseswarm.payments.eip3009_signer)
         want_manager: Object with retry_want_block(peer_id, cid) async method
-        max_auto_pay_usdc: Maximum amount to auto-pay in USDC (default $1.00)
+        max_auto_pay_usdc: Maximum amount to auto-pay in USDC (default $0.001)
         send_callback: Async function(peer_id, msg_bytes) to send responses
 
     """
@@ -43,7 +43,7 @@ class BitswapPaymentClient_1_3:
         self,
         signer: Any,  # gooseswarm.payments.eip3009_signer.EIP3009Signer
         want_manager: Any,  # has retry_want_block(peer_id, cid) method
-        max_auto_pay_usdc: float = 1.0,
+        max_auto_pay_usdc: float = 0.001,
         send_callback: Callable[..., Any] | None = None,
         ledger: Any = None,  # gooseswarm.payments.ledger.PaymentLedger (optional)
     ):

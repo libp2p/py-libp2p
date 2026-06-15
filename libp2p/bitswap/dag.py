@@ -165,34 +165,9 @@ class MerkleDag:
             return await self._service.get_blocks_batch(
                 cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
             )
-        # Check if the client supports native batch fetching
-        get_blocks_batch: Callable[..., Awaitable[dict[bytes, bytes]]] | None = getattr(
-            self.bitswap, "get_blocks_batch", None
+        return await self.bitswap.get_blocks_batch(
+            cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
         )
-        if get_blocks_batch is not None and callable(get_blocks_batch):
-            try:
-                result = await get_blocks_batch(
-                    cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
-                )
-                # Ensure the result is a plain dict (not a coroutine from a mock)
-                if isinstance(result, dict):
-                    return result
-            except Exception:
-                pass
-        # Fall back to individual _get_block calls
-        results: dict[bytes, bytes] = {}
-        for cid in cids:
-            from .cid import cid_to_bytes
-
-            cid_bytes = cid_to_bytes(cid)
-            try:
-                data = await self._get_block(
-                    cid_bytes, peer_id=peer_id, timeout=timeout
-                )
-                results[cid_bytes] = data
-            except Exception:
-                pass
-        return results
 
     async def add_file(
         self,
@@ -665,8 +640,6 @@ class MerkleDag:
         top_len = len(top_links)
         msg1 = f"[DAG] Recursively batch-fetching DAG tree ({top_len} top links)..."
         logger.info(msg1)
-        msg2 = f"[FETCH] Recursively batch-fetching DAG tree ({top_len} top links)..."
-        print(msg2, flush=True)
 
         # Map to store ALL fetched blocks (both intermediate and leaves)
         all_blocks_map: dict[bytes, bytes] = {}
@@ -679,8 +652,6 @@ class MerkleDag:
             c_count = len(cid_list)
             msg1 = f"[DAG] Depth {depth}: batch-fetching {c_count} blocks..."
             logger.info(msg1)
-            msg2 = f"[FETCH] Depth {depth}: batch-fetching {c_count} blocks..."
-            print(msg2, flush=True)
 
             # Batch-fetch this level's blocks
             level_blocks = await self._get_blocks_batch(
@@ -720,7 +691,6 @@ class MerkleDag:
         await _batch_fetch_tree(top_cids, depth=1)
         blocks_count = len(all_blocks_map)
         logger.info(f"[DAG] ✓ Tree fetch complete: {blocks_count} total blocks")
-        print(f"[FETCH] ✓ Tree fetch complete: {blocks_count} total blocks", flush=True)
 
         # Now traverse locally to collect leaf CIDs in order
         ordered_leaf_cids: list[bytes] = []
@@ -780,11 +750,6 @@ class MerkleDag:
         l_count = len(ordered_leaf_cids)
         msg1 = f"[DAG] Starting batch fetch of {l_count} leaves with batch_size=32"
         logger.info(f"{msg1}, timeout={timeout}s")
-        msg2 = (
-            f"[FETCH] Batch fetching {l_count} leaves "
-            f"(batch_size=32, timeout={timeout}s)"
-        )
-        print(msg2, flush=True)
 
         # First try to get blocks from the already-fetched tree
         block_map: dict[bytes, bytes] = {}
@@ -805,11 +770,10 @@ class MerkleDag:
             block_map.update(fetched_blocks)
 
         logger.info(f"[DAG] ✓ Batch fetch complete: {len(block_map)} blocks received")
-        print(f"[FETCH] ✓ Batch fetch complete: {len(block_map)} blocks", flush=True)
 
         # Step 8: Reassemble data in order
         # extracting UnixFS inline data from leaf nodes
-        file_data = b""
+        file_data = bytearray()
         bytes_fetched = 0
         missing_blocks: list[bytes] = []
         for idx, leaf_cid in enumerate(ordered_leaf_cids):
@@ -820,7 +784,6 @@ class MerkleDag:
                 c_str = format_cid_for_display(leaf_cid)
                 msg = f"[DAG] Leaf block {l_idx}/{t_leaves} MISSING: {c_str}"
                 logger.error(msg)
-                print(f"[FETCH] ✗ Leaf {l_idx}/{t_leaves} MISSING", flush=True)
                 missing_blocks.append(leaf_cid)
                 continue
 
@@ -838,7 +801,7 @@ class MerkleDag:
                 chunk = leaf_raw
                 logger.debug(f"[DAG] Leaf {idx + 1}: raw block {len(chunk)} bytes")
 
-            file_data += chunk
+            file_data.extend(chunk)
             bytes_fetched += len(chunk)
 
             if (idx + 1) % 10 == 0 or idx == len(ordered_leaf_cids) - 1:
@@ -846,7 +809,6 @@ class MerkleDag:
                 t_l = len(ordered_leaf_cids)
                 p_str = f"{bytes_fetched}/{total_size} bytes"
                 logger.info(f"[DAG] Reassembled {i_p}/{t_l} leaves: {p_str}")
-                print(f"[FETCH] Reassembled {i_p}/{t_l} leaves: {p_str}", flush=True)
 
             if progress_callback:
                 await _call_progress_callback(
@@ -868,8 +830,7 @@ class MerkleDag:
         file_len = len(file_data)
         msg = f"[DAG] ✓ File fetch complete: {file_len} bytes, filename={filename!r}"
         logger.info(msg)
-        print(f"[FETCH] ✓ DOWNLOAD COMPLETE: {file_len} bytes", flush=True)
-        return file_data, filename
+        return bytes(file_data), filename
 
     async def get_file_info(
         self, root_cid: CIDInput, peer_id: PeerID | None = None, timeout: float = 30.0

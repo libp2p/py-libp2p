@@ -220,6 +220,7 @@ __all__ = [
     "chunk_bytes",
     "chunk_file",
     "chunk_file_with_progress",
+    "chunk_stream",
     "estimate_chunk_count",
     "get_file_size",
 ]
