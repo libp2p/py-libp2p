@@ -24,7 +24,6 @@ from multiaddr import Multiaddr
 from libp2p.abc import IHost, INetStream
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.custom_types import TProtocol
-from libp2p.host.basic_host import BasicHost
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.pubsub.gossipsub import GossipSub
 from libp2p.pubsub.pb import rpc_pb2
@@ -43,17 +42,17 @@ SYNC_PROTOCOL: TProtocol = TProtocol("/p2pcalc/sync/1.0.0")
 
 # GossipSub parameters tuned for collaborative editing
 # Lower heartbeat = faster mesh convergence for small peer groups
-GOSSIPSUB_PARAMS = dict(
-    degree=6,
-    degree_low=4,
-    degree_high=8,
-    heartbeat_interval=1,  # 1s heartbeat for fast convergence
-    gossip_window=3,
-    gossip_history=5,
-    time_to_live=60,
-    adaptive_gossip_enabled=True,  # GossipSub v2.0 adaptive features
-    spam_protection_enabled=True,
-)
+GOSSIPSUB_PARAMS: dict[str, int | bool] = {
+    "degree": 6,
+    "degree_low": 4,
+    "degree_high": 8,
+    "heartbeat_interval": 1,  # 1s heartbeat for fast convergence
+    "gossip_window": 3,
+    "gossip_history": 5,
+    "time_to_live": 60,
+    "adaptive_gossip_enabled": True,  # GossipSub v2.0 adaptive features
+    "spam_protection_enabled": True,
+}
 
 
 def _topic(sheet_id: str) -> str:
@@ -93,7 +92,7 @@ class P2PCalcNode:
         self._presence: dict[str, dict[str, str]] = {}
 
         # Set during start()
-        self._host: BasicHost | None = None
+        self._host: IHost | None = None
         self._pubsub: Pubsub | None = None
         self._gossipsub: GossipSub | None = None
         self._factory: OperationFactory | None = None
@@ -103,7 +102,7 @@ class P2PCalcNode:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _require_host(self) -> BasicHost:
+    def _require_host(self) -> IHost:
         """Return _host, raising RuntimeError if node has not been started."""
         if self._host is None:
             raise RuntimeError("Node not started — call start() first")
@@ -121,11 +120,13 @@ class P2PCalcNode:
 
     async def start(self) -> str:
         """Start the libp2p host and GossipSub. Returns peer_id string."""
-        key_pair = create_new_key_pair()  # noqa: F841
+        key_pair = create_new_key_pair()
 
         listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{self._port}")
 
-        self._host: IHost | None = None
+        from libp2p import new_host as _new_host
+
+        self._host = _new_host(key_pair=key_pair)  # type: ignore[assignment]
         if self._host is None:
             raise RuntimeError("new_host() returned None — cannot start node")
 
@@ -144,14 +145,14 @@ class P2PCalcNode:
             PROTOCOL_ID_V20,
         )
 
-        self._gossipsub = GossipSub(
+        self._gossipsub = GossipSub(  # pyrefly: ignore
             protocols=[
                 PROTOCOL_ID_V20,
                 PROTOCOL_ID_V13,
                 PROTOCOL_ID_V11,
                 PROTOCOL_ID,
             ],
-            **GOSSIPSUB_PARAMS,
+            **GOSSIPSUB_PARAMS,  # pyrefly: ignore
         )
         self._pubsub = Pubsub(self._host, self._gossipsub)
 

@@ -11,9 +11,19 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from p2pcalc.crdt import ConflictPolicy, MultiValueRegister, SheetCRDT, StructuralCRDT
-from p2pcalc.operation import HLC, Operation, OperationFactory, OpType
-from p2pcalc.state_sync import SnapshotCandidate
+from p2pcalc.crdt import (  # pyrefly: ignore
+    ConflictPolicy,
+    MultiValueRegister,
+    SheetCRDT,
+    StructuralCRDT,
+)
+from p2pcalc.operation import (  # pyrefly: ignore
+    HLC,
+    Operation,
+    OperationFactory,
+    OpType,
+)
+from p2pcalc.state_sync import SnapshotCandidate  # pyrefly: ignore
 
 # ---------------------------------------------------------------------------
 # HLC Tests

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import logging
+from typing import IO
 
 from .crdt import SheetCRDT
 from .operation import Operation
@@ -235,7 +236,7 @@ class OpLogPersistence:
         _dir = Path(data_dir)
         _dir.mkdir(parents=True, exist_ok=True)
         self._path = str(_dir / f"{sheet_id}.oplog")
-        self._file = None
+        self._file: IO[bytes] | None = None
 
     async def open(self) -> None:
         self._file = open(self._path, "ab")

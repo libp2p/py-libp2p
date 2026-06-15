@@ -88,6 +88,7 @@ dev = [
     { include-group = "docs" },
     { include-group = "test" },
     { include-group = "release" },
+    { include-group = "p2pcalc" },
     "ipython",
     "mypy>=1.15.0",
     "pre-commit>=3.4.0",
@@ -117,6 +118,10 @@ release = [
     "setuptools>=42",
     "twine",
     "wheel",
+]
+p2pcalc = [
+    "msgpack>=1.0.7",
+    "redis[asyncio]>=5.0.4",
 ]
 
 [tool.setuptools]

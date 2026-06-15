@@ -75,8 +75,8 @@ async def run(args: argparse.Namespace) -> None:
     # fall back to the stdlib signal module which works on all platforms.
     if sys.platform != "win32":
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, _signal_handler)
-        loop.add_signal_handler(signal.SIGTERM, _signal_handler)
+        loop.add_signal_handler(signal.SIGINT, lambda: _signal_handler())
+        loop.add_signal_handler(signal.SIGTERM, lambda: _signal_handler())
     else:
         signal.signal(signal.SIGINT, lambda _s, _f: _signal_handler())
         signal.signal(signal.SIGTERM, lambda _s, _f: _signal_handler())
