@@ -1,3 +1,4 @@
+#!/usr/import/env python3
 import argparse
 import hashlib
 import json
@@ -12,9 +13,9 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.utils.address_validation import find_free_port, get_available_interfaces
 from libp2p.bitswap.cid import format_cid_for_display
 
-from .config import Config
-from .peer import Peer
-from .setup import setup_libp2p, new_in_memory_datastore
+from py_ipfs_lite.config import Config, AddParams
+from py_ipfs_lite.peer import Peer
+from py_ipfs_lite.setup import setup_libp2p, new_in_memory_datastore
 
 # Configure logging
 logging.basicConfig(
@@ -27,7 +28,7 @@ logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
 logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
 logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
-logger = logging.getLogger("py_ipfs_lite.cli")
+logger = logging.getLogger("py_ipfs_lite.main")
 
 def load_config(config_path: str) -> dict:
     path = Path(config_path)
@@ -122,7 +123,6 @@ async def run_add(file_path: str, port: int, seed: str | None, config: Config, a
         
         logger.info(f"Adding file {file_path}...")
         try:
-            from .config import AddParams
             params = AddParams(**add_params)
             
             with open(file_path_obj, "rb") as f:
@@ -192,7 +192,7 @@ async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: 
             await peer.close()
 
 def main():
-    parser = argparse.ArgumentParser(description="py-ipfs-lite CLI")
+    parser = argparse.ArgumentParser(description="py-ipfs-lite runner")
     parser.add_argument("--config", default="config.json", help="Path to JSON config file")
     
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -231,14 +231,12 @@ def main():
     def resolve_param(name, default_value=None):
         cli_val = getattr(parsed_args, name, None)
         if cli_val is not None and not (isinstance(cli_val, bool) and not cli_val):
-            # For booleans (like store_true), it's False by default.
-            # If it's False, we check config. If True, it was explicitly passed.
             return cli_val
         return config_defaults.get(name, default_value)
 
     port = resolve_param("port", 0)
     seed = resolve_param("seed", None)
-    # Configure logging level based on config
+    
     if config_defaults.get("debug"):
         logging.getLogger().setLevel(logging.DEBUG)
 
