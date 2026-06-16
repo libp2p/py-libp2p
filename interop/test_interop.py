@@ -1,9 +1,13 @@
 import io
 import os
 import subprocess
+import re
+import tempfile
 import pytest
 import trio
 
+from libp2p.bitswap import BitswapClient, MemoryBlockStore
+from libp2p.bitswap.dag import MerkleDag
 from libp2p.bitswap.cid import cid_to_text, parse_cid
 from multiaddr import Multiaddr
 
@@ -30,15 +34,12 @@ async def test_py_adds_go_fetches():
         sec_opt=sec_opt
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
-        from libp2p.bitswap import BitswapClient, MemoryBlockStore
-        from libp2p.bitswap.dag import MerkleDag
         
         bitswap = BitswapClient(host, MemoryBlockStore())
         await bitswap.start()
         dag = MerkleDag(bitswap)
         
         file_content = "Hello from Python IPFS Lite!"
-        import tempfile
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write(file_content)
             temp_path = f.name
@@ -106,7 +107,6 @@ async def test_py_adds_go_fetches():
                         except trio.ClosedResourceError:
                             break
                     
-                import re
                 match = re.search(r"DONE_FETCH:\s*(.*)", output_str)
                 if match:
                     fetched_content = match.group(1).strip()
@@ -135,8 +135,6 @@ async def test_go_adds_py_fetches():
         sec_opt=sec_opt
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
-        from libp2p.bitswap import BitswapClient, MemoryBlockStore
-        from libp2p.bitswap.dag import MerkleDag
         
         bitswap = BitswapClient(host, MemoryBlockStore())
         await bitswap.start()

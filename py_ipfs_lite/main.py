@@ -20,6 +20,8 @@ from py_ipfs_lite.config import Config, AddParams, CLIConfig
 from py_ipfs_lite.parser import get_parser
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
 from libp2p.bitswap.dag import MerkleDag
+from libp2p.peer.peerinfo import info_from_p2p_addr
+from libp2p.bitswap.cid import parse_cid
 
 # Configure logging
 logging.basicConfig(
@@ -139,9 +141,6 @@ async def run_add(file_path: str, port: int, seed: str | None, config: Config, a
 
 async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: int, seed: str | None, config: Config):
     """Fetch a file by CID."""
-    from libp2p.peer.peerinfo import info_from_p2p_addr
-    from libp2p.bitswap.cid import parse_cid
-
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
