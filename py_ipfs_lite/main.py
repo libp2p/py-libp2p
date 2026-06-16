@@ -185,34 +185,28 @@ def main():
     parser = get_parser()
     parsed_args = parser.parse_args()
 
-    if getattr(parsed_args, "debug", False):
+    if parsed_args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Core config
-    config_kwargs = {
-        "offline": getattr(parsed_args, "offline", False),
-    }
-    if hasattr(parsed_args, "reprovide_interval_seconds"):
-        config_kwargs["reprovide_interval_seconds"] = parsed_args.reprovide_interval_seconds
-    
-    config = Config(**config_kwargs)
-
-    port = getattr(parsed_args, "port", 0)
-    seed = getattr(parsed_args, "seed", None)
-
     if parsed_args.command == "daemon":
-        trio.run(run_daemon, port, seed, config)
+        config = Config(
+            offline=parsed_args.offline,
+            reprovide_interval_seconds=parsed_args.reprovide_interval_seconds,
+        )
+        trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
+    
     elif parsed_args.command == "add":
-        add_params_kwargs = {
-            "chunker": getattr(parsed_args, "chunker", "size-262144"),
-            "hash_fun": getattr(parsed_args, "hash_fun", "sha2-256"),
-            "raw_leaves": getattr(parsed_args, "raw_leaves", True),
-        }
-        add_params = AddParams(**add_params_kwargs)
-        trio.run(run_add, parsed_args.file, port, seed, config, add_params)
+        config = Config(offline=parsed_args.offline)
+        add_params = AddParams(
+            chunker=parsed_args.chunker,
+            hash_fun=parsed_args.hash_fun,
+            raw_leaves=parsed_args.raw_leaves,
+        )
+        trio.run(run_add, parsed_args.file, parsed_args.port, parsed_args.seed, config, add_params)
+    
     elif parsed_args.command == "get":
-        out_file = getattr(parsed_args, "out", None)
-        trio.run(run_get, parsed_args.cid, parsed_args.provider, out_file, port, seed, config)
+        config = Config(offline=parsed_args.offline)
+        trio.run(run_get, parsed_args.cid, parsed_args.provider, parsed_args.out, parsed_args.port, parsed_args.seed, config)
 
 if __name__ == "__main__":
     main()
