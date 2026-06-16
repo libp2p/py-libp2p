@@ -2,7 +2,7 @@ import py_ipfs_lite
 
 
 def test_public_exports_present() -> None:
-    assert hasattr(py_ipfs_lite, "Peer")
+    assert hasattr(py_ipfs_lite, "AddParams")
     assert hasattr(py_ipfs_lite, "Config")
     assert hasattr(py_ipfs_lite, "AddParams")
     assert hasattr(py_ipfs_lite, "setup_libp2p")

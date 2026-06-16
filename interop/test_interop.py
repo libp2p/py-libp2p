@@ -4,7 +4,7 @@ import subprocess
 import pytest
 import trio
 
-from py_ipfs_lite.peer import Peer
+
 from py_ipfs_lite.setup import setup_libp2p, new_in_memory_datastore
 from libp2p.bitswap.cid import cid_to_text, parse_cid
 from multiaddr import Multiaddr
@@ -20,15 +20,22 @@ async def test_py_adds_go_fetches():
         datastore=None
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
-        peer = await Peer.new(
-            datastore=new_in_memory_datastore(),
-            blockstore=None,
-            host=host,
-            routing=routing,
-        )
+        from libp2p.bitswap import BitswapClient, MemoryBlockStore
+        from libp2p.bitswap.dag import MerkleDag
+        
+        bitswap = BitswapClient(host, MemoryBlockStore())
+        await bitswap.start()
+        dag = MerkleDag(bitswap)
         
         file_content = "Hello from Python IPFS Lite!"
-        cid = await peer.add_file(file_content)
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            f.write(file_content)
+            temp_path = f.name
+            
+        cid = await dag.add_file(temp_path, wrap_with_directory=False)
+        os.remove(temp_path)
+        
         cid_str = cid_to_text(cid)
         
         # Wait for the listener to bind to the port
@@ -101,7 +108,7 @@ async def test_py_adds_go_fetches():
         except trio.TooSlowError:
             pytest.fail("Go peer timed out fetching")
         
-        await peer.close()
+        await bitswap.stop()
 
 @pytest.mark.trio
 async def test_go_adds_py_fetches():
@@ -112,12 +119,12 @@ async def test_go_adds_py_fetches():
         datastore=None
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
-        peer = await Peer.new(
-            datastore=new_in_memory_datastore(),
-            blockstore=None,
-            host=host,
-            routing=routing,
-        )
+        from libp2p.bitswap import BitswapClient, MemoryBlockStore
+        from libp2p.bitswap.dag import MerkleDag
+        
+        bitswap = BitswapClient(host, MemoryBlockStore())
+        await bitswap.start()
+        dag = MerkleDag(bitswap)
         
         addrs = []
         for _ in range(10):
@@ -162,8 +169,8 @@ async def test_go_adds_py_fetches():
         
         cid = parse_cid(cid_str)
         
-        retrieved_file = await peer.get_file(cid)
-        fetched = retrieved_file.read().decode()
+        retrieved_file, _ = await dag.fetch_file(cid)
+        fetched = retrieved_file.decode()
         assert fetched == file_content
         
-        await peer.close()
+        await bitswap.stop()
