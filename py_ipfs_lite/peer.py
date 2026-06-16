@@ -43,7 +43,8 @@ class Peer:
         return None
 
     async def bootstrap(self, peers: list[Any]) -> None:
-        raise NotImplementedError("Planned for Phase 3 networking setup")
+        if self.routing and hasattr(self.routing, "bootstrap"):
+            await self.routing.bootstrap()
 
     def session(self, ctx: Any | None = None) -> Any:
         raise NotImplementedError("Planned for Phase 4 DAG operations")
