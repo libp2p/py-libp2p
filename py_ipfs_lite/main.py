@@ -185,37 +185,28 @@ def main():
     parser = get_parser()
     parsed_args = parser.parse_args()
 
-    # Get default configurations from config.py
-    cli_defaults = CLIConfig()
-    core_defaults = Config()
-    add_defaults = AddParams()
-
-    # Resolve parameters (CLI overrides config defaults)
-    def resolve_param(name, default_value):
-        cli_val = getattr(parsed_args, name, None)
-        if cli_val is not None and not (isinstance(cli_val, bool) and not cli_val):
-            return cli_val
-        return default_value
-
-    port = resolve_param("port", cli_defaults.port)
-    seed = resolve_param("seed", cli_defaults.seed)
-    debug = resolve_param("debug", cli_defaults.debug)
-    
-    if debug:
+    if getattr(parsed_args, "debug", False):
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Core config
     config_kwargs = {
-        "offline": resolve_param("offline", core_defaults.offline),
+        "offline": getattr(parsed_args, "offline", False),
     }
+    if hasattr(parsed_args, "reprovide_interval_seconds"):
+        config_kwargs["reprovide_interval_seconds"] = parsed_args.reprovide_interval_seconds
+    
     config = Config(**config_kwargs)
+
+    port = getattr(parsed_args, "port", 0)
+    seed = getattr(parsed_args, "seed", None)
 
     if parsed_args.command == "daemon":
         trio.run(run_daemon, port, seed, config)
     elif parsed_args.command == "add":
         add_params_kwargs = {
-            "chunker": resolve_param("chunker", add_defaults.chunker),
-            "hash_fun": resolve_param("hash_fun", add_defaults.hash_fun),
-            "raw_leaves": resolve_param("raw_leaves", add_defaults.raw_leaves),
+            "chunker": getattr(parsed_args, "chunker", "size-262144"),
+            "hash_fun": getattr(parsed_args, "hash_fun", "sha2-256"),
+            "raw_leaves": getattr(parsed_args, "raw_leaves", True),
         }
         add_params = AddParams(**add_params_kwargs)
         trio.run(run_add, parsed_args.file, port, seed, config, add_params)
