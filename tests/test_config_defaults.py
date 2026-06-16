@@ -1,4 +1,4 @@
-from py_ipfs_lite import AddParams, Config
+from py_ipfs_lite.config import AddParams, Config
 
 
 def test_config_defaults() -> None:

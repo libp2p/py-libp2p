@@ -4,20 +4,30 @@ import subprocess
 import pytest
 import trio
 
-
-from py_ipfs_lite.setup import setup_libp2p, new_in_memory_datastore
 from libp2p.bitswap.cid import cid_to_text, parse_cid
 from multiaddr import Multiaddr
+
+from libp2p import new_host
+from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.secio.transport import Transport as SecioTransport
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
+from libp2p.crypto.ed25519 import create_new_key_pair
 
 GO_PEER_BIN = os.path.join(os.path.dirname(__file__), "go-peer", "go-peer")
 
 @pytest.mark.trio
 async def test_py_adds_go_fetches():
-    host, routing = await setup_libp2p(
-        host_key=None,
-        secret=None,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
-        datastore=None
+    host_key_pair = create_new_key_pair()
+    noise_key_pair = create_new_x25519_key_pair()
+    sec_opt = {
+        "/noise": NoiseTransport(host_key_pair, noise_privkey=noise_key_pair.private_key),
+        "/secio/1.0.0": SecioTransport(host_key_pair),
+    }
+
+    host = new_host(
+        key_pair=host_key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+        sec_opt=sec_opt
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
         from libp2p.bitswap import BitswapClient, MemoryBlockStore
@@ -112,11 +122,17 @@ async def test_py_adds_go_fetches():
 
 @pytest.mark.trio
 async def test_go_adds_py_fetches():
-    host, routing = await setup_libp2p(
-        host_key=None,
-        secret=None,
-        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
-        datastore=None
+    host_key_pair = create_new_key_pair()
+    noise_key_pair = create_new_x25519_key_pair()
+    sec_opt = {
+        "/noise": NoiseTransport(host_key_pair, noise_privkey=noise_key_pair.private_key),
+        "/secio/1.0.0": SecioTransport(host_key_pair),
+    }
+
+    host = new_host(
+        key_pair=host_key_pair,
+        listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/0")],
+        sec_opt=sec_opt
     )
     async with host.run([Multiaddr("/ip4/127.0.0.1/tcp/0")]):
         from libp2p.bitswap import BitswapClient, MemoryBlockStore

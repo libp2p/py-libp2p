@@ -10,10 +10,16 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.utils.address_validation import find_free_port, get_available_interfaces
 from libp2p.bitswap.cid import format_cid_for_display
 
+from libp2p import new_host
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
+from libp2p.security.noise.transport import Transport as NoiseTransport
+from libp2p.security.secio.transport import Transport as SecioTransport
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
+from libp2p.crypto.keys import KeyPair
 from py_ipfs_lite.config import Config, AddParams, CLIConfig
-from py_ipfs_lite.peer import Peer
-from py_ipfs_lite.setup import setup_libp2p, new_in_memory_datastore
 from py_ipfs_lite.parser import get_parser
+from libp2p.bitswap import BitswapClient, MemoryBlockStore
+from libp2p.bitswap.dag import MerkleDag
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +44,24 @@ def format_size(size_bytes: int) -> str:
         size /= 1024
     return f"{size:.1f} TB"
 
+async def create_host_and_routing(listen_addrs: list, host_key: KeyPair | None = None):
+    maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in listen_addrs]
+    host_key_pair = host_key if host_key else create_new_key_pair()
+    
+    noise_key_pair = create_new_x25519_key_pair()
+    sec_opt = {
+        "/noise": NoiseTransport(host_key_pair, noise_privkey=noise_key_pair.private_key),
+        "/secio/1.0.0": SecioTransport(host_key_pair),
+    }
+
+    host = new_host(
+        key_pair=host_key_pair,
+        listen_addrs=maddrs,
+        sec_opt=sec_opt
+    )
+    routing = KadDHT(host=host, mode=DHTMode.SERVER)
+    return host, routing
+
 async def run_daemon(port: int, seed: str | None, config: Config):
     """Run the IPFS Lite daemon (provider mode)."""
     if port <= 0:
@@ -51,21 +75,14 @@ async def run_daemon(port: int, seed: str | None, config: Config):
         logger.info("Using deterministic peer ID from seed")
 
     logger.info("Starting py-ipfs-lite daemon...")
-    host, routing = await setup_libp2p(
+    host, routing = await create_host_and_routing(
         host_key=key_pair,
-        secret=None,
         listen_addrs=listen_addrs,
-        datastore=None
     )
 
     async with host.run(listen_addrs=listen_addrs):
-        peer = await Peer.new(
-            datastore=new_in_memory_datastore(),
-            blockstore=None,
-            host=host,
-            routing=routing,
-            config=config,
-        )
+        bitswap = BitswapClient(host, MemoryBlockStore())
+        await bitswap.start()
 
         logger.info(f"Daemon Peer ID: {host.get_id()}")
         addrs = host.get_addrs()
@@ -79,7 +96,7 @@ async def run_daemon(port: int, seed: str | None, config: Config):
         except KeyboardInterrupt:
             logger.info("\nShutting down...")
         finally:
-            await peer.close()
+            await bitswap.stop()
 
 async def run_add(file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams):
     """Add a file to the IPFS Lite network."""
@@ -97,27 +114,20 @@ async def run_add(file_path: str, port: int, seed: str | None, config: Config, a
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         key_pair = create_new_key_pair(seed=seed_bytes)
 
-    host, routing = await setup_libp2p(
+    host, routing = await create_host_and_routing(
         host_key=key_pair,
-        secret=None,
         listen_addrs=listen_addrs,
-        datastore=None
     )
 
     async with host.run(listen_addrs=listen_addrs):
-        peer = await Peer.new(
-            datastore=new_in_memory_datastore(),
-            blockstore=None,
-            host=host,
-            routing=routing,
-            config=config,
-        )
+        bitswap = BitswapClient(host, MemoryBlockStore())
+        await bitswap.start()
+        dag = MerkleDag(bitswap)
         
         logger.info(f"Adding file {file_path}...")
         try:
-            with open(file_path_obj, "rb") as f:
-                content = f.read()
-            cid = await peer.add_file(content, params=add_params)
+            # We don't have peer.add_file, so we add file directly to dag
+            cid = await dag.add_file(file_path, wrap_with_directory=False)
             logger.info(f"Added file successfully! CID: {format_cid_for_display(cid)}")
             
             logger.info("Provider is running. Press Ctrl+C to stop...")
@@ -125,7 +135,7 @@ async def run_add(file_path: str, port: int, seed: str | None, config: Config, a
         except KeyboardInterrupt:
             logger.info("\nShutting down...")
         finally:
-            await peer.close()
+            await bitswap.stop()
 
 async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: int, seed: str | None, config: Config):
     """Fetch a file by CID."""
@@ -141,21 +151,15 @@ async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: 
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         key_pair = create_new_key_pair(seed=seed_bytes)
 
-    host, routing = await setup_libp2p(
+    host, routing = await create_host_and_routing(
         host_key=key_pair,
-        secret=None,
         listen_addrs=listen_addrs,
-        datastore=None
     )
 
     async with host.run(listen_addrs=listen_addrs):
-        peer = await Peer.new(
-            datastore=new_in_memory_datastore(),
-            blockstore=None,
-            host=host,
-            routing=routing,
-            config=config,
-        )
+        bitswap = BitswapClient(host, MemoryBlockStore())
+        await bitswap.start()
+        dag = MerkleDag(bitswap)
 
         try:
             maddr = Multiaddr(provider_addr)
@@ -167,7 +171,8 @@ async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: 
             cid = parse_cid(cid_str)
             logger.info(f"Fetching CID: {cid_str}...")
             
-            content = await peer.get_file(cid)
+            # Use dag to get file
+            content, filename = await dag.fetch_file(cid)
             logger.info(f"Fetched {len(content)} bytes.")
 
             if out_file:
@@ -179,7 +184,7 @@ async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: 
                 print(content.decode("utf-8", errors="replace"))
 
         finally:
-            await peer.close()
+            await bitswap.stop()
 
 def main():
     parser = get_parser()
