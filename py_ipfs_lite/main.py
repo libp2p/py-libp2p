@@ -1,10 +1,7 @@
-#!/usr/import/env python3
-import argparse
+#!/usr/bin/env python3
 import hashlib
-import json
 import logging
 from pathlib import Path
-import sys
 
 import trio
 from multiaddr import Multiaddr
@@ -13,9 +10,10 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.utils.address_validation import find_free_port, get_available_interfaces
 from libp2p.bitswap.cid import format_cid_for_display
 
-from py_ipfs_lite.config import Config, AddParams
+from py_ipfs_lite.config import Config, AddParams, CLIConfig
 from py_ipfs_lite.peer import Peer
 from py_ipfs_lite.setup import setup_libp2p, new_in_memory_datastore
+from py_ipfs_lite.parser import get_parser
 
 # Configure logging
 logging.basicConfig(
@@ -30,12 +28,6 @@ logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
 logger = logging.getLogger("py_ipfs_lite.main")
 
-def load_config(config_path: str) -> dict:
-    path = Path(config_path)
-    if path.exists():
-        with open(path, "r") as f:
-            return json.load(f)
-    return {}
 
 def format_size(size_bytes: int) -> str:
     """Format size in human-readable form."""
@@ -89,7 +81,7 @@ async def run_daemon(port: int, seed: str | None, config: Config):
         finally:
             await peer.close()
 
-async def run_add(file_path: str, port: int, seed: str | None, config: Config, add_params: dict):
+async def run_add(file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams):
     """Add a file to the IPFS Lite network."""
     file_path_obj = Path(file_path)
     if not file_path_obj.exists():
@@ -123,11 +115,9 @@ async def run_add(file_path: str, port: int, seed: str | None, config: Config, a
         
         logger.info(f"Adding file {file_path}...")
         try:
-            params = AddParams(**add_params)
-            
             with open(file_path_obj, "rb") as f:
                 content = f.read()
-            cid = await peer.add_file(content, params=params)
+            cid = await peer.add_file(content, params=add_params)
             logger.info(f"Added file successfully! CID: {format_cid_for_display(cid)}")
             
             logger.info("Provider is running. Press Ctrl+C to stop...")
@@ -192,44 +182,45 @@ async def run_get(cid_str: str, provider_addr: str, out_file: str | None, port: 
             await peer.close()
 
 def main():
-    from py_ipfs_lite.parser import get_parser
     parser = get_parser()
-
     parsed_args = parser.parse_args()
 
-    # Load config defaults
-    config_defaults = load_config(parsed_args.config)
+    # Get default configurations from config.py
+    cli_defaults = CLIConfig()
+    core_defaults = Config()
+    add_defaults = AddParams()
 
-    # Resolve parameters (CLI overrides config file)
-    def resolve_param(name, default_value=None):
+    # Resolve parameters (CLI overrides config defaults)
+    def resolve_param(name, default_value):
         cli_val = getattr(parsed_args, name, None)
         if cli_val is not None and not (isinstance(cli_val, bool) and not cli_val):
             return cli_val
-        return config_defaults.get(name, default_value)
+        return default_value
 
-    port = resolve_param("port", 0)
-    seed = resolve_param("seed", None)
+    port = resolve_param("port", cli_defaults.port)
+    seed = resolve_param("seed", cli_defaults.seed)
+    debug = resolve_param("debug", cli_defaults.debug)
     
-    if config_defaults.get("debug"):
+    if debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
     config_kwargs = {
-        "offline": resolve_param("offline", False),
-        "reprovide_interval_seconds": resolve_param("reprovide_interval_seconds", 43200),
+        "offline": resolve_param("offline", core_defaults.offline),
     }
     config = Config(**config_kwargs)
 
     if parsed_args.command == "daemon":
         trio.run(run_daemon, port, seed, config)
     elif parsed_args.command == "add":
-        add_params = {
-            "chunker": resolve_param("chunker", "size-262144"),
-            "hash_fun": resolve_param("hash_fun", "sha2-256"),
-            "raw_leaves": resolve_param("raw_leaves", True),
+        add_params_kwargs = {
+            "chunker": resolve_param("chunker", add_defaults.chunker),
+            "hash_fun": resolve_param("hash_fun", add_defaults.hash_fun),
+            "raw_leaves": resolve_param("raw_leaves", add_defaults.raw_leaves),
         }
+        add_params = AddParams(**add_params_kwargs)
         trio.run(run_add, parsed_args.file, port, seed, config, add_params)
     elif parsed_args.command == "get":
-        out_file = resolve_param("out", None)
+        out_file = getattr(parsed_args, "out", None)
         trio.run(run_get, parsed_args.cid, parsed_args.provider, out_file, port, seed, config)
 
 if __name__ == "__main__":

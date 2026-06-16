@@ -2,7 +2,6 @@ import argparse
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="py-ipfs-lite runner")
-    parser.add_argument("--config", default="config.json", help="Path to JSON config file")
     
     subparsers = parser.add_subparsers(dest="command", required=True)
 

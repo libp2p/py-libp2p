@@ -21,3 +21,8 @@ class AddParams:
     hash_fun: str = "sha2-256"
     max_links: int = 174
 
+@dataclass(slots=True)
+class CLIConfig:
+    port: int = 0
+    seed: str | None = None
+    debug: bool = False
