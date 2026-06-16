@@ -10,6 +10,7 @@ Phased roadmap for py-ipfs-lite
 ◦  Add core abstractions: config, peer lifecycle, storage adapters, service composition.
 ◦  Ensure clean startup/shutdown and error handling.
 4. Phase 3 — Setup helpers (SetupLibp2p-style)
+◦  Integrate with the external local py-libp2p repository to use real `Host`, `Routing`, and connection components rather than mocks.
 ◦  Implement helper constructors for host identity, listen addrs, DHT wiring, bootstrap peers.
 ◦  Make embedding simple while keeping lower-level control available.
 5. Phase 4 — DAG + file operations (functional core)

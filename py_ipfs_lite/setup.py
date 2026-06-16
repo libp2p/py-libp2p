@@ -2,22 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-
-class DummyHost:
-    def __init__(self, key: Any, addrs: list[Any]) -> None:
-        self.key = key
-        self.addrs = addrs
-
-    def get_id(self) -> str:
-        return "dummy_id"
-
-
-class DummyRouting:
-    def __init__(self, datastore: Any | None) -> None:
-        self.datastore = datastore
-
-    async def bootstrap(self) -> None:
-        pass
+from libp2p import new_host
+from libp2p.crypto.keys import KeyPair
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
+from multiaddr import Multiaddr
 
 
 def default_bootstrap_peers() -> list[Any]:
@@ -41,7 +29,14 @@ async def setup_libp2p(
     datastore: Any | None,
     extra_options: list[Any] | None = None,
 ) -> tuple[Any, Any]:
-    host = DummyHost(key=host_key, addrs=listen_addrs)
-    routing = DummyRouting(datastore=datastore)
+    # Ensure host_key is a proper KeyPair if it's supposed to be
+    # and listen_addrs are Multiaddrs
+    maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in listen_addrs]
+    
+    host = new_host(
+        key_pair=host_key if isinstance(host_key, KeyPair) else None,
+        listen_addrs=maddrs
+    )
+    routing = KadDHT(host=host, mode=DHTMode.SERVER)
     return host, routing
 
