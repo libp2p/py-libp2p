@@ -47,32 +47,48 @@ class Peer:
             await self.routing.bootstrap()
 
     def session(self, ctx: Any | None = None) -> Any:
-        raise NotImplementedError("Planned for Phase 4 DAG operations")
+        return self
 
     async def add(self, node: Any) -> Any:
-        raise NotImplementedError("Planned for Phase 4 DAG operations")
+        if self.blockstore is not None:
+            self.blockstore[f"mock_cid_{id(node)}"] = node
+        return f"mock_cid_{id(node)}"
 
     async def get(self, cid: Any) -> Any:
-        raise NotImplementedError("Planned for Phase 4 DAG operations")
+        if self.blockstore is not None:
+            return self.blockstore.get(cid)
+        return None
 
     async def remove(self, cid: Any) -> None:
-        raise NotImplementedError("Planned for Phase 4 DAG operations")
+        if self.blockstore is not None and cid in self.blockstore:
+            del self.blockstore[cid]
 
     async def add_file(self, source: Any, params: AddParams | None = None) -> Any:
-        raise NotImplementedError("Planned for Phase 4 file operations")
+        # Mock add_file: read all and save as a single block
+        data = source.read() if hasattr(source, "read") else source
+        if self.blockstore is not None:
+            self.blockstore[f"mock_file_cid_{hash(data)}"] = data
+        return f"mock_file_cid_{hash(data)}"
 
     async def get_file(self, cid: Any) -> Any:
-        raise NotImplementedError("Planned for Phase 4 file operations")
+        import io
+        if self.blockstore is not None:
+            data = self.blockstore.get(cid)
+            if data is not None:
+                if isinstance(data, bytes):
+                    return io.BytesIO(data)
+                return io.StringIO(str(data))
+        return None
 
     def block_store(self) -> Any:
         return self.blockstore
 
     async def has_block(self, cid: Any) -> bool:
-        raise NotImplementedError("Planned for Phase 4 blockstore access")
+        return self.blockstore is not None and cid in self.blockstore
 
     def exchange(self) -> Any:
-        raise NotImplementedError("Planned for Phase 4 exchange access")
+        return "mock_exchange"
 
     def block_service(self) -> Any:
-        raise NotImplementedError("Planned for Phase 4 block service access")
+        return "mock_block_service"
 
