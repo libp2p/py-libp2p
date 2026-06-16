@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-ipfs-lite"
+version = "0.1.0"
+description = "Embeddable lightweight IPFS peer for Python (bootstrap phase)"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+license = { text = "Apache-2.0 OR MIT" }
+authors = [
+  { name = "py-ipfs-lite contributors" }
+]
+keywords = ["ipfs", "libp2p", "bitswap", "unixfs", "ipld"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.1",
+  "mypy>=1.10.0",
+  "pre-commit>=3.7.0",
+  "ruff>=0.6.0",
+]
+test = [
+  "pytest>=8.0.0",
+  "pytest-cov>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/py-ipfs-lite"
+Repository = "https://github.com/your-org/py-ipfs-lite"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["py_ipfs_lite*"]
+exclude = ["tests*", "examples*", "interop*"]
+
+[tool.setuptools.package-data]
+py_ipfs_lite = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
