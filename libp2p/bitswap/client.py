@@ -756,10 +756,9 @@ class BitswapClient:
                     f"   [{_i + 1}] cid={_cid_hex}... type={_wt} cancel={_e.cancel}"
                 )
             logger.warning("=" * 70)
-            print(
+            logger.debug(
                 f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with "
-                f"{len(msg.wantlist.entries)} entries",
-                flush=True,
+                f"{len(msg.wantlist.entries)} entries"
             )
 
         # Detect peer protocol version from stream
@@ -877,11 +876,10 @@ class BitswapClient:
                         # HAVE) is the correct interop approach.
                         data = await self.block_store.get_block(entry_cid)
                         if data:
-                            print(
+                            logger.debug(
                                 f"\n[WANT_HAVE] Sending block directly "
                                 f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}",
-                                flush=True,
+                                f"{format_cid_for_display(entry_cid, max_len=16)}"
                             )
                             logger.warning(
                                 f"[WANT_HAVE] Sending block directly "
@@ -897,10 +895,9 @@ class BitswapClient:
                     else:
                         # Don't have the block — send DontHave so requester
                         # knows to look elsewhere.
-                        print(
+                        logger.debug(
                             f"\n[WANT_HAVE] DontHave for "
-                            f"{format_cid_for_display(entry_cid, max_len=16)}",
-                            flush=True,
+                            f"{format_cid_for_display(entry_cid, max_len=16)}"
                         )
                         logger.warning(
                             f"[WANT_HAVE] Sending DontHave for "
@@ -911,11 +908,10 @@ class BitswapClient:
                     if has_block:
                         data = await self.block_store.get_block(entry_cid)
                         if data:
-                            print(
+                            logger.debug(
                                 f"\n[WANT_BLOCK] Sending block directly "
                                 f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}",
-                                flush=True,
+                                f"{format_cid_for_display(entry_cid, max_len=16)}"
                             )
                             logger.warning(
                                 f"[WANT_BLOCK] Sending block for "
