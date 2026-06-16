@@ -58,6 +58,8 @@ class Peer:
     async def close(self) -> None:
         if self._bitswap is not None:
             await self._bitswap.stop()
+        if self.host is not None:
+            await self.host.close()
 
     async def bootstrap(self, peers: list[Any]) -> None:
         if self.routing and hasattr(self.routing, "bootstrap"):
