@@ -9,7 +9,7 @@ class Config:
     bitswap_broadcast_max_random_peers: int = 64
     bitswap_broadcast_control_send_to_pending_peers: bool = False
     blockstore_type: str = "memory"
-    blockstore_path: str | None = None
+    blockstore_path: str | None = ".py_ipfs_lite/blocks"
 
 
 @dataclass(slots=True)
