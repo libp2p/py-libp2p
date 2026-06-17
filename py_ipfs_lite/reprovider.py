@@ -29,7 +29,7 @@ class Reprovider:
         if not self.peer.routing:
             return
             
-        cids = self.peer.blockstore.get_all_cids()
+        cids = self.peer.blockstore.all_keys()
         if not cids:
             return
             

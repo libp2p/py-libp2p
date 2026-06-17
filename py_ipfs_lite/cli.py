@@ -30,8 +30,8 @@ async def run_daemon(port: int, seed: str | None, config: Config):
     
     try:
         await peer.start()
-        logger.info(f"Daemon Peer ID: {peer.host.get_id()}")
-        addrs = peer.host.get_addrs()
+        logger.info(f"Daemon Peer ID: {peer.host.id()}")
+        addrs = peer.host.addrs()
         logger.info(f"Listening on {len(addrs)} address(es):")
         for addr in addrs:
             logger.info(f"  {addr}")
@@ -67,7 +67,7 @@ async def run_add(
         await peer.start()
         cid = await peer.add_file(abs_path)
         logger.info(f"Added file successfully! CID: {cid}")
-        logger.info(f"Provider Peer ID: {peer.host.get_id().to_base58()}")
+        logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
         logger.info("Provide the following address to peers:")
         for addr in peer.host.get_addrs():
             logger.info(f"  {addr}")
