@@ -8,9 +8,12 @@ multi-block resolution.
 """
 
 from collections.abc import Awaitable, Callable
+import cbor2
 import inspect
 import io
+import json
 import logging
+import os
 from typing import Union
 
 from libp2p.peer.id import ID as PeerID
@@ -28,15 +31,22 @@ from .chunker import (
 from .cid import (
     CODEC_DAG_PB,
     CODEC_RAW,
+    CODEC_DAG_JSON,
+    CODEC_DAG_CBOR,
+    CODEC_IPLD,
+    CODEC_DAG_JOSE,
     CIDInput,
     cid_to_bytes,
     compute_cid_v1,
     format_cid_for_display,
     verify_cid,
+    parse_cid_codec,
+    _normalise_codec,
 )
 from .client import BitswapClient
 from .dag_pb import (
     balanced_layout,
+    create_directory_node,
     decode_dag_pb,
     is_directory_node,
     is_file_node,
@@ -67,6 +77,30 @@ async def _call_progress_callback(
         await callback(current, total, status)
     else:
         callback(current, total, status)
+
+
+def get_codec_from_cid(cid: CIDInput) -> str:
+    return parse_cid_codec(cid_to_bytes(cid))
+
+
+def encode_node(node, codec) -> bytes:
+    norm = _normalise_codec(codec)
+    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
+        return json.dumps(node, separators=(',', ':')).encode('utf-8')
+    if norm == CODEC_DAG_CBOR:
+        return cbor2.dumps(node)
+    raise ValueError(f"Unsupported codec for encode_node: {norm.name}")
+
+
+def decode_node(data: bytes, codec):
+    norm = _normalise_codec(codec)
+    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
+        return json.loads(data.decode('utf-8'))
+    if norm == CODEC_DAG_CBOR:
+        return cbor2.loads(data)
+    if norm == CODEC_RAW:
+        return data
+    raise ValueError(f"Unsupported codec for decode_node: {norm.name}")
 
 
 class MerkleDag:
@@ -145,8 +179,6 @@ class MerkleDag:
         if self._service is not None:
             data = await self._service.get_block(cid, peer_id=peer_id, timeout=timeout)
             if data is None:
-                from .cid import cid_to_bytes, format_cid_for_display
-
                 raise BlockNotFoundError(
                     f"Block not found: {format_cid_for_display(cid_to_bytes(cid))}"
                 )
@@ -238,10 +270,6 @@ class MerkleDag:
 
             # Wrap in directory if requested
             if wrap_with_directory:
-                import os
-
-                from .dag_pb import create_directory_node
-
                 filename = os.path.basename(file_path)
                 logger.info(
                     f"Wrapping single-block file in directory with name: {filename}"
@@ -347,10 +375,6 @@ class MerkleDag:
 
         # Wrap in directory if requested (IPFS-standard way for filename preservation)
         if wrap_with_directory:
-            import os
-
-            from .dag_pb import create_directory_node
-
             filename = os.path.basename(file_path)
             logger.info(f"Wrapping file in directory with name: {filename}")
 
@@ -886,6 +910,47 @@ class MerkleDag:
 
         # Single raw block
         return {"size": len(root_data), "chunks": 1, "chunk_sizes": [len(root_data)]}
+
+    async def add_encoded_block(self, data: bytes, codec) -> bytes:
+        """Store an already-encoded block using a given codec."""
+        cid = compute_cid_v1(data, codec=codec)
+        await self._put_block(cid, data)
+        return cid
+
+    async def add_node(self, node, codec=None) -> bytes:
+        """Store a structured IPLD node."""
+        if codec is None:
+            codec = CODEC_DAG_JSON
+        encoded = encode_node(node, codec)
+        return await self.add_encoded_block(encoded, codec)
+
+    async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None):
+        """Fetches a CID and decodes the block back into a structured node."""
+        cid_bytes = cid_to_bytes(cid)
+        # Try to get the block
+        data = None
+        if self._service is not None:
+            data = await self._service.get_block(cid_bytes, peer_id=peer_id, timeout=30.0)
+        else:
+            try:
+                # Try local store first if block_store is available directly
+                data = await self.block_store.get_block(cid_bytes)
+            except Exception:
+                pass
+            
+            if data is None:
+                data = await self.bitswap.get_block(cid_bytes, peer_id)
+
+        if data is None:
+            raise BlockNotFoundError(cid_bytes)
+
+        codec = get_codec_from_cid(cid_bytes)
+        return decode_node(data, codec)
+
+    async def remove_node(self, cid: CIDInput) -> None:
+        """Deletes a node from the local blockstore only."""
+        cid_bytes = cid_to_bytes(cid)
+        await self.block_store.delete_block(cid_bytes)
 
 
 __all__ = ["MerkleDag"]

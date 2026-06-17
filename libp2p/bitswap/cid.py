@@ -27,7 +27,7 @@ from typing import TypeAlias
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
 from multicodec import Code, is_codec
-from multicodec.code_table import DAG_PB, RAW, SHA2_256
+from multicodec.code_table import DAG_PB, RAW, SHA2_256, DAG_JSON, DAG_CBOR, IPLD, DAG_JOSE
 
 # Simplified CID version constants
 CID_V0 = 0
@@ -36,6 +36,10 @@ CID_V1 = 1
 # Multicodec and multihash constants (type-safe Code objects)
 CODEC_DAG_PB: Code = DAG_PB
 CODEC_RAW: Code = RAW
+CODEC_DAG_JSON: Code = DAG_JSON
+CODEC_DAG_CBOR: Code = DAG_CBOR
+CODEC_IPLD: Code = IPLD
+CODEC_DAG_JOSE: Code = DAG_JOSE
 HASH_SHA256: Code = SHA2_256
 CIDInput: TypeAlias = bytes | str | CIDv0 | CIDv1
 CIDObject: TypeAlias = CIDv0 | CIDv1

@@ -705,3 +705,98 @@ class TestEndToEnd:
             assert filename is None  # No directory wrapping
         finally:
             Path(temp_path).unlink()
+
+
+class TestGenericDag:
+    """Test generic node methods."""
+
+    @pytest.mark.trio
+    async def test_add_get_node_json(self):
+        """Test adding and getting a DAG-JSON node."""
+        from libp2p.bitswap.cid import CODEC_DAG_JSON
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        async def get_block_impl(cid, *args, **kwargs):
+            return await store.get_block(cid)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+        mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"type": "test_json", "value": 42}
+        cid = await dag.add_node(node, codec=CODEC_DAG_JSON)
+        assert cid is not None
+        
+        restored = await dag.get_node(cid)
+        assert restored == node
+
+    @pytest.mark.trio
+    async def test_add_get_node_cbor(self):
+        """Test adding and getting a DAG-CBOR node."""
+        from libp2p.bitswap.cid import CODEC_DAG_CBOR
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        async def get_block_impl(cid, *args, **kwargs):
+            return await store.get_block(cid)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+        mock_client.get_block = AsyncMock(side_effect=get_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"type": "test_cbor", "data": [1, 2, 3]}
+        cid = await dag.add_node(node, codec=CODEC_DAG_CBOR)
+        assert cid is not None
+
+        restored = await dag.get_node(cid)
+        assert restored == node
+
+    @pytest.mark.trio
+    async def test_remove_node(self):
+        """Test removing a node."""
+        from libp2p.bitswap.cid import CODEC_DAG_JSON
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = store
+
+        async def add_block_impl(cid, data):
+            await store.put_block(cid, data)
+
+        mock_client.add_block = AsyncMock(side_effect=add_block_impl)
+
+        dag = MerkleDag(mock_client)
+
+        node = {"hello": "world"}
+        cid = await dag.add_node(node, codec=CODEC_DAG_JSON)
+        assert await store.has_block(cid)
+
+        await dag.remove_node(cid)
+        assert not await store.has_block(cid)
+
+    @pytest.mark.trio
+    async def test_codec_mismatch_fails(self):
+        """Test that get_node fails or handles codec mismatch."""
+        from libp2p.bitswap.cid import CODEC_DAG_CBOR
+        store = MemoryBlockStore()
+        mock_client = MagicMock(spec=BitswapClient)
+        mock_client.block_store = store
+
+        bad_data = b'{"name":"Alice"}'  # This is JSON, not CBOR
+        cid = compute_cid_v1(bad_data, codec=CODEC_DAG_CBOR)
+        await store.put_block(cid, bad_data)
+
+        dag = MerkleDag(mock_client)
+
+        with pytest.raises(Exception):
+            await dag.get_node(cid)
