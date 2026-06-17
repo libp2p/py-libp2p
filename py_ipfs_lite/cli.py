@@ -44,13 +44,10 @@ async def run_daemon(port: int, seed: str | None, config: Config):
         await peer.close()
 
 async def run_add(
-    file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams, api_host: str = "127.0.0.1", api_port: int = 5001
+    file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams
 ):
     """Add a file to the IPFS Lite network."""
     import os
-    import json
-    import urllib.request
-    import urllib.error
 
     file_path_obj = Path(file_path)
     if not file_path_obj.exists():
@@ -58,34 +55,6 @@ async def run_add(
         return
 
     abs_path = os.path.abspath(file_path)
-    
-    # Try HTTP API first
-    api_url = f"http://{api_host}:{api_port}/api/v0/add"
-    try:
-        with open(abs_path, "rb") as f:
-            file_data = f.read()
-            
-        boundary = "----pyIpfsLiteBoundary"
-        body = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{os.path.basename(abs_path)}"\r\n'
-            f"Content-Type: application/octet-stream\r\n\r\n"
-        ).encode() + file_data + f"\r\n--{boundary}--\r\n".encode()
-
-        req = urllib.request.Request(
-            api_url, 
-            data=body, 
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
-        )
-        
-        with urllib.request.urlopen(req, timeout=2) as response:
-            if response.status == 200:
-                res_data = json.loads(response.read().decode())
-                logger.info(f"Added file successfully via HTTP API! CID: {res_data.get('Hash')}")
-                return
-    except urllib.error.URLError:
-        # Daemon not running or unreachable, fallback to ephemeral node
-        pass
 
     if port <= 0:
         port = find_free_port()
@@ -93,7 +62,7 @@ async def run_add(
     key_pair = _get_key_pair(seed)
 
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
-    logger.info(f"Adding file {file_path} via ephemeral P2P node...")
+    logger.info(f"Adding file {file_path}...")
     try:
         await peer.start()
         cid = await peer.add_file(abs_path)
@@ -107,6 +76,7 @@ async def run_add(
     finally:
         await peer.close()
 
+
 async def run_get(
     cid_str: str,
     provider_addr: str | None,
@@ -114,34 +84,9 @@ async def run_get(
     port: int,
     seed: str | None,
     config: Config,
-    api_host: str = "127.0.0.1",
-    api_port: int = 5001,
 ):
     """Fetch a file by CID."""
     import os
-    import urllib.request
-    import urllib.error
-
-    out_path = os.path.abspath(out_file) if out_file else None
-
-    # Try HTTP API first
-    api_url = f"http://{api_host}:{api_port}/api/v0/cat?arg={cid_str}"
-    try:
-        req = urllib.request.Request(api_url, method="POST")
-        with urllib.request.urlopen(req, timeout=2) as response:
-            if response.status == 200:
-                content = response.read()
-                if out_path:
-                    with open(out_path, "wb") as f:
-                        f.write(content)
-                    logger.info(f"Saved {len(content)} bytes to {out_path} via HTTP API")
-                else:
-                    logger.info(f"Fetched {len(content)} bytes via HTTP API")
-                    print(content.decode("utf-8", errors="replace"))
-                return
-    except urllib.error.URLError:
-        # Daemon not running or unreachable, fallback to ephemeral node
-        pass
 
     if port <= 0:
         port = find_free_port()
@@ -149,8 +94,9 @@ async def run_get(
     key_pair = _get_key_pair(seed)
 
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
+    out_path = os.path.abspath(out_file) if out_file else None
 
-    logger.info(f"Fetching CID {cid_str} via ephemeral P2P node...")
+    logger.info(f"Fetching CID {cid_str}...")
     try:
         await peer.start()
         content = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
@@ -228,8 +174,6 @@ def main():
             parsed_args.seed,
             config,
             add_params,
-            parsed_args.api_host,
-            parsed_args.api_port,
         )
 
     elif parsed_args.command == "get":
@@ -246,8 +190,6 @@ def main():
             parsed_args.port,
             parsed_args.seed,
             config,
-            parsed_args.api_host,
-            parsed_args.api_port,
         )
 
 if __name__ == "__main__":
