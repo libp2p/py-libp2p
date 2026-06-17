@@ -128,11 +128,11 @@ class Peer:
         maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
         await self._exit_stack.enter_async_context(self.host.run(maddrs))
         
-        nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
+        self._nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
         if hasattr(self.exchange, "set_nursery"):
-            self.exchange.set_nursery(nursery)
+            self.exchange.set_nursery(self._nursery)
         
-        nursery.start_soon(self.reprovider.start)
+        self._nursery.start_soon(self.reprovider.start)
         
         await self.exchange.start()
         
@@ -141,6 +141,9 @@ class Peer:
     async def close(self) -> None:
         if not self._started:
             return
+            
+        if hasattr(self, "_nursery") and self._nursery:
+            self._nursery.cancel_scope.cancel()
             
         await self.reprovider.stop()
         await self.exchange.stop()
