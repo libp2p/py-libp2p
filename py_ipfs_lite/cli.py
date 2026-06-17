@@ -133,7 +133,28 @@ def main():
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
         )
-        trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
+        
+        if parsed_args.api:
+            import hypercorn.trio
+            import hypercorn.config
+            from py_ipfs_lite.api import app
+            
+            port = parsed_args.port
+            if port <= 0:
+                port = find_free_port()
+            listen_addrs = get_available_interfaces(port)
+            key_pair = _get_key_pair(parsed_args.seed)
+            
+            peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
+            app.state.peer = peer
+            
+            hyperconfig = hypercorn.config.Config()
+            hyperconfig.bind = [f"{parsed_args.api_host}:{parsed_args.api_port}"]
+            
+            logger.info(f"Starting py-ipfs-lite HTTP API daemon at http://{parsed_args.api_host}:{parsed_args.api_port}")
+            trio.run(hypercorn.trio.serve, app, hyperconfig)
+        else:
+            trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
 
     elif parsed_args.command == "add":
         config = Config(

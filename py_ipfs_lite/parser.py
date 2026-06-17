@@ -23,6 +23,15 @@ def get_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=cli_defaults.port, help="Port to listen on"
     )
     daemon_parser.add_argument(
+        "--api", action="store_true", help="Enable the HTTP API server"
+    )
+    daemon_parser.add_argument(
+        "--api-host", type=str, default="127.0.0.1", help="API server host"
+    )
+    daemon_parser.add_argument(
+        "--api-port", type=int, default=5001, help="API server port"
+    )
+    daemon_parser.add_argument(
         "--seed",
         type=str,
         default=cli_defaults.seed,

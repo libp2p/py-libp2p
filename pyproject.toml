@@ -25,7 +25,10 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+  "fastapi>=0.137.1",
+  "hypercorn>=0.18.0",
   "libp2p @ file:///Users/sumanjeet/code/goose-universal-connectivity/extra/py-libp2p",
+  "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

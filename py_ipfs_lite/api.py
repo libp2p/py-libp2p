@@ -1,0 +1,154 @@
+import tempfile
+import os
+import json
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, File, UploadFile, Query, HTTPException, Request
+from fastapi.responses import Response, JSONResponse
+
+from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
+
+
+import logging
+
+logger = logging.getLogger("py_ipfs_lite.api")
+# The actual instantiation of the peer depends on how the daemon is run,
+# but we can set up a default initialization inside the lifespan if none exists.
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Check if a peer was already provided (e.g. injected during setup)
+    peer = getattr(app.state, "peer", None)
+    if not peer:
+        # If not, initialize a default one for the daemon
+        from libp2p.utils.address_validation import get_available_interfaces, find_free_port
+        config = Config()
+        port = find_free_port()
+        listen_addrs = get_available_interfaces(port)
+        peer = Peer(config, listen_addrs=listen_addrs)
+        app.state.peer = peer
+    
+    # Start the peer
+    await peer.start()
+    
+    logger.info(f"Daemon P2P Peer ID: {peer.host.id()}")
+    for addr in peer.host.addrs():
+        logger.info(f"  P2P Listening on: {addr}")
+    
+    yield
+    
+    # Clean up on shutdown
+    await peer.close()
+
+app = FastAPI(title="py-ipfs-lite HTTP API", lifespan=lifespan)
+
+@app.post("/api/v0/add")
+async def add_file(request: Request, file: UploadFile = File(...)):
+    """Add a file to the local blockstore and announce it."""
+    peer: Peer = request.app.state.peer
+    
+    # Save the uploaded file to a temporary file, then add it via peer
+    fd, path = tempfile.mkstemp()
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            content = await file.read()
+            f.write(content)
+        
+        cid_str = await peer.add_file(path)
+        return JSONResponse(content={"Name": file.filename, "Hash": cid_str, "Size": str(len(content))})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+
+@app.post("/api/v0/cat")
+@app.get("/api/v0/cat")
+async def cat_file(request: Request, arg: str = Query(..., description="The path to the IPFS object(s) to be outputted")):
+    """Fetch a file by its CID."""
+    peer: Peer = request.app.state.peer
+    try:
+        content = await peer.get_file(arg)
+        return Response(content=content, media_type="application/octet-stream")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/dag/put")
+async def dag_put(request: Request, store_codec: str = Query("dag-json", alias="store-codec")):
+    """Store a generic DAG node."""
+    peer: Peer = request.app.state.peer
+    body = await request.body()
+    try:
+        node_data = json.loads(body)
+        cid_str = await peer.add_node(node_data, codec=store_codec)
+        return JSONResponse(content={"Cid": {"/": cid_str}})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/dag/get")
+async def dag_get(request: Request, arg: str = Query(..., description="The object to get")):
+    """Retrieve a generic DAG node."""
+    peer: Peer = request.app.state.peer
+    try:
+        node_data = await peer.get_node(arg)
+        return JSONResponse(content=node_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/block/stat")
+async def block_stat(request: Request, arg: str = Query(..., description="The base58 multihash of an existing block to stat")):
+    """Check if a block exists locally and get its size."""
+    peer: Peer = request.app.state.peer
+    from libp2p.bitswap.cid import parse_cid
+    try:
+        cid = parse_cid(arg)
+        has = await peer.blockstore.has(cid)
+        if not has:
+            raise HTTPException(status_code=404, detail="Block not found locally")
+        
+        # To get size we must read it
+        data = await peer.blockstore.get(cid)
+        return JSONResponse(content={"Key": arg, "Size": len(data)})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/block/rm")
+async def block_rm(request: Request, arg: str = Query(..., description="Bash58 multihash of block(s) to remove")):
+    """Remove a raw block from the local blockstore."""
+    peer: Peer = request.app.state.peer
+    try:
+        await peer.remove_node(arg)
+        return JSONResponse(content={"Hash": arg, "Error": ""})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/pin/add")
+async def pin_add(request: Request, arg: str = Query(..., description="Path to object(s) to be pinned"), recursive: bool = Query(True)):
+    """Pin a CID."""
+    peer: Peer = request.app.state.peer
+    try:
+        await peer.add_pin(arg, recursive=recursive)
+        return JSONResponse(content={"Pins": [arg]})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/pin/rm")
+async def pin_rm(request: Request, arg: str = Query(..., description="Path to object(s) to be unpinned")):
+    """Unpin a CID."""
+    peer: Peer = request.app.state.peer
+    try:
+        await peer.remove_pin(arg)
+        return JSONResponse(content={"Pins": [arg]})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/repo/gc")
+async def repo_gc(request: Request):
+    """Run garbage collection."""
+    peer: Peer = request.app.state.peer
+    try:
+        stats = await peer.gc()
+        return JSONResponse(content=stats)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
