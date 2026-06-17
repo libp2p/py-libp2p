@@ -30,6 +30,7 @@ from libp2p.bitswap.cid import (
     _normalise_codec,
     cid_to_bytes,
 )
+from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 
 from py_ipfs_lite.config import Config
 from py_ipfs_lite.pin import PinStore
@@ -135,13 +136,11 @@ class Peer:
     async def bootstrap(self, peers: list[str]) -> None:
         """Connect to bootstrap peers and join the DHT network."""
         self._ensure_started()
-        for peer_addr in peers:
-            try:
-                maddr = Multiaddr(peer_addr)
-                info = info_from_p2p_addr(maddr)
-                await self.host.connect(info)
-            except Exception as e:
-                logger.warning(f"Failed to connect to bootstrap peer {peer_addr}: {e}")
+        discovery = BootstrapDiscovery(
+            swarm=self.host.get_network(),
+            bootstrap_addrs=peers
+        )
+        await discovery.start()
 
     async def add_file(self, path: str) -> str:
         self._ensure_started()
