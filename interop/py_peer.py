@@ -7,8 +7,6 @@ Usage:
   uv run python py_peer.py get --connect /ip4/.../p2p/<id> --cid <cid> --out /path/to/out
 """
 import argparse
-import hashlib
-import os
 import sys
 import logging
 
@@ -21,14 +19,8 @@ logging.basicConfig(
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 
 import trio
-from libp2p import new_host
-from libp2p.crypto.ed25519 import create_new_key_pair
-from libp2p.peer.peerinfo import info_from_p2p_addr
-from multiaddr import Multiaddr
-
-from libp2p.bitswap import BitswapClient, MemoryBlockStore
-from libp2p.bitswap.dag import MerkleDag
-from libp2p.bitswap.cid import parse_cid, cid_to_text
+from py_ipfs_lite.peer import Peer
+from py_ipfs_lite.config import Config
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Python IPFS-Lite interop peer")
@@ -48,55 +40,41 @@ def parse_args():
 
 
 async def run_add(listen_addr: str, filepath: str):
-    key_pair = create_new_key_pair()
-    host = new_host(key_pair=key_pair)
+    config = Config()
+    peer = Peer(config, listen_addrs=[listen_addr])
 
-    async with host.run(listen_addrs=[Multiaddr(listen_addr)]), trio.open_nursery() as nursery:
-        bitswap = BitswapClient(host, MemoryBlockStore())
-        bitswap.set_nursery(nursery)
-        await bitswap.start()
-        dag = MerkleDag(bitswap)
-        root_cid = await dag.add_file(filepath, chunk_size=262144)
+    try:
+        await peer.bootstrap()
+        root_cid = await peer.add_file(filepath)
 
-        peer_id = host.get_id()
-        addr = str(host.get_addrs()[0])
+        peer_id = peer.host.get_id()
+        addr = str(peer.host.get_addrs()[0])
 
         print(f"PEER_ID={peer_id}", flush=True)
         print(f"ADDR={addr}", flush=True)
-        print(f"CID={cid_to_text(root_cid)}", flush=True)
+        print(f"CID={root_cid}", flush=True)
         print("READY", flush=True)
 
         await trio.sleep_forever()
+    finally:
+        await peer.close()
 
 
 async def run_get(listen_addr: str, connect_addr: str, cid_str: str, out_path: str):
-    key_pair = create_new_key_pair()
-    host = new_host(key_pair=key_pair)
+    config = Config()
+    peer = Peer(config, listen_addrs=[listen_addr])
 
-    async with host.run(listen_addrs=[Multiaddr(listen_addr)]), trio.open_nursery() as nursery:
-        bitswap = BitswapClient(host, MemoryBlockStore())
-        bitswap.set_nursery(nursery)
-        await bitswap.start()
-        dag = MerkleDag(bitswap)
+    try:
+        await peer.bootstrap()
+        with trio.fail_after(180):
+            await peer.get_file(cid_str, output_path=out_path, provider_addr=connect_addr)
+    except Exception as e:
+        print(f"Failed to get file: {e}", file=sys.stderr)
+        return
+    finally:
+        await peer.close()
 
-        ma = Multiaddr(connect_addr)
-        peer_info = info_from_p2p_addr(ma)
-        await host.connect(peer_info)
-
-        cid = parse_cid(cid_str)
-        try:
-            with trio.fail_after(180):
-                retrieved_file, _ = await dag.fetch_file(cid)
-        except Exception as e:
-            print(f"Failed to get file: {e}", file=sys.stderr)
-            nursery.cancel_scope.cancel()
-            return
-
-        with open(out_path, "wb") as f:
-            f.write(retrieved_file)
-
-        print(f"CONTENT_SAVED", flush=True)
-        nursery.cancel_scope.cancel()
+    print(f"CONTENT_SAVED", flush=True)
 
 
 def main():

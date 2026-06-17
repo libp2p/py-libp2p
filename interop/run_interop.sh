@@ -89,7 +89,7 @@ PY_FETCHED_HASH=$(shasum -a 256 "$PY_FETCHED" | awk '{print $1}')
 if [ "$PY_FETCHED_HASH" = "$EXPECTED_HASH" ]; then
     echo "PASS: Python received correct 10MB file from Go"
 else
-    echo "FAIL: Content mismatch"
+    echo "FAIL: Content mismatch"; ls -l "$PY_FETCHED" "$LARGE_FILE"; cat "$PY_ERR1"
     exit 1
 fi
 
@@ -142,7 +142,7 @@ GO_FETCHED_HASH=$(shasum -a 256 "$GO_FETCHED" | awk '{print $1}')
 if [ "$GO_FETCHED_HASH" = "$EXPECTED_HASH" ]; then
     echo "PASS: Go received correct 10MB file from Python"
 else
-    echo "FAIL: Content mismatch"
+    echo "FAIL: Content mismatch"; ls -l "$PY_FETCHED" "$LARGE_FILE"; cat "$PY_ERR1"
     exit 1
 fi
 
