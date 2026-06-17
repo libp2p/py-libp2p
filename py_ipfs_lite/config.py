@@ -8,7 +8,7 @@ class Config:
     uncached_blockstore: bool = False
     bitswap_broadcast_max_random_peers: int = 64
     bitswap_broadcast_control_send_to_pending_peers: bool = False
-    blockstore_type: str = "memory"
+    blockstore_type: str = "filesystem"
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
 
 
