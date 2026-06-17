@@ -51,9 +51,8 @@ func main() {
 		ctx,
 		priv,
 		nil,
-		[]multiaddr.Multiaddr{},
+		[]multiaddr.Multiaddr{h.Addrs()[0]},
 		ds,
-		libp2p.NoListenAddrs,
 	)
 	if err != nil {
 		panic(err)
@@ -65,33 +64,50 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("Parsing multiaddr...")
-	maddr, err := multiaddr.NewMultiaddr(targetAddr)
-	if err != nil {
-		panic(err)
-	}
-
-	peerInfo, err := peer.AddrInfoFromP2pAddr(maddr)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Connecting...")
-	err = h.Connect(ctx, *peerInfo)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Connected. Executing command...")
-	if command == "add" {
-		text := os.Args[3]
-		reader := bytes.NewReader([]byte(text))
-		node, err := lite.AddFile(ctx, reader, nil)
+	if targetAddr != "none" {
+		fmt.Println("Parsing multiaddr...")
+		maddr, err := multiaddr.NewMultiaddr(targetAddr)
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("DONE_ADD:", node.Cid().String())
+
+		peerInfo, err := peer.AddrInfoFromP2pAddr(maddr)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("Connecting...")
+		err = h.Connect(ctx, *peerInfo)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("Connected. Executing command...")
+	} else {
+	    fmt.Println("ADDR=" + fmt.Sprintf("%s/p2p/%s", h.Addrs()[0], h.ID()))
+	}
+
+	if command == "add" {
+		text := os.Args[3]
+		reader := bytes.NewReader([]byte(text))
+		node, err := lite.AddFile(ctx, reader, &ipfslite.AddParams{RawLeaves: true})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("CID=" + node.Cid().String())
 		time.Sleep(10 * time.Second)
+	} else if command == "add-file" {
+		filePath := os.Args[3]
+		file, err := os.Open(filePath)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+		node, err := lite.AddFile(ctx, file, &ipfslite.AddParams{RawLeaves: true})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("CID=" + node.Cid().String())
+		time.Sleep(180 * time.Second)
 	} else if command == "fetch" {
 		c, err := cid.Decode(os.Args[3])
 		if err != nil {
@@ -106,5 +122,25 @@ func main() {
 			panic(err)
 		}
 		fmt.Println("DONE_FETCH:", string(content))
+	} else if command == "fetch-file" {
+		c, err := cid.Decode(os.Args[3])
+		if err != nil {
+			panic(err)
+		}
+		outPath := os.Args[4]
+		reader, err := lite.GetFile(ctx, c)
+		if err != nil {
+			panic(err)
+		}
+		outFile, err := os.Create(outPath)
+		if err != nil {
+			panic(err)
+		}
+		defer outFile.Close()
+		_, err = io.Copy(outFile, reader)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("DONE_FETCH_FILE")
 	}
 }
