@@ -109,4 +109,19 @@ def get_parser() -> argparse.ArgumentParser:
         help="Run in offline mode",
     )
 
+    for p in [daemon_parser, add_parser, get_parser]:
+        p.add_argument(
+            "--blockstore-type",
+            type=str,
+            default=core_defaults.blockstore_type,
+            choices=["memory", "filesystem"],
+            help="Type of blockstore to use (memory or filesystem)",
+        )
+        p.add_argument(
+            "--blockstore-path",
+            type=str,
+            default=core_defaults.blockstore_path,
+            help="Path to filesystem blockstore (required if type is filesystem)",
+        )
+
     return parser

@@ -14,6 +14,7 @@ from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.security.secio.transport import Transport as SecioTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
+from libp2p.bitswap.block_store import FilesystemBlockStore
 from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.bitswap.cid import parse_cid, format_cid_for_display, compute_cid_v1
@@ -66,6 +67,10 @@ class Peer:
         return KadDHT(host=self.host, mode=DHTMode.SERVER)
 
     def _create_blockstore(self):
+        if self.config.blockstore_type == "filesystem":
+            if not self.config.blockstore_path:
+                raise ValueError("blockstore_path must be provided when blockstore_type is 'filesystem'")
+            return FilesystemBlockStore(self.config.blockstore_path)
         return MemoryBlockStore()
 
     def _create_exchange(self):

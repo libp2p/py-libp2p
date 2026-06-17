@@ -130,11 +130,17 @@ def main():
         config = Config(
             offline=parsed_args.offline,
             reprovide_interval_seconds=parsed_args.reprovide_interval_seconds,
+            blockstore_type=parsed_args.blockstore_type,
+            blockstore_path=parsed_args.blockstore_path,
         )
         trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
 
     elif parsed_args.command == "add":
-        config = Config(offline=parsed_args.offline)
+        config = Config(
+            offline=parsed_args.offline,
+            blockstore_type=parsed_args.blockstore_type,
+            blockstore_path=parsed_args.blockstore_path,
+        )
         add_params = AddParams(
             chunker=parsed_args.chunker,
             hash_fun=parsed_args.hash_fun,
@@ -150,7 +156,11 @@ def main():
         )
 
     elif parsed_args.command == "get":
-        config = Config(offline=parsed_args.offline)
+        config = Config(
+            offline=parsed_args.offline,
+            blockstore_type=parsed_args.blockstore_type,
+            blockstore_path=parsed_args.blockstore_path,
+        )
         trio.run(
             run_get,
             parsed_args.cid,
