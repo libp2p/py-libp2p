@@ -15,11 +15,24 @@ from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.security.secio.transport import Transport as SecioTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
 from libp2p.bitswap.block_store import FilesystemBlockStore
-from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid
+from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid, decode_dag_pb
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.bitswap.cid import parse_cid, format_cid_for_display, compute_cid_v1
+from libp2p.bitswap.cid import (
+    parse_cid, 
+    format_cid_for_display, 
+    compute_cid_v1,
+    CODEC_DAG_PB,
+    CODEC_RAW,
+    CODEC_DAG_JSON,
+    CODEC_DAG_CBOR,
+    CODEC_IPLD,
+    CODEC_DAG_JOSE,
+    _normalise_codec,
+    cid_to_bytes,
+)
 
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.pin import PinStore
 
 logger = logging.getLogger("py_ipfs_lite.peer")
 
@@ -48,6 +61,12 @@ class Peer:
         self.blockstore = blockstore
         self.exchange = exchange
         self.dag_service = dag_service
+        
+        pin_path = None
+        if self.config.blockstore_type == "filesystem" and self.config.blockstore_path:
+            import os
+            pin_path = os.path.join(self.config.blockstore_path, "pins.json")
+        self.pin_store = PinStore(pin_path)
         
         self._started = False
         self._exit_stack = contextlib.AsyncExitStack()
@@ -159,6 +178,82 @@ class Peer:
         self._ensure_started()
         cid = parse_cid(cid_str)
         await self.blockstore.delete_block(cid)
+
+    async def add_pin(self, cid_str: str, recursive: bool = True) -> None:
+        self._ensure_started()
+        self.pin_store.add_pin(cid_str, recursive)
+
+    async def remove_pin(self, cid_str: str) -> None:
+        self._ensure_started()
+        self.pin_store.remove_pin(cid_str)
+
+    async def gc(self) -> dict:
+        self._ensure_started()
+        
+        all_cids = set(self.blockstore.get_all_cids())
+        reachable_cids = set()
+
+        async def traverse(cid_bytes: bytes, recursive: bool):
+            queue = [cid_bytes]
+            while queue:
+                curr_cid = queue.pop(0)
+                if curr_cid in reachable_cids:
+                    continue
+                
+                reachable_cids.add(curr_cid)
+
+                if not recursive and curr_cid != cid_bytes:
+                    continue
+                
+                data = await self.blockstore.get_block(curr_cid)
+                if data is None:
+                    continue
+                
+                codec = get_codec_from_cid(curr_cid)
+                norm_codec = _normalise_codec(codec)
+
+                if norm_codec == CODEC_DAG_PB:
+                    try:
+                        node_links, _ = decode_dag_pb(data)
+                        for link in node_links:
+                            if hasattr(link, "cid"):
+                                queue.append(link.cid)
+                    except Exception:
+                        pass
+                elif norm_codec in (CODEC_DAG_JSON, CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE):
+                    try:
+                        decoded = decode_node(data, codec)
+                        def extract_links(obj):
+                            if isinstance(obj, dict):
+                                if "/" in obj and isinstance(obj["/"], str):
+                                    try:
+                                        link_cid = parse_cid(obj["/"])
+                                        queue.append(cid_to_bytes(link_cid))
+                                    except Exception:
+                                        pass
+                                for v in obj.values():
+                                    extract_links(v)
+                            elif isinstance(obj, list):
+                                for item in obj:
+                                    extract_links(item)
+                        extract_links(decoded)
+                    except Exception:
+                        pass
+
+        for cid_str, is_rec in self.pin_store.get_pins().items():
+            try:
+                c = parse_cid(cid_str)
+                await traverse(cid_to_bytes(c), is_rec)
+            except Exception as e:
+                logger.warning(f"Failed to traverse pinned CID {cid_str}: {e}")
+
+        to_delete = all_cids - reachable_cids
+        deleted_count = 0
+        for c_bytes in to_delete:
+            await self.blockstore.delete_block(c_bytes)
+            deleted_count += 1
+            
+        return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
 
     def _ensure_started(self) -> None:
         if not self._started:
