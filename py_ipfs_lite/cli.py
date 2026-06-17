@@ -69,7 +69,7 @@ async def run_add(
         logger.info(f"Added file successfully! CID: {cid}")
         logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
         logger.info("Provide the following address to peers:")
-        for addr in peer.host.get_addrs():
+        for addr in peer.host.addrs():
             logger.info(f"  {addr}")
     except Exception as e:
         logger.error(f"Error: {e}")
