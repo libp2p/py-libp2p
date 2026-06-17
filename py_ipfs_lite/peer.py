@@ -34,6 +34,7 @@ from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 
 from py_ipfs_lite.config import Config
 from py_ipfs_lite.pin import PinStore
+from py_ipfs_lite.reprovider import Reprovider
 
 logger = logging.getLogger("py_ipfs_lite.peer")
 
@@ -68,6 +69,7 @@ class Peer:
             import os
             pin_path = os.path.join(self.config.blockstore_path, "pins.json")
         self.pin_store = PinStore(pin_path)
+        self.reprovider = Reprovider(self)
         
         self._started = False
         self._exit_stack = contextlib.AsyncExitStack()
@@ -121,6 +123,8 @@ class Peer:
         if hasattr(self.exchange, "set_nursery"):
             self.exchange.set_nursery(nursery)
         
+        nursery.start_soon(self.reprovider.start)
+        
         await self.exchange.start()
         
         self._started = True
@@ -129,6 +133,7 @@ class Peer:
         if not self._started:
             return
             
+        await self.reprovider.stop()
         await self.exchange.stop()
         await self._exit_stack.aclose()
         self._started = False
