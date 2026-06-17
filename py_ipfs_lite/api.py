@@ -152,3 +152,19 @@ async def repo_gc(request: Request):
         return JSONResponse(content=stats)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/refs/local")
+async def refs_local(request: Request):
+    """List all CIDs stored in the local blockstore."""
+    peer: Peer = request.app.state.peer
+    from libp2p.bitswap.cid import format_cid_for_display
+    try:
+        keys = peer.blockstore.all_keys()
+        results = []
+        for k in keys:
+            cid_str = format_cid_for_display(k)
+            results.append({"Ref": cid_str, "Err": ""})
+        # Kubo streams this as NDJSON, but returning a JSON array of objects is easier for testing
+        return JSONResponse(content={"Refs": results})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
