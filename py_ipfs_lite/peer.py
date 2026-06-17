@@ -14,9 +14,9 @@ from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.security.secio.transport import Transport as SecioTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
-from libp2p.bitswap.dag import MerkleDag
+from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid
 from libp2p.peer.peerinfo import info_from_p2p_addr
-from libp2p.bitswap.cid import parse_cid, format_cid_for_display
+from libp2p.bitswap.cid import parse_cid, format_cid_for_display, compute_cid_v1
 
 from py_ipfs_lite.config import Config
 
@@ -128,6 +128,32 @@ class Peer:
                 f.write(content)
                 
         return content
+
+    async def add_node(self, node, codec: str = "dag-json") -> str:
+        self._ensure_started()
+        data = encode_node(node, codec)
+        cid = compute_cid_v1(data, codec=codec)
+        await self.blockstore.put_block(cid, data)
+        return format_cid_for_display(cid)
+
+    async def get_node(self, cid_str: str, provider_addr: Optional[str] = None):
+        self._ensure_started()
+        if provider_addr:
+            maddr = Multiaddr(provider_addr)
+            info = info_from_p2p_addr(maddr)
+            await self.host.connect(info)
+            
+        cid = parse_cid(cid_str)
+        data = await self.exchange.get_block(cid)
+        if data is None:
+            raise ValueError(f"Block not found for CID: {cid_str}")
+        codec = get_codec_from_cid(cid)
+        return decode_node(data, codec)
+
+    async def remove_node(self, cid_str: str) -> None:
+        self._ensure_started()
+        cid = parse_cid(cid_str)
+        await self.blockstore.delete_block(cid)
 
     def _ensure_started(self) -> None:
         if not self._started:
