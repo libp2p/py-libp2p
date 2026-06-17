@@ -310,7 +310,7 @@ class Peer:
         to_delete = all_cids - reachable_cids
         deleted_count = 0
         for c_bytes in to_delete:
-            await self.blockstore.delete_block(c_bytes)
+            await self.blockstore.delete(c_bytes)
             deleted_count += 1
             
         return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
