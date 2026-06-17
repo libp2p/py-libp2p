@@ -31,6 +31,9 @@ dependencies = [
   "python-multipart>=0.0.32",
 ]
 
+[project.scripts]
+py-ipfs-lite = "py_ipfs_lite.cli:main"
+
 [project.optional-dependencies]
 dev = [
   "build>=1.2.1",
