@@ -98,7 +98,7 @@ class Peer:
     def _create_dag_service(self):
         return MerkleDag(self.exchange)
 
-    async def bootstrap(self) -> None:
+    async def start(self) -> None:
         if self._started:
             return
 
@@ -132,10 +132,27 @@ class Peer:
         await self._exit_stack.aclose()
         self._started = False
 
+    async def bootstrap(self, peers: list[str]) -> None:
+        """Connect to bootstrap peers and join the DHT network."""
+        self._ensure_started()
+        for peer_addr in peers:
+            try:
+                maddr = Multiaddr(peer_addr)
+                info = info_from_p2p_addr(maddr)
+                await self.host.connect(info)
+            except Exception as e:
+                logger.warning(f"Failed to connect to bootstrap peer {peer_addr}: {e}")
+
     async def add_file(self, path: str) -> str:
         self._ensure_started()
         cid = await self.dag_service.add_file(path, wrap_with_directory=False)
-        return format_cid_for_display(cid)
+        cid_str = format_cid_for_display(cid)
+        if self.routing:
+            try:
+                await self.routing.provide(cid_str)
+            except Exception as e:
+                logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
+        return cid_str
 
     async def get_file(self, cid_str: str, output_path: Optional[str] = None, provider_addr: Optional[str] = None) -> bytes:
         self._ensure_started()
@@ -143,6 +160,18 @@ class Peer:
             maddr = Multiaddr(provider_addr)
             info = info_from_p2p_addr(maddr)
             await self.host.connect(info)
+        elif self.routing:
+            try:
+                providers = await self.routing.find_providers(cid_str)
+                for provider in providers:
+                    if provider.peer_id == self.host.get_id():
+                        continue
+                    try:
+                        await self.host.connect(provider)
+                    except Exception as e:
+                        logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
             
         cid = parse_cid(cid_str)
         content, _ = await self.dag_service.fetch_file(cid)
@@ -158,7 +187,13 @@ class Peer:
         data = encode_node(node, codec)
         cid = compute_cid_v1(data, codec=codec)
         await self.blockstore.put_block(cid, data)
-        return format_cid_for_display(cid)
+        cid_str = format_cid_for_display(cid)
+        if self.routing:
+            try:
+                await self.routing.provide(cid_str)
+            except Exception as e:
+                logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
+        return cid_str
 
     async def get_node(self, cid_str: str, provider_addr: Optional[str] = None):
         self._ensure_started()
@@ -166,6 +201,18 @@ class Peer:
             maddr = Multiaddr(provider_addr)
             info = info_from_p2p_addr(maddr)
             await self.host.connect(info)
+        elif self.routing:
+            try:
+                providers = await self.routing.find_providers(cid_str)
+                for provider in providers:
+                    if provider.peer_id == self.host.get_id():
+                        continue
+                    try:
+                        await self.host.connect(provider)
+                    except Exception as e:
+                        logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
+            except Exception as e:
+                logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
             
         cid = parse_cid(cid_str)
         data = await self.exchange.get_block(cid)
@@ -257,4 +304,4 @@ class Peer:
 
     def _ensure_started(self) -> None:
         if not self._started:
-            raise RuntimeError("Peer not started. Call bootstrap() first.")
+            raise RuntimeError("Peer not started. Call start() first.")

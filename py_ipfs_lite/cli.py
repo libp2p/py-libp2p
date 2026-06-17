@@ -29,7 +29,7 @@ async def run_daemon(port: int, seed: str | None, config: Config):
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     
     try:
-        await peer.bootstrap()
+        await peer.start()
         logger.info(f"Daemon Peer ID: {peer.host.get_id()}")
         addrs = peer.host.get_addrs()
         logger.info(f"Listening on {len(addrs)} address(es):")
@@ -64,7 +64,7 @@ async def run_add(
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     logger.info(f"Adding file {file_path}...")
     try:
-        await peer.bootstrap()
+        await peer.start()
         cid = await peer.add_file(abs_path)
         logger.info(f"Added file successfully! CID: {cid}")
         logger.info(f"Provider Peer ID: {peer.host.get_id().to_base58()}")
@@ -98,7 +98,7 @@ async def run_get(
 
     logger.info(f"Fetching CID {cid_str}...")
     try:
-        await peer.bootstrap()
+        await peer.start()
         content = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
         if out_path:
             logger.info(f"Saved {len(content)} bytes to {out_path}")
