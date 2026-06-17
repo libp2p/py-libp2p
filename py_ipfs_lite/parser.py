@@ -117,6 +117,13 @@ def get_parser() -> argparse.ArgumentParser:
         help="Path to filesystem blockstore (required if type is filesystem)",
     )
 
+    add_parser.add_argument(
+        "--api-host", type=str, default="127.0.0.1", help="API server host"
+    )
+    add_parser.add_argument(
+        "--api-port", type=int, default=5001, help="API server port"
+    )
+
     # Get command
     get_parser = subparsers.add_parser("get", help="Get a file by CID")
     get_parser.add_argument("cid", type=str, help="CID to fetch")
@@ -155,6 +162,12 @@ def get_parser() -> argparse.ArgumentParser:
         type=str,
         default=core_defaults.blockstore_path,
         help="Path to filesystem blockstore (required if type is filesystem)",
+    )
+    get_parser.add_argument(
+        "--api-host", type=str, default="127.0.0.1", help="API server host"
+    )
+    get_parser.add_argument(
+        "--api-port", type=int, default=5001, help="API server port"
     )
 
     return parser
