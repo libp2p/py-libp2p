@@ -150,9 +150,49 @@ kill "$PY_PID2" "$TAIL_PID2" 2>/dev/null || true
 wait "$PY_PID2" "$TAIL_PID2" 2>/dev/null || true
 PIDS=()
 
-rm -f "$LARGE_FILE" "$PY_FETCHED" "$GO_FETCHED"
+echo ""
+echo "========================================="
+echo "  Test 3: CID generation match for 1MB file"
+echo "========================================="
+
+SMALL_FILE=$(mktemp)
+dd if=/dev/urandom of="$SMALL_FILE" bs=1048576 count=1 2>/dev/null
+
+# Go adds 1MB file
+GO_OUT3=$(mktemp)
+GO_ERR3=$(mktemp)
+$GO_PEER none add-file "$SMALL_FILE" > "$GO_OUT3" 2>"$GO_ERR3" &
+GO_PID3=$!
+PIDS+=("$GO_PID3")
+TAIL_PID3=$!
+PIDS+=("$TAIL_PID3")
+
+GO_CID3=$(wait_ready_and_parse "$GO_PID3" "$GO_OUT3" "CID=")
+
+# Python adds 1MB file
+PY_ADD_OUT3=$(mktemp)
+PY_ADD_ERR3=$(mktemp)
+(cd "$PYPROJECT_DIR" && uv run python "$SCRIPT_DIR/py_peer.py" add \
+    --listen /ip4/127.0.0.1/tcp/0 --file "$SMALL_FILE" > "$PY_ADD_OUT3" 2>"$PY_ADD_ERR3") &
+PY_PID3=$!
+PIDS+=("$PY_PID3")
+
+PY_CID3=$(wait_ready_and_parse "$PY_PID3" "$PY_ADD_OUT3" "CID=")
+
+if [ "$PY_CID3" = "$GO_CID3" ]; then
+    echo "PASS: CID match: Go ($GO_CID3) and Python ($PY_CID3) produce same CID for 1MB file"
+else
+    echo "FAIL: CID mismatch (Go=$GO_CID3 Python=$PY_CID3)"
+    exit 1
+fi
+
+kill "$GO_PID3" "$PY_PID3" 2>/dev/null || true
+wait "$GO_PID3" "$PY_PID3" 2>/dev/null || true
+PIDS=()
+
+rm -f "$LARGE_FILE" "$PY_FETCHED" "$GO_FETCHED" "$SMALL_FILE"
 
 echo ""
 echo "========================================="
-echo "  All 10MB Interop tests passed!"
+echo "  All Interop tests passed!"
 echo "========================================="
