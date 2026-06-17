@@ -18,3 +18,4 @@ venv/
 .idea/
 .vscode/
 
+interop/go-peer/go_peer
