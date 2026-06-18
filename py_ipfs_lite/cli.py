@@ -18,6 +18,10 @@ def _get_key_pair(seed: str | None):
         return create_new_key_pair(seed=seed_bytes)
     return None
 
+DEFAULT_BOOTSTRAP_PEERS = [
+    "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWCvVxG5SBv5fZNVULQGpJuhBCiRNAABs24QqyxtEYy1Pv",
+]
+
 async def run_daemon(port: int, seed: str | None, config: Config):
     """Run the IPFS Lite daemon (provider mode)."""
     if port <= 0:
@@ -35,6 +39,11 @@ async def run_daemon(port: int, seed: str | None, config: Config):
         logger.info(f"Listening on {len(addrs)} address(es):")
         for addr in addrs:
             logger.info(f"  {addr}")
+
+        if not config.offline:
+            logger.info("Connecting to IPFS bootstrap nodes...")
+            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
+            logger.info("Successfully joined the DHT network!")
 
         logger.info("Daemon is running. Press Ctrl+C to stop...")
         await trio.sleep_forever()
@@ -65,6 +74,10 @@ async def run_add(
     logger.info(f"Adding file {file_path}...")
     try:
         await peer.start()
+        if not config.offline:
+            logger.info("Connecting to IPFS bootstrap nodes...")
+            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
+            
         cid = await peer.add_file(abs_path)
         logger.info(f"Added file successfully! CID: {cid}")
         logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
@@ -99,6 +112,10 @@ async def run_get(
     logger.info(f"Fetching CID {cid_str}...")
     try:
         await peer.start()
+        if not config.offline and not provider_addr:
+            logger.info("Connecting to IPFS bootstrap nodes to search DHT...")
+            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
+            
         content = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
         if out_path:
             logger.info(f"Saved {len(content)} bytes to {out_path}")
@@ -109,7 +126,6 @@ async def run_get(
         logger.error(f"Error: {e}")
     finally:
         await peer.close()
-
 
 def main():
     parser = get_parser()
