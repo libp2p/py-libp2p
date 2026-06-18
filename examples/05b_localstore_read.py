@@ -34,6 +34,6 @@ async def main(cid: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python examples/05b_read.py <cid>")
+        print("Usage: python examples/05b_localstore_read.py <cid>")
         sys.exit(1)
     trio.run(main, sys.argv[1])

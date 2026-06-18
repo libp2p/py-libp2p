@@ -25,8 +25,8 @@ async def main():
     print(f"Stored node successfully.\nCID: {cid}")
     
     print("\nInstruction:")
-    print("Copy this CID and pass it to '05b_read.py'")
-    print(f"Example: python examples/05b_read.py {cid}")
+    print("Copy this CID and pass it to '05b_localstore_read.py'")
+    print(f"Example: python examples/05b_localstore_read.py {cid}")
 
     print("\nClosing the peer cleanly...")
     await peer.close()
