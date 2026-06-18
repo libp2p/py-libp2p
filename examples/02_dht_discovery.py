@@ -14,8 +14,8 @@ async def main():
     await peer_a.start()
     await peer_b.start()
 
-    print(f"Peer A has Peer ID {peer_a.host.id()} and multiaddr {peer_a.host.addrs()[0]}")
-    print(f"Peer B has Peer ID {peer_b.host.id()} and multiaddr {peer_b.host.addrs()[0]}")
+    print(f"Peer A has Peer ID {peer_a.host.id()}\nmultiaddr: {peer_a.host.addrs()[0]}\n")
+    print(f"Peer B has Peer ID {peer_b.host.id()}\nmultiaddr: {peer_b.host.addrs()[0]}")
 
     peer_a_addr = str(peer_a.host.addrs()[0])
     print(f"\nConnecting Peer B to Peer A using multiaddr: {peer_a_addr}")
