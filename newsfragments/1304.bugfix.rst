@@ -1,0 +1,1 @@
+Circuit relay v2: open a new HOP stream to the relay for CONNECT after a client RESERVE, matching relays that close the substream after one exchange. QUIC: dial with a per-dial copy of the client ``QuicConfiguration`` and without sharing a ``QuicLogger`` on the cached template, fixing intermittent handshake and aioquic logger errors.

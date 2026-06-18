@@ -13,7 +13,6 @@ from aioquic.quic.configuration import (
 from aioquic.quic.connection import (
     QuicConnection as NativeQUICConnection,
 )
-from aioquic.quic.logger import QuicLogger
 import multiaddr
 import trio
 
@@ -269,12 +268,16 @@ class QUICTransport(ITransport):
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
             logger.debug("config_key", config_key, self._quic_configs.keys())
-            config = self._quic_configs.get(config_key)
-            if not config:
+            template = self._quic_configs.get(config_key)
+            if not template:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
+            # Per-dial copy: the cached template must not be mutated (is_client,
+            # quic_logger) or concurrent/overlapping dials share one QuicConfiguration
+            # and aioquic raises "QuicLoggerTrace does not belong to QuicLogger".
+            config = copy.copy(template)
             config.is_client = True
-            config.quic_logger = QuicLogger()
+            config.quic_logger = None
 
             # Ensure client certificate is properly set for mutual authentication
             if not config.certificate or not config.private_key:

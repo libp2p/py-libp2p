@@ -10,15 +10,16 @@ from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
 )
 from libp2p.relay.circuit_v2.pb import circuit_pb2 as proto
+from libp2p.relay.circuit_v2.pb_framing import (
+    read_circuit_v2_pb,
+    write_circuit_v2_pb,
+)
 from libp2p.relay.circuit_v2.protocol import (
     PROTOCOL_ID,
     STOP_PROTOCOL_ID,
 )
 from libp2p.tools.anyio_service import (
     background_trio_service,
-)
-from libp2p.tools.constants import (
-    MAX_READ_LEN,
 )
 from libp2p.tools.utils import (
     connect,
@@ -43,7 +44,7 @@ async def simple_stream_handler(stream):
     logger.info("Simple stream handler invoked")
     try:
         # Read the request
-        request_data = await stream.read(MAX_READ_LEN)
+        request_data = await read_circuit_v2_pb(stream)
         if not request_data:
             logger.error("Empty request received")
             return
@@ -54,14 +55,11 @@ async def simple_stream_handler(stream):
         logger.info("Received request: type=%s", request.type)
 
         # Only handle RESERVE requests
-        if request.type == proto.HopMessage.RESERVE:
+        if request.type == proto.HopMessage.Type.RESERVE:
             # Create a valid response
             response = proto.HopMessage(
-                type=proto.HopMessage.STATUS,
-                status=proto.Status(
-                    code=proto.Status.OK,
-                    message="Test reservation accepted",
-                ),
+                type=proto.HopMessage.Type.STATUS,
+                status=proto.Status.OK,
                 reservation=proto.Reservation(
                     expire=int(time.time()) + 3600,  # 1 hour from now
                     voucher=b"test-voucher",
@@ -75,7 +73,7 @@ async def simple_stream_handler(stream):
 
             # Send the response
             logger.info("Sending response")
-            await stream.write(response.SerializeToString())
+            await write_circuit_v2_pb(stream, response.SerializeToString())
             logger.info("Response sent")
     except Exception as e:
         logger.error("Error in simple stream handler: %s", str(e))
