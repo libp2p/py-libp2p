@@ -8,19 +8,22 @@ logging.getLogger("py_ipfs_lite.reprovider").setLevel(logging.WARNING)
 
 async def main():
     print("Demo 4: Pinning + garbage collection")
+    
     print("\nStarting an IPFS Peer...")
     peer = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
+    print(f"Peer initialized with Peer ID: {peer.host.id()}")
+    print(f"Listening on multiaddr: {peer.host.addrs()[0]}")
 
     print("\nStoring two nodes in the blockstore...")
     cid_keep = await peer.add_node({"name": "pinned-log"})
     cid_drop = await peer.add_node({"name": "unpinned-log"})
-    print(f"Node to keep: {cid_keep}")
-    print(f"Node to drop: {cid_drop}")
+    print(f"Node to keep:\nCID: {cid_keep}\n")
+    print(f"Node to drop:\nCID: {cid_drop}")
 
     print("\nPinning the first node to prevent garbage collection...")
     await peer.add_pin(cid_keep, recursive=False)
-    print(f"Successfully pinned: {cid_keep}")
+    print(f"Successfully pinned:\nCID: {cid_keep}")
 
     print("\nTriggering Garbage Collection (GC)...")
     stats = await peer.gc()
@@ -37,7 +40,7 @@ async def main():
 
     assert keep_present is True
     assert drop_present is False
-    print("Assertions passed! Garbage collection successfully removed only the unpinned block.")
+    print("\nAssertions passed! Garbage collection successfully removed only the unpinned block.")
 
     print("\nClosing the peer cleanly...")
     await peer.close()
