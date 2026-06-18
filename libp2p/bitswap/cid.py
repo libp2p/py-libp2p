@@ -27,7 +27,15 @@ from typing import TypeAlias
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
 from multicodec import Code, is_codec
-from multicodec.code_table import DAG_PB, RAW, SHA2_256, DAG_JSON, DAG_CBOR, IPLD, DAG_JOSE
+from multicodec.code_table import (
+    DAG_CBOR,
+    DAG_JOSE,
+    DAG_JSON,
+    DAG_PB,
+    IPLD,
+    RAW,
+    SHA2_256,
+)
 
 # Simplified CID version constants
 CID_V0 = 0

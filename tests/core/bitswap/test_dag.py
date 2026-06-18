@@ -714,6 +714,7 @@ class TestGenericDag:
     async def test_add_get_node_json(self):
         """Test adding and getting a DAG-JSON node."""
         from libp2p.bitswap.cid import CODEC_DAG_JSON
+
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = store
@@ -732,7 +733,7 @@ class TestGenericDag:
         node = {"type": "test_json", "value": 42}
         cid = await dag.add_node(node, codec=CODEC_DAG_JSON)
         assert cid is not None
-        
+
         restored = await dag.get_node(cid)
         assert restored == node
 
@@ -740,6 +741,7 @@ class TestGenericDag:
     async def test_add_get_node_cbor(self):
         """Test adding and getting a DAG-CBOR node."""
         from libp2p.bitswap.cid import CODEC_DAG_CBOR
+
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = store
@@ -766,6 +768,7 @@ class TestGenericDag:
     async def test_remove_node(self):
         """Test removing a node."""
         from libp2p.bitswap.cid import CODEC_DAG_JSON
+
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = store
@@ -788,6 +791,7 @@ class TestGenericDag:
     async def test_codec_mismatch_fails(self):
         """Test that get_node fails or handles codec mismatch."""
         from libp2p.bitswap.cid import CODEC_DAG_CBOR
+
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
         mock_client.block_store = store

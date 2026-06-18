@@ -313,12 +313,17 @@ def get_file_size(data: bytes) -> int:
 
 def create_leaf_node(data: bytes) -> bytes:
     """
-    Create a DAG-PB leaf node for a single file chunk.
+    Create a DAG-PB-wrapped leaf block for a single file chunk.
 
     Wraps raw bytes in UnixFS Data(type=File, data=chunk, filesize=len(chunk))
-    inside a PBNode with no links. This matches Kubo's default behaviour
-    (RawLeaves=false), ensuring leaf CIDs are byte-identical to those
-    produced by `ipfs add`.
+    inside a PBNode with no links. This corresponds to Kubo's
+    ``RawLeaves=false`` mode.
+
+    Note:
+        ``MerkleDag.add_file`` and ``add_bytes`` use raw ``CODEC_RAW`` leaves
+        (Kubo ``RawLeaves=true`` default). This helper is used by tests and
+        layout utilities that need dag-pb-wrapped leaves, not by the default
+        file-ingestion path.
 
     Args:
         data: Raw chunk bytes (may be empty for an empty file)

@@ -8,13 +8,15 @@ multi-block resolution.
 """
 
 from collections.abc import Awaitable, Callable
-import cbor2
 import inspect
 import io
 import json
 import logging
 import os
-from typing import Union
+from typing import Any, Union
+
+import cbor2
+from multicodec import Code
 
 from libp2p.peer.id import ID as PeerID
 
@@ -29,19 +31,19 @@ from .chunker import (
     get_file_size,
 )
 from .cid import (
-    CODEC_DAG_PB,
-    CODEC_RAW,
-    CODEC_DAG_JSON,
     CODEC_DAG_CBOR,
-    CODEC_IPLD,
     CODEC_DAG_JOSE,
+    CODEC_DAG_JSON,
+    CODEC_DAG_PB,
+    CODEC_IPLD,
+    CODEC_RAW,
     CIDInput,
+    _normalise_codec,
     cid_to_bytes,
     compute_cid_v1,
     format_cid_for_display,
-    verify_cid,
     parse_cid_codec,
-    _normalise_codec,
+    verify_cid,
 )
 from .client import BitswapClient
 from .dag_pb import (
@@ -83,19 +85,19 @@ def get_codec_from_cid(cid: CIDInput) -> str:
     return parse_cid_codec(cid_to_bytes(cid))
 
 
-def encode_node(node, codec) -> bytes:
+def encode_node(node: Any, codec: Code | str | int) -> bytes:
     norm = _normalise_codec(codec)
     if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
-        return json.dumps(node, separators=(',', ':')).encode('utf-8')
+        return json.dumps(node, separators=(",", ":")).encode("utf-8")
     if norm == CODEC_DAG_CBOR:
         return cbor2.dumps(node)
     raise ValueError(f"Unsupported codec for encode_node: {norm.name}")
 
 
-def decode_node(data: bytes, codec):
+def decode_node(data: bytes, codec: Code | str | int) -> Any:
     norm = _normalise_codec(codec)
     if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
-        return json.loads(data.decode('utf-8'))
+        return json.loads(data.decode("utf-8"))
     if norm == CODEC_DAG_CBOR:
         return cbor2.loads(data)
     if norm == CODEC_RAW:
@@ -911,33 +913,35 @@ class MerkleDag:
         # Single raw block
         return {"size": len(root_data), "chunks": 1, "chunk_sizes": [len(root_data)]}
 
-    async def add_encoded_block(self, data: bytes, codec) -> bytes:
+    async def add_encoded_block(self, data: bytes, codec: Code | str | int) -> bytes:
         """Store an already-encoded block using a given codec."""
         cid = compute_cid_v1(data, codec=codec)
         await self._put_block(cid, data)
         return cid
 
-    async def add_node(self, node, codec=None) -> bytes:
+    async def add_node(self, node: Any, codec: Code | str | int | None = None) -> bytes:
         """Store a structured IPLD node."""
         if codec is None:
             codec = CODEC_DAG_JSON
         encoded = encode_node(node, codec)
         return await self.add_encoded_block(encoded, codec)
 
-    async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None):
+    async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None) -> Any:
         """Fetches a CID and decodes the block back into a structured node."""
         cid_bytes = cid_to_bytes(cid)
         # Try to get the block
         data = None
         if self._service is not None:
-            data = await self._service.get_block(cid_bytes, peer_id=peer_id, timeout=30.0)
+            data = await self._service.get_block(
+                cid_bytes, peer_id=peer_id, timeout=30.0
+            )
         else:
             try:
                 # Try local store first if block_store is available directly
                 data = await self.block_store.get_block(cid_bytes)
             except Exception:
                 pass
-            
+
             if data is None:
                 data = await self.bitswap.get_block(cid_bytes, peer_id)
 
