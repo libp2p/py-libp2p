@@ -22,6 +22,6 @@ async def main(cid):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python demo_5b_read.py <cid>")
+        print("Usage: python 05b_read.py <cid>")
         sys.exit(1)
     trio.run(main, sys.argv[1])

@@ -14,7 +14,7 @@ async def main():
 
     cid = await peer.add_node({"note": "this should survive a process restart"})
     print("Stored node. CID:", cid)
-    print("Copy this CID — pass it to demo_5b_read.py")
+    print("Copy this CID — pass it to 05b_read.py")
 
     await peer.close()
 
