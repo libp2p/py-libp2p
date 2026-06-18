@@ -5,22 +5,45 @@ This module provides encoding and decoding functionality for DAG-PB format,
 which is used by IPFS to represent files and directories as Merkle DAGs.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import logging
 
-from .cid import CIDInput, cid_to_bytes
-from .pb.dag_pb_pb2 import PBNode
+from .cid import CODEC_DAG_PB, CIDInput, compute_cid_v1
+from .pb.dag_pb_pb2 import PBLink, PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
+
+# Maximum links per internal DAG-PB node — matches Go's balanced.Layout default
+MAX_LINKS_PER_NODE = 174
 
 logger = logging.getLogger(__name__)
 
 
+def _encode_varint(value: int) -> bytes:
+    """Encode an unsigned integer as a protobuf varint."""
+    buf = []
+    while value > 0x7F:
+        buf.append((value & 0x7F) | 0x80)
+        value >>= 7
+    buf.append(value & 0x7F)
+    return bytes(buf)
+
+
 def _normalize_link_cid(cid: CIDInput) -> bytes:
-    """Normalize CID input for DAG links while preserving raw-bytes compatibility."""
-    if isinstance(cid, bytes):
-        return cid
-    return cid_to_bytes(cid)
+    """
+    Normalize CID input for DAG links.
+
+    DAG-PB links store the full CID bytes in the Hash field.
+    For CIDv0 (legacy), this is the 34-byte multihash.
+    For CIDv1 (e.g. raw-leaf blocks), this is the full CIDv1 buffer
+    (version varint + codec varint + multihash), matching Kubo's behavior.
+    """
+    from .cid import parse_cid
+
+    cid_obj = parse_cid(cid)
+    # CIDv0: buffer IS the multihash — no change in behavior.
+    # CIDv1: buffer includes version + codec + multihash — store the full CID.
+    return cid_obj.buffer
 
 
 @dataclass(init=False)
@@ -103,38 +126,42 @@ def encode_dag_pb(links: list[Link], unixfs_data: UnixFSData | None = None) -> b
         >>> encoded = encode_dag_pb(links, data)
 
     """
-    # Create PBNode
-    pb_node = PBNode()
+    # DAG-PB canonical format requires Links (field 2) BEFORE Data (field 1).
+    # Standard protobuf SerializeToString() emits fields in field-number order
+    # (Data=1 first, Links=2 second), producing different bytes and a different
+    # CID than Kubo for the same logical content.
+    # We manually construct the wire format to enforce the correct ordering.
 
-    # Add links
+    result = bytearray()
+
+    # 1. Serialize each Link first — field 2, wire type 2 (length-delimited) = tag 0x12
     for link in links:
-        pb_link = pb_node.Links.add()
+        pb_link = PBLink()
         pb_link.Hash = link.cid
         pb_link.Name = link.name
         pb_link.Tsize = link.size
+        link_bytes = pb_link.SerializeToString()
+        result.extend(b"\x12" + _encode_varint(len(link_bytes)) + link_bytes)
 
-    # Add UnixFS data if provided
-    if unixfs_data:
-        # Create UnixFS data structure
+    # 2. Serialize Data after Links — field 1, wire type 2 = tag 0x0a
+    if unixfs_data is not None:
         pb_unixfs = PBUnixFSData()
         pb_unixfs.Type = UnixFSData.TYPE_MAP[unixfs_data.type]  # type: ignore[assignment]
-        pb_unixfs.Data = unixfs_data.data
-        pb_unixfs.filesize = unixfs_data.filesize
-
-        # Add blocksizes
+        # Only set fields with non-default values to match Kubo's encoding
+        if unixfs_data.data:
+            pb_unixfs.Data = unixfs_data.data
+        if unixfs_data.filesize:
+            pb_unixfs.filesize = unixfs_data.filesize
         for blocksize in unixfs_data.blocksizes:
             pb_unixfs.blocksizes.append(blocksize)
-
         if unixfs_data.hash_type:
             pb_unixfs.hashType = unixfs_data.hash_type
         if unixfs_data.fanout:
             pb_unixfs.fanout = unixfs_data.fanout
+        data_bytes = pb_unixfs.SerializeToString()
+        result.extend(b"\x0a" + _encode_varint(len(data_bytes)) + data_bytes)
 
-        # Serialize UnixFS data and add to PBNode
-        pb_node.Data = pb_unixfs.SerializeToString()
-
-    # Serialize PBNode
-    return pb_node.SerializeToString()
+    return bytes(result)
 
 
 def decode_dag_pb(data: bytes) -> tuple[list[Link], UnixFSData | None]:
@@ -213,7 +240,7 @@ def create_file_node(chunks: Sequence[tuple[CIDInput, int]]) -> bytes:
     blocksizes = []
 
     for i, (cid, size) in enumerate(chunks):
-        links.append(Link(cid=cid, name=f"chunk{i}", size=size))
+        links.append(Link(cid=cid, name="", size=size))
         blocksizes.append(size)
         total_size += size
 
@@ -282,3 +309,109 @@ def get_file_size(data: bytes) -> int:
     if unixfs_data and unixfs_data.type == "file":
         return unixfs_data.filesize
     return 0
+
+
+def create_leaf_node(data: bytes) -> bytes:
+    """
+    Create a DAG-PB-wrapped leaf block for a single file chunk.
+
+    Wraps raw bytes in UnixFS Data(type=File, data=chunk, filesize=len(chunk))
+    inside a PBNode with no links. This corresponds to Kubo's
+    ``RawLeaves=false`` mode.
+
+    Note:
+        ``MerkleDag.add_file`` and ``add_bytes`` use raw ``CODEC_RAW`` leaves
+        (Kubo ``RawLeaves=true`` default). This helper is used by tests and
+        layout utilities that need dag-pb-wrapped leaves, not by the default
+        file-ingestion path.
+
+    Args:
+        data: Raw chunk bytes (may be empty for an empty file)
+
+    Returns:
+        Encoded DAG-PB bytes, suitable for storage as a dag-pb block
+
+    """
+    unixfs_data = UnixFSData(type="file", data=data, filesize=len(data))
+    return encode_dag_pb([], unixfs_data)
+
+
+def balanced_layout(
+    leaves: list[tuple[bytes, bytes, int]],
+    max_links: int = MAX_LINKS_PER_NODE,
+    put_block_callback: Callable[[bytes, bytes], None] | None = None,
+) -> tuple[bytes, bytes, int]:
+    """
+    Build a balanced Merkle DAG from a flat list of leaf blocks.
+
+    Groups leaves into batches of `max_links` (default 174), creates an
+    internal DAG-PB node for each batch, then repeats level by level until
+    a single root remains. Matches Go's balanced.Layout exactly.
+
+    Args:
+        leaves: List of (cid_bytes, block_bytes, file_data_size) tuples where
+                - cid_bytes:      CID of the leaf block as raw bytes
+                - block_bytes:    The encoded dag-pb leaf block bytes
+                - file_data_size: Size of the raw file data inside this leaf
+                                  (i.e. len(original chunk), NOT len(block))
+        max_links: Max links per internal node (default 174, matches Kubo)
+        put_block_callback: Optional async callback to store each internal node
+                           Signature: callback(cid_bytes, block_bytes)
+
+    Returns:
+        (root_cid_bytes, root_block_bytes, cumulative_tsize)
+        where cumulative_tsize = len(root_block) + sum of all descendant block sizes.
+        This matches the Tsize value Kubo stores in directory links pointing to
+        the root of a multi-block file.
+
+    Raises:
+        ValueError: If leaves is empty
+
+    """
+    if not leaves:
+        raise ValueError("Cannot build balanced layout from empty leaf list")
+
+    if len(leaves) == 1:
+        return leaves[0][0], leaves[0][1], len(leaves[0][1])
+
+    # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
+    # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
+    level: list[tuple[bytes, bytes, int, int]] = [
+        (cid, blk, fsize, len(blk)) for cid, blk, fsize in leaves
+    ]
+
+    while len(level) > 1:
+        next_level: list[tuple[bytes, bytes, int, int]] = []
+        for i in range(0, len(level), max_links):
+            batch = level[i : i + max_links]
+            if len(batch) == 1:
+                next_level.append(batch[0])
+                continue
+
+            # Build internal node: links to each child, UnixFS blocksizes
+            internal_links: list[Link] = []
+            blocksizes: list[int] = []
+            total_filesize = 0
+            total_cum = 0
+            for cid_b, _, fsize, cum in batch:
+                # Tsize = cumulative block size of the subtree rooted at this child
+                internal_links.append(Link(cid=cid_b, name="", size=cum))
+                blocksizes.append(fsize)
+                total_filesize += fsize
+                total_cum += cum
+
+            unixfs_data = UnixFSData(
+                type="file", filesize=total_filesize, blocksizes=blocksizes
+            )
+            internal_block = encode_dag_pb(internal_links, unixfs_data)
+            internal_cid = compute_cid_v1(internal_block, codec=CODEC_DAG_PB)
+
+            # Store internal node if callback provided
+            if put_block_callback is not None:
+                put_block_callback(internal_cid, internal_block)
+            # cumulative size = own block + sum of children's cumulative sizes
+            cum_size = len(internal_block) + total_cum
+            next_level.append((internal_cid, internal_block, total_filesize, cum_size))
+        level = next_level
+
+    return level[0][0], level[0][1], level[0][3]
