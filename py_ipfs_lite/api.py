@@ -85,6 +85,7 @@ async def dag_put(request: Request, store_codec: str = Query("dag-json", alias="
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v0/dag/get")
+@app.get("/api/v0/dag/get")
 async def dag_get(request: Request, arg: str = Query(..., description="The object to get")):
     """Retrieve a generic DAG node."""
     peer: Peer = request.app.state.peer
