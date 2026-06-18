@@ -4,6 +4,7 @@ from py_ipfs_lite.config import Config
 
 
 async def main():
+    print("Embedding 2 peers in the same process...")
     peer_a = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     peer_b = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
 

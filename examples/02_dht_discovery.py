@@ -4,6 +4,7 @@ from py_ipfs_lite.config import Config
 
 
 async def main():
+    print("Demo 2: DHT discovery by CID alone...")
     peer_a = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     peer_b = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
 
