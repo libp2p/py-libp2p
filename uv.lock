@@ -1000,7 +1000,7 @@ wheels = [
 [[package]]
 name = "libp2p"
 version = "0.6.0"
-source = { git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=improvement%2Fbitswap#30a13aab63a74e246e01b44db3d6401f6182971d" }
+source = { git = "https://github.com/libp2p/py-libp2p.git?rev=main#5c89d21a05631973c46bf8cfc73842d9cabe94ed" }
 dependencies = [
     { name = "aioquic" },
     { name = "anyio" },
@@ -1661,7 +1661,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.137.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypercorn", specifier = ">=0.18.0" },
-    { name = "libp2p", git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=improvement%2Fbitswap" },
+    { name = "libp2p", git = "https://github.com/libp2p/py-libp2p.git?rev=main" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },

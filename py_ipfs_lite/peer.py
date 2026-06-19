@@ -6,6 +6,8 @@ from typing import Optional, Tuple, AsyncIterator, Union, BinaryIO
 import trio
 from multiaddr import Multiaddr
 
+from py_ipfs_lite.config import Config, AddParams
+
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
@@ -18,7 +20,6 @@ from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
 from libp2p.bitswap.block_store import FilesystemBlockStore
 from libp2p.bitswap.dag import MerkleDag, decode_dag_pb
-from py_ipfs_lite.dag_utils import encode_node, decode_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.bitswap.cid import (
     parse_cid, 
@@ -27,11 +28,40 @@ from libp2p.bitswap.cid import (
     parse_cid_codec,
     CODEC_DAG_PB,
     CODEC_RAW,
+    _normalise_codec,
     cid_to_bytes,
+    parse_cid_codec,
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 
-from py_ipfs_lite.config import Config, AddParams
+import json
+import cbor2
+
+def encode_node(node, codec: str) -> bytes:
+    if codec == "dag-json":
+        return json.dumps(node, separators=(',', ':')).encode("utf-8")
+    elif codec in ("dag-cbor", "cbor"):
+        return cbor2.dumps(node)
+    elif codec == "raw":
+        return node if isinstance(node, bytes) else node.encode("utf-8")
+    else:
+        raise ValueError(f"Unsupported codec for encode_node: {codec}")
+
+def decode_node(data: bytes, codec: str):
+    if codec == "dag-json":
+        return json.loads(data.decode("utf-8"))
+    elif codec in ("dag-cbor", "cbor"):
+        return cbor2.loads(data)
+    elif codec == "raw":
+        return data
+    elif codec == "dag-pb":
+        links, unixfs = decode_dag_pb(data)
+        return {"Links": links, "Data": unixfs}
+    else:
+        raise ValueError(f"Unsupported codec for decode_node: {codec}")
+
+
+from py_ipfs_lite.config import Config
 from py_ipfs_lite.pin import PinStore
 from py_ipfs_lite.reprovider import Reprovider
 from py_ipfs_lite.interfaces import (
