@@ -165,6 +165,31 @@ async def test_gc_concurrency_lock(memory_config):
         await peer.close()
 
 @pytest.mark.trio
+async def test_add_file_progress_callback(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"hello progress callback")
+        temp_path = f.name
+        
+    progress_updates = []
+    def my_progress(written: int, total: int):
+        progress_updates.append((written, total))
+        
+    try:
+        cid_str = await peer.add_file(temp_path, progress_callback=my_progress)
+        assert cid_str is not None
+        assert len(progress_updates) > 0
+        # The last update should have written == total
+        assert progress_updates[-1][0] == progress_updates[-1][1]
+        assert progress_updates[-1][1] == len(b"hello progress callback")
+    finally:
+        os.unlink(temp_path)
+        
+    await peer.close()
+
+@pytest.mark.trio
 async def test_api_parity_methods():
     from py_ipfs_lite import setup_libp2p, default_bootstrap_peers, new_in_memory_datastore
     from libp2p.crypto.ed25519 import create_new_key_pair

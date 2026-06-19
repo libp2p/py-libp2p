@@ -48,3 +48,27 @@ async def test_pin_types(memory_config):
         assert pins_direct2.get(direct_cid) == "direct"
     finally:
         await peer.close()
+
+@pytest.mark.trio
+async def test_atomic_save():
+    import os
+    import json
+    from pathlib import Path
+    from py_ipfs_lite.pin import PinStore
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pin_file = Path(tmpdir) / "pins.json"
+        store = PinStore(str(pin_file))
+        
+        # Add a pin to trigger a save
+        store.add_pin("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", "recursive")
+        
+        # Check that the .tmp file doesn't exist anymore, meaning the swap was successful
+        tmp_file = pin_file.with_suffix('.tmp')
+        assert not tmp_file.exists()
+        
+        # Check that the target file does exist and has correct contents
+        assert pin_file.exists()
+        with open(pin_file, "r") as f:
+            data = json.load(f)
+            assert "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi" in data["pins"]
