@@ -42,6 +42,7 @@ class SwarmConn(INetConn):
     _direction: Direction
     _actual_transport_addresses: list[Multiaddr] | None
     _connection_type: ConnectionType
+    _metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
         self,
@@ -268,8 +269,7 @@ class SwarmConn(INetConn):
                 await self.swarm.notify_closed_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        #
-        net_stream = NetStream(muxed_stream, self)
+        net_stream = NetStream(muxed_stream, self, self._metric_send_channel)
         # Set Stream state to OPEN if the event has already started.
         # This is to ensure that the new streams created after connection has started
         # are immediately set to OPEN state.

@@ -186,12 +186,11 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
-        psk: str | None = None,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
@@ -266,7 +265,6 @@ class BasicHost(IHost):
                 dns_resolution_timeout=bootstrap_dns_timeout,
                 dns_max_retries=bootstrap_dns_max_retries,
             )
-        self.psk = psk
 
         # Address announcement configuration (from #1268)
         self._announce_addrs = (
@@ -295,6 +293,9 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: set[ID] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
+
+        # Metrics
+        self.metric_recv_channel = metric_recv_channel
 
     def get_id(self) -> ID:
         """
@@ -566,6 +567,12 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
+        """
+        return self.metric_recv_channel
 
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """
