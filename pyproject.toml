@@ -48,8 +48,8 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/py-ipfs-lite"
-Repository = "https://github.com/your-org/py-ipfs-lite"
+Homepage = "https://github.com/sumanjeet0012/py-ipfs-lite"
+Repository = "https://github.com/sumanjeet0012/py-ipfs-lite"
 
 [tool.setuptools]
 include-package-data = true
