@@ -157,4 +157,23 @@ def get_parser() -> argparse.ArgumentParser:
         help="Path to filesystem blockstore (required if type is filesystem)",
     )
 
+    # dag-export command
+    dag_export_parser = subparsers.add_parser("dag-export", help="Export a DAG to a CAR file")
+    dag_export_parser.add_argument("cid", type=str, help="CID to export")
+    dag_export_parser.add_argument("out", type=str, help="Output CAR file path")
+    dag_export_parser.add_argument("--port", type=int, default=cli_defaults.port, help="Port to listen on")
+    dag_export_parser.add_argument("--seed", type=str, default=cli_defaults.seed, help="Seed for deterministic peer ID")
+    dag_export_parser.add_argument("--offline", action="store_true", default=core_defaults.offline, help="Run in offline mode")
+    dag_export_parser.add_argument("--blockstore-type", type=str, default=core_defaults.blockstore_type, choices=["memory", "filesystem"])
+    dag_export_parser.add_argument("--blockstore-path", type=str, default=core_defaults.blockstore_path)
+
+    # dag-import command
+    dag_import_parser = subparsers.add_parser("dag-import", help="Import a CAR file into the blockstore")
+    dag_import_parser.add_argument("file", type=str, help="CAR file path to import")
+    dag_import_parser.add_argument("--port", type=int, default=cli_defaults.port, help="Port to listen on")
+    dag_import_parser.add_argument("--seed", type=str, default=cli_defaults.seed, help="Seed for deterministic peer ID")
+    dag_import_parser.add_argument("--offline", action="store_true", default=core_defaults.offline, help="Run in offline mode")
+    dag_import_parser.add_argument("--blockstore-type", type=str, default=core_defaults.blockstore_type, choices=["memory", "filesystem"])
+    dag_import_parser.add_argument("--blockstore-path", type=str, default=core_defaults.blockstore_path)
+
     return parser

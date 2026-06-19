@@ -135,6 +135,54 @@ async def run_get(
     finally:
         await peer.close()
 
+async def run_dag_export(cid_str: str, out_file: str, port: int, seed: str | None, config: Config):
+    """Export a DAG to a CAR file."""
+    if port <= 0:
+        port = find_free_port()
+    listen_addrs = get_available_interfaces(port)
+    key_pair = _get_key_pair(seed)
+
+    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
+    
+    logger.info(f"Exporting DAG {cid_str} to CAR file {out_file}...")
+    try:
+        await peer.start()
+        if not config.offline:
+            logger.info("Connecting to IPFS bootstrap nodes...")
+            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
+            
+        await peer.export_car(cid_str, out_file)
+        logger.info("Export complete.")
+    except Exception as e:
+        logger.error(f"Error: {e}")
+    finally:
+        await peer.close()
+
+async def run_dag_import(file_path: str, port: int, seed: str | None, config: Config):
+    """Import a CAR file into the blockstore."""
+    import os
+    if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
+        return
+
+    if port <= 0:
+        port = find_free_port()
+    listen_addrs = get_available_interfaces(port)
+    key_pair = _get_key_pair(seed)
+
+    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
+    
+    logger.info(f"Importing CAR file {file_path}...")
+    try:
+        await peer.start()
+            
+        roots = await peer.import_car(file_path)
+        logger.info(f"Import complete. Imported roots: {roots}")
+    except Exception as e:
+        logger.error(f"Error: {e}")
+    finally:
+        await peer.close()
+
 def main():
     parser = get_parser()
     parsed_args = parser.parse_args()
@@ -211,6 +259,35 @@ def main():
             parsed_args.cid,
             parsed_args.provider,
             parsed_args.out,
+            parsed_args.port,
+            parsed_args.seed,
+            config,
+        )
+        
+    elif parsed_args.command == "dag-export":
+        config = Config(
+            offline=parsed_args.offline,
+            blockstore_type=parsed_args.blockstore_type,
+            blockstore_path=parsed_args.blockstore_path,
+        )
+        trio.run(
+            run_dag_export,
+            parsed_args.cid,
+            parsed_args.out,
+            parsed_args.port,
+            parsed_args.seed,
+            config,
+        )
+        
+    elif parsed_args.command == "dag-import":
+        config = Config(
+            offline=parsed_args.offline,
+            blockstore_type=parsed_args.blockstore_type,
+            blockstore_path=parsed_args.blockstore_path,
+        )
+        trio.run(
+            run_dag_import,
+            parsed_args.file,
             parsed_args.port,
             parsed_args.seed,
             config,
