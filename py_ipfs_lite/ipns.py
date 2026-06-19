@@ -62,14 +62,15 @@ def create_ipns_record(private_key: PrivateKey, value: str, sequence: int, lifet
 async def publish_name(routing, private_key: PrivateKey, peer_id: ID, value: str, sequence: int, lifetime_hours: int = 24) -> None:
     """Publish an IPNS record to the DHT."""
     record_bytes = create_ipns_record(private_key, value, sequence, lifetime_hours)
-    # The DHT key for IPNS is /ipns/<peer-id-bytes>
-    dht_key = b"/ipns/" + peer_id.to_bytes()
+    # The DHT key for IPNS in py-libp2p must be a string.
+    # We use base58 representation of the peer ID.
+    dht_key = f"/ipns/{peer_id.to_base58()}"
     await routing.put_value(dht_key, record_bytes)
     logger.info(f"Published IPNS record for {peer_id.to_base58()} -> {value}")
 
 async def resolve_name(routing, peer_id: ID) -> str:
     """Resolve an IPNS record from the DHT."""
-    dht_key = b"/ipns/" + peer_id.to_bytes()
+    dht_key = f"/ipns/{peer_id.to_base58()}"
     record_bytes = await routing.get_value(dht_key)
     if not record_bytes:
         raise RoutingError(f"Could not resolve name: {peer_id.to_base58()}")

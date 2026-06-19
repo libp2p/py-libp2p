@@ -158,8 +158,8 @@ class TieredRouting:
         for r in self.routers:
             try:
                 await r.put_value(key, value)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"TieredRouting put_value failed on {r}: {type(e)} {e}")
 
     async def close(self) -> None:
         for r in self.routers:
