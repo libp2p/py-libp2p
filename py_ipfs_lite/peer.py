@@ -10,6 +10,9 @@ from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
+from libp2p.crypto.keys import PrivateKey
+from libp2p.network.auto_connector import AutoConnector
+from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
@@ -101,6 +104,8 @@ class Peer:
         self._gc_lock = trio.Lock()
         self._started = False
         self._exit_stack = contextlib.AsyncExitStack()
+        self._auto_connector = None
+        self._connection_pruner = None
 
     @classmethod
     async def new(cls, datastore, blockstore, host, routing, config):
@@ -176,9 +181,31 @@ class Peer:
         
         self._nursery.start_soon(self.reprovider.start)
         
+        # Initialize and start connection managers
+        raw_swarm = self.host._host.get_network()
+        if hasattr(raw_swarm, "connection_config"):
+            self._auto_connector = AutoConnector(raw_swarm)
+            self._connection_pruner = ConnectionPruner(raw_swarm)
+            
+            await self._auto_connector.start()
+            await self._connection_pruner.start()
+            
+            await self._auto_connector.run_background_task(self._nursery)
+            self._nursery.start_soon(self._periodic_pruner_task)
+
         await self.exchange.start()
         
         self._started = True
+
+    async def _periodic_pruner_task(self) -> None:
+        """Periodically trigger connection pruning."""
+        while self._started:
+            if self._connection_pruner:
+                try:
+                    await self._connection_pruner.maybe_prune_connections()
+                except Exception as e:
+                    logger.debug(f"Error in connection pruner: {e}")
+            await trio.sleep(15.0)
 
     async def close(self) -> None:
         if not self._started:
@@ -189,6 +216,10 @@ class Peer:
             
         await self.reprovider.stop()
         await self.exchange.stop()
+        if self._auto_connector:
+            await self._auto_connector.stop()
+        if self._connection_pruner:
+            await self._connection_pruner.stop()
         await self._exit_stack.aclose()
         self._started = False
 
