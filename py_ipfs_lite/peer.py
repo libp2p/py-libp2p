@@ -131,7 +131,14 @@ class Peer:
     async def _create_routing(self):
         raw_host = getattr(self.host, "_host", self.host)
         raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)
-        return RoutingAdapter(raw_routing)
+        dht_adapter = RoutingAdapter(raw_routing)
+        
+        if getattr(self.config, "use_ipni", False):
+            from py_ipfs_lite.routing import DelegatedHTTPRouting, TieredRouting
+            ipni = DelegatedHTTPRouting(endpoint=getattr(self.config, "ipni_endpoint", "https://cid.contact"))
+            return TieredRouting([ipni, dht_adapter])
+            
+        return dht_adapter
 
     def _create_blockstore(self):
         if self.config.blockstore_type == "filesystem":

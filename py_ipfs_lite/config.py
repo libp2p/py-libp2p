@@ -13,6 +13,8 @@ class Config:
     bitswap_broadcast_control_send_to_pending_peers: bool = False
     blockstore_type: str = "filesystem"
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
+    use_ipni: bool = True
+    ipni_endpoint: str = "https://cid.contact"
 
 
 @dataclass(slots=True)
