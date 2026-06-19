@@ -62,6 +62,15 @@ def maybe_consume_signed_record(
                 )
                 if not (isinstance(peer_id, ID) and record.peer_id == peer_id):
                     return False
+                # Bind the signer identity to the record's claimed peer id
+                # (libp2p/py-libp2p#1338): a valid signature from an unrelated
+                # key must not be able to certify addresses for another peer.
+                if ID.from_pubkey(envelope.public_key) != record.peer_id:
+                    logger.error(
+                        "Rejected signed peer record: signer identity does not "
+                        "match record peer_id"
+                    )
+                    return False
                 # Use the default  TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):
                     logger.error("Failed to update the Certified-Addr-Book")
@@ -79,6 +88,15 @@ def maybe_consume_signed_record(
                     "libp2p-peer-record",
                 )
                 if not record.peer_id.to_bytes() == msg.id:
+                    return False
+                # Bind the signer identity to the record's claimed peer id
+                # (libp2p/py-libp2p#1338): a valid signature from an unrelated
+                # key must not be able to certify addresses for another peer.
+                if ID.from_pubkey(envelope.public_key) != record.peer_id:
+                    logger.error(
+                        "Rejected signed peer record: signer identity does not "
+                        "match record peer_id"
+                    )
                     return False
                 # Use the default TTL of 2 hours (7200 seconds)
                 if not host.get_peerstore().consume_peer_record(envelope, 7200):
