@@ -113,3 +113,52 @@ async def test_filesystem_blockstore(fs_config):
     await peer.close()
     
     assert os.path.exists(fs_config.blockstore_path)
+
+def test_init_exports():
+    from py_ipfs_lite import Peer, Config, AddParams
+    assert Peer is not None
+    assert Config is not None
+    assert AddParams is not None
+
+@pytest.mark.trio
+async def test_add_file_with_params(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    
+    from py_ipfs_lite.config import AddParams
+    params = AddParams(chunker="size-1024")
+    
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"a" * 2048)
+        temp_path = f.name
+        
+    try:
+        cid_str = await peer.add_file(temp_path, params=params)
+        assert cid_str is not None
+        
+        content_iter = await peer.get_file(cid_str)
+        chunks = []
+        async for chunk in content_iter:
+            chunks.append(chunk)
+        content = b"".join(chunks)
+        assert content == b"a" * 2048
+    finally:
+        os.unlink(temp_path)
+        await peer.close()
+
+@pytest.mark.trio
+async def test_gc_concurrency_lock(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(b"large data block " * 1000)
+        temp_path = f.name
+        
+    try:
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(peer.add_file, temp_path)
+            nursery.start_soon(peer.gc)
+    finally:
+        os.unlink(temp_path)
+        await peer.close()
