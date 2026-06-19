@@ -331,70 +331,65 @@ class Peer:
 
     async def add_pin(self, cid_str: str, recursive: bool = True) -> None:
         self._ensure_started()
-        self.pin_store.add_pin(cid_str, recursive)
+        pin_type = "recursive" if recursive else "direct"
+        self.pin_store.add_pin(cid_str, pin_type)
 
     async def remove_pin(self, cid_str: str) -> None:
         self._ensure_started()
         self.pin_store.remove_pin(cid_str)
 
+    async def list_pins(self, type_filter: str = "all") -> dict[str, str]:
+        """
+        List pins by type. type_filter can be 'direct', 'recursive', 'indirect', or 'all'.
+        """
+        self._ensure_started()
+        
+        if type_filter not in ("all", "direct", "recursive", "indirect"):
+            raise ValueError("Invalid type_filter. Must be 'all', 'direct', 'recursive', or 'indirect'")
+            
+        stored_pins = self.pin_store.get_pins()
+        
+        if type_filter in ("direct", "recursive"):
+            return {k: v for k, v in stored_pins.items() if v == type_filter}
+            
+        result = stored_pins.copy()
+        
+        from py_ipfs_lite.dag_utils import walk_dag
+        from libp2p.bitswap.cid import parse_cid, cid_to_bytes, format_cid_for_display
+        
+        indirect_pins = {}
+        for cid_str, pin_type in stored_pins.items():
+            if pin_type == "recursive":
+                try:
+                    c_bytes = cid_to_bytes(parse_cid(cid_str))
+                    async for reachable_cid_bytes in walk_dag(c_bytes, self.blockstore.get, recursive=True):
+                        if reachable_cid_bytes != c_bytes:
+                            r_str = format_cid_for_display(parse_cid(reachable_cid_bytes))
+                            if r_str not in result:
+                                indirect_pins[r_str] = "indirect"
+                except Exception as e:
+                    logger.warning(f"Failed to traverse pinned CID {cid_str}: {e}")
+                    
+        if type_filter == "indirect":
+            return indirect_pins
+            
+        result.update(indirect_pins)
+        return result
+
     async def gc(self) -> dict:
         self._ensure_started()
+        from py_ipfs_lite.dag_utils import walk_dag
         
         async with self._gc_lock:
             all_cids = set(self.blockstore.all_keys())
             reachable_cids = set()
 
-            async def traverse(cid_bytes: bytes, recursive: bool):
-                queue = [cid_bytes]
-                while queue:
-                    curr_cid = queue.pop(0)
-                    if curr_cid in reachable_cids:
-                        continue
-                    
-                    reachable_cids.add(curr_cid)
-
-                    if not recursive and curr_cid != cid_bytes:
-                        continue
-                    
-                    data = await self.blockstore.get(curr_cid)
-                    if data is None:
-                        continue
-                    
-                    codec = get_codec_from_cid(curr_cid)
-                    norm_codec = _normalise_codec(codec)
-
-                    if norm_codec == CODEC_DAG_PB:
-                        try:
-                            node_links, _ = decode_dag_pb(data)
-                            for link in node_links:
-                                if hasattr(link, "cid"):
-                                    queue.append(link.cid)
-                        except Exception:
-                            pass
-                    elif norm_codec in (CODEC_DAG_JSON, CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE):
-                        try:
-                            decoded = decode_node(data, codec)
-                            def extract_links(obj):
-                                if isinstance(obj, dict):
-                                    if "/" in obj and isinstance(obj["/"], str):
-                                        try:
-                                            link_cid = parse_cid(obj["/"])
-                                            queue.append(cid_to_bytes(link_cid))
-                                        except Exception:
-                                            pass
-                                    for v in obj.values():
-                                        extract_links(v)
-                                elif isinstance(obj, list):
-                                    for item in obj:
-                                        extract_links(item)
-                            extract_links(decoded)
-                        except Exception:
-                            pass
-
-            for cid_str, is_rec in self.pin_store.get_pins().items():
+            for cid_str, pin_type in self.pin_store.get_pins().items():
                 try:
-                    c = parse_cid(cid_str)
-                    await traverse(cid_to_bytes(c), is_rec)
+                    c_bytes = cid_to_bytes(parse_cid(cid_str))
+                    is_rec = (pin_type == "recursive")
+                    async for reachable_cid_bytes in walk_dag(c_bytes, self.blockstore.get, recursive=is_rec):
+                        reachable_cids.add(reachable_cid_bytes)
                 except Exception as e:
                     logger.warning(f"Failed to traverse pinned CID {cid_str}: {e}")
 

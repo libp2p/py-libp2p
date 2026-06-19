@@ -8,7 +8,7 @@ logger = logging.getLogger("py_ipfs_lite.pin")
 class PinStore:
     def __init__(self, path: Optional[str] = None):
         self.path = path
-        self._pins: Dict[str, bool] = {}  # cid_str -> is_recursive
+        self._pins: Dict[str, str] = {}  # cid_str -> "direct" | "recursive"
         self._load()
 
     def _load(self):
@@ -19,7 +19,14 @@ class PinStore:
             try:
                 with open(pin_file, "r") as f:
                     data = json.load(f)
-                    self._pins = data.get("pins", {})
+                    # Migrate old bool format to new string format if needed
+                    raw_pins = data.get("pins", {})
+                    self._pins = {}
+                    for k, v in raw_pins.items():
+                        if isinstance(v, bool):
+                            self._pins[k] = "recursive" if v else "direct"
+                        else:
+                            self._pins[k] = v
             except Exception as e:
                 logger.error(f"Failed to load pins from {self.path}: {e}")
 
@@ -34,8 +41,10 @@ class PinStore:
         except Exception as e:
             logger.error(f"Failed to save pins to {self.path}: {e}")
 
-    def add_pin(self, cid_str: str, recursive: bool = True):
-        self._pins[cid_str] = recursive
+    def add_pin(self, cid_str: str, pin_type: str = "recursive"):
+        if pin_type not in ("direct", "recursive"):
+            raise ValueError(f"Invalid pin type: {pin_type}")
+        self._pins[cid_str] = pin_type
         self._save()
 
     def remove_pin(self, cid_str: str):
@@ -46,8 +55,12 @@ class PinStore:
     def is_pinned(self, cid_str: str) -> bool:
         return cid_str in self._pins
 
-    def is_recursive(self, cid_str: str) -> bool:
-        return self._pins.get(cid_str, False)
+    def get_pin_type(self, cid_str: str) -> Optional[str]:
+        return self._pins.get(cid_str)
 
-    def get_pins(self) -> Dict[str, bool]:
-        return self._pins.copy()
+    def get_pins(self, type_filter: str = "all") -> Dict[str, str]:
+        if type_filter == "all":
+            return self._pins.copy()
+        if type_filter in ("direct", "recursive"):
+            return {k: v for k, v in self._pins.items() if v == type_filter}
+        return {}
