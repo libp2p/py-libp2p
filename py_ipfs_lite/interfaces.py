@@ -13,7 +13,7 @@ class BlockStore(Protocol):
     async def has(self, cid: bytes) -> bool: ...
     async def delete(self, cid: bytes) -> None: ...
     def get_size(self, cid: bytes) -> int: ...
-    def all_keys(self) -> List[bytes]: ...
+    def all_keys(self) -> List[str]: ...
 
 class Exchange(Protocol):
     async def get_block(self, cid: bytes) -> Optional[bytes]: ...
@@ -99,8 +99,9 @@ class BlockStoreAdapter:
     def get_size(self, cid: bytes) -> int:
         return self._store.get_size(cid)
 
-    def all_keys(self) -> List[bytes]:
-        return self._store.get_all_cids()
+    def all_keys(self) -> List[str]:
+        from libp2p.bitswap.cid import parse_cid, format_cid_for_display
+        return [format_cid_for_display(parse_cid(c)) for c in self._store.get_all_cids()]
 
 
 from py_ipfs_lite.metrics import IPFS_DHT_QUERY_LATENCY_SECONDS

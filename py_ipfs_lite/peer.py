@@ -17,6 +17,15 @@ from py_ipfs_lite.metrics import (
 )
 
 from libp2p import new_host
+import os
+from typing import Optional, AsyncIterator, Dict, Any, Union, List
+from dataclasses import dataclass
+
+@dataclass
+class GCResult:
+    reclaimed_blocks: int
+    retained_blocks: int
+
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
@@ -369,7 +378,7 @@ class Peer:
         else:
             return fetch_stream(cid)
 
-    async def add_node(self, node, codec: str = "dag-json") -> str:
+    async def add_node(self, node: Union[dict, list, str, int, bytes], codec: str = "dag-json") -> str:
         self._ensure_started()
         data = encode_node(node, codec)
         cid = compute_cid_v1(data, codec=codec)
@@ -383,7 +392,7 @@ class Peer:
                 logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
         return cid_str
 
-    async def get_node(self, cid_str: str, provider_addr: Optional[str] = None):
+    async def get_node(self, cid_str: str, provider_addr: Optional[str] = None) -> Union[dict, list, str, int, bytes]:
         self._ensure_started()
         if provider_addr:
             maddr = Multiaddr(provider_addr)
@@ -461,9 +470,10 @@ class Peer:
         result.update(indirect_pins)
         return result
 
-    async def gc(self) -> dict:
+    async def gc(self) -> GCResult:
         self._ensure_started()
         from py_ipfs_lite.dag_utils import walk_dag
+        from libp2p.bitswap.cid import format_cid_for_display
         
         async with self._gc_lock:
             IPFS_GC_RUNS_TOTAL.inc()
@@ -475,18 +485,18 @@ class Peer:
                     c_bytes = cid_to_bytes(parse_cid(cid_str))
                     is_rec = (pin_type == "recursive")
                     async for reachable_cid_bytes in walk_dag(c_bytes, self.blockstore.get, recursive=is_rec):
-                        reachable_cids.add(reachable_cid_bytes)
+                        reachable_cids.add(format_cid_for_display(parse_cid(reachable_cid_bytes)))
                 except Exception as e:
                     logger.warning(f"Failed to traverse pinned CID {cid_str}: {e}")
 
             to_delete = all_cids - reachable_cids
             deleted_count = 0
-            for c_bytes in to_delete:
-                await self.blockstore.delete(c_bytes)
+            for c_str in to_delete:
+                await self.blockstore.delete(cid_to_bytes(parse_cid(c_str)))
                 deleted_count += 1
                 
             IPFS_GC_RECLAIMED_BLOCKS_TOTAL.inc(deleted_count)
-            return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
+            return GCResult(reclaimed_blocks=deleted_count, retained_blocks=len(reachable_cids))
 
     async def resolve_name(self, peer_id_str: str) -> str:
         """Resolve an IPNS name (PeerID) to its value."""

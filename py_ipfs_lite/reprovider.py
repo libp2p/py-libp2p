@@ -36,9 +36,8 @@ class Reprovider:
         logger.info(f"Reproviding {len(cids)} blocks to the DHT...")
         
         success_count = 0
-        for cid_bytes in cids:
+        for cid_str in cids:
             try:
-                cid_str = format_cid_for_display(cid_bytes)
                 await self.peer.routing.provide(cid_str)
                 success_count += 1
             except Exception as e:

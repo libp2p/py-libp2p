@@ -151,8 +151,9 @@ async def repo_gc(request: Request):
     """Run garbage collection."""
     peer: Peer = request.app.state.peer
     try:
+        import dataclasses
         stats = await peer.gc()
-        return JSONResponse(content=stats)
+        return JSONResponse(content=dataclasses.asdict(stats))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -160,13 +161,11 @@ async def repo_gc(request: Request):
 async def refs_local(request: Request):
     """List all CIDs stored in the local blockstore."""
     peer: Peer = request.app.state.peer
-    from libp2p.bitswap.cid import format_cid_for_display
     try:
         keys = peer.blockstore.all_keys()
         results = []
         for k in keys:
-            cid_str = format_cid_for_display(k)
-            results.append({"Ref": cid_str, "Err": ""})
+            results.append({"Ref": k, "Err": ""})
         # Kubo streams this as NDJSON, but returning a JSON array of objects is easier for testing
         return JSONResponse(content={"Refs": results})
     except Exception as e:
@@ -198,10 +197,11 @@ async def repo_stat(request: Request):
     """Get stats for the currently used repo."""
     peer: Peer = request.app.state.peer
     try:
+        from libp2p.bitswap.cid import parse_cid, cid_to_bytes
         keys = peer.blockstore.all_keys()
         num_objects = len(keys)
         # get_size can be called synchronously in the underlying memory/fs blockstore in py_ipfs_lite
-        repo_size = sum(peer.blockstore.get_size(k) for k in keys)
+        repo_size = sum(peer.blockstore.get_size(cid_to_bytes(parse_cid(k))) for k in keys)
         
         path = peer.config.blockstore_path
         if peer.config.blockstore_type == "memory":

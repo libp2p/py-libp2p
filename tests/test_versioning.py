@@ -35,13 +35,30 @@ def test_init_repo_version_existing_mismatch(caplog):
         init_repo_version(temp_dir)
         assert "Repo version mismatch!" in caplog.text
 
-from fastapi.testclient import TestClient
+from httpx import AsyncClient, ASGITransport
+import pytest
 from py_ipfs_lite.api import app
+from py_ipfs_lite.peer import Peer
+from py_ipfs_lite.config import Config
 
-def test_repo_version_endpoint():
-    # Setup testclient
-    client = TestClient(app)
-    # the peer inside lifespan uses memory blockstore by default if config is empty
-    response = client.get("/api/v0/repo/version")
+@pytest.fixture
+def memory_config():
+    return Config(blockstore_type="memory")
+
+@pytest.fixture
+async def client(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    try:
+        app.state.peer = peer
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+    finally:
+        await peer.close()
+
+@pytest.mark.trio
+async def test_repo_version_endpoint(client):
+    response = await client.get("/api/v0/repo/version")
     assert response.status_code == 200
     assert response.json()["Version"] == "memory"
