@@ -19,7 +19,7 @@ from py_ipfs_lite.metrics import (
 from libp2p import new_host
 import os
 import trio
-from typing import Optional, AsyncIterator, Dict, Any, Union, List
+from typing import Optional, AsyncIterator, Dict, Any, Union, List, Callable
 from dataclasses import dataclass
 
 from py_ipfs_lite.exceptions import BlockNotFoundError, PeerNotStartedError
@@ -301,15 +301,27 @@ class Peer:
         )
         await discovery.start()
 
-    async def add_file(self, path_or_stream: Union[str, BinaryIO], params: Optional[AddParams] = None, timeout: Optional[float] = None) -> str:
+    async def add_file(
+        self,
+        path_or_stream: Union[str, BinaryIO],
+        params: Optional[AddParams] = None,
+        timeout: Optional[float] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> str:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
-        kwargs = {"wrap_with_directory": False}
+        kwargs: Dict[str, Any] = {"wrap_with_directory": False}
         if params is not None and params.chunker and params.chunker.startswith("size-"):
             try:
                 kwargs["chunk_size"] = int(params.chunker.split("-")[1])
             except ValueError:
                 pass
+                
+        if progress_callback is not None:
+            def _wrapped_callback(bytes_written: int, total_bytes: int, phase: str) -> None:
+                progress_callback(bytes_written, total_bytes)
+            kwargs["progress_callback"] = _wrapped_callback
+
         async with self._gc_lock:
             if isinstance(path_or_stream, str):
                 cid = await self.dag_service.add_file(path_or_stream, **kwargs)
