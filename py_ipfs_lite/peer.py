@@ -488,6 +488,31 @@ class Peer:
             IPFS_GC_RECLAIMED_BLOCKS_TOTAL.inc(deleted_count)
             return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
 
+    async def resolve_name(self, peer_id_str: str) -> str:
+        """Resolve an IPNS name (PeerID) to its value."""
+        self._ensure_started()
+        from libp2p.peer.id import ID
+        from py_ipfs_lite.ipns import resolve_name as ipns_resolve
+        
+        # We need to look up the routing
+        peer_id = ID.from_base58(peer_id_str)
+        return await ipns_resolve(self.routing, peer_id)
+
+    async def publish_name(self, value: str, lifetime_hours: int = 24) -> str:
+        """Publish an IPNS record pointing to `value` using this node's private key."""
+        self._ensure_started()
+        from py_ipfs_lite.ipns import publish_name as ipns_publish
+        
+        # Sequence number could be maintained in datastore or retrieved from DHT first.
+        # For a basic implementation, we just use a timestamp for sequence to ensure it's monotonically increasing
+        import time
+        seq = int(time.time())
+        
+        peer_id = self.host.id()
+        await ipns_publish(self.routing, self._host_key.private_key, peer_id, value, seq, lifetime_hours)
+        
+        return peer_id.to_base58()
+
     async def export_car(self, cid_str: str, output_path: str) -> None:
         self._ensure_started()
         from py_ipfs_lite.car import export_car as _export_car

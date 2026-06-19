@@ -1,4 +1,4 @@
-from typing import Protocol, Optional, Any, AsyncIterator, List
+from typing import Protocol, Optional, Any, AsyncIterator, List, Union
 
 class Datastore(Protocol):
     async def get(self, key: bytes) -> bytes: ...
@@ -124,8 +124,8 @@ class RoutingAdapter:
         with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
             return await self._routing.provide(key)
 
-    async def get_value(self, key: str) -> Optional[bytes]:
+    async def get_value(self, key: Union[str, bytes]) -> Optional[bytes]:
         return await self._routing.get_value(key)
 
-    async def put_value(self, key: str, value: bytes) -> None:
+    async def put_value(self, key: Union[str, bytes], value: bytes) -> None:
         return await self._routing.put_value(key, value)

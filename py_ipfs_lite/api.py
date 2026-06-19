@@ -269,3 +269,25 @@ async def repo_version(request: Request):
         v = "memory"
         
     return JSONResponse(content={"Version": v})
+
+@app.post("/api/v0/name/publish")
+async def name_publish(request: Request, arg: str = Query(..., description="IPFS path of the object to be published")):
+    """Publish an IPNS record."""
+    peer: Peer = request.app.state.peer
+    try:
+        # Default lifetime is 24 hours.
+        name = await peer.publish_name(arg, lifetime_hours=24)
+        return JSONResponse(content={"Name": name, "Value": arg})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/name/resolve")
+@app.get("/api/v0/name/resolve")
+async def name_resolve(request: Request, arg: str = Query(..., description="The IPNS name to resolve")):
+    """Resolve an IPNS record."""
+    peer: Peer = request.app.state.peer
+    try:
+        value = await peer.resolve_name(arg)
+        return JSONResponse(content={"Path": value})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
