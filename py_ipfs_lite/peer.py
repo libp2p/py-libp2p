@@ -7,6 +7,14 @@ import trio
 from multiaddr import Multiaddr
 
 from py_ipfs_lite.config import Config, AddParams
+from py_ipfs_lite.metrics import (
+    MetricsBlockStore,
+    IPFS_DHT_QUERY_LATENCY_SECONDS,
+    IPFS_GC_RUNS_TOTAL,
+    IPFS_GC_RECLAIMED_BLOCKS_TOTAL,
+    IPFS_BITSWAP_BYTES_SENT_TOTAL,
+    IPFS_BITSWAP_BYTES_RECEIVED_TOTAL,
+)
 
 from libp2p import new_host
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -176,13 +184,28 @@ class Peer:
         if self.config.blockstore_type == "filesystem":
             if not self.config.blockstore_path:
                 raise ValueError("blockstore_path must be provided when blockstore_type is 'filesystem'")
-            return BlockStoreAdapter(FilesystemBlockStore(self.config.blockstore_path))
-        return BlockStoreAdapter(MemoryBlockStore())
+            raw_bs = FilesystemBlockStore(self.config.blockstore_path)
+        else:
+            raw_bs = MemoryBlockStore()
+        return BlockStoreAdapter(MetricsBlockStore(raw_bs))
 
     def _create_exchange(self):
         raw_host = getattr(self.host, "_host", self.host)
         raw_bs = getattr(self.blockstore, "_store", self.blockstore)
-        return BitswapClient(raw_host, raw_bs)
+        bitswap = BitswapClient(raw_host, raw_bs)
+        
+        class ExchangeAdapter:
+            def __init__(self, exchange):
+                self._exchange = exchange
+            async def get_block(self, cid):
+                data = await self._exchange.get_block(cid)
+                if data:
+                    IPFS_BITSWAP_BYTES_RECEIVED_TOTAL.inc(len(data))
+                return data
+            def __getattr__(self, name):
+                return getattr(self._exchange, name)
+                
+        return ExchangeAdapter(bitswap)
 
     def _create_dag_service(self):
         return MerkleDag(self.exchange)
@@ -439,6 +462,7 @@ class Peer:
         from py_ipfs_lite.dag_utils import walk_dag
         
         async with self._gc_lock:
+            IPFS_GC_RUNS_TOTAL.inc()
             all_cids = set(self.blockstore.all_keys())
             reachable_cids = set()
 
@@ -457,6 +481,7 @@ class Peer:
                 await self.blockstore.delete(c_bytes)
                 deleted_count += 1
                 
+            IPFS_GC_RECLAIMED_BLOCKS_TOTAL.inc(deleted_count)
             return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
 
     async def export_car(self, cid_str: str, output_path: str) -> None:

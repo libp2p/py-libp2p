@@ -10,6 +10,7 @@ from py_ipfs_lite.peer import Peer
 
 
 import logging
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 logger = logging.getLogger("py_ipfs_lite.api")
 # The actual instantiation of the peer depends on how the daemon is run,
@@ -249,3 +250,8 @@ async def swarm_peers(request: Request):
         logger.warning(f"Failed to list swarm peers: {e}")
         
     return JSONResponse(content={"Peers": peers_data})
+
+@app.get("/debug/metrics/prometheus")
+async def metrics():
+    """Expose Prometheus metrics."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)

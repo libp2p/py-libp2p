@@ -103,21 +103,26 @@ class BlockStoreAdapter:
         return self._store.get_all_cids()
 
 
+from py_ipfs_lite.metrics import IPFS_DHT_QUERY_LATENCY_SECONDS
+
 class RoutingAdapter:
     def __init__(self, routing):
         self._routing = routing
 
     async def bootstrap(self) -> None:
-        if hasattr(self._routing, "bootstrap"):
-            return await self._routing.bootstrap()
-        elif hasattr(self._routing, "refresh_routing_table"):
-            return await self._routing.refresh_routing_table()
+        with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
+            if hasattr(self._routing, "bootstrap"):
+                return await self._routing.bootstrap()
+            elif hasattr(self._routing, "refresh_routing_table"):
+                return await self._routing.refresh_routing_table()
 
     async def find_providers(self, key: str, count: int = 20) -> List[Any]:
-        return await self._routing.find_providers(key, count)
+        with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
+            return await self._routing.find_providers(key, count)
 
     async def provide(self, key: str) -> bool:
-        return await self._routing.provide(key)
+        with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
+            return await self._routing.provide(key)
 
     async def get_value(self, key: str) -> Optional[bytes]:
         return await self._routing.get_value(key)
