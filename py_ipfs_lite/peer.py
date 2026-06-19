@@ -1,7 +1,7 @@
 import contextlib
 import hashlib
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, AsyncIterator, Union
 
 import trio
 from multiaddr import Multiaddr
@@ -174,7 +174,7 @@ class Peer:
                 logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
         return cid_str
 
-    async def get_file(self, cid_str: str, output_path: Optional[str] = None, provider_addr: Optional[str] = None) -> bytes:
+    async def get_file(self, cid_str: str, output_path: Optional[str] = None, provider_addr: Optional[str] = None) -> Union[AsyncIterator[bytes], None]:
         self._ensure_started()
         if provider_addr:
             maddr = Multiaddr(provider_addr)
@@ -194,13 +194,44 @@ class Peer:
                 logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
             
         cid = parse_cid(cid_str)
-        content, _ = await self.dag_service.fetch_file(cid)
         
+        from libp2p.bitswap.dag import is_directory_node
+        
+        async def fetch_stream(current_cid):
+            data = await self.exchange.get_block(current_cid)
+            if data is None:
+                raise ValueError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
+            
+            norm_codec = _normalise_codec(get_codec_from_cid(current_cid))
+            if norm_codec == CODEC_RAW:
+                yield data
+                return
+                
+            if norm_codec == CODEC_DAG_PB:
+                if is_directory_node(data):
+                    links, _ = decode_dag_pb(data)
+                    if links:
+                        async for chunk in fetch_stream(links[0].cid):
+                            yield chunk
+                    return
+                
+                links, unixfs = decode_dag_pb(data)
+                if not links:
+                    if unixfs and unixfs.data:
+                        yield unixfs.data
+                    return
+                
+                for link in links:
+                    async for chunk in fetch_stream(link.cid):
+                        yield chunk
+
         if output_path:
             with open(output_path, "wb") as f:
-                f.write(content)
-                
-        return content
+                async for chunk in fetch_stream(cid):
+                    f.write(chunk)
+            return None
+        else:
+            return fetch_stream(cid)
 
     async def add_node(self, node, codec: str = "dag-json") -> str:
         self._ensure_started()

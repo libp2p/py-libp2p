@@ -67,8 +67,9 @@ async def cat_file(request: Request, arg: str = Query(..., description="The path
     """Fetch a file by its CID."""
     peer: Peer = request.app.state.peer
     try:
-        content = await peer.get_file(arg)
-        return Response(content=content, media_type="application/octet-stream")
+        content_iter = await peer.get_file(arg)
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(content_iter, media_type="application/octet-stream")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

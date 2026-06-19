@@ -66,7 +66,11 @@ async def test_add_get_file(memory_config):
         cid_str = await peer.add_file(temp_path)
         assert cid_str is not None
         
-        content = await peer.get_file(cid_str)
+        content_iter = await peer.get_file(cid_str)
+        chunks = []
+        async for chunk in content_iter:
+            chunks.append(chunk)
+        content = b"".join(chunks)
         assert content == b"hello world"
     finally:
         os.unlink(temp_path)
