@@ -48,14 +48,21 @@ def _flatten(exc: BaseException) -> list[BaseException]:
 
 @pytest.mark.trio
 async def test_subscribed_mesh_rejects_unreachable_readiness() -> None:
-    """A ready_timeout that's too short surfaces a TimeoutError, not a quiet sleep."""
-    # Ask for an absurdly short timeout; the mesh can't form in 1ms.
-    # Trio may or may not wrap the TimeoutError in an ExceptionGroup depending
-    # on the nursery strictness of upstream context managers, so catch broadly
-    # and then assert on the flattened leaves.
+    """
+    Unreachable readiness surfaces a TimeoutError, not a quiet yield.
+
+    Uses an unsatisfiable readiness predicate so the timeout path is exercised
+    deterministically — relying on a tiny ``ready_timeout`` is racy, since the
+    mesh may already be formed by the first poll (``wait_for`` checks the
+    predicate before the deadline), in which case the fixture yields instead.
+    Trio may or may not wrap the TimeoutError in an ExceptionGroup depending on
+    nursery strictness, so catch broadly and assert on the flattened leaves.
+    """
     raised: BaseException | None = None
     try:
-        async with subscribed_mesh(TOPIC, 3, ready_timeout=0.001):
+        async with subscribed_mesh(
+            TOPIC, 3, ready_predicate=lambda: False, ready_timeout=0.05
+        ):
             pytest.fail("subscribed_mesh should have timed out before yielding")
     except BaseException as exc:
         raised = exc

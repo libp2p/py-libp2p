@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 import dataclasses
 from typing import Any
@@ -94,6 +94,7 @@ async def subscribed_mesh(
     *,
     ready_timeout: float = 5.0,
     poll_interval: float = 0.02,
+    ready_predicate: Callable[[], bool] | None = None,
     **kwargs: Any,
 ) -> AsyncIterator[GossipSubHarness]:
     """
@@ -103,6 +104,11 @@ async def subscribed_mesh(
     *topic* to contain at least ``min(n - 1, router.degree_low)`` peers
     before yielding. This replaces the previous fixed-sleep wait with a
     deterministic, predicate-driven poll (see #1307).
+
+    *ready_predicate* overrides the default mesh-readiness check; pass an
+    unsatisfiable predicate to exercise the timeout path deterministically
+    (the default cannot be made to time out reliably, since the mesh may
+    already be formed by the first poll).
     """
     if ready_timeout <= 0:
         raise ValueError(f"ready_timeout must be > 0, got {ready_timeout!r}")
@@ -123,7 +129,7 @@ async def subscribed_mesh(
             return True
 
         await wait_for(
-            _mesh_ready,
+            ready_predicate or _mesh_ready,
             timeout=ready_timeout,
             poll_interval=poll_interval,
             fail_msg=(
