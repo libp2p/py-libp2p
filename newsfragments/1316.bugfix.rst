@@ -1,0 +1,6 @@
+Fix ``WebsocketListener.listen()`` binding IPv6 addresses. ``socket.getsockname()``
+returns a 4-tuple ``(host, port, flowinfo, scopeid)`` for IPv6 sockets, which
+previously failed to unpack into ``(sock_addr, sock_port)`` and surfaced as
+``OpenConnectionError("Failed to listen on ...")``. The listener now accepts
+any 2-or-more-tuple with ``(host: str, port: int)`` in the first two slots and
+falls back to the requested host/port on unknown shapes.
