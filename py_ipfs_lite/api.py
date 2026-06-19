@@ -255,3 +255,17 @@ async def swarm_peers(request: Request):
 async def metrics():
     """Expose Prometheus metrics."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+@app.post("/api/v0/repo/version")
+@app.get("/api/v0/repo/version")
+async def repo_version(request: Request):
+    """Return the datastore/repo version."""
+    peer: Peer = request.app.state.peer
+    
+    if peer.config.blockstore_type == "filesystem" and peer.config.blockstore_path:
+        from py_ipfs_lite.versioning import get_repo_version
+        v = get_repo_version(peer.config.blockstore_path)
+    else:
+        v = "memory"
+        
+    return JSONResponse(content={"Version": v})

@@ -184,6 +184,10 @@ class Peer:
         if self.config.blockstore_type == "filesystem":
             if not self.config.blockstore_path:
                 raise ValueError("blockstore_path must be provided when blockstore_type is 'filesystem'")
+                
+            from py_ipfs_lite.versioning import init_repo_version
+            init_repo_version(self.config.blockstore_path)
+            
             raw_bs = FilesystemBlockStore(self.config.blockstore_path)
         else:
             raw_bs = MemoryBlockStore()
