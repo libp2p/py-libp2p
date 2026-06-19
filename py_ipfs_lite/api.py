@@ -7,6 +7,7 @@ from fastapi.responses import Response, JSONResponse
 
 from py_ipfs_lite.config import Config
 from py_ipfs_lite.peer import Peer
+from py_ipfs_lite.exceptions import IPFSLiteError, BlockNotFoundError, PinNotFoundError, PeerNotStartedError, RoutingError
 
 
 import logging
@@ -57,6 +58,13 @@ async def add_file(request: Request, file: UploadFile = File(...)):
         
         cid_str = await peer.add_file(path)
         return JSONResponse(content={"Name": file.filename, "Hash": cid_str, "Size": str(len(content))})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -71,6 +79,13 @@ async def cat_file(request: Request, arg: str = Query(..., description="The path
         content_iter = await peer.get_file(arg)
         from fastapi.responses import StreamingResponse
         return StreamingResponse(content_iter, media_type="application/octet-stream")
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -83,6 +98,13 @@ async def dag_put(request: Request, store_codec: str = Query("dag-json", alias="
         node_data = json.loads(body)
         cid_str = await peer.add_node(node_data, codec=store_codec)
         return JSONResponse(content={"Cid": {"/": cid_str}})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -94,6 +116,13 @@ async def dag_get(request: Request, arg: str = Query(..., description="The objec
     try:
         node_data = await peer.get_node(arg)
         return JSONResponse(content=node_data)
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -113,6 +142,13 @@ async def block_stat(request: Request, arg: str = Query(..., description="The ba
         return JSONResponse(content={"Key": arg, "Size": len(data)})
     except HTTPException:
         raise
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -123,6 +159,13 @@ async def block_rm(request: Request, arg: str = Query(..., description="Bash58 m
     try:
         await peer.remove_node(arg)
         return JSONResponse(content={"Hash": arg, "Error": ""})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -133,6 +176,13 @@ async def pin_add(request: Request, arg: str = Query(..., description="Path to o
     try:
         await peer.add_pin(arg, recursive=recursive)
         return JSONResponse(content={"Pins": [arg]})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -143,6 +193,13 @@ async def pin_rm(request: Request, arg: str = Query(..., description="Path to ob
     try:
         await peer.remove_pin(arg)
         return JSONResponse(content={"Pins": [arg]})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -154,6 +211,13 @@ async def repo_gc(request: Request):
         import dataclasses
         stats = await peer.gc()
         return JSONResponse(content=dataclasses.asdict(stats))
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -168,6 +232,13 @@ async def refs_local(request: Request):
             results.append({"Ref": k, "Err": ""})
         # Kubo streams this as NDJSON, but returning a JSON array of objects is easier for testing
         return JSONResponse(content={"Refs": results})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -213,6 +284,13 @@ async def repo_stat(request: Request):
             "RepoPath": path,
             "Version": "1"
         })
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -278,6 +356,13 @@ async def name_publish(request: Request, arg: str = Query(..., description="IPFS
         # Default lifetime is 24 hours.
         name = await peer.publish_name(arg, lifetime_hours=24)
         return JSONResponse(content={"Name": name, "Value": arg})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -289,5 +374,12 @@ async def name_resolve(request: Request, arg: str = Query(..., description="The 
     try:
         value = await peer.resolve_name(arg)
         return JSONResponse(content={"Path": value})
+    except IPFSLiteError as e:
+        status_code = 500
+        if isinstance(e, (BlockNotFoundError, PinNotFoundError, RoutingError)):
+            status_code = 404
+        elif isinstance(e, PeerNotStartedError):
+            status_code = 503
+        raise HTTPException(status_code=status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -48,9 +48,11 @@ class PinStore:
         self._save()
 
     def remove_pin(self, cid_str: str):
-        if cid_str in self._pins:
-            del self._pins[cid_str]
-            self._save()
+        if cid_str not in self._pins:
+            from py_ipfs_lite.exceptions import PinNotFoundError
+            raise PinNotFoundError(f"not pinned or pinned indirectly: {cid_str}")
+        del self._pins[cid_str]
+        self._save()
 
     def is_pinned(self, cid_str: str) -> bool:
         return cid_str in self._pins

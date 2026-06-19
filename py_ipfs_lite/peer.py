@@ -21,6 +21,8 @@ import os
 from typing import Optional, AsyncIterator, Dict, Any, Union, List
 from dataclasses import dataclass
 
+from py_ipfs_lite.exceptions import BlockNotFoundError, PeerNotStartedError
+
 @dataclass
 class GCResult:
     reclaimed_blocks: int
@@ -345,7 +347,7 @@ class Peer:
         async def fetch_stream(current_cid):
             data = await self.exchange.get_block(current_cid)
             if data is None:
-                raise ValueError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
+                raise BlockNotFoundError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
             
             codec = parse_cid_codec(cid_to_bytes(current_cid))
             if codec == "raw":
@@ -414,7 +416,7 @@ class Peer:
         cid = parse_cid(cid_str)
         data = await self.exchange.get_block(cid)
         if data is None:
-            raise ValueError(f"Block not found for CID: {cid_str}")
+            raise BlockNotFoundError(f"Block not found for CID: {cid_str}")
         codec = parse_cid_codec(cid_to_bytes(cid))
         return decode_node(data, codec)
 
@@ -552,4 +554,4 @@ class Peer:
 
     def _ensure_started(self) -> None:
         if not self._started:
-            raise RuntimeError("Peer not started. Call start() first.")
+            raise PeerNotStartedError("Peer not started. Call start() first.")

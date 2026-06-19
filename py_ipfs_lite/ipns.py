@@ -2,6 +2,7 @@ import cbor2
 from datetime import datetime, timezone, timedelta
 import logging
 
+from py_ipfs_lite.exceptions import RoutingError
 from libp2p.crypto.keys import PrivateKey, PublicKey
 from libp2p.records.pb.ipns_pb2 import IpnsEntry
 from libp2p.peer.id import ID
@@ -71,7 +72,7 @@ async def resolve_name(routing, peer_id: ID) -> str:
     dht_key = b"/ipns/" + peer_id.to_bytes()
     record_bytes = await routing.get_value(dht_key)
     if not record_bytes:
-        raise ValueError(f"Could not resolve name: {peer_id.to_base58()}")
+        raise RoutingError(f"Could not resolve name: {peer_id.to_base58()}")
         
     entry = IpnsEntry()
     entry.ParseFromString(record_bytes)
