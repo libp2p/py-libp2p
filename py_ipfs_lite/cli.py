@@ -19,7 +19,10 @@ def _get_key_pair(seed: str | None):
     return None
 
 DEFAULT_BOOTSTRAP_PEERS = [
-    "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWCvVxG5SBv5fZNVULQGpJuhBCiRNAABs24QqyxtEYy1Pv",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
 ]
 
 async def run_daemon(port: int, seed: str | None, config: Config):
