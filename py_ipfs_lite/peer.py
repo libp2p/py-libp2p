@@ -399,6 +399,16 @@ class Peer:
                 
             return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
 
+    async def export_car(self, cid_str: str, output_path: str) -> None:
+        self._ensure_started()
+        from py_ipfs_lite.car import export_car as _export_car
+        await _export_car(self, cid_str, output_path)
+
+    async def import_car(self, input_path: str) -> list[str]:
+        self._ensure_started()
+        from py_ipfs_lite.car import import_car as _import_car
+        return await _import_car(self, input_path)
+
     def session(self):
         return self
 
