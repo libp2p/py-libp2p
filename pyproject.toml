@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "fastapi>=0.137.1",
+  "httpx>=0.28.1",
   "hypercorn>=0.18.0",
   "libp2p @ git+https://github.com/sumanjeet0012/py-libp2p.git@improvement/bitswap",
   "python-multipart>=0.0.32",

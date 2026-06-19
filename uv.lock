@@ -1636,6 +1636,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "hypercorn" },
     { name = "libp2p" },
     { name = "python-multipart" },
@@ -1658,6 +1659,7 @@ test = [
 requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.1" },
     { name = "fastapi", specifier = ">=0.137.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypercorn", specifier = ">=0.18.0" },
     { name = "libp2p", git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=improvement%2Fbitswap" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },

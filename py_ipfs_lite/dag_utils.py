@@ -1,9 +1,31 @@
 from typing import AsyncIterator, Callable, Awaitable, Optional
 from libp2p.bitswap.cid import (
     parse_cid, cid_to_bytes,
-    CODEC_DAG_PB, CODEC_DAG_JSON, CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE, _normalise_codec
+    CODEC_DAG_PB, CODEC_RAW, _normalise_codec, parse_cid_codec
 )
-from libp2p.bitswap.dag import decode_node, decode_dag_pb, get_codec_from_cid
+from libp2p.bitswap.dag import decode_dag_pb
+import cbor2
+import json
+
+def encode_node(node: dict, codec: str) -> bytes:
+    if codec == "dag-cbor":
+        return cbor2.dumps(node)
+    elif codec == "dag-json":
+        return json.dumps(node).encode("utf-8")
+    else:
+        # Fallback to json for testing if codec unknown but dict provided
+        return json.dumps(node).encode("utf-8")
+
+def decode_node(data: bytes, codec: str) -> dict:
+    if codec == "dag-cbor":
+        return cbor2.loads(data)
+    elif codec == "dag-json":
+        return json.loads(data.decode("utf-8"))
+    else:
+        try:
+            return json.loads(data.decode("utf-8"))
+        except:
+            raise ValueError(f"Unsupported codec for decoding: {codec}")
 
 async def walk_dag(root_cid_bytes: bytes, get_block: Callable[[bytes], Awaitable[Optional[bytes]]], recursive: bool = True) -> AsyncIterator[bytes]:
     queue = [root_cid_bytes]
@@ -22,7 +44,7 @@ async def walk_dag(root_cid_bytes: bytes, get_block: Callable[[bytes], Awaitable
         if data is None:
             continue
             
-        codec = get_codec_from_cid(curr_cid)
+        codec = parse_cid_codec(curr_cid)
         norm_codec = _normalise_codec(codec)
         
         if norm_codec == CODEC_DAG_PB:
@@ -33,7 +55,7 @@ async def walk_dag(root_cid_bytes: bytes, get_block: Callable[[bytes], Awaitable
                         queue.append(link.cid)
             except Exception:
                 pass
-        elif norm_codec in (CODEC_DAG_JSON, CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE):
+        elif str(norm_codec) in ("dag-json", "dag-cbor", "dag-jose", "ipld"):
             try:
                 decoded = decode_node(data, codec)
                 def extract_links(obj):

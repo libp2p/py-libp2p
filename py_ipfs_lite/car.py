@@ -4,11 +4,11 @@ from typing import List
 from cbor2 import loads, dumps, CBORTag
 
 from libp2p.bitswap.cid import (
-    parse_cid, format_cid_for_display, cid_to_bytes, 
-    CODEC_DAG_PB, CODEC_DAG_JSON, 
-    CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE, _normalise_codec
+    parse_cid, cid_to_bytes, format_cid_for_display,
+    CODEC_DAG_PB, CODEC_RAW, parse_cid_codec, _normalise_codec
 )
-from libp2p.bitswap.dag import decode_node, decode_dag_pb, get_codec_from_cid
+from libp2p.bitswap.dag import MerkleDag, decode_dag_pb
+from py_ipfs_lite.dag_utils import decode_node
 
 def get_cid_len(data: bytes) -> int:
     if data[0] == 0x12 and data[1] == 0x20:
@@ -53,10 +53,10 @@ async def export_car(peer, cid_str: str, output_path: str):
             f.write(curr_cid_bytes)
             f.write(data)
             
-            codec = get_codec_from_cid(curr_cid_bytes)
+            codec = parse_cid_codec(curr_cid_bytes)
             norm_codec = _normalise_codec(codec)
             
-            if norm_codec == CODEC_DAG_PB:
+            if str(norm_codec) == "dag-pb":
                 try:
                     node_links, _ = decode_dag_pb(data)
                     for link in node_links:
@@ -64,7 +64,7 @@ async def export_car(peer, cid_str: str, output_path: str):
                             queue.append(link.cid)
                 except Exception:
                     pass
-            elif norm_codec in (CODEC_DAG_JSON, CODEC_DAG_CBOR, CODEC_IPLD, CODEC_DAG_JOSE):
+            elif str(norm_codec) in ("dag-json", "dag-cbor", "ipld", "dag-jose"):
                 try:
                     decoded = decode_node(data, codec)
                     def extract_links(obj):

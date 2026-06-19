@@ -14,19 +14,16 @@ from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.security.noise.transport import Transport as NoiseTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
 from libp2p.bitswap.block_store import FilesystemBlockStore
-from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid, decode_dag_pb
+from libp2p.bitswap.dag import MerkleDag, decode_dag_pb
+from py_ipfs_lite.dag_utils import encode_node, decode_node
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.bitswap.cid import (
     parse_cid, 
     format_cid_for_display, 
     compute_cid_v1,
+    parse_cid_codec,
     CODEC_DAG_PB,
     CODEC_RAW,
-    CODEC_DAG_JSON,
-    CODEC_DAG_CBOR,
-    CODEC_IPLD,
-    CODEC_DAG_JOSE,
-    _normalise_codec,
     cid_to_bytes,
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
@@ -253,12 +250,12 @@ class Peer:
             if data is None:
                 raise ValueError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
             
-            norm_codec = _normalise_codec(get_codec_from_cid(current_cid))
-            if norm_codec == CODEC_RAW:
+            codec = parse_cid_codec(cid_to_bytes(current_cid))
+            if codec == "raw":
                 yield data
                 return
                 
-            if norm_codec == CODEC_DAG_PB:
+            if codec == "dag-pb":
                 if is_directory_node(data):
                     links, _ = decode_dag_pb(data)
                     if links:
@@ -321,7 +318,7 @@ class Peer:
         data = await self.exchange.get_block(cid)
         if data is None:
             raise ValueError(f"Block not found for CID: {cid_str}")
-        codec = get_codec_from_cid(cid)
+        codec = parse_cid_codec(cid_to_bytes(cid))
         return decode_node(data, codec)
 
     async def remove_node(self, cid_str: str) -> None:

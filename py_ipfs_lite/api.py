@@ -170,3 +170,82 @@ async def refs_local(request: Request):
         return JSONResponse(content={"Refs": results})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/version")
+@app.get("/api/v0/version")
+async def api_version():
+    """Get the version of py-ipfs-lite."""
+    return JSONResponse(content={
+        "Version": "0.1.0",
+        "Commit": "",
+        "System": "py-ipfs-lite"
+    })
+
+@app.post("/api/v0/id")
+@app.get("/api/v0/id")
+async def api_id(request: Request):
+    """Show IPFS node id info."""
+    peer: Peer = request.app.state.peer
+    return JSONResponse(content={
+        "ID": peer.host.id().to_base58(),
+        "Addresses": [str(addr) for addr in peer.host.addrs()]
+    })
+
+@app.post("/api/v0/repo/stat")
+@app.get("/api/v0/repo/stat")
+async def repo_stat(request: Request):
+    """Get stats for the currently used repo."""
+    peer: Peer = request.app.state.peer
+    try:
+        keys = peer.blockstore.all_keys()
+        num_objects = len(keys)
+        # get_size can be called synchronously in the underlying memory/fs blockstore in py_ipfs_lite
+        repo_size = sum(peer.blockstore.get_size(k) for k in keys)
+        
+        path = peer.config.blockstore_path
+        if peer.config.blockstore_type == "memory":
+            path = ""
+            
+        return JSONResponse(content={
+            "NumObjects": num_objects,
+            "RepoSize": repo_size,
+            "RepoPath": path,
+            "Version": "1"
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v0/swarm/peers")
+@app.get("/api/v0/swarm/peers")
+async def swarm_peers(request: Request):
+    """List peers with open connections."""
+    peer: Peer = request.app.state.peer
+    network = peer.host.get_network()
+    peers_data = []
+    
+    try:
+        if hasattr(network, "connections"):
+            conns_dict = network.connections
+            for peer_id_obj, conns in conns_dict.items():
+                if not isinstance(conns, list):
+                    conns = [conns]
+                
+                for c in conns:
+                    addr_str = ""
+                    try:
+                        if hasattr(c, "remote_addr"):
+                            addr_str = str(c.remote_addr)
+                        elif hasattr(c, "get_remote_multiaddr"):
+                            addr_str = str(c.get_remote_multiaddr())
+                    except Exception:
+                        pass
+                        
+                    peers_data.append({
+                        "Peer": peer_id_obj.to_base58(),
+                        "Addr": addr_str,
+                        "Direction": 0
+                    })
+    except Exception as e:
+        logger.warning(f"Failed to list swarm peers: {e}")
+        
+    return JSONResponse(content={"Peers": peers_data})
