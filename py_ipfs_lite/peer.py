@@ -12,7 +12,6 @@ from libp2p.crypto.keys import KeyPair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.security.noise.transport import Transport as NoiseTransport
-from libp2p.security.secio.transport import Transport as SecioTransport
 from libp2p.bitswap import BitswapClient, MemoryBlockStore
 from libp2p.bitswap.block_store import FilesystemBlockStore
 from libp2p.bitswap.dag import MerkleDag, encode_node, decode_node, get_codec_from_cid, decode_dag_pb
@@ -85,7 +84,6 @@ class Peer:
             "/noise": NoiseTransport(
                 self._host_key, noise_privkey=noise_key_pair.private_key
             ),
-            "/secio/1.0.0": SecioTransport(self._host_key),
         }
         raw_host = new_host(key_pair=self._host_key, listen_addrs=maddrs, sec_opt=sec_opt)
         return HostAdapter(raw_host)
