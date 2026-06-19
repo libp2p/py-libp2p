@@ -33,13 +33,23 @@ class PinStore:
     def _save(self):
         if not self.path:
             return
+        import os
         pin_file = Path(self.path)
         pin_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = pin_file.with_suffix('.tmp')
         try:
-            with open(pin_file, "w") as f:
+            with open(tmp_file, "w") as f:
                 json.dump({"pins": self._pins}, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, pin_file)
         except Exception as e:
             logger.error(f"Failed to save pins to {self.path}: {e}")
+            if tmp_file.exists():
+                try:
+                    tmp_file.unlink()
+                except Exception:
+                    pass
 
     def add_pin(self, cid_str: str, pin_type: str = "recursive"):
         if pin_type not in ("direct", "recursive"):
