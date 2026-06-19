@@ -204,6 +204,8 @@ def main():
             reprovide_interval_seconds=parsed_args.reprovide_interval_seconds,
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
+            use_ipni=parsed_args.use_ipni,
+            ipni_endpoint=parsed_args.ipni_endpoint,
         )
         
         if parsed_args.api:
@@ -233,6 +235,8 @@ def main():
             offline=parsed_args.offline,
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
+            use_ipni=parsed_args.use_ipni,
+            ipni_endpoint=parsed_args.ipni_endpoint,
         )
         add_params = AddParams(
             chunker=parsed_args.chunker,
@@ -253,6 +257,8 @@ def main():
             offline=parsed_args.offline,
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
+            use_ipni=parsed_args.use_ipni,
+            ipni_endpoint=parsed_args.ipni_endpoint,
         )
         trio.run(
             run_get,
@@ -269,6 +275,8 @@ def main():
             offline=parsed_args.offline,
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
+            use_ipni=parsed_args.use_ipni,
+            ipni_endpoint=parsed_args.ipni_endpoint,
         )
         trio.run(
             run_dag_export,
@@ -284,6 +292,8 @@ def main():
             offline=parsed_args.offline,
             blockstore_type=parsed_args.blockstore_type,
             blockstore_path=parsed_args.blockstore_path,
+            use_ipni=parsed_args.use_ipni,
+            ipni_endpoint=parsed_args.ipni_endpoint,
         )
         trio.run(
             run_dag_import,
