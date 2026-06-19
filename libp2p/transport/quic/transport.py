@@ -270,7 +270,7 @@ class QUICTransport(ITransport):
 
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
-            logger.debug("config_key", config_key, self._quic_configs.keys())
+            logger.debug("config_key %s %s", config_key, self._quic_configs.keys())
             config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
@@ -288,7 +288,7 @@ class QUICTransport(ITransport):
 
             # Debug log to verify certificate is present
             logger.info(
-                f"Dialing QUIC connection to {host}:{port} (version: {{quic_version}})"
+                f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
             )
 
             logger.debug("Starting QUIC Connection")
