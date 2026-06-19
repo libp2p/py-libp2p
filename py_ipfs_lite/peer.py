@@ -418,28 +418,34 @@ class Peer:
     async def get_node(self, cid_str: str, provider_addr: Optional[str] = None, timeout: Optional[float] = None) -> Union[dict, list, str, int, bytes]:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
-        if provider_addr:
-            maddr = Multiaddr(provider_addr)
-            info = info_from_p2p_addr(maddr)
-            await self.host.connect(info)
-        elif self.routing:
-            try:
-                with trio.fail_after(t_val):
-                    providers = await self.routing.find_providers(cid_str)
-                for provider in providers:
-                    if provider.peer_id == self.host.id():
-                        continue
-                    try:
-                        with trio.fail_after(t_val):
-                            await self.host.connect(provider)
-                    except Exception as e:
-                        logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
-            
         cid = parse_cid(cid_str)
-        with trio.fail_after(t_val):
-            data = await self.exchange.get_block(cid)
+        
+        # Check local blockstore first
+        data = await self.blockstore.get(cid_to_bytes(cid))
+        
+        if data is None:
+            if provider_addr:
+                maddr = Multiaddr(provider_addr)
+                info = info_from_p2p_addr(maddr)
+                await self.host.connect(info)
+            elif self.routing:
+                try:
+                    with trio.fail_after(t_val):
+                        providers = await self.routing.find_providers(cid_str)
+                    for provider in providers:
+                        if provider.peer_id == self.host.id():
+                            continue
+                        try:
+                            with trio.fail_after(t_val):
+                                await self.host.connect(provider)
+                        except Exception as e:
+                            logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
+                
+            with trio.fail_after(t_val):
+                data = await self.exchange.get_block(cid)
+                
         if data is None:
             raise BlockNotFoundError(f"Block not found for CID: {cid_str}")
         codec = parse_cid_codec(cid_to_bytes(cid))
