@@ -15,6 +15,7 @@ class Config:
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
     use_ipni: bool = True
     ipni_endpoint: str = "https://cid.contact"
+    default_timeout: float = 30.0
 
 
 @dataclass(slots=True)

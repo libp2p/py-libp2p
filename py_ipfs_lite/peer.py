@@ -18,6 +18,7 @@ from py_ipfs_lite.metrics import (
 
 from libp2p import new_host
 import os
+import trio
 from typing import Optional, AsyncIterator, Dict, Any, Union, List
 from dataclasses import dataclass
 
@@ -300,8 +301,9 @@ class Peer:
         )
         await discovery.start()
 
-    async def add_file(self, path_or_stream: Union[str, BinaryIO], params: Optional[AddParams] = None) -> str:
+    async def add_file(self, path_or_stream: Union[str, BinaryIO], params: Optional[AddParams] = None, timeout: Optional[float] = None) -> str:
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         kwargs = {"wrap_with_directory": False}
         if params is not None and params.chunker and params.chunker.startswith("size-"):
             try:
@@ -316,25 +318,29 @@ class Peer:
         cid_str = format_cid_for_display(cid)
         if self.routing:
             try:
-                await self.routing.provide(cid_str)
+                with trio.fail_after(t_val):
+                    await self.routing.provide(cid_str)
             except Exception as e:
                 logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
         return cid_str
 
-    async def get_file(self, cid_str: str, output_path: Optional[str] = None, provider_addr: Optional[str] = None) -> Union[AsyncIterator[bytes], None]:
+    async def get_file(self, cid_str: str, provider_addr: Optional[str] = None, output_path: Optional[str] = None, timeout: Optional[float] = None) -> Union[bytes, AsyncIterator[bytes]]:
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         if provider_addr:
             maddr = Multiaddr(provider_addr)
             info = info_from_p2p_addr(maddr)
             await self.host.connect(info)
         elif self.routing:
             try:
-                providers = await self.routing.find_providers(cid_str)
+                with trio.fail_after(t_val):
+                    providers = await self.routing.find_providers(cid_str)
                 for provider in providers:
                     if provider.peer_id == self.host.id():
                         continue
                     try:
-                        await self.host.connect(provider)
+                        with trio.fail_after(t_val):
+                            await self.host.connect(provider)
                     except Exception as e:
                         logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
             except Exception as e:
@@ -345,7 +351,8 @@ class Peer:
         from libp2p.bitswap.dag import is_directory_node
         
         async def fetch_stream(current_cid):
-            data = await self.exchange.get_block(current_cid)
+            with trio.fail_after(t_val):
+                data = await self.exchange.get_block(current_cid)
             if data is None:
                 raise BlockNotFoundError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
             
@@ -380,8 +387,9 @@ class Peer:
         else:
             return fetch_stream(cid)
 
-    async def add_node(self, node: Union[dict, list, str, int, bytes], codec: str = "dag-json") -> str:
+    async def add_node(self, node: Union[dict, list, str, int, bytes], codec: str = "dag-json", timeout: Optional[float] = None) -> str:
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         data = encode_node(node, codec)
         cid = compute_cid_v1(data, codec=codec)
         async with self._gc_lock:
@@ -389,32 +397,37 @@ class Peer:
         cid_str = format_cid_for_display(cid)
         if self.routing:
             try:
-                await self.routing.provide(cid_str)
+                with trio.fail_after(t_val):
+                    await self.routing.provide(cid_str)
             except Exception as e:
                 logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
         return cid_str
 
-    async def get_node(self, cid_str: str, provider_addr: Optional[str] = None) -> Union[dict, list, str, int, bytes]:
+    async def get_node(self, cid_str: str, provider_addr: Optional[str] = None, timeout: Optional[float] = None) -> Union[dict, list, str, int, bytes]:
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         if provider_addr:
             maddr = Multiaddr(provider_addr)
             info = info_from_p2p_addr(maddr)
             await self.host.connect(info)
         elif self.routing:
             try:
-                providers = await self.routing.find_providers(cid_str)
+                with trio.fail_after(t_val):
+                    providers = await self.routing.find_providers(cid_str)
                 for provider in providers:
                     if provider.peer_id == self.host.id():
                         continue
                     try:
-                        await self.host.connect(provider)
+                        with trio.fail_after(t_val):
+                            await self.host.connect(provider)
                     except Exception as e:
                         logger.debug(f"Failed to connect to provider {provider.peer_id}: {e}")
             except Exception as e:
                 logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
             
         cid = parse_cid(cid_str)
-        data = await self.exchange.get_block(cid)
+        with trio.fail_after(t_val):
+            data = await self.exchange.get_block(cid)
         if data is None:
             raise BlockNotFoundError(f"Block not found for CID: {cid_str}")
         codec = parse_cid_codec(cid_to_bytes(cid))
@@ -500,30 +513,33 @@ class Peer:
             IPFS_GC_RECLAIMED_BLOCKS_TOTAL.inc(deleted_count)
             return GCResult(reclaimed_blocks=deleted_count, retained_blocks=len(reachable_cids))
 
-    async def resolve_name(self, peer_id_str: str) -> str:
+    async def resolve_name(self, peer_id_str: str, timeout: Optional[float] = None) -> str:
         """Resolve an IPNS name (PeerID) to its value."""
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         from libp2p.peer.id import ID
         from py_ipfs_lite.ipns import resolve_name as ipns_resolve
         
         # We need to look up the routing
         peer_id = ID.from_base58(peer_id_str)
-        return await ipns_resolve(self.routing, peer_id)
+        with trio.fail_after(t_val):
+            return await ipns_resolve(self.routing, peer_id)
 
-    async def publish_name(self, value: str, lifetime_hours: int = 24) -> str:
+    async def publish_name(self, value: str, lifetime_hours: int = 24, timeout: Optional[float] = None) -> str:
         """Publish an IPNS record pointing to `value` using this node's private key."""
         self._ensure_started()
+        t_val = timeout if timeout is not None else self.config.default_timeout
         from py_ipfs_lite.ipns import publish_name as ipns_publish
+        from datetime import timedelta
         
         # Sequence number could be maintained in datastore or retrieved from DHT first.
         # For a basic implementation, we just use a timestamp for sequence to ensure it's monotonically increasing
         import time
-        seq = int(time.time())
+        sequence = int(time.time())
         
-        peer_id = self.host.id()
-        await ipns_publish(self.routing, self._host_key.private_key, peer_id, value, seq, lifetime_hours)
-        
-        return peer_id.to_base58()
+        with trio.fail_after(t_val):
+            await ipns_publish(self.routing, self._host_key.private_key, self.host.id(), value, sequence, lifetime_hours)
+        return self.host.id().to_base58()
 
     async def export_car(self, cid_str: str, output_path: str) -> None:
         self._ensure_started()
