@@ -45,6 +45,7 @@ async def test_add_get_remove_node(memory_config):
     # 2. Get
     fetched = await peer.get_node(cid_str)
     assert fetched == node_data
+    assert await peer.has_block(cid_str) is True
     
     # 3. Remove
     await peer.remove_node(cid_str)
@@ -162,3 +163,33 @@ async def test_gc_concurrency_lock(memory_config):
     finally:
         os.unlink(temp_path)
         await peer.close()
+
+@pytest.mark.trio
+async def test_api_parity_methods():
+    from py_ipfs_lite import setup_libp2p, default_bootstrap_peers, new_in_memory_datastore
+    from libp2p.crypto.ed25519 import create_new_key_pair
+    from multiaddr import Multiaddr
+
+    # Test helpers
+    boot_peers = default_bootstrap_peers()
+    assert isinstance(boot_peers, list)
+    assert len(boot_peers) > 0
+
+    mem_store = new_in_memory_datastore()
+    assert mem_store is not None
+
+    key_pair = create_new_key_pair()
+    host, routing = await setup_libp2p(key_pair, ["/ip4/127.0.0.1/tcp/0"], offline=True)
+    assert host is not None
+    assert routing is None  # Since offline is True
+
+def test_peer_accessors(memory_config):
+    from py_ipfs_lite.peer import Peer
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    
+    # Initialize properties manually to avoid full async start() overhead in this test
+    peer.blockstore = peer._create_blockstore()
+    
+    # Test accessors
+    assert peer.session() == peer
+    assert peer.block_store() is not None

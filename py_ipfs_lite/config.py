@@ -5,6 +5,9 @@ from dataclasses import dataclass
 class Config:
     offline: bool = False
     reprovide_interval_seconds: int = 43200
+    reprovider_strategy: str = "all"
+    conn_mgr_high_water: int = 900
+    conn_mgr_low_water: int = 600
     uncached_blockstore: bool = False
     bitswap_broadcast_max_random_peers: int = 64
     bitswap_broadcast_control_send_to_pending_peers: bool = False

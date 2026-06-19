@@ -1,7 +1,7 @@
 import contextlib
 import hashlib
 import logging
-from typing import Optional, Tuple, AsyncIterator, Union
+from typing import Optional, Tuple, AsyncIterator, Union, BinaryIO
 
 import trio
 from multiaddr import Multiaddr
@@ -42,6 +42,33 @@ from py_ipfs_lite.interfaces import (
 logger = logging.getLogger("py_ipfs_lite.peer")
 
 
+def default_bootstrap_peers() -> list[str]:
+    from py_ipfs_lite.cli import DEFAULT_BOOTSTRAP_PEERS
+    return DEFAULT_BOOTSTRAP_PEERS.copy()
+
+async def setup_libp2p(
+    host_key,
+    listen_addrs: list,
+    datastore=None,
+    offline: bool = False,
+):
+    maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in listen_addrs]
+    noise_key_pair = create_new_x25519_key_pair()
+    sec_opt = {
+        "/noise": NoiseTransport(
+            host_key, noise_privkey=noise_key_pair.private_key
+        ),
+    }
+    raw_host = new_host(key_pair=host_key, listen_addrs=maddrs, sec_opt=sec_opt)
+    
+    if not offline:
+        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)
+        return HostAdapter(raw_host), RoutingAdapter(raw_routing)
+    return HostAdapter(raw_host), None
+
+def new_in_memory_datastore():
+    return BlockStoreAdapter(MemoryBlockStore())
+
 class Peer:
     def __init__(
         self,
@@ -77,6 +104,18 @@ class Peer:
         self._gc_lock = trio.Lock()
         self._started = False
         self._exit_stack = contextlib.AsyncExitStack()
+
+    @classmethod
+    async def new(cls, datastore, blockstore, host, routing, config):
+        peer = cls(
+            config=config,
+            datastore=datastore,
+            blockstore=blockstore,
+            host=host,
+            routing=routing
+        )
+        await peer.start()
+        return peer
 
     async def _create_host(self):
         maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
@@ -158,7 +197,7 @@ class Peer:
         )
         await discovery.start()
 
-    async def add_file(self, path: str, params: Optional[AddParams] = None) -> str:
+    async def add_file(self, path_or_stream: Union[str, BinaryIO], params: Optional[AddParams] = None) -> str:
         self._ensure_started()
         kwargs = {"wrap_with_directory": False}
         if params is not None and params.chunker and params.chunker.startswith("size-"):
@@ -167,7 +206,10 @@ class Peer:
             except ValueError:
                 pass
         async with self._gc_lock:
-            cid = await self.dag_service.add_file(path, **kwargs)
+            if isinstance(path_or_stream, str):
+                cid = await self.dag_service.add_file(path_or_stream, **kwargs)
+            else:
+                cid = await self.dag_service.add_stream(path_or_stream, **kwargs)
         cid_str = format_cid_for_display(cid)
         if self.routing:
             try:
@@ -356,6 +398,23 @@ class Peer:
                 deleted_count += 1
                 
             return {"reclaimed_blocks": deleted_count, "retained_blocks": len(reachable_cids)}
+
+    def session(self):
+        return self
+
+    async def has_block(self, cid_str: str) -> bool:
+        self._ensure_started()
+        cid = parse_cid(cid_str)
+        return await self.blockstore.has(cid)
+
+    def block_store(self):
+        return self.blockstore
+
+    def exchange(self):
+        return self.exchange
+
+    def block_service(self):
+        return self.dag_service
 
     def _ensure_started(self) -> None:
         if not self._started:
