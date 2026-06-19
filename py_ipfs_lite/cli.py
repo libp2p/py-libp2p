@@ -78,7 +78,7 @@ async def run_add(
             logger.info("Connecting to IPFS bootstrap nodes...")
             await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
             
-        cid = await peer.add_file(abs_path)
+        cid = await peer.add_file(abs_path, params=add_params)
         logger.info(f"Added file successfully! CID: {cid}")
         logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
         logger.info("Provide the following address to peers:")

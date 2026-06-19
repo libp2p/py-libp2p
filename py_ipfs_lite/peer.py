@@ -32,7 +32,7 @@ from libp2p.bitswap.cid import (
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
 
-from py_ipfs_lite.config import Config
+from py_ipfs_lite.config import Config, AddParams
 from py_ipfs_lite.pin import PinStore
 from py_ipfs_lite.reprovider import Reprovider
 from py_ipfs_lite.interfaces import (
@@ -159,9 +159,15 @@ class Peer:
         )
         await discovery.start()
 
-    async def add_file(self, path: str) -> str:
+    async def add_file(self, path: str, params: Optional[AddParams] = None) -> str:
         self._ensure_started()
-        cid = await self.dag_service.add_file(path, wrap_with_directory=False)
+        kwargs = {"wrap_with_directory": False}
+        if params is not None and params.chunker and params.chunker.startswith("size-"):
+            try:
+                kwargs["chunk_size"] = int(params.chunker.split("-")[1])
+            except ValueError:
+                pass
+        cid = await self.dag_service.add_file(path, **kwargs)
         cid_str = format_cid_for_display(cid)
         if self.routing:
             try:
