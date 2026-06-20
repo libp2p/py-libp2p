@@ -19,3 +19,28 @@ venv/
 .vscode/
 
 interop/go-peer/go_peer
+
+# Local node state & blockstores
+.py_ipfs_lite/
+py_node_data/
+demo_blocks/
+
+# Downloaded files / fetched CIDs
+bafy*
+bafk*
+Qm*
+downloaded_*
+fetched_*
+
+# Scratch / Test files in root
+scratch_*.py
+test_*.py
+test.car
+*.log
+
+# Misc
+*.txt
+!requirements.txt
+!API_SPEC_*.txt
+*.pdf
+copy_of_readme.md
