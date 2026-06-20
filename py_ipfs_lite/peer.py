@@ -119,6 +119,38 @@ async def setup_libp2p(
 def new_in_memory_datastore():
     return BlockStoreAdapter(MemoryBlockStore())
 
+class RWLock:
+    """A trio-compatible read-write lock to allow concurrent reads but exclusive writes."""
+    def __init__(self):
+        self._write_lock = trio.Lock()
+        self._read_count = 0
+        self._read_count_lock = trio.Lock()
+        self._read_cond = trio.Condition(self._read_count_lock)
+
+    @contextlib.asynccontextmanager
+    async def read_lock(self):
+        async with self._write_lock:
+            async with self._read_count_lock:
+                self._read_count += 1
+        try:
+            yield
+        finally:
+            async with self._read_count_lock:
+                self._read_count -= 1
+                if self._read_count == 0:
+                    self._read_cond.notify_all()
+
+    @contextlib.asynccontextmanager
+    async def write_lock(self):
+        async with self._write_lock:
+            async with self._read_count_lock:
+                while self._read_count > 0:
+                    await self._read_cond.wait()
+            try:
+                yield
+            finally:
+                pass
+
 class Peer:
     def __init__(
         self,
@@ -151,7 +183,7 @@ class Peer:
         self.pin_store = PinStore(pin_path)
         self.reprovider = Reprovider(self)
         
-        self._gc_lock = trio.Lock()
+        self._gc_lock = RWLock()
         self._started = False
         self._exit_stack = contextlib.AsyncExitStack()
         self._auto_connector = None
@@ -326,7 +358,7 @@ class Peer:
                 progress_callback(bytes_written, total_bytes)
             kwargs["progress_callback"] = _wrapped_callback
 
-        async with self._gc_lock:
+        async with self._gc_lock.read_lock():
             if isinstance(path_or_stream, str):
                 cid = await self.dag_service.add_file(path_or_stream, **kwargs)
             else:
@@ -419,7 +451,7 @@ class Peer:
         t_val = timeout if timeout is not None else self.config.default_timeout
         data = encode_node(node, codec)
         cid = compute_cid_v1(data, codec=codec)
-        async with self._gc_lock:
+        async with self._gc_lock.read_lock():
             await self.blockstore.put(cid, data)
         cid_str = format_cid_for_display(cid)
         if self.routing:
@@ -523,7 +555,7 @@ class Peer:
         from py_ipfs_lite.dag_utils import walk_dag
         from libp2p.bitswap.cid import format_cid_for_display
         
-        async with self._gc_lock:
+        async with self._gc_lock.write_lock():
             IPFS_GC_RUNS_TOTAL.inc()
             all_cids = set(self.blockstore.all_keys())
             reachable_cids = set()
