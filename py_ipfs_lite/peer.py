@@ -252,7 +252,11 @@ class Peer:
         
         # Initialize and start connection managers
         raw_swarm = self.host._host.get_network()
-        if hasattr(raw_swarm, "connection_config"):
+        if hasattr(raw_swarm, "connection_config") and raw_swarm.connection_config:
+            raw_swarm.connection_config.high_watermark = self.config.conn_mgr_high_water
+            raw_swarm.connection_config.low_watermark = self.config.conn_mgr_low_water
+            raw_swarm.connection_config.max_connections = self.config.conn_mgr_high_water
+            
             self._auto_connector = AutoConnector(raw_swarm)
             self._connection_pruner = ConnectionPruner(raw_swarm)
             
