@@ -29,7 +29,7 @@ async def main():
     received = 0
     
     # get_file returns an AsyncIterator when output_path is None
-    content_iter = await peer.get_file(cid)
+    content_iter = await peer.get_file(cid, stream=True)
     async for chunk in content_iter:
         received += len(chunk)
         await progress(received, len(data))

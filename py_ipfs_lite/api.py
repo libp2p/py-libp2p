@@ -76,7 +76,7 @@ async def cat_file(request: Request, arg: str = Query(..., description="The path
     """Fetch a file by its CID."""
     peer: Peer = request.app.state.peer
     try:
-        content_iter = await peer.get_file(arg)
+        content_iter = await peer.get_file(arg, stream=True)
         from fastapi.responses import StreamingResponse
         return StreamingResponse(content_iter, media_type="application/octet-stream")
     except IPFSLiteError as e:

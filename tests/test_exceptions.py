@@ -30,7 +30,7 @@ async def started_peer():
 async def test_block_not_found_error(started_peer):
     async def mock_get_block(cid):
         return None
-    started_peer.exchange.get_block = mock_get_block
+    started_peer._exchange.get_block = mock_get_block
     
     with pytest.raises(BlockNotFoundError):
         await started_peer.get_node("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
@@ -51,7 +51,7 @@ async def client(started_peer):
 async def test_api_404_for_block_not_found(client, started_peer):
     async def mock_get_block(cid):
         return None
-    started_peer.exchange.get_block = mock_get_block
+    started_peer._exchange.get_block = mock_get_block
     
     response = await client.post("/api/v0/dag/get?arg=QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
     assert response.status_code == 404

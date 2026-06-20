@@ -60,10 +60,8 @@ async def test_car_export_import(fs_config):
                 
                 # Should be able to get the file
                 content = await peer2.get_file(file_cid)
-                data = b""
-                async for chunk in content:
-                    data += chunk
-                assert data == b"hello car"
+                file_data = content
+                assert file_data == b"hello car"
             finally:
                 await peer2.close()
     finally:

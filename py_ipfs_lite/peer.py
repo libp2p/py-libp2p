@@ -141,7 +141,7 @@ class Peer:
         self.routing = routing
         self.datastore = datastore
         self.blockstore = blockstore
-        self.exchange = exchange
+        self._exchange = exchange
         self.dag_service = dag_service
         
         pin_path = None
@@ -224,7 +224,7 @@ class Peer:
         return ExchangeAdapter(bitswap)
 
     def _create_dag_service(self):
-        return MerkleDag(self.exchange)
+        return MerkleDag(self._exchange)
 
     async def start(self) -> None:
         if self._started:
@@ -236,8 +236,8 @@ class Peer:
             self.routing = await self._create_routing()
         if self.blockstore is None:
             self.blockstore = self._create_blockstore()
-        if self.exchange is None:
-            self.exchange = self._create_exchange()
+        if self._exchange is None:
+            self._exchange = self._create_exchange()
         if self.dag_service is None:
             self.dag_service = self._create_dag_service()
 
@@ -245,8 +245,8 @@ class Peer:
         await self._exit_stack.enter_async_context(self.host.run(maddrs))
         
         self._nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
-        if hasattr(self.exchange, "set_nursery"):
-            self.exchange.set_nursery(self._nursery)
+        if hasattr(self._exchange, "set_nursery"):
+            self._exchange.set_nursery(self._nursery)
         
         self._nursery.start_soon(self.reprovider.start)
         
@@ -262,7 +262,7 @@ class Peer:
             await self._auto_connector.run_background_task(self._nursery)
             self._nursery.start_soon(self._periodic_pruner_task)
 
-        await self.exchange.start()
+        await self._exchange.start()
         
         self._started = True
 
@@ -284,7 +284,7 @@ class Peer:
             self._nursery.cancel_scope.cancel()
             
         await self.reprovider.stop()
-        await self.exchange.stop()
+        await self._exchange.stop()
         if self._auto_connector:
             await self._auto_connector.stop()
         if self._connection_pruner:
@@ -336,7 +336,7 @@ class Peer:
                 logger.warning(f"Failed to provide {cid_str} to DHT: {e}")
         return cid_str
 
-    async def get_file(self, cid_str: str, provider_addr: Optional[str] = None, output_path: Optional[str] = None, timeout: Optional[float] = None) -> Union[bytes, AsyncIterator[bytes]]:
+    async def get_file(self, cid_str: str, provider_addr: Optional[str] = None, output_path: Optional[str] = None, timeout: Optional[float] = None, stream: bool = False) -> Union[bytes, AsyncIterator[bytes], None]:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         if provider_addr:
@@ -362,9 +362,13 @@ class Peer:
         
         from libp2p.bitswap.dag import is_directory_node
         
-        async def fetch_stream(current_cid):
+        # Helper to isolate trio.fail_after from the async generator
+        async def fetch_block_with_timeout(current_cid):
             with trio.fail_after(t_val):
-                data = await self.exchange.get_block(current_cid)
+                return await self._exchange.get_block(current_cid)
+        
+        async def fetch_stream(current_cid):
+            data = await fetch_block_with_timeout(current_cid)
             if data is None:
                 raise BlockNotFoundError(f"Block not found for CID: {format_cid_for_display(current_cid)}")
             
@@ -396,8 +400,15 @@ class Peer:
                 async for chunk in fetch_stream(cid):
                     f.write(chunk)
             return None
-        else:
+            
+        if stream:
             return fetch_stream(cid)
+            
+        # Default behavior: buffer and return bytes
+        chunks = []
+        async for chunk in fetch_stream(cid):
+            chunks.append(chunk)
+        return b"".join(chunks)
 
     async def add_node(self, node: Union[dict, list, str, int, bytes], codec: str = "dag-json", timeout: Optional[float] = None) -> str:
         self._ensure_started()
@@ -444,7 +455,7 @@ class Peer:
                     logger.warning(f"Failed to find providers for {cid_str} in DHT: {e}")
                 
             with trio.fail_after(t_val):
-                data = await self.exchange.get_block(cid)
+                data = await self._exchange.get_block(cid)
                 
         if data is None:
             raise BlockNotFoundError(f"Block not found for CID: {cid_str}")
@@ -581,7 +592,7 @@ class Peer:
         return self.blockstore
 
     def exchange(self):
-        return self.exchange
+        return self._exchange
 
     def block_service(self):
         return self.dag_service

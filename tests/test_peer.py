@@ -67,7 +67,7 @@ async def test_add_get_file(memory_config):
         cid_str = await peer.add_file(temp_path)
         assert cid_str is not None
         
-        content_iter = await peer.get_file(cid_str)
+        content_iter = await peer.get_file(cid_str, stream=True)
         chunks = []
         async for chunk in content_iter:
             chunks.append(chunk)
@@ -137,7 +137,7 @@ async def test_add_file_with_params(memory_config):
         cid_str = await peer.add_file(temp_path, params=params)
         assert cid_str is not None
         
-        content_iter = await peer.get_file(cid_str)
+        content_iter = await peer.get_file(cid_str, stream=True)
         chunks = []
         async for chunk in content_iter:
             chunks.append(chunk)
@@ -214,7 +214,9 @@ def test_peer_accessors(memory_config):
     
     # Initialize properties manually to avoid full async start() overhead in this test
     peer.blockstore = peer._create_blockstore()
+    peer._exchange = "dummy_exchange"
     
     # Test accessors
     assert peer.session() == peer
     assert peer.block_store() is not None
+    assert peer.exchange() == "dummy_exchange"
