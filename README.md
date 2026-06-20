@@ -92,6 +92,7 @@ curl -X POST "http://127.0.0.1:5001/api/v0/dag/get?arg=bafy..."
 | Use IPNS mutable pointers and understand the trust model | [docs/guides/ipns.md](docs/guides/ipns.md) |
 | Interoperate with a live Kubo daemon over Bitswap | [docs/guides/interop-with-kubo.md](docs/guides/interop-with-kubo.md) |
 | See the full list of all 21 examples with one-line descriptions | [docs/reference/examples-index.md](docs/reference/examples-index.md) |
+| Browse all documentation | [docs/index.md](docs/index.md) |
 
 ## License
 MIT License
