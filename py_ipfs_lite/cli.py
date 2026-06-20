@@ -105,17 +105,13 @@ async def run_get(
     try:
         bootstrap = not bool(provider_addr)
         async with create_and_start_peer(port, seed, config, bootstrap=bootstrap) as peer:
-            content_or_iter = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
+            content = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
             if out_path:
                 import os
                 logger.info(f"Saved to {out_path} (size: {os.path.getsize(out_path)} bytes)")
             else:
-                chunks = []
-                async for chunk in content_or_iter:
-                    chunks.append(chunk)
-                full_content = b"".join(chunks)
-                logger.info(f"Fetched {len(full_content)} bytes")
-                print(full_content.decode("utf-8", errors="replace"))
+                logger.info(f"Fetched {len(content)} bytes")
+                print(content.decode("utf-8", errors="replace"))
     except Exception as e:
         logger.error(f"Error: {e}")
 
