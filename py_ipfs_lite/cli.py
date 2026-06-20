@@ -25,35 +25,42 @@ DEFAULT_BOOTSTRAP_PEERS = [
     "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
 ]
 
-async def run_daemon(port: int, seed: str | None, config: Config):
-    """Run the IPFS Lite daemon (provider mode)."""
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def create_and_start_peer(port: int, seed: str | None, config: Config, bootstrap: bool = True):
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
     key_pair = _get_key_pair(seed)
-
-    logger.info("Starting py-ipfs-lite daemon...")
-    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     
+    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     try:
         await peer.start()
-        logger.info(f"Daemon Peer ID: {peer.host.id()}")
-        addrs = peer.host.addrs()
-        logger.info(f"Listening on {len(addrs)} address(es):")
-        for addr in addrs:
-            logger.info(f"  {addr}")
-
-        if not config.offline:
+        if bootstrap and not config.offline:
             logger.info("Connecting to IPFS bootstrap nodes...")
             await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
             logger.info("Successfully joined the DHT network!")
-
-        logger.info("Daemon is running. Press Ctrl+C to stop...")
-        await trio.sleep_forever()
-    except KeyboardInterrupt:
-        logger.info("\nShutting down...")
+        yield peer
     finally:
         await peer.close()
+
+async def run_daemon(port: int, seed: str | None, config: Config):
+    """Run the IPFS Lite daemon (provider mode)."""
+    logger.info("Starting py-ipfs-lite daemon...")
+    try:
+        async with create_and_start_peer(port, seed, config, bootstrap=True) as peer:
+            logger.info(f"Daemon Peer ID: {peer.host.id()}")
+            addrs = peer.host.addrs()
+            logger.info(f"Listening on {len(addrs)} address(es):")
+            for addr in addrs:
+                logger.info(f"  {addr}")
+
+            logger.info("Daemon is running. Press Ctrl+C to stop...")
+            await trio.sleep_forever()
+    except KeyboardInterrupt:
+        logger.info("\nShutting down...")
+
 
 async def run_add(
     file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams
@@ -68,29 +75,17 @@ async def run_add(
 
     abs_path = os.path.abspath(file_path)
 
-    if port <= 0:
-        port = find_free_port()
-    listen_addrs = get_available_interfaces(port)
-    key_pair = _get_key_pair(seed)
-
-    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     logger.info(f"Adding file {file_path}...")
     try:
-        await peer.start()
-        if not config.offline:
-            logger.info("Connecting to IPFS bootstrap nodes...")
-            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
-            
-        cid = await peer.add_file(abs_path, params=add_params)
-        logger.info(f"Added file successfully! CID: {cid}")
-        logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
-        logger.info("Provide the following address to peers:")
-        for addr in peer.host.addrs():
-            logger.info(f"  {addr}")
+        async with create_and_start_peer(port, seed, config, bootstrap=True) as peer:
+            cid = await peer.add_file(abs_path, params=add_params)
+            logger.info(f"Added file successfully! CID: {cid}")
+            logger.info(f"Provider Peer ID: {peer.host.id().to_base58()}")
+            logger.info("Provide the following address to peers:")
+            for addr in peer.host.addrs():
+                logger.info(f"  {addr}")
     except Exception as e:
         logger.error(f"Error: {e}")
-    finally:
-        await peer.close()
 
 
 async def run_get(
@@ -104,84 +99,52 @@ async def run_get(
     """Fetch a file by CID."""
     import os
 
-    if port <= 0:
-        port = find_free_port()
-    listen_addrs = get_available_interfaces(port)
-    key_pair = _get_key_pair(seed)
-
-    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     out_path = os.path.abspath(out_file) if out_file else None
 
     logger.info(f"Fetching CID {cid_str}...")
     try:
-        await peer.start()
-        if not config.offline and not provider_addr:
-            logger.info("Connecting to IPFS bootstrap nodes to search DHT...")
-            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
-            
-        content_or_iter = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
-        if out_path:
-            import os
-            logger.info(f"Saved to {out_path} (size: {os.path.getsize(out_path)} bytes)")
-        else:
-            chunks = []
-            async for chunk in content_or_iter:
-                chunks.append(chunk)
-            full_content = b"".join(chunks)
-            logger.info(f"Fetched {len(full_content)} bytes")
-            print(full_content.decode("utf-8", errors="replace"))
+        bootstrap = not bool(provider_addr)
+        async with create_and_start_peer(port, seed, config, bootstrap=bootstrap) as peer:
+            content_or_iter = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
+            if out_path:
+                import os
+                logger.info(f"Saved to {out_path} (size: {os.path.getsize(out_path)} bytes)")
+            else:
+                chunks = []
+                async for chunk in content_or_iter:
+                    chunks.append(chunk)
+                full_content = b"".join(chunks)
+                logger.info(f"Fetched {len(full_content)} bytes")
+                print(full_content.decode("utf-8", errors="replace"))
     except Exception as e:
         logger.error(f"Error: {e}")
-    finally:
-        await peer.close()
 
 async def run_dag_export(cid_str: str, out_file: str, port: int, seed: str | None, config: Config):
     """Export a DAG to a CAR file."""
-    if port <= 0:
-        port = find_free_port()
-    listen_addrs = get_available_interfaces(port)
-    key_pair = _get_key_pair(seed)
-
-    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
-    
     logger.info(f"Exporting DAG {cid_str} to CAR file {out_file}...")
     try:
-        await peer.start()
-        if not config.offline:
-            logger.info("Connecting to IPFS bootstrap nodes...")
-            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
-            
-        await peer.export_car(cid_str, out_file)
-        logger.info("Export complete.")
+        async with create_and_start_peer(port, seed, config, bootstrap=True) as peer:
+            await peer.export_car(cid_str, out_file)
+            logger.info(f"Successfully exported {cid_str} to {out_file}")
     except Exception as e:
-        logger.error(f"Error: {e}")
-    finally:
-        await peer.close()
+        logger.error(f"Error exporting DAG: {e}")
 
 async def run_dag_import(file_path: str, port: int, seed: str | None, config: Config):
     """Import a CAR file into the blockstore."""
     import os
     if not os.path.exists(file_path):
-        logger.error(f"File not found: {file_path}")
+        logger.error(f"CAR file not found: {file_path}")
         return
-
-    if port <= 0:
-        port = find_free_port()
-    listen_addrs = get_available_interfaces(port)
-    key_pair = _get_key_pair(seed)
-
-    peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
-    
+        
     logger.info(f"Importing CAR file {file_path}...")
     try:
-        await peer.start()
-            
-        roots = await peer.import_car(file_path)
-        logger.info(f"Import complete. Imported roots: {roots}")
+        async with create_and_start_peer(port, seed, config, bootstrap=False) as peer:
+            root_cids = await peer.import_car(file_path)
+            logger.info(f"Successfully imported CAR file. Root CIDs:")
+            for cid in root_cids:
+                logger.info(f"  {cid}")
     except Exception as e:
-        logger.error(f"Error: {e}")
-    finally:
-        await peer.close()
+        logger.error(f"Error importing CAR file: {e}")
 
 def main():
     parser = get_parser()
