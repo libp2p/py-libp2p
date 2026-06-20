@@ -20,5 +20,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **IPNS Security**: Fixed missing validation in IPNS resolution. Forged records with mismatched PeerIDs or invalid signatures are now correctly rejected.
-- **CAR I/O**: Switched CAR export from synchronous blocking file I/O to async I/O via `anyio`, preventing event loop stalls on large files.
+- **CAR I/O**: Switched CAR export from synchronous blocking file I/O to async I/O via `trio`, preventing event loop stalls on large files.
 - **Async Iterators**: Fixed `get_file(stream=True)` to correctly return an `AsyncIterator[bytes]` and prevent async loop blocking bugs.

@@ -18,11 +18,11 @@
 | **Pinning** | Direct, Recursive, Indirect | Direct, Recursive, Indirect | All | |
 | **Garbage Collection** | ✅ | ✅ | ✅ | Atomic RWLock in Python version |
 | **IPNS** | ✅ (Publish & Resolve) | ✅ | ✅ | Verified signatures and expiry |
-| **IPNI (`cid.contact`)** | ✅ (Resolve only) | ❌ | ✅ | Python version supports IPNI via `TieredRouting` |
+| **IPNI (`cid.contact`)** | ✅ | ❌ | ✅ | Python version supports IPNI via `TieredRouting` (resolve and announce) |
 | **CAR File Export/Import** | ✅ (CARv1) | ❌ | ✅ | Filecoin-compatible CARv1 export |
 | **Prometheus Metrics** | ✅ | ❌ | ✅ | |
 | **Connection Manager** | ✅ | ✅ | ✅ | High/Low watermarks prune connections |
-| **Transport** | TCP, Noise | TCP, Noise, QUIC | All | QUIC is not yet supported in `py-libp2p` |
+| **Transport** | TCP, Noise | TCP, Noise, QUIC | All | QUIC ships in `py-libp2p`; not yet wired into `py-ipfs-lite`'s host construction |
 | **HTTP API** | ✅ (Subset) | ❌ | ✅ | Python version wraps a Kubo-compatible `/api/v0/` |
 
 ---
@@ -37,8 +37,5 @@ To keep the library "lite" and maintainable, a few complex Kubo features are exp
 ### 2. Repo Migration Tooling
 Kubo has a complex migration system (`fs-repo-migrations`) because it updates its on-disk data structures over time. `py-ipfs-lite` uses a simple filesystem layout where the CID is the filename. We do not intend to change this format, so we do not ship migration tooling.
 
-### 3. IPNI Announce (`provide`)
-While we resolve CIDs from IPNI (`cid.contact`), we do not publish to it. IPNI requires Reframe authentication or signed provider records. Publishing without authentication is ignored by the network. Content added via `py-ipfs-lite` is announced to the KadDHT instead.
-
-### 4. MFS (Mutable File System)
+### 3. MFS (Mutable File System)
 MFS provides a virtual directory tree (`/api/v0/files/...`). This requires a lot of state management and overhead. If you need mutable directories, use IPNS pointers to updated directory DAGs instead.
