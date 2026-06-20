@@ -1,4 +1,5 @@
 import io
+import trio
 import varint
 from typing import List
 from cbor2 import loads, dumps, CBORTag
@@ -9,6 +10,55 @@ from libp2p.bitswap.cid import (
 )
 from libp2p.bitswap.dag import MerkleDag, decode_dag_pb
 from py_ipfs_lite.dag_utils import decode_node
+
+class BufferedAsyncReader:
+    def __init__(self, f, buffer_size=65536):
+        self.f = f
+        self.buffer_size = buffer_size
+        self.buffer = bytearray()
+        self.offset = 0
+
+    async def read_exactly(self, n: int) -> bytes:
+        while len(self.buffer) - self.offset < n:
+            chunk = await self.f.read(self.buffer_size)
+            if not chunk:
+                if len(self.buffer) - self.offset == 0 and n > 0:
+                    raise EOFError("Unexpected EOF")
+                break
+            self.buffer.extend(chunk)
+        
+        data = self.buffer[self.offset : self.offset + n]
+        self.offset += n
+        if self.offset > self.buffer_size * 2:
+            self.buffer = self.buffer[self.offset:]
+            self.offset = 0
+        return bytes(data)
+
+    async def read_varint(self) -> int:
+        shift = 0
+        result = 0
+        while True:
+            if self.offset >= len(self.buffer):
+                chunk = await self.f.read(self.buffer_size)
+                if not chunk:
+                    if shift == 0:
+                        raise TypeError("EOF")
+                    raise EOFError("Unexpected EOF reading varint")
+                self.buffer.extend(chunk)
+            
+            val = self.buffer[self.offset]
+            self.offset += 1
+            
+            result |= (val & 0x7f) << shift
+            if not (val & 0x80):
+                break
+            shift += 7
+            
+            if self.offset > self.buffer_size * 2:
+                self.buffer = self.buffer[self.offset:]
+                self.offset = 0
+                
+        return result
 
 def get_cid_len(data: bytes) -> int:
     if data[0] == 0x12 and data[1] == 0x20:
@@ -25,12 +75,12 @@ def get_cid_len(data: bytes) -> int:
 async def export_car(peer, cid_str: str, output_path: str):
     root_cid = parse_cid(cid_str)
     
-    with open(output_path, "wb") as f:
+    async with await trio.open_file(output_path, "wb") as f:
         # Header
         header_dict = {"version": 1, "roots": [CBORTag(42, b'\x00' + cid_to_bytes(root_cid))]}
         header_bytes = dumps(header_dict)
-        f.write(varint.encode(len(header_bytes)))
-        f.write(header_bytes)
+        await f.write(varint.encode(len(header_bytes)))
+        await f.write(header_bytes)
         
         # Traverse
         queue = [cid_to_bytes(root_cid)]
@@ -49,9 +99,9 @@ async def export_car(peer, cid_str: str, output_path: str):
                     continue
                 
             block_len = len(curr_cid_bytes) + len(data)
-            f.write(varint.encode(block_len))
-            f.write(curr_cid_bytes)
-            f.write(data)
+            await f.write(varint.encode(block_len))
+            await f.write(curr_cid_bytes)
+            await f.write(data)
             
             codec = parse_cid_codec(curr_cid_bytes)
             norm_codec = _normalise_codec(codec)
@@ -86,14 +136,15 @@ async def export_car(peer, cid_str: str, output_path: str):
 
 async def import_car(peer, input_path: str) -> List[str]:
     roots = []
-    with open(input_path, "rb") as f:
+    async with await trio.open_file(input_path, "rb") as raw_f:
+        f = BufferedAsyncReader(raw_f)
         # Header length
         try:
-            header_len = varint.decode_stream(f)
+            header_len = await f.read_varint()
         except TypeError:
             return roots
             
-        header_bytes = f.read(header_len)
+        header_bytes = await f.read_exactly(header_len)
         header = loads(header_bytes)
         if header.get("version") != 1:
             raise ValueError(f"Unsupported CAR version: {header.get('version')}")
@@ -107,11 +158,11 @@ async def import_car(peer, input_path: str) -> List[str]:
         # Read blocks
         while True:
             try:
-                block_len = varint.decode_stream(f)
+                block_len = await f.read_varint()
             except TypeError:
                 break
                 
-            block_data_full = f.read(block_len)
+            block_data_full = await f.read_exactly(block_len)
             if not block_data_full:
                 break
                 
