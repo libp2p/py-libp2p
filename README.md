@@ -82,26 +82,16 @@ curl -X POST -F file=@test.txt http://127.0.0.1:5001/api/v0/add
 curl -X POST "http://127.0.0.1:5001/api/v0/dag/get?arg=bafy..."
 ```
 
-## Examples
+## What's Next
 
-The `examples/` directory is packed with powerful demonstrations of `py-ipfs-lite` in action. Run any of them via `uv run python examples/<script>.py`:
-
-1. **`01_embeddable_peers.py`**: Transfer a file directly between two embedded Python IPFS peers using Bitswap.
-2. **`02_dht_discovery.py`**: Find content using the Kademlia DHT.
-3. **`03_ipld_node.py`**: Work with generic IPLD JSON documents.
-4. **`04_pin_and_gc.py`**: Protect blocks from garbage collection.
-5. **`05_localstore_*`**: Persist data to disk instead of memory.
-6. **`06_http_api.sh`**: Use the HTTP API endpoints.
-7. **`07_reprovider.sh`**: Continuously broadcast CIDs to the DHT.
-8. **`08_verifiable_inference.py`**: Sign and verify ML inferences with CIDs.
-9. **`09_kubo_interop.py`**: Bi-directional file sharing with an official Go-Kubo daemon.
-10. **`10_ipld_linked_dag.py`**: Traverse linked knowledge graphs entirely locally without network delay.
-11. **`11_car_export_import.py`**: Archive DAGs to `.car` files and restore them completely offline.
-12. **`12_streaming_large_file.py`**: Handle multi-gigabyte files gracefully with chunked AsyncIterators.
-13. **`13_agent_memory_chain.py`**: Build a cryptographically verifiable, append-only Agent memory log.
-14. **`14_distributed_rag.py`**: Perform Distributed RAG (Retrieval-Augmented Generation) across multiple IPFS nodes.
-15. **`15_ipns_mutable_registry.py`**: Use IPNS as a stable, versioned pointer for an ever-changing DAG.
-16. **`16_metrics_dashboard.py`**: Export Prometheus metrics to track GC runs and blockstore sizes.
+| I want to… | Go to… |
+|---|---|
+| Understand how `py-ipfs-lite` is structured internally | [docs/architecture.md](docs/architecture.md) |
+| Build verifiable AI agent memory / RAG pipelines | [docs/guides/ai-agents-and-rag.md](docs/guides/ai-agents-and-rag.md) |
+| Export a DAG as a CAR file for Filecoin storage | [docs/guides/car-files-and-filecoin.md](docs/guides/car-files-and-filecoin.md) |
+| Use IPNS mutable pointers and understand the trust model | [docs/guides/ipns.md](docs/guides/ipns.md) |
+| Interoperate with a live Kubo daemon over Bitswap | [docs/guides/interop-with-kubo.md](docs/guides/interop-with-kubo.md) |
+| See the full list of all 21 examples with one-line descriptions | `docs/reference/examples-index.md` *(coming soon)* |
 
 ## License
 MIT License
