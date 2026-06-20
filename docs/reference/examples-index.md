@@ -12,7 +12,7 @@ uv run python examples/<script>.py
 | # | File | What it shows | Guide |
 |---|---|---|---|
 | 01 | [`01_embeddable_peers.py`](../../examples/01_embeddable_peers.py) | Bitswap file transfer between two in-process Python peers | [Tutorial: Your First Peer](../tutorials/01-your-first-peer.md) *(coming soon)* |
-| 02 | [`02_dht_discovery.py`](../../examples/02_dht_discovery.py) | Finding content by CID alone via the Kademlia DHT | [DHT and Routing](./dht-and-routing.md) *(coming soon)* |
+| 02 | [`02_dht_discovery.py`](../../examples/02_dht_discovery.py) | Finding content by CID alone via the Kademlia DHT | [DHT and Routing](../guides/dht-and-routing.md) *(coming soon)* |
 | 03 | [`03_ipld_node.py`](../../examples/03_ipld_node.py) | Storing and retrieving generic IPLD DAG-JSON / DAG-CBOR nodes | [Tutorial: Your First Peer](../tutorials/01-your-first-peer.md) *(coming soon)* |
 | 04 | [`04_pin_and_gc.py`](../../examples/04_pin_and_gc.py) | Direct vs recursive pinning; running GC and observing what is reclaimed | [Persistence and GC](../guides/persistence-and-gc.md) *(coming soon)* |
 | 05a | [`05a_localstore_write.py`](../../examples/05a_localstore_write.py) | Writing blocks to a persistent filesystem blockstore | [Persistence and GC](../guides/persistence-and-gc.md) *(coming soon)* |
