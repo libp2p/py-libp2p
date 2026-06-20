@@ -11,9 +11,10 @@ from multiaddr import Multiaddr
 logger = logging.getLogger("py_ipfs_lite.routing")
 
 class DelegatedHTTPRouting:
-    def __init__(self, endpoint: str = "https://cid.contact"):
+    def __init__(self, endpoint: str = "https://cid.contact", host=None):
         self.endpoint = endpoint.rstrip('/')
         self.client = httpx.AsyncClient(base_url=self.endpoint, timeout=10.0)
+        self.host = host
 
     async def bootstrap(self) -> None:
         pass
@@ -93,7 +94,33 @@ class DelegatedHTTPRouting:
         return providers
 
     async def provide(self, key: str) -> bool:
-        return False
+        if not self.host:
+            return False
+            
+        try:
+            peer_id = self.host.get_id().to_base58()
+            addrs = [str(a) for a in self.host.get_addrs()]
+            
+            payload = {
+                "Schema": "peer",
+                "ID": peer_id,
+                "Addrs": addrs
+            }
+            
+            resp = await self.client.put(
+                f"/routing/v1/providers/{key}",
+                json=payload
+            )
+            
+            if resp.status_code in (200, 202, 204):
+                return True
+            else:
+                logger.debug(f"IPNI provide failed: {resp.status_code} {resp.text}")
+                return False
+                
+        except Exception as e:
+            logger.debug(f"Failed to query HTTP Delegated Routing provide for {key}: {e}")
+            return False
 
     async def get_value(self, key: str) -> Optional[bytes]:
         return None

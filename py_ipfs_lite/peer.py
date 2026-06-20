@@ -219,7 +219,7 @@ class Peer:
         
         if getattr(self.config, "use_ipni", False):
             from py_ipfs_lite.routing import DelegatedHTTPRouting, TieredRouting
-            ipni = DelegatedHTTPRouting(endpoint=getattr(self.config, "ipni_endpoint", "https://cid.contact"))
+            ipni = DelegatedHTTPRouting(endpoint=getattr(self.config, "ipni_endpoint", "https://cid.contact"), host=raw_host)
             return TieredRouting([ipni, dht_adapter])
             
         return dht_adapter
