@@ -375,6 +375,19 @@ node = await peer.get_node(roots[0])
 
 ---
 
+### Subsystem Accessors
+
+For compatibility with upstream `go-ipfs-lite` interfaces, these accessors expose internal subsystems. They are rarely needed for high-level operations.
+
+| Method | Returns | Description |
+|---|---|---|
+| `session()` | `Peer` | Returns `self`. (In Go this returns a `Session` struct; in Python the Peer acts as its own session) |
+| `block_store()` | `BlockStoreAdapter` | Returns the local blockstore (same as `peer.blockstore` attribute) |
+| `exchange()` | `Bitswap` | Returns the Bitswap exchange instance |
+| `block_service()` | `MerkleDag` | Returns the DAG service responsible for UnixFS/IPLD chunking and linking |
+
+---
+
 ### Attributes
 
 | Attribute | Type | Description |
