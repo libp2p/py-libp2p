@@ -47,6 +47,40 @@ async def test_ipns_publish_resolve():
     resolved = await resolve_name(routing, peer_id)
     assert resolved == val
 
+@pytest.mark.trio
+async def test_ipns_validation_failures():
+    from py_ipfs_lite.exceptions import RoutingError
+    
+    keypair = create_new_key_pair()
+    peer_id = ID.from_pubkey(keypair.public_key)
+    routing = MockRouting()
+    
+    # 1. Test expired record
+    expired_bytes = create_ipns_record(keypair.private_key, "expired", 1, lifetime_hours=-1)
+    await routing.put_value(f"/ipns/{peer_id.to_base58()}", expired_bytes)
+    with pytest.raises(RoutingError, match="expired"):
+        await resolve_name(routing, peer_id)
+        
+    # 2. Test tampered signature
+    valid_bytes = create_ipns_record(keypair.private_key, "valid", 1)
+    entry = IpnsEntry()
+    entry.ParseFromString(valid_bytes)
+    # Tamper with the value
+    entry.value = b"tampered"
+    tampered_bytes = entry.SerializeToString()
+    
+    await routing.put_value(f"/ipns/{peer_id.to_base58()}", tampered_bytes)
+    with pytest.raises(RoutingError, match="signature is invalid"):
+        await resolve_name(routing, peer_id)
+        
+    # 3. Test wrong pubkey for peer ID
+    keypair2 = create_new_key_pair()
+    wrong_key_bytes = create_ipns_record(keypair2.private_key, "wrong_key", 1)
+    # Put it under peer_id 1's DHT key
+    await routing.put_value(f"/ipns/{peer_id.to_base58()}", wrong_key_bytes)
+    with pytest.raises(RoutingError, match="pubKey does not match"):
+        await resolve_name(routing, peer_id)
+
 from py_ipfs_lite.peer import Peer
 from py_ipfs_lite.config import Config
 from httpx import AsyncClient, ASGITransport

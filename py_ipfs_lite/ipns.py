@@ -68,17 +68,84 @@ async def publish_name(routing, private_key: PrivateKey, peer_id: ID, value: str
     await routing.put_value(dht_key, record_bytes)
     logger.info(f"Published IPNS record for {peer_id.to_base58()} -> {value}")
 
+from libp2p.crypto.serialization import deserialize_public_key
+
+def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry:
+    """Validate the signature, expiry, and pubkey of an IPNS record."""
+    entry = IpnsEntry()
+    entry.ParseFromString(record_bytes)
+    
+    # 1. Check Public Key
+    if not entry.pubKey:
+        pubkey = expected_peer_id.extract_public_key()
+        if pubkey is None:
+            raise RoutingError("IPNS record missing pubKey and Peer ID does not inline it")
+    else:
+        try:
+            pubkey = deserialize_public_key(entry.pubKey)
+        except Exception as e:
+            raise RoutingError(f"Failed to deserialize IPNS pubKey: {e}")
+            
+        if ID.from_pubkey(pubkey) != expected_peer_id:
+            raise RoutingError("IPNS record pubKey does not match the expected Peer ID")
+
+    # 2. Check Signature
+    if entry.signatureV2 and entry.data:
+        data_to_sign = SIGNATURE_PREFIX + entry.data
+        if not pubkey.verify(data_to_sign, entry.signatureV2):
+            raise RoutingError("IPNS V2 signature is invalid")
+            
+        # V2 requires that the signed CBOR data matches the raw fields!
+        try:
+            import cbor2
+            cbor_dict = cbor2.loads(entry.data)
+            if entry.value != cbor_dict.get("Value"):
+                raise RoutingError("IPNS V2 signature is invalid: value mismatch")
+            if entry.validity != cbor_dict.get("Validity"):
+                raise RoutingError("IPNS V2 signature is invalid: validity mismatch")
+        except Exception as e:
+            if isinstance(e, RoutingError):
+                raise
+            raise RoutingError(f"Failed to parse IPNS V2 CBOR data: {e}")
+            
+    elif entry.signatureV1:
+        data_to_sign = entry.value + entry.validity + str(entry.validityType).encode('utf-8')
+        if not pubkey.verify(data_to_sign, entry.signatureV1):
+            raise RoutingError("IPNS V1 signature is invalid")
+    else:
+        raise RoutingError("IPNS record is missing signatures")
+
+    # 3. Check Expiry
+    validity_str = entry.validity.decode('utf-8')
+    if validity_str.endswith("Z"):
+        validity_str = validity_str[:-1] + "+00:00"
+    if "." in validity_str:
+        base, frac_tz = validity_str.split(".", 1)
+        if "+" in frac_tz:
+            frac, tz = frac_tz.split("+", 1)
+            tz = "+" + tz
+        else:
+            frac = frac_tz
+            tz = ""
+        frac = frac[:6]
+        validity_str = f"{base}.{frac}{tz}"
+        
+    try:
+        validity_dt = datetime.fromisoformat(validity_str)
+        if validity_dt < datetime.now(timezone.utc):
+            raise RoutingError("IPNS record has expired")
+    except ValueError:
+        logger.warning(f"Failed to parse IPNS validity date: {entry.validity.decode('utf-8')}")
+        raise RoutingError("Invalid IPNS validity format")
+
+    return entry
+
 async def resolve_name(routing, peer_id: ID) -> str:
-    """Resolve an IPNS record from the DHT."""
+    """Resolve an IPNS record from the DHT and verify its signature."""
     dht_key = f"/ipns/{peer_id.to_base58()}"
     record_bytes = await routing.get_value(dht_key)
     if not record_bytes:
         raise RoutingError(f"Could not resolve name: {peer_id.to_base58()}")
         
-    entry = IpnsEntry()
-    entry.ParseFromString(record_bytes)
-    
-    # For a full implementation, we should validate the signature here
-    # libp2p.records.ipns.IPNSValidator can do this if hooked up.
-    
+    entry = validate_ipns_record(record_bytes, peer_id)
     return entry.value.decode('utf-8')
