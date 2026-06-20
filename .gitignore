@@ -33,8 +33,8 @@ downloaded_*
 fetched_*
 
 # Scratch / Test files in root
-scratch_*.py
-test_*.py
+/scratch_*.py
+/test_*.py
 test.car
 *.log
 

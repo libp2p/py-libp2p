@@ -67,11 +67,7 @@ async def main():
                 
                 print("\nFetching Kubo CID from Python peer...")
                 # We are already connected, so Bitswap should just pull it
-                content_iter = await peer.get_file(kubo_cid)
-                chunks = []
-                async for chunk in content_iter:
-                    chunks.append(chunk)
-                data = b"".join(chunks)
+                data = await peer.get_file(kubo_cid)
                 print(f"Python peer fetched content: {data.decode('utf-8').strip()}")
                 print("\n✓ Interoperability test successful!")
             else:
