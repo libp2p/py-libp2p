@@ -1,1 +1,0 @@
-Testing bootstrap connection to local kubo!
