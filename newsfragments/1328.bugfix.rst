@@ -1,0 +1,1 @@
+Allowed identify response parsing to fall back to raw protobuf messages when the length-prefix probe raises ``ParseError``.
