@@ -20,6 +20,7 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.record import make_signed_put_record
 
 from .common import (
     DEFAULT_TTL,
@@ -65,14 +66,17 @@ class ValueStore:
         None
 
         """
-        from libp2p.records.record import make_put_record
-
         if validity == 0.0:
             validity = time.time() + DEFAULT_TTL
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex(), validity
         )
-        record = make_put_record(key, value)
+
+        # Create a signed record using the host's private key
+        private_key = self.host.get_private_key()
+        record = make_signed_put_record(key, value, private_key)
+
+        # Set timeReceived when storing locally
         record.timeReceived = str(time.time())
 
         self.store[key] = (record, validity)
@@ -123,11 +127,20 @@ class ValueStore:
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
-            # Set message fields
+            # Build the outbound record from the locally-stored signed record when
+            # available (normal put() path), otherwise sign the record now so the
+            # outbound message always carries signature and author fields.
+            local_entry = self.store.get(key)
+            if local_entry is not None:
+                signed_record, _ = local_entry
+                message.record.CopyFrom(signed_record)
+            else:
+                private_key = self.host.get_private_key()
+                signed_record = make_signed_put_record(key, value, private_key)
+                message.record.CopyFrom(signed_record)
             message.key = key
-            message.record.key = key
-            message.record.value = value
-            message.record.timeReceived = str(time.time())
+            # Note: timeReceived will be set by the receiving peer when storing
+            message.record.ClearField("timeReceived")
 
             # Serialize and send the protobuf message with length prefix
             proto_bytes = message.SerializeToString()
@@ -320,6 +333,10 @@ class ValueStore:
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )
+
+                    # Update timeReceived to current time (when we received it locally)
+                    response.record.timeReceived = str(time.time())
+
                     return response.record if return_record else response.record.value
 
                 # Handle case where value is not found but peer infos are returned

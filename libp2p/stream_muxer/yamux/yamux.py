@@ -1158,16 +1158,20 @@ class Yamux(IMuxedConn):
                                 stream.closed = True
                                 stream.reset_received = True
                                 self.stream_events[stream_id].set()
-
-                            ack_header = struct.pack(
-                                YAMUX_HEADER_FORMAT,
-                                0,
-                                TYPE_WINDOW_UPDATE,
-                                FLAG_ACK,
-                                stream_id,
-                                0,
-                            )
-                            new_stream_notify = stream
+                                # Deliver the reset stream to accept_stream() so
+                                # callers can observe the reset state, but do NOT
+                                # send an ACK back — the stream is already dead.
+                                new_stream_notify = stream
+                            else:
+                                ack_header = struct.pack(
+                                    YAMUX_HEADER_FORMAT,
+                                    0,
+                                    TYPE_WINDOW_UPDATE,
+                                    FLAG_ACK,
+                                    stream_id,
+                                    0,
+                                )
+                                new_stream_notify = stream
                         else:
                             rst_header = struct.pack(
                                 YAMUX_HEADER_FORMAT,
@@ -1188,6 +1192,14 @@ class Yamux(IMuxedConn):
                         )
                         if new_stream_notify is not None:
                             await self.new_stream_send_channel.send(new_stream_notify)
+                    elif new_stream_notify is not None:
+                        # SYN+RST: stream is reset on arrival — deliver to
+                        # accept_stream() without sending an ACK back.
+                        logger.debug(
+                            f"Delivering reset stream {stream_id} "
+                            f"to channel (no ACK) for peer {self.peer_id}"
+                        )
+                        await self.new_stream_send_channel.send(new_stream_notify)
                 elif (
                     typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE
                 ) and flags & FLAG_ACK:
