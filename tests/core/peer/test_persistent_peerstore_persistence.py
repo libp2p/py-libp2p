@@ -11,6 +11,7 @@ import tempfile
 import pytest
 from multiaddr import Multiaddr
 
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStoreError
 from libp2p.peer.persistent import (
@@ -471,3 +472,60 @@ def test_sync_cross_backend_no_persistence():
         addrs = sqlite_store.addrs(peer_id)
         assert len(addrs) == 0
         sqlite_store.close()
+
+
+# ============================================================================
+# Keypair Persistence Tests
+# ============================================================================
+
+
+def test_sync_sqlite_keypair_persistence():
+    """Test that keypairs survive a peerstore restart."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "test.db"
+
+        peerstore1 = create_sync_sqlite_peerstore(str(db_path))
+        peerstore1.add_key_pair(peer_id, key_pair)
+        peerstore1.close()
+
+        peerstore2 = create_sync_sqlite_peerstore(str(db_path))
+        assert peerstore2.pubkey(peer_id) == key_pair.public_key
+        assert peerstore2.privkey(peer_id) == key_pair.private_key
+        peerstore2.close()
+
+
+def test_sync_memory_keypair_not_persistent():
+    """Test that keypairs are not persisted in the memory backend."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+
+    peerstore1 = create_sync_memory_peerstore()
+    peerstore1.add_key_pair(peer_id, key_pair)
+    peerstore1.close()
+
+    peerstore2 = create_sync_memory_peerstore()
+    with pytest.raises(PeerStoreError):
+        peerstore2.pubkey(peer_id)
+    peerstore2.close()
+
+
+@pytest.mark.trio
+async def test_async_sqlite_keypair_persistence():
+    """Test that keypairs survive a peerstore restart (async)."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = Path(temp_dir) / "test.db"
+
+        peerstore1 = create_async_sqlite_peerstore(str(db_path))
+        await peerstore1.add_key_pair_async(peer_id, key_pair)
+        await peerstore1.close_async()
+
+        peerstore2 = create_async_sqlite_peerstore(str(db_path))
+        assert await peerstore2.pubkey_async(peer_id) == key_pair.public_key
+        assert await peerstore2.privkey_async(peer_id) == key_pair.private_key
+        await peerstore2.close_async()
