@@ -114,8 +114,12 @@ def encode_varint_prefixed(data: bytes) -> bytes:
     return length_bytes + data
 
 
-async def read_varint_prefixed_bytes(reader: Reader) -> bytes:
+async def read_varint_prefixed_bytes(
+    reader: Reader, max_length: int | None = None
+) -> bytes:
     len_msg = await decode_uvarint_from_stream(reader)
+    if max_length is not None and len_msg > max_length:
+        raise ValueError(f"Data length {len_msg} exceeds maximum allowed {max_length}")
     data = await read_exactly(reader, len_msg)
     return data
 
