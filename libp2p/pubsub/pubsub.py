@@ -84,6 +84,9 @@ from .pubsub_notifee import (
     PubsubNotifee,
 )
 from .rpc_queue import (
+    DefaultMaxMessageSize,
+    DefaultMaxSubscriptionsPerPeer,
+    DefaultMaxSubscriptionsPerRPC,
     RpcQueue,
     drop_rpc,
 )
@@ -337,6 +340,11 @@ class Pubsub(Service, IPubsub):
 
     _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
     _pending_announce_retries: set[tuple[ID, str, bool]]
+    _peer_subscription_count: dict[ID, int]
+
+    max_subscriptions_per_rpc: int
+    max_subscriptions_per_peer: int
+    max_inbound_rpc_size: int
 
     def __init__(
         self,
@@ -352,6 +360,9 @@ class Pubsub(Service, IPubsub):
         validation_cache_ttl: int = 300,
         validation_cache_size: int = 1000,
         validation_timeout: float = 5.0,
+        max_subscriptions_per_rpc: int = DefaultMaxSubscriptionsPerRPC,
+        max_subscriptions_per_peer: int = DefaultMaxSubscriptionsPerPeer,
+        max_inbound_rpc_size: int = DefaultMaxMessageSize,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -362,6 +373,13 @@ class Pubsub(Service, IPubsub):
         Since the logic for choosing peers to send pubsub messages to is
         in the router, the same Pubsub impl can back floodsub,
         gossipsub, etc.
+
+        :param max_subscriptions_per_rpc: maximum subscription entries accepted
+            per inbound RPC message
+        :param max_subscriptions_per_peer: maximum distinct topics a remote peer
+            may subscribe to
+        :param max_inbound_rpc_size: maximum inbound pubsub RPC frame size in
+            bytes
         """
         self.host = host
         self.router = router
@@ -439,6 +457,11 @@ class Pubsub(Service, IPubsub):
         self._peer_added_events: dict[ID, trio.Event] = {}
         self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
         self._pending_announce_retries = set()
+        self._peer_subscription_count = {}
+
+        self.max_subscriptions_per_rpc = max_subscriptions_per_rpc
+        self.max_subscriptions_per_peer = max_subscriptions_per_peer
+        self.max_inbound_rpc_size = max_inbound_rpc_size
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -488,7 +511,9 @@ class Pubsub(Service, IPubsub):
 
         try:
             while self.manager.is_running:
-                incoming: bytes = await read_varint_prefixed_bytes(stream)
+                incoming: bytes = await read_varint_prefixed_bytes(
+                    stream, max_length=self.max_inbound_rpc_size
+                )
                 rpc_incoming: rpc_pb2.RPC = rpc_pb2.RPC()
                 rpc_incoming.ParseFromString(incoming)
 
@@ -512,6 +537,15 @@ class Pubsub(Service, IPubsub):
                             self.manager.run_task(self.push_msg, peer_id, msg)
 
                 if rpc_incoming.subscriptions:
+                    if len(rpc_incoming.subscriptions) > self.max_subscriptions_per_rpc:
+                        logger.warning(
+                            "Peer %s sent %d subscriptions exceeding limit %d, "
+                            "rejecting RPC",
+                            peer_id,
+                            len(rpc_incoming.subscriptions),
+                            self.max_subscriptions_per_rpc,
+                        )
+                        continue
                     # deal with RPC.subscriptions
                     # We don't need to relay the subscription to our
                     # peers because a given node only needs its peers
@@ -536,6 +570,12 @@ class Pubsub(Service, IPubsub):
                         peer_id,
                     )
                     await self.router.handle_rpc(rpc_incoming, peer_id)
+        except ValueError as error:
+            logger.warning(
+                "Inbound pubsub RPC from peer %s exceeded size limit: %s",
+                peer_id,
+                error,
+            )
         except StreamEOF:
             logger.debug(
                 f"Stream closed for peer {peer_id}, exiting read loop cleanly."
@@ -600,9 +640,21 @@ class Pubsub(Service, IPubsub):
                 pass
             del self.peers[peer_id]
         # Also remove from any subscription maps:
-        for _topic, peerset in self.peer_topics.items():
-            if peer_id in peerset:
-                peerset.discard(peer_id)
+        self._clear_peer_from_all_topics(peer_id)
+
+    def _remove_peer_from_topic(self, topic: str, peer_id: ID) -> None:
+        peers = self.peer_topics.get(topic)
+        if peers is None:
+            return
+        peers.discard(peer_id)
+        if not peers:
+            del self.peer_topics[topic]
+
+    def _clear_peer_from_all_topics(self, peer_id: ID) -> None:
+        for topic in list(self.peer_topics):
+            if peer_id in self.peer_topics.get(topic, set()):
+                self._remove_peer_from_topic(topic, peer_id)
+        self._peer_subscription_count.pop(peer_id, None)
 
     def remove_from_blacklist(self, peer_id: ID) -> None:
         """
@@ -834,9 +886,7 @@ class Pubsub(Service, IPubsub):
         if peer_id in self.peer_queues:
             self.peer_queues.pop(peer_id).close()
 
-        for topic in self.peer_topics:
-            if peer_id in self.peer_topics[topic]:
-                self.peer_topics[topic].discard(peer_id)
+        self._clear_peer_from_all_topics(peer_id)
 
         self.router.remove_peer(peer_id)
 
@@ -924,18 +974,37 @@ class Pubsub(Service, IPubsub):
         :param sub_message: RPC.SubOpts
         """
         if sub_message.subscribe:
+            topic = sub_message.topicid
+            already_subscribed = (
+                topic in self.peer_topics and origin_id in self.peer_topics[topic]
+            )
+            if not already_subscribed:
+                peer_count = self._peer_subscription_count.get(origin_id, 0)
+                if peer_count >= self.max_subscriptions_per_peer:
+                    logger.warning(
+                        "Peer %s exceeded max subscriptions per peer (%d), "
+                        "ignoring subscribe to %s",
+                        origin_id,
+                        self.max_subscriptions_per_peer,
+                        topic,
+                    )
+                    return
+
             was_newly_added = False
-            if sub_message.topicid not in self.peer_topics:
-                self.peer_topics[sub_message.topicid] = {origin_id}
+            if topic not in self.peer_topics:
+                self.peer_topics[topic] = {origin_id}
                 was_newly_added = True
-            elif origin_id not in self.peer_topics[sub_message.topicid]:
+            elif origin_id not in self.peer_topics[topic]:
                 # Add peer to topic
-                self.peer_topics[sub_message.topicid].add(origin_id)
+                self.peer_topics[topic].add(origin_id)
                 was_newly_added = True
 
             if was_newly_added:
+                self._peer_subscription_count[origin_id] = (
+                    self._peer_subscription_count.get(origin_id, 0) + 1
+                )
                 # Notify anyone waiting in wait_for_subscription()
-                key = (origin_id, sub_message.topicid)
+                key = (origin_id, topic)
                 if key in self._subscription_events:
                     self._subscription_events.pop(key).set()
 
@@ -959,12 +1028,15 @@ class Pubsub(Service, IPubsub):
                         self.manager.run_task(
                             self.router.send_recent_messages,  # type: ignore[attr-defined]
                             origin_id,
-                            sub_message.topicid,
+                            topic,
                         )
         else:
-            if sub_message.topicid in self.peer_topics:
-                if origin_id in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].discard(origin_id)
+            topic = sub_message.topicid
+            if topic in self.peer_topics and origin_id in self.peer_topics[topic]:
+                self._remove_peer_from_topic(topic, origin_id)
+                peer_count = self._peer_subscription_count.get(origin_id, 0)
+                if peer_count > 0:
+                    self._peer_subscription_count[origin_id] = peer_count - 1
 
     def notify_subscriptions(self, publish_message: rpc_pb2.Message) -> None:
         """
