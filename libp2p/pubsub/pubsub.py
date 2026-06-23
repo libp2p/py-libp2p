@@ -6,6 +6,7 @@ import base64
 from collections.abc import (
     Callable,
     KeysView,
+    Set as AbstractSet,
 )
 import functools
 import hashlib
@@ -345,6 +346,7 @@ class Pubsub(Service, IPubsub):
     max_subscriptions_per_rpc: int
     max_subscriptions_per_peer: int
     max_inbound_rpc_size: int
+    allowed_topics: frozenset[str] | None
 
     def __init__(
         self,
@@ -363,6 +365,7 @@ class Pubsub(Service, IPubsub):
         max_subscriptions_per_rpc: int = DefaultMaxSubscriptionsPerRPC,
         max_subscriptions_per_peer: int = DefaultMaxSubscriptionsPerPeer,
         max_inbound_rpc_size: int = DefaultMaxMessageSize,
+        allowed_topics: AbstractSet[str] | None = None,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -380,6 +383,8 @@ class Pubsub(Service, IPubsub):
             may subscribe to
         :param max_inbound_rpc_size: maximum inbound pubsub RPC frame size in
             bytes
+        :param allowed_topics: when set, only subscriptions to these topics are
+            accepted from remote peers (mirrors js-libp2p ``allowedTopics``)
         """
         self.host = host
         self.router = router
@@ -462,15 +467,26 @@ class Pubsub(Service, IPubsub):
         self.max_subscriptions_per_rpc = max_subscriptions_per_rpc
         self.max_subscriptions_per_peer = max_subscriptions_per_peer
         self.max_inbound_rpc_size = max_inbound_rpc_size
+        self.allowed_topics = (
+            frozenset(allowed_topics) if allowed_topics is not None else None
+        )
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
 
     async def run(self) -> None:
-        self.manager.run_daemon_task(self.handle_peer_queue)
-        self.manager.run_daemon_task(self.handle_dead_peer_queue)
-        self.manager.run_daemon_task(self._validation_cache_cleanup)
-        await self.manager.wait_finished()
+        try:
+            self.manager.run_daemon_task(self.handle_peer_queue)
+            self.manager.run_daemon_task(self.handle_dead_peer_queue)
+            self.manager.run_daemon_task(self._validation_cache_cleanup)
+            await self.manager.wait_finished()
+        finally:
+            self._clear_subscription_state()
+
+    def _clear_subscription_state(self) -> None:
+        """Release remote subscription tracking state on service shutdown."""
+        self.peer_topics.clear()
+        self._peer_subscription_count.clear()
 
     @property
     def my_id(self) -> ID:
@@ -975,6 +991,14 @@ class Pubsub(Service, IPubsub):
         """
         if sub_message.subscribe:
             topic = sub_message.topicid
+            if self.allowed_topics is not None and topic not in self.allowed_topics:
+                logger.debug(
+                    "Ignoring subscription to disallowed topic %s from peer %s",
+                    topic,
+                    origin_id,
+                )
+                return
+
             already_subscribed = (
                 topic in self.peer_topics and origin_id in self.peer_topics[topic]
             )
