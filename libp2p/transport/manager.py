@@ -110,9 +110,7 @@ class TransportManager:
 
         # Re-sort by listen_order() to match go-libp2p's ListenOrder priority.
         # Transports without listen_order() default to priority 0 (highest).
-        self._transports.sort(
-            key=lambda t: getattr(t, "listen_order", lambda: 0)()
-        )
+        self._transports.sort(key=lambda t: getattr(t, "listen_order", lambda: 0)())
 
         logger.debug(
             "TransportManager: registered %s (protocols=%s, listen_order=%d)",

@@ -1303,6 +1303,7 @@ class Swarm(Service, INetworkService):
                     logger.error(
                         "PortDemultiplexer.listen failed for %s:%s: %s", host, port, exc
                     )
+                    return False
 
         # ── 2. Start all listeners in parallel ──────────────────────────────────
         results: list[tuple[Multiaddr, bool]] = []
@@ -1346,8 +1347,9 @@ class Swarm(Service, INetworkService):
                 logger.debug("successfully started listening on: %s", maddr)
                 async with results_lock:
                     results.append((maddr, True))
-            except OSError as exc:
+            except (OSError, OpenConnectionError, SwarmException) as exc:
                 logger.debug("fail to listen on %s: %s", maddr, exc)
+                self.listeners.pop(str(maddr), None)
                 async with results_lock:
                     results.append((maddr, False))
 

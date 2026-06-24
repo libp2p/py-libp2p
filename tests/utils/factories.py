@@ -141,7 +141,7 @@ def default_key_pair_factory() -> KeyPair:
     return generate_new_rsa_identity()
 
 
-class IDFactory(factory.Factory):
+class IDFactory(factory.Factory):  # type: ignore
     class Meta:
         model = ID
 
@@ -446,7 +446,7 @@ async def tls_conn_factory(
         yield local_secure_conn, remote_secure_conn
 
 
-class SwarmFactory(factory.Factory):
+class SwarmFactory(factory.Factory):  # type: ignore
     class Meta:
         model = Swarm
 
@@ -510,7 +510,7 @@ class SwarmFactory(factory.Factory):
             yield tuple(ctx_mgrs)
 
 
-class HostFactory(factory.Factory):
+class HostFactory(factory.Factory):  # type: ignore
     class Meta:
         model = BasicHost
 
@@ -554,7 +554,7 @@ class DummyRouter(IPeerRouting):
         return self._routing_table.get(peer_id, None)
 
 
-class RoutedHostFactory(factory.Factory):
+class RoutedHostFactory(factory.Factory):  # type: ignore
     class Meta:
         model = RoutedHost
 
@@ -590,14 +590,14 @@ class RoutedHostFactory(factory.Factory):
             yield routed_hosts
 
 
-class FloodsubFactory(factory.Factory):
+class FloodsubFactory(factory.Factory):  # type: ignore
     class Meta:
         model = FloodSub
 
     protocols = (FLOODSUB_PROTOCOL_ID,)
 
 
-class GossipsubFactory(factory.Factory):
+class GossipsubFactory(factory.Factory):  # type: ignore
     class Meta:
         model = GossipSub
 
@@ -622,7 +622,7 @@ class GossipsubFactory(factory.Factory):
     pending_messages_ttl = GOSSIPSUB_PARAMS.pending_messages_ttl
 
 
-class PubsubFactory(factory.Factory):
+class PubsubFactory(factory.Factory):  # type: ignore
     class Meta:
         model = Pubsub
 

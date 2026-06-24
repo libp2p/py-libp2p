@@ -601,17 +601,17 @@ async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
 
 @pytest.mark.anyio
 async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
-    ready_cancel = Event()
+    ready_cancel = Event()  # type: ignore
 
     class TryFinallyService(Service):
         cleanup_up = False
 
         async def run(self) -> None:
             try:
-                ready_cancel.set()
+                _ = ready_cancel.set()  # type: ignore
                 await self.manager.wait_finished()
             finally:
-                with CancelScope(shield=True):
+                with CancelScope(shield=True):  # type: ignore
                     await anyio.sleep(0)
                 self.cleanup_up = True
 
