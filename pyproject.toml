@@ -87,6 +87,12 @@ filecoin-connect-demo = "examples.filecoin.filecoin_connect_demo:main"
 filecoin-ping-identify-demo = "examples.filecoin.filecoin_ping_identify_demo:main"
 filecoin-pubsub-demo = "examples.filecoin.filecoin_pubsub_demo:main"
 
+[project.optional-dependencies]
+pq = ["kyber-py>=0.9.0"]
+pq-fast = [
+    "liboqs-python>=0.12.0",
+]
+
 [dependency-groups]
 dev = [
     { include-group = "docs" },
@@ -115,6 +121,7 @@ test = [
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
     "pytest-rerunfailures>=12.0",
+    "kyber-py>=0.9.0",
 ]
 a2a-demo = [
     "a2a-sdk[http-server]>=1.0.0",
