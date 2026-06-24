@@ -1,14 +1,14 @@
 """
 XXhfs Noise handshake pattern for post-quantum security.
 
-Implements Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256: a three-message
-handshake that adds X-Wing KEM tokens to the classical Noise XX pattern
+Implements Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256: a three-message
+handshake that adds ML-KEM-768 KEM tokens to the classical Noise XX pattern
 for hybrid post-quantum forward secrecy.
 
 Message layout (wire bytes, inside 2-byte length-prefixed frames)::
 
-    A (initiator -> responder): e_pk(32) || e1_pk(1216)         = 1248 B
-    B (responder -> initiator): e_pk(32) || enc_ct(1136)
+    A (initiator -> responder): e_pk(32) || e1_pk(1184)         = 1216 B
+    B (responder -> initiator): e_pk(32) || enc_ct(1104)
                                  || enc_s(48) || enc_payload
     C (initiator -> responder): enc_s(48) || enc_payload
 
@@ -57,8 +57,8 @@ from ..messages import (
     verify_handshake_payload_sig,
 )
 from .kem import (
-    XWING_CT_SIZE,
-    XWING_PK_SIZE,
+    MLKEM768_CT_SIZE,
+    MLKEM768_PK_SIZE,
     IKem,
 )
 from .kem_backends import make_fast_kem
@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 # Size constants
 _X25519_SIZE = 32
 _AEAD_TAG = 16
-_KEM_CT_ENC_SIZE = XWING_CT_SIZE + _AEAD_TAG  # 1120 + 16 = 1136
+_KEM_CT_ENC_SIZE = MLKEM768_CT_SIZE + _AEAD_TAG  # 1088 + 16 = 1104
 _S_ENC_SIZE = _X25519_SIZE + _AEAD_TAG  # 32   + 16 = 48
 
 
@@ -113,14 +113,14 @@ class PQTransportReadWriter(EncryptedMsgReadWriter):
 
 class PatternXXhfs:
     """
-    Noise XXhfs handshake pattern with X-Wing hybrid KEM.
+    Noise XXhfs handshake pattern with ML-KEM-768 KEM.
 
     Provides mutual authentication (libp2p identity signatures) and
-    hybrid post-quantum forward secrecy via the X-Wing KEM (ML-KEM-768
-    + X25519) alongside the classical X25519 DH exchange.
+    hybrid post-quantum forward secrecy via raw ML-KEM-768 in the ekem1
+    slot alongside the classical X25519 DH exchange (ee, es, se tokens).
     """
 
-    PROTOCOL_NAME = b"Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256"
+    PROTOCOL_NAME = b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
 
     def __init__(
         self,
@@ -204,10 +204,10 @@ class PatternXXhfs:
         ss.mix_hash(e_pk)
         logger.debug("handshake_outbound: msg A – generated ephemeral X25519")
 
-        # e1: ephemeral X-Wing KEM keypair
+        # e1: ephemeral ML-KEM-768 KEM keypair
         e1_pk, e1_sk = self.kem.keygen()
         ss.mix_hash(e1_pk)
-        logger.debug("handshake_outbound: msg A – generated X-Wing KEM keypair")
+        logger.debug("handshake_outbound: msg A – generated ML-KEM-768 keypair")
 
         # Empty payload (no cipher key yet; encrypt_and_hash = mix_hash + identity)
         enc_payload_a = ss.encrypt_and_hash(b"")
@@ -319,9 +319,9 @@ class PatternXXhfs:
         offset += _X25519_SIZE
         ss.mix_hash(init_e_pk)
 
-        # e1: initiator's X-Wing KEM public key
-        init_e1_pk = msg_a[offset : offset + XWING_PK_SIZE]
-        offset += XWING_PK_SIZE
+        # e1: initiator's ML-KEM-768 KEM public key
+        init_e1_pk = msg_a[offset : offset + MLKEM768_PK_SIZE]
+        offset += MLKEM768_PK_SIZE
         ss.mix_hash(init_e1_pk)
 
         # Empty payload (no cipher key yet)

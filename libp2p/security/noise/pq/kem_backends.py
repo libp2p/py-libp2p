@@ -183,20 +183,14 @@ class LibOQSXWingKem:
 
 def make_fast_kem() -> IKem:
     """
-    Return the fastest available X-Wing KEM backend.
+    Return an ML-KEM-768 KEM backend.
 
-    Tries LibOQSXWingKem first (C library, ~100x faster). Falls back to
-    XWingKem (pure-Python kyber-py) if liboqs is not installed.
+    Uses kyber-py (pure Python). For a faster alternative, a liboqs-backed
+    MLKEM768Kem can be added following the LibOQSXWingKem pattern.
     """
-    try:
-        kem = LibOQSXWingKem()
-        logger.info("Using LibOQSXWingKem (liboqs C backend)")
-        return kem
-    except (ImportError, RuntimeError, OSError) as e:
-        logger.info("liboqs not available (%s), falling back to kyber-py", e)
-        from .kem import XWingKem
+    from .kem import MLKEM768Kem
 
-        return XWingKem()
+    return MLKEM768Kem()
 
 
 class KeypairPool:

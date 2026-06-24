@@ -145,13 +145,13 @@ class TestPatternXXhfsInit:
 
     def test_protocol_name(self) -> None:
         pattern, _, _, _ = _make_pattern()
-        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256"
+        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
 
-    def test_default_kem_is_xwing(self) -> None:
-        from libp2p.security.noise.pq.kem import XWingKem
+    def test_default_kem_is_mlkem768(self) -> None:
+        from libp2p.security.noise.pq.kem import MLKEM768Kem
 
         pattern, _, _, _ = _make_pattern()
-        assert isinstance(pattern.kem, XWingKem)
+        assert isinstance(pattern.kem, MLKEM768Kem)
 
 
 class TestPatternXXhfsHandshake:
@@ -335,8 +335,8 @@ class TestPatternXXhfsWireFormat:
     """Verify the on-wire message layout."""
 
     @pytest.mark.trio
-    async def test_message_a_is_1248_bytes(self) -> None:
-        """Message A = e_pk(32) + e1_pk(1216) = 1248 bytes payload."""
+    async def test_message_a_is_1216_bytes(self) -> None:
+        """Message A = e_pk(32) + e1_pk(1184) = 1216 bytes payload."""
         init_pat, _, _, _ = _make_pattern()
         resp_pat, _, _, resp_peer = _make_pattern()
 
@@ -359,11 +359,11 @@ class TestPatternXXhfsWireFormat:
         assert len(spy.writes) >= 1
         frame = spy.writes[0]
         msg_len = int.from_bytes(frame[:2], "big")
-        assert msg_len == 1248, f"Expected 1248, got {msg_len}"
+        assert msg_len == 1216, f"Expected 1216, got {msg_len}"
 
     @pytest.mark.trio
     async def test_message_b_overhead(self) -> None:
-        """Message B = e(32) + enc_ct(1136) + enc_s(48) + enc_payload(len+16)."""
+        """Message B = e(32) + enc_ct(1104) + enc_s(48) + enc_payload(len+16)."""
         init_pat, _, _, _ = _make_pattern()
         resp_pat, _, _, resp_peer = _make_pattern()
 
@@ -387,10 +387,10 @@ class TestPatternXXhfsWireFormat:
         frame = spy.writes[0]
         msg_len = int.from_bytes(frame[:2], "big")
 
-        # Fixed overhead: 32 (e) + 1136 (enc_ct) + 48 (enc_s) + 16 (AEAD tag)
+        # Fixed overhead: 32 (e) + 1104 (enc_ct) + 48 (enc_s) + 16 (AEAD tag)
         # Payload size varies (protobuf-serialised NoiseHandshakePayload) but
         # total fixed overhead is constant
-        fixed_overhead = 32 + 1136 + 48 + 16
+        fixed_overhead = 32 + 1104 + 48 + 16
         assert msg_len >= fixed_overhead, (
             f"Message B too short: {msg_len} < {fixed_overhead}"
         )

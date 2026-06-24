@@ -89,7 +89,7 @@ def _make_transport() -> tuple[TransportPQ, ID]:
 
 class TestTransportPQInit:
     def test_protocol_id(self) -> None:
-        assert PROTOCOL_ID == "/noise-pq/1.0.0"
+        assert PROTOCOL_ID == "/noise-mlkem768-hfs/0.1.0"
 
     def test_instantiation(self) -> None:
         transport, peer = _make_transport()
@@ -105,7 +105,7 @@ class TestTransportPQInit:
     def test_get_pattern_protocol_name(self) -> None:
         transport, _ = _make_transport()
         pattern = transport.get_pattern()
-        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256"
+        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
 
 
 class TestTransportPQHandshake:

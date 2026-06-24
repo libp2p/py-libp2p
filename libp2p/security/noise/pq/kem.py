@@ -189,3 +189,67 @@ class XWingKem:
         x25519_pk_r = bytes(crypto_scalarmult_base(x25519_sk_r))
 
         return _xwing_combine(ss_mlkem, ss_x25519, x25519_eph_pk, x25519_pk_r)
+
+
+# --- ML-KEM-768 standalone (no X25519 wrapper) ---
+
+MLKEM768_PK_SIZE = _ML_KEM_PK_SIZE   # 1184
+MLKEM768_SK_SIZE = _ML_KEM_SK_SIZE   # 2400
+MLKEM768_CT_SIZE = _ML_KEM_CT_SIZE   # 1088
+MLKEM768_SS_SIZE = 32
+
+
+class MLKEM768Kem:
+    """
+    Raw ML-KEM-768 KEM (no X25519 hybrid wrapper).
+
+    The hybridization in Noise XXhfs happens at the protocol level: ML-KEM-768
+    provides the KEM token (ekem1) while X25519 provides the DH tokens (ee, es, se).
+    No combiner is needed inside the KEM.
+
+    Uses kyber-py as the ML-KEM-768 backend.
+    Requires the ``kyber-py`` package (``pip install 'libp2p[pq]'``).
+    The import is deferred to construction time so modules importing
+    this class do not require kyber-py to be installed.
+
+    IMPORTANT: kyber-py's ``ML_KEM_768.encaps(pk)`` returns ``(ss, ct)`` —
+    shared secret first, ciphertext second. This is reversed from the liboqs
+    convention. ``encapsulate()`` corrects the order to ``(ct, ss)`` per IKem.
+    """
+
+    def __init__(self) -> None:
+        try:
+            from kyber_py.ml_kem import ML_KEM_768
+        except ImportError as exc:
+            raise ImportError(
+                "MLKEM768Kem requires the 'kyber-py' package. "
+                "Install it with: pip install 'libp2p[pq]'"
+            ) from exc
+        self._ml_kem = ML_KEM_768
+
+    def keygen(self) -> tuple[bytes, bytes]:
+        """Returns (pk, sk) where pk=1184 B, sk=2400 B."""
+        pk, sk = self._ml_kem.keygen()
+        return pk, sk
+
+    def encapsulate(self, pk: bytes) -> tuple[bytes, bytes]:
+        """
+        Returns (ciphertext, shared_secret) where ct=1088 B, ss=32 B.
+
+        Note: kyber-py ML_KEM_768.encaps() returns (ss, ct) — we swap the order
+        to match the IKem convention of (ct, ss).
+        """
+        if len(pk) != MLKEM768_PK_SIZE:
+            raise ValueError(
+                f"ML-KEM-768 public key must be {MLKEM768_PK_SIZE} bytes, got {len(pk)}"
+            )
+        ss, ct = self._ml_kem.encaps(pk)  # kyber-py returns (ss, ct)
+        return ct, ss
+
+    def decapsulate(self, ct: bytes, sk: bytes) -> bytes:
+        """Returns shared_secret (32 bytes)."""
+        if len(ct) != MLKEM768_CT_SIZE:
+            raise ValueError(
+                f"ML-KEM-768 ciphertext must be {MLKEM768_CT_SIZE} bytes, got {len(ct)}"
+            )
+        return self._ml_kem.decaps(sk, ct)

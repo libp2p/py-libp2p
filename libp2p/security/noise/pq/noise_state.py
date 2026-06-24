@@ -5,7 +5,7 @@ Implements CipherState and SymmetricState as defined in the Noise protocol spec
 (https://noiseprotocol.org/noise.html) with ChaCha20-Poly1305 and SHA-256,
 extended for the HFS (Hybrid Forward Secrecy) pattern.
 
-Protocol name: Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256
+Protocol name: Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256
 """
 
 import hashlib
@@ -15,7 +15,7 @@ import struct
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 # Full protocol name -- cryptographically bound to every derived key
-PROTOCOL_NAME = b"Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256"
+PROTOCOL_NAME = b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
 
 _HASH_LEN = 32  # SHA-256 output length
 _KEY_LEN = 32  # ChaCha20 key length
@@ -78,7 +78,7 @@ class CipherState:
 
 class SymmetricState:
     """
-    Noise SymmetricState for Noise_XXhfs_25519+XWing_ChaChaPoly_SHA256.
+    Noise SymmetricState for Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256.
 
     Maintains the chaining key (ck) and handshake hash (h) across all
     message tokens. Both are initialised to SHA-256(PROTOCOL_NAME).

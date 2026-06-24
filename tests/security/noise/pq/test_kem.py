@@ -1,31 +1,31 @@
-"""Tests for the IKem interface and XWingKem implementation."""
+"""Tests for the IKem interface and MLKEM768Kem implementation."""
 
-from libp2p.security.noise.pq.kem import XWingKem
+from libp2p.security.noise.pq.kem import MLKEM768Kem
 
 
-class TestXWingKemKeySizes:
-    """Verify X-Wing key and ciphertext sizes match the spec."""
+class TestMLKEM768KemKeySizes:
+    """Verify ML-KEM-768 key and ciphertext sizes match the spec."""
 
-    kem: XWingKem
+    kem: MLKEM768Kem
 
     def setup_method(self) -> None:
-        self.kem = XWingKem()
+        self.kem = MLKEM768Kem()
 
     def test_keygen_public_key_size(self) -> None:
         pk, _ = self.kem.keygen()
-        # ML-KEM-768 ek (1184) + X25519 pk (32) = 1216
-        assert len(pk) == 1216
+        # ML-KEM-768 encapsulation key = 1184 bytes
+        assert len(pk) == 1184
 
     def test_keygen_secret_key_size(self) -> None:
         _, sk = self.kem.keygen()
-        # ML-KEM-768 dk (2400) + X25519 sk (32) = 2432
-        assert len(sk) == 2432
+        # ML-KEM-768 decapsulation key = 2400 bytes
+        assert len(sk) == 2400
 
     def test_encapsulate_ciphertext_size(self) -> None:
         pk, _ = self.kem.keygen()
         ct, _ = self.kem.encapsulate(pk)
-        # ML-KEM-768 ct (1088) + X25519 ephemeral pk (32) = 1120
-        assert len(ct) == 1120
+        # ML-KEM-768 ciphertext = 1088 bytes
+        assert len(ct) == 1088
 
     def test_encapsulate_shared_secret_size(self) -> None:
         pk, _ = self.kem.keygen()
@@ -39,13 +39,13 @@ class TestXWingKemKeySizes:
         assert len(ss) == 32
 
 
-class TestXWingKemRoundTrip:
+class TestMLKEM768KemRoundTrip:
     """Verify encapsulate and decapsulate produce the same shared secret."""
 
-    kem: XWingKem
+    kem: MLKEM768Kem
 
     def setup_method(self) -> None:
-        self.kem = XWingKem()
+        self.kem = MLKEM768Kem()
 
     def test_round_trip(self) -> None:
         pk, sk = self.kem.keygen()
@@ -75,19 +75,19 @@ class TestXWingKemRoundTrip:
         assert ss_enc != ss_wrong
 
 
-class TestXWingKemCombiner:
-    """Verify the X-Wing combiner produces deterministic output."""
+class TestMLKEM768KemDeterminism:
+    """Verify decapsulate produces deterministic output."""
 
-    kem: XWingKem
+    kem: MLKEM768Kem
 
     def setup_method(self) -> None:
-        self.kem = XWingKem()
+        self.kem = MLKEM768Kem()
 
-    def test_same_inputs_produce_same_output(self) -> None:
+    def test_decapsulate_is_deterministic(self) -> None:
         pk, sk = self.kem.keygen()
         ct, ss1 = self.kem.encapsulate(pk)
-        # Encapsulate is non-deterministic (uses fresh ephemeral each time)
-        # but decapsulate must be deterministic
+        # Encapsulate is non-deterministic (uses fresh randomness each time)
+        # but decapsulate must be deterministic given the same (ct, sk)
         ss_dec1 = self.kem.decapsulate(ct, sk)
         ss_dec2 = self.kem.decapsulate(ct, sk)
         assert ss_dec1 == ss_dec2
@@ -96,5 +96,15 @@ class TestXWingKemCombiner:
         pk, _ = self.kem.keygen()
         ct1, _ = self.kem.encapsulate(pk)
         ct2, _ = self.kem.encapsulate(pk)
-        # Different ephemeral X25519 keys each time
+        # Different randomness each time → different ciphertexts
         assert ct1 != ct2
+
+
+class TestMakeFastKem:
+    """Verify make_fast_kem() returns MLKEM768Kem."""
+
+    def test_make_fast_kem_returns_mlkem768(self) -> None:
+        from libp2p.security.noise.pq.kem_backends import make_fast_kem
+
+        kem = make_fast_kem()
+        assert isinstance(kem, MLKEM768Kem)

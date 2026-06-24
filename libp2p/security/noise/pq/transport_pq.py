@@ -4,7 +4,7 @@ Post-quantum Noise transport for py-libp2p.
 Wraps PatternXXhfs as an ISecureTransport so it integrates with the
 standard py-libp2p security negotiation stack.
 
-Protocol ID: /noise-pq/1.0.0
+Protocol ID: /noise-mlkem768-hfs/0.1.0
 """
 
 from libp2p.abc import (
@@ -22,12 +22,12 @@ from libp2p.peer.id import ID
 from .kem_backends import make_fast_kem
 from .patterns_pq import PatternXXhfs
 
-PROTOCOL_ID = TProtocol("/noise-pq/1.0.0")
+PROTOCOL_ID = TProtocol("/noise-mlkem768-hfs/0.1.0")
 
 
 class TransportPQ(ISecureTransport):
     """
-    ISecureTransport backed by the Noise XXhfs + X-Wing handshake.
+    ISecureTransport backed by the Noise XXhfs + ML-KEM-768 handshake.
 
     Drop-in replacement for the classical Noise ``Transport``; pass it
     as a security option to ``BasicHost`` under the key ``PROTOCOL_ID``.
