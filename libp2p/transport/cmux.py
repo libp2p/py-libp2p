@@ -178,7 +178,10 @@ class DemultiplexedListener(IListener):
             except BaseException:
                 pass
 
-        trio.lowlevel.spawn_system_task(_drain)
+        if hasattr(self, "background_nursery") and self.background_nursery is not None:
+            self.background_nursery.start_soon(_drain)
+        else:
+            trio.lowlevel.spawn_system_task(_drain)
 
     async def _run_handler(
         self,
@@ -388,7 +391,10 @@ class PortDemultiplexer(IListener):
                 self._stopped.set()
                 self._nursery = None
 
-        trio.lowlevel.spawn_system_task(_run_server)
+        if hasattr(self, "background_nursery") and self.background_nursery is not None:
+            self.background_nursery.start_soon(_run_server)
+        else:
+            trio.lowlevel.spawn_system_task(_run_server)
         await self._started.wait()
 
         if self._start_error is not None:

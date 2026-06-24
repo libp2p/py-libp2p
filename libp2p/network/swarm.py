@@ -1298,6 +1298,7 @@ class Swarm(Service, INetworkService):
             )
             if tcp_maddr is not None:
                 try:
+                    port_demux.background_nursery = self.background_nursery
                     await port_demux.listen(tcp_maddr)
                 except Exception as exc:
                     logger.error(
@@ -1342,6 +1343,7 @@ class Swarm(Service, INetworkService):
                 if self.background_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
 
+                listener.background_nursery = self.background_nursery
                 await listener.listen(maddr)
                 await self.notify_listen(maddr)
                 logger.debug("successfully started listening on: %s", maddr)
