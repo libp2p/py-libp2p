@@ -6,7 +6,10 @@ import logging
 from pathlib import Path
 import ssl
 from libp2p.transport.quic.utils import is_quic_multiaddr
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from libp2p.transport.cmux import PortDemultiplexer
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 
@@ -582,6 +585,7 @@ def new_swarm(
     # WebSocket address on the SAME port, we create one PortDemultiplexer so they share
     # the OS socket (EADDRINUSE prevention).
     port_demux = None
+    port_demuxers: dict[tuple[str, int], PortDemultiplexer] = {}
     if listen_addrs:
         from libp2p.transport.cmux import PortDemultiplexer as _ConnMgr
 
@@ -611,17 +615,16 @@ def new_swarm(
             )
             has_ws = any("ws" in ps or "wss" in ps for ps in proto_sets)
             if has_plain_tcp and has_ws:
-                port_demux = _ConnMgr(host, port)
+                port_demuxers[(host, port)] = _ConnMgr(host, port)
                 logger.debug(
                     "new_swarm: created PortDemultiplexer for shared port %s:%d",
                     host,
                     port,
                 )
-                break  # one PortDemultiplexer per swarm (extend later for multi-port)
 
     from libp2p.transport.manager import TransportManager
 
-    transport_manager = TransportManager(port_demux=port_demux)
+    transport_manager = TransportManager(port_demuxers=port_demuxers)
 
     swarm = Swarm(
         id_opt,
@@ -679,6 +682,7 @@ def new_host(
     # NEW: convenience flags
     enable_tcp: bool = True,
     enable_websocket: bool = False,
+    enable_relay: bool = True,
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -767,7 +771,7 @@ def new_host(
     )
 
     if disc_opt is not None:
-        return RoutedHost(
+        host: IHost = RoutedHost(
             network=swarm,
             router=disc_opt,
             enable_mDNS=enable_mDNS,
@@ -779,18 +783,33 @@ def new_host(
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
             announce_addrs=announce_addrs,
         )
-    return BasicHost(
-        network=swarm,
-        enable_mDNS=enable_mDNS,
-        bootstrap=bootstrap,
-        enable_upnp=enable_upnp,
-        negotiate_timeout=negotiate_timeout,
-        resource_manager=resource_manager,
-        bootstrap_allow_ipv6=bootstrap_allow_ipv6,
-        bootstrap_dns_timeout=bootstrap_dns_timeout,
-        bootstrap_dns_max_retries=bootstrap_dns_max_retries,
-        announce_addrs=announce_addrs,
-    )
+    else:
+        host = BasicHost(
+            network=swarm,
+            enable_mDNS=enable_mDNS,
+            bootstrap=bootstrap,
+            enable_upnp=enable_upnp,
+            negotiate_timeout=negotiate_timeout,
+            resource_manager=resource_manager,
+            bootstrap_allow_ipv6=bootstrap_allow_ipv6,
+            bootstrap_dns_timeout=bootstrap_dns_timeout,
+            bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+            announce_addrs=announce_addrs,
+        )
+
+    if enable_relay:
+        from libp2p.relay.circuit_v2.transport import CircuitV2Transport
+        from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
+        from libp2p.relay.circuit_v2.config import RelayConfig
+        from libp2p.network.swarm import Swarm
+        from typing import cast
+
+        config = RelayConfig()
+        protocol = CircuitV2Protocol(host, config.limits)
+        transport = CircuitV2Transport(host, protocol, config)
+        cast(Swarm, swarm).transport_manager.add_transport(transport)
+
+    return host
 
 
 __version__ = __version("libp2p")

@@ -426,10 +426,13 @@ class QUICTransport(ITransport):
         """
         Get supported protocol identifiers.
         Return True if this QUIC transport can listen on the given multiaddr.
+
         Args:
             maddr: Multiaddr to check.
+
         Returns:
             True if the multiaddr contains a QUIC protocol component.
+
         """
         return is_quic_multiaddr(maddr)
 

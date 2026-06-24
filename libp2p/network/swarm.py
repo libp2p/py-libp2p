@@ -59,7 +59,6 @@ from libp2p.transport.exceptions import (
 )
 from libp2p.transport.manager import TransportManager
 from libp2p.transport.quic.config import QUICTransportConfig
-from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.transport import QUICTransport
 from libp2p.transport.upgrader import (
     TransportUpgrader,
@@ -82,6 +81,9 @@ from .exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+_HAPPY_EYEBALLS_DELAY = 0.250
+_MAX_PARALLEL_DIALS = 8
 
 
 def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
@@ -251,7 +253,8 @@ class Swarm(Service, INetworkService):
             DeprecationWarning,
             stacklevel=2,
         )
-        self.transport_manager._transports = [value]
+        self.transport_manager._transports.clear()
+        self.transport_manager.add_transport(value)
 
     def _init_connection_management(self) -> None:
         """
@@ -623,24 +626,38 @@ class Swarm(Service, INetworkService):
         connections = []
         exceptions: list[SwarmException] = []
 
-        # Try all allowed addresses with retry logic
-        for multiaddr in allowed_addrs:
-            try:
-                connection = await self._dial_with_retry(multiaddr, peer_id)
-                connections.append(connection)
+        # Try allowed addresses using Happy Eyeballs algorithm
+        with trio.CancelScope() as cancel_scope:
+            async with trio.open_nursery() as nursery:
+                for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
+                    failed_event = trio.Event()
 
-                # Limit number of connections per peer
-                if len(connections) >= self.connection_config.max_connections_per_peer:
-                    break
+                    async def dial_task(
+                        addr: Multiaddr = multiaddr, ev: trio.Event = failed_event
+                    ) -> None:
+                        try:
+                            connection = await self._dial_with_retry(addr, peer_id)
+                            connections.append(connection)
+                            # Limit number of connections per peer
+                            if (
+                                len(connections)
+                                >= self.connection_config.max_connections_per_peer
+                            ):
+                                cancel_scope.cancel()
+                        except SwarmException as e:
+                            exceptions.append(e)
+                            logger.debug(
+                                "encountered exception when trying to connect to %s",
+                                addr,
+                                exc_info=e,
+                            )
+                            ev.set()
 
-            except SwarmException as e:
-                exceptions.append(e)
-                logger.debug(
-                    "encountered swarm exception when trying to connect to %s, "
-                    "trying next address...",
-                    multiaddr,
-                    exc_info=e,
-                )
+                    nursery.start_soon(dial_task)
+
+                    # Start next dial immediately if this one fails, or after 250ms
+                    with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
+                        await failed_event.wait()
 
         if not connections:
             # Tried all addresses, raising exception.
@@ -750,7 +767,16 @@ class Swarm(Service, INetworkService):
         # Dial peer via the selected transport (returns a raw connection).
         raw_conn = None
         try:
-            addr = Multiaddr(f"{addr}/p2p/{peer_id}")
+            # Ensure the multiaddr has the target peer ID, but don't append if
+            # already present
+            try:
+                existing_p2p = addr.value_for_protocol("p2p")
+            except Exception:
+                existing_p2p = None
+
+            if not existing_p2p:
+                addr = Multiaddr(f"{addr}/p2p/{peer_id}")
+
             raw_conn = await transport.dial(addr)
 
             # Enable PNET if psk is provided
@@ -1251,81 +1277,85 @@ class Swarm(Service, INetworkService):
         logger.debug("Starting to listen")
         await self.event_background_nursery_created.wait()
 
-        success_count = 0
-        for maddr in multiaddrs:
-            logger.debug(f"Swarm.listen processing multiaddr: {maddr}")
-            if str(maddr) in self.listeners:
-                logger.debug(f"Swarm.listen: listener already exists for {maddr}")
-                success_count += 1
-                continue
+        # ── 1. Start PortDemultiplexer FIRST so the OS socket is bound ──────────
+        port_demuxers = getattr(self.transport_manager, "_port_demuxers", {})
+        if not port_demuxers:
+            port_demux = getattr(self.transport_manager, "_port_demux", None)
+            if port_demux:
+                port_demuxers = {(port_demux.host, port_demux.port): port_demux}
 
-            # Route to the correct transport for this address.
+        for (host, port), port_demux in port_demuxers.items():
+            tcp_maddr = next(
+                (
+                    m
+                    for m in multiaddrs
+                    if "tcp" in {p.name for p in m.protocols()}
+                    and "ws" not in {p.name for p in m.protocols()}
+                    and "wss" not in {p.name for p in m.protocols()}
+                    and str(m.value_for_protocol("tcp")) == str(port)
+                ),
+                None,
+            )
+            if tcp_maddr is not None:
+                try:
+                    await port_demux.listen(tcp_maddr)
+                except Exception as exc:
+                    logger.error(
+                        "PortDemultiplexer.listen failed for %s:%s: %s", host, port, exc
+                    )
+
+        # ── 2. Start all listeners in parallel ──────────────────────────────────
+        results: list[tuple[Multiaddr, bool]] = []
+        results_lock = trio.Lock()
+
+        async def _start_one(maddr: Multiaddr) -> None:
+            if str(maddr) in self.listeners:
+                async with results_lock:
+                    results.append((maddr, True))
+                return
+
             transport = self.transport_manager.transport_for_listening(maddr)
             if transport is None:
                 logger.warning(
-                    "Swarm.listen: no registered transport can handle %s "
-                    "(registered: %s). Skipping.",
+                    "Swarm.listen: no transport for %s (registered: %s). Skipping.",
                     maddr,
                     [type(t).__name__ for t in self.transport_manager.get_transports()],
                 )
-                continue
+                async with results_lock:
+                    results.append((maddr, False))
+                return
 
             async def conn_handler(
-                read_write_closer: ReadWriteCloser, maddr: Multiaddr = maddr
+                read_write_closer: ReadWriteCloser, _maddr: Multiaddr = maddr
             ) -> None:
-                await self._handle_inbound_connection(read_write_closer, maddr)
+                await self._handle_inbound_connection(read_write_closer, _maddr)
 
-            # Delegate to TransportManager to create the listener (handles CMUX)
             try:
-                logger.debug(f"Swarm.listen: creating listener for {maddr}")
                 listener = self.transport_manager.add_listen_addr(maddr, conn_handler)
                 if listener is None:
-                    continue
-                logger.debug(f"Swarm.listen: listener created for {maddr}")
+                    async with results_lock:
+                        results.append((maddr, False))
+                    return
                 self.listeners[str(maddr)] = listener
+
                 if self.background_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
-                logger.debug(f"Swarm.listen: calling listener.listen for {maddr}")
+
                 await listener.listen(maddr)
-                logger.debug(f"Swarm.listen: listener.listen completed for {maddr}")
-
-                # Call notifiers since event occurred
                 await self.notify_listen(maddr)
-
-                success_count += 1
                 logger.debug("successfully started listening on: %s", maddr)
-            except OSError:
-                # Failed. Continue looping.
-                logger.debug("fail to listen on: %s", maddr)
+                async with results_lock:
+                    results.append((maddr, True))
+            except OSError as exc:
+                logger.debug("fail to listen on %s: %s", maddr, exc)
+                async with results_lock:
+                    results.append((maddr, False))
 
-        # ---- Start the shared PortDemultiplexer socket (if used) ----
-        # After all DemultiplexedListeners are registered, bind the single OS
-        # socket and start the 3-byte routing loop.  This is a no-op when no
-        # PortDemultiplexer is attached (plain TCP / QUIC / WS-only setups).
-        port_demux = getattr(self.transport_manager, "_port_demux", None)
-        if port_demux is not None and success_count > 0:
-            # Pick the TCP-only multiaddr (no /ws) as the bind address so the
-            # socket is created on the correct (host, port) without a /ws suffix.
-            tcp_maddr = None
+        async with trio.open_nursery() as nursery:
             for maddr in multiaddrs:
-                protos = {p.name for p in maddr.protocols()}
-                if "tcp" in protos and "ws" not in protos and "wss" not in protos:
-                    tcp_maddr = maddr
-                    break
-            if tcp_maddr is not None:
-                try:
-                    logger.debug(
-                        "Swarm.listen: starting PortDemultiplexer on %s", tcp_maddr
-                    )
-                    await port_demux.listen(tcp_maddr)
-                    logger.debug("Swarm.listen: PortDemultiplexer started")
-                except Exception as exc:
-                    logger.error(
-                        "Swarm.listen: PortDemultiplexer.listen failed: %s", exc
-                    )
+                nursery.start_soon(_start_one, maddr)
 
-        # Return true if at least one address succeeded
-        return success_count > 0
+        return any(ok for _, ok in results)
 
     async def _handle_inbound_connection(
         self, read_write_closer: ReadWriteCloser, maddr: Multiaddr
@@ -1371,7 +1401,7 @@ class Swarm(Service, INetworkService):
         # Detection is via the IMuxedConn interface, not a class check.
         if isinstance(read_write_closer, IMuxedConn):
             try:
-                muxed_conn = cast(QUICConnection, read_write_closer)
+                muxed_conn = cast(IMuxedConn, read_write_closer)
                 await self.add_conn(muxed_conn, direction="inbound")
                 peer_id = getattr(muxed_conn, "peer_id", None)
                 logger.debug(
@@ -1744,10 +1774,13 @@ class Swarm(Service, INetworkService):
         # Verify connection is fully established before proceeding.
         # For QUIC connections, wait for the connected event.
         # For other muxers (like Yamux/Mplex), check the is_established property.
-        # For QUIC connections, also verify connection is established
-        if isinstance(muxed_conn, QUICConnection):
-            if not muxed_conn.is_established:
-                await muxed_conn._connected_event.wait()
+        # For some muxers (e.g. QUIC), wait for the connected event.
+        # For others (like Yamux/Mplex), check the is_established property.
+        if hasattr(muxed_conn, "_connected_event") and hasattr(
+            muxed_conn, "is_established"
+        ):
+            if not getattr(muxed_conn, "is_established"):
+                await getattr(muxed_conn, "_connected_event").wait()
         elif not muxed_conn.is_established:
             logger.warning(
                 f"Swarm::add_conn | muxer event_started set but "

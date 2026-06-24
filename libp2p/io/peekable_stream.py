@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import socket
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import trio
 
@@ -21,10 +21,17 @@ class PeekableStream(trio.abc.Stream):
 
     stream: trio.abc.Stream
     buffer: bytearray
+    close_callback: Callable[[], None] | None
 
-    def __init__(self, stream: trio.abc.Stream, initial_buffer: bytes = b"") -> None:
+    def __init__(
+        self,
+        stream: trio.abc.Stream,
+        initial_buffer: bytes = b"",
+        close_callback: Callable[[], None] | None = None,
+    ) -> None:
         self.stream = stream
         self.buffer = bytearray(initial_buffer)
+        self.close_callback = close_callback
 
     @property
     def socket(self) -> socket.socket | None:
@@ -54,4 +61,8 @@ class PeekableStream(trio.abc.Stream):
         await self.stream.wait_send_all_might_not_block()
 
     async def aclose(self) -> None:
-        await self.stream.aclose()
+        try:
+            await self.stream.aclose()
+        finally:
+            if self.close_callback is not None:
+                self.close_callback()

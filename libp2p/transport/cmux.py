@@ -138,6 +138,7 @@ class DemultiplexedListener(IListener):
         # Optional handler called per-connection by the drain task.
         self._conn_handler = conn_handler
         self._nursery: trio.Nursery | None = None
+        self._cancel_scope: trio.CancelScope | None = None
 
     async def connections(self) -> AsyncIterator[PeekableStream]:
         """Async-iterate over pre-classified connections."""
@@ -165,12 +166,16 @@ class DemultiplexedListener(IListener):
 
         async def _drain() -> None:
             try:
-                async with trio.open_nursery() as nursery:
-                    self._nursery = nursery
-                    async with self._recv:
-                        async for stream in self._recv:
-                            nursery.start_soon(self._run_handler, handler, stream)
-            except trio.ClosedResourceError:
+                with trio.CancelScope() as cancel_scope:
+                    self._cancel_scope = cancel_scope
+                    async with trio.open_nursery() as nursery:
+                        self._nursery = nursery
+                        async with self._recv:
+                            async for stream in self._recv:
+                                nursery.start_soon(self._run_handler, handler, stream)
+            except Exception:
+                pass
+            except BaseException:
                 pass
 
         trio.lowlevel.spawn_system_task(_drain)
@@ -191,6 +196,8 @@ class DemultiplexedListener(IListener):
             return
         self._closed = True
         self._recv.close()
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
         if callable(self._close_callback):
             self._close_callback(self.conn_type)
 
@@ -289,6 +296,17 @@ class PortDemultiplexer(IListener):
                 f" on {self.host}:{self.port}"
             )
 
+        # Update TCP port component of the listen_maddr if it differs from self.port.
+        # This handles cases where demultiplexed_listen is called after listen()
+        # bound 0.
+        from multiaddr import Multiaddr
+
+        parts = str(maddr).split("/")
+        for i, part in enumerate(parts):
+            if part == "tcp" and i + 1 < len(parts):
+                parts[i + 1] = str(self.port)
+        real_maddr = Multiaddr("/".join(parts))
+
         send_ch, recv_ch = trio.open_memory_channel[PeekableStream](ACCEPT_QUEUE_SIZE)
         self._send_channels[conn_type] = send_ch
 
@@ -299,7 +317,7 @@ class PortDemultiplexer(IListener):
         dl = DemultiplexedListener(
             conn_type=conn_type,
             recv_channel=recv_ch,
-            listen_maddr=maddr,
+            listen_maddr=real_maddr,
             close_callback=_remove,
             conn_handler=conn_handler,
         )
@@ -347,7 +365,21 @@ class PortDemultiplexer(IListener):
                 async with trio.open_nursery() as nursery:
                     self._nursery = nursery
                     try:
-                        await nursery.start(_serve)
+                        listeners = await nursery.start(_serve)
+                        if listeners:
+                            sock = listeners[0].socket
+                            new_port = sock.getsockname()[1]
+                            self.port = new_port
+                            for dl in self._listeners.values():
+                                if dl._listen_maddr is not None:
+                                    # Update the tcp component with the real port
+                                    from multiaddr import Multiaddr
+
+                                    parts = str(dl._listen_maddr).split("/")
+                                    for i, part in enumerate(parts):
+                                        if part == "tcp" and i + 1 < len(parts):
+                                            parts[i + 1] = str(new_port)
+                                    dl._listen_maddr = Multiaddr("/".join(parts))
                     except BaseException as err:
                         self._start_error = err
                     finally:
@@ -412,15 +444,7 @@ class PortDemultiplexer(IListener):
             # Create an event to keep the trio.serve_tcp handler alive
             # because trio automatically closes the stream when the handler returns.
             stream_closed = trio.Event()
-            original_aclose = peekable.aclose
-
-            async def hooked_aclose() -> None:
-                try:
-                    await original_aclose()
-                finally:
-                    stream_closed.set()
-
-            peekable.aclose = hooked_aclose  # type: ignore[method-assign]
+            peekable.close_callback = stream_closed.set
 
             # Try to deliver with a bounded timeout to avoid blocking the
             # accept loop (mirrors go-libp2p's acceptTimeout = 30s).

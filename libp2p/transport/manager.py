@@ -40,7 +40,7 @@ Port sharing (TCP + WebSocket on the same port)::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from multiaddr import Multiaddr
 import trio
@@ -75,12 +75,25 @@ class TransportManager:
         ``NewTCPTransport`` / ``websocket.New`` in go-libp2p.
     """
 
-    def __init__(self, port_demux: PortDemultiplexer | None = None) -> None:
+    def __init__(
+        self,
+        port_demux: PortDemultiplexer | None = None,
+        port_demuxers: dict[tuple[str, int], PortDemultiplexer] | None = None,
+    ) -> None:
         self._transports: list[ITransport] = []
         # Shared PortDemultiplexer for TCP port reuse (optional).
-        # Mirrors go-libp2p: stored at construction, passed to transports
-        # that support it via add_listen_addr().
-        self._port_demux: PortDemultiplexer | None = port_demux
+        if port_demuxers is not None:
+            self._port_demuxers = port_demuxers
+        elif port_demux is not None:
+            self._port_demuxers = {(port_demux.host, port_demux.port): port_demux}
+        else:
+            self._port_demuxers = {}
+
+        self._port_demux: PortDemultiplexer | None = (
+            next(iter(self._port_demuxers.values()), None)
+            if self._port_demuxers
+            else None
+        )
         # Tracks per-(host, port) listeners for non-PortDemultiplexer paths.
         self._listeners: dict[tuple[str, int], IListener] = {}
 
@@ -94,10 +107,18 @@ class TransportManager:
             :class:`~libp2p.abc.ITransport`.
         """
         self._transports.append(transport)
+
+        # Re-sort by listen_order() to match go-libp2p's ListenOrder priority.
+        # Transports without listen_order() default to priority 0 (highest).
+        self._transports.sort(
+            key=lambda t: getattr(t, "listen_order", lambda: 0)()
+        )
+
         logger.debug(
-            "TransportManager: registered %s (protocols=%s)",
+            "TransportManager: registered %s (protocols=%s, listen_order=%d)",
             type(transport).__name__,
             getattr(transport, "protocols", lambda: "<unknown>")(),
+            getattr(transport, "listen_order", lambda: 0)(),
         )
 
     def add_transports(self, transports: list[ITransport]) -> None:
@@ -242,12 +263,21 @@ class TransportManager:
 
         protocols = [p.name for p in maddr.protocols()]
 
-        if "tcp" in protocols and self._port_demux is not None:
-            # ---- Shared-port path (mirrors go-libp2p TcpTransport.Listen /
-            #      WebsocketTransport.Listen with sharedTcp != nil) -----
-            return self._add_listen_addr_shared(
-                maddr, protocols, transport, conn_handler
+        if "tcp" in protocols:
+            host_val = maddr.value_for_protocol("ip4") or maddr.value_for_protocol(
+                "ip6"
             )
+            port_val = maddr.value_for_protocol("tcp")
+            if host_val and port_val:
+                key = (str(host_val), int(port_val))
+                if hasattr(self, "_port_demuxers") and key in self._port_demuxers:
+                    return self._add_listen_addr_shared(
+                        maddr,
+                        protocols,
+                        transport,
+                        conn_handler,
+                        self._port_demuxers[key],
+                    )
 
         # ---- Non-TCP or no PortDemultiplexer: let the transport own its listener ----
         return transport.create_listener(conn_handler)
@@ -258,6 +288,7 @@ class TransportManager:
         protocols: list[str],
         transport: ITransport,
         conn_handler: THandler,
+        port_demux: PortDemultiplexer,
     ) -> IListener | None:
         """
         Wire a TCP-based transport into the shared
@@ -274,8 +305,6 @@ class TransportManager:
             or ``None`` on failure.
         """
         from libp2p.transport.cmux import DemultiplexedConnType
-
-        port_demux = cast("PortDemultiplexer", self._port_demux)
 
         # Determine connection type for this transport.
         if "ws" in protocols or "wss" in protocols:
@@ -331,7 +360,7 @@ class TransportManager:
 
             async def tcp_wrapped_handler(stream: trio.abc.Stream) -> None:
                 try:
-                    tcp_stream = TrioTCPStream(stream)
+                    tcp_stream = TrioTCPStream(stream)  # type: ignore[arg-type]
                     await conn_handler(tcp_stream)
                 except Exception as exc:
                     logger.debug("TCP handler failed on shared port: %s", exc)

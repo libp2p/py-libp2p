@@ -86,6 +86,14 @@ class TransportRegistry:
     """
 
     def __init__(self) -> None:
+        import warnings
+
+        warnings.warn(
+            "TransportRegistry is deprecated and will be removed in a future release. "
+            "Use TransportManager instead to manage instantiated transports.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._transports: dict[str, type[ITransport]] = {}
         self._register_default_transports()
 
