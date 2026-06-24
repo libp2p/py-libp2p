@@ -7,10 +7,10 @@ Public API::
     # Default (pure-Python kyber-py backend):
     security_options = {PROTOCOL_ID: TransportPQ(libp2p_keypair, noise_privkey)}
 
-    # Fast backends (when liboqs C library is installed):
+    # Fast ML-KEM-768 backend:
     from libp2p.security.noise.pq import make_fast_kem, KeypairPool
 
-    kem = make_fast_kem()                           # auto-selects liboqs or kyber-py
+    kem = make_fast_kem()                           # returns MLKEM768Kem (pure Python via kyber-py)
     pool = await KeypairPool.create(kem, min_size=3) # pre-compute keypairs
 """
 

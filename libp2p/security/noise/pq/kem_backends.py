@@ -27,10 +27,10 @@ KeypairPool
     Python ≥ 3.9 so the event loop is never blocked.
 
     Usage:
-        from libp2p.security.noise.pq.kem import XWingKem
+        from libp2p.security.noise.pq.kem import MLKEM768Kem
         from libp2p.security.noise.pq.kem_backends import KeypairPool
 
-        pool = await KeypairPool.create(XWingKem(), min_size=3)
+        pool = await KeypairPool.create(MLKEM768Kem(), min_size=3)
         pk, sk = pool.acquire()   # instant — no keygen on critical path
 """
 
