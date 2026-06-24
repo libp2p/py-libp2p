@@ -1,3 +1,13 @@
+"""
+Example 15: IPNS Mutable Pointer (Versioned Agent Registry)
+
+This example demonstrates how to use the InterPlanetary Name System (IPNS) to 
+create a stable, mutable pointer that resolves to immutable CIDs. This is 
+particularly useful for use cases like a versioned AI agent registry, where 
+the content updates over time but consumers need a single, unchanging address 
+to fetch the latest version.
+"""
+
 import trio
 from py_ipfs_lite.peer import Peer
 from py_ipfs_lite.config import Config

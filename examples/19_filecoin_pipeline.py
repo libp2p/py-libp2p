@@ -1,5 +1,5 @@
 """
-Example 19: GooseSwarm Filecoin Pipeline (CAR → ProPGF M1)
+Example 19: AI Agent Filecoin Pipeline (CAR → ProPGF M1)
 
 This example demonstrates how an AI agent can build a cryptographically 
 verifiable log of its inference steps (prompts, tool calls, thoughts)
@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("filecoin_pipeline")
 
 async def main():
-    logger.info("--- GooseSwarm Verifiable Inference Pipeline ---")
+    logger.info("--- AI Agent Verifiable Inference Pipeline ---")
     
     # 1. Initialize local, offline py-ipfs-lite peer
     # We use a memory blockstore to prove we don't need a heavy local disk setup
@@ -89,8 +89,9 @@ async def main():
         await peer.close()
         
     # Clean up the file so we don't litter the repo
-    if os.path.exists(car_filename):
-        os.remove(car_filename)
+    # (Commented out for the demo so the user can show the CAR file)
+    # if os.path.exists(car_filename):
+    #     os.remove(car_filename)
 
 if __name__ == "__main__":
     trio.run(main)

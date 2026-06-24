@@ -213,6 +213,9 @@ class Peer:
         return HostAdapter(raw_host)
 
     async def _create_routing(self):
+        if self.config.offline:
+            return None
+            
         raw_host = getattr(self.host, "_host", self.host)
         raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)
         dht_adapter = RoutingAdapter(raw_routing)

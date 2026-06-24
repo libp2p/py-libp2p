@@ -60,7 +60,14 @@ async def main():
     logger.info(f"Kubo local address: {kubo_local_addr}")
     
     # 2. Start py-ipfs-lite
-    config = Config(offline=True, blockstore_type="memory", use_ipni=False)
+    # We disable reprovider (interval=-1) to avoid KadDHT background noise
+    # trying to provide to the local Kubo daemon (which only supports /ipfs/lan/kad/1.0.0 locally).
+    config = Config(
+        offline=True, 
+        blockstore_type="memory", 
+        use_ipni=False,
+        reprovide_interval_seconds=-1
+    )
     peer = Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
     

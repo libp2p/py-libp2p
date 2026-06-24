@@ -1,3 +1,11 @@
+"""
+Example 04: Pinning and Garbage Collection (GC)
+
+This demo illustrates fundamental IPFS blockstore management. It demonstrates 
+how to safely pin essential blocks to protect them from deletion, and how to 
+run a garbage collection sweep to reclaim storage from unpinned, orphaned blocks.
+"""
+
 import trio
 import logging
 from py_ipfs_lite.peer import Peer
@@ -28,8 +36,8 @@ async def main():
     print("\nTriggering Garbage Collection (GC)...")
     stats = await peer.gc()
     print("GC statistics returned by daemon:")
-    print(f"  Blocks reclaimed: {stats.get('reclaimed_blocks')}")
-    print(f"  Blocks retained:  {stats.get('retained_blocks')}")
+    print(f"  Blocks reclaimed: {stats.reclaimed_blocks}")
+    print(f"  Blocks retained:  {stats.retained_blocks}")
 
     print("\nVerifying block presence on disk...")
     keep_present = await peer.blockstore.has(parse_cid(cid_keep))

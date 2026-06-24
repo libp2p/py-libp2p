@@ -15,9 +15,10 @@ async def main():
         temp_path = f.name
 
     try:
-        # Start py peer
         print("\nStarting py-ipfs-lite peer...")
-        peer = Peer(Config(reprovide_interval_seconds=10), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+        # We disable reprovider (interval=-1) to avoid KadDHT background noise
+        # trying to provide to the local Kubo daemon (which only supports /ipfs/lan/kad/1.0.0 locally).
+        peer = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
         await peer.start()
         
         # 2. Add file from Python
@@ -83,4 +84,6 @@ async def main():
 if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("libp2p").setLevel(logging.CRITICAL)
     trio.run(main)

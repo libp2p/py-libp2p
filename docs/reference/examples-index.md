@@ -30,7 +30,7 @@ uv run python examples/<script>.py
 | 16 | [`16_metrics_dashboard.py`](../../examples/16_metrics_dashboard.py) | Scraping Prometheus metrics from `/debug/metrics/prometheus` | [Observability](../guides/observability.md) |
 | 17 | [`17_concurrent_ingestion_benchmark.py`](../../examples/17_concurrent_ingestion_benchmark.py) | Concurrent `add_file()` calls under the RWLock — safety and throughput | [Observability](../guides/observability.md) |
 | 18 | [`18_ipns_trust_boundary.py`](../../examples/18_ipns_trust_boundary.py) | Adversarial demo: two forged-record strategies both correctly rejected | [IPNS — Trust Model](../guides/ipns.md#example-18-trust-model--the-flagship-security-demo) |
-| 19 | [`19_filecoin_pipeline.py`](../../examples/19_filecoin_pipeline.py) | GooseSwarm inference trace → linked IPLD DAG → CARv1 → Filecoin | [CAR Files and Filecoin](../guides/car-files-and-filecoin.md) |
+| 19 | [`19_filecoin_pipeline.py`](../../examples/19_filecoin_pipeline.py) | AI Agent inference trace → linked IPLD DAG → CARv1 → Filecoin | [CAR Files and Filecoin](../guides/car-files-and-filecoin.md) |
 | 20 | [`20_kubo_round_trip.py`](../../examples/20_kubo_round_trip.py) | Full round-trip: Python writes DAG-JSON, Kubo reads; Kubo writes UnixFS, Python reads | [Interop with Kubo](../guides/interop-with-kubo.md) |
 | 21 | [`21_resource_footprint.py`](../../examples/21_resource_footprint.py) | Measuring memory and CPU footprint of a running peer at rest and under load | [Observability](../guides/observability.md) |
 
