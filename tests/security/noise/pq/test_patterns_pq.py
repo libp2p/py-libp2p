@@ -145,7 +145,9 @@ class TestPatternXXhfsInit:
 
     def test_protocol_name(self) -> None:
         pattern, _, _, _ = _make_pattern()
-        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
+        assert (
+            pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
+        )
 
     def test_default_kem_is_mlkem768(self) -> None:
         from libp2p.security.noise.pq.kem import MLKEM768Kem

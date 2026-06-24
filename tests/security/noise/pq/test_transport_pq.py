@@ -105,7 +105,9 @@ class TestTransportPQInit:
     def test_get_pattern_protocol_name(self) -> None:
         transport, _ = _make_transport()
         pattern = transport.get_pattern()
-        assert pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
+        assert (
+            pattern.PROTOCOL_NAME == b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
+        )
 
 
 class TestTransportPQHandshake:
