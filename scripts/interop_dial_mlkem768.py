@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import asyncio
 import hashlib
 import hmac
 import logging
@@ -25,22 +24,25 @@ from typing import cast
 
 import anyio
 import anyio.abc
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 from kyber_py.ml_kem import ML_KEM_768
 from nacl.bindings import crypto_scalarmult, crypto_scalarmult_base
 import nacl.utils
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 from libp2p.crypto.ed25519 import create_new_key_pair as ed25519_keypair
-from libp2p.crypto.x25519 import X25519PublicKey, create_new_key_pair as x25519_keypair
+from libp2p.crypto.x25519 import (
+    X25519PublicKey,
+    create_new_key_pair as x25519_keypair,
+)
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.peer.id import ID
+from libp2p.security.noise.exceptions import InvalidSignature
 from libp2p.security.noise.io import NoisePacketReadWriter
 from libp2p.security.noise.messages import (
     NoiseHandshakePayload,
     make_handshake_payload_sig,
     verify_handshake_payload_sig,
 )
-from libp2p.security.noise.exceptions import InvalidSignature
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,17 +56,17 @@ logger = logging.getLogger("interop_dial_mlkem768")
 # ---------------------------------------------------------------------------
 PROTOCOL_NAME = b"Noise_XXhfs_25519+ML-KEM-768_ChaChaPoly_SHA256"
 
-ML_KEM_768_PK_SIZE = 1184   # ML-KEM-768 encapsulation key
-ML_KEM_768_CT_SIZE = 1088   # ML-KEM-768 ciphertext
-ML_KEM_768_SS_SIZE = 32     # ML-KEM-768 shared secret
-X25519_SIZE = 32             # X25519 public/private key size
-AEAD_TAG = 16                # Poly1305 tag length
-KEY_LEN = 32                 # ChaCha20 key length
-HASH_LEN = 32                # SHA-256 output length
+ML_KEM_768_PK_SIZE = 1184  # ML-KEM-768 encapsulation key
+ML_KEM_768_CT_SIZE = 1088  # ML-KEM-768 ciphertext
+ML_KEM_768_SS_SIZE = 32  # ML-KEM-768 shared secret
+X25519_SIZE = 32  # X25519 public/private key size
+AEAD_TAG = 16  # Poly1305 tag length
+KEY_LEN = 32  # ChaCha20 key length
+HASH_LEN = 32  # SHA-256 output length
 
 # Encrypted sizes (plaintext + AEAD tag)
-_CT_ENC_SIZE = ML_KEM_768_CT_SIZE + AEAD_TAG   # 1088 + 16 = 1104
-_S_ENC_SIZE = X25519_SIZE + AEAD_TAG            # 32   + 16 = 48
+_CT_ENC_SIZE = ML_KEM_768_CT_SIZE + AEAD_TAG  # 1088 + 16 = 1104
+_S_ENC_SIZE = X25519_SIZE + AEAD_TAG  # 32   + 16 = 48
 
 HOST = "127.0.0.1"
 
@@ -72,6 +74,7 @@ HOST = "127.0.0.1"
 # ---------------------------------------------------------------------------
 # Noise symmetric state for ML-KEM-768 variant
 # ---------------------------------------------------------------------------
+
 
 def _hmac_sha256(key: bytes, data: bytes) -> bytes:
     return hmac.new(key, data, hashlib.sha256).digest()
@@ -131,7 +134,7 @@ class SymmetricStateMLKEM:
         self._cs: CipherStateMLKEM | None = None
 
     def mix_hash(self, data: bytes) -> None:
-        """h = SHA-256(h || data)"""
+        """H = SHA-256(h || data)"""
         self.h = hashlib.sha256(self.h + data).digest()
 
     def mix_key(self, ikm: bytes) -> None:
@@ -176,6 +179,7 @@ class SymmetricStateMLKEM:
 # Minimal IRawConnection wrapper over anyio ByteStream
 # ---------------------------------------------------------------------------
 
+
 class RawTCPConn:
     """
     Minimal IRawConnection wrapping an anyio SocketStream.
@@ -208,6 +212,7 @@ class RawTCPConn:
 # Transport read/writer after handshake completes
 # ---------------------------------------------------------------------------
 
+
 class MLKEMTransportReadWriter:
     """Post-handshake transport using independent send/recv CipherStates."""
 
@@ -236,8 +241,13 @@ class MLKEMTransportReadWriter:
 #       from the liboqs convention. Handle accordingly.
 # ---------------------------------------------------------------------------
 
+
 def mlkem768_keygen() -> tuple[bytes, bytes]:
-    """Generate an ML-KEM-768 keypair. Returns (encapsulation_key, decapsulation_key)."""
+    """
+    Generate an ML-KEM-768 keypair.
+
+    Returns (encapsulation_key, decapsulation_key).
+    """
     pk, sk = ML_KEM_768.keygen()
     return pk, sk
 
@@ -250,6 +260,7 @@ def mlkem768_decap(ct: bytes, sk: bytes) -> bytes:
 # ---------------------------------------------------------------------------
 # Handshake initiator
 # ---------------------------------------------------------------------------
+
 
 async def run_handshake_initiator(
     conn: RawTCPConn,
@@ -274,6 +285,7 @@ async def run_handshake_initiator(
 
     Returns:
         (transport, remote_peer_id)
+
     """
     ss = SymmetricStateMLKEM()
     # MixHash(prologue=empty) -- required by Noise spec even when empty
@@ -297,7 +309,9 @@ async def run_handshake_initiator(
 
     msg1 = e_pk + e1_pk + enc_payload_1
     await pkt.write_msg(msg1)
-    logger.info("msg1 sent: %d bytes (e_pk=%d, e1_pk=%d)", len(msg1), len(e_pk), len(e1_pk))
+    logger.info(
+        "msg1 sent: %d bytes (e_pk=%d, e1_pk=%d)", len(msg1), len(e_pk), len(e1_pk)
+    )
 
     # ---- Message 2: e, ee, ekem1, s, es ---------------------------------
     msg2 = await pkt.read_msg()
@@ -317,7 +331,7 @@ async def run_handshake_initiator(
     # ekem1: receive encrypted ML-KEM-768 ciphertext, decap, mix_key
     enc_ct = msg2[offset : offset + _CT_ENC_SIZE]
     offset += _CT_ENC_SIZE
-    ct = ss.decrypt_and_hash(enc_ct)   # decrypt under ee-derived key
+    ct = ss.decrypt_and_hash(enc_ct)  # decrypt under ee-derived key
     if len(ct) != ML_KEM_768_CT_SIZE:
         raise ValueError(
             f"ekem1: expected {ML_KEM_768_CT_SIZE}-byte ML-KEM-768 ct, got {len(ct)}"
@@ -386,6 +400,7 @@ async def run_handshake_initiator(
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 async def main(port: int) -> None:
     # Generate libp2p identity key (Ed25519) and Noise static key (X25519)
     libp2p_kp = ed25519_keypair()
@@ -394,9 +409,7 @@ async def main(port: int) -> None:
     noise_static_privkey = noise_kp.private_key
 
     logger.info("Local peer ID: %s", local_peer)
-    logger.info(
-        "Protocol: %s", PROTOCOL_NAME.decode()
-    )
+    logger.info("Protocol: %s", PROTOCOL_NAME.decode())
 
     logger.info("Connecting to Rust listener at %s:%d", HOST, port)
     async with await anyio.connect_tcp(HOST, port) as stream:
@@ -414,7 +427,9 @@ async def main(port: int) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Dial a Rust noise_hfs_listener using ML-KEM-768 (no X-Wing wrapper).",
+        description=(
+            "Dial a Rust noise_hfs_listener using ML-KEM-768 (no X-Wing wrapper)."
+        ),
     )
     parser.add_argument(
         "--port",
