@@ -533,9 +533,7 @@ class Swarm(Service, INetworkService):
         # Avoids ProtocolLookupError crashes when the peerstore contains
         # multiaddrs for protocols the current transport doesn't support
         # (e.g. /udp/... or /quic when only TCP is registered).
-        dialable_addrs = [
-            a for a in allowed_addrs if self.transport.can_dial(a)
-        ]
+        dialable_addrs = [a for a in allowed_addrs if self.transport.can_dial(a)]
         if not dialable_addrs:
             raise SwarmException(
                 f"No supported transport for any address of peer {peer_id}: "

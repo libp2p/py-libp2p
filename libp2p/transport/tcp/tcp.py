@@ -275,12 +275,15 @@ class TCP(ITransport):
                 f"Failed to dial {maddr}: no TCP component in multiaddr."
             ) from error
 
+        if port_str is None:
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: TCP port has no value in multiaddr."
+            )
+
         if host_str is None:
             raise OpenConnectionError(
                 f"Failed to dial {maddr}: IP address not found in multiaddr."
             )
-
-
 
         try:
             port_int = int(port_str)

@@ -22,12 +22,13 @@ This benchmark quantifies the improvement on three dimensions:
 All async benchmarks run with retry_config.max_retries=0 to avoid sleep delays
 that would dominate wall time and obscure the filter's actual contribution.
 """
+
 import statistics
 import time
 from unittest.mock import patch
 
-import trio
 from multiaddr import Multiaddr
+import trio
 
 from libp2p import generate_new_ed25519_identity, new_swarm
 from libp2p.network.config import RetryConfig
@@ -48,40 +49,44 @@ N_ASYNC = 3_000
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _stats(times: list[float]) -> dict[str, float]:
     s = sorted(times)
     return {
         "mean_us": statistics.mean(s) * 1e6,
-        "p50_us":  s[len(s) // 2] * 1e6,
-        "p99_us":  s[int(len(s) * 0.99)] * 1e6,
-        "min_us":  s[0] * 1e6,
+        "p50_us": s[len(s) // 2] * 1e6,
+        "p99_us": s[int(len(s) * 0.99)] * 1e6,
+        "min_us": s[0] * 1e6,
     }
 
 
 def _row(label: str, st: dict[str, float]) -> None:
     print(f"  {label}")
-    print(f"    mean={st['mean_us']:.1f} µs  p50={st['p50_us']:.1f} µs  "
-          f"p99={st['p99_us']:.1f} µs  min={st['min_us']:.1f} µs")
+    print(
+        f"    mean={st['mean_us']:.1f} µs  p50={st['p50_us']:.1f} µs  "
+        f"p99={st['p99_us']:.1f} µs  min={st['min_us']:.1f} µs"
+    )
 
 
 def _sep(title: str, n: int = 0) -> None:
     tag = f"  N={n:,}" if n else ""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  {title}{tag}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 # ---------------------------------------------------------------------------
 # [1] Synchronous can_dial() microbenchmark
 # ---------------------------------------------------------------------------
 
+
 def bench_can_dial() -> None:
     _sep("can_dial() overhead", N_SYNC)
     transport = TCP()
 
     for addr, label in [
-        (TCP_ADDR,  "can_dial(tcp)   → True  (passes through)"),
-        (UDP_ADDR,  "can_dial(udp)   → False (rejected)"),
+        (TCP_ADDR, "can_dial(tcp)   → True  (passes through)"),
+        (UDP_ADDR, "can_dial(udp)   → False (rejected)"),
         (QUIC_ADDR, "can_dial(quic)  → False (rejected)"),
     ]:
         times = []
@@ -91,24 +96,23 @@ def bench_can_dial() -> None:
             times.append(time.perf_counter() - t0)
         _row(label, _stats(times))
 
-    udp_mean = statistics.mean(
-        [time.perf_counter() - time.perf_counter() for _ in range(N_SYNC)]  # warm loop
-    )
-    # re-measure cleanly
     times = []
     for _ in range(N_SYNC):
         t0 = time.perf_counter()
         transport.can_dial(UDP_ADDR)
         times.append(time.perf_counter() - t0)
     overhead = statistics.mean(times) * 1e6
-    print(f"\n  The guard costs ≈{overhead:.0f} µs per address."
-          f"  A TCP handshake costs ≈1–100 ms → overhead is negligible.")
+    print(
+        f"\n  The guard costs ≈{overhead:.0f} µs per address."
+        "  A TCP handshake costs ≈1–100 ms → overhead is negligible."
+    )
 
 
 # ---------------------------------------------------------------------------
 # [2] transport.dial() with bad addr (single attempt, no retry)
 #     This is what each loop iteration did in the old code.
 # ---------------------------------------------------------------------------
+
 
 async def bench_transport_dial_bad_addr(n: int) -> list[float]:
     """Time a single transport.dial() call with an unsupported multiaddr."""
@@ -129,6 +133,7 @@ async def bench_transport_dial_bad_addr(n: int) -> list[float]:
 # ---------------------------------------------------------------------------
 # [3] High-level dial_peer() comparison (max_retries=0 to avoid sleep)
 # ---------------------------------------------------------------------------
+
 
 def _no_retry_config() -> RetryConfig:
     return RetryConfig(max_retries=0, initial_delay=0.0, max_delay=0.0)
@@ -184,6 +189,7 @@ async def bench_after(n: int) -> list[float]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 async def main() -> None:
     # [1] Synchronous can_dial()
     bench_can_dial()
@@ -205,27 +211,27 @@ async def main() -> None:
 
     # Summary
     mean_before = statistics.mean(before)
-    mean_after  = statistics.mean(after)
-    mean_dial   = statistics.mean(dial_times)
+    mean_after = statistics.mean(after)
+    mean_dial = statistics.mean(dial_times)
 
-    speedup      = mean_before / mean_after
-    saving_us    = (mean_before - mean_after) * 1e6
-    dial_ratio   = mean_dial / (statistics.mean(after) / len([UDP_ADDR, QUIC_ADDR]))
+    speedup = mean_before / mean_after
+    saving_us = (mean_before - mean_after) * 1e6
+    _ = mean_dial  # reported above; kept for reference
 
-    print(f"\n{'='*60}")
-    print(f"  Results Summary")
-    print(f"  ---------------")
-    print(f"  Before  (no filter, no retry):  {mean_before*1e6:.1f} µs/call")
-    print(f"  After   (can_dial() filter):     {mean_after*1e6:.1f} µs/call")
+    print(f"\n{'=' * 60}")
+    print("  Results Summary")
+    print("  ---------------")
+    print(f"  Before  (no filter, no retry):  {mean_before * 1e6:.1f} µs/call")
+    print(f"  After   (can_dial() filter):     {mean_after * 1e6:.1f} µs/call")
     print(f"  Speedup: {speedup:.1f}x   saving ≈{saving_us:.1f} µs per bad-addr dial")
-    print(f"")
-    print(f"  Error type BEFORE: SwarmException wrapping OpenConnectionError")
-    print(f"                     (came from ProtocolLookupError — wrong layer)")
-    print(f"  Error type AFTER:  SwarmException('No supported transport ...')")
-    print(f"                     (descriptive, raised at the right abstraction)")
-    print(f"  Note: in production max_retries>0 amplifies the before-fix cost by")
-    print(f"        retry_count × sleep_delay per unsupported address.")
-    print(f"{'='*60}")
+    print()
+    print("  Error type BEFORE: SwarmException wrapping OpenConnectionError")
+    print("                     (came from ProtocolLookupError — wrong layer)")
+    print("  Error type AFTER:  SwarmException('No supported transport ...')")
+    print("                     (descriptive, raised at the right abstraction)")
+    print("  Note: in production max_retries>0 amplifies the before-fix cost by")
+    print("        retry_count × sleep_delay per unsupported address.")
+    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":

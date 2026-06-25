@@ -490,7 +490,7 @@ class WebsocketTransport(ITransport):
         ):
             nursery.start_soon(self._initialize_autotls, self._peer_id)
 
-    async def can_dial(self, maddr: Multiaddr) -> bool:
+    def can_dial(self, maddr: Multiaddr) -> bool:
         """Check if we can dial the given multiaddr."""
         try:
             parse_websocket_multiaddr(maddr)
@@ -847,7 +847,7 @@ class WebsocketTransport(ITransport):
 
     async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
-        if not await self.can_dial(maddr):
+        if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
         try:

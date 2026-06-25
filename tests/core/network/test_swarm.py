@@ -372,7 +372,8 @@ def test_tcp_can_dial_returns_false_for_quic_addr():
 
 @pytest.mark.trio
 async def test_swarm_skips_unsupported_multiaddrs():
-    """Swarm.dial_peer() raises SwarmException (not ProtocolLookupError) when
+    """
+    Swarm.dial_peer() raises SwarmException (not ProtocolLookupError) when
     all peerstore addresses are unsupported by the registered transport.
 
     Regression test for https://github.com/libp2p/py-libp2p/issues/391.
@@ -385,25 +386,24 @@ async def test_swarm_skips_unsupported_multiaddrs():
     # Store only an unsupported UDP address for that peer.
     # The can_dial() filter fires before any real TCP connection is attempted,
     # so no background service is needed.
-    swarm.peerstore.add_addrs(
-        peer_id, [Multiaddr("/ip4/127.0.0.1/udp/9090")], ttl=3600
-    )
+    swarm.peerstore.add_addrs(peer_id, [Multiaddr("/ip4/127.0.0.1/udp/9090")], ttl=3600)
 
     with pytest.raises(SwarmException, match="No supported transport"):
         await swarm.dial_peer(peer_id)
 
 
 def test_swarm_can_dial_filters_unsupported():
-    """Swarm.transport.can_dial() filters out non-TCP addresses so dial_peer()
-    raises SwarmException rather than ProtocolLookupError.
+    """
+    TCP.can_dial() correctly classifies multiaddrs so that Swarm.dial_peer()
+    can filter unsupported addresses and raise SwarmException rather than
+    ProtocolLookupError.
 
     Regression test for https://github.com/libp2p/py-libp2p/issues/391.
     """
-    swarm = new_swarm()
-    # TCP transport must reject UDP and QUIC addresses
-    assert swarm.transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
-    assert swarm.transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090")) is False
-    assert swarm.transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic")) is False
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic")) is False
 
 
 def test_new_swarm_defaults_to_ed25519():
