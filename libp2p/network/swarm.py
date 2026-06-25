@@ -529,11 +529,24 @@ class Swarm(Service, INetworkService):
                 f"All addresses for peer {peer_id} blocked by connection gate"
             )
 
+        # Filter out addresses that no registered transport can handle.
+        # Avoids ProtocolLookupError crashes when the peerstore contains
+        # multiaddrs for protocols the current transport doesn't support
+        # (e.g. /udp/... or /quic when only TCP is registered).
+        dialable_addrs = [
+            a for a in allowed_addrs if self.transport.can_dial(a)
+        ]
+        if not dialable_addrs:
+            raise SwarmException(
+                f"No supported transport for any address of peer {peer_id}: "
+                f"{allowed_addrs}"
+            )
+
         connections = []
         exceptions: list[SwarmException] = []
 
-        # Try all allowed addresses with retry logic
-        for multiaddr in allowed_addrs:
+        # Try all dialable addresses with retry logic
+        for multiaddr in dialable_addrs:
             try:
                 connection = await self._dial_with_retry(multiaddr, peer_id)
                 connections.append(connection)

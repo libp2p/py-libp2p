@@ -3038,6 +3038,29 @@ class ITransport(ABC):
 
         """
 
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this transport can dial the given multiaddr.
+
+        Implementations should override this to inspect the multiaddr's
+        protocol stack and return False for addresses they cannot handle
+        (e.g. a TCP transport returning False for a QUIC multiaddr).
+        The default returns True so that existing transports that do not
+        override this method continue to work unchanged.
+
+        Parameters
+        ----------
+        maddr : Multiaddr
+            The multiaddress to check.
+
+        Returns
+        -------
+        bool
+            True if this transport supports the given multiaddr.
+
+        """
+        return True
+
 
 # -------------------------- pubsub abc.py --------------------------
 

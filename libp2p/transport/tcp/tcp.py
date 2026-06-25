@@ -257,20 +257,30 @@ class TCP(ITransport):
             )
         return await self._dial_resolved(maddr)
 
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """Return True if this TCP transport can handle the given multiaddr."""
+        try:
+            maddr.value_for_protocol("tcp")
+            return True
+        except Exception:
+            return False
+
     async def _dial_resolved(self, maddr: Multiaddr) -> IRawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
         host_str = extract_ip_from_multiaddr(maddr)
-        port_str = maddr.value_for_protocol("tcp")
+        try:
+            port_str = maddr.value_for_protocol("tcp")
+        except Exception as error:
+            raise OpenConnectionError(
+                f"Failed to dial {maddr}: no TCP component in multiaddr."
+            ) from error
 
         if host_str is None:
             raise OpenConnectionError(
                 f"Failed to dial {maddr}: IP address not found in multiaddr."
             )
 
-        if port_str is None:
-            raise OpenConnectionError(
-                f"Failed to dial {maddr}: TCP port not found in multiaddr."
-            )
+
 
         try:
             port_int = int(port_str)
