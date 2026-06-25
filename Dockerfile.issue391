@@ -1,0 +1,45 @@
+FROM python:3.13-slim
+
+LABEL description="py-libp2p issue #391 regression tests + benchmark"
+
+WORKDIR /app
+
+# System deps needed to compile native extensions (coincurve, fastecdsa, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    pkg-config \
+    libgmp-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency resolution
+RUN pip install --no-cache-dir uv
+
+# Copy the full repo into the image
+COPY . /app/
+
+# Create venv, install the library + test deps
+RUN uv venv /app/venv && \
+    uv pip install --python /app/venv/bin/python --no-cache-dir \
+        -e "." \
+        "pytest>=7.0.0" \
+        "pytest-trio>=0.5.2" \
+        "pytest-timeout>=2.4.0" \
+        "pytest-xdist>=2.4.0" \
+        "factory-boy>=2.12.0,<3.0.0" \
+        "kyber-py>=0.9.0"
+
+ENV PATH="/app/venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+
+# Default: run the issue #391 regression suite + benchmark
+CMD bash -c "\
+  echo '=== Issue #391 Regression Tests ===' && \
+  pytest tests/core/network/test_swarm.py \
+    -k 'can_dial or swarm_skips or swarm_can_dial or tcp_can_dial' \
+    -v --tb=short && \
+  echo '' && \
+  echo '=== Issue #391 Benchmark ===' && \
+  python benchmarks/bench_issue391.py \
+"
