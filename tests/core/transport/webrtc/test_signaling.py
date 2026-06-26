@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 import trio
 
+from libp2p.transport.webrtc._varint import encode_uvarint as _encode_uvarint
 from libp2p.transport.webrtc.signaling import (
     SignalingSession,
-    _encode_uvarint,
     _read_uvarint,
     read_signaling_message,
     write_signaling_message,

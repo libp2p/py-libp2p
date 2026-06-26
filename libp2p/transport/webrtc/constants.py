@@ -25,7 +25,14 @@ WEBRTC_SIGNALING_PROTOCOL_ID = TProtocol("/webrtc-signaling/0.0.1")
 # ---------------------------------------------------------------------------
 # Message size constraints (from spec §Message Framing)
 # ---------------------------------------------------------------------------
-MAX_MESSAGE_SIZE = 16_384  # 16 KiB — hard limit for browser compat
+# Hard ceiling for the full framed wire message: uvarint(proto_len) + proto_len.
+MAX_MESSAGE_SIZE = 16_384
+# Maximum payload bytes per Message(message=...) frame, chosen so the worst-case
+# wire encoding stays within MAX_MESSAGE_SIZE:
+#   outer uvarint (2 bytes) + proto field tag (1) + inner uvarint (2) + N <= 16384
+# => N <= 16379.  Conservative round-down leaves a few bytes of safety margin
+# for future small additions to the Message schema.
+MAX_PAYLOAD_SIZE = 16_368
 # Spec-recommended payload, avoids IP fragmentation at the IPv6 minimum MTU.
 RECOMMENDED_PAYLOAD_SIZE = 1_200
 

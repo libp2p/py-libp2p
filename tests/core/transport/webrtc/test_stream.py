@@ -9,8 +9,24 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from libp2p.transport.webrtc._varint import decode_uvarint, encode_uvarint
+from libp2p.transport.webrtc.constants import MAX_PAYLOAD_SIZE
 from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
 from libp2p.transport.webrtc.stream import StreamState, WebRTCStream
+
+
+def _framed(msg: Message) -> bytes:
+    """Encode a Message in the on-wire uvarint-length-prefixed form."""
+    data = msg.SerializeToString()
+    return encode_uvarint(len(data)) + data
+
+
+def _parse_framed(raw: bytes) -> Message:
+    """Inverse of :func:`_framed` — decode the wire format back to a Message."""
+    length, consumed = decode_uvarint(raw)
+    msg = Message()
+    msg.ParseFromString(raw[consumed : consumed + length])
+    return msg
 
 
 def _make_stream(channel_id: int = 2) -> WebRTCStream:
@@ -28,27 +44,35 @@ def _make_stream(channel_id: int = 2) -> WebRTCStream:
 
 class TestWrite:
     @pytest.mark.trio
-    async def test_write_sends_protobuf_framed_data(self):
+    async def test_write_sends_framed_protobuf(self):
         stream = _make_stream()
         await stream.write(b"hello")
         stream._send_callback.assert_called_once()
         raw = stream._send_callback.call_args[0][0]
-        msg = Message()
-        msg.ParseFromString(raw)
+        # Wire form is uvarint(len) || protobuf bytes.
+        msg = _parse_framed(raw)
         assert msg.message == b"hello"
         assert not msg.HasField("flag")
 
     @pytest.mark.trio
-    async def test_write_chunks_large_data(self):
+    async def test_write_chunks_at_payload_size(self):
         stream = _make_stream()
-        big = b"x" * 32768  # 2x max message size
+        big = b"x" * (MAX_PAYLOAD_SIZE * 2)
         await stream.write(big)
         assert stream._send_callback.call_count == 2
-        # First chunk is MAX_MESSAGE_SIZE
-        raw1 = stream._send_callback.call_args_list[0][0][0]
-        msg1 = Message()
-        msg1.ParseFromString(raw1)
-        assert len(msg1.message) == 16384
+        msg1 = _parse_framed(stream._send_callback.call_args_list[0][0][0])
+        msg2 = _parse_framed(stream._send_callback.call_args_list[1][0][0])
+        assert len(msg1.message) == MAX_PAYLOAD_SIZE
+        assert len(msg2.message) == MAX_PAYLOAD_SIZE
+
+    @pytest.mark.trio
+    async def test_framed_message_never_exceeds_16_kib(self):
+        """Every send must keep the full framed wire payload <= 16 KiB."""
+        stream = _make_stream()
+        await stream.write(b"y" * (MAX_PAYLOAD_SIZE * 3 + 7))
+        for call in stream._send_callback.call_args_list:
+            framed = call[0][0]
+            assert len(framed) <= 16_384
 
     @pytest.mark.trio
     async def test_write_after_close_raises(self):
@@ -69,9 +93,7 @@ class TestRead:
     @pytest.mark.trio
     async def test_read_returns_data_from_on_data(self):
         stream = _make_stream()
-        # Simulate incoming data
-        msg = Message(message=b"world")
-        stream.on_data(msg.SerializeToString())
+        stream.on_data(_framed(Message(message=b"world")))
         data = await stream.read()
         assert data == b"world"
 
@@ -85,8 +107,7 @@ class TestRead:
     @pytest.mark.trio
     async def test_read_buffers_partial(self):
         stream = _make_stream()
-        msg = Message(message=b"abcdefgh")
-        stream.on_data(msg.SerializeToString())
+        stream.on_data(_framed(Message(message=b"abcdefgh")))
         # Read 3 bytes
         data = await stream.read(3)
         assert data == b"abc"
@@ -94,41 +115,44 @@ class TestRead:
         data = await stream.read()
         assert data == b"defgh"
 
+    @pytest.mark.trio
+    async def test_malformed_varint_is_logged_not_raised(self):
+        stream = _make_stream()
+        # Five continuation bytes with no terminator is a truncated varint.
+        stream.on_data(b"\xff\xff\xff\xff\xff")
+        # No payload delivered.
+        assert not stream._read_buf
+
 
 class TestFlags:
     @pytest.mark.trio
     async def test_on_data_fin_closes_read_and_sends_fin_ack(self):
         stream = _make_stream()
-        fin_msg = Message(flag=Message.FIN)
-        stream.on_data(fin_msg.SerializeToString())
+        stream.on_data(_framed(Message(flag=Message.FIN)))
         assert stream._read_closed is True
 
     @pytest.mark.trio
     async def test_on_data_fin_ack_sets_event(self):
         stream = _make_stream()
-        ack_msg = Message(flag=Message.FIN_ACK)
-        stream.on_data(ack_msg.SerializeToString())
+        stream.on_data(_framed(Message(flag=Message.FIN_ACK)))
         assert stream._fin_ack_received.is_set()
 
     @pytest.mark.trio
     async def test_on_data_stop_sending_closes_write(self):
         stream = _make_stream()
-        stop_msg = Message(flag=Message.STOP_SENDING)
-        stream.on_data(stop_msg.SerializeToString())
+        stream.on_data(_framed(Message(flag=Message.STOP_SENDING)))
         assert stream._write_closed is True
 
     @pytest.mark.trio
     async def test_on_data_reset_sets_state(self):
         stream = _make_stream()
-        reset_msg = Message(flag=Message.RESET)
-        stream.on_data(reset_msg.SerializeToString())
+        stream.on_data(_framed(Message(flag=Message.RESET)))
         assert stream._state == StreamState.RESET
 
     @pytest.mark.trio
     async def test_on_data_with_flag_and_payload(self):
         stream = _make_stream()
-        msg = Message(flag=Message.FIN, message=b"last-chunk")
-        stream.on_data(msg.SerializeToString())
+        stream.on_data(_framed(Message(flag=Message.FIN, message=b"last-chunk")))
         # FIN should close reads but payload should be delivered
         data = await stream.read()
         assert data == b"last-chunk"
@@ -145,8 +169,7 @@ class TestClose:
         # Should have sent FIN
         calls = stream._send_callback.call_args_list
         assert len(calls) >= 1
-        msg = Message()
-        msg.ParseFromString(calls[0][0][0])
+        msg = _parse_framed(calls[0][0][0])
         assert msg.flag == Message.FIN
 
     @pytest.mark.trio
@@ -163,8 +186,7 @@ class TestClose:
         await stream.reset()
         assert stream._state == StreamState.RESET
         calls = stream._send_callback.call_args_list
-        msg = Message()
-        msg.ParseFromString(calls[0][0][0])
+        msg = _parse_framed(calls[0][0][0])
         assert msg.flag == Message.RESET
 
 

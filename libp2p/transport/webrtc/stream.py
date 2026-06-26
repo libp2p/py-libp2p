@@ -20,7 +20,8 @@ import trio
 
 from libp2p.abc import IMuxedStream
 
-from .constants import MAX_MESSAGE_SIZE
+from ._varint import decode_uvarint, encode_uvarint
+from .constants import MAX_MESSAGE_SIZE, MAX_PAYLOAD_SIZE
 from .exceptions import WebRTCStreamError
 from .pb.webrtc_pb2 import Message
 
@@ -189,10 +190,12 @@ class WebRTCStream(IMuxedStream):
 
     async def write(self, data: bytes) -> None:
         """
-        Write *data* to the stream, protobuf-framed.
+        Write *data* to the stream, length-prefixed-protobuf framed.
 
         Large writes are split into chunks of at most
-        :data:`MAX_MESSAGE_SIZE` bytes.
+        :data:`MAX_PAYLOAD_SIZE` bytes so the full framed wire message
+        (uvarint length prefix + protobuf) stays within
+        :data:`MAX_MESSAGE_SIZE`.
 
         :raises WebRTCStreamError: If the write side is closed or reset.
         """
@@ -201,10 +204,9 @@ class WebRTCStream(IMuxedStream):
         if self._write_closed:
             raise WebRTCStreamError("Write side is closed")
 
-        # Split into spec-compliant chunks
         offset = 0
         while offset < len(data):
-            chunk = data[offset : offset + MAX_MESSAGE_SIZE]
+            chunk = data[offset : offset + MAX_PAYLOAD_SIZE]
             msg = Message(message=chunk)
             await self._send_message(msg)
             offset += len(chunk)
@@ -284,10 +286,12 @@ class WebRTCStream(IMuxedStream):
     def on_data(self, raw: bytes) -> None:
         """
         Called by :class:`WebRTCConnection` when the data channel receives
-        a protobuf-framed message.
+        an SCTP message.
 
-        Parses the :class:`Message`, processes any flag, and enqueues
-        payload bytes for :meth:`read`.
+        Per the libp2p WebRTC spec each SCTP message carries one uvarint
+        length-prefixed protobuf :class:`Message`.  We decode the length
+        prefix, parse the protobuf, process any flag, and enqueue payload
+        bytes for :meth:`read`.
 
         May be invoked from the asyncio bridge thread (not a Trio task).
         To stay safe we route every Trio primitive call (memory channel,
@@ -296,8 +300,47 @@ class WebRTCStream(IMuxedStream):
         from within a Trio task (for example in unit tests) we execute
         the mutations inline.
         """
+        try:
+            length, consumed = decode_uvarint(raw)
+        except ValueError as e:
+            logger.warning(
+                "WebRTCStream channel=%d: malformed varint prefix: %s",
+                self._channel_id,
+                e,
+            )
+            return
+        proto_bytes = raw[consumed : consumed + length]
+        if len(proto_bytes) != length:
+            logger.warning(
+                "WebRTCStream channel=%d: framed length=%d but only %d bytes "
+                "available in SCTP message",
+                self._channel_id,
+                length,
+                len(proto_bytes),
+            )
+            return
+        # The spec requires exactly one framed Message per SCTP datagram.
+        # If a peer (or a buggy intermediary) packs multiple frames into one
+        # SCTP message, we'd otherwise silently drop everything past the
+        # first.  Surface it loudly so the symptom isn't "reader hangs".
+        if consumed + length < len(raw):
+            logger.warning(
+                "WebRTCStream channel=%d: SCTP message has %d trailing bytes "
+                "after framed protobuf — peer may be batching frames "
+                "(spec violation); trailing bytes dropped",
+                self._channel_id,
+                len(raw) - consumed - length,
+            )
         msg = Message()
-        msg.ParseFromString(raw)
+        try:
+            msg.ParseFromString(proto_bytes)
+        except Exception as e:
+            logger.warning(
+                "WebRTCStream channel=%d: malformed protobuf message: %s",
+                self._channel_id,
+                e,
+            )
+            return
 
         # Snapshot flags/payload first; all subsequent state mutations are
         # performed under the Trio thread.
@@ -414,11 +457,21 @@ class WebRTCStream(IMuxedStream):
         self._schedule_send(Message(flag=Message.STOP_SENDING))
 
     async def _send_message(self, msg: Message) -> None:
-        """Serialize and send a protobuf Message via the data channel."""
+        """
+        Serialize, length-prefix, and send a protobuf Message.
+
+        Per spec each data-channel message is a single protobuf with an
+        unsigned-varint length prefix, and the full framed wire size must
+        not exceed :data:`MAX_MESSAGE_SIZE`.
+        """
         if self._send_callback is None:
             raise WebRTCStreamError("Stream not connected to a data channel")
-        data = msg.SerializeToString()
-        await self._send_callback(data)
+        framed = _frame(msg)
+        if len(framed) > MAX_MESSAGE_SIZE:
+            raise WebRTCStreamError(
+                f"Framed message too large: {len(framed)} > {MAX_MESSAGE_SIZE} bytes"
+            )
+        await self._send_callback(framed)
 
     def _schedule_send(self, msg: Message) -> None:
         """
@@ -430,7 +483,7 @@ class WebRTCStream(IMuxedStream):
         """
         if self._send_callback is None:
             return
-        data = msg.SerializeToString()
+        framed = _frame(msg)
         bridge = getattr(self.muxed_conn, "_bridge", None)
         # CRITICAL: do NOT use self._send_callback here.  That callback is
         # the trio-facing wrapper which itself awaits bridge.run_coro() —
@@ -439,7 +492,7 @@ class WebRTCStream(IMuxedStream):
         # Bypass it and call the asyncio-native callback directly.
         send_cb = getattr(self.muxed_conn, "_send_on_channel_cb", None)
         if bridge is not None and bridge.is_running and send_cb is not None:
-            bridge.schedule_fire_and_forget(send_cb(self._channel_id, data))
+            bridge.schedule_fire_and_forget(send_cb(self._channel_id, framed))
 
     def _cleanup(self) -> None:
         """Release resources."""
@@ -451,6 +504,12 @@ class WebRTCStream(IMuxedStream):
             self._read_recv.close()
         except trio.ClosedResourceError:
             pass
+
+
+def _frame(msg: Message) -> bytes:
+    """Encode *msg* as uvarint-length-prefixed protobuf bytes."""
+    data = msg.SerializeToString()
+    return encode_uvarint(len(data)) + data
 
 
 # Type alias for the send callback

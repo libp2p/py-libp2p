@@ -33,6 +33,7 @@ import trio
 
 from libp2p.abc import INetStream
 
+from ._varint import encode_uvarint
 from .exceptions import WebRTCSignalingError
 from .signaling_pb.signaling_pb2 import SignalingMessage
 
@@ -57,9 +58,7 @@ async def write_signaling_message(
     :raises WebRTCSignalingError: If writing fails.
     """
     data = msg.SerializeToString()
-    length = len(data)
-    # Encode length as unsigned varint
-    varint_buf = _encode_uvarint(length)
+    varint_buf = encode_uvarint(len(data))
     try:
         await stream.write(varint_buf + data)
     except Exception as e:
@@ -265,22 +264,12 @@ class SignalingSession:
 
 
 # ------------------------------------------------------------------
-# Varint encoding/decoding (unsigned, for length prefixing)
+# Streaming varint read (sync encoder/decoder live in ._varint)
 # ------------------------------------------------------------------
 
 
-def _encode_uvarint(value: int) -> bytes:
-    """Encode an unsigned integer as a varint."""
-    buf = bytearray()
-    while value > 0x7F:
-        buf.append((value & 0x7F) | 0x80)
-        value >>= 7
-    buf.append(value & 0x7F)
-    return bytes(buf)
-
-
 async def _read_uvarint(stream: INetStream) -> int:
-    """Read an unsigned varint from the stream."""
+    """Read an unsigned varint from a libp2p :class:`INetStream`."""
     result = 0
     shift = 0
     for _ in range(10):  # Max 10 bytes for uint64 varint
