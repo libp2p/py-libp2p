@@ -1,1 +1,38 @@
-Added WebRTC transport scaffolding (``libp2p.transport.webrtc``) per the libp2p WebRTC and WebRTC Direct specs. Introduces ``WebRTCDirectTransport`` (``/webrtc-direct``) and ``WebRTCPrivateTransport`` (``/webrtc`` via Circuit Relay v2), data-channel stream framing with the FIN/FIN_ACK/STOP_SENDING/RESET protocol, signaling with bilateral ``ICE_DONE`` (libp2p/specs#585 fix), Noise XX prologue binding the handshake to DTLS certificate fingerprints, a SDP builder with an isolated ``_apply_ice_credentials()`` seam for libp2p/specs#672, ECDSA P-256 certificate generation with multihash/multibase fingerprint encoding, and a clean trio↔asyncio bridge. ``aiortc`` is added as an optional dependency under the ``webrtc`` extra. The underlying ``RTCPeerConnection`` wiring is stubbed with ``NOTE`` comments and will follow in a subsequent PR.
+Added **experimental** WebRTC transport scaffolding (``libp2p.transport.webrtc``)
+per the libp2p WebRTC and WebRTC Direct specs.  Enabled via the optional
+``libp2p[webrtc]`` extra (``aiortc``) and the ``enable_webrtc`` opt-in.
+
+This is a v1 **node-to-node** foundation, not a production-ready WebRTC stack.
+
+**What works (node-to-node):**
+
+- ``WebRTCDirectTransport`` (``/webrtc-direct``) and ``WebRTCPrivateTransport``
+  (``/webrtc`` via Circuit Relay v2).
+- Data-channel stream framing with uvarint length-prefixed protobuf and the
+  FIN / FIN_ACK / STOP_SENDING / RESET state machine.
+- In-band data channels for application streams; the Noise channel (id=0)
+  remains negotiated per spec.
+- Signaling with bilateral ``ICE_DONE`` (libp2p/specs#585 fix).
+- Noise XX prologue binding the handshake to the DTLS certificate fingerprints.
+- SDP builder with an isolated ``_apply_ice_credentials()`` seam for
+  libp2p/specs#672.
+- ECDSA P-256 certificate generation with multihash / multibase fingerprint
+  encoding; DTLS cert pinned to ``RTCPeerConnection`` via the aiortc-internal
+  private slot so the advertised ``/certhash/`` matches the actual handshake.
+- A clean trio ↔ asyncio bridge for ``aiortc``.
+
+**Out of scope for this PR (follow-ups):**
+
+- **Browser interop is explicitly NOT supported.**  v1 SDP munging on the
+  browser side is being phased out by Chrome's ``WebRTC-NoSdpMangleUfrag``
+  field trial; browser dial will land on v2 (libp2p/specs#715).
+- Interop with go-libp2p / js-libp2p WebRTC Direct dialers.  Their listener
+  reconstructs the offer from the inbound STUN ``USERNAME``; our listener
+  currently uses an HTTP ``POST /sdp`` exchange, which is documented as a
+  py-to-py temporary harness.
+- Private ``/webrtc`` dial — only the listener / signaling skeleton lands here.
+- Full inbound handler wiring (Noise + handler invocation) on the
+  ``WebRTCDirectListener`` is pending the aiortc STUN ``USERNAME`` exposure
+  spike (sub-issue of #546).
+
+Refs #546.
