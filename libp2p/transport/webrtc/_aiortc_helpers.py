@@ -47,19 +47,34 @@ async def create_peer_connection(
     ice_servers: list[str] | None = None,
 ) -> RTCPeerConnection:
     """
-    Create an ``RTCPeerConnection`` with the given certificate.
+    Create an ``RTCPeerConnection`` pinned to the given certificate.
 
     Must run on the asyncio bridge loop because aiortc's
     ``RTCPeerConnection.__init__`` calls ``asyncio.get_event_loop()``
     internally to schedule ICE initialization.
+
+    aiortc >= 1.5 no longer accepts ``certificates=`` in
+    :class:`RTCConfiguration` — passing it raises ``TypeError``.  We
+    build the peer connection with ICE servers only, then replace the
+    auto-generated DTLS certificate before any SDP operation triggers
+    the DTLS handshake.  The fingerprint and the actual handshake cert
+    are read from a name-mangled private attribute
+    (``self.__certificates`` inside ``RTCPeerConnection`` →
+    ``self._RTCPeerConnection__certificates`` from the outside —
+    see ``aiortc/rtcpeerconnection.py:295,1129``).  Setting the
+    un-mangled ``pc._certificates`` is a no-op that aiortc never reads.
 
     :param rtc_cert: An aiortc certificate
         (from ``WebRTCCertificate._rtc_certificate``).
     :param ice_servers: Optional STUN/TURN server URLs.
     :returns: A new peer connection.
     """
-    config = RTCConfiguration(certificates=[rtc_cert])  # type: ignore[call-arg]
-    return RTCPeerConnection(configuration=config)
+    config = RTCConfiguration(iceServers=list(ice_servers) if ice_servers else [])
+    pc = RTCPeerConnection(configuration=config)
+    # Replace aiortc's auto-generated cert.  Must use the mangled name —
+    # aiortc reads only `self.__certificates`, which mangles to this.
+    pc._RTCPeerConnection__certificates = [rtc_cert]  # type: ignore[attr-defined]
+    return pc
 
 
 async def create_noise_channel(pc: RTCPeerConnection) -> Any:
