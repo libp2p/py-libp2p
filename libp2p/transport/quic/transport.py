@@ -268,7 +268,11 @@ class QUICTransport(ITransport):
 
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
-            logger.debug("config_key", config_key, self._quic_configs.keys())
+            logger.debug(
+                "config_key=%s, configs=%s",
+                config_key,
+                self._quic_configs.keys(),
+            )
             config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")

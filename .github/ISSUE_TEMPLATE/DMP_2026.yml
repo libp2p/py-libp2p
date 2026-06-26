@@ -31,7 +31,7 @@ body:
   - type: textarea
     id: ticket-setup
     attributes:
-      label: Setup/Installation 
+      label: Setup/Installation
       description: Please list or link setup or installation guide (if any)
 
   - type: textarea
@@ -191,11 +191,11 @@ body:
     attributes:
       label: Domain
       options:
-        - ⁠Healthcare 
+        - ⁠Healthcare
         - ⁠Education
         - Financial Inclusion
         - ⁠Livelihoods
-        - ⁠Skilling 
+        - ⁠Skilling
         - ⁠Learning & Development
         - ⁠Agriculture
         - ⁠Service Delivery
@@ -307,7 +307,7 @@ body:
 
   - type: dropdown
     id: ticket-category
-    attributes: 
+    attributes:
       label: Category
       description: Choose the categories that best describe your ticket
       multiple: true

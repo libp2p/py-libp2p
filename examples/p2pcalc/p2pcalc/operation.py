@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 import hashlib
 import time
+from typing import Any, cast
 import uuid
 
 import msgpack
@@ -195,7 +196,7 @@ class Operation:
     @classmethod
     def from_bytes(cls, data: bytes) -> Operation:
         """Deserialise from MessagePack bytes."""
-        d = msgpack.unpackb(data, raw=False)
+        d = cast(dict[str, Any], msgpack.unpackb(data, raw=False))
         return cls(
             op_id=d["i"],
             peer_id=d["p"],
