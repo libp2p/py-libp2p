@@ -23,6 +23,8 @@ from aiortc import (
 )
 from aiortc.rtcdtlstransport import RTCCertificate
 
+from .exceptions import WebRTCStreamError
+
 if TYPE_CHECKING:
     from .connection import WebRTCConnection
 
@@ -164,18 +166,35 @@ def wire_pc_to_connection(
     ``on_message`` / ``on_close`` event handlers that route into the
     connection's thread-safe methods.
     """
-    # Track open channels so _send_on_channel_cb can find them.
+    # Track open channels so _send_on_channel_cb can find them.  Keyed by
+    # the libp2p-local channel id (the conn's outbound/inbound counter),
+    # NOT by aiortc's SCTP channel.id.  These two id spaces are disjoint
+    # by design: outbound = even, inbound = odd.
     channels: dict[int, Any] = {}
 
     async def _create_channel(channel_id: int, label: str) -> None:
-        ch = pc.createDataChannel(label or "", negotiated=True, id=channel_id)
+        # In-band channel: drop `negotiated=True, id=`.  aiortc opens an
+        # SCTP DCEP-negotiated channel; the peer's `datachannel` event
+        # fires (which is what makes accept_stream() unblock).  The
+        # libp2p `channel_id` is a local routing key only and never
+        # crosses the wire.
+        ch = pc.createDataChannel(label or f"stream-{channel_id}")
         channels[channel_id] = ch
         _bind_channel_events(ch, channel_id, conn)
 
     async def _send_on_channel(channel_id: int, data: bytes) -> None:
         ch = channels.get(channel_id)
-        if ch is not None:
-            ch.send(data)
+        if ch is None:
+            return
+        # aiortc's RTCDataChannel raises InvalidStateError if send() is
+        # called while the channel is still in "connecting".  For
+        # in-band channels there's a real window between createDataChannel
+        # (when open_stream() returns) and the SCTP+DCEP open event;
+        # any caller that writes immediately would hit it.  Wait once;
+        # after the channel opens this is a fast readyState check.
+        if ch.readyState != "open":
+            await _wait_channel_open(ch)
+        ch.send(data)
 
     async def _close_pc() -> None:
         await pc.close()
@@ -186,10 +205,89 @@ def wire_pc_to_connection(
 
     @pc.on("datachannel")  # type: ignore[misc,untyped-decorator]
     def _on_datachannel(channel: Any) -> None:
-        ch_id = channel.id if channel.id is not None else len(channels)
-        channels[ch_id] = channel
-        conn.on_datachannel(ch_id)
-        _bind_channel_events(channel, ch_id, conn)
+        # Remote opened an in-band channel.  Allocate a fresh libp2p id
+        # in our inbound (odd) space; we never use channel.id from SCTP
+        # because that would risk colliding with our outbound (even) ids.
+        try:
+            channel_id = conn._allocate_inbound_id()
+        except WebRTCStreamError as exc:
+            # At max_concurrent_streams.  If we did nothing the new channel
+            # would sit open with no handlers, the remote would assume it
+            # works, and writes would silently disappear into the void.
+            # Close it instead so the remote sees the rejection.
+            logger.warning("Rejecting inbound data channel (%s); closing.", exc)
+            try:
+                channel.close()
+            except Exception:
+                logger.debug("Error closing rejected inbound channel", exc_info=True)
+            return
+        channels[channel_id] = channel
+        # Bind message/close handlers BEFORE notifying the connection.
+        # aiortc may have already buffered the channel's `open` event,
+        # and any early message would otherwise race past on_datachannel.
+        _bind_channel_events(channel, channel_id, conn)
+        conn.on_datachannel(channel_id)
+
+
+# Bound on how long _wait_channel_open will block.  Matches the ICE
+# connect ceiling — if SCTP DCEP hasn't opened the channel by then,
+# something is wedged and we want the trio caller to learn about it
+# rather than hang on bridge.run_coro forever.
+_CHANNEL_OPEN_TIMEOUT = 30.0
+
+
+async def _wait_channel_open(ch: Any, timeout: float = _CHANNEL_OPEN_TIMEOUT) -> None:
+    """
+    Block until *ch* reaches ``readyState == "open"``, or fail if it
+    terminally closes / the wait times out.  Runs on the asyncio loop.
+    """
+    if ch.readyState == "open":
+        return
+    if ch.readyState in ("closing", "closed"):
+        raise WebRTCStreamError(f"data channel never opened (state={ch.readyState})")
+
+    opened = asyncio.Event()
+    closed = asyncio.Event()
+
+    @ch.on("open")  # type: ignore[misc,untyped-decorator]
+    def _on_open() -> None:
+        opened.set()
+
+    @ch.on("close")  # type: ignore[misc,untyped-decorator]
+    def _on_close() -> None:
+        closed.set()
+
+    # Re-check after handler registration to avoid losing an "open"
+    # event that fired between the early-return check above and now.
+    if ch.readyState == "open":
+        return
+
+    open_task = asyncio.ensure_future(opened.wait())
+    closed_task = asyncio.ensure_future(closed.wait())
+    try:
+        try:
+            await asyncio.wait_for(
+                asyncio.wait(
+                    [open_task, closed_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            raise WebRTCStreamError(
+                f"data channel did not open within {timeout}s (state={ch.readyState})"
+            ) from None
+    finally:
+        for task in (open_task, closed_task):
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    if closed.is_set():
+        raise WebRTCStreamError("data channel closed before it could open")
 
 
 def _bind_channel_events(

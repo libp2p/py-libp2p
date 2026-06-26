@@ -30,6 +30,7 @@ from libp2p.peer.id import ID
 from .config import WebRTCTransportConfig
 from .constants import (
     ACCEPT_QUEUE_SIZE,
+    INBOUND_STREAM_START_ID,
     OUTBOUND_STREAM_START_ID,
 )
 from .exceptions import WebRTCConnectionError, WebRTCStreamError
@@ -80,8 +81,15 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
         self._streams: dict[int, WebRTCStream] = {}
         self._streams_lock = threading.Lock()
 
-        # Outbound channel ID counter: even IDs starting at 2
+        # Local routing IDs.  These never cross the wire — they're the keys
+        # we use inside `_streams`.  Outbound channels get even IDs starting
+        # at 2; inbound channels (allocated when a remote-initiated SCTP
+        # channel arrives) get odd IDs starting at 1.  Keeping the two
+        # spaces disjoint avoids collisions in the local registry now that
+        # data channels are in-band (their wire IDs are SCTP-assigned and
+        # we no longer mirror them locally).
         self._next_outbound_id = OUTBOUND_STREAM_START_ID
+        self._next_inbound_id = INBOUND_STREAM_START_ID
 
         # Inbound stream accept queue
         self._accept_send: trio.MemorySendChannel[WebRTCStream]
@@ -355,6 +363,22 @@ class WebRTCConnection(IRawConnection, IMuxedConn):
                 )
             channel_id = self._next_outbound_id
             self._next_outbound_id += 2  # Even IDs only
+        return channel_id
+
+    def _allocate_inbound_id(self) -> int:
+        """
+        Allocate the next odd data-channel ID for inbound streams.
+
+        Thread-safe: called from the asyncio bridge when a remote-initiated
+        data channel arrives.
+        """
+        with self._streams_lock:
+            if len(self._streams) >= self._config.max_concurrent_streams:
+                raise WebRTCStreamError(
+                    f"Stream limit reached ({self._config.max_concurrent_streams})"
+                )
+            channel_id = self._next_inbound_id
+            self._next_inbound_id += 2  # Odd IDs only
         return channel_id
 
     def _make_send_callback(self, channel_id: int) -> Any:
