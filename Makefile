@@ -26,7 +26,7 @@ typecheck:
 	pre-commit run mypy-local --all-files
 
 test:
-	python3 -m pytest tests
+	python3 -m pytest -v tests
 
 pr: clean fix lint typecheck test
 
