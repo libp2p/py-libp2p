@@ -20,7 +20,7 @@ class DelegatedHTTPRouting:
     async def bootstrap(self) -> None:
         pass
 
-    async def find_providers(self, key: str, count: int = 20) -> List[PeerInfo]:
+    async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         providers = []
         try:
             # IPIP-337 Delegated Routing API
@@ -121,7 +121,7 @@ class DelegatedHTTPRouting:
             )
             return False
 
-    async def get_value(self, key: str) -> Optional[bytes]:
+    async def get_value(self, key: str) -> bytes | None:
         return None
 
     async def put_value(self, key: str, value: bytes) -> None:
@@ -132,7 +132,7 @@ class DelegatedHTTPRouting:
 
 
 class TieredRouting:
-    def __init__(self, routers: List[Any]):
+    def __init__(self, routers: list[Any]):
         self.routers = routers
 
     async def bootstrap(self) -> None:
@@ -142,7 +142,7 @@ class TieredRouting:
             elif hasattr(r, "refresh_routing_table"):
                 await r.refresh_routing_table()
 
-    async def find_providers(self, key: str, count: int = 20) -> List[PeerInfo]:
+    async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         all_providers = []
         seen_ids = set()
         for r in self.routers:
@@ -170,7 +170,7 @@ class TieredRouting:
                 pass
         return success
 
-    async def get_value(self, key: str) -> Optional[bytes]:
+    async def get_value(self, key: str) -> bytes | None:
         for r in self.routers:
             try:
                 val = await r.get_value(key)

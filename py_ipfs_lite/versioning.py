@@ -18,7 +18,7 @@ def init_repo_version(repo_path: str) -> None:
             f.write(REPO_VERSION)
         logger.info(f"Initialized repo at {repo_path} with version {REPO_VERSION}")
     else:
-        with open(version_file, "r") as f:
+        with open(version_file) as f:
             current_version = f.read().strip()
 
         if current_version != REPO_VERSION:
@@ -34,6 +34,6 @@ def get_repo_version(repo_path: str) -> str:
     """Return the current repo version from the version file."""
     version_file = os.path.join(repo_path, "version")
     if os.path.exists(version_file):
-        with open(version_file, "r") as f:
+        with open(version_file) as f:
             return f.read().strip()
     return "unknown"

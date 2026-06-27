@@ -1,5 +1,6 @@
 import json
-from typing import AsyncIterator, Awaitable, Callable, Optional
+from typing import Optional
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import cbor2
 from libp2p.bitswap.cid import (
@@ -36,7 +37,7 @@ def decode_node(data: bytes, codec: str) -> dict:
 
 async def walk_dag(
     root_cid_bytes: bytes,
-    get_block: Callable[[bytes], Awaitable[Optional[bytes]]],
+    get_block: Callable[[bytes], Awaitable[bytes | None]],
     recursive: bool = True,
 ) -> AsyncIterator[bytes]:
     queue = [root_cid_bytes]

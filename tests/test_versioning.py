@@ -13,7 +13,7 @@ def test_init_repo_version_creates_file():
         version_file = os.path.join(temp_dir, "version")
         assert os.path.exists(version_file)
 
-        with open(version_file, "r") as f:
+        with open(version_file) as f:
             content = f.read().strip()
 
         assert content == REPO_VERSION

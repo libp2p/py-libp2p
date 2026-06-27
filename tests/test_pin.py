@@ -72,7 +72,7 @@ async def test_atomic_save():
 
         # Check that the target file does exist and has correct contents
         assert pin_file.exists()
-        with open(pin_file, "r") as f:
+        with open(pin_file) as f:
             data = json.load(f)
             assert (
                 "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"

@@ -7,9 +7,9 @@ logger = logging.getLogger("py_ipfs_lite.pin")
 
 
 class PinStore:
-    def __init__(self, path: Optional[str] = None):
+    def __init__(self, path: str | None = None):
         self.path = path
-        self._pins: Dict[str, str] = {}  # cid_str -> "direct" | "recursive"
+        self._pins: dict[str, str] = {}  # cid_str -> "direct" | "recursive"
         self._load()
 
     def _load(self):
@@ -18,7 +18,7 @@ class PinStore:
         pin_file = Path(self.path)
         if pin_file.exists():
             try:
-                with open(pin_file, "r") as f:
+                with open(pin_file) as f:
                     data = json.load(f)
                     # Migrate old bool format to new string format if needed
                     raw_pins = data.get("pins", {})
@@ -70,10 +70,10 @@ class PinStore:
     def is_pinned(self, cid_str: str) -> bool:
         return cid_str in self._pins
 
-    def get_pin_type(self, cid_str: str) -> Optional[str]:
+    def get_pin_type(self, cid_str: str) -> str | None:
         return self._pins.get(cid_str)
 
-    def get_pins(self, type_filter: str = "all") -> Dict[str, str]:
+    def get_pins(self, type_filter: str = "all") -> dict[str, str]:
         if type_filter == "all":
             return self._pins.copy()
         if type_filter in ("direct", "recursive"):

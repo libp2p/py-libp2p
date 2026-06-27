@@ -3,13 +3,12 @@ import logging
 from dataclasses import dataclass
 from typing import (
     Any,
-    AsyncIterator,
     BinaryIO,
-    Callable,
     Dict,
     Optional,
     Union,
 )
+from collections.abc import AsyncIterator, Callable
 
 import trio
 from libp2p import new_host
@@ -165,14 +164,14 @@ class Peer:
         self,
         config: Config,
         *,
-        host: Optional[Host] = None,
-        routing: Optional[Routing] = None,
-        datastore: Optional[Datastore] = None,
-        blockstore: Optional[BlockStore] = None,
-        exchange: Optional[Exchange] = None,
-        dag_service: Optional[DagService] = None,
-        host_key: Optional[KeyPair] = None,
-        listen_addrs: Optional[list] = None,
+        host: Host | None = None,
+        routing: Routing | None = None,
+        datastore: Datastore | None = None,
+        blockstore: BlockStore | None = None,
+        exchange: Exchange | None = None,
+        dag_service: DagService | None = None,
+        host_key: KeyPair | None = None,
+        listen_addrs: list | None = None,
     ):
         self.config = config
         self._host_key = host_key or create_new_key_pair()
@@ -364,14 +363,14 @@ class Peer:
 
     async def add_file(
         self,
-        path_or_stream: Union[str, BinaryIO],
-        params: Optional[AddParams] = None,
-        timeout: Optional[float] = None,
-        progress_callback: Optional[Callable[[int, int], None]] = None,
+        path_or_stream: str | BinaryIO,
+        params: AddParams | None = None,
+        timeout: float | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> str:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
-        kwargs: Dict[str, Any] = {"wrap_with_directory": False}
+        kwargs: dict[str, Any] = {"wrap_with_directory": False}
         if params is not None and params.chunker and params.chunker.startswith("size-"):
             try:
                 kwargs["chunk_size"] = int(params.chunker.split("-")[1])
@@ -404,11 +403,11 @@ class Peer:
     async def get_file(
         self,
         cid_str: str,
-        provider_addr: Optional[str] = None,
-        output_path: Optional[str] = None,
-        timeout: Optional[float] = None,
+        provider_addr: str | None = None,
+        output_path: str | None = None,
+        timeout: float | None = None,
         stream: bool = False,
-    ) -> Union[bytes, AsyncIterator[bytes], None]:
+    ) -> bytes | AsyncIterator[bytes] | None:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         if provider_addr:
@@ -488,9 +487,9 @@ class Peer:
 
     async def add_node(
         self,
-        node: Union[dict, list, str, int, bytes],
+        node: dict | list | str | int | bytes,
         codec: str = "dag-json",
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> str:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
@@ -510,9 +509,9 @@ class Peer:
     async def get_node(
         self,
         cid_str: str,
-        provider_addr: Optional[str] = None,
-        timeout: Optional[float] = None,
-    ) -> Union[dict, list, str, int, bytes]:
+        provider_addr: str | None = None,
+        timeout: float | None = None,
+    ) -> dict | list | str | int | bytes:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
@@ -645,7 +644,7 @@ class Peer:
             )
 
     async def resolve_name(
-        self, peer_id_str: str, timeout: Optional[float] = None
+        self, peer_id_str: str, timeout: float | None = None
     ) -> str:
         """Resolve an IPNS name (PeerID) to its value."""
         self._ensure_started()
@@ -660,7 +659,7 @@ class Peer:
             return await ipns_resolve(self.routing, peer_id)
 
     async def publish_name(
-        self, value: str, lifetime_hours: int = 24, timeout: Optional[float] = None
+        self, value: str, lifetime_hours: int = 24, timeout: float | None = None
     ) -> str:
         """Publish an IPNS record pointing to `value` using this node's private key."""
         self._ensure_started()
