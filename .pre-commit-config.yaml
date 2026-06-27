@@ -32,3 +32,17 @@ repos:
       - id: mdformat
         additional_dependencies:
           - mdformat-gfm
+  - repo: local
+    hooks:
+      - id: check-rst-files
+        name: check rst files
+        entry: python scripts/check_rst.py
+        language: system
+        types: [text]
+        pass_filenames: false
+      - id: path-audit
+        name: path audit
+        entry: python scripts/audit_paths.py
+        language: system
+        types: [python]
+        pass_filenames: false
