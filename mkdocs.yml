@@ -1,7 +1,7 @@
 site_name: py-ipfs-lite
 site_description: Embeddable lightweight IPFS peer for Python
-repo_url: https://github.com/sumanjeet0012/py-ipfs-lite
-repo_name: sumanjeet0012/py-ipfs-lite
+repo_url: https://github.com/meshkit/py-ipfs-lite
+repo_name: meshkit/py-ipfs-lite
 
 theme:
   name: material
