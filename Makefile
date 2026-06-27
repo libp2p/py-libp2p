@@ -1,4 +1,4 @@
-.PHONY: help install-dev format lint typecheck test check clean
+.PHONY: help install-dev format lint typecheck test check docs clean
 
 help:
 	@echo "install-dev - install package and dev/test dependencies"
