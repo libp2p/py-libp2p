@@ -1,3 +1,5 @@
+from typing import Any
+
 from prometheus_client import Counter, Gauge, Histogram
 
 IPFS_BLOCKSTORE_SIZE_BYTES = Gauge(
@@ -33,7 +35,7 @@ IPFS_GC_RECLAIMED_BLOCKS_TOTAL = Counter(
 class MetricsBlockStore:
     """Wraps a libp2p BlockStore to record prometheus metrics on put/delete."""
 
-    def __init__(self, store):
+    def __init__(self, store: Any) -> None:
         self._store = store
 
     async def put_block(self, cid: bytes, data: bytes) -> None:
@@ -41,14 +43,14 @@ class MetricsBlockStore:
         IPFS_BLOCKSTORE_BLOCKS_TOTAL.inc()
         IPFS_BLOCKSTORE_SIZE_BYTES.inc(len(data))
 
-    async def put_many(self, blocks) -> None:
+    async def put_many(self, blocks: Any) -> None:
         if hasattr(self._store, "put_many"):
             await self._store.put_many(blocks)
         else:
             for cid, data in blocks:
                 await self.put_block(cid, data)
 
-    async def get_block(self, cid: bytes):
+    async def get_block(self, cid: bytes) -> Any:
         return await self._store.get_block(cid)
 
     async def has_block(self, cid: bytes) -> bool:
@@ -73,8 +75,8 @@ class MetricsBlockStore:
     def get_size(self, cid: bytes) -> int:
         return self._store.get_size(cid)
 
-    def get_all_cids(self):
+    def get_all_cids(self) -> Any:
         return self._store.get_all_cids()
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: Any) -> Any:
         return getattr(self._store, name)

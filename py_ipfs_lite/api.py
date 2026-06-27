@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -24,7 +26,7 @@ logger = logging.getLogger("py_ipfs_lite.api")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     # Check if a peer was already provided (e.g. injected during setup)
     peer = getattr(app.state, "peer", None)
     if not peer:
@@ -57,7 +59,7 @@ app = FastAPI(title="py-ipfs-lite HTTP API", lifespan=lifespan)
 
 
 @app.exception_handler(IPFSLiteError)
-async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError):
+async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError) -> Any:
     status_code = 500
     if isinstance(exc, (BlockNotFoundError, PinNotFoundError, RoutingError)):
         status_code = 404
@@ -67,7 +69,7 @@ async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError):
 
 
 @app.post("/api/v0/add")
-async def add_file(request: Request, file: UploadFile = File(...)):
+async def add_file(request: Request, file: UploadFile = File(...)) -> Any:
     """Add a file to the local blockstore and announce it."""
     peer: Peer = request.app.state.peer
 
@@ -95,7 +97,7 @@ async def add_file(request: Request, file: UploadFile = File(...)):
 async def cat_file(
     request: Request,
     arg: str = Query(..., description="The path to the IPFS object(s) to be outputted"),
-):
+) -> Any:
     """Fetch a file by its CID."""
     peer: Peer = request.app.state.peer
     try:
@@ -112,7 +114,7 @@ async def cat_file(
 @app.post("/api/v0/dag/put")
 async def dag_put(
     request: Request, store_codec: str = Query("dag-json", alias="store-codec")
-):
+) -> Any:
     """Store a generic DAG node."""
     peer: Peer = request.app.state.peer
     body = await request.body()
@@ -130,7 +132,7 @@ async def dag_put(
 @app.get("/api/v0/dag/get")
 async def dag_get(
     request: Request, arg: str = Query(..., description="The object to get")
-):
+) -> Any:
     """Retrieve a generic DAG node."""
     peer: Peer = request.app.state.peer
     try:
@@ -148,7 +150,7 @@ async def block_stat(
     arg: str = Query(
         ..., description="The base58 multihash of an existing block to stat"
     ),
-):
+) -> Any:
     """Check if a block exists locally and get its size."""
     peer: Peer = request.app.state.peer
     from libp2p.bitswap.cid import parse_cid
@@ -174,7 +176,7 @@ async def block_stat(
 async def block_rm(
     request: Request,
     arg: str = Query(..., description="Bash58 multihash of block(s) to remove"),
-):
+) -> Any:
     """Remove a raw block from the local blockstore."""
     peer: Peer = request.app.state.peer
     try:
@@ -191,7 +193,7 @@ async def pin_add(
     request: Request,
     arg: str = Query(..., description="Path to object(s) to be pinned"),
     recursive: bool = Query(True),
-):
+) -> Any:
     """Pin a CID."""
     peer: Peer = request.app.state.peer
     try:
@@ -207,7 +209,7 @@ async def pin_add(
 async def pin_rm(
     request: Request,
     arg: str = Query(..., description="Path to object(s) to be unpinned"),
-):
+) -> Any:
     """Unpin a CID."""
     peer: Peer = request.app.state.peer
     try:
@@ -220,7 +222,7 @@ async def pin_rm(
 
 
 @app.post("/api/v0/repo/gc")
-async def repo_gc(request: Request):
+async def repo_gc(request: Request) -> Any:
     """Run garbage collection."""
     peer: Peer = request.app.state.peer
     try:
@@ -235,7 +237,7 @@ async def repo_gc(request: Request):
 
 
 @app.post("/api/v0/refs/local")
-async def refs_local(request: Request):
+async def refs_local(request: Request) -> Any:
     """List all CIDs stored in the local blockstore."""
     peer: Peer = request.app.state.peer
     try:
@@ -253,7 +255,7 @@ async def refs_local(request: Request):
 
 @app.post("/api/v0/version")
 @app.get("/api/v0/version")
-async def api_version():
+async def api_version() -> Any:
     """Get the version of py-ipfs-lite."""
     return JSONResponse(
         content={"Version": "0.1.0", "Commit": "", "System": "py-ipfs-lite"}
@@ -262,7 +264,7 @@ async def api_version():
 
 @app.post("/api/v0/id")
 @app.get("/api/v0/id")
-async def api_id(request: Request):
+async def api_id(request: Request) -> Any:
     """Show IPFS node id info."""
     peer: Peer = request.app.state.peer
     return JSONResponse(
@@ -275,7 +277,7 @@ async def api_id(request: Request):
 
 @app.post("/api/v0/repo/stat")
 @app.get("/api/v0/repo/stat")
-async def repo_stat(request: Request):
+async def repo_stat(request: Request) -> Any:
     """Get stats for the currently used repo."""
     peer: Peer = request.app.state.peer
     try:
@@ -285,8 +287,8 @@ async def repo_stat(request: Request):
         num_objects = len(keys)
         # get_size can be called synchronously in the underlying memory/fs blockstore in py_ipfs_lite
         repo_size = sum(
-            peer.blockstore.get_size(cid_to_bytes(parse_cid(k)))
-            for k in keys  # type: ignore[union-attr, misc]
+            peer.blockstore.get_size(cid_to_bytes(parse_cid(k)))  # type: ignore[union-attr, misc]
+            for k in keys
         )
 
         path = peer.config.blockstore_path
@@ -309,7 +311,7 @@ async def repo_stat(request: Request):
 
 @app.post("/api/v0/swarm/peers")
 @app.get("/api/v0/swarm/peers")
-async def swarm_peers(request: Request):
+async def swarm_peers(request: Request) -> Any:
     """List peers with open connections."""
     peer: Peer = request.app.state.peer
     network = peer.host.get_network()  # type: ignore[union-attr]
@@ -346,14 +348,14 @@ async def swarm_peers(request: Request):
 
 
 @app.get("/debug/metrics/prometheus")
-async def metrics():
+async def metrics() -> Any:
     """Expose Prometheus metrics."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/api/v0/repo/version")
 @app.get("/api/v0/repo/version")
-async def repo_version(request: Request):
+async def repo_version(request: Request) -> Any:
     """Return the datastore/repo version."""
     peer: Peer = request.app.state.peer
 
@@ -371,7 +373,7 @@ async def repo_version(request: Request):
 async def name_publish(
     request: Request,
     arg: str = Query(..., description="IPFS path of the object to be published"),
-):
+) -> Any:
     """Publish an IPNS record."""
     peer: Peer = request.app.state.peer
     try:
@@ -388,7 +390,7 @@ async def name_publish(
 @app.get("/api/v0/name/resolve")
 async def name_resolve(
     request: Request, arg: str = Query(..., description="The IPNS name to resolve")
-):
+) -> Any:
     """Resolve an IPNS record."""
     peer: Peer = request.app.state.peer
     try:

@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 import cbor2
 from libp2p.bitswap.cid import (
@@ -12,7 +13,7 @@ from libp2p.bitswap.cid import (
 from libp2p.bitswap.dag import decode_dag_pb
 
 
-def encode_node(node: dict, codec: str) -> bytes:
+def encode_node(node: dict[Any, Any], codec: str) -> bytes:
     if codec == "dag-cbor":
         return cbor2.dumps(node)
     elif codec == "dag-json":
@@ -22,7 +23,7 @@ def encode_node(node: dict, codec: str) -> bytes:
         return json.dumps(node).encode("utf-8")
 
 
-def decode_node(data: bytes, codec: str) -> dict:
+def decode_node(data: bytes, codec: str) -> dict[Any, Any]:
     if codec == "dag-cbor":
         return cbor2.loads(data)
     elif codec == "dag-json":
@@ -70,7 +71,7 @@ async def walk_dag(
             try:
                 decoded = decode_node(data, codec)
 
-                def extract_links(obj):
+                def extract_links(obj: Any) -> None:
                     if isinstance(obj, dict):
                         if "/" in obj and isinstance(obj["/"], (str, bytes)):
                             try:

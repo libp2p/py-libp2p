@@ -12,7 +12,7 @@ logger = logging.getLogger("py_ipfs_lite.routing")
 
 
 class DelegatedHTTPRouting:
-    def __init__(self, endpoint: str = "https://cid.contact", host=None):
+    def __init__(self, endpoint: str = "https://cid.contact", host: Any = None) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.client = httpx.AsyncClient(base_url=self.endpoint, timeout=10.0)
         self.host = host
@@ -132,7 +132,7 @@ class DelegatedHTTPRouting:
 
 
 class TieredRouting:
-    def __init__(self, routers: list[Any]):
+    def __init__(self, routers: list[Any]) -> None:
         self.routers = routers
 
     async def bootstrap(self) -> None:

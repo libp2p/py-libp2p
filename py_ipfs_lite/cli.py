@@ -1,6 +1,8 @@
 import hashlib
 import logging
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
@@ -13,7 +15,7 @@ from py_ipfs_lite.peer import Peer
 logger = logging.getLogger("py_ipfs_lite.cli")
 
 
-def _get_key_pair(seed: str | None):
+def _get_key_pair(seed: str | None) -> Any:
     if seed:
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         return create_new_key_pair(seed=seed_bytes)
@@ -33,7 +35,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def create_and_start_peer(
     port: int, seed: str | None, config: Config, bootstrap: bool = True
-):
+) -> AsyncGenerator[Any, None]:
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
@@ -51,7 +53,7 @@ async def create_and_start_peer(
         await peer.close()
 
 
-async def run_daemon(port: int, seed: str | None, config: Config):
+async def run_daemon(port: int, seed: str | None, config: Config) -> None:
     """Run the IPFS Lite daemon (provider mode)."""
     logger.info("Starting py-ipfs-lite daemon...")
     try:
@@ -70,7 +72,7 @@ async def run_daemon(port: int, seed: str | None, config: Config):
 
 async def run_add(
     file_path: str, port: int, seed: str | None, config: Config, add_params: AddParams
-):
+) -> None:
     """Add a file to the IPFS Lite network."""
     import os
 
@@ -101,7 +103,7 @@ async def run_get(
     port: int,
     seed: str | None,
     config: Config,
-):
+) -> None:
     """Fetch a file by CID."""
     import os
 
@@ -131,7 +133,7 @@ async def run_get(
 
 async def run_dag_export(
     cid_str: str, out_file: str, port: int, seed: str | None, config: Config
-):
+) -> None:
     """Export a DAG to a CAR file."""
     logger.info(f"Exporting DAG {cid_str} to CAR file {out_file}...")
     try:
@@ -142,7 +144,9 @@ async def run_dag_export(
         logger.error(f"Error exporting DAG: {e}")
 
 
-async def run_dag_import(file_path: str, port: int, seed: str | None, config: Config):
+async def run_dag_import(
+    file_path: str, port: int, seed: str | None, config: Config
+) -> None:
     """Import a CAR file into the blockstore."""
     import os
 
@@ -161,7 +165,7 @@ async def run_dag_import(file_path: str, port: int, seed: str | None, config: Co
         logger.error(f"Error importing CAR file: {e}")
 
 
-def main():
+def main() -> None:
     parser = get_parser()
     parsed_args = parser.parse_args()
 

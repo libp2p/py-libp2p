@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 import trio
 
@@ -6,12 +7,12 @@ logger = logging.getLogger("py_ipfs_lite.reprovider")
 
 
 class Reprovider:
-    def __init__(self, peer):
+    def __init__(self, peer: Any) -> None:
         self.peer = peer
         self.interval = peer.config.reprovide_interval_seconds
-        self._cancel_scope = None
+        self._cancel_scope: Any = None
 
-    async def start(self):
+    async def start(self) -> None:
         if self.interval < 0:
             logger.info("Reprovider disabled (interval < 0)")
             return
@@ -22,11 +23,11 @@ class Reprovider:
                 await self.reprovide()
                 await trio.sleep(self.interval)
 
-    async def stop(self):
+    async def stop(self) -> None:
         if self._cancel_scope:
             self._cancel_scope.cancel()
 
-    async def reprovide(self):
+    async def reprovide(self) -> None:
         if not self.peer.routing:
             return
 

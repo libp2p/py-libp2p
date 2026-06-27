@@ -58,40 +58,40 @@ class Host(Protocol):
 
 
 class HostAdapter:
-    def __init__(self, host):
+    def __init__(self, host: Any) -> None:
         self._host = host
 
-    def id(self):
+    def id(self) -> Any:
         return self._host.get_id()
 
-    def addrs(self):
+    def addrs(self) -> Any:
         return self._host.get_addrs()
 
-    async def connect(self, peer_info):
+    async def connect(self, peer_info: Any) -> Any:
         return await self._host.connect(peer_info)
 
-    async def disconnect(self, peer_id):
+    async def disconnect(self, peer_id: Any) -> Any:
         return await self._host.disconnect(peer_id)
 
-    async def open_stream(self, peer_id, protocol_ids):
+    async def open_stream(self, peer_id: Any, protocol_ids: Any) -> Any:
         return await self._host.new_stream(peer_id, protocol_ids)
 
-    def set_stream_handler(self, protocol_id, stream_handler):
+    def set_stream_handler(self, protocol_id: Any, stream_handler: Any) -> Any:
         return self._host.set_stream_handler(protocol_id, stream_handler)
 
-    async def close(self):
+    async def close(self) -> Any:
         return await self._host.close()
 
     # Pass-through for existing usage
-    def get_network(self):
+    def get_network(self) -> Any:
         return self._host.get_network()
 
-    def run(self, *args, **kwargs):
+    def run(self, *args: Any, **kwargs: Any) -> Any:
         return self._host.run(*args, **kwargs)
 
 
 class BlockStoreAdapter:
-    def __init__(self, blockstore):
+    def __init__(self, blockstore: Any) -> None:
         self._store = blockstore
 
     async def put(self, cid: bytes, data: bytes) -> None:
@@ -121,7 +121,7 @@ from py_ipfs_lite.metrics import IPFS_DHT_QUERY_LATENCY_SECONDS
 
 
 class RoutingAdapter:
-    def __init__(self, routing):
+    def __init__(self, routing: Any) -> None:
         self._routing = routing
 
     async def bootstrap(self) -> None:

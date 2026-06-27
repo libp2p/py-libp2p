@@ -1,4 +1,5 @@
 import io
+from typing import Any
 
 import trio
 import varint
@@ -16,7 +17,7 @@ from py_ipfs_lite.dag_utils import decode_node
 
 
 class BufferedAsyncReader:
-    def __init__(self, f, buffer_size=65536):
+    def __init__(self, f: Any, buffer_size: Any = 65536) -> None:
         self.f = f
         self.buffer_size = buffer_size
         self.buffer = bytearray()
@@ -78,7 +79,7 @@ def get_cid_len(data: bytes) -> int:
     return stream.tell()
 
 
-async def export_car(peer, cid_str: str, output_path: str):
+async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
     root_cid = parse_cid(cid_str)
 
     async with await trio.open_file(output_path, "wb") as f:
@@ -127,7 +128,7 @@ async def export_car(peer, cid_str: str, output_path: str):
                 try:
                     decoded = decode_node(data, codec)
 
-                    def extract_links(obj):
+                    def extract_links(obj: Any) -> None:
                         if isinstance(obj, dict):
                             if "/" in obj and isinstance(obj["/"], (str, bytes)):
                                 try:
@@ -146,7 +147,7 @@ async def export_car(peer, cid_str: str, output_path: str):
                     pass
 
 
-async def import_car(peer, input_path: str) -> list[str]:
+async def import_car(peer: Any, input_path: str) -> list[str]:
     roots = []  # type: ignore[var-annotated]
     async with await trio.open_file(input_path, "rb") as raw_f:
         f = BufferedAsyncReader(raw_f)

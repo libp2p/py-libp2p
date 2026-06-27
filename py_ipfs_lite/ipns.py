@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import cbor2
 from libp2p.crypto.keys import PrivateKey
@@ -66,7 +67,7 @@ def create_ipns_record(
 
 
 async def publish_name(
-    routing,
+    routing: Any,
     private_key: PrivateKey,
     peer_id: ID,
     value: str,
@@ -163,7 +164,7 @@ def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry
     return entry
 
 
-async def resolve_name(routing, peer_id: ID) -> str:
+async def resolve_name(routing: Any, peer_id: ID) -> str:
     """Resolve an IPNS record from the DHT and verify its signature."""
     dht_key = f"/ipns/{peer_id.to_base58()}"
     record_bytes = await routing.get_value(dht_key)

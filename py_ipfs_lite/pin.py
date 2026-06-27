@@ -6,12 +6,12 @@ logger = logging.getLogger("py_ipfs_lite.pin")
 
 
 class PinStore:
-    def __init__(self, path: str | None = None):
+    def __init__(self, path: str | None = None) -> None:
         self.path = path
         self._pins: dict[str, str] = {}  # cid_str -> "direct" | "recursive"
         self._load()
 
-    def _load(self):
+    def _load(self) -> None:
         if not self.path:
             return
         pin_file = Path(self.path)
@@ -30,7 +30,7 @@ class PinStore:
             except Exception as e:
                 logger.error(f"Failed to load pins from {self.path}: {e}")
 
-    def _save(self):
+    def _save(self) -> None:
         if not self.path:
             return
         import os
@@ -52,13 +52,13 @@ class PinStore:
                 except Exception:
                     pass
 
-    def add_pin(self, cid_str: str, pin_type: str = "recursive"):
+    def add_pin(self, cid_str: str, pin_type: str = "recursive") -> None:
         if pin_type not in ("direct", "recursive"):
             raise ValueError(f"Invalid pin type: {pin_type}")
         self._pins[cid_str] = pin_type
         self._save()
 
-    def remove_pin(self, cid_str: str):
+    def remove_pin(self, cid_str: str) -> None:
         if cid_str not in self._pins:
             from py_ipfs_lite.exceptions import PinNotFoundError
 

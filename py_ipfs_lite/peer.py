@@ -1,6 +1,6 @@
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -51,7 +51,7 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.noise.transport import Transport as NoiseTransport
 
 
-def encode_node(node, codec: str) -> bytes:
+def encode_node(node: Any, codec: str) -> bytes:
     if codec == "dag-json":
         return json.dumps(node, separators=(",", ":")).encode("utf-8")
     elif codec in ("dag-cbor", "cbor"):
@@ -62,7 +62,7 @@ def encode_node(node, codec: str) -> bytes:
         raise ValueError(f"Unsupported codec for encode_node: {codec}")
 
 
-def decode_node(data: bytes, codec: str):
+def decode_node(data: bytes, codec: str) -> Any:
     if codec == "dag-json":
         return json.loads(data.decode("utf-8"))
     elif codec in ("dag-cbor", "cbor"):
@@ -100,11 +100,11 @@ def default_bootstrap_peers() -> list[str]:
 
 
 async def setup_libp2p(
-    host_key,
-    listen_addrs: list,
-    datastore=None,
+    host_key: Any,
+    listen_addrs: list[Any],
+    datastore: Any = None,
     offline: bool = False,
-):
+) -> Any:
     maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in listen_addrs]
     noise_key_pair = create_new_x25519_key_pair()
     sec_opt = {
@@ -118,21 +118,21 @@ async def setup_libp2p(
     return HostAdapter(raw_host), None
 
 
-def new_in_memory_datastore():
+def new_in_memory_datastore() -> Any:
     return BlockStoreAdapter(MemoryBlockStore())
 
 
 class RWLock:
     """A trio-compatible read-write lock to allow concurrent reads but exclusive writes."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._write_lock = trio.Lock()
         self._read_count = 0
         self._read_count_lock = trio.Lock()
         self._read_cond = trio.Condition(self._read_count_lock)
 
     @contextlib.asynccontextmanager
-    async def read_lock(self):
+    async def read_lock(self) -> AsyncGenerator[Any, None]:
         async with self._write_lock:
             async with self._read_count_lock:
                 self._read_count += 1
@@ -145,7 +145,7 @@ class RWLock:
                     self._read_cond.notify_all()
 
     @contextlib.asynccontextmanager
-    async def write_lock(self):
+    async def write_lock(self) -> AsyncGenerator[Any, None]:
         async with self._write_lock:
             async with self._read_count_lock:
                 while self._read_count > 0:
@@ -168,8 +168,8 @@ class Peer:
         exchange: Exchange | None = None,
         dag_service: DagService | None = None,
         host_key: KeyPair | None = None,
-        listen_addrs: list | None = None,
-    ):
+        listen_addrs: list[Any] | None = None,
+    ) -> None:
         self.config = config
         self._host_key = host_key or create_new_key_pair()
         self._listen_addrs = listen_addrs or []
@@ -196,7 +196,9 @@ class Peer:
         self._connection_pruner = None
 
     @classmethod
-    async def new(cls, datastore, blockstore, host, routing, config):
+    async def new(
+        cls, datastore: Any, blockstore: Any, host: Any, routing: Any, config: Any
+    ) -> Any:
         peer = cls(
             config=config,
             datastore=datastore,
@@ -207,7 +209,7 @@ class Peer:
         await peer.start()
         return peer
 
-    async def _create_host(self):
+    async def _create_host(self) -> Any:
         maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
         noise_key_pair = create_new_x25519_key_pair()
         sec_opt = {
@@ -222,7 +224,7 @@ class Peer:
         )
         return HostAdapter(raw_host)
 
-    async def _create_routing(self):
+    async def _create_routing(self) -> Any:
         if self.config.offline:
             return None
 
@@ -241,7 +243,7 @@ class Peer:
 
         return dht_adapter
 
-    def _create_blockstore(self):
+    def _create_blockstore(self) -> Any:
         if self.config.blockstore_type == "filesystem":
             if not self.config.blockstore_path:
                 raise ValueError(
@@ -257,27 +259,27 @@ class Peer:
             raw_bs = MemoryBlockStore()  # type: ignore[assignment]
         return BlockStoreAdapter(MetricsBlockStore(raw_bs))
 
-    def _create_exchange(self):
+    def _create_exchange(self) -> Any:
         raw_host = getattr(self.host, "_host", self.host)
         raw_bs = getattr(self.blockstore, "_store", self.blockstore)
         bitswap = BitswapClient(raw_host, raw_bs)  # type: ignore[arg-type]
 
         class ExchangeAdapter:
-            def __init__(self, exchange):
+            def __init__(self, exchange: Any) -> None:
                 self._exchange = exchange
 
-            async def get_block(self, cid):
+            async def get_block(self, cid: Any) -> Any:
                 data = await self._exchange.get_block(cid)
                 if data:
                     IPFS_BITSWAP_BYTES_RECEIVED_TOTAL.inc(len(data))
                 return data
 
-            def __getattr__(self, name):
+            def __getattr__(self, name: Any) -> Any:
                 return getattr(self._exchange, name)
 
         return ExchangeAdapter(bitswap)
 
-    def _create_dag_service(self):
+    def _create_dag_service(self) -> Any:
         return MerkleDag(self._exchange)  # type: ignore[arg-type]
 
     async def start(self) -> None:
@@ -356,7 +358,7 @@ class Peer:
         """Connect to bootstrap peers and join the DHT network."""
         self._ensure_started()
         discovery = BootstrapDiscovery(
-            swarm=self.host.get_network(),
+            swarm=self.host.get_network(),  # type: ignore
             bootstrap_addrs=peers,  # type: ignore[union-attr]
         )
         await discovery.start()
@@ -436,11 +438,11 @@ class Peer:
         from libp2p.bitswap.dag import is_directory_node
 
         # Helper to isolate trio.fail_after from the async generator
-        async def fetch_block_with_timeout(current_cid):
+        async def fetch_block_with_timeout(current_cid: Any) -> Any:
             with trio.fail_after(t_val):
                 return await self._exchange.get_block(current_cid)  # type: ignore[union-attr]
 
-        async def fetch_stream(current_cid):
+        async def fetch_stream(current_cid: Any) -> AsyncGenerator[Any, None]:
             data = await fetch_block_with_timeout(current_cid)
             if data is None:
                 raise BlockNotFoundError(
@@ -487,7 +489,7 @@ class Peer:
 
     async def add_node(
         self,
-        node: dict | list | str | int | bytes,
+        node: dict[Any, Any] | list[Any] | str | int | bytes,
         codec: str = "dag-json",
         timeout: float | None = None,
     ) -> str:
@@ -511,7 +513,7 @@ class Peer:
         cid_str: str,
         provider_addr: str | None = None,
         timeout: float | None = None,
-    ) -> dict | list | str | int | bytes:
+    ) -> dict[Any, Any] | list[Any] | str | int | bytes:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
@@ -592,7 +594,7 @@ class Peer:
                     c_bytes = cid_to_bytes(parse_cid(cid_str))
                     async for reachable_cid_bytes in walk_dag(
                         c_bytes,
-                        self.blockstore.get,
+                        self.blockstore.get,  # type: ignore[union-attr]
                         recursive=True,  # type: ignore[union-attr]
                     ):
                         if reachable_cid_bytes != c_bytes:
@@ -627,7 +629,7 @@ class Peer:
                     is_rec = pin_type == "recursive"
                     async for reachable_cid_bytes in walk_dag(
                         c_bytes,
-                        self.blockstore.get,
+                        self.blockstore.get,  # type: ignore[union-attr]
                         recursive=is_rec,  # type: ignore[union-attr]
                     ):
                         reachable_cids.add(
@@ -697,7 +699,7 @@ class Peer:
 
         return await _import_car(self, input_path)
 
-    def session(self):
+    def session(self) -> Any:
         return self
 
     async def has_block(self, cid_str: str) -> bool:
@@ -705,13 +707,13 @@ class Peer:
         cid = parse_cid(cid_str)
         return await self.blockstore.has(cid)  # type: ignore[union-attr]
 
-    def block_store(self):
+    def block_store(self) -> Any:
         return self.blockstore
 
-    def exchange(self):
+    def exchange(self) -> Any:
         return self._exchange
 
-    def block_service(self):
+    def block_service(self) -> Any:
         return self.dag_service
 
     def _ensure_started(self) -> None:
