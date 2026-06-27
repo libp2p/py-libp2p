@@ -75,7 +75,7 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "D"]
-ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D205"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D205", "D203", "D213"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["py_ipfs_lite", "tests"]
