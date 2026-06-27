@@ -1,7 +1,6 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 logger = logging.getLogger("py_ipfs_lite.pin")
 

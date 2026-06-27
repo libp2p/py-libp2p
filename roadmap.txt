@@ -29,7 +29,7 @@ Phased roadmap for py-ipfs-lite
 ◦  Add CI matrix (lint/type/tests + interop smoke), packaging/release flow, changelog/version policy.
 
 Recommended execution slices
-•  Slice A (MVP fast path): Phase 1 → 2 → 4  
-•  Slice B (network parity): Phase 3 + multi-peer integration tests  
-•  Slice C (cross-language confidence): Phase 6 → 7  
+•  Slice A (MVP fast path): Phase 1 → 2 → 4
+•  Slice B (network parity): Phase 3 + multi-peer integration tests
+•  Slice C (cross-language confidence): Phase 6 → 7
 •  Slice D (publish-ready): Phase 8

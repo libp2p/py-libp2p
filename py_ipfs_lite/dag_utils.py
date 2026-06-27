@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import cbor2

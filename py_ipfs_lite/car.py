@@ -1,5 +1,4 @@
 import io
-from typing import List
 
 import trio
 import varint

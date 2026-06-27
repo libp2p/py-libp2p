@@ -1,14 +1,11 @@
 import contextlib
 import logging
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import (
     Any,
     BinaryIO,
-    Dict,
-    Optional,
-    Union,
 )
-from collections.abc import AsyncIterator, Callable
 
 import trio
 from libp2p import new_host
@@ -219,7 +216,9 @@ class Peer:
             ),
         }
         raw_host = new_host(
-            key_pair=self._host_key, listen_addrs=maddrs, sec_opt=sec_opt  # type: ignore[arg-type]
+            key_pair=self._host_key,
+            listen_addrs=maddrs,
+            sec_opt=sec_opt,  # type: ignore[arg-type]
         )
         return HostAdapter(raw_host)
 
@@ -357,7 +356,8 @@ class Peer:
         """Connect to bootstrap peers and join the DHT network."""
         self._ensure_started()
         discovery = BootstrapDiscovery(
-            swarm=self.host.get_network(), bootstrap_addrs=peers  # type: ignore[union-attr]
+            swarm=self.host.get_network(),
+            bootstrap_addrs=peers,  # type: ignore[union-attr]
         )
         await discovery.start()
 
@@ -591,7 +591,9 @@ class Peer:
                 try:
                     c_bytes = cid_to_bytes(parse_cid(cid_str))
                     async for reachable_cid_bytes in walk_dag(
-                        c_bytes, self.blockstore.get, recursive=True  # type: ignore[union-attr]
+                        c_bytes,
+                        self.blockstore.get,
+                        recursive=True,  # type: ignore[union-attr]
                     ):
                         if reachable_cid_bytes != c_bytes:
                             r_str = format_cid_for_display(
@@ -624,7 +626,9 @@ class Peer:
                     c_bytes = cid_to_bytes(parse_cid(cid_str))
                     is_rec = pin_type == "recursive"
                     async for reachable_cid_bytes in walk_dag(
-                        c_bytes, self.blockstore.get, recursive=is_rec  # type: ignore[union-attr]
+                        c_bytes,
+                        self.blockstore.get,
+                        recursive=is_rec,  # type: ignore[union-attr]
                     ):
                         reachable_cids.add(
                             format_cid_for_display(parse_cid(reachable_cid_bytes))
@@ -643,9 +647,7 @@ class Peer:
                 reclaimed_blocks=deleted_count, retained_blocks=len(reachable_cids)
             )
 
-    async def resolve_name(
-        self, peer_id_str: str, timeout: float | None = None
-    ) -> str:
+    async def resolve_name(self, peer_id_str: str, timeout: float | None = None) -> str:
         """Resolve an IPNS name (PeerID) to its value."""
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout

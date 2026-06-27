@@ -34,4 +34,3 @@ check: lint typecheck test
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .tox build dist *.egg-info
-

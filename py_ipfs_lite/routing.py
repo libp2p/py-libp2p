@@ -1,7 +1,7 @@
 import base64
 import json
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 import httpx
 from libp2p.peer.id import ID

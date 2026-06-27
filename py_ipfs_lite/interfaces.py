@@ -1,5 +1,5 @@
-from typing import Any, List, Optional, Protocol, Union
 from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
 
 class Datastore(Protocol):
