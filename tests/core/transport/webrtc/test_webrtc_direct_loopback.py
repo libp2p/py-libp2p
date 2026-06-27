@@ -1,11 +1,11 @@
 """
-Integration test: WebRTC Direct loopback.
+Integration tests for WebRTC Direct listener setup (aiortc required).
 
-Creates a listener and a dialer on localhost and verifies the full
-connection lifecycle: HTTP SDP exchange → ICE → DTLS → Noise handshake
-→ data-channel stream echo.
-
-Requires aiortc to be installed.  Skipped automatically otherwise.
+Verifies that a listener advertises a multiaddr with /certhash/ and /p2p/,
+binds a real UDP port when port 0 is requested, and uses an aiortc-native
+certificate.  Does not exercise dial(), Noise, or stream echo — see
+test_multiplexing_loopback.py for data-channel layer loopback and add a
+transport-level loopback test in a follow-up.
 """
 # pyrefly: ignore
 
