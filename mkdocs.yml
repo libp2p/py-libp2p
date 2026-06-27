@@ -1,0 +1,72 @@
+site_name: py-ipfs-lite
+site_description: Embeddable lightweight IPFS peer for Python
+repo_url: https://github.com/sumanjeet0012/py-ipfs-lite
+repo_name: sumanjeet0012/py-ipfs-lite
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Comparison: comparison.md
+  - Tutorials:
+    - tutorials/01-your-first-peer.md
+    - tutorials/02-running-a-daemon.md
+  - Guides:
+    - guides/ai-agents-and-rag.md
+    - guides/car-files-and-filecoin.md
+    - guides/dht-and-routing.md
+    - guides/http-api-daemon.md
+    - guides/interop-with-kubo.md
+    - guides/ipns.md
+    - guides/observability.md
+    - guides/persistence-and-gc.md
+    - guides/production-deployment.md
+    - guides/streaming-large-files.md
+  - Reference:
+    - reference/cli.md
+    - reference/examples-index.md
+    - reference/http-api.md
+    - reference/python-sdk.md

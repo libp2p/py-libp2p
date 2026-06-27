@@ -7,11 +7,12 @@ help:
 	@echo "typecheck   - run static type checks"
 	@echo "test        - run unit tests"
 	@echo "check       - run lint + typecheck + tests"
+	@echo "docs        - build and serve documentation locally"
 	@echo "clean       - remove generated/cache artifacts"
 
 install-dev:
 	python3 -m pip install --upgrade pip
-	python3 -m pip install -e ".[dev,test]"
+	python3 -m pip install -e ".[dev,test,docs]"
 
 format:
 	python3 -m ruff format .
@@ -32,5 +33,8 @@ pr: clean fix lint typecheck test
 
 check: lint typecheck test
 
+docs:
+	mkdocs serve
+
 clean:
-	rm -rf .pytest_cache .mypy_cache .ruff_cache .tox build dist *.egg-info
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .tox build dist *.egg-info site
