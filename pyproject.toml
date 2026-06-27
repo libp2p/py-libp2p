@@ -28,7 +28,7 @@ dependencies = [
   "fastapi>=0.137.1",
   "httpx>=0.28.1",
   "hypercorn>=0.18.0",
-  "libp2p @ git+https://github.com/libp2p/py-libp2p.git@main",
+  "libp2p>=0.6.0",
   "prometheus-client>=0.25.0",
   "python-multipart>=0.0.32",
 ]
