@@ -16,14 +16,19 @@ install-dev:
 format:
 	python3 -m ruff format .
 
+fix:
+	python3 -m ruff check --fix .
+
 lint:
-	python3 -m ruff check .
+	pre-commit run --all-files --show-diff-on-failure
 
 typecheck:
-	python3 -m mypy py_ipfs_lite
+	pre-commit run mypy-local --all-files
 
 test:
 	python3 -m pytest tests
+
+pr: clean fix lint typecheck test
 
 check: lint typecheck test
 
