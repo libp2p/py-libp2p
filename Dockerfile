@@ -8,7 +8,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install system dependencies required for cryptography (e.g. fastecdsa used by libp2p)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
+    git \
+    build-essential \
     libgmp-dev \
     && rm -rf /var/lib/apt/lists/*
 
