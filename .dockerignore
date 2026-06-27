@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Python caches and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing and Coverage
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+.dockerignore
