@@ -43,8 +43,8 @@ async def lifespan(app: FastAPI):
     # Start the peer
     await peer.start()
 
-    logger.info(f"Daemon P2P Peer ID: {peer.host.id()}")
-    for addr in peer.host.addrs():
+    logger.info(f"Daemon P2P Peer ID: {peer.host.id()}")  # type: ignore[union-attr]
+    for addr in peer.host.addrs():  # type: ignore[union-attr]
         logger.info(f"  P2P Listening on: {addr}")
 
     yield
@@ -102,7 +102,7 @@ async def cat_file(
         content_iter = await peer.get_file(arg, stream=True)
         from fastapi.responses import StreamingResponse
 
-        return StreamingResponse(content_iter, media_type="application/octet-stream")
+        return StreamingResponse(content_iter, media_type="application/octet-stream")  # type: ignore[arg-type]
     except Exception as e:
         if isinstance(e, IPFSLiteError):
             raise
@@ -155,13 +155,13 @@ async def block_stat(
 
     try:
         cid = parse_cid(arg)
-        has = await peer.blockstore.has(cid)
+        has = await peer.blockstore.has(cid)  # type: ignore[union-attr]
         if not has:
             raise HTTPException(status_code=404, detail="Block not found locally")
 
         # To get size we must read it
-        data = await peer.blockstore.get(cid)
-        return JSONResponse(content={"Key": arg, "Size": len(data)})
+        data = await peer.blockstore.get(cid)  # type: ignore[union-attr]
+        return JSONResponse(content={"Key": arg, "Size": len(data)})  # type: ignore[arg-type]
     except HTTPException:
         raise
     except Exception as e:
@@ -239,7 +239,7 @@ async def refs_local(request: Request):
     """List all CIDs stored in the local blockstore."""
     peer: Peer = request.app.state.peer
     try:
-        keys = peer.blockstore.all_keys()
+        keys = peer.blockstore.all_keys()  # type: ignore[union-attr]
         results = []
         for k in keys:
             results.append({"Ref": k, "Err": ""})
@@ -267,8 +267,8 @@ async def api_id(request: Request):
     peer: Peer = request.app.state.peer
     return JSONResponse(
         content={
-            "ID": peer.host.id().to_base58(),
-            "Addresses": [str(addr) for addr in peer.host.addrs()],
+            "ID": peer.host.id().to_base58(),  # type: ignore[union-attr]
+            "Addresses": [str(addr) for addr in peer.host.addrs()],  # type: ignore[union-attr]
         }
     )
 
@@ -281,11 +281,11 @@ async def repo_stat(request: Request):
     try:
         from libp2p.bitswap.cid import cid_to_bytes, parse_cid
 
-        keys = peer.blockstore.all_keys()
+        keys = peer.blockstore.all_keys()  # type: ignore[union-attr]
         num_objects = len(keys)
         # get_size can be called synchronously in the underlying memory/fs blockstore in py_ipfs_lite
         repo_size = sum(
-            peer.blockstore.get_size(cid_to_bytes(parse_cid(k))) for k in keys
+            peer.blockstore.get_size(cid_to_bytes(parse_cid(k))) for k in keys  # type: ignore[union-attr, misc]
         )
 
         path = peer.config.blockstore_path
@@ -311,7 +311,7 @@ async def repo_stat(request: Request):
 async def swarm_peers(request: Request):
     """List peers with open connections."""
     peer: Peer = request.app.state.peer
-    network = peer.host.get_network()
+    network = peer.host.get_network()  # type: ignore[union-attr]
     peers_data = []
 
     try:

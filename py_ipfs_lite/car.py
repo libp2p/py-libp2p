@@ -148,7 +148,7 @@ async def export_car(peer, cid_str: str, output_path: str):
 
 
 async def import_car(peer, input_path: str) -> List[str]:
-    roots = []
+    roots = []  # type: ignore[var-annotated]
     async with await trio.open_file(input_path, "rb") as raw_f:
         f = BufferedAsyncReader(raw_f)
         # Header length
