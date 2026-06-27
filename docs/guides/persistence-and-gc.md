@@ -18,17 +18,17 @@ uv run python examples/05a_localstore_write.py
 uv run python examples/05b_localstore_read.py <cid>
 ```
 
----
+______________________________________________________________________
 
 ## Blockstore Types
 
 Every block stored in `py-ipfs-lite` lives in the **blockstore** — a key/value store
 keyed by CID. Two implementations are available:
 
-| Type | Config value | Persistence | Best for |
-|---|---|---|---|
+| Type       | Config value             | Persistence               | Best for                           |
+| ---------- | ------------------------ | ------------------------- | ---------------------------------- |
 | Filesystem | `"filesystem"` (default) | Survives process restarts | Production, daemons, CAR workflows |
-| In-memory | `"memory"` | Lost on process exit | Tests, short-lived agents, CI |
+| In-memory  | `"memory"`               | Lost on process exit      | Tests, short-lived agents, CI      |
 
 ```python
 # Default: filesystem blockstore at .py_ipfs_lite/blocks
@@ -47,7 +47,7 @@ peer = Peer(
 )
 ```
 
----
+______________________________________________________________________
 
 ## Example 05a + 05b: Surviving a Process Restart
 
@@ -116,7 +116,7 @@ The key insight: `get_node()` checks the local blockstore first. If the block is
 there, no network request is made at all. The filesystem blockstore is what makes this
 work across restarts.
 
----
+______________________________________________________________________
 
 ## Example 04: Pinning and Garbage Collection
 
@@ -133,11 +133,11 @@ and must not be deleted. That is what pinning provides.
 
 ### Pin types
 
-| Type | Created by | What it protects |
-|---|---|---|
-| `recursive` | `add_pin(cid, recursive=True)` | Root block + all blocks reachable from it |
-| `direct` | `add_pin(cid, recursive=False)` | Root block only |
-| `indirect` | Automatically | Blocks reachable from a `recursive` pin (cannot be directly created or deleted) |
+| Type        | Created by                      | What it protects                                                                |
+| ----------- | ------------------------------- | ------------------------------------------------------------------------------- |
+| `recursive` | `add_pin(cid, recursive=True)`  | Root block + all blocks reachable from it                                       |
+| `direct`    | `add_pin(cid, recursive=False)` | Root block only                                                                 |
+| `indirect`  | Automatically                   | Blocks reachable from a `recursive` pin (cannot be directly created or deleted) |
 
 For most use cases, recursive pinning is what you want. Direct pinning is useful when
 you have a large DAG and only want to protect the root node itself, not its children.
@@ -196,7 +196,7 @@ stats = await peer.gc()
 # }
 ```
 
----
+______________________________________________________________________
 
 ## How GC interacts with concurrent operations
 
@@ -205,7 +205,7 @@ GC uses an exclusive write lock (`RWLock`). This has two practical consequences:
 1. **`add_file()` and `add_node()` are safe to call concurrently with each other** —
    they both hold the lock in *read* mode, so they run in parallel.
 
-2. **GC waits for all in-flight writes to complete** before it acquires the exclusive
+1. **GC waits for all in-flight writes to complete** before it acquires the exclusive
    lock. A block that is being written during a GC run will either be fully committed
    before GC starts (and may be reclaimed if unpinned), or GC will wait for it.
 
@@ -221,17 +221,17 @@ time ─────────────────────────
                     then takes exclusive write lock
 ```
 
----
+______________________________________________________________________
 
 ## API Quick Reference
 
-| Method | Description |
-|---|---|
+| Method                                    | Description                                  |
+| ----------------------------------------- | -------------------------------------------- |
 | `await peer.add_pin(cid, recursive=True)` | Pin a CID (and optionally all linked blocks) |
-| `await peer.remove_pin(cid)` | Unpin a CID — block becomes GC-eligible |
-| `await peer.list_pins(type_filter="all")` | List all pinned CIDs |
-| `await peer.gc()` | Run mark-and-sweep GC; returns `GCResult` |
-| `await peer.has_block(cid)` | Check if a block exists locally |
-| `await peer.remove_node(cid)` | Delete a single block (bypasses pin check) |
+| `await peer.remove_pin(cid)`              | Unpin a CID — block becomes GC-eligible      |
+| `await peer.list_pins(type_filter="all")` | List all pinned CIDs                         |
+| `await peer.gc()`                         | Run mark-and-sweep GC; returns `GCResult`    |
+| `await peer.has_block(cid)`               | Check if a block exists locally              |
+| `await peer.remove_node(cid)`             | Delete a single block (bypasses pin check)   |
 
 For full parameter details, see the [Python SDK reference](../reference/python-sdk.md).

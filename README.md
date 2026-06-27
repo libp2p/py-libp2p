@@ -1,7 +1,7 @@
 # py-ipfs-lite
 
-**py-ipfs-lite** is a lightweight, embeddable Python IPFS peer built on top of `py-libp2p`. 
-It provides the core features of IPFS (Blockstore, Bitswap, DHT, IPNI, IPNS, and IPLD DAGs) without the overhead of a heavy Kubo daemon. 
+**py-ipfs-lite** is a lightweight, embeddable Python IPFS peer built on top of `py-libp2p`.
+It provides the core features of IPFS (Blockstore, Bitswap, DHT, IPNI, IPNS, and IPLD DAGs) without the overhead of a heavy Kubo daemon.
 
 It is designed to be highly interoperable with standard IPFS implementations like Kubo and go-ipfs-lite, natively supporting `dag-cbor`, CARv1 file import/export, Bitswap streaming, and more.
 
@@ -84,15 +84,16 @@ curl -X POST "http://127.0.0.1:5001/api/v0/dag/get?arg=bafy..."
 
 ## What's Next
 
-| I want to… | Go to… |
-|---|---|
-| Understand how `py-ipfs-lite` is structured internally | [docs/architecture.md](docs/architecture.md) |
-| Build verifiable AI agent memory / RAG pipelines | [docs/guides/ai-agents-and-rag.md](docs/guides/ai-agents-and-rag.md) |
-| Export a DAG as a CAR file for Filecoin storage | [docs/guides/car-files-and-filecoin.md](docs/guides/car-files-and-filecoin.md) |
-| Use IPNS mutable pointers and understand the trust model | [docs/guides/ipns.md](docs/guides/ipns.md) |
-| Interoperate with a live Kubo daemon over Bitswap | [docs/guides/interop-with-kubo.md](docs/guides/interop-with-kubo.md) |
-| See the full list of all 21 examples with one-line descriptions | [docs/reference/examples-index.md](docs/reference/examples-index.md) |
-| Browse all documentation | [docs/index.md](docs/index.md) |
+| I want to…                                                      | Go to…                                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Understand how `py-ipfs-lite` is structured internally          | [docs/architecture.md](docs/architecture.md)                                   |
+| Build verifiable AI agent memory / RAG pipelines                | [docs/guides/ai-agents-and-rag.md](docs/guides/ai-agents-and-rag.md)           |
+| Export a DAG as a CAR file for Filecoin storage                 | [docs/guides/car-files-and-filecoin.md](docs/guides/car-files-and-filecoin.md) |
+| Use IPNS mutable pointers and understand the trust model        | [docs/guides/ipns.md](docs/guides/ipns.md)                                     |
+| Interoperate with a live Kubo daemon over Bitswap               | [docs/guides/interop-with-kubo.md](docs/guides/interop-with-kubo.md)           |
+| See the full list of all 21 examples with one-line descriptions | [docs/reference/examples-index.md](docs/reference/examples-index.md)           |
+| Browse all documentation                                        | [docs/index.md](docs/index.md)                                                 |
 
 ## License
+
 MIT License

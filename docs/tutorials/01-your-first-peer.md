@@ -11,7 +11,7 @@ By the end of this tutorial you will have:
 **Time:** ~10 minutes
 **Prerequisites:** Python 3.12+, [`uv`](https://docs.astral.sh/uv/) installed
 
----
+______________________________________________________________________
 
 ## Step 1 — Install
 
@@ -32,7 +32,7 @@ uv run py-ipfs-lite --help
 You should see the list of subcommands (`daemon`, `add`, `get`, `dag-export`,
 `dag-import`).
 
----
+______________________________________________________________________
 
 ## Step 2 — Start an In-Memory Peer
 
@@ -84,7 +84,7 @@ passing a fixed key pair. The port number also changes because `tcp/0` asks the 
 pick a free port. This is intentional for ephemeral peers — for a stable daemon, see
 Tutorial 02.
 
----
+______________________________________________________________________
 
 ## Step 3 — Add a File
 
@@ -145,16 +145,16 @@ Content:  Hello from py-ipfs-lite!
 > `get_file()` looked up the CID in the local blockstore, found it immediately (no
 > network request needed), decoded the UnixFS structure, and returned the raw bytes.
 
----
+______________________________________________________________________
 
 ## What Is a CID?
 
 A **CID (Content Identifier)** is a self-describing, content-addressed label. It encodes:
 
 1. **A hash of the data** — SHA-256 of the block bytes
-2. **The hash function used** — so verifiers know how to re-compute it
-3. **The codec** — how the bytes are structured (DAG-PB for files, DAG-CBOR/JSON for nodes)
-4. **The CID version** — CIDv1 (base32 string, starts with `bafy...` or `bafk...`)
+1. **The hash function used** — so verifiers know how to re-compute it
+1. **The codec** — how the bytes are structured (DAG-PB for files, DAG-CBOR/JSON for nodes)
+1. **The CID version** — CIDv1 (base32 string, starts with `bafy...` or `bafk...`)
 
 This means **the CID is the verification**. When `get_file()` returns bytes, it has
 already verified that those bytes hash to the expected CID. It is not possible to
@@ -163,7 +163,7 @@ receive tampered content without the CID check failing.
 The same data always produces the same CID, on any machine, in any language. A file
 added by Python will have the same CID as the same file added by Kubo.
 
----
+______________________________________________________________________
 
 ## Step 4 — Add a Structured IPLD Node
 
@@ -224,13 +224,14 @@ Data integrity verified via CID!
 > **DAG-CBOR vs DAG-JSON**
 >
 > Both codecs store the same data — the difference is encoding.
+>
 > - `dag-cbor` is binary, compact, and **deterministic** (same dict → same bytes → same CID, always). Use it for production and linked DAGs.
 > - `dag-json` is human-readable JSON. Easier to inspect, but slightly larger on disk.
 >
 > For linked DAGs (nodes that reference other nodes), use `dag-cbor` and include IPLD
 > link objects: `{"prev": {"/": other_cid}}`.
 
----
+______________________________________________________________________
 
 ## Step 5 — Fetch It Back and Close
 
@@ -279,28 +280,28 @@ async def main():
 trio.run(main)
 ```
 
----
+______________________________________________________________________
 
 ## What You Just Did — Recap
 
-| Action | API | What happened internally |
-|---|---|---|
-| `Peer(Config(...), ...)` | Constructor | Allocated subsystem objects (not started yet) |
-| `await peer.start()` | Lifecycle | Started libp2p host, blockstore, Bitswap, background tasks |
-| `await peer.add_file(path)` | File op | Chunked file → DAG-PB → blockstore write → returned root CID |
-| `await peer.get_file(cid)` | File op | Local blockstore hit → UnixFS decode → returned bytes |
-| `await peer.add_node(dict, codec)` | DAG op | CBOR encode → CID compute → blockstore write |
-| `await peer.get_node(cid)` | DAG op | Local blockstore hit → CBOR decode → returned dict |
-| `await peer.close()` | Lifecycle | Cancelled background tasks, closed host connections |
+| Action                             | API         | What happened internally                                     |
+| ---------------------------------- | ----------- | ------------------------------------------------------------ |
+| `Peer(Config(...), ...)`           | Constructor | Allocated subsystem objects (not started yet)                |
+| `await peer.start()`               | Lifecycle   | Started libp2p host, blockstore, Bitswap, background tasks   |
+| `await peer.add_file(path)`        | File op     | Chunked file → DAG-PB → blockstore write → returned root CID |
+| `await peer.get_file(cid)`         | File op     | Local blockstore hit → UnixFS decode → returned bytes        |
+| `await peer.add_node(dict, codec)` | DAG op      | CBOR encode → CID compute → blockstore write                 |
+| `await peer.get_node(cid)`         | DAG op      | Local blockstore hit → CBOR decode → returned dict           |
+| `await peer.close()`               | Lifecycle   | Cancelled background tasks, closed host connections          |
 
----
+______________________________________________________________________
 
 ## What's Next?
 
-| I want to… | Go to… |
-|---|---|
-| Run a long-lived daemon with the HTTP API | [Tutorial 02: Running a Daemon](./02-running-a-daemon.md) |
-| Transfer content between two peers | [DHT and Routing guide](../guides/dht-and-routing.md) |
-| Store a linked agent memory chain | [AI Agents and RAG guide](../guides/ai-agents-and-rag.md) |
-| Understand what's happening inside the peer | [Architecture](../architecture.md) |
-| See the full list of examples | [Examples Index](../reference/examples-index.md) |
+| I want to…                                  | Go to…                                                    |
+| ------------------------------------------- | --------------------------------------------------------- |
+| Run a long-lived daemon with the HTTP API   | [Tutorial 02: Running a Daemon](./02-running-a-daemon.md) |
+| Transfer content between two peers          | [DHT and Routing guide](../guides/dht-and-routing.md)     |
+| Store a linked agent memory chain           | [AI Agents and RAG guide](../guides/ai-agents-and-rag.md) |
+| Understand what's happening inside the peer | [Architecture](../architecture.md)                        |
+| See the full list of examples               | [Examples Index](../reference/examples-index.md)          |

@@ -21,7 +21,7 @@ uv run python examples/17_concurrent_ingestion_benchmark.py
 uv run python examples/21_resource_footprint.py
 ```
 
----
+______________________________________________________________________
 
 ## Metrics Endpoint
 
@@ -37,7 +37,7 @@ Response format: `text/plain; version=0.0.4` (standard Prometheus text expositio
 curl http://127.0.0.1:5001/debug/metrics/prometheus
 ```
 
----
+______________________________________________________________________
 
 ## Exposed Metrics
 
@@ -45,27 +45,27 @@ All metrics are prefixed with `ipfs_`.
 
 ### Blockstore
 
-| Metric | Type | Description |
-|---|---|---|
-| `ipfs_blockstore_blocks_total` | Gauge | Current number of blocks in the blockstore |
-| `ipfs_blockstore_size_bytes` | Gauge | Total byte size of all blocks in the blockstore |
+| Metric                         | Type  | Description                                     |
+| ------------------------------ | ----- | ----------------------------------------------- |
+| `ipfs_blockstore_blocks_total` | Gauge | Current number of blocks in the blockstore      |
+| `ipfs_blockstore_size_bytes`   | Gauge | Total byte size of all blocks in the blockstore |
 
 These are updated on every `put_block()` (incremented) and `delete_block()` (decremented)
 call by the `MetricsBlockStore` wrapper.
 
 ### Bitswap
 
-| Metric | Type | Description |
-|---|---|---|
-| `ipfs_bitswap_bytes_sent_total` | Counter | Cumulative bytes sent to remote peers over Bitswap |
+| Metric                              | Type    | Description                                              |
+| ----------------------------------- | ------- | -------------------------------------------------------- |
+| `ipfs_bitswap_bytes_sent_total`     | Counter | Cumulative bytes sent to remote peers over Bitswap       |
 | `ipfs_bitswap_bytes_received_total` | Counter | Cumulative bytes received from remote peers over Bitswap |
 
 Both are monotonically increasing counters — use `rate()` in PromQL to get throughput.
 
 ### DHT
 
-| Metric | Type | Description |
-|---|---|---|
+| Metric                           | Type      | Description                                          |
+| -------------------------------- | --------- | ---------------------------------------------------- |
 | `ipfs_dht_query_latency_seconds` | Histogram | Latency distribution of DHT `find_providers` queries |
 
 Histogram buckets follow the default Prometheus SDK distribution. Use
@@ -73,12 +73,12 @@ Histogram buckets follow the default Prometheus SDK distribution. Use
 
 ### Garbage Collection
 
-| Metric | Type | Description |
-|---|---|---|
-| `ipfs_gc_runs_total` | Counter | Total number of GC runs since process start |
-| `ipfs_gc_reclaimed_blocks_total` | Counter | Total blocks deleted across all GC runs |
+| Metric                           | Type    | Description                                 |
+| -------------------------------- | ------- | ------------------------------------------- |
+| `ipfs_gc_runs_total`             | Counter | Total number of GC runs since process start |
+| `ipfs_gc_reclaimed_blocks_total` | Counter | Total blocks deleted across all GC runs     |
 
----
+______________________________________________________________________
 
 ## Example 16: Scraping Metrics
 
@@ -136,7 +136,7 @@ trio.run(main)
 After GC, the blockstore gauges drop to `0.0` because all 50 nodes were unpinned and
 reclaimed. The GC counter increments to `1` and reclaimed blocks to `50`.
 
----
+______________________________________________________________________
 
 ## Example 17: Concurrent Ingestion — Safety Under Load
 
@@ -182,12 +182,13 @@ Aggregate Throughput: 847.46 nodes/sec
 > this example is **correctness under concurrency**, not raw throughput.
 
 The `RWLock` that makes this safe:
+
 - Agents hold the lock in **read mode** while writing nodes — they run concurrently.
 - GC acquires the lock in **exclusive write mode** — it waits for all agents to yield,
   then runs atomically.
 - No manual coordination needed in user code.
 
----
+______________________________________________________________________
 
 ## Example 21: Resource Footprint
 
@@ -216,12 +217,12 @@ print_usage("Post-GC")
 
 ### Typical numbers (Apple M-series, in-memory blockstore)
 
-| Stage | RSS Memory | CPU |
-|---|---|---|
-| Baseline (Python) | ~35 MB | ~0% |
-| Peer Idle | ~55 MB | ~0.5% |
-| Peak Load (5000 nodes) | ~110 MB | ~15% |
-| Post-GC | ~60 MB | ~1% |
+| Stage                  | RSS Memory | CPU   |
+| ---------------------- | ---------- | ----- |
+| Baseline (Python)      | ~35 MB     | ~0%   |
+| Peer Idle              | ~55 MB     | ~0.5% |
+| Peak Load (5000 nodes) | ~110 MB    | ~15%  |
+| Post-GC                | ~60 MB     | ~1%   |
 
 These numbers back up the "lite" in the project name — a running peer at idle costs
 roughly **20 MB above the baseline Python interpreter**. Peak memory during heavy
@@ -232,7 +233,7 @@ For embedded or edge deployments (Raspberry Pi, Docker containers), use
 `blockstore_type="filesystem"` so in-memory usage is bounded to block metadata
 rather than full block content.
 
----
+______________________________________________________________________
 
 ## Known Caveats
 
@@ -249,6 +250,7 @@ combined block count across all peers, with no way to distinguish which peer eac
 belongs to.
 
 For multi-peer processes, consider either:
+
 - Running each peer in a separate process with its own exporter port, or
 - Treating the metrics as process-level aggregates (often acceptable for agent workloads).
 
@@ -266,7 +268,7 @@ process lifetime**.
 For accurate at-rest storage reporting, use `GET /api/v0/repo/stat` instead — that
 endpoint scans all keys in the blockstore synchronously on each call.
 
----
+______________________________________________________________________
 
 ## Prometheus Scrape Configuration
 

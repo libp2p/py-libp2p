@@ -5,7 +5,7 @@ you need to understand before running `py-ipfs-lite` in a production environment
 It intentionally documents the rough edges — reading this once is better than
 discovering them yourself at 2 AM.
 
----
+______________________________________________________________________
 
 ## Connection Manager Tuning
 
@@ -20,10 +20,10 @@ Config(
 )
 ```
 
-| Field | Default | Meaning |
-|---|---|---|
-| `conn_mgr_high_water` | `900` | When the open connection count crosses this, the pruner kicks in |
-| `conn_mgr_low_water` | `600` | The pruner closes least-recently-used connections until this target is reached |
+| Field                 | Default | Meaning                                                                        |
+| --------------------- | ------- | ------------------------------------------------------------------------------ |
+| `conn_mgr_high_water` | `900`   | When the open connection count crosses this, the pruner kicks in               |
+| `conn_mgr_low_water`  | `600`   | The pruner closes least-recently-used connections until this target is reached |
 
 ### Tuning for your environment
 
@@ -46,7 +46,7 @@ Config(
 No DHT bootstrap → far fewer ambient connections. The defaults are fine, but the limits
 will rarely be hit.
 
----
+______________________________________________________________________
 
 ## Bootstrap Peers
 
@@ -102,7 +102,7 @@ peer = Peer(Config(), host_key=key_pair, listen_addrs=["/ip4/0.0.0.0/tcp/4001"])
 The seed is deterministic — the same bytes always produce the same Ed25519 key pair and
 therefore the same PeerID.
 
----
+______________________________________________________________________
 
 ## Timeout Configuration
 
@@ -111,6 +111,7 @@ Config(default_timeout=30.0)   # seconds
 ```
 
 `default_timeout` is used as the per-operation timeout for:
+
 - DHT `find_providers` during `get_file()` / `get_node()`
 - Bitswap block fetch
 - IPNS publish and resolve
@@ -135,7 +136,7 @@ value = await peer.resolve_name(peer_id, timeout=15.0)
 If a timeout is exceeded, `get_file()` and `get_node()` raise `BlockNotFoundError`.
 `resolve_name()` raises `RoutingError`.
 
----
+______________________________________________________________________
 
 ## Known Limitations
 
@@ -175,6 +176,7 @@ which performs synchronous blocking file I/O under a global lock. This limits
 concurrent ingestion throughput.
 
 **Impact:**
+
 - Concurrent `add_file()` calls share a single effective serialization point.
 - The throughput ceiling for `add_node()` (small DAG-JSON/CBOR nodes, no file I/O)
   is ~850 nodes/sec on modern hardware. For file ingestion, throughput is constrained
@@ -182,6 +184,7 @@ concurrent ingestion throughput.
 - This is a `py-libp2p` upstream issue, not a `py-ipfs-lite` design choice.
 
 **Mitigation:**
+
 - For bulk file ingestion workloads, run multiple `py-ipfs-lite` processes (one per
   CPU core) rather than multiple `Peer` instances in one process.
 - For DAG node workloads, concurrent `add_node()` is safe and scales well up to the
@@ -200,32 +203,32 @@ not discover your content via IPNI.
 **Mitigation:** Use `peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)` so your peer participates
 in the public DHT and CIDs are reachable via DHT lookup.
 
----
+______________________________________________________________________
 
 ## Security Notes
 
 ### What IS verified
 
-| Property | Verification |
-|---|---|
-| Block integrity on fetch | Every fetched block's bytes are hashed and compared to the expected CID before being returned. Corrupted or tampered blocks are rejected. |
-| IPNS record authenticity | `resolve_name()` verifies the Ed25519 V2 signature, checks that the embedded pubkey matches the expected PeerID, and checks the record has not expired. |
-| IPNS record freshness | Records past their `validity` timestamp are rejected. |
-| Transport confidentiality | All connections use Noise (XX pattern) — traffic is encrypted and authenticated at the transport layer. |
+| Property                  | Verification                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Block integrity on fetch  | Every fetched block's bytes are hashed and compared to the expected CID before being returned. Corrupted or tampered blocks are rejected.               |
+| IPNS record authenticity  | `resolve_name()` verifies the Ed25519 V2 signature, checks that the embedded pubkey matches the expected PeerID, and checks the record has not expired. |
+| IPNS record freshness     | Records past their `validity` timestamp are rejected.                                                                                                   |
+| Transport confidentiality | All connections use Noise (XX pattern) — traffic is encrypted and authenticated at the transport layer.                                                 |
 
 ### What is NOT verified
 
-| Property | Explanation |
-|---|---|
-| IPNI announce-side trust | Any peer can `PUT /routing/v1/providers/{cid}` to IPNI claiming to have any CID. There is no cryptographic link between the announcement and the actual content. **This is closed on the fetch side** — block integrity is always verified against the CID. |
-| DHT provider record authenticity | Any peer can write a DHT provider record for any CID. Same mitigation: block integrity check on fetch. |
-| Peer reputation | `py-ipfs-lite` has no peer scoring or banning system. A peer that repeatedly sends bad data will time out, but is not banned. |
+| Property                         | Explanation                                                                                                                                                                                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IPNI announce-side trust         | Any peer can `PUT /routing/v1/providers/{cid}` to IPNI claiming to have any CID. There is no cryptographic link between the announcement and the actual content. **This is closed on the fetch side** — block integrity is always verified against the CID. |
+| DHT provider record authenticity | Any peer can write a DHT provider record for any CID. Same mitigation: block integrity check on fetch.                                                                                                                                                      |
+| Peer reputation                  | `py-ipfs-lite` has no peer scoring or banning system. A peer that repeatedly sends bad data will time out, but is not banned.                                                                                                                               |
 
 ### SECIO is fully removed
 
 `py-ipfs-lite` supports **Noise only** for transport security. The legacy SECIO
 protocol has been removed from `py-libp2p`. If you attempt to connect to a node
-that requires SECIO (Kubo < 0.14, 2022 or older), the handshake will fail immediately
+that requires SECIO (Kubo \< 0.14, 2022 or older), the handshake will fail immediately
 with a protocol negotiation error.
 
 Any current Kubo release (0.14+) supports Noise as the preferred transport.
@@ -245,7 +248,7 @@ uv run py-ipfs-lite daemon --api --api-host 127.0.0.1
 uv run py-ipfs-lite daemon --api --api-host 0.0.0.0
 ```
 
----
+______________________________________________________________________
 
 ## Pre-flight Checklist for Production
 

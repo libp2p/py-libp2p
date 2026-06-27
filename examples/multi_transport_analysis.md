@@ -1,24 +1,24 @@
 # py-libp2p `feat/multi_transport_support` — Deep Analysis & Improvement Report
 
-**Branch:** `sumanjeet0012/py-libp2p @ feat/multi_transport_support`  
-**Goal:** All transports (TCP, QUIC, WebSocket) running simultaneously — full go-libp2p alignment  
-**Files analysed:** `swarm.py` (1967 lines), `manager.py`, `cmux.py`, `tcp/tcp.py`, `quic/transport.py`, `websocket/transport.py`, `libp2p/__init__.py`  
+**Branch:** `sumanjeet0012/py-libp2p @ feat/multi_transport_support`\
+**Goal:** All transports (TCP, QUIC, WebSocket) running simultaneously — full go-libp2p alignment\
+**Files analysed:** `swarm.py` (1967 lines), `manager.py`, `cmux.py`, `tcp/tcp.py`, `quic/transport.py`, `websocket/transport.py`, `libp2p/__init__.py`\
 **Date:** June 2026
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
 1. [Architecture Overview — What Is Already Correct](#1-architecture-overview--what-is-already-correct)
-2. [Bug Catalogue — With Exact Line References](#2-bug-catalogue--with-exact-line-references)
-3. [go-libp2p Gap Analysis](#3-go-libp2p-gap-analysis)
-4. [Concrete Patches — Ready to Apply](#4-concrete-patches--ready-to-apply)
-5. [Code Change Guide — File by File](#5-code-change-guide--file-by-file)
-6. [Testing Matrix](#6-testing-matrix)
-7. [Priority Roadmap](#7-priority-roadmap)
-8. [Appendix — go-libp2p Symbol Map](#8-appendix--go-libp2p-symbol-map)
+1. [Bug Catalogue — With Exact Line References](#2-bug-catalogue--with-exact-line-references)
+1. [go-libp2p Gap Analysis](#3-go-libp2p-gap-analysis)
+1. [Concrete Patches — Ready to Apply](#4-concrete-patches--ready-to-apply)
+1. [Code Change Guide — File by File](#5-code-change-guide--file-by-file)
+1. [Testing Matrix](#6-testing-matrix)
+1. [Priority Roadmap](#7-priority-roadmap)
+1. [Appendix — go-libp2p Symbol Map](#8-appendix--go-libp2p-symbol-map)
 
----
+______________________________________________________________________
 
 ## 1. Architecture Overview — What Is Already Correct
 
@@ -27,6 +27,7 @@ After reading every relevant file in full, the following is **already implemente
 ### 1.1 Transport Routing (`TransportManager`)
 
 `TransportManager` holds an ordered `list[ITransport]` and provides:
+
 - `transport_for_dialing(maddr)` — two-step: protocol-name pre-filter then `can_dial()`
 - `transport_for_listening(maddr)` — same, with `can_listen()`
 - `add_listen_addr(maddr, handler)` — routes to cmux or direct transport
@@ -39,15 +40,16 @@ This mirrors `swarm_transport.go` in go-libp2p faithfully.
 
 All three transports have correct implementations — **C-1 from the earlier draft is no longer an issue**:
 
-| Transport | `can_dial()` | `can_listen()` | `protocols()` |
-|---|---|---|---|
-| `TCP` | `"tcp" in names and not names ∩ {ws,wss,quic,quic-v1}` | same | `["tcp"]` |
-| `QUICTransport` | `is_quic_multiaddr(maddr)` | same | `[str(QUIC_V1_PROTOCOL)]` + draft-29 if enabled |
-| `WebsocketTransport` | `parse_websocket_multiaddr(maddr)` succeeds | same | `["ws", "wss"]` |
+| Transport            | `can_dial()`                                           | `can_listen()` | `protocols()`                                   |
+| -------------------- | ------------------------------------------------------ | -------------- | ----------------------------------------------- |
+| `TCP`                | `"tcp" in names and not names ∩ {ws,wss,quic,quic-v1}` | same           | `["tcp"]`                                       |
+| `QUICTransport`      | `is_quic_multiaddr(maddr)`                             | same           | `[str(QUIC_V1_PROTOCOL)]` + draft-29 if enabled |
+| `WebsocketTransport` | `parse_websocket_multiaddr(maddr)` succeeds            | same           | `["ws", "wss"]`                                 |
 
 ### 1.3 Port Demultiplexer / CMUX
 
 `PortDemultiplexer` implements the go-libp2p `tcpreuse` pattern exactly:
+
 - 3-byte classifier covering `\x13/m` (multistream-select), HTTP verbs, TLS records
 - `ACCEPT_TIMEOUT = 30.0` **is already enforced** via `with trio.fail_after(ACCEPT_TIMEOUT): await send_ch.send(peekable)` in `_classify_and_route()`
 - Memory-channel drain loop in `DemultiplexedListener.listen()`
@@ -55,38 +57,43 @@ All three transports have correct implementations — **C-1 from the earlier dra
 ### 1.4 Inbound Upgrade Timeout
 
 **Already applied** — `upgrade_inbound_raw_conn()` wraps the entire security + muxer upgrade in:
+
 ```python
 with trio.fail_after(inbound_timeout):
     secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
     ...
 ```
+
 This is correct and matches go-libp2p's `s.inboundUpgradeTimeout`.
 
 ### 1.5 QUIC Bypass of Upgrade Pipeline
 
 `_handle_inbound_connection()` correctly detects pre-multiplexed connections:
+
 ```python
 if isinstance(read_write_closer, IMuxedConn):
     muxed_conn = cast(QUICConnection, read_write_closer)
     await self.add_conn(muxed_conn, direction="inbound")
 ```
+
 The **detection** is correct (IMuxedConn interface check). The cast has a minor issue (see Bug #3 below).
 
 ### 1.6 Backward Compatibility Shims
 
 The `Swarm(transport=single_transport)` positional / keyword path is fully handled with `DeprecationWarning`. Old tests continue to work.
 
----
+______________________________________________________________________
 
 ## 2. Bug Catalogue — With Exact Line References
 
 ### 🔴 Critical — Breaks Simultaneous Multi-Transport
 
----
+______________________________________________________________________
 
 #### BUG-1: Sequential Listener Startup (`swarm.py` line ~1280)
 
 **What the code does:**
+
 ```python
 for maddr in multiaddrs:
     listener = self.transport_manager.add_listen_addr(maddr, conn_handler)
@@ -96,6 +103,7 @@ for maddr in multiaddrs:
 ```
 
 **What go-libp2p does (`swarm_listen.go`):**
+
 ```go
 for _, addr := range addrs {
     go func(a ma.Multiaddr) {
@@ -110,11 +118,12 @@ All three `transport.Listen(addr)` goroutines fire simultaneously. In py-libp2p,
 
 **Fix:** Wrap the loop in a `trio.open_nursery()` so all three listeners start concurrently.
 
----
+______________________________________________________________________
 
 #### BUG-2: `PortDemultiplexer.listen()` Called AFTER Listeners Are Registered — Drop Window (`swarm.py` line ~1355)
 
 **What the code does:**
+
 ```python
 # STEP 1: register all DemultiplexedListeners (channels created, no socket yet)
 for maddr in multiaddrs:
@@ -133,7 +142,7 @@ Between Step 1 and Step 2, `DemultiplexedListener._drain` is running but no conn
 
 **Fix:** Call `port_demux.listen()` first, before registering DemultiplexedListeners. Bind the socket, then attach the virtual channels.
 
----
+______________________________________________________________________
 
 #### BUG-3: Single `PortDemultiplexer` — Multi-Port TCP+WS Silently Broken (`__init__.py` line ~620)
 
@@ -147,6 +156,7 @@ for (host, port), proto_sets in port_protos.items():
 ```
 
 If you specify:
+
 ```python
 listen_addrs=[
     Multiaddr("/ip4/0.0.0.0/tcp/4001"),
@@ -155,9 +165,10 @@ listen_addrs=[
     Multiaddr("/ip4/0.0.0.0/tcp/4002/ws"),  # ← this pair gets no demux
 ]
 ```
+
 Port 4001 gets a demux. Port 4002 does not. Both TCP and WS on port 4002 try to bind the same OS socket → `OSError: [Errno 98] EADDRINUSE`.
 
----
+______________________________________________________________________
 
 #### BUG-4: `TransportManager._add_listen_addr_shared()` Returns `None` for Already-Registered Channel (`manager.py` line ~270)
 
@@ -171,11 +182,11 @@ if conn_type in port_demux._send_channels:
 
 More importantly, this code path is triggered when both TCP and WS are registered on the same port (the **second** call hits the `already registered` branch). If the channel is registered but the listener dict is out of sync, both transports appear to start successfully but only one actually handles connections.
 
----
+______________________________________________________________________
 
 ### 🟡 High — Functional Gaps vs go-libp2p
 
----
+______________________________________________________________________
 
 #### BUG-5: `cast(QUICConnection, ...)` — Wrong Type, Violates Interface Contract (`swarm.py` line ~1390)
 
@@ -187,11 +198,12 @@ if isinstance(read_write_closer, IMuxedConn):
 The code comment says "detection is via the IMuxedConn interface, not a class check" — but the `cast()` contradicts this. Any future transport implementing `IMuxedConn` (e.g. WebTransport) will be silently cast to `QUICConnection`, which is semantically wrong even if the runtime behaviour is the same.
 
 **Fix:**
+
 ```python
 muxed_conn = cast(IMuxedConn, read_write_closer)
 ```
 
----
+______________________________________________________________________
 
 #### BUG-6: `add_conn()` Contains Concrete `isinstance(muxed_conn, QUICConnection)` Check (`swarm.py` line ~1750)
 
@@ -214,7 +226,7 @@ if not muxed_conn.is_established and hasattr(muxed_conn, "wait_connected"):
     await muxed_conn.wait_connected()
 ```
 
----
+______________________________________________________________________
 
 #### BUG-7: `transport.setter` Directly Mutates Private List (`swarm.py` line ~255)
 
@@ -227,6 +239,7 @@ def transport(self, value: ITransport) -> None:
 This bypasses `TransportManager` invariants. If `TransportManager` ever adds a lock, per-transport state dict, or listener map keyed by transport object, this setter will corrupt the manager silently.
 
 **Fix:**
+
 ```python
 @transport.setter
 def transport(self, value: ITransport) -> None:
@@ -236,7 +249,7 @@ def transport(self, value: ITransport) -> None:
     self.transport_manager.add_transport(value)
 ```
 
----
+______________________________________________________________________
 
 #### BUG-8: `DemultiplexedListener._drain()` Spawns System Task — Resource Leak on Swarm Close (`cmux.py` line ~168)
 
@@ -250,7 +263,7 @@ async def listen(self, maddr: Multiaddr) -> None:
 
 **Fix:** Use `self._nursery.start_soon(_drain)` inside the swarm's `background_nursery`, or pass the nursery from the Swarm. Alternatively, store the cancel scope and cancel it in `close()`.
 
----
+______________________________________________________________________
 
 #### BUG-9: No Parallel Dial — Sequential Address Retry (`swarm.py` line ~650)
 
@@ -264,7 +277,7 @@ for multiaddr in allowed_addrs:
 
 go-libp2p's `dialPeer()` fires all known addresses in parallel with a 250ms Happy Eyeballs delay (RFC 8305). When a peer is reachable over both TCP and QUIC, py-libp2p pays the full retry backoff on TCP before even trying QUIC.
 
----
+______________________________________________________________________
 
 #### BUG-10: `/p2p/<peer_id>` Appended to Multiaddr Before `transport.dial()` (`swarm.py`)
 
@@ -277,17 +290,18 @@ raw_conn = await transport.dial(addr)
 
 Also, `WebsocketTransport._dial_resolved()` calls `parse_websocket_multiaddr(maddr)` — same risk.
 
----
+______________________________________________________________________
 
 ### 🟢 Medium — Code Quality and Alignment
 
----
+______________________________________________________________________
 
 #### BUG-11: `listen_order()` Defined on `QUICTransport` But Not Used by `TransportManager`
 
 `QUICTransport.listen_order() -> int: return 1` mirrors go-libp2p's `transport.SetStream.ListenOrder`. But `TransportManager.add_transport()` appends transports in registration order without sorting by `listen_order()`. This means the listen priority depends on registration order, not the intended semantics.
 
 **Fix:** Sort `_transports` by `listen_order()` when multiple transports are added:
+
 ```python
 def add_transports(self, transports: list[ITransport]) -> None:
     for t in transports:
@@ -295,13 +309,13 @@ def add_transports(self, transports: list[ITransport]) -> None:
     self._transports.sort(key=lambda t: getattr(t, "listen_order", lambda: 0)())
 ```
 
----
+______________________________________________________________________
 
 #### BUG-12: Dual `TransportRegistry` + `TransportManager` — Redundant Abstractions
 
 `TransportRegistry` (`transport_registry.py`) maps `str → type[ITransport]` (class registry). `TransportManager` maps instances. Both exist. Any transport registered in the registry but missing from the manager (or vice versa) causes silent routing divergence. go-libp2p has a single source of truth.
 
----
+______________________________________________________________________
 
 #### BUG-13: `_classify_and_route` `hooked_aclose` Monkey-Patch May Fail (`cmux.py` line ~295)
 
@@ -319,7 +333,7 @@ If `PeekableStream` defines `__slots__` (not confirmed from fetched code), assig
 
 **Safer alternative:** Pass a `close_callback` to `PeekableStream.__init__` and call it in `close()`.
 
----
+______________________________________________________________________
 
 #### BUG-14: `QUICTransport.protocols()` May Not Match Multiaddr Protocol Name
 
@@ -334,34 +348,34 @@ print(repr(str(QUICTransportConfig.PROTOCOL_QUIC_V1)))
 # Must print: 'quic-v1'  (not '/quic-v1' or 'quic/v1')
 ```
 
----
+______________________________________________________________________
 
 #### BUG-15: Circuit Relay Transport Not Registered in `TransportManager`
 
 go-libp2p's `Swarm.TransportForDialing()` recognises `/p2p-circuit` addresses and routes them to `relay.Transport`. In py-libp2p, circuit relay exists in `libp2p/relay/circuit_v2/` but is not wired into `TransportManager`. Dialing a `/p2p-circuit` address hits the "no registered transport" fallback and logs a warning.
 
----
+______________________________________________________________________
 
 ## 3. go-libp2p Gap Analysis
 
-| go-libp2p Feature | Status in This Branch | Bug # |
-|---|---|---|
-| `Swarm.TransportForDialing(maddr)` | ✅ `TransportManager.transport_for_dialing()` | — |
-| `Swarm.TransportForListening(maddr)` | ✅ `TransportManager.transport_for_listening()` | — |
-| Parallel `transport.Listen(addr)` goroutines | ❌ Sequential loop | BUG-1 |
-| `tcpreuse.PortDemultiplexer` | ✅ Implemented | — |
-| Multi-port TCP+WS sharing | ❌ Single demux only | BUG-3 |
-| `acceptTimeout = 30s` enforcement | ✅ Implemented in cmux | — |
-| `inboundUpgradeTimeout` per connection | ✅ Applied in `upgrade_inbound_raw_conn` | — |
-| QUIC native mux bypass | ✅ via `isinstance(rwc, IMuxedConn)` | minor cast BUG-5 |
-| Happy Eyeballs parallel dial | ❌ Sequential | BUG-9 |
-| `Swarm.AddTransport(t)` runtime API | ❌ Not on host | BUG-12 partial |
-| Circuit relay transport routing | ❌ Not in `TransportManager` | BUG-15 |
-| `transport.ListenOrder` sort | ❌ `listen_order()` defined but unused | BUG-11 |
-| All transports close concurrently | ✅ `TransportManager.close_all()` with nursery | — |
-| WebTransport | ❌ Out of scope | — |
+| go-libp2p Feature                            | Status in This Branch                           | Bug #            |
+| -------------------------------------------- | ----------------------------------------------- | ---------------- |
+| `Swarm.TransportForDialing(maddr)`           | ✅ `TransportManager.transport_for_dialing()`   | —                |
+| `Swarm.TransportForListening(maddr)`         | ✅ `TransportManager.transport_for_listening()` | —                |
+| Parallel `transport.Listen(addr)` goroutines | ❌ Sequential loop                              | BUG-1            |
+| `tcpreuse.PortDemultiplexer`                 | ✅ Implemented                                  | —                |
+| Multi-port TCP+WS sharing                    | ❌ Single demux only                            | BUG-3            |
+| `acceptTimeout = 30s` enforcement            | ✅ Implemented in cmux                          | —                |
+| `inboundUpgradeTimeout` per connection       | ✅ Applied in `upgrade_inbound_raw_conn`        | —                |
+| QUIC native mux bypass                       | ✅ via `isinstance(rwc, IMuxedConn)`            | minor cast BUG-5 |
+| Happy Eyeballs parallel dial                 | ❌ Sequential                                   | BUG-9            |
+| `Swarm.AddTransport(t)` runtime API          | ❌ Not on host                                  | BUG-12 partial   |
+| Circuit relay transport routing              | ❌ Not in `TransportManager`                    | BUG-15           |
+| `transport.ListenOrder` sort                 | ❌ `listen_order()` defined but unused          | BUG-11           |
+| All transports close concurrently            | ✅ `TransportManager.close_all()` with nursery  | —                |
+| WebTransport                                 | ❌ Out of scope                                 | —                |
 
----
+______________________________________________________________________
 
 ## 4. Concrete Patches — Ready to Apply
 
@@ -441,7 +455,7 @@ async def listen(self, *multiaddrs: Multiaddr) -> bool:
     return any(ok for _, ok in results)
 ```
 
----
+______________________________________________________________________
 
 ### Patch 2: Fix `cast()` to Correct Interface Type (`swarm.py`)
 
@@ -454,7 +468,7 @@ from libp2p.abc import IMuxedConn
 muxed_conn = cast(IMuxedConn, read_write_closer)
 ```
 
----
+______________________________________________________________________
 
 ### Patch 3: Fix `add_conn()` Concrete Type Check (`swarm.py`)
 
@@ -475,7 +489,7 @@ if not muxed_conn.is_established:
             await trio.sleep(0.01)
 ```
 
----
+______________________________________________________________________
 
 ### Patch 4: Fix `transport.setter` to Not Mutate Private List (`swarm.py`)
 
@@ -500,7 +514,7 @@ def transport(self, value: ITransport) -> None:
     self.transport_manager.add_transport(value)
 ```
 
----
+______________________________________________________________________
 
 ### Patch 5: Multi-Port `PortDemultiplexer` Support (`__init__.py` + `manager.py`)
 
@@ -571,7 +585,7 @@ class TransportManager:
         return transport.create_listener(conn_handler)
 ```
 
----
+______________________________________________________________________
 
 ### Patch 6: Fix `_add_listen_addr_shared()` Silent None Return (`manager.py`)
 
@@ -596,7 +610,7 @@ if conn_type in port_demux._send_channels:
     # Fall through to demultiplexed_listen() call below
 ```
 
----
+______________________________________________________________________
 
 ### Patch 7: Happy Eyeballs Parallel Dial (`swarm.py`)
 
@@ -657,7 +671,7 @@ async def dial_peer(self, peer_id: ID) -> list[INetConn]:
     return [winner]
 ```
 
----
+______________________________________________________________________
 
 ### Patch 8: Add `listen_order()` Sorting to `TransportManager` (`manager.py`)
 
@@ -677,7 +691,7 @@ def add_transport(self, transport: ITransport) -> None:
     )
 ```
 
----
+______________________________________________________________________
 
 ### Patch 9: Verify `is_quic_multiaddr` Handles `/p2p/<id>` Suffix
 
@@ -696,60 +710,60 @@ def test_quic_can_dial_with_p2p_suffix():
     assert qt.can_dial(addr_with_p2p), "QUIC must accept /p2p/<id> suffix"
 ```
 
----
+______________________________________________________________________
 
 ## 5. Code Change Guide — File by File
 
 ### `libp2p/network/swarm.py`
 
-| Location | Change | Bug Fixed |
-|---|---|---|
-| `listen()` — the `for maddr in multiaddrs` loop | Replace with parallel nursery startup | BUG-1 |
-| `listen()` — `port_demux.listen()` call at end | Move to START of method, before registering listeners | BUG-2 |
-| `_handle_inbound_connection()` line ~1390 | `cast(QUICConnection,...)` → `cast(IMuxedConn,...)` | BUG-5 |
-| `add_conn()` line ~1750 | `isinstance(muxed_conn, QUICConnection)` → duck-typing | BUG-6 |
-| `transport.setter` | Mutates private list → uses `add_transport()` | BUG-7 |
-| `dial_peer()` | Sequential loop → Happy Eyeballs parallel | BUG-9 |
-| Top of file | Add `_HAPPY_EYEBALLS_DELAY = 0.250`, `_MAX_PARALLEL_DIALS = 8` | BUG-9 |
+| Location                                        | Change                                                         | Bug Fixed |
+| ----------------------------------------------- | -------------------------------------------------------------- | --------- |
+| `listen()` — the `for maddr in multiaddrs` loop | Replace with parallel nursery startup                          | BUG-1     |
+| `listen()` — `port_demux.listen()` call at end  | Move to START of method, before registering listeners          | BUG-2     |
+| `_handle_inbound_connection()` line ~1390       | `cast(QUICConnection,...)` → `cast(IMuxedConn,...)`            | BUG-5     |
+| `add_conn()` line ~1750                         | `isinstance(muxed_conn, QUICConnection)` → duck-typing         | BUG-6     |
+| `transport.setter`                              | Mutates private list → uses `add_transport()`                  | BUG-7     |
+| `dial_peer()`                                   | Sequential loop → Happy Eyeballs parallel                      | BUG-9     |
+| Top of file                                     | Add `_HAPPY_EYEBALLS_DELAY = 0.250`, `_MAX_PARALLEL_DIALS = 8` | BUG-9     |
 
 ### `libp2p/__init__.py`
 
-| Location | Change | Bug Fixed |
-|---|---|---|
-| `new_swarm()` PortDemultiplexer detection loop | Remove `break`, collect all shared ports | BUG-3 |
-| `TransportManager()` instantiation | Pass `port_demuxers=` dict instead of single `port_demux=` | BUG-3 |
+| Location                                       | Change                                                     | Bug Fixed |
+| ---------------------------------------------- | ---------------------------------------------------------- | --------- |
+| `new_swarm()` PortDemultiplexer detection loop | Remove `break`, collect all shared ports                   | BUG-3     |
+| `TransportManager()` instantiation             | Pass `port_demuxers=` dict instead of single `port_demux=` | BUG-3     |
 
 ### `libp2p/transport/manager.py`
 
-| Location | Change | Bug Fixed |
-|---|---|---|
-| `__init__` | Accept `port_demuxers: dict[tuple,PortDemux]` + backward compat | BUG-3 |
-| Add `_get_port_demux(maddr)` | Per-port demux lookup | BUG-3 |
-| `add_listen_addr()` | Use `_get_port_demux(maddr)` instead of `self._port_demux` | BUG-3 |
-| `_add_listen_addr_shared()` line ~270 | Fix silent None return for already-registered channel | BUG-4 |
-| `add_transport()` | Sort `_transports` by `listen_order()` after appending | BUG-11 |
+| Location                              | Change                                                          | Bug Fixed |
+| ------------------------------------- | --------------------------------------------------------------- | --------- |
+| `__init__`                            | Accept `port_demuxers: dict[tuple,PortDemux]` + backward compat | BUG-3     |
+| Add `_get_port_demux(maddr)`          | Per-port demux lookup                                           | BUG-3     |
+| `add_listen_addr()`                   | Use `_get_port_demux(maddr)` instead of `self._port_demux`      | BUG-3     |
+| `_add_listen_addr_shared()` line ~270 | Fix silent None return for already-registered channel           | BUG-4     |
+| `add_transport()`                     | Sort `_transports` by `listen_order()` after appending          | BUG-11    |
 
 ### `libp2p/transport/cmux.py`
 
-| Location | Change | Bug Fixed |
-|---|---|---|
-| `DemultiplexedListener.listen()` | Replace `spawn_system_task` with nursery-scoped task | BUG-8 |
-| `_classify_and_route()` | Add `logger.debug` for `UNKNOWN` classification | Quality |
+| Location                         | Change                                               | Bug Fixed |
+| -------------------------------- | ---------------------------------------------------- | --------- |
+| `DemultiplexedListener.listen()` | Replace `spawn_system_task` with nursery-scoped task | BUG-8     |
+| `_classify_and_route()`          | Add `logger.debug` for `UNKNOWN` classification      | Quality   |
 
 ### `libp2p/transport/quic/transport.py`
 
-| Location | Change | Bug Fixed |
-|---|---|---|
-| `can_dial()` | Verify `is_quic_multiaddr` handles `/p2p/<id>` suffix | BUG-10 |
-| `protocols()` | Verify `str(QUIC_V1_PROTOCOL) == "quic-v1"` (not `"/quic-v1"`) | BUG-14 |
+| Location      | Change                                                         | Bug Fixed |
+| ------------- | -------------------------------------------------------------- | --------- |
+| `can_dial()`  | Verify `is_quic_multiaddr` handles `/p2p/<id>` suffix          | BUG-10    |
+| `protocols()` | Verify `str(QUIC_V1_PROTOCOL) == "quic-v1"` (not `"/quic-v1"`) | BUG-14    |
 
 ### `libp2p/transport/transport_registry.py`
 
-| Location | Change | Priority |
-|---|---|---|
-| Entire file | Deprecate: redirect `create_transport_for_multiaddr()` through `TransportManager` | Low |
+| Location    | Change                                                                            | Priority |
+| ----------- | --------------------------------------------------------------------------------- | -------- |
+| Entire file | Deprecate: redirect `create_transport_for_multiaddr()` through `TransportManager` | Low      |
 
----
+______________________________________________________________________
 
 ## 6. Testing Matrix
 
@@ -922,16 +936,16 @@ async def test_accept_timeout_drops_slow_consumer():
 
 ### 6.4 Regression Tests
 
-| Test | Guards |
-|---|---|
-| `test_tcp_only_swarm_still_works()` | No regression for single-transport deployments |
+| Test                                       | Guards                                                               |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| `test_tcp_only_swarm_still_works()`        | No regression for single-transport deployments                       |
 | `test_deprecated_single_transport_swarm()` | `Swarm(peer_id, ps, upg, TCP())` still works with DeprecationWarning |
-| `test_transport_property_returns_first()` | `swarm.transport` returns first registered transport |
-| `test_transport_setter_clears_list()` | `swarm.transport = tcp` replaces all others |
-| `test_quic_inbound_bypasses_upgrader()` | QUIC inbound goes directly to `add_conn` |
-| `test_ws_inbound_goes_through_upgrader()` | WS inbound runs security + muxer upgrade |
+| `test_transport_property_returns_first()`  | `swarm.transport` returns first registered transport                 |
+| `test_transport_setter_clears_list()`      | `swarm.transport = tcp` replaces all others                          |
+| `test_quic_inbound_bypasses_upgrader()`    | QUIC inbound goes directly to `add_conn`                             |
+| `test_ws_inbound_goes_through_upgrader()`  | WS inbound runs security + muxer upgrade                             |
 
----
+______________________________________________________________________
 
 ## 7. Priority Roadmap
 
@@ -939,57 +953,56 @@ async def test_accept_timeout_drops_slow_consumer():
 
 These are the minimum changes for "all transports simultaneously":
 
-| # | Task | File | Bug |
-|---|---|---|---|
-| 1.1 | Parallel listener startup (nursery) | `swarm.py` | BUG-1 |
-| 1.2 | Fix PortDemultiplexer start order | `swarm.py` | BUG-2 |
-| 1.3 | Multi-port demux (remove `break`) | `__init__.py`, `manager.py` | BUG-3 |
-| 1.4 | Fix `_add_listen_addr_shared` None return | `manager.py` | BUG-4 |
-| 1.5 | Fix `cast(QUICConnection,...)` → `cast(IMuxedConn,...)` | `swarm.py` | BUG-5 |
-| 1.6 | Integration test: all 3 transports simultaneously | `tests/` | Coverage |
+| #   | Task                                                    | File                        | Bug      |
+| --- | ------------------------------------------------------- | --------------------------- | -------- |
+| 1.1 | Parallel listener startup (nursery)                     | `swarm.py`                  | BUG-1    |
+| 1.2 | Fix PortDemultiplexer start order                       | `swarm.py`                  | BUG-2    |
+| 1.3 | Multi-port demux (remove `break`)                       | `__init__.py`, `manager.py` | BUG-3    |
+| 1.4 | Fix `_add_listen_addr_shared` None return               | `manager.py`                | BUG-4    |
+| 1.5 | Fix `cast(QUICConnection,...)` → `cast(IMuxedConn,...)` | `swarm.py`                  | BUG-5    |
+| 1.6 | Integration test: all 3 transports simultaneously       | `tests/`                    | Coverage |
 
 ### Phase 2 — go-libp2p Alignment (weeks 2–3)
 
-| # | Task | File | Bug |
-|---|---|---|---|
-| 2.1 | Happy Eyeballs parallel dial | `swarm.py` | BUG-9 |
-| 2.2 | Fix `add_conn` concrete class check | `swarm.py` | BUG-6 |
-| 2.3 | Fix `transport.setter` private mutation | `swarm.py` | BUG-7 |
-| 2.4 | `listen_order()` sorting in TransportManager | `manager.py` | BUG-11 |
-| 2.5 | Verify `is_quic_multiaddr` with `/p2p/` suffix | `quic/utils.py` | BUG-10 |
+| #   | Task                                                       | File             | Bug    |
+| --- | ---------------------------------------------------------- | ---------------- | ------ |
+| 2.1 | Happy Eyeballs parallel dial                               | `swarm.py`       | BUG-9  |
+| 2.2 | Fix `add_conn` concrete class check                        | `swarm.py`       | BUG-6  |
+| 2.3 | Fix `transport.setter` private mutation                    | `swarm.py`       | BUG-7  |
+| 2.4 | `listen_order()` sorting in TransportManager               | `manager.py`     | BUG-11 |
+| 2.5 | Verify `is_quic_multiaddr` with `/p2p/` suffix             | `quic/utils.py`  | BUG-10 |
 | 2.6 | Verify `QUICTransportConfig.PROTOCOL_QUIC_V1 == "quic-v1"` | `quic/config.py` | BUG-14 |
 
 ### Phase 3 — Cleanup (weeks 4–5)
 
-| # | Task | File | Bug |
-|---|---|---|---|
-| 3.1 | Fix `_drain` system task resource leak | `cmux.py` | BUG-8 |
-| 3.2 | Wire circuit relay into TransportManager | `relay/`, `manager.py` | BUG-15 |
-| 3.3 | Deprecate `TransportRegistry` | `transport_registry.py` | BUG-12 |
-| 3.4 | Log UNKNOWN classifications in cmux | `cmux.py` | Quality |
-| 3.5 | Full test coverage for manager + cmux | `tests/transport/` | Coverage |
+| #   | Task                                     | File                    | Bug      |
+| --- | ---------------------------------------- | ----------------------- | -------- |
+| 3.1 | Fix `_drain` system task resource leak   | `cmux.py`               | BUG-8    |
+| 3.2 | Wire circuit relay into TransportManager | `relay/`, `manager.py`  | BUG-15   |
+| 3.3 | Deprecate `TransportRegistry`            | `transport_registry.py` | BUG-12   |
+| 3.4 | Log UNKNOWN classifications in cmux      | `cmux.py`               | Quality  |
+| 3.5 | Full test coverage for manager + cmux    | `tests/transport/`      | Coverage |
 
----
+______________________________________________________________________
 
 ## 8. Appendix — go-libp2p Symbol Map
 
-| go-libp2p | py-libp2p | Match |
-|---|---|---|
-| `swarm.Swarm.transports` | `TransportManager._transports` | ✅ |
-| `Swarm.TransportForDialing(maddr)` | `TransportManager.transport_for_dialing(maddr)` | ✅ |
-| `Swarm.TransportForListening(maddr)` | `TransportManager.transport_for_listening(maddr)` | ✅ |
-| `Swarm.Listen(addrs...)` goroutines | `Swarm.listen(*multiaddrs)` — **sequential** | ❌ BUG-1 |
-| `tcpreuse.PortDemultiplexer` | `cmux.PortDemultiplexer` — single port only | ⚠️ BUG-3 |
-| `tcpreuse.NewTCPTransport(sharedTCP)` | `TransportManager(port_demux=…)` | ✅ |
-| `identifyConnType(prefix)` | `identify_conn_type(prefix)` | ✅ |
-| `acceptQueueSize = 64` | `ACCEPT_QUEUE_SIZE = 64` | ✅ |
-| `acceptTimeout = 30s` | `ACCEPT_TIMEOUT = 30.0` (enforced) | ✅ |
-| `inboundUpgradeTimeout` | `connection_config.inbound_upgrade_timeout` | ✅ |
-| `dialPeer()` Happy Eyeballs | Sequential retry | ❌ BUG-9 |
-| `Swarm.AddTransport(t)` | No public host-level API | ❌ BUG-15 partial |
-| `transport.ListenOrder` sort | `listen_order()` defined, unused | ⚠️ BUG-11 |
-| `relay.Transport` in routing | Not in `TransportManager` | ❌ BUG-15 |
-| `upgrader.Upgrade(conn,isServer,peer)` | Two calls: `upgrade_security` + `upgrade_connection` | ⚠️ works |
-| `muxer.Conn` (native mux bypass) | `isinstance(rwc, IMuxedConn)` detection | ✅ |
-| Concurrent `close_all()` | `TransportManager.close_all()` with nursery | ✅ |
-
+| go-libp2p                              | py-libp2p                                            | Match             |
+| -------------------------------------- | ---------------------------------------------------- | ----------------- |
+| `swarm.Swarm.transports`               | `TransportManager._transports`                       | ✅                |
+| `Swarm.TransportForDialing(maddr)`     | `TransportManager.transport_for_dialing(maddr)`      | ✅                |
+| `Swarm.TransportForListening(maddr)`   | `TransportManager.transport_for_listening(maddr)`    | ✅                |
+| `Swarm.Listen(addrs...)` goroutines    | `Swarm.listen(*multiaddrs)` — **sequential**         | ❌ BUG-1          |
+| `tcpreuse.PortDemultiplexer`           | `cmux.PortDemultiplexer` — single port only          | ⚠️ BUG-3          |
+| `tcpreuse.NewTCPTransport(sharedTCP)`  | `TransportManager(port_demux=…)`                     | ✅                |
+| `identifyConnType(prefix)`             | `identify_conn_type(prefix)`                         | ✅                |
+| `acceptQueueSize = 64`                 | `ACCEPT_QUEUE_SIZE = 64`                             | ✅                |
+| `acceptTimeout = 30s`                  | `ACCEPT_TIMEOUT = 30.0` (enforced)                   | ✅                |
+| `inboundUpgradeTimeout`                | `connection_config.inbound_upgrade_timeout`          | ✅                |
+| `dialPeer()` Happy Eyeballs            | Sequential retry                                     | ❌ BUG-9          |
+| `Swarm.AddTransport(t)`                | No public host-level API                             | ❌ BUG-15 partial |
+| `transport.ListenOrder` sort           | `listen_order()` defined, unused                     | ⚠️ BUG-11         |
+| `relay.Transport` in routing           | Not in `TransportManager`                            | ❌ BUG-15         |
+| `upgrader.Upgrade(conn,isServer,peer)` | Two calls: `upgrade_security` + `upgrade_connection` | ⚠️ works          |
+| `muxer.Conn` (native mux bypass)       | `isinstance(rwc, IMuxedConn)` detection              | ✅                |
+| Concurrent `close_all()`               | `TransportManager.close_all()` with nursery          | ✅                |

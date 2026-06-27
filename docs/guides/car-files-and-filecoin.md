@@ -17,7 +17,7 @@ uv run python examples/11_car_export_import.py
 uv run python examples/19_filecoin_pipeline.py
 ```
 
----
+______________________________________________________________________
 
 ## What Is a CAR File?
 
@@ -26,12 +26,12 @@ Merkle DAG — a root CID plus all the blocks it links to — into a single port
 
 Think of it like a `.tar` for content-addressed data:
 
-| tar | CAR |
-|---|---|
-| Groups files into one archive | Groups IPLD blocks into one archive |
-| Uses filesystem paths as identifiers | Uses CIDs as identifiers |
-| No integrity checking | Every block is addressed by its own hash |
-| No schema | CARv1 header declares the root CID(s) |
+| tar                                  | CAR                                      |
+| ------------------------------------ | ---------------------------------------- |
+| Groups files into one archive        | Groups IPLD blocks into one archive      |
+| Uses filesystem paths as identifiers | Uses CIDs as identifiers                 |
+| No integrity checking                | Every block is addressed by its own hash |
+| No schema                            | CARv1 header declares the root CID(s)    |
 
 CAR files are the **standard interchange format between IPFS and Filecoin**. When you want
 to submit a DAG to a Filecoin storage provider using tools like
@@ -57,7 +57,7 @@ to submit a DAG to a Filecoin storage provider using tools like
 > supported. This is a deliberate scope choice — CARv1 is what Filecoin storage
 > providers expect via `lotus client import --car`.
 
----
+______________________________________________________________________
 
 ## Example 11: Basic Export and Offline Import
 
@@ -137,7 +137,7 @@ and returns the root CIDs from the header. After import, any `get_node()` or `ge
 call for a CID in the CAR will be served entirely from local storage — no network access,
 no Bitswap exchange.
 
----
+______________________________________________________________________
 
 ## Example 19: AI Agent Filecoin Pipeline — The Flagship Demo
 
@@ -257,6 +257,7 @@ where payload compactness matters.
 Once you have the `.car` file, standard Filecoin tooling takes over:
 
 **Using Lotus (full node):**
+
 ```bash
 lotus client import --car agent_inference_trace.car
 # Returns a DataCID — use this to make a storage deal
@@ -264,6 +265,7 @@ lotus client deal <DataCID> <miner_address> <price> <duration>
 ```
 
 **Using web3.storage (no node required):**
+
 ```bash
 w3 up --car agent_inference_trace.car
 ```
@@ -271,7 +273,7 @@ w3 up --car agent_inference_trace.car
 **Using Estuary or other pinning services:**
 Most services accept CARv1 uploads via their HTTP API.
 
----
+______________________________________________________________________
 
 ## API Reference
 
@@ -281,9 +283,9 @@ Traverses the DAG rooted at `cid_str` and writes all blocks to `output_path` as 
 file. Uses `trio.open_file()` internally — the write is fully non-blocking and will not
 stall the event loop even for large DAGs.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `cid_str` | `str` | The root CID to export from |
+| Parameter     | Type  | Description                      |
+| ------------- | ----- | -------------------------------- |
+| `cid_str`     | `str` | The root CID to export from      |
 | `output_path` | `str` | Path to write the `.car` file to |
 
 ### `await peer.import_car(input_path)`
@@ -291,12 +293,12 @@ stall the event loop even for large DAGs.
 Reads a CARv1 file and writes all its blocks into the local blockstore. Returns the list
 of root CIDs declared in the CAR header.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `input_path` | `str` | Path to the `.car` file to import |
-| **Returns** | `list[str]` | Root CID strings from the CAR header |
+| Parameter    | Type        | Description                          |
+| ------------ | ----------- | ------------------------------------ |
+| `input_path` | `str`       | Path to the `.car` file to import    |
+| **Returns**  | `list[str]` | Root CID strings from the CAR header |
 
----
+______________________________________________________________________
 
 ## Known Limitations
 

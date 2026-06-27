@@ -42,6 +42,8 @@ dev = [
   "mypy>=1.10.0",
   "pre-commit>=3.7.0",
   "ruff>=0.6.0",
+  "mdformat>=0.7.22",
+  "mdformat-gfm",
 ]
 test = [
   "pytest>=8.0.0",
@@ -94,6 +96,9 @@ known-first-party = ["py_ipfs_lite", "tests"]
 python_version = "3.10"
 warn_unused_configs = true
 check_untyped_defs = true
-disallow_untyped_defs = false
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+disallow_any_generics = true
+incremental = false
 ignore_missing_imports = true
 

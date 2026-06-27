@@ -10,7 +10,7 @@ By the end of this tutorial you will have:
 **Time:** ~10 minutes
 **Prerequisites:** Completed [Tutorial 01](./01-your-first-peer.md), `curl` installed
 
----
+______________________________________________________________________
 
 ## Step 1 — Start the Daemon
 
@@ -36,12 +36,13 @@ Leave this terminal open. **Open a second terminal** for the `curl` commands bel
 
 ### What the flags mean
 
-| Flag | Value | Effect |
-|---|---|---|
-| `--api` | (boolean) | Enable the HTTP API server |
-| `--api-port` | `5001` | The port Kubo uses by default — existing tools and scripts just work |
+| Flag         | Value     | Effect                                                               |
+| ------------ | --------- | -------------------------------------------------------------------- |
+| `--api`      | (boolean) | Enable the HTTP API server                                           |
+| `--api-port` | `5001`    | The port Kubo uses by default — existing tools and scripts just work |
 
 The daemon also:
+
 - Bootstraps to the public IPFS DHT automatically
 - Starts a Reprovider that re-announces your pinned CIDs every 12 hours
 - Uses a **filesystem blockstore** at `.py_ipfs_lite/blocks` by default (data survives restarts)
@@ -49,7 +50,7 @@ The daemon also:
 > **Tip:** Add `--seed my-node-name` to get a **stable PeerID** that persists across
 > restarts. Without it, a new random identity is generated every time.
 
----
+______________________________________________________________________
 
 ## Step 2 — Add a File via the API
 
@@ -68,7 +69,7 @@ Response:
 
 The `Hash` field is the CID of your file. Save it — you will use it in the next step.
 
----
+______________________________________________________________________
 
 ## Step 3 — Fetch the File Back
 
@@ -88,7 +89,7 @@ The content is streamed back directly. For binary files, pipe into a file:
 curl "http://127.0.0.1:5001/api/v0/cat?arg=bafkrei..." --output fetched.bin
 ```
 
----
+______________________________________________________________________
 
 ## Step 4 — Check Your Node Identity
 
@@ -112,7 +113,7 @@ Response:
 `Addresses` are the multiaddrs you are listening on. Share these with another peer to
 let them connect to you directly without going through the DHT.
 
----
+______________________________________________________________________
 
 ## Step 5 — Check Connected Peers
 
@@ -142,7 +143,7 @@ If `Peers` is empty, the daemon is still bootstrapping — wait a few seconds an
 Once you have at least one peer, your node is part of the DHT and CIDs you add will
 be discoverable by other nodes on the network.
 
----
+______________________________________________________________________
 
 ## Step 6 — Stop the Daemon
 
@@ -157,7 +158,7 @@ All background tasks are cancelled cleanly and the libp2p host is closed. The bl
 you added are still on disk in `.py_ipfs_lite/blocks/` — they will be available
 immediately the next time you start the daemon.
 
----
+______________________________________________________________________
 
 ## Common Configurations
 
@@ -196,14 +197,14 @@ uv run py-ipfs-lite daemon --api --offline
 The HTTP API still works in full — add, cat, dag/put, dag/get, pin, GC all work
 locally. Only DHT discovery and Bitswap with remote peers are disabled.
 
----
+______________________________________________________________________
 
 ## What's Next?
 
-| I want to… | Go to… |
-|---|---|
-| Learn every daemon flag and what it does | [CLI Reference — daemon](../reference/cli.md#daemon) |
-| See the full list of all 17 API endpoints | [HTTP API Reference](../reference/http-api.md) |
-| Understand the Reprovider loop and pinning | [HTTP API Daemon guide](../guides/http-api-daemon.md) |
+| I want to…                                   | Go to…                                                              |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| Learn every daemon flag and what it does     | [CLI Reference — daemon](../reference/cli.md#daemon)                |
+| See the full list of all 17 API endpoints    | [HTTP API Reference](../reference/http-api.md)                      |
+| Understand the Reprovider loop and pinning   | [HTTP API Daemon guide](../guides/http-api-daemon.md)               |
 | Keep content available long-term on Filecoin | [CAR Files and Filecoin guide](../guides/car-files-and-filecoin.md) |
-| Run the daemon in production under systemd | [Production Deployment guide](../guides/production-deployment.md) |
+| Run the daemon in production under systemd   | [Production Deployment guide](../guides/production-deployment.md)   |

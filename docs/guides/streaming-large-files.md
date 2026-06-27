@@ -15,24 +15,24 @@ bytes and async streaming — and how to report progress during both `add_file()
 uv run python examples/12_streaming_large_file.py
 ```
 
----
+______________________________________________________________________
 
 ## The Core Decision: `bytes` vs `stream=True`
 
 `get_file()` has two return modes. Choosing the right one matters for large files.
 
-| Mode | How to invoke | Returns | When to use |
-|---|---|---|---|
-| Buffered (default) | `await peer.get_file(cid)` | `bytes` | Small files, or when you need the full content in memory |
-| Streaming | `await peer.get_file(cid, stream=True)` | `AsyncIterator[bytes]` | Large files where buffering the whole content would exhaust RAM |
-| Write to disk | `await peer.get_file(cid, output_path="/tmp/out")` | `None` | When you want the file on disk without passing bytes through Python at all |
+| Mode               | How to invoke                                      | Returns                | When to use                                                                |
+| ------------------ | -------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+| Buffered (default) | `await peer.get_file(cid)`                         | `bytes`                | Small files, or when you need the full content in memory                   |
+| Streaming          | `await peer.get_file(cid, stream=True)`            | `AsyncIterator[bytes]` | Large files where buffering the whole content would exhaust RAM            |
+| Write to disk      | `await peer.get_file(cid, output_path="/tmp/out")` | `None`                 | When you want the file on disk without passing bytes through Python at all |
 
 > **This distinction caused a real bug.** Earlier in this project's history, Example 09
 > tried to use `async for chunk in content` over a plain `bytes` object (which silently
 > iterates over individual integers, not chunks). If you see unexpected `int` values
 > instead of `bytes` chunks in a loop, you have this bug — switch to `stream=True`.
 
----
+______________________________________________________________________
 
 ## Adding a Large File with Progress
 
@@ -90,7 +90,7 @@ CID: bafyreig...
 - It is called inside the chunking loop; keep it fast. If you need to update a UI
   asynchronously, use `trio.from_thread.run_sync()` or a `trio.Event`.
 
----
+______________________________________________________________________
 
 ## Fetching a Large File with Streaming
 
@@ -134,7 +134,7 @@ await peer.get_file(cid, output_path="/tmp/bigfile.bin")
 
 This is equivalent to streaming + writing each chunk to disk, but handled internally.
 
----
+______________________________________________________________________
 
 ## Chunking: How Files Are Split
 
@@ -176,7 +176,7 @@ cid = await peer.add_file(path, params=AddParams(chunker="size-1048576"))
 cid = await peer.add_file(path, params=AddParams(chunker="size-65536"))
 ```
 
----
+______________________________________________________________________
 
 ## Performance Notes
 

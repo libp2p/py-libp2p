@@ -21,7 +21,7 @@ bash examples/07_reprovider.sh
 For the full list of every endpoint with parameters and response shapes, see the
 [HTTP API Reference](../reference/http-api.md).
 
----
+______________________________________________________________________
 
 ## Starting the Daemon
 
@@ -57,27 +57,27 @@ Daemon is running. Press Ctrl+C to stop...
 Press **Ctrl-C** to stop cleanly. All background tasks (Reprovider, ConnectionPruner)
 are cancelled and the libp2p host is closed.
 
----
+______________________________________________________________________
 
 ## Daemon Flags
 
 All flags from the [CLI reference](../reference/cli.md) apply. The ones most relevant
 to daemon operation:
 
-| Flag | Default | Effect |
-|---|---|---|
-| `--api` | off | Enable the HTTP API server |
-| `--api-host` | `127.0.0.1` | Bind the API to this address. Use `0.0.0.0` to expose externally |
-| `--api-port` | `5001` | HTTP API port |
-| `--port` | `0` (random) | P2P listening port |
-| `--seed` | none | Deterministic PeerID seed — same seed = same identity |
-| `--blockstore-type` | `filesystem` | `filesystem` (persistent) or `memory` (ephemeral) |
-| `--blockstore-path` | `.py_ipfs_lite/blocks` | Filesystem blockstore directory |
-| `--reprovide-interval` | `43200` (12 h) | Seconds between DHT re-announcements. `-1` to disable |
-| `--no-ipni` | off | Disable IPNI (cid.contact) routing |
-| `--offline` | off | Disable all networking |
+| Flag                   | Default                | Effect                                                           |
+| ---------------------- | ---------------------- | ---------------------------------------------------------------- |
+| `--api`                | off                    | Enable the HTTP API server                                       |
+| `--api-host`           | `127.0.0.1`            | Bind the API to this address. Use `0.0.0.0` to expose externally |
+| `--api-port`           | `5001`                 | HTTP API port                                                    |
+| `--port`               | `0` (random)           | P2P listening port                                               |
+| `--seed`               | none                   | Deterministic PeerID seed — same seed = same identity            |
+| `--blockstore-type`    | `filesystem`           | `filesystem` (persistent) or `memory` (ephemeral)                |
+| `--blockstore-path`    | `.py_ipfs_lite/blocks` | Filesystem blockstore directory                                  |
+| `--reprovide-interval` | `43200` (12 h)         | Seconds between DHT re-announcements. `-1` to disable            |
+| `--no-ipni`            | off                    | Disable IPNI (cid.contact) routing                               |
+| `--offline`            | off                    | Disable all networking                                           |
 
----
+______________________________________________________________________
 
 ## Example 06: HTTP API in Action
 
@@ -152,7 +152,7 @@ curl -s -X POST "http://127.0.0.1:8085/api/v0/repo/gc"
 
 The pinned DAG node and the added file both survive GC because they are pinned.
 
----
+______________________________________________________________________
 
 ## Example 07: The Reprovider Loop
 
@@ -192,16 +192,16 @@ Finished reproviding 2 blocks in 0.38s
 
 ### Reprovider configuration
 
-| `reprovide_interval_seconds` | Behaviour |
-|---|---|
-| `43200` (default, 12 h) | Suitable for long-running daemons serving public content |
-| `3600` (1 h) | More aggressive — useful for high-priority content |
-| `-1` | Disabled — content is announced once at `add_file()` time and never again |
+| `reprovide_interval_seconds` | Behaviour                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| `43200` (default, 12 h)      | Suitable for long-running daemons serving public content                  |
+| `3600` (1 h)                 | More aggressive — useful for high-priority content                        |
+| `-1`                         | Disabled — content is announced once at `add_file()` time and never again |
 
 **Only pinned blocks are re-announced.** Blocks cached from the network via Bitswap
 are not re-announced — only blocks you have explicitly pinned with `add_pin()`.
 
----
+______________________________________________________________________
 
 ## Running Behind a Process Supervisor
 
@@ -231,6 +231,7 @@ WantedBy=multi-user.target
 ```
 
 **Key points:**
+
 - Use `--seed` so the PeerID is stable across restarts. Without it, a new random key
   pair is generated on every start, and remote peers that cached your old PeerID will
   not find you.

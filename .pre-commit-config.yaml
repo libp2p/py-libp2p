@@ -17,4 +17,18 @@ repos:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
-
+  - repo: local
+    hooks:
+      - id: mypy-local
+        name: mypy (local)
+        entry: python -m mypy -p py_ipfs_lite
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: false
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.17
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm

@@ -25,19 +25,19 @@ uv run python examples/09_kubo_interop.py
 uv run python examples/20_kubo_round_trip.py
 ```
 
----
+______________________________________________________________________
 
 ## What Protocol Compatibility Actually Means
 
 "Kubo-compatible" is a claim worth unpacking precisely. There are four layers where
 compatibility is required, and `py-ipfs-lite` satisfies all of them:
 
-| Layer | Protocol | Status |
-|---|---|---|
-| Transport | TCP + Noise handshake | ✅ Noise-only (no legacy SECIO) |
-| Stream multiplexing | Yamux | ✅ Yamux |
-| Content exchange | Bitswap 1.2.0 | ✅ Verified against Kubo |
-| DAG codecs | DAG-PB (UnixFS), DAG-JSON, DAG-CBOR | ✅ All three verified |
+| Layer               | Protocol                            | Status                          |
+| ------------------- | ----------------------------------- | ------------------------------- |
+| Transport           | TCP + Noise handshake               | ✅ Noise-only (no legacy SECIO) |
+| Stream multiplexing | Yamux                               | ✅ Yamux                        |
+| Content exchange    | Bitswap 1.2.0                       | ✅ Verified against Kubo        |
+| DAG codecs          | DAG-PB (UnixFS), DAG-JSON, DAG-CBOR | ✅ All three verified           |
 
 > **SECIO is not supported.** SECIO is a legacy transport security protocol removed
 > from Kubo in v0.14.0. `py-ipfs-lite` uses Noise exclusively. If you are connecting to
@@ -57,7 +57,7 @@ and merged into the canonical `libp2p/py-libp2p` repository via
 This is verifiable on GitHub. The interop work is now part of the reference Python
 libp2p implementation — not a private fork.
 
----
+______________________________________________________________________
 
 ## Example 09: Simple Kubo Interop
 
@@ -69,11 +69,11 @@ participate, making the mechanics easy to follow.
 ### What it does
 
 1. Starts a `py-ipfs-lite` peer with DHT enabled (so Kubo can find it)
-2. Adds a test file from Python — gets a CID
-3. Connects the local Kubo daemon directly to the Python peer's multiaddr
-4. Asks Kubo to fetch the CID — Kubo uses Bitswap to pull the block from Python
-5. Adds a file from Kubo — gets a different CID
-6. Asks the Python peer to fetch that CID — Python uses Bitswap to pull from Kubo
+1. Adds a test file from Python — gets a CID
+1. Connects the local Kubo daemon directly to the Python peer's multiaddr
+1. Asks Kubo to fetch the CID — Kubo uses Bitswap to pull the block from Python
+1. Adds a file from Kubo — gets a different CID
+1. Asks the Python peer to fetch that CID — Python uses Bitswap to pull from Kubo
 
 ```python
 import trio
@@ -120,7 +120,7 @@ async def main():
 trio.run(main)
 ```
 
----
+______________________________________________________________________
 
 ## Example 20: Full Round-Trip Demo — The Flagship
 
@@ -244,17 +244,17 @@ When Kubo adds a file via `/api/v0/add`, it stores it as a UnixFS DAG-PB tree. P
 `get_file()` handles the full DAG-PB → UnixFS → raw bytes decoding internally, including
 multi-chunk files. The caller receives the reconstructed file bytes directly.
 
----
+______________________________________________________________________
 
 ## Reproducing the Interop Tests
 
 The `interop/` directory contains the automated test scripts used during development:
 
-| Script | What it tests |
-|---|---|
-| [`interop/run_kubo_interop.sh`](../../interop/run_kubo_interop.sh) | Full Kubo ↔ Python exchange |
-| [`interop/run_py_py_interop.sh`](../../interop/run_py_py_interop.sh) | Python peer ↔ Python peer exchange |
-| [`interop/py_peer.py`](../../interop/py_peer.py) | Standalone Python peer for the interop scripts |
+| Script                                                               | What it tests                                  |
+| -------------------------------------------------------------------- | ---------------------------------------------- |
+| [`interop/run_kubo_interop.sh`](../../interop/run_kubo_interop.sh)   | Full Kubo ↔ Python exchange                    |
+| [`interop/run_py_py_interop.sh`](../../interop/run_py_py_interop.sh) | Python peer ↔ Python peer exchange             |
+| [`interop/py_peer.py`](../../interop/py_peer.py)                     | Standalone Python peer for the interop scripts |
 
 To reproduce:
 
@@ -266,7 +266,7 @@ ipfs daemon &
 bash interop/run_kubo_interop.sh
 ```
 
----
+______________________________________________________________________
 
 ## Common Issues
 
@@ -286,6 +286,7 @@ produces DAG-PB / UnixFS, the native Kubo format).
 ### `get_file()` hangs waiting for the block
 
 **Cause:** The two peers are not connected. Check that either:
+
 - `provider_addr` is set correctly (direct connect path), or
 - Both peers have bootstrapped to the public DHT and the CID has been announced
 

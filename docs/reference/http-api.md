@@ -5,6 +5,7 @@ Kubo's `/api/v0` convention so existing tooling (scripts, clients, dashboards) w
 without modification.
 
 **Start the daemon:**
+
 ```bash
 uv run py-ipfs-lite daemon --api --api-port 5001
 ```
@@ -13,7 +14,7 @@ uv run py-ipfs-lite daemon --api --api-port 5001
 
 **Total endpoints:** 17
 
----
+______________________________________________________________________
 
 ## Error Responses
 
@@ -23,13 +24,13 @@ All errors return JSON with a `"detail"` field:
 {"detail": "Block not found for CID: bafy..."}
 ```
 
-| HTTP Status | Condition |
-|---|---|
-| `404` | Block, pin, or IPNS name not found |
-| `500` | Internal error |
-| `503` | Peer not started |
+| HTTP Status | Condition                          |
+| ----------- | ---------------------------------- |
+| `404`       | Block, pin, or IPNS name not found |
+| `500`       | Internal error                     |
+| `503`       | Peer not started                   |
 
----
+______________________________________________________________________
 
 ## Root
 
@@ -38,6 +39,7 @@ All errors return JSON with a `"detail"` field:
 Returns this node's identity information.
 
 **Response:**
+
 ```json
 {
   "ID": "12D3KooWHNte...",
@@ -48,17 +50,19 @@ Returns this node's identity information.
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/api/v0/id
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/version` · `POST /api/v0/version`
 
 Returns the node version.
 
 **Response:**
+
 ```json
 {
   "Version": "0.1.0",
@@ -68,11 +72,12 @@ Returns the node version.
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/api/v0/version
 ```
 
----
+______________________________________________________________________
 
 ## Files
 
@@ -83,6 +88,7 @@ Adds a file to the local blockstore and announces it to the DHT / IPNI.
 **Request:** `multipart/form-data` with a `file` field.
 
 **Response:**
+
 ```json
 {
   "Name": "test.txt",
@@ -92,11 +98,12 @@ Adds a file to the local blockstore and announces it to the DHT / IPNI.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST -F "file=@test.txt" http://127.0.0.1:5001/api/v0/add
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/cat` · `POST /api/v0/cat`
 
@@ -104,18 +111,19 @@ Streams the content of a file by CID.
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | CID of the file to fetch |
+| Param | Required | Description              |
+| ----- | -------- | ------------------------ |
+| `arg` | ✅       | CID of the file to fetch |
 
 **Response:** `application/octet-stream` — raw file bytes streamed.
 
 **Example:**
+
 ```bash
 curl "http://127.0.0.1:5001/api/v0/cat?arg=bafkrei..." --output file.txt
 ```
 
----
+______________________________________________________________________
 
 ## DAG
 
@@ -125,13 +133,14 @@ Stores a generic IPLD DAG node.
 
 **Query params:**
 
-| Param | Required | Default | Description |
-|---|---|---|---|
-| `store-codec` | ❌ | `dag-json` | Codec to use: `dag-json`, `dag-cbor` |
+| Param         | Required | Default    | Description                          |
+| ------------- | -------- | ---------- | ------------------------------------ |
+| `store-codec` | ❌       | `dag-json` | Codec to use: `dag-json`, `dag-cbor` |
 
 **Request body:** JSON-encoded node data.
 
 **Response:**
+
 ```json
 {
   "Cid": {"/": "bafyreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku"}
@@ -139,6 +148,7 @@ Stores a generic IPLD DAG node.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST \
   "http://127.0.0.1:5001/api/v0/dag/put?store-codec=dag-cbor" \
@@ -146,7 +156,7 @@ curl -X POST \
   -d '{"title": "Hello World", "author": "py-ipfs-lite"}'
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/dag/get` · `POST /api/v0/dag/get`
 
@@ -154,9 +164,9 @@ Fetches and decodes a DAG node by CID.
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | CID of the DAG node to fetch |
+| Param | Required | Description                  |
+| ----- | -------- | ---------------------------- |
+| `arg` | ✅       | CID of the DAG node to fetch |
 
 **Response:** The decoded node as JSON.
 
@@ -165,11 +175,12 @@ Fetches and decodes a DAG node by CID.
 ```
 
 **Example:**
+
 ```bash
 curl "http://127.0.0.1:5001/api/v0/dag/get?arg=bafyrei..."
 ```
 
----
+______________________________________________________________________
 
 ## Blocks
 
@@ -179,21 +190,23 @@ Returns the size of a raw block stored locally. Returns `404` if not found.
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | CID of the block |
+| Param | Required | Description      |
+| ----- | -------- | ---------------- |
+| `arg` | ✅       | CID of the block |
 
 **Response:**
+
 ```json
 {"Key": "bafkrei...", "Size": 512}
 ```
 
 **Example:**
+
 ```bash
 curl -X POST "http://127.0.0.1:5001/api/v0/block/stat?arg=bafkrei..."
 ```
 
----
+______________________________________________________________________
 
 ### `POST /api/v0/block/rm`
 
@@ -201,21 +214,23 @@ Removes a raw block from the local blockstore. Does not check pins.
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | CID of the block to remove |
+| Param | Required | Description                |
+| ----- | -------- | -------------------------- |
+| `arg` | ✅       | CID of the block to remove |
 
 **Response:**
+
 ```json
 {"Hash": "bafkrei...", "Error": ""}
 ```
 
 **Example:**
+
 ```bash
 curl -X POST "http://127.0.0.1:5001/api/v0/block/rm?arg=bafkrei..."
 ```
 
----
+______________________________________________________________________
 
 ## Pins
 
@@ -225,17 +240,19 @@ Pins a CID to protect it from garbage collection.
 
 **Query params:**
 
-| Param | Required | Default | Description |
-|---|---|---|---|
-| `arg` | ✅ | — | CID to pin |
-| `recursive` | ❌ | `true` | Pin the CID and all blocks it links to |
+| Param       | Required | Default | Description                            |
+| ----------- | -------- | ------- | -------------------------------------- |
+| `arg`       | ✅       | —       | CID to pin                             |
+| `recursive` | ❌       | `true`  | Pin the CID and all blocks it links to |
 
 **Response:**
+
 ```json
 {"Pins": ["bafyrei..."]}
 ```
 
 **Example:**
+
 ```bash
 # Recursive pin (default)
 curl -X POST "http://127.0.0.1:5001/api/v0/pin/add?arg=bafyrei..."
@@ -244,7 +261,7 @@ curl -X POST "http://127.0.0.1:5001/api/v0/pin/add?arg=bafyrei..."
 curl -X POST "http://127.0.0.1:5001/api/v0/pin/add?arg=bafyrei...&recursive=false"
 ```
 
----
+______________________________________________________________________
 
 ### `POST /api/v0/pin/rm`
 
@@ -252,21 +269,23 @@ Removes a pin. The block becomes eligible for GC on the next `/api/v0/repo/gc` c
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | CID to unpin |
+| Param | Required | Description  |
+| ----- | -------- | ------------ |
+| `arg` | ✅       | CID to unpin |
 
 **Response:**
+
 ```json
 {"Pins": ["bafyrei..."]}
 ```
 
 **Example:**
+
 ```bash
 curl -X POST "http://127.0.0.1:5001/api/v0/pin/rm?arg=bafyrei..."
 ```
 
----
+______________________________________________________________________
 
 ## Refs
 
@@ -275,6 +294,7 @@ curl -X POST "http://127.0.0.1:5001/api/v0/pin/rm?arg=bafyrei..."
 Lists all CIDs in the local blockstore.
 
 **Response:**
+
 ```json
 {
   "Refs": [
@@ -285,11 +305,12 @@ Lists all CIDs in the local blockstore.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST http://127.0.0.1:5001/api/v0/refs/local
 ```
 
----
+______________________________________________________________________
 
 ## Repo
 
@@ -299,6 +320,7 @@ Runs a garbage collection pass. Deletes all blocks that are not reachable from a
 root.
 
 **Response:**
+
 ```json
 {
   "reclaimed_blocks": 12,
@@ -307,17 +329,19 @@ root.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST http://127.0.0.1:5001/api/v0/repo/gc
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/repo/stat` · `POST /api/v0/repo/stat`
 
 Returns statistics about the local blockstore.
 
 **Response:**
+
 ```json
 {
   "NumObjects": 59,
@@ -328,11 +352,12 @@ Returns statistics about the local blockstore.
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/api/v0/repo/stat
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/repo/version` · `POST /api/v0/repo/version`
 
@@ -342,16 +367,18 @@ Returns the current repo version number. Used for detecting schema compatibility
 > repo migration. If the version is unexpected, inspect and handle manually.
 
 **Response:**
+
 ```json
 {"Version": "1"}
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/api/v0/repo/version
 ```
 
----
+______________________________________________________________________
 
 ## Swarm
 
@@ -360,6 +387,7 @@ curl http://127.0.0.1:5001/api/v0/repo/version
 Lists all currently connected peers.
 
 **Response:**
+
 ```json
 {
   "Peers": [
@@ -373,11 +401,12 @@ Lists all currently connected peers.
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/api/v0/swarm/peers
 ```
 
----
+______________________________________________________________________
 
 ## Name (IPNS)
 
@@ -387,11 +416,12 @@ Publishes an IPNS record for this node's PeerID pointing to `arg`.
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | The IPFS path to publish (e.g. `/ipfs/bafyrei...`) |
+| Param | Required | Description                                        |
+| ----- | -------- | -------------------------------------------------- |
+| `arg` | ✅       | The IPFS path to publish (e.g. `/ipfs/bafyrei...`) |
 
 **Response:**
+
 ```json
 {
   "Name": "12D3KooWHNte...",
@@ -400,11 +430,12 @@ Publishes an IPNS record for this node's PeerID pointing to `arg`.
 ```
 
 **Example:**
+
 ```bash
 curl -X POST "http://127.0.0.1:5001/api/v0/name/publish?arg=/ipfs/bafyrei..."
 ```
 
----
+______________________________________________________________________
 
 ### `GET /api/v0/name/resolve` · `POST /api/v0/name/resolve`
 
@@ -413,21 +444,23 @@ validation (signature + expiry check).
 
 **Query params:**
 
-| Param | Required | Description |
-|---|---|---|
-| `arg` | ✅ | PeerID string to resolve (base58) |
+| Param | Required | Description                       |
+| ----- | -------- | --------------------------------- |
+| `arg` | ✅       | PeerID string to resolve (base58) |
 
 **Response:**
+
 ```json
 {"Path": "/ipfs/bafyrei..."}
 ```
 
 **Example:**
+
 ```bash
 curl "http://127.0.0.1:5001/api/v0/name/resolve?arg=12D3KooWHNte..."
 ```
 
----
+______________________________________________________________________
 
 ## Observability
 
@@ -447,11 +480,13 @@ ipfs_blockstore_size_bytes 2097152.0
 ```
 
 **Example:**
+
 ```bash
 curl http://127.0.0.1:5001/debug/metrics/prometheus
 ```
 
 **Prometheus scrape config:**
+
 ```yaml
 scrape_configs:
   - job_name: py-ipfs-lite

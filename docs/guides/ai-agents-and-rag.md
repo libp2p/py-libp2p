@@ -18,7 +18,7 @@ uv run python examples/13_agent_memory_chain.py
 uv run python examples/14_distributed_rag.py
 ```
 
----
+______________________________________________________________________
 
 ## Why Content-Addressing for Agent Memory?
 
@@ -35,11 +35,11 @@ for agent memory:
    If you want to update a memory, you create a new node with a new CID. The old node stays
    exactly as it was. This creates an append-only audit trail by construction.
 
-2. **Tamper-evidence:** You do not need to trust the storage medium. Anyone holding a CID
+1. **Tamper-evidence:** You do not need to trust the storage medium. Anyone holding a CID
    can verify the data they receive against it. If the data has been tampered with, the
    hash will not match.
 
-3. **Addressability across peers:** Because CIDs are content-derived, two peers that
+1. **Addressability across peers:** Because CIDs are content-derived, two peers that
    independently store the same data will generate the same CID. This is what makes
    distributed RAG possible — the retriever can fetch a chunk by CID from any peer that
    has it, and verify it locally without trusting the peer.
@@ -48,7 +48,7 @@ For the AI Agent agent framework, these properties directly address the grant mi
 requirement: a verifiable, auditable, tamper-evident record of agent reasoning that can be
 exported for archival or handed off to Filecoin storage.
 
----
+______________________________________________________________________
 
 ## Example 08: Verifiable Inference — Your Entry Point
 
@@ -116,7 +116,7 @@ fetches the raw bytes, verifies they hash to `cid`, then deserializes them. If t
 been tampered with, they will not hash to the expected CID and the fetch will fail. The
 equality check is a semantic sanity check on top of the cryptographic guarantee.
 
----
+______________________________________________________________________
 
 ## Example 13: Agent Memory Chain — The Flagship Demo
 
@@ -231,7 +231,7 @@ This pattern directly addresses several audit and compliance requirements:
   [CAR files guide](./car-files-and-filecoin.md)) and submitted to Filecoin for
   long-term verifiable archival.
 
----
+______________________________________________________________________
 
 ## Example 14: Distributed RAG — Scaling to Multiple Peers
 
@@ -342,19 +342,19 @@ trio.run(main)
   via IPNS to make it mutable (see the [IPNS guide](./ipns.md)), allowing the corpus to
   grow while still being addressable by a fixed name.
 
----
+______________________________________________________________________
 
 ## Bringing It Together: The Full Agent Stack
 
 The three examples compose into a complete, verifiable agent memory system:
 
-| Layer | Example | What it provides |
-|---|---|---|
-| Single inference record | Example 08 | Tamper-evident proof of one model call |
-| Conversation chain | Example 13 | Linked, ordered history of a full session |
-| Distributed retrieval | Example 14 | Multi-peer RAG over content-addressed chunks |
-| Mutable registry | Example 15 | IPNS name pointing to the current chain head |
-| Long-term archival | Example 19 | CAR export → Filecoin storage |
+| Layer                   | Example    | What it provides                             |
+| ----------------------- | ---------- | -------------------------------------------- |
+| Single inference record | Example 08 | Tamper-evident proof of one model call       |
+| Conversation chain      | Example 13 | Linked, ordered history of a full session    |
+| Distributed retrieval   | Example 14 | Multi-peer RAG over content-addressed chunks |
+| Mutable registry        | Example 15 | IPNS name pointing to the current chain head |
+| Long-term archival      | Example 19 | CAR export → Filecoin storage                |
 
 For the next step, see the [CAR Files and Filecoin guide](./car-files-and-filecoin.md) to
 learn how to export a conversation chain as a single portable CAR file and submit it to

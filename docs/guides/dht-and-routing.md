@@ -15,7 +15,7 @@ relying on discovery.
 uv run python examples/02_dht_discovery.py
 ```
 
----
+______________________________________________________________________
 
 ## Two Routing Layers
 
@@ -82,7 +82,7 @@ peer = Peer(
 )
 ```
 
----
+______________________________________________________________________
 
 ## Example 02: DHT Discovery by CID Alone
 
@@ -145,7 +145,7 @@ peer_b.get_file(cid)
     └─ 5. Verify block hash == cid, decode, return bytes
 ```
 
----
+______________________________________________________________________
 
 ## Bootstrap: Joining the DHT
 
@@ -179,7 +179,7 @@ The `daemon` subcommand and `add`/`get` CLI commands call `bootstrap()` automati
 When using the SDK directly, call it yourself after `peer.start()` if you need public
 DHT access.
 
----
+______________________________________________________________________
 
 ## Direct Connect: Bypassing Discovery
 
@@ -199,15 +199,17 @@ This is faster, more reliable in local network environments, and mandatory when 
 in `offline=True` mode (where DHT is disabled).
 
 Use direct connect for:
+
 - Local tests between two in-process peers (see Examples 01, 11, 14)
 - Cross-peer transfers in controlled environments (AI Agent agent clusters)
 - `offline=True` workflows where no DHT is available
 
 Use DHT discovery for:
+
 - Fetching public IPFS content by CID (e.g., content added by Kubo or web3.storage)
 - Multi-peer scenarios where provider addresses are not known in advance
 
----
+______________________________________________________________________
 
 ## Reprovider: Keeping Your CIDs Discoverable
 
@@ -229,7 +231,7 @@ peer = Peer(Config(reprovide_interval_seconds=-1), ...)
 The Reprovider only re-announces blocks that are **pinned**. Unpinned cached blocks are
 not re-announced — only blocks that have been explicitly protected from GC.
 
----
+______________________________________________________________________
 
 ## Routing in Offline Mode
 

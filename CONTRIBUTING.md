@@ -7,18 +7,22 @@ First off, thank you for considering contributing to `py-ipfs-lite`.
 We use `uv` for dependency management and fast environment resolution.
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/sumanjeet0012/py-ipfs-lite.git
    cd py-ipfs-lite
    ```
 
-2. **Install dependencies:**
+1. **Install dependencies:**
+
    ```bash
    uv sync
    ```
+
    This will create a virtual environment (`.venv`) and install all package dependencies and development tools.
 
-3. **Run the tests:**
+1. **Run the tests:**
+
    ```bash
    uv run pytest
    ```
@@ -43,7 +47,7 @@ uv run tox
 
 ## Pull Request Expectations
 
-Our house standard is simple: **new features and bug fixes should come with a test that would have caught the bug.** 
+Our house standard is simple: **new features and bug fixes should come with a test that would have caught the bug.**
 
 If you are fixing a concurrency issue, write a test that reliably fails under concurrency before your fix. If you are fixing a protocol issue (like IPNS forgery), include an adversarial test that proves the vulnerability is closed. This standard is what keeps `py-ipfs-lite` stable.
 

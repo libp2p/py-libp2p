@@ -5,7 +5,7 @@ how they relate to each other, and why certain design decisions were made. It is
 starting point if you want to contribute, swap out a subsystem, or just understand what is
 happening under the hood when you call `peer.add_file()`.
 
----
+______________________________________________________________________
 
 ## 1. Component Overview
 
@@ -16,19 +16,19 @@ a user or embedding application interacts with goes through `Peer`.
 `Peer` orchestrates **five subsystems**, each defined as a `Protocol` interface in
 [`py_ipfs_lite/interfaces.py`](../py_ipfs_lite/interfaces.py):
 
-| Interface | Responsibility | Default implementation |
-|---|---|---|
-| `Host` | libp2p network layer: identity, connections, streams | `HostAdapter` wrapping py-libp2p's `BasicHost` |
-| `Routing` | Content discovery and DHT / IPNI interaction | `TieredRouting` ([DHT + IPNI]) or bare `RoutingAdapter` |
-| `BlockStore` | Persistent or in-memory raw block storage | `BlockStoreAdapter` wrapping `FilesystemBlockStore` or `MemoryBlockStore` |
-| `Exchange` | Bitswap: fetching blocks from remote peers | `ExchangeAdapter` wrapping py-libp2p's `BitswapClient` |
-| `DagService` | DAG construction and traversal | py-libp2p's `MerkleDag` |
+| Interface    | Responsibility                                       | Default implementation                                                    |
+| ------------ | ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| `Host`       | libp2p network layer: identity, connections, streams | `HostAdapter` wrapping py-libp2p's `BasicHost`                            |
+| `Routing`    | Content discovery and DHT / IPNI interaction         | `TieredRouting` (\[DHT + IPNI\]) or bare `RoutingAdapter`                 |
+| `BlockStore` | Persistent or in-memory raw block storage            | `BlockStoreAdapter` wrapping `FilesystemBlockStore` or `MemoryBlockStore` |
+| `Exchange`   | Bitswap: fetching blocks from remote peers           | `ExchangeAdapter` wrapping py-libp2p's `BitswapClient`                    |
+| `DagService` | DAG construction and traversal                       | py-libp2p's `MerkleDag`                                                   |
 
 Additionally, two service objects run alongside `Peer`:
 
-| Object | Responsibility |
-|---|---|
-| `PinStore` | Tracks pinned CIDs; controls what GC is allowed to delete |
+| Object       | Responsibility                                                             |
+| ------------ | -------------------------------------------------------------------------- |
+| `PinStore`   | Tracks pinned CIDs; controls what GC is allowed to delete                  |
 | `Reprovider` | Background task that periodically re-announces all local blocks to the DHT |
 
 ```
@@ -57,7 +57,7 @@ Additionally, two service objects run alongside `Peer`:
 └──────────────────────────────────────────────────────────┘
 ```
 
----
+______________________________________________________________________
 
 ## 2. The Adapter Pattern
 
@@ -75,11 +75,11 @@ The reason this matters: py-libp2p uses slightly different method names from wha
 Rather than forking py-libp2p or patching it, `py-ipfs-lite` uses three **adapter classes**
 in `interfaces.py` to bridge the gap:
 
-| Adapter | Wraps | Translates |
-|---|---|---|
-| `HostAdapter` | `BasicHost` | `get_id()` → `id()`, `get_addrs()` → `addrs()`, `new_stream()` → `open_stream()` |
-| `BlockStoreAdapter` | `MemoryBlockStore` or `FilesystemBlockStore` | `put_block()` → `put()`, `get_block()` → `get()`, etc. |
-| `RoutingAdapter` | `KadDHT` | Wraps DHT calls and instruments them with Prometheus timing |
+| Adapter             | Wraps                                        | Translates                                                                       |
+| ------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| `HostAdapter`       | `BasicHost`                                  | `get_id()` → `id()`, `get_addrs()` → `addrs()`, `new_stream()` → `open_stream()` |
+| `BlockStoreAdapter` | `MemoryBlockStore` or `FilesystemBlockStore` | `put_block()` → `put()`, `get_block()` → `get()`, etc.                           |
+| `RoutingAdapter`    | `KadDHT`                                     | Wraps DHT calls and instruments them with Prometheus timing                      |
 
 **What this buys you:** You can swap out any subsystem by providing a different implementation
 that satisfies the `Protocol` interface, without changing `Peer`. For example:
@@ -99,7 +99,7 @@ peer = Peer(config, blockstore=RedisBlockStore())
 All five interfaces (`Host`, `Routing`, `BlockStore`, `Exchange`, `DagService`) are injectable
 through `Peer.__init__`. Only those left as `None` will be auto-constructed during `peer.start()`.
 
----
+______________________________________________________________________
 
 ## 3. Data Flow: Adding a File
 
@@ -142,7 +142,7 @@ add_file(path)
 > ingestion is limited by this upstream behaviour. See the
 > [Observability guide](./guides/observability.md) for a concrete benchmark.
 
----
+______________________________________________________________________
 
 ## 4. Data Flow: Fetching Content
 
@@ -182,7 +182,7 @@ get_file(cid_str)
         output_path provided:   write chunks to file, return None
 ```
 
----
+______________________________________________________________________
 
 ## 5. Concurrency Model
 
@@ -244,7 +244,7 @@ async def fetch_stream(current_cid):
 - `_periodic_pruner_task()` — triggers `ConnectionPruner.maybe_prune_connections()` every 15
   seconds to enforce the `conn_mgr_high_water` / `conn_mgr_low_water` connection limits.
 
----
+______________________________________________________________________
 
 ## 6. The IPNS Trust Model
 
@@ -261,12 +261,12 @@ validation chain in `validate_ipns_record()` (in `py_ipfs_lite/ipns.py`):
    the expected `PeerID`. A record signed by any other key — even a structurally valid one —
    is rejected with `RoutingError("IPNS record pubKey does not match the expected Peer ID")`.
 
-2. **Signature verification (V2 preferred):** If the record contains a V2 signature (the
+1. **Signature verification (V2 preferred):** If the record contains a V2 signature (the
    current standard), the signed CBOR payload must match both the declared `value` and
    `validity` fields byte-for-byte. This prevents a partial-substitution forgery attack.
    V1 (legacy) signature verification is also supported as fallback.
 
-3. **Expiry verification:** The `validity` field is a RFC-3339 timestamp. If the current
+1. **Expiry verification:** The `validity` field is a RFC-3339 timestamp. If the current
    UTC time is past this timestamp, the record is rejected with
    `RoutingError("IPNS record has expired")`.
 
@@ -282,7 +282,7 @@ validation chain in `validate_ipns_record()` (in `py_ipfs_lite/ipns.py`):
   `validate_ipns_record()` signature check is what closes this gap — a forged record PUT
   into the DHT by a malicious peer will be rejected at validation time.
 
----
+______________________________________________________________________
 
 ## 7. Where py-libp2p Ends and py-ipfs-lite Begins
 

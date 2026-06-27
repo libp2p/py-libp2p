@@ -19,7 +19,7 @@ uv run python examples/15_ipns_mutable_registry.py
 uv run python examples/18_ipns_trust_boundary.py
 ```
 
----
+______________________________________________________________________
 
 ## What IPNS Is For
 
@@ -49,7 +49,7 @@ once (in your README, in your grant application, in your config file). Every tim
 add agents or update the registry, call `publish_name()` with the new CID. Consumers
 always resolve the same IPNS name to get the latest state.
 
----
+______________________________________________________________________
 
 ## Sequence Numbers
 
@@ -69,7 +69,7 @@ This is a pragmatic choice that avoids needing to persist a monotonic counter ac
 restarts. The trade-off is that the sequence number carries no semantic meaning beyond
 "this record is newer than records with a lower value."
 
----
+______________________________________________________________________
 
 ## Example 15: Mutable Pointer — Your Entry Point
 
@@ -149,7 +149,7 @@ trio.run(main)
 full cryptographic validation chain before returning the value. A record that fails
 validation is never returned — it raises `RoutingError` instead.
 
----
+______________________________________________________________________
 
 ## Example 18: Trust Model — The Flagship Security Demo
 
@@ -275,24 +275,24 @@ Both attack strategies fail independently. Even if the attacker somehow knew the
 publisher's public key (which is public information), they still cannot forge a valid
 record without the publisher's *private* key.
 
----
+______________________________________________________________________
 
 ## Trust Model Summary
 
-| Property | Guaranteed? | How |
-|---|---|---|
-| Record was signed by the named peer | ✅ Yes | Ed25519 signature verification |
-| Record has not been tampered with | ✅ Yes | V2 signature covers the CBOR payload; value/validity must match |
-| Record is not expired | ✅ Yes | Validity timestamp checked against UTC now |
-| A forged record is rejected even if the attacker knows the public key | ✅ Yes | Signature check with publisher's key will fail on attacker-signed data |
-| IPNI announcement is authenticated | ❌ No | IPNI `PUT /routing/v1/providers/{cid}` is unauthenticated by protocol — any peer can announce any CID |
-| DHT peer identity for stored records | ❌ Not by DHT | Any peer can PUT any bytes at any DHT key — the signature check is what closes this gap |
+| Property                                                              | Guaranteed?   | How                                                                                                   |
+| --------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| Record was signed by the named peer                                   | ✅ Yes        | Ed25519 signature verification                                                                        |
+| Record has not been tampered with                                     | ✅ Yes        | V2 signature covers the CBOR payload; value/validity must match                                       |
+| Record is not expired                                                 | ✅ Yes        | Validity timestamp checked against UTC now                                                            |
+| A forged record is rejected even if the attacker knows the public key | ✅ Yes        | Signature check with publisher's key will fail on attacker-signed data                                |
+| IPNI announcement is authenticated                                    | ❌ No         | IPNI `PUT /routing/v1/providers/{cid}` is unauthenticated by protocol — any peer can announce any CID |
+| DHT peer identity for stored records                                  | ❌ Not by DHT | Any peer can PUT any bytes at any DHT key — the signature check is what closes this gap               |
 
 The bottom line: `resolve_name()` is safe to use as an authoritative lookup in a security
 context. The only trust assumption it makes is that the caller knows the correct `PeerID`
 to look up — which is typically a hard-coded or out-of-band-distributed value.
 
----
+______________________________________________________________________
 
 ## API Reference
 
@@ -300,21 +300,21 @@ to look up — which is typically a hard-coded or out-of-band-distributed value.
 
 Signs and publishes an IPNS record mapping this peer's `PeerID` to `value`.
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `value` | `str` | — | The value to publish (e.g., `/ipfs/{cid}`) |
-| `lifetime_hours` | `int` | `24` | How long the record is valid before expiry |
-| **Returns** | `str` | — | This peer's `PeerID` as a base58 string (the IPNS name) |
+| Parameter        | Type  | Default | Description                                             |
+| ---------------- | ----- | ------- | ------------------------------------------------------- |
+| `value`          | `str` | —       | The value to publish (e.g., `/ipfs/{cid}`)              |
+| `lifetime_hours` | `int` | `24`    | How long the record is valid before expiry              |
+| **Returns**      | `str` | —       | This peer's `PeerID` as a base58 string (the IPNS name) |
 
 ### `await peer.resolve_name(peer_id_str)`
 
 Fetches and cryptographically validates the IPNS record for `peer_id_str` from the DHT.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `peer_id_str` | `str` | The `PeerID` to resolve (base58 string) |
-| **Returns** | `str` | The validated value stored in the record |
-| **Raises** | `RoutingError` | If the record cannot be found, has an invalid signature, or has expired |
+| Parameter     | Type           | Description                                                             |
+| ------------- | -------------- | ----------------------------------------------------------------------- |
+| `peer_id_str` | `str`          | The `PeerID` to resolve (base58 string)                                 |
+| **Returns**   | `str`          | The validated value stored in the record                                |
+| **Raises**    | `RoutingError` | If the record cannot be found, has an invalid signature, or has expired |
 
 ### Low-level functions (in `py_ipfs_lite/ipns.py`)
 

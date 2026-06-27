@@ -4,42 +4,44 @@
 share a set of common flags.
 
 **Invoke:**
+
 ```bash
 uv run py-ipfs-lite <subcommand> [flags]
 ```
 
 Or after `pip install`:
+
 ```bash
 py-ipfs-lite <subcommand> [flags]
 ```
 
----
+______________________________________________________________________
 
 ## Global flags
 
 Available on every subcommand.
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
+| Flag      | Type | Default | Description                                   |
+| --------- | ---- | ------- | --------------------------------------------- |
 | `--debug` | bool | `false` | Enable debug-level logging for all components |
 
----
+______________________________________________________________________
 
 ## Common flags
 
 Shared by all subcommands.
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--port` | int | `0` (random) | P2P listening port. `0` picks a random free port |
-| `--seed` | str | `None` | Deterministic seed for the peer's Ed25519 identity key. Same seed → same PeerID across restarts |
-| `--offline` | bool | `false` | Disable all network activity (DHT, Bitswap, IPNI) |
-| `--blockstore-type` | str | `filesystem` | `filesystem` (persistent) or `memory` (ephemeral) |
-| `--blockstore-path` | str | `.py_ipfs_lite/blocks` | Directory for the filesystem blockstore |
-| `--no-ipni` | bool | `false` | Disable IPNI (cid.contact) routing. Only KadDHT will be used |
-| `--ipni-endpoint` | str | `https://cid.contact` | IPNI HTTP endpoint URL |
+| Flag                | Type | Default                | Description                                                                                     |
+| ------------------- | ---- | ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `--port`            | int  | `0` (random)           | P2P listening port. `0` picks a random free port                                                |
+| `--seed`            | str  | `None`                 | Deterministic seed for the peer's Ed25519 identity key. Same seed → same PeerID across restarts |
+| `--offline`         | bool | `false`                | Disable all network activity (DHT, Bitswap, IPNI)                                               |
+| `--blockstore-type` | str  | `filesystem`           | `filesystem` (persistent) or `memory` (ephemeral)                                               |
+| `--blockstore-path` | str  | `.py_ipfs_lite/blocks` | Directory for the filesystem blockstore                                                         |
+| `--no-ipni`         | bool | `false`                | Disable IPNI (cid.contact) routing. Only KadDHT will be used                                    |
+| `--ipni-endpoint`   | str  | `https://cid.contact`  | IPNI HTTP endpoint URL                                                                          |
 
----
+______________________________________________________________________
 
 ## `daemon`
 
@@ -53,12 +55,12 @@ uv run py-ipfs-lite daemon [flags]
 
 All common flags, plus:
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--api` | bool | `false` | Enable the Kubo-compatible HTTP API server |
-| `--api-host` | str | `127.0.0.1` | Host address to bind the HTTP API to |
-| `--api-port` | int | `5001` | Port for the HTTP API server |
-| `--reprovide-interval` | int | `43200` (12h) | Seconds between DHT re-announce cycles. Set to `-1` to disable |
+| Flag                   | Type | Default       | Description                                                    |
+| ---------------------- | ---- | ------------- | -------------------------------------------------------------- |
+| `--api`                | bool | `false`       | Enable the Kubo-compatible HTTP API server                     |
+| `--api-host`           | str  | `127.0.0.1`   | Host address to bind the HTTP API to                           |
+| `--api-port`           | int  | `5001`        | Port for the HTTP API server                                   |
+| `--reprovide-interval` | int  | `43200` (12h) | Seconds between DHT re-announce cycles. Set to `-1` to disable |
 
 ### Examples
 
@@ -85,7 +87,7 @@ uv run py-ipfs-lite daemon --offline --blockstore-type memory
 uv run py-ipfs-lite daemon --api --no-ipni
 ```
 
----
+______________________________________________________________________
 
 ## `add`
 
@@ -98,19 +100,19 @@ uv run py-ipfs-lite add <file> [flags]
 
 ### Arguments
 
-| Argument | Required | Description |
-|---|---|---|
-| `file` | ✅ | Path to the file to add |
+| Argument | Required | Description             |
+| -------- | -------- | ----------------------- |
+| `file`   | ✅       | Path to the file to add |
 
 ### Flags
 
 All common flags, plus:
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--chunker` | str | `size-262144` | Chunking strategy. Format: `size-{bytes}` |
-| `--hash-fun` | str | `sha2-256` | Hash function for CID computation |
-| `--raw-leaves` / `--no-raw-leaves` | bool | `true` | Store leaf blocks as raw bytes (matches Kubo's CIDv1 default) |
+| Flag                               | Type | Default       | Description                                                   |
+| ---------------------------------- | ---- | ------------- | ------------------------------------------------------------- |
+| `--chunker`                        | str  | `size-262144` | Chunking strategy. Format: `size-{bytes}`                     |
+| `--hash-fun`                       | str  | `sha2-256`    | Hash function for CID computation                             |
+| `--raw-leaves` / `--no-raw-leaves` | bool | `true`        | Store leaf blocks as raw bytes (matches Kubo's CIDv1 default) |
 
 ### Examples
 
@@ -128,7 +130,7 @@ uv run py-ipfs-lite add secret.txt --offline
 uv run py-ipfs-lite add photo.jpg --blockstore-path /data/ipfs/blocks
 ```
 
----
+______________________________________________________________________
 
 ## `get`
 
@@ -141,18 +143,18 @@ uv run py-ipfs-lite get <cid> [flags]
 
 ### Arguments
 
-| Argument | Required | Description |
-|---|---|---|
-| `cid` | ✅ | CIDv1 string of the file to fetch |
+| Argument | Required | Description                       |
+| -------- | -------- | --------------------------------- |
+| `cid`    | ✅       | CIDv1 string of the file to fetch |
 
 ### Flags
 
 All common flags, plus:
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--provider` | str | `None` | Direct multiaddr of the provider peer. If set, bypasses DHT discovery |
-| `--out` | str | `None` | Write content to this file path. If not set, prints to stdout |
+| Flag         | Type | Default | Description                                                           |
+| ------------ | ---- | ------- | --------------------------------------------------------------------- |
+| `--provider` | str  | `None`  | Direct multiaddr of the provider peer. If set, bypasses DHT discovery |
+| `--out`      | str  | `None`  | Write content to this file path. If not set, prints to stdout         |
 
 ### Examples
 
@@ -169,7 +171,7 @@ uv run py-ipfs-lite get bafkrei... \
   --out /tmp/output.bin
 ```
 
----
+______________________________________________________________________
 
 ## `dag-export`
 
@@ -183,10 +185,10 @@ uv run py-ipfs-lite dag-export <cid> <out> [flags]
 
 ### Arguments
 
-| Argument | Required | Description |
-|---|---|---|
-| `cid` | ✅ | Root CID of the DAG to export |
-| `out` | ✅ | Output `.car` file path |
+| Argument | Required | Description                   |
+| -------- | -------- | ----------------------------- |
+| `cid`    | ✅       | Root CID of the DAG to export |
+| `out`    | ✅       | Output `.car` file path       |
 
 ### Flags
 
@@ -206,7 +208,7 @@ uv run py-ipfs-lite dag-export bafyrei... trace.car \
   --blockstore-path /data/ipfs/blocks
 ```
 
----
+______________________________________________________________________
 
 ## `dag-import`
 
@@ -219,9 +221,9 @@ uv run py-ipfs-lite dag-import <file> [flags]
 
 ### Arguments
 
-| Argument | Required | Description |
-|---|---|---|
-| `file` | ✅ | Path to the `.car` file to import |
+| Argument | Required | Description                       |
+| -------- | -------- | --------------------------------- |
+| `file`   | ✅       | Path to the `.car` file to import |
 
 ### Flags
 
