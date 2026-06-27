@@ -3,20 +3,22 @@ import logging
 from pathlib import Path
 
 import trio
-
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.utils.address_validation import find_free_port, get_available_interfaces
-from py_ipfs_lite.config import Config, AddParams
+
+from py_ipfs_lite.config import AddParams, Config
 from py_ipfs_lite.parser import get_parser
 from py_ipfs_lite.peer import Peer
 
 logger = logging.getLogger("py_ipfs_lite.cli")
+
 
 def _get_key_pair(seed: str | None):
     if seed:
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         return create_new_key_pair(seed=seed_bytes)
     return None
+
 
 DEFAULT_BOOTSTRAP_PEERS = [
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
@@ -27,13 +29,16 @@ DEFAULT_BOOTSTRAP_PEERS = [
 
 from contextlib import asynccontextmanager
 
+
 @asynccontextmanager
-async def create_and_start_peer(port: int, seed: str | None, config: Config, bootstrap: bool = True):
+async def create_and_start_peer(
+    port: int, seed: str | None, config: Config, bootstrap: bool = True
+):
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
     key_pair = _get_key_pair(seed)
-    
+
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     try:
         await peer.start()
@@ -44,6 +49,7 @@ async def create_and_start_peer(port: int, seed: str | None, config: Config, boo
         yield peer
     finally:
         await peer.close()
+
 
 async def run_daemon(port: int, seed: str | None, config: Config):
     """Run the IPFS Lite daemon (provider mode)."""
@@ -104,18 +110,28 @@ async def run_get(
     logger.info(f"Fetching CID {cid_str}...")
     try:
         bootstrap = not bool(provider_addr)
-        async with create_and_start_peer(port, seed, config, bootstrap=bootstrap) as peer:
-            content = await peer.get_file(cid_str, output_path=out_path, provider_addr=provider_addr)
+        async with create_and_start_peer(
+            port, seed, config, bootstrap=bootstrap
+        ) as peer:
+            content = await peer.get_file(
+                cid_str, output_path=out_path, provider_addr=provider_addr
+            )
             if out_path:
                 import os
-                logger.info(f"Saved to {out_path} (size: {os.path.getsize(out_path)} bytes)")
+
+                logger.info(
+                    f"Saved to {out_path} (size: {os.path.getsize(out_path)} bytes)"
+                )
             else:
                 logger.info(f"Fetched {len(content)} bytes")
                 print(content.decode("utf-8", errors="replace"))
     except Exception as e:
         logger.error(f"Error: {e}")
 
-async def run_dag_export(cid_str: str, out_file: str, port: int, seed: str | None, config: Config):
+
+async def run_dag_export(
+    cid_str: str, out_file: str, port: int, seed: str | None, config: Config
+):
     """Export a DAG to a CAR file."""
     logger.info(f"Exporting DAG {cid_str} to CAR file {out_file}...")
     try:
@@ -125,22 +141,25 @@ async def run_dag_export(cid_str: str, out_file: str, port: int, seed: str | Non
     except Exception as e:
         logger.error(f"Error exporting DAG: {e}")
 
+
 async def run_dag_import(file_path: str, port: int, seed: str | None, config: Config):
     """Import a CAR file into the blockstore."""
     import os
+
     if not os.path.exists(file_path):
         logger.error(f"CAR file not found: {file_path}")
         return
-        
+
     logger.info(f"Importing CAR file {file_path}...")
     try:
         async with create_and_start_peer(port, seed, config, bootstrap=False) as peer:
             root_cids = await peer.import_car(file_path)
-            logger.info(f"Successfully imported CAR file. Root CIDs:")
+            logger.info("Successfully imported CAR file. Root CIDs:")
             for cid in root_cids:
                 logger.info(f"  {cid}")
     except Exception as e:
         logger.error(f"Error importing CAR file: {e}")
+
 
 def main():
     parser = get_parser()
@@ -166,25 +185,28 @@ def main():
             use_ipni=parsed_args.use_ipni,
             ipni_endpoint=parsed_args.ipni_endpoint,
         )
-        
+
         if parsed_args.api:
-            import hypercorn.trio
             import hypercorn.config
+            import hypercorn.trio
+
             from py_ipfs_lite.api import app
-            
+
             port = parsed_args.port
             if port <= 0:
                 port = find_free_port()
             listen_addrs = get_available_interfaces(port)
             key_pair = _get_key_pair(parsed_args.seed)
-            
+
             peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
             app.state.peer = peer
-            
+
             hyperconfig = hypercorn.config.Config()
             hyperconfig.bind = [f"{parsed_args.api_host}:{parsed_args.api_port}"]
-            
-            logger.info(f"Starting py-ipfs-lite HTTP API daemon at http://{parsed_args.api_host}:{parsed_args.api_port}")
+
+            logger.info(
+                f"Starting py-ipfs-lite HTTP API daemon at http://{parsed_args.api_host}:{parsed_args.api_port}"
+            )
             trio.run(hypercorn.trio.serve, app, hyperconfig)
         else:
             trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
@@ -228,7 +250,7 @@ def main():
             parsed_args.seed,
             config,
         )
-        
+
     elif parsed_args.command == "dag-export":
         config = Config(
             offline=parsed_args.offline,
@@ -245,7 +267,7 @@ def main():
             parsed_args.seed,
             config,
         )
-        
+
     elif parsed_args.command == "dag-import":
         config = Config(
             offline=parsed_args.offline,
@@ -261,6 +283,7 @@ def main():
             parsed_args.seed,
             config,
         )
+
 
 if __name__ == "__main__":
     main()

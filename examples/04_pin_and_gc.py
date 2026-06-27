@@ -1,24 +1,28 @@
-"""
-Example 04: Pinning and Garbage Collection (GC)
+"""Example 04: Pinning and Garbage Collection (GC).
 
-This demo illustrates fundamental IPFS blockstore management. It demonstrates 
-how to safely pin essential blocks to protect them from deletion, and how to 
+This demo illustrates fundamental IPFS blockstore management. It demonstrates
+how to safely pin essential blocks to protect them from deletion, and how to
 run a garbage collection sweep to reclaim storage from unpinned, orphaned blocks.
 """
 
-import trio
 import logging
-from py_ipfs_lite.peer import Peer
-from py_ipfs_lite.config import Config
+
+import trio
 from libp2p.bitswap.cid import parse_cid
+
+from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
 
 logging.getLogger("py_ipfs_lite.reprovider").setLevel(logging.WARNING)
 
+
 async def main():
     print("Demo 4: Pinning + garbage collection")
-    
+
     print("\nStarting an IPFS Peer...")
-    peer = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    peer = Peer(
+        Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"]
+    )
     await peer.start()
     print(f"Peer initialized with Peer ID: {peer.host.id()}")
     print(f"Listening on multiaddr: {peer.host.addrs()[0]}")
@@ -42,16 +46,19 @@ async def main():
     print("\nVerifying block presence on disk...")
     keep_present = await peer.blockstore.has(parse_cid(cid_keep))
     drop_present = await peer.blockstore.has(parse_cid(cid_drop))
-    
+
     print(f"Pinned block still present:   {keep_present}")
     print(f"Unpinned block still present: {drop_present}")
 
     assert keep_present is True
     assert drop_present is False
-    print("\nAssertions passed! Garbage collection successfully removed only the unpinned block.")
+    print(
+        "\nAssertions passed! Garbage collection successfully removed only the unpinned block."
+    )
 
     print("\nClosing the peer cleanly...")
     await peer.close()
+
 
 if __name__ == "__main__":
     trio.run(main)

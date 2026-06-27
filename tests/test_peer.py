@@ -1,18 +1,20 @@
 import os
 import tempfile
+
 import pytest
 import trio
-from multiaddr import Multiaddr
 
-from py_ipfs_lite.peer import Peer
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
+
 
 @pytest.fixture
 def memory_config():
     return Config(
         blockstore_type="memory",
-        reprovide_interval_seconds=-1  # Disable reprovider for quick tests
+        reprovide_interval_seconds=-1,  # Disable reprovider for quick tests
     )
+
 
 @pytest.fixture
 def fs_config():
@@ -20,8 +22,9 @@ def fs_config():
         yield Config(
             blockstore_type="filesystem",
             blockstore_path=tmpdirname,
-            reprovide_interval_seconds=-1
+            reprovide_interval_seconds=-1,
         )
+
 
 @pytest.mark.trio
 async def test_peer_lifecycle(memory_config):
@@ -32,41 +35,44 @@ async def test_peer_lifecycle(memory_config):
     await peer.close()
     assert peer._started is False
 
+
 @pytest.mark.trio
 async def test_add_get_remove_node(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     # 1. Add
     node_data = {"msg": "hello from node test"}
     cid_str = await peer.add_node(node_data, codec="dag-json")
     assert cid_str is not None
-    
+
     # 2. Get
     fetched = await peer.get_node(cid_str)
     assert fetched == node_data
     assert await peer.has_block(cid_str) is True
-    
+
     # 3. Remove
     await peer.remove_node(cid_str)
     from libp2p.bitswap.cid import parse_cid
+
     assert not await peer.blockstore.has(parse_cid(cid_str))
-        
+
     await peer.close()
+
 
 @pytest.mark.trio
 async def test_add_get_file(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"hello world")
         temp_path = f.name
-        
+
     try:
         cid_str = await peer.add_file(temp_path)
         assert cid_str is not None
-        
+
         content_iter = await peer.get_file(cid_str, stream=True)
         chunks = []
         async for chunk in content_iter:
@@ -75,68 +81,75 @@ async def test_add_get_file(memory_config):
         assert content == b"hello world"
     finally:
         os.unlink(temp_path)
-        
+
     await peer.close()
+
 
 @pytest.mark.trio
 async def test_pin_and_gc(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     # Add two nodes
     cid1 = await peer.add_node({"name": "pinned"})
     cid2 = await peer.add_node({"name": "unpinned"})
-    
+
     # Pin cid1
     await peer.add_pin(cid1, recursive=False)
-    
+
     # GC
-    stats = await peer.gc()
-    
+    await peer.gc()
+
     # cid1 should exist, cid2 should be gone
     from libp2p.bitswap.cid import parse_cid
+
     assert await peer.blockstore.has(parse_cid(cid1))
     assert not await peer.blockstore.has(parse_cid(cid2))
-        
+
     await peer.close()
+
 
 @pytest.mark.trio
 async def test_filesystem_blockstore(fs_config):
     peer = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     cid_str = await peer.add_node({"foo": "bar"})
     assert cid_str is not None
-    
+
     fetched = await peer.get_node(cid_str)
     assert fetched == {"foo": "bar"}
-    
+
     await peer.close()
-    
+
     assert os.path.exists(fs_config.blockstore_path)
 
+
 def test_init_exports():
-    from py_ipfs_lite import Peer, Config, AddParams
+    from py_ipfs_lite import AddParams, Config, Peer
+
     assert Peer is not None
     assert Config is not None
     assert AddParams is not None
+
 
 @pytest.mark.trio
 async def test_add_file_with_params(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     from py_ipfs_lite.config import AddParams
+
     params = AddParams(chunker="size-1024")
-    
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"a" * 2048)
         temp_path = f.name
-        
+
     try:
         cid_str = await peer.add_file(temp_path, params=params)
         assert cid_str is not None
-        
+
         content_iter = await peer.get_file(cid_str, stream=True)
         chunks = []
         async for chunk in content_iter:
@@ -147,15 +160,16 @@ async def test_add_file_with_params(memory_config):
         os.unlink(temp_path)
         await peer.close()
 
+
 @pytest.mark.trio
 async def test_gc_concurrency_lock(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"large data block " * 1000)
         temp_path = f.name
-        
+
     try:
         async with trio.open_nursery() as nursery:
             nursery.start_soon(peer.add_file, temp_path)
@@ -164,19 +178,21 @@ async def test_gc_concurrency_lock(memory_config):
         os.unlink(temp_path)
         await peer.close()
 
+
 @pytest.mark.trio
 async def test_add_file_progress_callback(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"hello progress callback")
         temp_path = f.name
-        
+
     progress_updates = []
+
     def my_progress(written: int, total: int):
         progress_updates.append((written, total))
-        
+
     try:
         cid_str = await peer.add_file(temp_path, progress_callback=my_progress)
         assert cid_str is not None
@@ -186,14 +202,19 @@ async def test_add_file_progress_callback(memory_config):
         assert progress_updates[-1][1] == len(b"hello progress callback")
     finally:
         os.unlink(temp_path)
-        
+
     await peer.close()
+
 
 @pytest.mark.trio
 async def test_api_parity_methods():
-    from py_ipfs_lite import setup_libp2p, default_bootstrap_peers, new_in_memory_datastore
     from libp2p.crypto.ed25519 import create_new_key_pair
-    from multiaddr import Multiaddr
+
+    from py_ipfs_lite import (
+        default_bootstrap_peers,
+        new_in_memory_datastore,
+        setup_libp2p,
+    )
 
     # Test helpers
     boot_peers = default_bootstrap_peers()
@@ -208,14 +229,16 @@ async def test_api_parity_methods():
     assert host is not None
     assert routing is None  # Since offline is True
 
+
 def test_peer_accessors(memory_config):
     from py_ipfs_lite.peer import Peer
+
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
-    
+
     # Initialize properties manually to avoid full async start() overhead in this test
     peer.blockstore = peer._create_blockstore()
     peer._exchange = "dummy_exchange"
-    
+
     # Test accessors
     assert peer.session() == peer
     assert peer.block_store() is not None

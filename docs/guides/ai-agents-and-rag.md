@@ -44,7 +44,7 @@ for agent memory:
    distributed RAG possible — the retriever can fetch a chunk by CID from any peer that
    has it, and verify it locally without trusting the peer.
 
-For the GooseSwarm agent framework, these properties directly address the grant milestone
+For the AI Agent agent framework, these properties directly address the grant milestone
 requirement: a verifiable, auditable, tamper-evident record of agent reasoning that can be
 exported for archival or handed off to Filecoin storage.
 
@@ -216,7 +216,7 @@ Given only the chain head CID, the full conversation can be reconstructed and ve
 trio.run(main)
 ```
 
-### Why this matters for GooseSwarm / grant compliance
+### Why this matters for AI Agent / grant compliance
 
 This pattern directly addresses several audit and compliance requirements:
 

@@ -21,6 +21,7 @@ class AddParams:
     raw_leaves: bool = True
     hash_fun: str = "sha2-256"
 
+
 @dataclass(slots=True)
 class CLIConfig:
     port: int = 0

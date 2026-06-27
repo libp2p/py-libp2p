@@ -1,20 +1,29 @@
-import trio
 import logging
-from py_ipfs_lite.peer import Peer
+
+import trio
+
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
 
 logging.getLogger("py_ipfs_lite.reprovider").setLevel(logging.WARNING)
+
 
 async def main():
     print("Demo 2: DHT discovery by CID alone...")
     print("\nStarting 2 peers...")
-    peer_a = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
-    peer_b = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    peer_a = Peer(
+        Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"]
+    )
+    peer_b = Peer(
+        Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"]
+    )
 
     await peer_a.start()
     await peer_b.start()
 
-    print(f"Peer A has Peer ID {peer_a.host.id()}\nmultiaddr: {peer_a.host.addrs()[0]}\n")
+    print(
+        f"Peer A has Peer ID {peer_a.host.id()}\nmultiaddr: {peer_a.host.addrs()[0]}\n"
+    )
     print(f"Peer B has Peer ID {peer_b.host.id()}\nmultiaddr: {peer_b.host.addrs()[0]}")
 
     peer_a_addr = str(peer_a.host.addrs()[0])
@@ -27,7 +36,9 @@ async def main():
     print(f"Peer A added file. CID: {cid}")
 
     # Note: no provider_addr argument here on purpose.
-    print("\nRequesting file by CID from Peer B (without providing Peer A's address)...")
+    print(
+        "\nRequesting file by CID from Peer B (without providing Peer A's address)..."
+    )
     content = await peer_b.get_file(cid)
     print(f"Peer B fetched {len(content)} bytes without being told who has it.")
 
@@ -36,6 +47,7 @@ async def main():
     print("\nClosing both peers cleanly...")
     await peer_b.close()
     await peer_a.close()
+
 
 if __name__ == "__main__":
     trio.run(main)

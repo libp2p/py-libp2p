@@ -1,14 +1,17 @@
-import sys
-import trio
 import logging
-from py_ipfs_lite.peer import Peer
+import sys
+
+import trio
+
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
 
 logging.getLogger("py_ipfs_lite.reprovider").setLevel(logging.WARNING)
 
+
 async def main(cid: str):
     print("Demo 5b: Reading data from disk (persistence test)")
-    
+
     print("\nStarting an IPFS Peer (Reader)...")
     config = Config(
         blockstore_type="filesystem",
@@ -17,7 +20,7 @@ async def main(cid: str):
     )
     peer = Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
-    
+
     print(f"Peer initialized with Peer ID: {peer.host.id()}")
     print(f"Listening on multiaddr: {peer.host.addrs()[0]}")
 
@@ -31,6 +34,7 @@ async def main(cid: str):
     finally:
         print("\nClosing the peer cleanly...")
         await peer.close()
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

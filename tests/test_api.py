@@ -1,17 +1,15 @@
 import pytest
-from httpx import AsyncClient, ASGITransport
-import trio
-from py_ipfs_lite.api import app
+from httpx import ASGITransport, AsyncClient
 
-from py_ipfs_lite.peer import Peer
+from py_ipfs_lite.api import app
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
+
 
 @pytest.fixture
 def memory_config():
-    return Config(
-        blockstore_type="memory",
-        reprovide_interval_seconds=-1
-    )
+    return Config(blockstore_type="memory", reprovide_interval_seconds=-1)
+
 
 @pytest.fixture
 async def client(memory_config):
@@ -25,11 +23,13 @@ async def client(memory_config):
     finally:
         await peer.close()
 
+
 @pytest.mark.trio
 async def test_api_version(client):
     res = await client.post("/api/v0/version")
     assert res.status_code == 200
     assert res.json()["System"] == "py-ipfs-lite"
+
 
 @pytest.mark.trio
 async def test_api_id(client):
@@ -37,11 +37,13 @@ async def test_api_id(client):
     assert res.status_code == 200
     assert "ID" in res.json()
 
+
 @pytest.mark.trio
 async def test_api_repo_stat(client):
     res = await client.post("/api/v0/repo/stat")
     assert res.status_code == 200
     assert "NumObjects" in res.json()
+
 
 @pytest.mark.trio
 async def test_api_swarm_peers(client):

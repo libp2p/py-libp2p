@@ -1,4 +1,5 @@
-from typing import Protocol, Optional, Any, AsyncIterator, List, Union
+from typing import Any, AsyncIterator, List, Optional, Protocol, Union
+
 
 class Datastore(Protocol):
     async def get(self, key: bytes) -> bytes: ...
@@ -6,6 +7,7 @@ class Datastore(Protocol):
     async def delete(self, key: bytes) -> None: ...
     async def query(self, prefix: str) -> AsyncIterator[tuple[str, bytes]]: ...
     async def close(self) -> None: ...
+
 
 class BlockStore(Protocol):
     async def put(self, cid: bytes, data: bytes) -> None: ...
@@ -15,12 +17,16 @@ class BlockStore(Protocol):
     def get_size(self, cid: bytes) -> int: ...
     def all_keys(self) -> List[str]: ...
 
+
 class Exchange(Protocol):
     async def get_block(self, cid: bytes) -> Optional[bytes]: ...
-    async def get_blocks(self, cids: List[bytes]) -> AsyncIterator[tuple[bytes, bytes]]: ...
+    async def get_blocks(
+        self, cids: List[bytes]
+    ) -> AsyncIterator[tuple[bytes, bytes]]: ...
     def notify_new_blocks(self, blocks: Any) -> None: ...
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
+
 
 class DagService(Protocol):
     async def add(self, node: Any) -> Any: ...
@@ -28,12 +34,14 @@ class DagService(Protocol):
     async def remove(self, cid: Any) -> None: ...
     async def get_many(self, cids: List[Any]) -> Any: ...
 
+
 class Routing(Protocol):
     async def bootstrap(self) -> None: ...
     async def find_providers(self, key: str, count: int = 20) -> List[Any]: ...
     async def provide(self, key: str) -> bool: ...
     async def get_value(self, key: str) -> Optional[bytes]: ...
     async def put_value(self, key: str, value: bytes) -> None: ...
+
 
 class Host(Protocol):
     def id(self) -> Any: ...
@@ -47,28 +55,29 @@ class Host(Protocol):
 
 # Adapters for py-libp2p concrete types
 
+
 class HostAdapter:
     def __init__(self, host):
         self._host = host
-        
+
     def id(self):
         return self._host.get_id()
-        
+
     def addrs(self):
         return self._host.get_addrs()
-        
+
     async def connect(self, peer_info):
         return await self._host.connect(peer_info)
-        
+
     async def disconnect(self, peer_id):
         return await self._host.disconnect(peer_id)
-        
+
     async def open_stream(self, peer_id, protocol_ids):
         return await self._host.new_stream(peer_id, protocol_ids)
-        
+
     def set_stream_handler(self, protocol_id, stream_handler):
         return self._host.set_stream_handler(protocol_id, stream_handler)
-        
+
     async def close(self):
         return await self._host.close()
 
@@ -100,11 +109,15 @@ class BlockStoreAdapter:
         return self._store.get_size(cid)
 
     def all_keys(self) -> List[str]:
-        from libp2p.bitswap.cid import parse_cid, format_cid_for_display
-        return [format_cid_for_display(parse_cid(c)) for c in self._store.get_all_cids()]
+        from libp2p.bitswap.cid import format_cid_for_display, parse_cid
+
+        return [
+            format_cid_for_display(parse_cid(c)) for c in self._store.get_all_cids()
+        ]
 
 
 from py_ipfs_lite.metrics import IPFS_DHT_QUERY_LATENCY_SECONDS
+
 
 class RoutingAdapter:
     def __init__(self, routing):

@@ -1,42 +1,38 @@
-from prometheus_client import Gauge, Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
 
 IPFS_BLOCKSTORE_SIZE_BYTES = Gauge(
-    "ipfs_blockstore_size_bytes", 
-    "Total size of blocks in the blockstore"
+    "ipfs_blockstore_size_bytes", "Total size of blocks in the blockstore"
 )
 
 IPFS_BLOCKSTORE_BLOCKS_TOTAL = Gauge(
-    "ipfs_blockstore_blocks_total", 
-    "Total number of blocks in the blockstore"
+    "ipfs_blockstore_blocks_total", "Total number of blocks in the blockstore"
 )
 
 IPFS_BITSWAP_BYTES_SENT_TOTAL = Counter(
-    "ipfs_bitswap_bytes_sent_total", 
-    "Total bytes sent over bitswap"
+    "ipfs_bitswap_bytes_sent_total", "Total bytes sent over bitswap"
 )
 
 IPFS_BITSWAP_BYTES_RECEIVED_TOTAL = Counter(
-    "ipfs_bitswap_bytes_received_total", 
-    "Total bytes received over bitswap"
+    "ipfs_bitswap_bytes_received_total", "Total bytes received over bitswap"
 )
 
 IPFS_DHT_QUERY_LATENCY_SECONDS = Histogram(
-    "ipfs_dht_query_latency_seconds", 
-    "Latency of DHT queries"
+    "ipfs_dht_query_latency_seconds", "Latency of DHT queries"
 )
 
 IPFS_GC_RUNS_TOTAL = Counter(
-    "ipfs_gc_runs_total", 
-    "Total number of garbage collection runs"
+    "ipfs_gc_runs_total", "Total number of garbage collection runs"
 )
 
 IPFS_GC_RECLAIMED_BLOCKS_TOTAL = Counter(
-    "ipfs_gc_reclaimed_blocks_total", 
-    "Total number of blocks reclaimed during garbage collection"
+    "ipfs_gc_reclaimed_blocks_total",
+    "Total number of blocks reclaimed during garbage collection",
 )
+
 
 class MetricsBlockStore:
     """Wraps a libp2p BlockStore to record prometheus metrics on put/delete."""
+
     def __init__(self, store):
         self._store = store
 
@@ -64,9 +60,9 @@ class MetricsBlockStore:
             size = self.get_size(cid)
         except Exception:
             pass
-            
+
         await self._store.delete_block(cid)
-        
+
         try:
             IPFS_BLOCKSTORE_BLOCKS_TOTAL.dec()
             if size > 0:

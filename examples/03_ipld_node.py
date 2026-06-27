@@ -1,16 +1,21 @@
-import trio
 import logging
-from py_ipfs_lite.peer import Peer
+
+import trio
+
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
 
 logging.getLogger("py_ipfs_lite.reprovider").setLevel(logging.WARNING)
+
 
 async def main():
     print("Demo 3: Structured data as an IPLD node (inference-log shape)")
     print("\nStarting an IPFS Peer...")
-    peer = Peer(Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    peer = Peer(
+        Config(reprovide_interval_seconds=-1), listen_addrs=["/ip4/127.0.0.1/tcp/0"]
+    )
     await peer.start()
-    
+
     print(f"Peer initialized with Peer ID: {peer.host.id()}")
     print(f"Listening on multiaddr: {peer.host.addrs()[0]}")
 
@@ -33,12 +38,15 @@ async def main():
     print("Fetched result:")
     print(fetched)
 
-    print("\nVerifying that the fetched data perfectly matches the original dictionary...")
+    print(
+        "\nVerifying that the fetched data perfectly matches the original dictionary..."
+    )
     assert fetched == log_entry
     print("Assertion passed! Data integrity maintained.")
 
     print("\nClosing the peer cleanly...")
     await peer.close()
+
 
 if __name__ == "__main__":
     trio.run(main)

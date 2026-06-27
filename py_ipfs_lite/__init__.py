@@ -1,6 +1,11 @@
-from py_ipfs_lite.peer import Peer, setup_libp2p, default_bootstrap_peers, new_in_memory_datastore
-from py_ipfs_lite.config import Config, AddParams
-from py_ipfs_lite.interfaces import Host, Routing, BlockStore, Exchange, DagService
+from py_ipfs_lite.config import AddParams, Config
+from py_ipfs_lite.interfaces import BlockStore, DagService, Exchange, Host, Routing
+from py_ipfs_lite.peer import (
+    Peer,
+    default_bootstrap_peers,
+    new_in_memory_datastore,
+    setup_libp2p,
+)
 
 __all__ = [
     "Peer",

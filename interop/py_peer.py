@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Interop peer: Python IPFS-Lite peer for cross-language testing.
+"""Interop peer: Python IPFS-Lite peer for cross-language testing.
 
 Commands:
   add      --listen ADDR --file PATH           Add file and serve
@@ -11,11 +10,11 @@ Commands:
   remove   --listen ADDR --cid CID             Remove a block
   pin-gc   --listen ADDR                       Pin/GC round-trip test
 """
+
 import argparse
 import json
-import os
-import sys
 import logging
+import sys
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -26,9 +25,10 @@ logging.basicConfig(
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 
 import trio
-from py_ipfs_lite.peer import Peer
-from py_ipfs_lite.config import Config
 from libp2p.bitswap.cid import parse_cid
+
+from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
 
 
 def parse_args():
@@ -37,12 +37,16 @@ def parse_args():
 
     # --- add file ---
     add_p = sub.add_parser("add", help="Add file and serve it")
-    add_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    add_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     add_p.add_argument("--file", required=True, help="File to add")
 
     # --- get file ---
     get_p = sub.add_parser("get", help="Fetch a CID from a peer")
-    get_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    get_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     get_p.add_argument("--connect", required=False, help="Peer multiaddr to connect to")
     get_p.add_argument("--bootstrap", required=False, help="Bootstrap peer multiaddr")
     get_p.add_argument("--cid", required=True, help="CID to fetch")
@@ -50,33 +54,45 @@ def parse_args():
 
     # --- add node ---
     add_node_p = sub.add_parser("add-node", help="Add a generic JSON node")
-    add_node_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    add_node_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     add_node_p.add_argument("--data", required=True, help="JSON string data")
 
     # --- get node ---
     get_node_p = sub.add_parser("get-node", help="Fetch a generic JSON node")
-    get_node_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    get_node_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     get_node_p.add_argument("--bootstrap", required=False, help="Bootstrap peer")
     get_node_p.add_argument("--connect", required=False, help="Direct connect peer")
     get_node_p.add_argument("--cid", required=True, help="CID to fetch")
 
     # --- has block ---
     has_p = sub.add_parser("has", help="Check if a block exists locally")
-    has_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    has_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     has_p.add_argument("--cid", required=True, help="CID to check")
 
     # --- remove block ---
     rm_p = sub.add_parser("remove", help="Remove a block locally")
-    rm_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    rm_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     rm_p.add_argument("--cid", required=True, help="CID to remove")
 
     # --- pin-gc test ---
     pingc_p = sub.add_parser("pin-gc", help="Pin/GC round-trip test")
-    pingc_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    pingc_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
 
     # --- add-get-remove compound test ---
     agr_p = sub.add_parser("add-get-remove", help="Compound add/has/remove test")
-    agr_p.add_argument("--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr")
+    agr_p.add_argument(
+        "--listen", default="/ip4/127.0.0.1/tcp/0", help="Listen multiaddr"
+    )
     agr_p.add_argument("--data", required=True, help="Text data to add")
 
     return parser.parse_args()
@@ -85,6 +101,7 @@ def parse_args():
 # ──────────────────────────────────────────────────────────────
 # Command implementations
 # ──────────────────────────────────────────────────────────────
+
 
 async def run_add(listen_addr: str, filepath: str):
     config = Config(reprovide_interval_seconds=-1)
@@ -106,7 +123,13 @@ async def run_add(listen_addr: str, filepath: str):
         await peer.close()
 
 
-async def run_get(listen_addr: str, connect_addr: str, bootstrap_addr: str, cid_str: str, out_path: str):
+async def run_get(
+    listen_addr: str,
+    connect_addr: str,
+    bootstrap_addr: str,
+    cid_str: str,
+    out_path: str,
+):
     config = Config(reprovide_interval_seconds=-1)
     peer = Peer(config, listen_addrs=[listen_addr])
     try:
@@ -115,7 +138,9 @@ async def run_get(listen_addr: str, connect_addr: str, bootstrap_addr: str, cid_
             await peer.bootstrap([bootstrap_addr])
 
         with trio.fail_after(180):
-            await peer.get_file(cid_str, output_path=out_path, provider_addr=connect_addr)
+            await peer.get_file(
+                cid_str, output_path=out_path, provider_addr=connect_addr
+            )
     except Exception as e:
         print(f"Failed to get file: {e}", file=sys.stderr)
         return
@@ -146,7 +171,9 @@ async def run_add_node(listen_addr: str, data: str):
         await peer.close()
 
 
-async def run_get_node(listen_addr: str, connect_addr: str, bootstrap_addr: str, cid_str: str):
+async def run_get_node(
+    listen_addr: str, connect_addr: str, bootstrap_addr: str, cid_str: str
+):
     config = Config(reprovide_interval_seconds=-1)
     peer = Peer(config, listen_addrs=[listen_addr])
     try:
@@ -261,16 +288,30 @@ async def run_add_get_remove(listen_addr: str, data: str):
 
 # ──────────────────────────────────────────────────────────────
 
+
 def main():
     args = parse_args()
     if args.mode == "add":
         trio.run(run_add, args.listen, args.file)
     elif args.mode == "get":
-        trio.run(run_get, args.listen, args.connect, getattr(args, 'bootstrap', None), args.cid, args.out)
+        trio.run(
+            run_get,
+            args.listen,
+            args.connect,
+            getattr(args, "bootstrap", None),
+            args.cid,
+            args.out,
+        )
     elif args.mode == "add-node":
         trio.run(run_add_node, args.listen, args.data)
     elif args.mode == "get-node":
-        trio.run(run_get_node, args.listen, getattr(args, 'connect', None), getattr(args, 'bootstrap', None), args.cid)
+        trio.run(
+            run_get_node,
+            args.listen,
+            getattr(args, "connect", None),
+            getattr(args, "bootstrap", None),
+            args.cid,
+        )
     elif args.mode == "has":
         trio.run(run_has, args.listen, args.cid)
     elif args.mode == "remove":

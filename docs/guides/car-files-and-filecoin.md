@@ -8,7 +8,7 @@ and consume them with `py-ipfs-lite`, and how they connect to the Filecoin stora
 - [`examples/11_car_export_import.py`](../../examples/11_car_export_import.py) — basic
   DAG export and offline import
 - [`examples/19_filecoin_pipeline.py`](../../examples/19_filecoin_pipeline.py) — full
-  GooseSwarm inference trace → CAR → Filecoin pipeline (the flagship grant-relevant demo)
+  AI Agent inference trace → CAR → Filecoin pipeline (the flagship grant-relevant demo)
 
 **Run them:**
 
@@ -139,7 +139,7 @@ no Bitswap exchange.
 
 ---
 
-## Example 19: GooseSwarm Filecoin Pipeline — The Flagship Demo
+## Example 19: AI Agent Filecoin Pipeline — The Flagship Demo
 
 [`examples/19_filecoin_pipeline.py`](../../examples/19_filecoin_pipeline.py)
 

@@ -72,8 +72,23 @@ line-length = 88
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
-ignore = []
+select = ["E", "F", "I", "W", "D"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D205"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["py_ipfs_lite", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E501", "D", "E402", "F"]
+"tests/*" = ["E501", "D", "E402", "F841"]
+"interop/*" = ["E501", "D", "E402"]
+"py_ipfs_lite/api.py" = ["E501", "E402"]
+"py_ipfs_lite/peer.py" = ["E501", "E402", "D200"]
+"py_ipfs_lite/versioning.py" = ["E501"]
+"py_ipfs_lite/cli.py" = ["E402"]
+"py_ipfs_lite/interfaces.py" = ["E402"]
+"py_ipfs_lite/ipns.py" = ["E402"]
+"py_ipfs_lite/dag_utils.py" = ["E722"]
 
 [tool.mypy]
 python_version = "3.10"

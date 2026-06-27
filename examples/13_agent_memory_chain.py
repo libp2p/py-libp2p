@@ -1,19 +1,31 @@
-import trio
-import hashlib
 import datetime
-from py_ipfs_lite.peer import Peer
+import hashlib
+
+import trio
+
 from py_ipfs_lite.config import Config
+from py_ipfs_lite.peer import Peer
+
 
 async def main():
-    peer = Peer(Config(reprovide_interval_seconds=-1, blockstore_type="memory"), listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    peer = Peer(
+        Config(reprovide_interval_seconds=-1, blockstore_type="memory"),
+        listen_addrs=["/ip4/127.0.0.1/tcp/0"],
+    )
     await peer.start()
 
     print("=== Example 13: Verifiable AI Agent Memory Chain (IPLD DAG) ===")
     turns = [
         ("user", "What is content-addressed storage?"),
-        ("agent", "Content-addressed storage identifies data by a hash of its content..."),
+        (
+            "agent",
+            "Content-addressed storage identifies data by a hash of its content...",
+        ),
         ("user", "How does IPFS use it?"),
-        ("agent", "IPFS assigns every file and data structure a CID derived from its content hash..."),
+        (
+            "agent",
+            "IPFS assigns every file and data structure a CID derived from its content hash...",
+        ),
     ]
 
     prev_cid = None
@@ -40,12 +52,13 @@ async def main():
         chain.append((node["role"], node["text"][:50]))
         link = node.get("prev")
         current_cid = link["/"] if link else None
-        
+
     chain.reverse()
     for role, text in chain:
         print(f"  [{role}]: {text}...")
     print(f"\n✓ Chain of {len(chain)} turns verified — immutable and content-addressed")
     await peer.close()
+
 
 if __name__ == "__main__":
     trio.run(main)

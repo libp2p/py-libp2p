@@ -5,6 +5,7 @@ from typing import Dict, Optional
 
 logger = logging.getLogger("py_ipfs_lite.pin")
 
+
 class PinStore:
     def __init__(self, path: Optional[str] = None):
         self.path = path
@@ -34,9 +35,10 @@ class PinStore:
         if not self.path:
             return
         import os
+
         pin_file = Path(self.path)
         pin_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp_file = pin_file.with_suffix('.tmp')
+        tmp_file = pin_file.with_suffix(".tmp")
         try:
             with open(tmp_file, "w") as f:
                 json.dump({"pins": self._pins}, f, indent=2)
@@ -60,6 +62,7 @@ class PinStore:
     def remove_pin(self, cid_str: str):
         if cid_str not in self._pins:
             from py_ipfs_lite.exceptions import PinNotFoundError
+
             raise PinNotFoundError(f"not pinned or pinned indirectly: {cid_str}")
         del self._pins[cid_str]
         self._save()

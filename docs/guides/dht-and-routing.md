@@ -200,7 +200,7 @@ in `offline=True` mode (where DHT is disabled).
 
 Use direct connect for:
 - Local tests between two in-process peers (see Examples 01, 11, 14)
-- Cross-peer transfers in controlled environments (GooseSwarm agent clusters)
+- Cross-peer transfers in controlled environments (AI Agent agent clusters)
 - `offline=True` workflows where no DHT is available
 
 Use DHT discovery for:

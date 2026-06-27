@@ -32,7 +32,7 @@ The defaults are sized for a node that participates in DHT routing and accumulat
 many ambient connections. 900/600 is conservative — most deployments won't approach it.
 
 **Embedded agent process (resource-constrained):**
-Lower both thresholds significantly. A GooseSwarm agent that only connects to a handful
+Lower both thresholds significantly. A AI Agent agent that only connects to a handful
 of known peers doesn't need 900 connections:
 
 ```python

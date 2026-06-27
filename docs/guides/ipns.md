@@ -44,7 +44,7 @@ IPNS Name (stable, never changes)          Current value (changes with each publ
 12D3KooWHNte...  ──────────────────────►  /ipfs/bafyrei...v2   (version 2.0.0)
 ```
 
-The canonical use case for GooseSwarm: publish the IPNS name of your agent registry
+The canonical use case for AI Agent: publish the IPNS name of your agent registry
 once (in your README, in your grant application, in your config file). Every time you
 add agents or update the registry, call `publish_name()` with the new CID. Consumers
 always resolve the same IPNS name to get the latest state.
