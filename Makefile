@@ -11,8 +11,8 @@ help:
 	@echo "clean       - remove generated/cache artifacts"
 
 install-dev:
-	python3 -m pip install --upgrade pip
-	python3 -m pip install -e ".[dev,test,docs]"
+	python3 -m pip install uv
+	uv pip install -e ".[dev,test,docs]"
 
 format:
 	python3 -m ruff format .

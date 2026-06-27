@@ -20,7 +20,7 @@ WORKDIR /app
 COPY . .
 
 # Install the application
-RUN pip install .
+RUN pip install uv && uv pip install --system .
 
 # Expose the API and Swarm ports
 EXPOSE 5001
