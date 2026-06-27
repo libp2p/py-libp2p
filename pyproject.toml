@@ -66,7 +66,7 @@ exclude = ["tests*", "examples*", "interop*"]
 py_ipfs_lite = ["py.typed"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-v"
 testpaths = ["tests"]
 
 [tool.ruff]
