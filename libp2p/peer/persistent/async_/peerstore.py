@@ -22,7 +22,11 @@ from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import ID
 from libp2p.peer.peerdata import PeerData, PeerDataError
 from libp2p.peer.peerinfo import PeerInfo
-from libp2p.peer.peerstore import PeerRecordState, PeerStoreError
+from libp2p.peer.peerstore import (
+    PeerRecordState,
+    PeerStoreError,
+    _peer_record_signer_matches,
+)
 
 from ..datastore.base import IDatastore
 from ..serialization import (
@@ -607,6 +611,9 @@ class AsyncPersistentPeerStore(IAsyncPeerStore):
         Accept and store a signed PeerRecord, unless it's older than
         the one already stored.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 
