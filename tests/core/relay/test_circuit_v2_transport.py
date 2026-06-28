@@ -21,6 +21,7 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
+from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.relay.circuit_v2.config import RelayConfig, RelayRole
 from libp2p.relay.circuit_v2.discovery import (
     RelayDiscovery,
@@ -373,7 +374,24 @@ async def test_circuit_v2_transport_message_routing_through_relay():
 
         await trio.sleep(SLEEP_TIME)
 
-        # Step 2: Source connects to Relay
+        # Step 2: Destination makes a reservation on the relay.
+        with trio.fail_after(CONNECT_TIMEOUT):
+            dest_relay_stream = await target_host.new_stream(
+                relay_host.get_id(), [PROTOCOL_ID]
+            )
+            envelope_bytes, _ = env_to_send_in_RPC(target_host)
+            reserve_msg = HopMessage(
+                type=HopMessage.RESERVE,
+                peer=target_host.get_id().to_bytes(),
+                senderRecord=envelope_bytes,
+            )
+            await dest_relay_stream.write(reserve_msg.SerializeToString())
+            # Read and discard the STATUS response from the relay
+            await dest_relay_stream.read(1024)
+
+        await trio.sleep(SLEEP_TIME)
+
+        # Step 3: Source connects to Relay
         with trio.fail_after(CONNECT_TIMEOUT):
             await connect(client_host, relay_host)
             assert relay_host.get_id() in client_host.get_network().connections
@@ -383,7 +401,7 @@ async def test_circuit_v2_transport_message_routing_through_relay():
         relay_id = relay_host.get_id()
         client_discovery.get_relay = lambda: relay_id
 
-        # Step 3: Source tries to dial the destination via p2p-circuit and opens stream
+        # Step 4: Source tries to dial the destination via p2p-circuit and opens stream
         relay_addr = relay_host.get_addrs()[0]
         dest_id = target_host.get_id()
         p2p_circuit_addr = Multiaddr(f"{relay_addr}/p2p-circuit/p2p/{dest_id}")
