@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiortc import (
     RTCConfiguration,
+    RTCIceServer,
     RTCPeerConnection,
 )
 from aiortc.rtcdtlstransport import RTCCertificate
@@ -69,7 +70,10 @@ async def create_peer_connection(
     :param ice_servers: Optional STUN/TURN server URLs.
     :returns: A new peer connection.
     """
-    config = RTCConfiguration(iceServers=list(ice_servers) if ice_servers else [])
+    ice_server_list = (
+        [RTCIceServer(urls=[url]) for url in ice_servers] if ice_servers else []
+    )
+    config = RTCConfiguration(iceServers=ice_server_list)
     pc = RTCPeerConnection(configuration=config)
     # Replace aiortc's auto-generated cert.  Must use the mangled name —
     # aiortc reads only `self.__certificates`, which mangles to this.
