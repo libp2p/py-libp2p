@@ -843,9 +843,11 @@ class Swarm(Service, INetworkService):
                 raise
 
         logger.debug("dialed peer %s over base transport", peer_id)
+        if not isinstance(raw_conn, IRawConnection):
+            raise TypeError("Expected an IRawConnection to upgrade")
         try:
             swarm_conn = await self.upgrade_outbound_raw_conn(
-                cast(IRawConnection, raw_conn), peer_id, pre_scope
+                raw_conn, peer_id, pre_scope
             )
         except Exception:
             # Ensure raw_conn is closed if upgrade fails
