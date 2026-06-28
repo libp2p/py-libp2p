@@ -1,0 +1,1 @@
+Fixed Circuit Relay v2 issue where a source peer could connect to a destination peer without an active reservation on the relay.

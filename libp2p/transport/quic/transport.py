@@ -73,6 +73,8 @@ class QUICTransport(ITransport):
     QUIC Stream implementation following libp2p IMuxedStream interface.
     """
 
+    provides_native_muxing: bool = True
+
     def __init__(
         self,
         private_key: PrivateKey,

@@ -60,6 +60,7 @@ from libp2p.transport.exceptions import (
 from libp2p.transport.manager import TransportManager
 from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.transport import QUICTransport
+from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -316,6 +317,15 @@ class Swarm(Service, INetworkService):
             # special-cases — the TransportManager delegates generically.
             self.transport_manager.set_background_nursery(nursery)
             self.transport_manager.set_swarm(self)
+            # Set background nursery BEFORE setting the event
+            # This ensures transports have the nursery when they check
+            if hasattr(self.transport, "set_swarm"):
+                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
+                self.transport.set_swarm(self)  # type: ignore[attr-defined]
+            elif hasattr(self.transport, "set_background_nursery"):
+                # WebSocket transport also needs background nursery
+                # for connection management
+                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
 
             # Signal that the background nursery is available.
             self.event_background_nursery_created.set()
@@ -811,6 +821,13 @@ class Swarm(Service, INetworkService):
                 "Skipping upgrade: connection is already multiplexed (transport=%s)",
                 type(transport).__name__,
             )
+        if getattr(self.transport, "provides_native_muxing", False) and isinstance(
+            raw_conn, IMuxedConn
+        ):
+            logger.info(
+                "Skipping upgrade for native-mux transport "
+                "(connection already multiplexed)"
+            )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
                 return swarm_conn
@@ -1091,19 +1108,17 @@ class Swarm(Service, INetworkService):
         peer_id: ID,
     ) -> INetStream:
         """Try to open a stream on *connection*, falling back to alternatives."""
-        if isinstance(self.transport, QUICTransport) and connection is not None:
-            conn = cast("SwarmConn", connection)
-            try:
-                stream = await conn.new_stream()
-                logger.debug("successfully opened a stream to peer %s", peer_id)
-                return stream
-            except Exception:
-                raise
-
         try:
-            net_stream = await connection.new_stream()
+            if (
+                getattr(self.transport, "provides_native_muxing", False)
+                and connection is not None
+            ):
+                conn = cast("SwarmConn", connection)
+                stream = await conn.new_stream()
+            else:
+                stream = await connection.new_stream()  # type: ignore[assignment]
             logger.debug("successfully opened a stream to peer %s", peer_id)
-            return net_stream
+            return stream
         except Exception as e:
             logger.debug(f"Failed to create stream on connection: {e}")
 
@@ -1331,6 +1346,65 @@ class Swarm(Service, INetworkService):
                 read_write_closer: ReadWriteCloser, _maddr: Multiaddr = maddr
             ) -> None:
                 await self._handle_inbound_connection(read_write_closer, _maddr)
+                # Enforce connection gate on inbound connections
+                # Build multiaddr from remote address tuple
+                logger.debug(
+                    f"[conn_handler] Handling inbound connection on listener {maddr}"
+                )
+                remote_maddr = self._build_remote_multiaddr(read_write_closer)
+                logger.debug(f"[conn_handler] Built remote_maddr: {remote_maddr}")
+
+                if remote_maddr is not None:
+                    if not await self.connection_gate.is_allowed(remote_maddr):
+                        logger.debug(
+                            "Inbound connection from %s denied by connection gate",
+                            remote_maddr,
+                        )
+                        try:
+                            await read_write_closer.close()
+                        except Exception:
+                            pass
+                        return
+
+                # No need to upgrade native-mux connections (QUIC, WebRTC)
+                if getattr(self.transport, "provides_native_muxing", False):
+                    try:
+                        muxed_conn = cast(IMuxedConn, read_write_closer)
+                        await self.add_conn(muxed_conn, direction="inbound")
+                        peer_id = muxed_conn.peer_id
+                        logger.debug(
+                            "successfully opened native-mux connection to peer %s",
+                            peer_id,
+                        )
+                        # NOTE: This is a intentional barrier to prevent from the
+                        # handler exiting and closing the connection.
+                        await self.manager.wait_finished()
+                    except Exception:
+                        await read_write_closer.close()
+                    return
+
+                # For non-QUIC connections, wrap in try/except to ensure cleanup
+                raw_conn = None
+                try:
+                    raw_conn = RawConnection(read_write_closer, False)
+                    await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+                    # NOTE: This is a intentional barrier to prevent from the handler
+                    # exiting and closing the connection.
+                    await self.manager.wait_finished()
+                except Exception as e:
+                    logger.debug(f"Error handling incoming connection: {e}")
+                    # Ensure the underlying connection is closed on any error
+                    try:
+                        if raw_conn is not None:
+                            await raw_conn.close()
+                        else:
+                            # If raw_conn wasn't created,
+                            # close the underlying connection
+                            await read_write_closer.close()
+                    except Exception:
+                        pass
+                    # Re-raise to let the listener handle it appropriately
+                    # (swallow the exception to prevent propagation)
 
             try:
                 listener = self.transport_manager.add_listen_addr(maddr, conn_handler)
