@@ -36,9 +36,10 @@ async def test_secure_inbound_rejects_missing_client_certificate() -> None:
     mock_conn = MagicMock()
     mock_rw = _mock_tls_reader_writer_no_cert()
 
-    with patch(
-        "libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw
-    ), pytest.raises(TLSHandshakeFailure, match="no client certificate"):
+    with (
+        patch("libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw),
+        pytest.raises(TLSHandshakeFailure, match="no client certificate"),
+    ):
         await transport.secure_inbound(mock_conn)
 
 
@@ -49,9 +50,7 @@ async def test_upgrader_rejects_missing_client_certificate(nursery) -> None:
     upgrader = TransportUpgrader(sec_opt, default_mplex_muxer_transport_factory())
     mock_rw = _mock_tls_reader_writer_no_cert()
 
-    with patch(
-        "libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw
-    ):
+    with patch("libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw):
         async with raw_conn_factory(nursery) as (_local_conn, remote_conn):
             with pytest.raises(SecurityUpgradeFailure):
                 await upgrader.upgrade_security(remote_conn, False)
