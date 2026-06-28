@@ -845,7 +845,7 @@ class Swarm(Service, INetworkService):
         logger.debug("dialed peer %s over base transport", peer_id)
         try:
             swarm_conn = await self.upgrade_outbound_raw_conn(
-                raw_conn, peer_id, pre_scope
+                cast(IRawConnection, raw_conn), peer_id, pre_scope
             )
         except Exception:
             # Ensure raw_conn is closed if upgrade fails
