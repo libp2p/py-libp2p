@@ -244,14 +244,16 @@ class TransportRegistry:
                     return None
                 config = kwargs.get("config")
                 if protocol == "webrtc-direct":
-                    return transport_class(  # type: ignore[call-arg]
-                        private_key=private_key, config=config
-                    )
+                    kwargs_dict = {"private_key": private_key, "config": config}
+                    return transport_class(**kwargs_dict)  # type: ignore[call-arg]
                 # private-to-private also accepts an optional host
                 host = kwargs.get("host")
-                return transport_class(  # type: ignore[call-arg]
-                    private_key=private_key, host=host, config=config
-                )
+                kwargs_dict2 = {
+                    "private_key": private_key,
+                    "host": host,
+                    "config": config,
+                }
+                return transport_class(**kwargs_dict2)  # type: ignore[call-arg]
             else:
                 # TCP transport doesn't require upgrader
                 return transport_class()

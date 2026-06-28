@@ -59,8 +59,6 @@ from libp2p.transport.exceptions import (
 )
 from libp2p.transport.manager import TransportManager
 from libp2p.transport.quic.config import QUICTransportConfig
-from libp2p.transport.quic.transport import QUICTransport
-from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
@@ -1417,7 +1415,7 @@ class Swarm(Service, INetworkService):
                 if self.background_nursery is None:
                     raise SwarmException("swarm instance hasn't been run")
 
-                listener.background_nursery = self.background_nursery
+                setattr(listener, "background_nursery", self.background_nursery)
                 await listener.listen(maddr)
                 await self.notify_listen(maddr)
                 logger.debug("successfully started listening on: %s", maddr)

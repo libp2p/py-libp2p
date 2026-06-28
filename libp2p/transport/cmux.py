@@ -166,7 +166,7 @@ class DemultiplexedListener(IListener):
 
         async def _drain() -> None:
             try:
-                with trio.CancelScope() as cancel_scope:
+                with trio.CancelScope(**{}) as cancel_scope:
                     self._cancel_scope = cancel_scope
                     async with trio.open_nursery() as nursery:
                         self._nursery = nursery

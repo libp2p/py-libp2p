@@ -4,6 +4,7 @@ from collections.abc import (
     Sequence,
 )
 import logging
+import typing
 
 from multiaddr import Multiaddr
 from multiaddr.exceptions import ProtocolLookupError
@@ -132,7 +133,7 @@ class TCPListener(IListener):
                 )
             try:
                 started_listeners = await nursery.start(
-                    serve_tcp,
+                    typing.cast(typing.Any, serve_tcp),
                     handler,
                     tcp_port,
                     host_str,
