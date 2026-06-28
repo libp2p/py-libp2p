@@ -57,6 +57,10 @@ class ServerQuicConnection(QuicConnection):
     aioquic's tls.Context defaults _request_client_certificate to False. Since
     the ServerHello is generated synchronously inside receive_datagram, we must
     override _initialize to set the flag immediately after the TLS context is created.
+
+    Coupled to aioquic internal APIs (``_initialize``,
+    ``tls._request_client_certificate``) stable for ``aioquic>=1.2.0``; guarded by
+    ``test_server_quic_connection_requests_client_certificate``.
     """
 
     def _initialize(self, peer_cid: bytes) -> None:
@@ -1061,18 +1065,10 @@ class QUICListener(IListener):
                         destination_connection_id, connection, addr
                     )
 
-                if self._nursery:
-                    connection._nursery = self._nursery
-                    # connect() will start background tasks internally. Avoid calling it
-                    # repeatedly when multiple packets race to promote the same CID.
-                    if not getattr(connection, "_background_tasks_started", False):
-                        await connection.connect(self._nursery)
-
                 # Belt-and-suspenders: reject inbound connections that have no
-                # peer certificate before we even attempt security verification.
-                # _verify_peer_identity_with_security already raises for this
-                # case, but checking here provides an early, explicit rejection
-                # that is independent of the security manager being configured.
+                # peer certificate before connect() and the application callback.
+                # Must run before connect(), which also verifies identity and would
+                # raise without incrementing connections_rejected.
                 if not connection._is_initiator:
                     peer_cert = await connection.get_peer_certificate()
                     if peer_cert is None:
@@ -1085,6 +1081,13 @@ class QUICListener(IListener):
                         self._stats["connections_rejected"] += 1
                         await connection.close()
                         return
+
+                if self._nursery:
+                    connection._nursery = self._nursery
+                    # connect() will start background tasks internally. Avoid calling it
+                    # repeatedly when multiple packets race to promote the same CID.
+                    if not getattr(connection, "_background_tasks_started", False):
+                        await connection.connect(self._nursery)
 
                 if self._security_manager:
                     try:
@@ -1138,6 +1141,7 @@ class QUICListener(IListener):
                 logger.error(
                     f"Error promoting connection {destination_connection_id.hex()}: {e}"
                 )
+                self._stats["connections_rejected"] += 1
                 await self._remove_connection(destination_connection_id)
             finally:
                 # Best-effort cleanup of the per-CID lock and related tracking.
