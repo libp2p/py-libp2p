@@ -1,8 +1,76 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from libp2p import generate_new_rsa_identity
+from libp2p.peer.id import ID
+from libp2p.security.exceptions import HandshakeFailure
+from libp2p.security.tls.exceptions import TLSHandshakeFailure
 from libp2p.security.tls.transport import TLSTransport
-from tests.utils.factories import tls_conn_factory
+from libp2p.transport.exceptions import SecurityUpgradeFailure
+from libp2p.transport.upgrader import TransportUpgrader
+from tests.utils.factories import (
+    TLS_PROTOCOL_ID,
+    default_mplex_muxer_transport_factory,
+    raw_conn_factory,
+    security_options_factory_factory,
+    tls_conn_factory,
+)
+
+
+def test_tls_handshake_failure_extends_central_handshake_failure() -> None:
+    assert issubclass(TLSHandshakeFailure, HandshakeFailure)
+
+
+def _mock_tls_reader_writer_no_cert() -> MagicMock:
+    mock_rw = MagicMock()
+    mock_rw.handshake = AsyncMock()
+    mock_rw.get_peer_certificate.return_value = None
+    return mock_rw
+
+
+@pytest.mark.trio
+async def test_secure_inbound_rejects_missing_client_certificate() -> None:
+    keypair = generate_new_rsa_identity()
+    transport = TLSTransport(keypair, enable_autotls=False)
+    mock_conn = MagicMock()
+    mock_rw = _mock_tls_reader_writer_no_cert()
+
+    with patch(
+        "libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw
+    ), pytest.raises(TLSHandshakeFailure, match="no client certificate"):
+        await transport.secure_inbound(mock_conn)
+
+
+@pytest.mark.trio
+async def test_upgrader_rejects_missing_client_certificate(nursery) -> None:
+    keypair = generate_new_rsa_identity()
+    sec_opt = security_options_factory_factory(TLS_PROTOCOL_ID)(keypair)
+    upgrader = TransportUpgrader(sec_opt, default_mplex_muxer_transport_factory())
+    mock_rw = _mock_tls_reader_writer_no_cert()
+
+    with patch(
+        "libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw
+    ):
+        async with raw_conn_factory(nursery) as (_local_conn, remote_conn):
+            with pytest.raises(SecurityUpgradeFailure):
+                await upgrader.upgrade_security(remote_conn, False)
+
+
+@pytest.mark.trio
+async def test_secure_inbound_autotls_allows_primitive_exchange_identity() -> None:
+    server_keypair = generate_new_rsa_identity()
+    client_keypair = generate_new_rsa_identity()
+    transport = TLSTransport(server_keypair, enable_autotls=True)
+    mock_conn = MagicMock()
+    mock_rw = _mock_tls_reader_writer_no_cert()
+    mock_rw.remote_primitive_pk = client_keypair.public_key
+    mock_rw.remote_primitive_peerid = ID.from_pubkey(client_keypair.public_key)
+
+    with patch("libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw):
+        session = await transport.secure_inbound(mock_conn)
+
+    assert session.get_remote_peer() == ID.from_pubkey(client_keypair.public_key)
 
 
 @pytest.mark.trio
