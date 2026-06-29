@@ -343,6 +343,69 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
     assert swarm_forced.transport.enable_autotls is True
 
 
+# --- Tests for issue #391: transport must detect unsupported multiaddrs ---
+
+
+def test_tcp_can_dial_returns_true_for_tcp_addr():
+    """TCP.can_dial() returns True for a standard TCP multiaddr."""
+    from libp2p.transport.tcp.tcp import TCP
+
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
+
+
+def test_tcp_can_dial_returns_false_for_udp_addr():
+    """TCP.can_dial() returns False for a UDP-only multiaddr (issue #391)."""
+    from libp2p.transport.tcp.tcp import TCP
+
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9000")) is False
+
+
+def test_tcp_can_dial_returns_false_for_quic_addr():
+    """TCP.can_dial() returns False for a QUIC multiaddr (issue #391)."""
+    from libp2p.transport.tcp.tcp import TCP
+
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9000/quic")) is False
+
+
+@pytest.mark.trio
+async def test_swarm_skips_unsupported_multiaddrs():
+    """
+    Swarm.dial_peer() raises SwarmException (not ProtocolLookupError) when
+    all peerstore addresses are unsupported by the registered transport.
+
+    Regression test for https://github.com/libp2p/py-libp2p/issues/391.
+    """
+    from libp2p.peer.id import ID
+
+    swarm = new_swarm()
+    peer_id = ID.from_pubkey(generate_new_ed25519_identity().public_key)
+
+    # Store only an unsupported UDP address for that peer.
+    # The can_dial() filter fires before any real TCP connection is attempted,
+    # so no background service is needed.
+    swarm.peerstore.add_addrs(peer_id, [Multiaddr("/ip4/127.0.0.1/udp/9090")], ttl=3600)
+
+    with pytest.raises(SwarmException, match="No supported transport"):
+        await swarm.dial_peer(peer_id)
+
+
+def test_swarm_can_dial_filters_unsupported():
+    """
+    TCP.can_dial() correctly classifies multiaddrs so that Swarm.dial_peer()
+    can filter unsupported addresses and raise SwarmException rather than
+    ProtocolLookupError.
+
+    Regression test for https://github.com/libp2p/py-libp2p/issues/391.
+    """
+    transport = TCP()
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/tcp/9000")) is True
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090")) is False
+    assert transport.can_dial(Multiaddr("/ip4/127.0.0.1/udp/9090/quic")) is False
+
+
 def test_new_swarm_defaults_to_ed25519():
     """Test that new_swarm() generates Ed25519 keys by default (not RSA)."""
     # Test that new_swarm() without key_pair parameter generates a valid swarm
