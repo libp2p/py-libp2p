@@ -490,21 +490,17 @@ def new_swarm(
         # Explicit transport list
         swarm = new_swarm(transports=[TCP(), QUICTransport(kp.private_key)])
 
-    Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer due to
-          improved performance and features. Mplex is retained for backward
-          compatibility but may be deprecated in the future.
-    """
-    logger.debug(
-        "new_swarm: enable_quic=%s, enable_websocket=%s, listen_addrs=%s, "
-        "transports=%s",
-        enable_quic,
-        enable_websocket,
-        listen_addrs,
-        [type(t).__name__ for t in transports] if transports is not None else None,
-    )
+    Note: Yamux (/yamux/1.0.0) is the preferred stream multiplexer
+          due to its improved performance and features.
+          Mplex (/mplex/6.7.0) is retained for backward compatibility
+          but may be deprecated in the future.
 
+    Note: Ed25519 keys are used by default for better interoperability with
+          other libp2p implementations (Rust, Go) which often disable RSA support.
+    """
     if key_pair is None:
         # Use Ed25519 by default for better interoperability with Rust/Go libp2p
+        # which often compile without RSA support
         key_pair = generate_new_ed25519_identity()
 
     id_opt = generate_peer_id_from(key_pair)
@@ -572,11 +568,17 @@ def new_swarm(
     noise_key_pair = create_new_x25519_key_pair()
 
     # Default security transports
+    # NOTE: Using Noise as primary for now because Python's ssl module has limitations
+    # with mutual TLS authentication. See TLS_ANALYSIS.md for details.
+    # TLS is still offered as a fallback option.
     secure_transports_by_protocol: Mapping[TProtocol, ISecureTransport] = sec_opt or {
+        # TLS_PROTOCOL_ID: TLSTransport(key_pair),
         NOISE_PROTOCOL_ID: NoiseTransport(
             key_pair, noise_privkey=noise_key_pair.private_key
         ),
-        TLS_PROTOCOL_ID: TLSTransport(key_pair, enable_autotls=enable_autotls),
+        TLS_PROTOCOL_ID: TLSTransport (
+            key_pair, enable_autotls = enable_autotls
+        ),
         TProtocol(secio.ID): secio.Transport(key_pair),
         TProtocol(PLAINTEXT_PROTOCOL_ID): InsecureTransport(
             key_pair, peerstore=peerstore_opt
@@ -603,7 +605,6 @@ def new_swarm(
         else:  # YAMUX is default
             muxer_transports_by_protocol = create_yamux_muxer_option()
 
-    # Build the real upgrader first (WebSocket transport needs it at construction).
     upgrader = TransportUpgrader(
         secure_transports_by_protocol=secure_transports_by_protocol,
         muxer_transports_by_protocol=muxer_transports_by_protocol,
@@ -737,8 +738,7 @@ def new_host(
     transports: Sequence[ITransport] | None = None,
     # NEW: convenience flags
     enable_tcp: bool = True,
-    enable_websocket: bool = False,
-    enable_relay: bool = True,
+    enable_websocket: bool = False
 ) -> IHost:
     """
     Create a new libp2p host based on the given parameters.
@@ -798,8 +798,8 @@ def new_host(
             # Fallback to leaving it None if creation fails for any reason.
             resource_manager = None
 
-    # Determine the connection config to use.
-    # QUIC transport config takes precedence if QUIC is enabled.
+    # Determine the connection config to use
+    # QUIC transport config takes precedence if QUIC is enabled
     effective_config: ConnectionConfig | QUICTransportConfig | None
     if enable_quic and quic_transport_opt is not None:
         effective_config = quic_transport_opt
@@ -828,7 +828,7 @@ def new_host(
     )
 
     if disc_opt is not None:
-        host: IHost = RoutedHost(
+        return RoutedHost(
             network=swarm,
             router=disc_opt,
             enable_mDNS=enable_mDNS,
@@ -840,33 +840,17 @@ def new_host(
             bootstrap_dns_max_retries=bootstrap_dns_max_retries,
             announce_addrs=announce_addrs,
         )
-    else:
-        host = BasicHost(
-            network=swarm,
-            enable_mDNS=enable_mDNS,
-            bootstrap=bootstrap,
-            enable_upnp=enable_upnp,
-            negotiate_timeout=negotiate_timeout,
-            resource_manager=resource_manager,
-            bootstrap_allow_ipv6=bootstrap_allow_ipv6,
-            bootstrap_dns_timeout=bootstrap_dns_timeout,
-            bootstrap_dns_max_retries=bootstrap_dns_max_retries,
-            announce_addrs=announce_addrs,
-        )
-
-    if enable_relay:
-        from libp2p.relay.circuit_v2.transport import CircuitV2Transport
-        from libp2p.relay.circuit_v2.protocol import CircuitV2Protocol
-        from libp2p.relay.circuit_v2.config import RelayConfig
-        from libp2p.network.swarm import Swarm
-        from typing import cast
-
-        config = RelayConfig()
-        protocol = CircuitV2Protocol(host, config.limits)
-        transport = CircuitV2Transport(host, protocol, config)
-        cast(Swarm, swarm).transport_manager.add_transport(transport)
-
-    return host
-
+    return BasicHost(
+        network=swarm,
+        enable_mDNS=enable_mDNS,
+        bootstrap=bootstrap,
+        enable_upnp=enable_upnp,
+        negotiate_timeout=negotiate_timeout,
+        resource_manager=resource_manager,
+        bootstrap_allow_ipv6=bootstrap_allow_ipv6,
+        bootstrap_dns_timeout=bootstrap_dns_timeout,
+        bootstrap_dns_max_retries=bootstrap_dns_max_retries,
+        announce_addrs=announce_addrs,
+    )
 
 __version__ = __version("libp2p")

@@ -96,7 +96,6 @@ class Swarm(Service, INetworkService):
     self_id: ID
     peerstore: IPeerStore
     upgrader: TransportUpgrader
-    # Multi-transport routing manager (replaces the old single `transport` field).
     transport_manager: TransportManager
     connections: dict[ID, list[INetConn]]
     listeners: dict[str, IListener]
