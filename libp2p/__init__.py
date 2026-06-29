@@ -505,64 +505,7 @@ def new_swarm(
 
     id_opt = generate_peer_id_from(key_pair)
 
-    transport: TCP | QUICTransport | ITransport
     quic_transport_opt = connection_config if isinstance(connection_config, QUICTransportConfig) else None
-
-    if listen_addrs is None:
-        if enable_quic:
-            transport = QUICTransport(
-                key_pair.private_key,
-                config=quic_transport_opt,
-                enable_autotls=enable_autotls,
-            )
-        else:
-            transport = TCP()
-    else:
-        # Use transport registry to select the appropriate transport
-        from libp2p.transport.transport_registry import create_transport_for_multiaddr
-
-        # Create a temporary upgrader for transport selection
-        # We'll create the real upgrader later with the proper configuration
-        temp_upgrader = TransportUpgrader(
-            secure_transports_by_protocol={},
-            muxer_transports_by_protocol={}
-        )
-
-        addr = listen_addrs[0]
-        logger.debug(f"new_swarm: Creating transport for address: {addr}")
-        transport_maybe = create_transport_for_multiaddr(
-            addr,
-            temp_upgrader,
-            private_key=key_pair.private_key,
-            config=quic_transport_opt,
-            enable_autotls=enable_autotls,
-            tls_client_config=tls_client_config,
-            tls_server_config=tls_server_config
-        )
-
-        if transport_maybe is None:
-            raise ValueError(f"Unsupported transport for listen_addrs: {listen_addrs}")
-
-        transport = transport_maybe
-        logger.debug(f"new_swarm: Created transport: {type(transport)}")
-
-    # If enable_quic is True but we didn't get a QUIC transport, force QUIC
-    if enable_quic and not isinstance(transport, QUICTransport):
-        logger.debug(f"new_swarm: Forcing QUIC transport (enable_quic=True but got {type(transport)})")
-        transport = QUICTransport(
-            key_pair.private_key,
-            config=quic_transport_opt,
-            enable_autotls=enable_autotls,
-        )
-
-    # If enable_webrtc is True, force WebRTC Direct transport
-    if enable_webrtc:
-        from libp2p.transport.webrtc.transport import WebRTCDirectTransport
-
-        logger.debug("new_swarm: Creating WebRTC Direct transport")
-        transport = WebRTCDirectTransport(private_key=key_pair.private_key)
-
-    logger.debug(f"new_swarm: Final transport type: {type(transport)}")
 
     # Generate X25519 keypair for Noise
     noise_key_pair = create_new_x25519_key_pair()

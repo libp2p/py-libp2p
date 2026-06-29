@@ -262,9 +262,11 @@ class TransportManager:
         protocols = [p.name for p in maddr.protocols()]
 
         if "tcp" in protocols:
-            host_val = maddr.value_for_protocol("ip4") or maddr.value_for_protocol(
-                "ip6"
-            )
+            host_val = None
+            if "ip4" in protocols:
+                host_val = maddr.value_for_protocol("ip4")
+            elif "ip6" in protocols:
+                host_val = maddr.value_for_protocol("ip6")
             port_val = maddr.value_for_protocol("tcp")
             if host_val and port_val:
                 key = (str(host_val), int(port_val))
