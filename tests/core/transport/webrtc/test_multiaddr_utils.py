@@ -23,8 +23,10 @@ class TestIsWebrtcDirectMultiaddr:
         assert is_webrtc_direct_multiaddr(maddr)
 
     def test_valid_ipv4_with_certhash(self):
+        cert = WebRTCCertificate.generate()
+        certhash = cert.fingerprint_to_multibase()
         maddr = Multiaddr(
-            "/ip4/192.168.1.1/udp/4001/webrtc-direct/certhash/uEiBkEKoo3S"
+            f"/ip4/192.168.1.1/udp/4001/webrtc-direct/certhash/{certhash}"
         )
         assert is_webrtc_direct_multiaddr(maddr)
 

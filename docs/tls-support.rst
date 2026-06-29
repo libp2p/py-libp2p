@@ -158,6 +158,21 @@ Testing TLS Connections
 Security Considerations
 -----------------------
 
+Mutual authentication (inbound)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Inbound TLS connections **must** present a client certificate that carries the
+libp2p X.509 extension so py-libp2p can derive and verify the remote Peer ID.
+The server-side SSL context requests a client certificate (``CERT_OPTIONAL``);
+post-handshake logic enforces the requirement. If the remote peer completes the
+TLS handshake without sending a certificate, the connection is rejected and no
+``SecureSession`` is created.
+
+**AutoTLS exception:** When ``enable_autotls=True``, broker registration may
+use the primitive key-exchange side-channel or a placeholder identity instead
+of a libp2p client certificate. This path is scoped exclusively to the
+AutoTLS bootstrap flow and is not reachable on a standard node.
+
 - Never disable certificate verification in production.
 - Use TLS 1.3 or later.
 - Pin certificates for critical peers.
@@ -181,6 +196,9 @@ Troubleshooting
    * - SSL handshake failure
      - TLS version mismatch or clock skew
      - Enforce TLS 1.3, sync system clock.
+   * - Inbound connection rejected / handshake failure
+     - Remote peer sent no client certificate
+     - Ensure the dialer uses libp2p TLS with an identity certificate; do not connect with a plain TLS client.
    * - Connection refused
      - Port blocked or listener not running
      - Check firewall rules and listener status.

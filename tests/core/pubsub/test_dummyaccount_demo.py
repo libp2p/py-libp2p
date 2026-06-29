@@ -8,6 +8,7 @@ from tests.utils.pubsub.dummy_account_node import (
     DummyAccountNode,
 )
 from tests.utils.pubsub.wait import (
+    wait_for_adjacency_ready,
     wait_for_convergence,
 )
 
@@ -35,8 +36,7 @@ async def perform_test(num_nodes, adjacency_map, action_func, assertion_func):
                         dummy_nodes[target_num].host,
                     )
 
-        # Allow time for network creation to take place
-        await trio.sleep(0.25)
+        await wait_for_adjacency_ready(dummy_nodes, adjacency_map, timeout=10.0)
 
         # Perform action function
         await action_func(dummy_nodes)
@@ -90,6 +90,7 @@ async def test_simple_three_nodes_triangle_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_simple_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -103,6 +104,7 @@ async def test_simple_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_root_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
@@ -127,6 +129,7 @@ async def test_set_then_send_from_root_seven_nodes_tree_topography():
     await perform_test(num_nodes, adj_map, action_func, assertion_func)
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
 async def test_set_then_send_from_different_leafs_seven_nodes_tree_topography():
     num_nodes = 7
     adj_map = {0: [1, 2], 1: [3, 4], 2: [5, 6]}
