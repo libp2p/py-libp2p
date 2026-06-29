@@ -1,8 +1,0 @@
-The ``Swarm`` now supports **simultaneous multi-transport listening** (TCP,
-WebSocket, QUIC) mirroring go-libp2p's architecture.  A new
-``TransportManager`` routes dial and listen calls to the correct transport
-using a two-step multiaddr pre-filter.  The ``new_host`` / ``new_swarm``
-factories auto-detect required transports from ``listen_addrs``; an explicit
-``transports=[...]`` list can be supplied for full control.  The deprecated
-single-transport ``transport=`` keyword argument continues to work but emits a
-``DeprecationWarning``.
