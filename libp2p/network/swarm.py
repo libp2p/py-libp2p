@@ -126,18 +126,11 @@ class Swarm(Service, INetworkService):
         peer_id: ID,
         peerstore: IPeerStore,
         upgrader: TransportUpgrader,
-        # New multi-transport API: accepts a list of transports OR a single
-        # legacy transport.
-        # When a single (non-list) value is passed positionally, it is treated as the
-        # deprecated single-transport argument so old call sites still work:
-        #   Swarm(peer_id, ps, upgrader, transport, retry_config, conn_config)
-        transports: list[ITransport] | ITransport | None = None,
+        transports: list[ITransport] | None = None,
         retry_config: RetryConfig | None = None,
         connection_config: ConnectionConfig | QUICTransportConfig | None = None,
         psk: str | None = None,
-        # Deprecated keyword-only single-transport arg for explicit callers.
         *,
-        transport: ITransport | None = None,
         # Optional pre-built TransportManager (e.g. with a PortDemultiplexer attached
         # for shared-port TCP+WS demultiplexing).  When supplied, it is used as-is
         # and transports are appended to it; when omitted a fresh one is created.
@@ -160,33 +153,12 @@ class Swarm(Service, INetworkService):
         # Swarm(peer_id, ps, upgrader, Mock())) will land in `transports`.
         # Detect this by checking whether `transports` is actually a list.
         if isinstance(transports, list):
-            # New API: explicit list of transports.
             self.transport_manager.add_transports(transports)
         elif transports is not None:
-            # Single-transport positional arg (deprecated but still supported).
-            import warnings
-
-            warnings.warn(
-                "Passing a single transport as the 4th positional argument to "
-                "Swarm() is deprecated; use Swarm(transports=[...]) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
             self.transport_manager.add_transport(transports)
-        elif transport is not None:
-            import warnings
-
-            warnings.warn(
-                "Swarm(transport=...) is deprecated; "
-                "use Swarm(transports=[...]) instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            self.transport_manager.add_transport(transport)
         else:
             raise ValueError(
-                "At least one transport must be provided. "
-                "Use Swarm(transports=[...]) or Swarm(transport=...)."
+                "At least one transport must be provided. Use Swarm(transports=[...])."
             )
 
         # Enhanced: Initialize retry and connection configuration
@@ -212,47 +184,6 @@ class Swarm(Service, INetworkService):
 
         # Initialize connection management components
         self._init_connection_management()
-
-    # ── Backward-compatibility shim ──────────────────────────────────────────
-
-    @property
-    def transport(self) -> ITransport:
-        """
-        Deprecated single-transport accessor.
-
-        Returns the first registered transport for backward compatibility.
-        New code should use :attr:`transport_manager` instead.
-        """
-        import warnings
-
-        warnings.warn(
-            "swarm.transport is deprecated; use swarm.transport_manager instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        ts = self.transport_manager.get_transports()
-        if not ts:
-            raise AttributeError("No transports registered in transport_manager")
-        return ts[0]
-
-    @transport.setter
-    def transport(self, value: ITransport) -> None:
-        """
-        Deprecated single-transport setter.
-
-        Replaces all registered transports with the provided one.
-        New code should use :meth:`transport_manager.add_transport` instead.
-        """
-        import warnings
-
-        warnings.warn(
-            "Setting swarm.transport is deprecated; "
-            "use swarm.transport_manager.add_transport() instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.transport_manager._transports.clear()
-        self.transport_manager.add_transport(value)
 
     def _init_connection_management(self) -> None:
         """
@@ -314,15 +245,6 @@ class Swarm(Service, INetworkService):
             # special-cases — the TransportManager delegates generically.
             self.transport_manager.set_background_nursery(nursery)
             self.transport_manager.set_swarm(self)
-            # Set background nursery BEFORE setting the event
-            # This ensures transports have the nursery when they check
-            if hasattr(self.transport, "set_swarm"):
-                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
-                self.transport.set_swarm(self)  # type: ignore[attr-defined]
-            elif hasattr(self.transport, "set_background_nursery"):
-                # WebSocket transport also needs background nursery
-                # for connection management
-                self.transport.set_background_nursery(nursery)  # type: ignore[attr-defined]
 
             # Signal that the background nursery is available.
             self.event_background_nursery_created.set()
@@ -818,13 +740,6 @@ class Swarm(Service, INetworkService):
                 "Skipping upgrade: connection is already multiplexed (transport=%s)",
                 type(transport).__name__,
             )
-        if getattr(self.transport, "provides_native_muxing", False) and isinstance(
-            raw_conn, IMuxedConn
-        ):
-            logger.info(
-                "Skipping upgrade for native-mux transport "
-                "(connection already multiplexed)"
-            )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
                 return swarm_conn
@@ -1108,10 +1023,7 @@ class Swarm(Service, INetworkService):
     ) -> INetStream:
         """Try to open a stream on *connection*, falling back to alternatives."""
         try:
-            if (
-                getattr(self.transport, "provides_native_muxing", False)
-                and connection is not None
-            ):
+            if connection is not None:
                 conn = cast("SwarmConn", connection)
                 stream = await conn.new_stream()
             else:
@@ -1366,7 +1278,9 @@ class Swarm(Service, INetworkService):
                         return
 
                 # No need to upgrade native-mux connections (QUIC, WebRTC)
-                if getattr(self.transport, "provides_native_muxing", False):
+                if isinstance(read_write_closer, IMuxedConn):
+                    # For natively muxed transports, the raw connection
+                    # IS the muxed connection
                     try:
                         muxed_conn = cast(IMuxedConn, read_write_closer)
                         await self.add_conn(muxed_conn, direction="inbound")
@@ -1720,13 +1634,8 @@ class Swarm(Service, INetworkService):
                         )
                 self.listeners.clear()
 
-            # Close the transport if it exists and has a close method
-            if hasattr(self, "transport") and self.transport is not None:
-                # Check if transport has close method before calling it
-                if hasattr(self.transport, "close"):
-                    await self.transport.close()  # type: ignore
-                # Ignoring the type above since `transport` may not have a close method
-                # and we have already checked it with hasattr
+            # Close all transports
+            await self.transport_manager.close_all()
 
         logger.debug("swarm successfully closed")
 

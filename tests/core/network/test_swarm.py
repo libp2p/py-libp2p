@@ -257,14 +257,14 @@ async def test_swarm_multiaddr(security_protocol):
 def test_new_swarm_defaults_to_tcp():
     swarm = new_swarm()
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_tcp_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/tcp/9999")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, TCP)
+    assert isinstance(swarm.transport_manager.get_transports()[0], TCP)
 
 
 def test_new_swarm_quic_multiaddr_supported():
@@ -273,7 +273,7 @@ def test_new_swarm_quic_multiaddr_supported():
     addr = Multiaddr("/ip4/127.0.0.1/udp/9999/quic")
     swarm = new_swarm(listen_addrs=[addr])
     assert isinstance(swarm, Swarm)
-    assert isinstance(swarm.transport, QUICTransport)
+    assert isinstance(swarm.transport_manager.get_transports()[0], QUICTransport)
 
 
 def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
@@ -291,8 +291,9 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_autotls=True,
     )
     assert isinstance(swarm_direct, Swarm)
-    assert isinstance(swarm_direct.transport, _FakeQUICTransport)
-    assert swarm_direct.transport.enable_autotls is True
+    transport1 = swarm_direct.transport_manager.get_transports()[0]
+    assert isinstance(transport1, _FakeQUICTransport)
+    assert transport1.enable_autotls is True
 
     # Path 2: registry-based creation should receive enable_autotls in kwargs.
     registry_calls = []
@@ -317,8 +318,9 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
     )
     assert registry_calls[0]["enable_autotls"] is True
     assert isinstance(swarm_registry, Swarm)
-    assert isinstance(swarm_registry.transport, _FakeQUICTransport)
-    assert swarm_registry.transport.enable_autotls is True
+    transport2 = swarm_registry.transport_manager.get_transports()[0]
+    assert isinstance(transport2, _FakeQUICTransport)
+    assert transport2.enable_autotls is True
 
     # Path 3: forced-QUIC fallback when enable_quic=True but registry gives non-QUIC.
     monkeypatch.setattr(libp2p_module, "QUICTransport", original_quic_transport)
@@ -339,8 +341,9 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
         enable_autotls=True,
     )
     assert isinstance(swarm_forced, Swarm)
-    assert isinstance(swarm_forced.transport, _FakeQUICTransport)
-    assert swarm_forced.transport.enable_autotls is True
+    transport3 = swarm_forced.transport_manager.get_transports()[0]
+    assert isinstance(transport3, _FakeQUICTransport)
+    assert transport3.enable_autotls is True
 
 
 def test_new_swarm_defaults_to_ed25519():

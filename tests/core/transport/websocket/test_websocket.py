@@ -54,7 +54,7 @@ async def make_host(
 
     # Transport + Swarm + Host
     transport = WebsocketTransport(upgrader)
-    swarm = Swarm(peer_id, peer_store, upgrader, transport)
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
     host = BasicHost(swarm)
 
     # Optionally run/listen

@@ -616,7 +616,8 @@ async def test_trio_service_with_try_finally_cleanup_with_shielded_await():
                 ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope() as scope:
+                    scope.shield = True
                     await trio.lowlevel.checkpoint()
                 self.cleanup_up = True
 
