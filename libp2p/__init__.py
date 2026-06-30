@@ -113,10 +113,7 @@ from libp2p.transport.tcp.tcp import (
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
-from libp2p.transport.transport_registry import (
-    create_transport_for_multiaddr,
-    get_supported_transport_protocols,
-)
+
 import libp2p.utils
 from libp2p.utils.logging import (
     setup_logging,
@@ -330,48 +327,51 @@ def _build_transports_for_swarm(
     result: list[ITransport] = []
 
     if listen_addrs:
-        # Use the transport registry to create transports for each address type,
-        # matching the original new_swarm() behavior so monkeypatching the registry
-        # in tests still works correctly.
-        # NOTE: import the module (not the function) so tests can monkeypatch
-        # `transport_registry.create_transport_for_multiaddr` and have it respected.
-        from libp2p.transport import transport_registry as _tr
-
-        # Build a temporary upgrader for registry lookup (the real upgrader is wired
-        # in after the Swarm is created; the registry uses it mainly for WebSocket).
-        from libp2p.transport.upgrader import TransportUpgrader as _TU
-
-        temp_upgrader = _TU(
-            secure_transports_by_protocol={},
-            muxer_transports_by_protocol={},
-        )
-
         seen_classes: set[type] = set()
         for addr in listen_addrs:
-            transport_obj = _tr.create_transport_for_multiaddr(
-                addr,
-                temp_upgrader,
-                private_key=key_pair.private_key,
-                config=quic_config,
-                enable_autotls=enable_autotls,
-                tls_client_config=tls_client_config,
-                tls_server_config=tls_server_config,
-            )
+            protocols = [p.name for p in addr.protocols()]
+            transport_obj: ITransport | None = None
+
+            if "tcp" in protocols and "ws" not in protocols and "wss" not in protocols:
+                transport_obj = TCP()
+            elif "quic" in protocols or "quic-v1" in protocols:
+                if key_pair is None:
+                    logger.warning("QUIC transport requires key_pair (private_key)")
+                    continue
+                transport_obj = _QUICTransport(
+                    key_pair.private_key,
+                    config=quic_config,
+                    enable_autotls=enable_autotls,
+                )
+            elif "ws" in protocols or "wss" in protocols:
+                from libp2p.transport.websocket.transport import WebsocketTransport
+
+                transport_obj = WebsocketTransport(
+                    upgrader,
+                    tls_client_config=tls_client_config,
+                    tls_server_config=tls_server_config,
+                )
+            elif "webrtc-direct" in protocols:
+                from libp2p.transport.webrtc.transport import WebRTCDirectTransport
+
+                if key_pair is None:
+                    logger.warning("WebRTC transport requires key_pair (private_key)")
+                    continue
+                transport_obj = WebRTCDirectTransport(private_key=key_pair.private_key)
+            elif "webrtc" in protocols:
+                from libp2p.transport.webrtc.private_transport import WebRTCPrivateTransport
+
+                if key_pair is None:
+                    logger.warning("WebRTC transport requires key_pair (private_key)")
+                    continue
+                transport_obj = WebRTCPrivateTransport(private_key=key_pair.private_key)
+
             if transport_obj is None:
                 continue
 
             cls = type(transport_obj)
             if cls not in seen_classes:
                 seen_classes.add(cls)
-                # For WebSocket, re-create with the real upgrader so the transport
-                # gets the actual security/muxer config.
-                from libp2p.transport.websocket.transport import WebsocketTransport
-                if isinstance(transport_obj, WebsocketTransport):
-                    transport_obj = WebsocketTransport(
-                        upgrader,
-                        tls_client_config=tls_client_config,
-                        tls_server_config=tls_server_config,
-                    )
                 result.append(transport_obj)
 
         # If enable_quic=True is requested but no QUIC was detected in listen_addrs,

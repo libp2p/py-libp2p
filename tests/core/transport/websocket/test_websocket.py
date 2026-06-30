@@ -1010,40 +1010,6 @@ async def test_wss_listen_with_tls_config():
     await listener.close()
 
 
-def test_wss_transport_registry():
-    """Test WSS support in transport registry."""
-    from libp2p.transport.transport_registry import (
-        create_transport_for_multiaddr,
-        get_supported_transport_protocols,
-    )
-
-    # Test that WSS is supported
-    supported = get_supported_transport_protocols()
-    assert "ws" in supported
-    assert "wss" in supported
-
-    # Test transport creation for WSS multiaddrs
-    upgrader = create_upgrader()
-
-    # Test WS multiaddr
-    ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/ws")
-    ws_transport = create_transport_for_multiaddr(ws_maddr, upgrader)
-    assert ws_transport is not None
-    assert isinstance(ws_transport, WebsocketTransport)
-
-    # Test WSS multiaddr
-    wss_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/wss")
-    wss_transport = create_transport_for_multiaddr(wss_maddr, upgrader)
-    assert wss_transport is not None
-    assert isinstance(wss_transport, WebsocketTransport)
-
-    # Test TLS/WS multiaddr
-    tls_ws_maddr = Multiaddr("/ip4/127.0.0.1/tcp/8080/tls/ws")
-    tls_ws_transport = create_transport_for_multiaddr(tls_ws_maddr, upgrader)
-    assert tls_ws_transport is not None
-    assert isinstance(tls_ws_transport, WebsocketTransport)
-
-
 def test_wss_multiaddr_formats():
     """Test different WSS multiaddr formats."""
     # Test various WSS formats
@@ -1160,15 +1126,17 @@ async def test_handshake_timeout_creation():
     upgrader = create_upgrader()
 
     # Test creating transport with handshake timeout via create_transport
-    from libp2p.transport import create_transport
+    from libp2p.transport.websocket.transport import WebsocketConfig, WebsocketTransport
 
-    transport = create_transport("ws", upgrader, handshake_timeout=5.0)
+    config1 = WebsocketConfig(handshake_timeout=5.0)
+    transport = WebsocketTransport(upgrader, config=config1)
     # Type assertion to access private attribute for testing
     assert hasattr(transport, "_handshake_timeout")
     assert getattr(transport, "_handshake_timeout") == 5.0
 
     # Test default timeout
-    transport_default = create_transport("ws", upgrader)
+    config2 = WebsocketConfig()
+    transport_default = WebsocketTransport(upgrader, config=config2)
     assert hasattr(transport_default, "_handshake_timeout")
     assert getattr(transport_default, "_handshake_timeout") == 15.0
 

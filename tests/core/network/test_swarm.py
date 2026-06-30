@@ -278,10 +278,8 @@ def test_new_swarm_quic_multiaddr_supported():
 
 def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
     import libp2p as libp2p_module
-    from libp2p.transport import transport_registry
 
     key_pair = generate_new_ed25519_identity()
-    original_quic_transport = libp2p_module.QUICTransport
 
     # Path 1: direct QUIC creation when listen_addrs is None and enable_quic=True.
     monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
@@ -295,45 +293,18 @@ def test_new_swarm_quic_paths_propagate_enable_autotls(monkeypatch):
     assert isinstance(transport1, _FakeQUICTransport)
     assert transport1.enable_autotls is True
 
-    # Path 2: registry-based creation should receive enable_autotls in kwargs.
-    registry_calls = []
-
-    def fake_create_transport_for_multiaddr(maddr, upgrader, **kwargs):
-        registry_calls.append(kwargs)
-        return _FakeQUICTransport(
-            kwargs["private_key"],
-            config=kwargs.get("config"),
-            enable_autotls=kwargs.get("enable_autotls", False),
-        )
-
-    monkeypatch.setattr(
-        transport_registry,
-        "create_transport_for_multiaddr",
-        fake_create_transport_for_multiaddr,
-    )
+    # Path 2: list_addrs based creation should receive enable_autotls in kwargs.
     swarm_registry = new_swarm(
         key_pair=key_pair,
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/udp/9999/quic")],
         enable_autotls=True,
     )
-    assert registry_calls[0]["enable_autotls"] is True
     assert isinstance(swarm_registry, Swarm)
     transport2 = swarm_registry.transport_manager.get_transports()[0]
     assert isinstance(transport2, _FakeQUICTransport)
     assert transport2.enable_autotls is True
 
-    # Path 3: forced-QUIC fallback when enable_quic=True but registry gives non-QUIC.
-    monkeypatch.setattr(libp2p_module, "QUICTransport", original_quic_transport)
-
-    def fake_create_transport_for_multiaddr_non_quic(maddr, upgrader, **kwargs):
-        return TCP()
-
-    monkeypatch.setattr(
-        transport_registry,
-        "create_transport_for_multiaddr",
-        fake_create_transport_for_multiaddr_non_quic,
-    )
-    monkeypatch.setattr(libp2p_module, "QUICTransport", _FakeQUICTransport)
+    # Path 3: forced-QUIC fallback when enable_quic=True but no QUIC addr provided.
     swarm_forced = new_swarm(
         key_pair=key_pair,
         listen_addrs=[Multiaddr("/ip4/127.0.0.1/tcp/9999")],
