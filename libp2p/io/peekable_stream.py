@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import socket
-from typing import TYPE_CHECKING
 
 import trio
-
-if TYPE_CHECKING:
-    pass
 
 
 class PeekableStream(trio.abc.Stream):
