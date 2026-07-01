@@ -157,7 +157,7 @@ class TransportManager:
             ):
                 continue
             _can_dial = getattr(transport, "can_dial", None)
-            if _can_dial is None or _can_dial(maddr):
+            if _can_dial is not None and _can_dial(maddr):
                 logger.debug(
                     "TransportManager.transport_for_dialing: %s => %s",
                     maddr,
@@ -196,7 +196,7 @@ class TransportManager:
             ):
                 continue
             _can_listen = getattr(transport, "can_listen", None)
-            if _can_listen is None or _can_listen(maddr):
+            if _can_listen is not None and _can_listen(maddr):
                 logger.debug(
                     "TransportManager.transport_for_listening: %s => %s",
                     maddr,
@@ -342,12 +342,12 @@ class TransportManager:
                         exc_info=True,
                     )
 
-            if conn_type in port_demux._send_channels:
+            if port_demux.has_listener(conn_type):
                 logger.debug(
                     "PortDemultiplexer already has a listener for %s; reusing",
                     conn_type.name,
                 )
-                return port_demux._listeners.get(conn_type)
+                return port_demux.get_listener(conn_type)
 
             return port_demux.demultiplexed_listen(
                 maddr, conn_type, conn_handler=ws_wrapped_handler
@@ -368,12 +368,12 @@ class TransportManager:
             # Check whether this conn_type is already registered — return the
             # existing DemultiplexedListener so the swarm can call listen() on it
             # and notify listeners without error.
-            if conn_type in port_demux._send_channels:
+            if port_demux.has_listener(conn_type):
                 logger.debug(
                     "PortDemultiplexer already has a listener for %s; reusing",
                     conn_type.name,
                 )
-                return port_demux._listeners.get(conn_type)
+                return port_demux.get_listener(conn_type)
 
             # Register and wire the handler in one step.
             return port_demux.demultiplexed_listen(

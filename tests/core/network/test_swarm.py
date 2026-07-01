@@ -47,6 +47,31 @@ class _FakeQUICTransport:
         self.enable_autotls = enable_autotls
 
 
+def test_swarm_legacy_keyword_raises_typeerror():
+    from unittest.mock import Mock
+
+    with pytest.raises(TypeError, match="no longer accepts 'transport='"):
+        Swarm(Mock(), Mock(), Mock(), transport=Mock())
+
+
+def test_swarm_positional_backward_compatibility():
+    from unittest.mock import Mock
+
+    peer_id = Mock()
+    peerstore = Mock()
+    upgrader = Mock()
+
+    # Passing a single transport positionally should be wrapped in a list internally
+    # and added to the transport manager.
+    transport = Mock()
+    swarm1 = Swarm(peer_id, peerstore, upgrader, transport)
+    assert len(swarm1.transport_manager.get_transports()) == 1
+
+    # Passing a list of transports positionally
+    swarm2 = Swarm(peer_id, peerstore, upgrader, [transport])
+    assert len(swarm2.transport_manager.get_transports()) == 1
+
+
 @pytest.mark.trio
 async def test_swarm_dial_peer(security_protocol):
     async with SwarmFactory.create_batch_and_listen(

@@ -1,6 +1,14 @@
 examples.multi\_transport package
 =================================
 
+Migration Guide
+---------------
+The `libp2p.transport.transport_registry` module has been removed, and `Swarm` no longer accepts the `transport=` keyword argument.
+
+To migrate to the new `TransportManager` architecture:
+- Pass a list of transports to `new_swarm` or `new_host` using the `transports=[...]` keyword argument.
+- If `transports` is omitted, the swarm will automatically detect and create transports based on the provided `listen_addrs`.
+
 Submodules
 ----------
 

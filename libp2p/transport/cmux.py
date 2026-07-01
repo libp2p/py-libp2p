@@ -173,16 +173,18 @@ class DemultiplexedListener(IListener):
                         async with self._recv:
                             async for stream in self._recv:
                                 nursery.start_soon(self._run_handler, handler, stream)
+            except (trio.Cancelled, KeyboardInterrupt):
+                raise
             except Exception:
-                pass
-            except BaseException:
                 pass
 
         nursery = getattr(self, "background_nursery", None)
         if nursery is not None:
             nursery.start_soon(_drain)
         else:
-            trio.lowlevel.spawn_system_task(_drain)
+            raise RuntimeError(
+                "DemultiplexedListener.listen requires a background_nursery to be set."
+            )
 
     async def _run_handler(
         self,
@@ -262,6 +264,16 @@ class PortDemultiplexer(IListener):
         self._stopped: trio.Event = trio.Event()
         self._closed: bool = False
         self._start_error: BaseException | None = None
+
+    def has_listener(self, conn_type: DemultiplexedConnType) -> bool:
+        """Return True if a listener is registered for this conn_type."""
+        return conn_type in self._send_channels
+
+    def get_listener(
+        self, conn_type: DemultiplexedConnType
+    ) -> DemultiplexedListener | None:
+        """Return the listener registered for this conn_type, or None."""
+        return self._listeners.get(conn_type)
 
     # ------------------------------------------------------------------
     # Public API – mirrors go-libp2p PortDemultiplexer.DemultiplexedListen()

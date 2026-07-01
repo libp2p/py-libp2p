@@ -2,5 +2,4 @@ Add multi-transport support to ``Swarm``, ``new_swarm``, and ``new_host``.
 A node can now listen and dial over TCP, WebSocket, and QUIC simultaneously,
 matching go-libp2p's ``TransportManager`` architecture.  Pass an explicit
 ``transports=[...]`` list to ``new_swarm`` / ``new_host``, or let transports
-be auto-detected from ``listen_addrs``.  The legacy single-transport
-``transport=`` keyword still works but emits a ``DeprecationWarning``.
+be auto-detected from ``listen_addrs``.
