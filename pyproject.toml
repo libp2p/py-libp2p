@@ -322,6 +322,7 @@ project_excludes = [
     "**/.project-template/**",
     "**/docs/conf.py",
     "**/*pb2.py",
+    "**/*pb2_grpc.py",
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",

@@ -411,7 +411,7 @@ class QUICTransport(ITransport):
         """
         return is_quic_multiaddr(maddr)
 
-    def protocols(self) -> list[TProtocol]:
+    def protocols(self) -> list[str]:
         """
         Get supported protocol identifiers.
 
@@ -419,10 +419,24 @@ class QUICTransport(ITransport):
             List of supported protocol strings
 
         """
-        protocols = [QUIC_V1_PROTOCOL]
+        protocols: list[str] = [str(QUIC_V1_PROTOCOL)]
         if self._config.enable_draft29:
-            protocols.append(QUIC_DRAFT29_PROTOCOL)
+            protocols.append(str(QUIC_DRAFT29_PROTOCOL))
         return protocols
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """
+        Get supported protocol identifiers.
+        Return True if this QUIC transport can listen on the given multiaddr.
+
+        Args:
+            maddr: Multiaddr to check.
+
+        Returns:
+            True if the multiaddr contains a QUIC protocol component.
+
+        """
+        return is_quic_multiaddr(maddr)
 
     def listen_order(self) -> int:
         """
