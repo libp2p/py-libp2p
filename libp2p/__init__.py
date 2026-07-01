@@ -284,6 +284,7 @@ def _build_transports_for_swarm(
     listen_addrs: Sequence[multiaddr.Multiaddr] | None,
     transports: Sequence[ITransport] | None,
     enable_quic: bool,
+    enable_webrtc: bool,
     enable_tcp: bool,
     enable_websocket: bool,
     enable_autotls: bool,
@@ -308,6 +309,7 @@ def _build_transports_for_swarm(
     :param listen_addrs: The multiaddrs the host will listen on.
     :param transports: Explicit transport list, or ``None`` to auto-build.
     :param enable_quic: Whether to create a QUIC transport when auto-building.
+    :param enable_webrtc: Whether to create a WebRTC transport when auto-building.
     :param enable_tcp: Whether to include a TCP transport when auto-building.
     :param enable_websocket: Whether to include a WebSocket transport.
     :param enable_autotls: Whether to enable AutoTLS in QUIC/WebSocket transports.
@@ -398,6 +400,7 @@ def _build_transports_for_swarm(
             )
         if enable_websocket:
             from libp2p.transport.websocket.transport import WebsocketTransport
+
             result.append(
                 WebsocketTransport(
                     upgrader,
@@ -405,6 +408,13 @@ def _build_transports_for_swarm(
                     tls_server_config=tls_server_config,
                 )
             )
+        if enable_webrtc:
+            from libp2p.transport.webrtc.transport import WebRTCDirectTransport
+
+            if key_pair is None:
+                logger.warning("WebRTC transport requires key_pair (private_key)")
+            else:
+                result.append(WebRTCDirectTransport(private_key=key_pair.private_key))
         if enable_tcp or not result:
             result.append(TCP())
 
@@ -560,6 +570,7 @@ def new_swarm(
         listen_addrs=listen_addrs,
         transports=transports,
         enable_quic=enable_quic,
+        enable_webrtc=enable_webrtc,
         enable_tcp=enable_tcp,
         enable_websocket=enable_websocket,
         enable_autotls=enable_autotls,
