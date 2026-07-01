@@ -16,7 +16,6 @@ import logging
 from pathlib import Path
 import sys
 
-
 # Ensure local libp2p is used
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
