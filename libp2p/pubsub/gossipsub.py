@@ -53,6 +53,15 @@ from .extensions import (
     PeerExtensions,
     TopicObservationState,
 )
+from .segmentation import (
+    DEFAULT_MAX_MESSAGE_SIZE,
+    DEFAULT_SEGMENT_SIZE,
+    DEFAULT_REASSEMBLY_TIMEOUT,
+    ReassemblyBuffer,
+    compute_message_id,
+    segment_message,
+    should_segment,
+)
 from .mcache import (
     MessageCache,
 )
@@ -193,6 +202,13 @@ class GossipSub(IPubsubRouter, Service):
         my_extensions: PeerExtensions | None = None,
         max_pending_messages_per_peer: int = 100,
         pending_messages_ttl: float = 30.0,
+        # --- Large Message Segmentation (experimental) ---
+        # Messages whose serialized size exceeds *max_msg_size* are automatically
+        # split into segments of *segment_size* bytes and reassembled on the
+        # receiving side.  Set to 0 to disable segmentation entirely.
+        max_msg_size: int = DEFAULT_MAX_MESSAGE_SIZE,
+        segment_size: int = DEFAULT_SEGMENT_SIZE,
+        reassembly_timeout: float = DEFAULT_REASSEMBLY_TIMEOUT,
     ) -> None:
         self.protocols = list(protocols)
         self.pubsub = None
@@ -257,6 +273,15 @@ class GossipSub(IPubsubRouter, Service):
         # Tracks observers (inbound) and topics we are observing (outbound).
         self.topic_observation = TopicObservationState()
 
+        # --- Large Message Segmentation ----------------------------------
+        self.max_msg_size = max_msg_size
+        self.segment_size = segment_size
+        self.reassembly_timeout = reassembly_timeout
+        self.reassembly_buffer = ReassemblyBuffer(
+            timeout=reassembly_timeout,
+            on_complete=self._on_segments_reassembled,
+        )
+
         # Gossipsub v2.0 adaptive features
         self.adaptive_gossip_enabled = adaptive_gossip_enabled
         self.network_health_score = 1.0  # Start optimistic
@@ -315,6 +340,16 @@ class GossipSub(IPubsubRouter, Service):
 
         # v1.4 adaptive gossip parameters
         self.opportunistic_graft_threshold: float = 0.5
+
+    # ------------------------------------------------------------------
+    # Large Message Segmentation: reassembly complete callback
+    # ------------------------------------------------------------------
+    async def _on_segments_reassembled(self, data: bytes) -> None:
+        msg = rpc_pb2.Message()
+        msg.ParseFromString(data)
+        from_id = ID(msg.from_id) if msg.from_id else None
+        if self.pubsub is not None and from_id is not None:
+            await self.pubsub.push_msg(from_id, msg)
 
     def supports_scoring(self, peer_id: ID) -> bool:
         """
@@ -833,6 +868,17 @@ class GossipSub(IPubsubRouter, Service):
         :param rpc: RPC message
         :param sender_peer_id: id of the peer who sent the message
         """
+        # -- Large Message Segmentation: intercept segments --------------
+        if rpc.HasField("largeMessageSegmentation"):
+            seg = rpc.largeMessageSegmentation
+            data = await self.reassembly_buffer.add_segment(seg)
+            if data is not None and self.pubsub is not None:
+                msg = rpc_pb2.Message()
+                msg.ParseFromString(data)
+                forwarder_id = ID(msg.from_id) if msg.from_id else sender_peer_id
+                await self.pubsub.push_msg(forwarder_id, msg)
+            return
+
         # Process the senderRecord if sent
         if isinstance(self.pubsub, Pubsub):
             if not maybe_consume_signed_record(rpc, self.pubsub.host, sender_peer_id):
@@ -923,17 +969,40 @@ class GossipSub(IPubsubRouter, Service):
         # a message so observers get near-real-time awareness of new messages.
         await self._notify_observers(pubsub_msg.topicIDs, msg_id)
 
+        # -- Large Message Segmentation ----------------------------------
+        pubsub_bytes = pubsub_msg.SerializeToString()
+        needs_segmentation = (
+            self.segment_size > 0
+            and len(pubsub_bytes) > self.segment_size
+        )
+        segments = []
+        if needs_segmentation:
+            from .segmentation import segment_message
+            import uuid
+            nonce = pubsub_msg.seqno or uuid.uuid4().bytes
+            topic = pubsub_msg.topicIDs[0] if pubsub_msg.topicIDs else ""
+            seg_msg_id = compute_message_id(
+                pubsub_msg.from_id, topic, nonce
+            )
+            segments = segment_message(seg_msg_id, pubsub_bytes, self.segment_size)
+
         for peer_id in peers_gen:
             if self.pubsub is None:
                 raise NoPubsubAttached
             if peer_id not in self.pubsub.peers:
                 continue
-            # Publish gate
             if self.scorer is not None and not self.scorer.allow_publish(
                 peer_id, list(pubsub_msg.topicIDs)
             ):
                 continue
-            self.send_rpc(peer_id, rpc_msg)
+
+            if needs_segmentation and self.extensions_state.both_support_large_message_segmentation(peer_id):
+                for seg in segments:
+                    seg_rpc = rpc_pb2.RPC()
+                    seg_rpc.largeMessageSegmentation.CopyFrom(seg)
+                    self.send_rpc(peer_id, seg_rpc)
+            else:
+                self.send_rpc(peer_id, rpc_msg)
 
         # Queue messages for peers whose subscriptions we haven't received yet.
         # This handles two cases:
