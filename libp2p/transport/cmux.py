@@ -127,8 +127,8 @@ class DemultiplexedListener(IListener):
         conn_type: DemultiplexedConnType,
         recv_channel: trio.MemoryReceiveChannel[PeekableStream],
         listen_maddr: Multiaddr,
-        close_callback: object,
-        conn_handler: object = None,
+        close_callback: Callable[[DemultiplexedConnType], None],
+        conn_handler: Callable[[trio.abc.Stream], Awaitable[None]] | None = None,
     ) -> None:
         self.conn_type = conn_type
         self._recv = recv_channel
@@ -271,7 +271,7 @@ class PortDemultiplexer(IListener):
         self,
         maddr: Multiaddr,
         conn_type: DemultiplexedConnType,
-        conn_handler: object = None,
+        conn_handler: Callable[[trio.abc.Stream], Awaitable[None]] | None = None,
     ) -> DemultiplexedListener:
         """
         Register a listener for *conn_type* connections on this shared port.

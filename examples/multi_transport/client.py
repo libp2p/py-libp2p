@@ -15,7 +15,7 @@ import argparse
 import logging
 from pathlib import Path
 import sys
-from time import sleep
+
 
 # Ensure local libp2p is used
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -92,7 +92,7 @@ async def run_client(
             print("\n✅  Echo verified — round-trip successful!")
         else:
             print("\n❌  Echo mismatch!")
-        sleep(30)
+        await trio.sleep(30)
 
 
 def main() -> None:
