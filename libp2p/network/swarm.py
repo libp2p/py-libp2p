@@ -135,7 +135,13 @@ class Swarm(Service, INetworkService):
         # for shared-port TCP+WS demultiplexing).  When supplied, it is used as-is
         # and transports are appended to it; when omitted a fresh one is created.
         transport_manager: TransportManager | None = None,
+        **kwargs: Any,
     ):
+        if kwargs.pop("transport", None):
+            raise TypeError("Swarm() no longer accepts 'transport='. Use transports=[...] instead.")
+        if kwargs:
+            raise TypeError(f"Swarm.__init__() got unexpected keyword arguments: {list(kwargs.keys())}")
+        
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
@@ -156,10 +162,6 @@ class Swarm(Service, INetworkService):
             self.transport_manager.add_transports(transports)
         elif transports is not None:
             self.transport_manager.add_transport(transports)
-        else:
-            raise ValueError(
-                "At least one transport must be provided. Use Swarm(transports=[...])."
-            )
 
         # Enhanced: Initialize retry and connection configuration
         self.retry_config = retry_config or RetryConfig()
