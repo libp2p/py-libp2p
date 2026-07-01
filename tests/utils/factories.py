@@ -465,7 +465,7 @@ class SwarmFactory(factory.Factory):
             o.muxer_opt,
         )
     )
-    transport = factory.LazyFunction(TCP)
+    transports = factory.LazyFunction(lambda: [TCP()])
 
     @classmethod
     @asynccontextmanager

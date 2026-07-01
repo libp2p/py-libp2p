@@ -91,6 +91,15 @@ class WebRTCPrivateTransport(ITransport):
                 await self._bridge.start()
         return self._bridge
 
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        return is_webrtc_multiaddr(maddr)
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        return is_webrtc_multiaddr(maddr)
+
+    def protocols(self) -> list[str]:
+        return ["webrtc"]
+
     async def dial(self, maddr: Multiaddr) -> WebRTCConnection:
         """
         Dial a remote peer over WebRTC via a relay.
