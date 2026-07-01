@@ -138,10 +138,15 @@ class Swarm(Service, INetworkService):
         **kwargs: Any,
     ):
         if kwargs.pop("transport", None):
-            raise TypeError("Swarm() no longer accepts 'transport='. Use transports=[...] instead.")
+            raise TypeError(
+                "Swarm() no longer accepts 'transport='. Use transports=[...] instead."
+            )
         if kwargs:
-            raise TypeError(f"Swarm.__init__() got unexpected keyword arguments: {list(kwargs.keys())}")
-        
+            keys = list(kwargs.keys())
+            raise TypeError(
+                f"Swarm.__init__() got unexpected keyword arguments: {keys}"
+            )
+
         self.self_id = peer_id
         self.peerstore = peerstore
         self.upgrader = upgrader
