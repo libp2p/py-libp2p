@@ -18,6 +18,12 @@ from libp2p.transport.webrtc.multiaddr_utils import (
 class TestIsWebrtcDirectMultiaddr:
     """Test WebRTC Direct multiaddr detection."""
 
+    def test_native_certhash_protocol_parsing(self):
+        cert = WebRTCCertificate.generate()
+        certhash = cert.fingerprint_to_multibase()
+        maddr = Multiaddr(f"/ip4/127.0.0.1/udp/9090/webrtc-direct/certhash/{certhash}")
+        assert maddr.value_for_protocol("certhash") == certhash
+
     def test_valid_ipv4_webrtc_direct(self):
         maddr = Multiaddr("/ip4/127.0.0.1/udp/9090/webrtc-direct")
         assert is_webrtc_direct_multiaddr(maddr)

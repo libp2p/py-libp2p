@@ -1,0 +1,1 @@
+Bumped ``p2pclient`` to ``>=0.3.0`` and ``multiaddr`` to ``>=0.2.0`` to enable proper WebRTC multiaddr support. WebRTC multiaddrs now use native py-multiaddr parsing.
