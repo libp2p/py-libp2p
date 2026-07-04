@@ -8,15 +8,17 @@
 Total: 28 dependencies
 
 - **aioquic** (>=1.2.0)
+- **anyio** (>=4.0)
 - **base58** (>=1.0.3)
+- **cbor2** (>=5.4.0)
 - **coincurve** (==21.0.0)
 - **exceptiongroup** (>=1.2.0) [python_version < '3.11']
 - **fastecdsa** (==2.3.2) [sys_platform != 'win32']
 - **grpcio** (>=1.41.0)
 - **httpx** (>=0.25.0)
 - **lru-dict** (>=1.1.6)
-- **miniupnpc** (>=2.3)
-- **multiaddr** (==0.0.11)
+- **miniupnpc** (>=2.3,\<3.0)
+- **multiaddr** (>=0.2.0)
 - **mypy-protobuf** (>=3.0.0)
 - **noiseprotocol** (>=0.3.0)
 - **protobuf** (>=4.25.0,\<7.0.0)
@@ -27,13 +29,15 @@ Total: 28 dependencies
 - **pycryptodome** (>=3.9.2)
 - **pynacl** (>=1.3.0)
 - **requests** (>=2.28.0)
-- **requests** (>=2.25.0)
 - **rpcudp** (>=3.0.0)
 - **trio** (>=0.26.0)
 - **trio-typing** (>=0.0.4)
 - **trio-websocket** (>=0.11.0)
 - **types-requests**
-- **types-requests**
 - **zeroconf** (>=0.147.0,\<0.148.0)
 
 ## Optional Dependencies
+
+### Webrtc (1 dependencies)
+
+- **aiortc** (>=1.5.0,\<2.0)
