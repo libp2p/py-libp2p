@@ -23,6 +23,7 @@ from libp2p.security.tls.exceptions import (
     TLSHandshakeFailure,
 )
 from libp2p.security.tls.io import TLSReadWriter
+from libp2p.security.tls.openssl_verify import install_skip_pkix_peer_verification
 import libp2p.utils
 import libp2p.utils.paths
 
@@ -135,14 +136,21 @@ class TLSTransport(ISecureTransport):
         # that are not bound to DNS names.
         ctx.check_hostname = False
 
-        # For server-side (inbound) contexts we use CERT_OPTIONAL so that the
-        # TLS engine *requests* a client certificate from the remote peer.
-        # Without a CA configured Python will not reject an absent cert at the
-        # TLS layer, but the cert IS made available via getpeercert(binary_form=True)
-        # if one is sent.  Our post-handshake logic then enforces the hard
-        # requirement.
-        # For client-side (outbound) contexts CERT_NONE is fine because the
-        # server always sends a certificate in TLS 1.3.
+        # libp2p specs/tls/tls.md Peer Authentication: peers use self-signed
+        # certificates carrying the libp2p Public Key Extension (OID
+        # 1.3.6.1.4.1.53594.1.1), not PKIX CA chains.  Go/js skip TLS-layer
+        # PKIX and verify via extension + signature (see also design
+        # considerations.md: host key is not the certificate signing key).
+        #
+        # Python's CERT_OPTIONAL triggers OpenSSL PKIX verification and rejects
+        # unknown self-signed peer certs with TLSV1_ALERT_UNKNOWN_CA before our
+        # post-handshake extension check runs.  We therefore skip PKIX at the
+        # OpenSSL layer and enforce identity in secure_inbound/secure_outbound.
+        #
+        # Server: CERT_OPTIONAL requests a client certificate; an OpenSSL verify
+        # callback (install_skip_pkix_peer_verification) accepts any presented
+        # cert so the handshake completes and get_peer_certificate() works.
+        # Client: CERT_NONE — TLS 1.3 servers always send a certificate.
         ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
 
         # Load our cached self-signed certificate bound to libp2p identity
@@ -228,7 +236,6 @@ class TLSTransport(ISecureTransport):
         # Load trusted peer certs as CA certificates if present
         # This enables mutual TLS when peers explicitly trust each other's certs
         if self._trusted_peer_certs_pem and server_side:
-            print("loading trust store")
             for i, cert_pem in enumerate(self._trusted_peer_certs_pem):
                 ca_file = tempfile.NamedTemporaryFile("w", delete=False, suffix=".pem")
                 ca_path = ca_file.name
@@ -243,10 +250,11 @@ class TLSTransport(ISecureTransport):
                             os.unlink(ca_path)
                     except (OSError, PermissionError):
                         pass
-            # Request client cert and verify against trusted CAs
-            ctx.verify_mode = ssl.CERT_OPTIONAL
             cnt = len(self._trusted_peer_certs_pem)
             logger.debug("TLS: loaded %d trusted certs", cnt)
+
+        if server_side:
+            install_skip_pkix_peer_verification(ctx)
 
         # ALPN: Set up protocol list with preferred muxers + "libp2p" fallback
         # Note: Python's ssl module doesn't support set_alpn_select_callback
@@ -544,7 +552,13 @@ class TLSTransport(ISecureTransport):
 
     def trust_peer_cert_pem(self, pem: str) -> None:
         """
-        Add a trusted peer certificate PEM.
+        Add a trusted peer certificate PEM (legacy / test-demo only).
+
+        Production interop does not require PKIX trust-store preloading: peer
+        identity is verified via the libp2p X.509 extension after the handshake.
+        Server-side contexts skip PKIX verification via
+        ``install_skip_pkix_peer_verification()``, so this method no longer
+        affects inbound verification behavior.
 
         Args:
             pem: The PEM-encoded certificate to trust

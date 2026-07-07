@@ -118,12 +118,15 @@ Dialer node:
 
 **Note for testing with self-signed certificates**
 
-When testing with self-signed certificates, peers need to trust each other's certificates.
-You can do this by calling ``trust_peer_cert_pem()`` on the TLS transport before creating the host:
+When testing with self-signed certificates in unit tests or demos, peers may call
+``trust_peer_cert_pem()`` to preload a peer cert into the OpenSSL trust store.
+Production interop does **not** require this: identity is verified via the
+libp2p X.509 extension after the handshake (same model as go-libp2p and
+js-libp2p).
 
 .. code-block:: python
 
-   # For testing: trust peer certificates
+   # Optional for tests/demos only: PKIX trust store workaround
    listener_tls.trust_peer_cert_pem(dialer_tls.get_certificate_pem())
    dialer_tls.trust_peer_cert_pem(listener_tls.get_certificate_pem())
 
@@ -161,12 +164,21 @@ Security Considerations
 Mutual authentication (inbound)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Per `libp2p specs/tls/tls.md` (Handshake Protocol + Peer Authentication):
+
+- Servers **must** require client authentication during the TLS handshake.
+- Endpoints **must** verify peer identity via the libp2p Public Key Extension
+  in a self-signed certificate (not PKIX CA trust).
+- If the remote peer sends no certificate, or extension/signature verification
+  fails, the connection **must** be aborted.
+
 Inbound TLS connections **must** present a client certificate that carries the
 libp2p X.509 extension so py-libp2p can derive and verify the remote Peer ID.
-The server-side SSL context requests a client certificate (``CERT_OPTIONAL``);
-post-handshake logic enforces the requirement. If the remote peer completes the
-TLS handshake without sending a certificate, the connection is rejected and no
-``SecureSession`` is created.
+The server requests a client certificate during the TLS handshake; post-handshake
+logic enforces the requirement via ``verify_certificate_chain()`` (validity
+window, single cert, self-signature, extension OID, host-key signature, peer ID).
+If the remote peer completes the TLS handshake without sending a certificate, the
+connection is rejected and no ``SecureSession`` is created.
 
 **AutoTLS exception:** When ``enable_autotls=True``, broker registration may
 use the primitive key-exchange side-channel or a placeholder identity instead
@@ -176,6 +188,15 @@ AutoTLS bootstrap flow and is not reachable on a standard node.
 - Never disable certificate verification in production.
 - Use TLS 1.3 or later.
 - Pin certificates for critical peers.
+
+Platform requirements
+~~~~~~~~~~~~~~~~~~~~~
+
+- **CPython 3.10+** is required for the TLS transport. Inbound server contexts
+  use ctypes to access the underlying OpenSSL ``SSL_CTX`` handle; this is not
+  supported on PyPy or other non-CPython runtimes.
+- The ``libssl`` shared library loaded via ctypes must match the OpenSSL
+  version linked to CPython's ``_ssl`` module.
 
 Troubleshooting
 ---------------
@@ -187,9 +208,12 @@ Troubleshooting
    * - Problem
      - Cause
      - Solution
-   * - Certificate not trusted
-     - Self-signed without trust store entry
-     - Add cert to local trust store or disable verification **only** in testing.
+   * - Certificate verification failed
+     - Missing libp2p extension, invalid signature, or expired cert
+     - Ensure peers use libp2p TLS identity certificates; check system clock.
+   * - ``TLSV1_ALERT_UNKNOWN_CA``
+     - Legacy PKIX rejection of self-signed libp2p certs (fixed in recent releases)
+     - Upgrade to a release with libp2p extension verification; no PKIX trust store needed.
    * - Protocol negotiation failed
      - One peer does not support `/tls/1.0.0`
      - Enable TLS on both peers or use Noise.
