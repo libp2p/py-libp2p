@@ -164,11 +164,20 @@ Security Considerations
 Mutual authentication (inbound)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Per `libp2p specs/tls/tls.md` (Handshake Protocol + Peer Authentication):
+
+- Servers **must** require client authentication during the TLS handshake.
+- Endpoints **must** verify peer identity via the libp2p Public Key Extension
+  in a self-signed certificate (not PKIX CA trust).
+- If the remote peer sends no certificate, or extension/signature verification
+  fails, the connection **must** be aborted.
+
 Inbound TLS connections **must** present a client certificate that carries the
 libp2p X.509 extension so py-libp2p can derive and verify the remote Peer ID.
 The server requests a client certificate during the TLS handshake; post-handshake
-logic enforces the requirement via the libp2p extension (not PKIX CA trust). If
-the remote peer completes the TLS handshake without sending a certificate, the
+logic enforces the requirement via ``verify_certificate_chain()`` (validity
+window, single cert, self-signature, extension OID, host-key signature, peer ID).
+If the remote peer completes the TLS handshake without sending a certificate, the
 connection is rejected and no ``SecureSession`` is created.
 
 **AutoTLS exception:** When ``enable_autotls=True``, broker registration may

@@ -136,10 +136,11 @@ class TLSTransport(ISecureTransport):
         # that are not bound to DNS names.
         ctx.check_hostname = False
 
-        # libp2p peers use self-signed identity certificates verified via the
-        # libp2p X.509 extension, not PKIX CA chains (see go-libp2p
-        # InsecureSkipVerify + VerifyPeerCertificate, js-libp2p
-        # rejectUnauthorized=false + verifyPeerCertificate).
+        # libp2p specs/tls/tls.md Peer Authentication: peers use self-signed
+        # certificates carrying the libp2p Public Key Extension (OID
+        # 1.3.6.1.4.1.53594.1.1), not PKIX CA chains.  Go/js skip TLS-layer
+        # PKIX and verify via extension + signature (see also design
+        # considerations.md: host key is not the certificate signing key).
         #
         # Python's CERT_OPTIONAL triggers OpenSSL PKIX verification and rejects
         # unknown self-signed peer certs with TLSV1_ALERT_UNKNOWN_CA before our
