@@ -436,7 +436,12 @@ class PingTest:
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+        for proto in ("ip4", "ip6"):
+            try:
+                return addr.value_for_protocol(proto)
+            except multiaddr.exceptions.ProtocolLookupError:
+                continue
+        return None
 
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         """Get protocol names from multiaddr."""
