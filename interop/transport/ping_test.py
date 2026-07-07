@@ -60,6 +60,7 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 _orig_mk_identify_protobuf = _identify_mod._mk_identify_protobuf
 
@@ -436,12 +437,7 @@ class PingTest:
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        for proto in ("ip4", "ip6"):
-            try:
-                return addr.value_for_protocol(proto)
-            except multiaddr.exceptions.ProtocolLookupError:
-                continue
-        return None
+        return extract_ip_from_multiaddr(addr)
 
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         """Get protocol names from multiaddr."""

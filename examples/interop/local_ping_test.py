@@ -35,6 +35,7 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -174,14 +175,9 @@ class PingTest:
         else:
             raise ValueError(f"Unsupported muxer: {self.muxer}")
 
-    def _get_ip_value(self, addr) -> str | None:
+    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        for proto in ("ip4", "ip6"):
-            try:
-                return addr.value_for_protocol(proto)
-            except multiaddr.exceptions.ProtocolLookupError:
-                continue
-        return None
+        return extract_ip_from_multiaddr(addr)
 
     def _get_protocol_names(self, addr) -> list:
         """Get protocol names from multiaddr."""
