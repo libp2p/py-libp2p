@@ -45,7 +45,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio-websocket>=0.11.0",
     "trio>=0.26.0",
-    "zeroconf (>=0.147.0,<0.148.0)",
+    "zeroconf>=0.149.16,<0.151.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
