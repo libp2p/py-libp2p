@@ -6,7 +6,11 @@ import trio
 from libp2p import generate_new_rsa_identity
 from libp2p.peer.id import ID
 from libp2p.security.exceptions import HandshakeFailure
-from libp2p.security.tls.exceptions import TLSHandshakeFailure
+from libp2p.security.tls import certificate as certmod
+from libp2p.security.tls.exceptions import (
+    MissingLibp2pExtensionError,
+    TLSHandshakeFailure,
+)
 from libp2p.security.tls.transport import TLSTransport
 from libp2p.transport.exceptions import SecurityUpgradeFailure
 from libp2p.transport.upgrader import TransportUpgrader
@@ -27,6 +31,14 @@ def _mock_tls_reader_writer_no_cert() -> MagicMock:
     mock_rw = MagicMock()
     mock_rw.handshake = AsyncMock()
     mock_rw.get_peer_certificate.return_value = None
+    return mock_rw
+
+
+def _mock_tls_reader_writer_invalid_cert() -> MagicMock:
+    mock_rw = MagicMock()
+    mock_rw.handshake = AsyncMock()
+    _, invalid_cert = certmod.generate_self_signed_cert()
+    mock_rw.get_peer_certificate.return_value = invalid_cert
     return mock_rw
 
 
@@ -105,15 +117,37 @@ async def test_tls_handshake_without_trust_store(nursery) -> None:
 
 
 @pytest.mark.trio
+async def test_tls_handshake_rejects_invalid_cert_without_trust_store() -> None:
+    """PKIX skip must not weaken libp2p extension verification."""
+    keypair = generate_new_rsa_identity()
+    transport = TLSTransport(keypair, enable_autotls=False)
+    mock_conn = MagicMock()
+    mock_rw = _mock_tls_reader_writer_invalid_cert()
+
+    with (
+        patch("libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw),
+        pytest.raises(MissingLibp2pExtensionError),
+    ):
+        await transport.secure_inbound(mock_conn)
+
+    mock_rw_out = _mock_tls_reader_writer_invalid_cert()
+    mock_rw_out.remote_primitive_pk = None
+    mock_rw_out.remote_primitive_peerid = None
+
+    with (
+        patch("libp2p.security.tls.transport.TLSReadWriter", return_value=mock_rw_out),
+        pytest.raises(MissingLibp2pExtensionError),
+    ):
+        await transport.secure_outbound(mock_conn, transport.local_peer)
+
+
+@pytest.mark.trio
 async def test_tls_basic_handshake(nursery):
     keypair_a = generate_new_rsa_identity()
     keypair_b = generate_new_rsa_identity()
 
     t_a = TLSTransport(keypair_a)
     t_b = TLSTransport(keypair_b)
-    # Trust each other's certs during tests to avoid system verify failure
-    t_a.trust_peer_cert_pem(t_b.get_certificate_pem())
-    t_b.trust_peer_cert_pem(t_a.get_certificate_pem())
 
     async with tls_conn_factory(
         nursery, client_transport=t_a, server_transport=t_b

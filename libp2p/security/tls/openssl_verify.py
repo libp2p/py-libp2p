@@ -12,6 +12,18 @@ at the OpenSSL layer via a verify callback that always accepts.
 
 See libp2p specs/tls/tls.md Peer Authentication: identity is carried in a
 self-signed certificate with the libp2p Public Key Extension, not PKIX CA trust.
+
+Platform requirements
+---------------------
+- **CPython only.** ``_ssl_ctx_ptr()`` reads the undocumented ``PySSLContext``
+  struct layout via ``id(context) + offset``. This is unsupported on PyPy,
+  GraalPython, and other non-CPython runtimes.
+- **libssl coupling.** ctypes must load the same OpenSSL shared library that
+  CPython's ``_ssl`` module is linked against. On Windows we prefer the DLL
+  directory adjacent to ``_ssl.pyd``; on Unix we use ``find_library("ssl")``.
+
+Long-term, an upstream CPython API exposing the ``SSL_CTX*`` handle would
+remove the need for the layout hack.
 """
 
 from __future__ import annotations
@@ -26,9 +38,6 @@ from typing import Any
 # OpenSSL SSL_VERIFY_PEER requests a peer certificate during the handshake.
 _VERIFY_PEER = 0x01
 
-# Keep callbacks alive for the process lifetime; OpenSSL stores only a pointer.
-_verify_callbacks: list[Any] = []
-
 _libssl: ctypes.CDLL | None = None
 _SSL_CTX_set_verify: Any = None
 
@@ -41,11 +50,12 @@ def _load_libssl() -> ctypes.CDLL:
         dll_dir = Path(_ssl.__file__).resolve().parent
         for name in ("libssl-3.dll", "libssl-1_1.dll", "ssleay32.dll"):
             for candidate in (dll_dir / name, Path(name)):
-                if candidate == Path(name) or candidate.is_file():
-                    try:
-                        return ctypes.CDLL(str(candidate))
-                    except OSError:
-                        continue
+                if not candidate.is_file():
+                    continue
+                try:
+                    return ctypes.CDLL(str(candidate))
+                except OSError:
+                    continue
         raise RuntimeError("Could not load libssl on Windows")
 
     libname = ctypes.util.find_library("ssl")
@@ -72,9 +82,13 @@ def _ensure_libssl() -> None:
 
 
 def _ssl_ctx_ptr(context: ssl.SSLContext) -> int:
-    """Return the OpenSSL SSL_CTX* for a Python SSLContext (CPython layout)."""
-    # PySSLContext: PyObject_HEAD then SSL_CTX *ctx.
-    # 64-bit: 16 bytes; 32-bit: 8 bytes.
+    """
+    Return the OpenSSL SSL_CTX* for a Python SSLContext (CPython layout).
+
+    Reads ``PySSLContext.ctx`` via a fixed offset past ``PyObject_HEAD``
+    (16 bytes on 64-bit, 8 bytes on 32-bit). This layout is undocumented and
+    may change in future CPython versions or free-threaded builds.
+    """
     offset = 16 if sys.maxsize > 2**32 else 8
     # pyrefly: ignore
     ptr = ctypes.cast(
@@ -92,6 +106,9 @@ def _accept_all_verify_cb(_preverify_ok: int, _x509_ctx: int) -> int:
 
 _VerifyCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 
+# Single process-lifetime callback; OpenSSL stores only a pointer.
+_ACCEPT_ALL_VERIFY_CB = _VerifyCallback(_accept_all_verify_cb)
+
 
 def install_skip_pkix_peer_verification(context: ssl.SSLContext) -> None:
     """
@@ -103,7 +120,10 @@ def install_skip_pkix_peer_verification(context: ssl.SSLContext) -> None:
     PKIX CA chains.  This helper satisfies the TLS-layer certificate request
     while deferring identity checks to verify_certificate_chain().
     """
+    if sys.implementation.name != "cpython":
+        raise RuntimeError(
+            "libp2p TLS PKIX skip requires CPython; "
+            f"unsupported implementation: {sys.implementation.name}"
+        )
     _ensure_libssl()
-    verify_cb = _VerifyCallback(_accept_all_verify_cb)
-    _verify_callbacks.append(verify_cb)
-    _SSL_CTX_set_verify(_ssl_ctx_ptr(context), _VERIFY_PEER, verify_cb)
+    _SSL_CTX_set_verify(_ssl_ctx_ptr(context), _VERIFY_PEER, _ACCEPT_ALL_VERIFY_CB)

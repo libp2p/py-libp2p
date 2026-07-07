@@ -189,6 +189,15 @@ AutoTLS bootstrap flow and is not reachable on a standard node.
 - Use TLS 1.3 or later.
 - Pin certificates for critical peers.
 
+Platform requirements
+~~~~~~~~~~~~~~~~~~~~~
+
+- **CPython 3.10+** is required for the TLS transport. Inbound server contexts
+  use ctypes to access the underlying OpenSSL ``SSL_CTX`` handle; this is not
+  supported on PyPy or other non-CPython runtimes.
+- The ``libssl`` shared library loaded via ctypes must match the OpenSSL
+  version linked to CPython's ``_ssl`` module.
+
 Troubleshooting
 ---------------
 
@@ -199,9 +208,12 @@ Troubleshooting
    * - Problem
      - Cause
      - Solution
-   * - Certificate not trusted
-     - Self-signed without trust store entry
-     - Add cert to local trust store or disable verification **only** in testing.
+   * - Certificate verification failed
+     - Missing libp2p extension, invalid signature, or expired cert
+     - Ensure peers use libp2p TLS identity certificates; check system clock.
+   * - ``TLSV1_ALERT_UNKNOWN_CA``
+     - Legacy PKIX rejection of self-signed libp2p certs (fixed in recent releases)
+     - Upgrade to a release with libp2p extension verification; no PKIX trust store needed.
    * - Protocol negotiation failed
      - One peer does not support `/tls/1.0.0`
      - Enable TLS on both peers or use Noise.

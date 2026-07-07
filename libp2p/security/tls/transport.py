@@ -552,7 +552,13 @@ class TLSTransport(ISecureTransport):
 
     def trust_peer_cert_pem(self, pem: str) -> None:
         """
-        Add a trusted peer certificate PEM.
+        Add a trusted peer certificate PEM (legacy / test-demo only).
+
+        Production interop does not require PKIX trust-store preloading: peer
+        identity is verified via the libp2p X.509 extension after the handshake.
+        Server-side contexts skip PKIX verification via
+        ``install_skip_pkix_peer_verification()``, so this method no longer
+        affects inbound verification behavior.
 
         Args:
             pem: The PEM-encoded certificate to trust

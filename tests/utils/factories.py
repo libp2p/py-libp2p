@@ -418,9 +418,7 @@ async def tls_conn_factory(
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = client_transport or TLSTransport(create_secp256k1_key_pair())
     remote_transport = server_transport or TLSTransport(create_secp256k1_key_pair())
-    # Trust each other's certs for test handshake
-    local_transport.trust_peer_cert_pem(remote_transport.get_certificate_pem())
-    remote_transport.trust_peer_cert_pem(local_transport.get_certificate_pem())
+    # Interop-style handshakes work without a PKIX trust store (libp2p extension only).
 
     local_secure_conn: ISecureConn | None = None
     remote_secure_conn: ISecureConn | None = None
