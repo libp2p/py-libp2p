@@ -118,12 +118,15 @@ Dialer node:
 
 **Note for testing with self-signed certificates**
 
-When testing with self-signed certificates, peers need to trust each other's certificates.
-You can do this by calling ``trust_peer_cert_pem()`` on the TLS transport before creating the host:
+When testing with self-signed certificates in unit tests or demos, peers may call
+``trust_peer_cert_pem()`` to preload a peer cert into the OpenSSL trust store.
+Production interop does **not** require this: identity is verified via the
+libp2p X.509 extension after the handshake (same model as go-libp2p and
+js-libp2p).
 
 .. code-block:: python
 
-   # For testing: trust peer certificates
+   # Optional for tests/demos only: PKIX trust store workaround
    listener_tls.trust_peer_cert_pem(dialer_tls.get_certificate_pem())
    dialer_tls.trust_peer_cert_pem(listener_tls.get_certificate_pem())
 
@@ -163,10 +166,10 @@ Mutual authentication (inbound)
 
 Inbound TLS connections **must** present a client certificate that carries the
 libp2p X.509 extension so py-libp2p can derive and verify the remote Peer ID.
-The server-side SSL context requests a client certificate (``CERT_OPTIONAL``);
-post-handshake logic enforces the requirement. If the remote peer completes the
-TLS handshake without sending a certificate, the connection is rejected and no
-``SecureSession`` is created.
+The server requests a client certificate during the TLS handshake; post-handshake
+logic enforces the requirement via the libp2p extension (not PKIX CA trust). If
+the remote peer completes the TLS handshake without sending a certificate, the
+connection is rejected and no ``SecureSession`` is created.
 
 **AutoTLS exception:** When ``enable_autotls=True``, broker registration may
 use the primitive key-exchange side-channel or a placeholder identity instead

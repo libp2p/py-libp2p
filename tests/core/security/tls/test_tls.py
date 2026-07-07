@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import trio
 
 from libp2p import generate_new_rsa_identity
 from libp2p.peer.id import ID
@@ -70,6 +71,37 @@ async def test_secure_inbound_autotls_allows_primitive_exchange_identity() -> No
         session = await transport.secure_inbound(mock_conn)
 
     assert session.get_remote_peer() == ID.from_pubkey(client_keypair.public_key)
+
+
+@pytest.mark.trio
+async def test_tls_handshake_without_trust_store(nursery) -> None:
+    """Interop-style handshake: no PKIX trust store, libp2p extension only."""
+    keypair_a = generate_new_rsa_identity()
+    keypair_b = generate_new_rsa_identity()
+
+    t_a = TLSTransport(keypair_a)
+    t_b = TLSTransport(keypair_b)
+
+    local_secure_conn = None
+    remote_secure_conn = None
+
+    async def upgrade_local_conn(local_conn):
+        nonlocal local_secure_conn
+        local_secure_conn = await t_a.secure_outbound(local_conn, t_b.local_peer)
+
+    async def upgrade_remote_conn(remote_conn):
+        nonlocal remote_secure_conn
+        remote_secure_conn = await t_b.secure_inbound(remote_conn)
+
+    async with raw_conn_factory(nursery) as (local_conn, remote_conn):
+        async with trio.open_nursery() as n:
+            n.start_soon(upgrade_local_conn, local_conn)
+            n.start_soon(upgrade_remote_conn, remote_conn)
+
+        assert local_secure_conn is not None
+        assert remote_secure_conn is not None
+        assert local_secure_conn.get_remote_peer() == t_b.local_peer
+        assert remote_secure_conn.get_remote_peer() == t_a.local_peer
 
 
 @pytest.mark.trio
