@@ -1,0 +1,1 @@
+Fixed identify protocol reporting empty listen addresses under heavy parallel load. Integration tests that depend on identify and peerstore address propagation are now run serially in ``make test`` to avoid xdist timing flakes.
