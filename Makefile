@@ -46,7 +46,15 @@ typecheck:
 	pre-commit run mypy-local --all-files && pre-commit run pyrefly-local --all-files
 
 test:
-	python -m pytest tests -n auto
+	python -m pytest tests -n auto -m "not serial_only"
+	python -m pytest \
+		tests/core/identity/identify/test_identify.py::test_identify_protocol \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_protocol_varint_format_integration \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_protocol_raw_format_integration \
+		tests/core/identity/identify/test_identify_integration.py::test_identify_multi_transport_host_addresses \
+		tests/core/test_libp2p/test_libp2p.py::test_host_connect \
+		tests/core/transport/quic/test_integration.py::test_yamux_stress_ping \
+		-n 0
 
 pr: clean fix lint typecheck test
 
