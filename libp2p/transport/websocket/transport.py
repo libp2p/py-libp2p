@@ -490,13 +490,41 @@ class WebsocketTransport(ITransport):
         ):
             nursery.start_soon(self._initialize_autotls, self._peer_id)
 
-    async def can_dial(self, maddr: Multiaddr) -> bool:
-        """Check if we can dial the given multiaddr."""
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can dial the given multiaddr.
+
+        Checks whether the multiaddr matches the WebSocket multiaddr pattern
+        (e.g. ``/ip4/.../tcp/.../ws`` or ``/ip4/.../tcp/.../wss``).
+
+        The check is purely protocol-level (no I/O); it changed from async
+        to sync to satisfy the :class:`~libp2p.abc.ITransport` interface.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport handles the multiaddr.
+        """
         try:
             parse_websocket_multiaddr(maddr)
-            return True  # If parsing succeeds, it's a valid WebSocket multiaddr
+            return True
         except (ValueError, KeyError):
             return False
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can listen on the given multiaddr.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport can listen on the multiaddr.
+        """
+        return self.can_dial(maddr)
+
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names handled by WebSocket transport.
+
+        :return: ["ws", "wss"]
+        """
+        return ["ws", "wss"]
 
     async def _initialize_autotls(self, peer_id: ID | None = None) -> None:
         """Initialize AutoTLS if configured."""
@@ -847,7 +875,7 @@ class WebsocketTransport(ITransport):
 
     async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
         """Dial using a multiaddr that has an IP (no DNS)."""
-        if not await self.can_dial(maddr):
+        if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
         try:

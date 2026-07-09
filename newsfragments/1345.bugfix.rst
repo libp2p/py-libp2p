@@ -1,0 +1,1 @@
+Fixed an authentication bypass where inbound QUIC connections were accepted without verifying the peer's libp2p certificate.

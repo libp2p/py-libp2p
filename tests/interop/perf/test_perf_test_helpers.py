@@ -9,6 +9,8 @@ import sys
 import pytest
 import multiaddr
 
+pytest.importorskip("redis")
+
 try:
     ExceptionGroup  # noqa: B018
 except NameError:

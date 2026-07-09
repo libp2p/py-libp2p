@@ -35,7 +35,8 @@ Examples
    examples.websocket
    examples.tls
    examples.tcp
-   examples.transport
+
    examples.autotls
    examples.perf
    examples.path_handling
+   examples.multi_transport

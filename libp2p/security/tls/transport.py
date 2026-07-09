@@ -18,8 +18,12 @@ from libp2p.security.tls.certificate import (
     generate_certificate,
     verify_certificate_chain,
 )
-from libp2p.security.tls.exceptions import MissingLibp2pExtensionError
+from libp2p.security.tls.exceptions import (
+    MissingLibp2pExtensionError,
+    TLSHandshakeFailure,
+)
 from libp2p.security.tls.io import TLSReadWriter
+from libp2p.security.tls.openssl_verify import install_skip_pkix_peer_verification
 import libp2p.utils
 import libp2p.utils.paths
 
@@ -127,15 +131,27 @@ class TLSTransport(ISecureTransport):
             ssl.PROTOCOL_TLS_SERVER if server_side else ssl.PROTOCOL_TLS_CLIENT
         )
         ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-        # We do our own verification (like Go's InsecureSkipVerify).
-        # Python's ssl module can't request a client cert without CA verification.
-        # TODO: Implement proper mutual TLS with custom verification
+        # We do our own post-handshake verification of the libp2p extension.
+        # check_hostname is disabled because we use self-signed peer certificates
+        # that are not bound to DNS names.
         ctx.check_hostname = False
 
-        # TODO: Fix this default: no client cert verification
-        # INBOUND connection can't ask for tls cert from remote peers
-        # ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
-        ctx.verify_mode = ssl.CERT_NONE
+        # libp2p specs/tls/tls.md Peer Authentication: peers use self-signed
+        # certificates carrying the libp2p Public Key Extension (OID
+        # 1.3.6.1.4.1.53594.1.1), not PKIX CA chains.  Go/js skip TLS-layer
+        # PKIX and verify via extension + signature (see also design
+        # considerations.md: host key is not the certificate signing key).
+        #
+        # Python's CERT_OPTIONAL triggers OpenSSL PKIX verification and rejects
+        # unknown self-signed peer certs with TLSV1_ALERT_UNKNOWN_CA before our
+        # post-handshake extension check runs.  We therefore skip PKIX at the
+        # OpenSSL layer and enforce identity in secure_inbound/secure_outbound.
+        #
+        # Server: CERT_OPTIONAL requests a client certificate; an OpenSSL verify
+        # callback (install_skip_pkix_peer_verification) accepts any presented
+        # cert so the handshake completes and get_peer_certificate() works.
+        # Client: CERT_NONE — TLS 1.3 servers always send a certificate.
+        ctx.verify_mode = ssl.CERT_OPTIONAL if server_side else ssl.CERT_NONE
 
         # Load our cached self-signed certificate bound to libp2p identity
         import os
@@ -220,7 +236,6 @@ class TLSTransport(ISecureTransport):
         # Load trusted peer certs as CA certificates if present
         # This enables mutual TLS when peers explicitly trust each other's certs
         if self._trusted_peer_certs_pem and server_side:
-            print("loading trust store")
             for i, cert_pem in enumerate(self._trusted_peer_certs_pem):
                 ca_file = tempfile.NamedTemporaryFile("w", delete=False, suffix=".pem")
                 ca_path = ca_file.name
@@ -235,10 +250,11 @@ class TLSTransport(ISecureTransport):
                             os.unlink(ca_path)
                     except (OSError, PermissionError):
                         pass
-            # Request client cert and verify against trusted CAs
-            ctx.verify_mode = ssl.CERT_OPTIONAL
             cnt = len(self._trusted_peer_certs_pem)
             logger.debug("TLS: loaded %d trusted certs", cnt)
+
+        if server_side:
+            install_skip_pkix_peer_verification(ctx)
 
         # ALPN: Set up protocol list with preferred muxers + "libp2p" fallback
         # Note: Python's ssl module doesn't support set_alpn_select_callback
@@ -304,55 +320,66 @@ class TLSTransport(ISecureTransport):
         # Extract peer information
         peer_cert = tls_reader_writer.get_peer_certificate()
         if not peer_cert:
-            logger.warning("[INBOUND] Server couldn't fetch dialer's certificate")
+            # The libp2p TLS spec mandates mutual authentication: every inbound
+            # connection MUST present a certificate that carries the libp2p
+            # extension so we can derive and verify the remote Peer ID.
+            #
+            # AutoTLS bootstrap connections are a legitimate exception: when a
+            # node registers with the ACME broker it uses the primitive
+            # key-exchange side-channel instead of the certificate extension.
+            # That path is kept here but is strictly guarded by enable_autotls.
+            # The normal (non-AutoTLS) path raises a hard TLSHandshakeFailure and
+            # never returns a synthetic placeholder identity.
 
-            # TODO: Python ssl can't request client cert without CA verification.
-            # Use placeholder peer ID - client can still verify server identity.
-            logger.warning("TLS inbound: no peer cert (Python ssl limitation)")
-
-            # Extaract the keys from primitive key-exchange, if autotls enabled
             if self.enable_autotls:
                 remote_public_key = tls_reader_writer.remote_primitive_pk
                 remote_peer_id = tls_reader_writer.remote_primitive_peerid
                 logger.warning(
-                    "TLS inbound: using peerid obtained from primitive key-exchange"
-                )
-            else:
-                placeholder_keypair = libp2p.generate_new_ed25519_identity()
-                remote_public_key = placeholder_keypair.public_key
-                remote_peer_id = ID.from_pubkey(remote_public_key)
-                logger.error(
-                    "TLS inbound: using peerid obtained from placeholder keypair"
+                    "TLS inbound [autotls]: no peer cert; "
+                    "using peer ID from primitive key-exchange"
                 )
 
-            # This is the case when the autotls is enabled, and we did a self-signed
-            # certificate handshake with AUTO-TLS BROKER, and naturally we didn't do the
-            # primitive peer-identify exchange, so again use a placeholde
-            if self.enable_autotls and remote_peer_id is None:
-                placeholder_keypair = libp2p.generate_new_ed25519_identity()
-                remote_public_key = placeholder_keypair.public_key
-                remote_peer_id = ID.from_pubkey(remote_public_key)
+                # AutoTLS broker registration: primitive exchange also absent.
+                # Use a placeholder exclusively for the broker session.
+                if remote_peer_id is None:
+                    placeholder_keypair = libp2p.generate_new_ed25519_identity()
+                    remote_public_key = placeholder_keypair.public_key
+                    remote_peer_id = ID.from_pubkey(remote_public_key)
+                    logger.warning(
+                        "TLS inbound [autotls broker]: no cert and no primitive "
+                        "exchange; using placeholder identity for broker session only"
+                    )
 
-            if remote_peer_id is None:
-                raise ValueError(
-                    "remote peer ID must be known before creating SecureSession"
+                if remote_peer_id is None or remote_public_key is None:
+                    raise TLSHandshakeFailure(
+                        "TLS inbound [autotls]: could not determine remote identity "
+                        "from either certificate or primitive key-exchange."
+                    )
+
+                session = SecureSession(
+                    local_peer=self.local_peer,
+                    local_private_key=self.libp2p_privkey,
+                    remote_peer=remote_peer_id,
+                    remote_permanent_pubkey=remote_public_key,
+                    is_initiator=False,
+                    conn=tls_reader_writer,
                 )
-
-            if remote_public_key is None:
-                raise ValueError(
-                    "remote public-key must be known before creating SecureSession"
+                logger.debug(
+                    "TLS secure_inbound [autotls]: returning SecureSession "
+                    "with primitive-exchange identity"
                 )
+                return session
 
-            session = SecureSession(
-                local_peer=self.local_peer,
-                local_private_key=self.libp2p_privkey,
-                remote_peer=remote_peer_id,
-                remote_permanent_pubkey=remote_public_key,
-                is_initiator=False,
-                conn=tls_reader_writer,
+            # Normal (non-AutoTLS) path: no certificate → hard failure.
+            # Do NOT create a session or assign a synthetic identity.
+            logger.error(
+                "[INBOUND] Rejecting connection: remote peer sent no TLS certificate. "
+                "Mutual authentication is required by the libp2p TLS spec."
             )
-            logger.debug("TLS secure_inbound: returning placeholder SecureSession")
-            return session
+            raise TLSHandshakeFailure(
+                "Inbound TLS connection presented no client certificate. "
+                "Mutual authentication is required by the libp2p TLS spec."
+            )
 
         # Extract remote public key from certificate
         logger.debug("TLS secure_inbound: extracting public key from certificate")
@@ -525,7 +552,13 @@ class TLSTransport(ISecureTransport):
 
     def trust_peer_cert_pem(self, pem: str) -> None:
         """
-        Add a trusted peer certificate PEM.
+        Add a trusted peer certificate PEM (legacy / test-demo only).
+
+        Production interop does not require PKIX trust-store preloading: peer
+        identity is verified via the libp2p X.509 extension after the handshake.
+        Server-side contexts skip PKIX verification via
+        ``install_skip_pkix_peer_verification()``, so this method no longer
+        affects inbound verification behavior.
 
         Args:
             pem: The PEM-encoded certificate to trust
