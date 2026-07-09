@@ -1,5 +1,4 @@
 import pytest
-import multiaddr
 
 from libp2p.custom_types import (
     TProtocol,
@@ -304,6 +303,8 @@ async def test_host_connect(security_protocol):
         assert len(hosts[0].get_peerstore().peer_ids()) == 2
 
         assert hosts[1].get_id() in hosts[0].get_peerstore().peer_ids()
-        ma_node_b = multiaddr.Multiaddr("/p2p/%s" % hosts[1].get_id().pretty())
-        for addr in hosts[0].get_peerstore().addrs(hosts[1].get_id()):
-            assert addr.encapsulate(ma_node_b) in hosts[1].get_addrs()
+        # Ensure host 0 learned all of host 1's advertised addresses
+        host1_advertised_addrs = hosts[1].get_addrs()
+        host0_known_addrs = hosts[0].get_peerstore().addrs(hosts[1].get_id())
+        for addr in host1_advertised_addrs:
+            assert addr in host0_known_addrs

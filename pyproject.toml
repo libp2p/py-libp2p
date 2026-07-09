@@ -31,7 +31,7 @@ dependencies = [
     "miniupnpc>=2.3,<3.0",
     "requests>=2.28.0",
     "types-requests",
-    "multiaddr==0.0.11",
+    "multiaddr>=0.2.0",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
     "protobuf>=4.25.0,<7.0.0",
@@ -45,7 +45,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio-websocket>=0.11.0",
     "trio>=0.26.0",
-    "zeroconf (>=0.147.0,<0.148.0)",
+    "zeroconf>=0.149.16,<0.151.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -60,6 +60,9 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/libp2p/py-libp2p"
+
+[project.optional-dependencies]
+webrtc = ["aiortc>=1.5.0,<2.0"]
 
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
@@ -108,7 +111,7 @@ docs = [
 ]
 test = [
     "factory-boy>=2.12.0,<3.0.0",
-    "p2pclient>=0.2.1",
+    "p2pclient>=0.3.0",
     "pytest>=7.0.0",
     "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
@@ -319,8 +322,15 @@ project_excludes = [
     "**/.project-template/**",
     "**/docs/conf.py",
     "**/*pb2.py",
+    "**/*pb2_grpc.py",
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "./tests/core/transport/webrtc",
+    "./libp2p/transport/webrtc/_asyncio_bridge.py",
+    "./libp2p/transport/webrtc/_aiortc_helpers.py",
+    "./libp2p/transport/webrtc/certificate.py",
+    "./libp2p/transport/webrtc/transport.py",
+    "./libp2p/transport/webrtc/listener.py",
 ]
 search_path = ["stubs"]
