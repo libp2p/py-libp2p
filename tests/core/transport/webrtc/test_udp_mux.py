@@ -21,7 +21,6 @@ import pytest
 
 try:
     import aioice.stun as _stun
-    from aioice.ice import Connection as _Connection
 
     from libp2p.transport.webrtc._udp_mux import UdpMux, _MuxedTransport
 
@@ -248,9 +247,7 @@ class TestAddIceConnection:
         ufrag = "myufrag1"
         password = "mypassword1234567890ab"
         try:
-            conn = mux.add_ice_connection(
-                ufrag, password, host="127.0.0.1"
-            )
+            conn = mux.add_ice_connection(ufrag, password, host="127.0.0.1")
             # Registered for STUN dispatch
             assert ufrag in mux._by_ufrag
             # Has one protocol with a local candidate pointing at the mux port
@@ -275,8 +272,10 @@ class TestAddIceConnection:
         ufrag = "uf1x"
         password = "pw1password1234567890ab"
         try:
-            # Replace the protocol with a recorder to observe dispatch
-            conn = mux.add_ice_connection(ufrag, password, host="127.0.0.1")
+            # Register the connection so the ufrag is in the dispatch table,
+            # then replace it with a recorder to observe dispatch without
+            # triggering real aioice connectivity checks.
+            mux.add_ice_connection(ufrag, password, host="127.0.0.1")
             recorder = _RecordingProtocol()
             mux._by_ufrag[ufrag] = recorder
 

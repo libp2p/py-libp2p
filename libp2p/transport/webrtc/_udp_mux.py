@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional, Protocol
+from typing import Protocol
 
 try:
+    from aioice.candidate import Candidate
     import aioice.ice as _ice
     import aioice.stun as _stun
-    from aioice.candidate import Candidate
 
     _HAS_AIOICE = True
 except ImportError:
@@ -29,8 +29,9 @@ except ImportError:
 
 
 class _HasConnectionLost(Protocol):
-    def connection_lost(self, exc: Optional[Exception]) -> None: ...
+    def connection_lost(self, exc: Exception | None) -> None: ...
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class _MuxedTransport:
         self._real = real_transport
         self._local_addr = local_addr
         # Set by UdpMux after the StunProtocol is constructed (avoids circular ref).
-        self._protocol: Optional[_HasConnectionLost] = None
+        self._protocol: _HasConnectionLost | None = None
 
     def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
         self._real.sendto(data, addr)
@@ -96,8 +97,8 @@ class UdpMux(asyncio.DatagramProtocol):
     """
 
     def __init__(self) -> None:
-        self._transport: Optional[asyncio.DatagramTransport] = None
-        self._local_addr: Optional[tuple[str, int]] = None
+        self._transport: asyncio.DatagramTransport | None = None
+        self._local_addr: tuple[str, int] | None = None
         # ufrag -> StunProtocol (pre-ICE STUN dispatch)
         self._by_ufrag: dict[str, _HasConnectionLost] = {}
         # (host, port) -> StunProtocol (post-ICE DTLS/SCTP dispatch)
@@ -108,7 +109,7 @@ class UdpMux(asyncio.DatagramProtocol):
     # ------------------------------------------------------------------
 
     @classmethod
-    async def create(cls, host: str, port: int) -> tuple["UdpMux", int]:
+    async def create(cls, host: str, port: int) -> tuple[UdpMux, int]:
         """
         Bind a shared UDP socket on *host*:*port* (use ``port=0`` for OS choice).
         Returns ``(mux, bound_port)``.
@@ -154,7 +155,7 @@ class UdpMux(asyncio.DatagramProtocol):
     def error_received(self, exc: Exception) -> None:
         logger.warning("UdpMux socket error: %s", exc)
 
-    def connection_lost(self, exc: Optional[Exception]) -> None:
+    def connection_lost(self, exc: Exception | None) -> None:
         logger.debug("UdpMux connection lost: %s", exc)
 
     # ------------------------------------------------------------------
@@ -165,7 +166,9 @@ class UdpMux(asyncio.DatagramProtocol):
         """Route STUN packets with local ufrag *ufrag* to *protocol*."""
         self._by_ufrag[ufrag] = protocol
 
-    def register_addr(self, addr: tuple[str, int], protocol: _HasConnectionLost) -> None:
+    def register_addr(
+        self, addr: tuple[str, int], protocol: _HasConnectionLost
+    ) -> None:
         """Route non-STUN packets from *addr* to *protocol* (call after ICE)."""
         self._by_addr[addr] = protocol
 
@@ -185,7 +188,7 @@ class UdpMux(asyncio.DatagramProtocol):
         local_password: str,
         *,
         host: str,
-    ) -> "_ice.Connection":
+    ) -> _ice.Connection:
         """
         Create an ``aioice.Connection`` backed by this mux (no own UDP socket).
 
@@ -240,7 +243,7 @@ class UdpMux(asyncio.DatagramProtocol):
     # ------------------------------------------------------------------
 
     @property
-    def local_addr(self) -> Optional[tuple[str, int]]:
+    def local_addr(self) -> tuple[str, int] | None:
         return self._local_addr
 
     async def close(self) -> None:
