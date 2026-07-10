@@ -216,6 +216,11 @@ async def test_publish_before_identify_completes():
 
         # Connect and publish in rapid succession – no sleep in between
         await connect(pubsubs[0].host, pubsubs[1].host)
+        # Wait for the peer pubsub stream to be registered so the pending
+        # message queue can target it.  The subscription from the hello
+        # packet may not have been processed yet, so this still exercises
+        # the identify-aware queuing path.
+        await pubsubs[0].wait_for_peer(pubsubs[1].host.get_id())
         await pubsubs[0].publish(topic, data)
 
         # Give enough time for:
@@ -291,6 +296,7 @@ async def test_multiple_rapid_publishes_before_identify():
         sub_1 = await pubsubs[1].subscribe(topic)
 
         await connect(pubsubs[0].host, pubsubs[1].host)
+        await pubsubs[0].wait_for_peer(pubsubs[1].host.get_id())
 
         # Rapid-fire publishes
         for data in messages:
@@ -334,7 +340,9 @@ async def test_three_nodes_publish_before_full_mesh():
 
         # Connect A-B and B-C
         await connect(pubsubs[0].host, pubsubs[1].host)
+        await pubsubs[0].wait_for_peer(pubsubs[1].host.get_id())
         await connect(pubsubs[1].host, pubsubs[2].host)
+        await pubsubs[1].wait_for_peer(pubsubs[2].host.get_id())
 
         # Publish immediately from A
         await pubsubs[0].publish(topic, data)
