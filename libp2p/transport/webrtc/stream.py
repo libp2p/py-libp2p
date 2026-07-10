@@ -20,7 +20,7 @@ import trio
 
 from libp2p.abc import IMuxedStream
 
-from ._varint import decode_uvarint, encode_uvarint
+from libp2p.utils.varint import decode_varint_with_size, encode_uvarint
 from .constants import MAX_MESSAGE_SIZE, MAX_PAYLOAD_SIZE
 from .exceptions import WebRTCStreamError
 from .pb.webrtc_pb2 import Message
@@ -301,7 +301,7 @@ class WebRTCStream(IMuxedStream):
         the mutations inline.
         """
         try:
-            length, consumed = decode_uvarint(raw)
+            length, consumed = decode_varint_with_size(raw)
         except ValueError as e:
             logger.warning(
                 "WebRTCStream channel=%d: malformed varint prefix: %s",

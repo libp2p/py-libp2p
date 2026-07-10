@@ -33,7 +33,7 @@ import trio
 
 from libp2p.abc import INetStream
 
-from ._varint import encode_uvarint
+from libp2p.utils.varint import decode_uvarint_from_stream, encode_uvarint
 from .exceptions import WebRTCSignalingError
 from .signaling_pb.signaling_pb2 import SignalingMessage
 
@@ -74,7 +74,7 @@ async def read_signaling_message(stream: INetStream) -> SignalingMessage:
     :raises WebRTCSignalingError: If reading or parsing fails.
     """
     try:
-        length = await _read_uvarint(stream)
+        length = await decode_uvarint_from_stream(stream)
         if length > _MAX_SIGNALING_MSG_SIZE:
             raise WebRTCSignalingError(
                 f"Signaling message too large: {length} bytes "
@@ -262,23 +262,3 @@ class SignalingSession:
             )
         return msg
 
-
-# ------------------------------------------------------------------
-# Streaming varint read (sync encoder/decoder live in ._varint)
-# ------------------------------------------------------------------
-
-
-async def _read_uvarint(stream: INetStream) -> int:
-    """Read an unsigned varint from a libp2p :class:`INetStream`."""
-    result = 0
-    shift = 0
-    for _ in range(10):  # Max 10 bytes for uint64 varint
-        byte_data = await stream.read(1)
-        if not byte_data:
-            raise WebRTCSignalingError("Stream closed while reading varint")
-        byte = byte_data[0]
-        result |= (byte & 0x7F) << shift
-        if not (byte & 0x80):
-            return result
-        shift += 7
-    raise WebRTCSignalingError("Varint too long (> 10 bytes)")
