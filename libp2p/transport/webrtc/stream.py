@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import trio
 
 from libp2p.abc import IMuxedStream
-
 from libp2p.utils.varint import decode_varint_with_size, encode_uvarint
+
 from .constants import MAX_MESSAGE_SIZE, MAX_PAYLOAD_SIZE
 from .exceptions import WebRTCStreamError
 from .pb.webrtc_pb2 import Message

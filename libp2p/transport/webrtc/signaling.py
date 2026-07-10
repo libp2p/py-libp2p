@@ -32,8 +32,8 @@ import logging
 import trio
 
 from libp2p.abc import INetStream
-
 from libp2p.utils.varint import decode_uvarint_from_stream, encode_uvarint
+
 from .exceptions import WebRTCSignalingError
 from .signaling_pb.signaling_pb2 import SignalingMessage
 
@@ -261,4 +261,3 @@ class SignalingSession:
                 f"Expected signaling message type {expected_type}, got {msg.type}"
             )
         return msg
-
