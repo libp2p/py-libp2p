@@ -9,7 +9,7 @@ We use `uv` for dependency management and fast environment resolution.
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/sumanjeet0012/py-ipfs-lite.git
+   git clone https://github.com/IPFS-Meshkit/py-ipfs-lite.git
    cd py-ipfs-lite
    ```
 

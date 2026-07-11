@@ -22,7 +22,7 @@ py-ipfs-lite uses `uv` for dependency management.
 
 ```bash
 # Clone the repository
-git clone https://github.com/sumanjeet0012/py-ipfs-lite.git
+git clone https://github.com/IPFS-Meshkit/py-ipfs-lite.git
 cd py-ipfs-lite
 
 # Install dependencies using uv
