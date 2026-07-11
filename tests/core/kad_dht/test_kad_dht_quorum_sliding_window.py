@@ -41,6 +41,7 @@ def _make_dht() -> KadDHT:
     host = MagicMock()
     key_pair = create_new_key_pair()
     host.get_id.return_value = ID.from_pubkey(key_pair.public_key)
+    host.get_private_key.return_value = key_pair.private_key
     host.get_addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
     host.get_peerstore.return_value = MagicMock()
     host.new_stream = AsyncMock()

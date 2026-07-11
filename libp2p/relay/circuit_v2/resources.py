@@ -461,7 +461,7 @@ class RelayResourceManager:
             True if the connection can be accepted
 
         """
-        reservation = self._reservations.get(peer_id)
+        reservation = self.get_reservation(peer_id)
         return reservation is not None and reservation.can_accept_connection()
 
     def track_data_transfer(self, peer_id: ID, bytes_transferred: int) -> bool:
@@ -552,3 +552,23 @@ class RelayResourceManager:
             return self.limits.duration
 
         return 0
+
+    def get_reservation(self, peer_id: ID) -> Reservation | None:
+        """
+        Get an active reservation for a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to get the reservation for
+
+        Returns
+        -------
+        Reservation | None
+            The reservation if it exists and is active, None otherwise
+
+        """
+        reservation = self._reservations.get(peer_id)
+        if reservation and not reservation.is_expired():
+            return reservation
+        return None

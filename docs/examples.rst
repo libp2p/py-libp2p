@@ -11,6 +11,10 @@ Examples
    examples.echo
    examples.echo_quic
    examples.ping
+   examples.request_response
+   examples.agentic_request_response
+   examples.a2a_payment_demo
+   examples.a2a_http_payment_demo
    examples.interop
    examples.pubsub
    examples.bitswap
@@ -20,6 +24,7 @@ Examples
    examples.mDNS
    examples.nat
    examples.filecoin
+   advertising_addresses
    examples.announce_addrs
    examples.rendezvous
    examples.random_walk
@@ -30,7 +35,8 @@ Examples
    examples.websocket
    examples.tls
    examples.tcp
-   examples.transport
+
    examples.autotls
    examples.perf
    examples.path_handling
+   examples.multi_transport

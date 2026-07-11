@@ -22,6 +22,9 @@ SIZE_NOISE_MESSAGE_LEN = 2
 MAX_NOISE_MESSAGE_LEN = 2 ** (8 * SIZE_NOISE_MESSAGE_LEN) - 1
 SIZE_NOISE_MESSAGE_BODY_LEN = 2
 MAX_NOISE_MESSAGE_BODY_LEN = MAX_NOISE_MESSAGE_LEN - SIZE_NOISE_MESSAGE_BODY_LEN
+# Max plaintext per Noise message: 65535 - 16 bytes Poly1305 MAC overhead.
+# Matches go-libp2p's MaxPlaintextLength in p2p/security/noise/rw.go.
+MAX_PLAINTEXT_LENGTH = MAX_NOISE_MESSAGE_LEN - 16
 BYTE_ORDER = "big"
 
 # |                         Noise packet                            |
@@ -53,14 +56,26 @@ class BaseNoiseMsgReadWriter(EncryptedMsgReadWriter):
         self.noise_state = noise_state
 
     async def write_msg(self, msg: bytes, prefix_encoded: bool = False) -> None:
-        logger.debug(f"Noise write_msg: encrypting {len(msg)} bytes")
-        data_encrypted = self.encrypt(msg)
-        if prefix_encoded:
-            # Manually add the prefix if needed
-            data_encrypted = self.prefix + data_encrypted
-        logger.debug(f"Noise write_msg: writing {len(data_encrypted)} encrypted bytes")
-        await self.read_writer.write_msg(data_encrypted)
-        logger.debug("Noise write_msg: write completed successfully")
+        # Chunk large messages to stay within the Noise 65535-byte transport
+        # message limit, matching go-libp2p's noise/rw.go Write() approach.
+        if len(msg) <= MAX_PLAINTEXT_LENGTH:
+            # Fast path: single message (covers handshake and small writes)
+            data_encrypted = self.encrypt(msg)
+            if prefix_encoded:
+                data_encrypted = self.prefix + data_encrypted
+            await self.read_writer.write_msg(data_encrypted)
+        else:
+            # Slow path: chunk into multiple Noise messages
+            total = len(msg)
+            written = 0
+            while written < total:
+                end = min(written + MAX_PLAINTEXT_LENGTH, total)
+                chunk = msg[written:end]
+                data_encrypted = self.encrypt(chunk)
+                if prefix_encoded and written == 0:
+                    data_encrypted = self.prefix + data_encrypted
+                await self.read_writer.write_msg(data_encrypted)
+                written = end
 
     async def read_msg(self, prefix_encoded: bool = False) -> bytes:
         logger.debug("Noise read_msg: reading encrypted message")

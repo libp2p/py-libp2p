@@ -251,7 +251,7 @@ class QUICStream(IMuxedStream):
                             return data
 
                         # Check if stream was reset (unblocking read loop)
-                        if self._state == StreamState.RESET:
+                        if self.is_reset():
                             raise QUICStreamResetError(
                                 f"Stream {self.stream_id} was reset"
                             )

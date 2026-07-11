@@ -200,6 +200,18 @@ class CircuitV2Transport(ITransport):
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
 
+    def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can dial the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can listen on the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def protocols(self) -> list[str]:
+        """Return the list of protocol names handled by this transport."""
+        return ["p2p-circuit"]
+
     async def dial(  # type: ignore[override]
         self,
         maddr: multiaddr.Multiaddr,

@@ -239,3 +239,57 @@ async def test_identify_message_equivalence_real_network(security_protocol):
         assert result_varint.protocol_version == result_raw.protocol_version
         assert result_varint.public_key == result_raw.public_key
         assert result_varint.listen_addrs == result_raw.listen_addrs
+
+
+@pytest.mark.trio
+async def test_identify_multi_transport_host_addresses(security_protocol):
+    """Test that a multi-transport host advertises all its addrs and they're learned."""
+    from multiaddr import Multiaddr
+
+    from libp2p import new_host
+    from libp2p.peer.peerinfo import info_from_p2p_addr
+
+    host_a = new_host(
+        enable_tcp=True,
+        enable_websocket=True,
+    )
+    host_b = new_host(enable_tcp=True, enable_websocket=True)
+
+    from libp2p.tools.anyio_service import background_trio_service
+
+    async with (
+        background_trio_service(host_a.get_network()),
+        background_trio_service(host_b.get_network()),
+    ):
+        await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0/ws"))
+        await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+
+        # host_b dials host_a using one of its addresses
+        host_a.set_stream_handler(ID, identify_handler_for(host_a))
+
+        host_a_addrs = host_a.get_addrs()
+        assert len(host_a_addrs) == 2, "host_a should have 2 listen addresses"
+
+        # We dial using the first address
+        maddr = host_a_addrs[0].encapsulate(
+            Multiaddr(f"/p2p/{host_a.get_id().to_base58()}")
+        )
+        info = info_from_p2p_addr(maddr)
+
+        # Connect
+        await host_b.connect(info)
+
+        # Make identify request
+        stream = await host_b.new_stream(host_a.get_id(), (ID,))
+        response = await stream.read(8192)
+        await stream.close()
+
+        # Parse response
+        result = parse_identify_response(response)
+
+        # Verify response contains all addresses
+        for addr in host_a_addrs:
+            assert _multiaddr_to_bytes(addr) in result.listen_addrs, (
+                f"Address {addr} not advertised by host_a"
+            )

@@ -571,6 +571,37 @@ async def test_invalid_certificate_verification():
 
 
 @pytest.mark.trio
+async def test_verify_peer_identity_raises_when_inbound_has_no_certificate() -> None:
+    """Inbound server-side connections without a peer certificate must fail closed."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    manager = QUICTLSConfigManager(
+        libp2p_private_key=key_pair.private_key, peer_id=peer_id
+    )
+
+    mock_quic_conn = Mock()
+    mock_quic_conn.configuration = Mock()
+    mock_quic_conn.configuration.is_client = False
+    mock_quic_conn._handshake_complete = True
+    mock_quic_conn.tls = Mock()
+    mock_quic_conn.tls._peer_certificate = None
+
+    connection = QUICConnection(
+        quic_connection=mock_quic_conn,
+        remote_addr=("127.0.0.1", 4001),
+        remote_peer_id=None,
+        local_peer_id=peer_id,
+        is_initiator=False,
+        maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"),
+        transport=Mock(),
+        security_manager=manager,
+    )
+
+    with pytest.raises(QUICPeerVerificationError, match="no peer certificate"):
+        await connection._verify_peer_identity_with_security()
+
+
+@pytest.mark.trio
 async def test_connection_id_issued_notifies_listener():
     """Test that ConnectionIdIssued events notify listener to register new CID."""
     # Setup mock transport with listener

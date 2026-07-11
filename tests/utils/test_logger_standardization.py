@@ -140,12 +140,10 @@ def test_logger_name_matches_module_path_transport():
     """Test transport modules use correct logger names."""
     from libp2p.stream_muxer.mplex import mplex
     from libp2p.stream_muxer.yamux import yamux
-    from libp2p.transport import transport_registry
     from libp2p.transport.websocket import autotls, listener
 
     assert listener.logger.name == "libp2p.transport.websocket.listener"
     assert autotls.logger.name == "libp2p.transport.websocket.autotls"
-    assert transport_registry.logger.name == "libp2p.transport.transport_registry"
     assert yamux.logger.name == "libp2p.stream_muxer.yamux.yamux"
     assert mplex.logger.name == "libp2p.stream_muxer.mplex.mplex"
 
@@ -372,7 +370,6 @@ def test_all_updated_modules_have_correct_logger_names():
     )
     from libp2p.stream_muxer.mplex import mplex
     from libp2p.stream_muxer.yamux import yamux
-    from libp2p.transport import transport_registry
     from libp2p.transport.tcp import tcp
     from libp2p.transport.websocket import (
         autotls,
@@ -419,7 +416,6 @@ def test_all_updated_modules_have_correct_logger_names():
         (varint, "libp2p.utils.varint"),
         (ws_listener, "libp2p.transport.websocket.listener"),
         (autotls, "libp2p.transport.websocket.autotls"),
-        (transport_registry, "libp2p.transport.transport_registry"),
         (yamux, "libp2p.stream_muxer.yamux.yamux"),
         (mplex, "libp2p.stream_muxer.mplex.mplex"),
     ]

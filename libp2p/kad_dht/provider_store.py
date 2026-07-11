@@ -226,6 +226,8 @@ class ProviderStore:
             True if the message was successfully sent and acknowledged
 
         """
+        stream = None
+
         try:
             result = False
             # Open a stream to the peer
@@ -298,7 +300,8 @@ class ProviderStore:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
 
         finally:
-            await stream.close()
+            if stream is not None:
+                await stream.close()
             return result
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:

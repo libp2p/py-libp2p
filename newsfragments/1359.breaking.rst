@@ -1,0 +1,1 @@
+Removed the ``libp2p.transport.transport_registry`` module and the legacy ``transport=`` keyword argument from ``Swarm.__init__``. Third-party transports should now be registered using ``TransportManager`` or by passing ``transports=[...]`` to ``Swarm()``.

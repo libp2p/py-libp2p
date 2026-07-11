@@ -66,7 +66,7 @@ def create_tcp_host():
     transport = TCP()
 
     # Create swarm and host
-    swarm = Swarm(peer_id, peer_store, upgrader, transport)
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
     host = BasicHost(swarm)
 
     return host

@@ -5,6 +5,7 @@ from collections.abc import (
     AsyncIterable,
     Sequence,
 )
+import logging
 
 from multiaddr import (
     Multiaddr,
@@ -39,6 +40,23 @@ from .peerinfo import (
 )
 
 PERMANENT_ADDR_TTL = 0
+
+logger = logging.getLogger(__name__)
+
+
+def _peer_record_signer_matches(envelope: Envelope) -> bool:
+    """Return True if envelope signer identity matches record.peer_id."""
+    try:
+        record = envelope.record()
+        if ID.from_pubkey(envelope.public_key) != record.peer_id:
+            logger.debug(
+                "Rejected peer record: signer identity does not match record peer_id"
+            )
+            return False
+        return True
+    except Exception:
+        logger.debug("Rejected peer record: failed to validate signer identity")
+        return False
 
 
 def create_signed_peer_record(
@@ -327,6 +345,7 @@ class PeerStore(IPeerStore):
 
         This function:
         - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if the signer identity does not match record.peer_id
         - Rejects the record if it's older (lower seq)
         - Updates the stored peer record and replaces associated addresses if accepted
 
@@ -334,6 +353,9 @@ class PeerStore(IPeerStore):
         :param ttl: Time-to-live for the included multiaddrs (in seconds).
         :return: True if the record was accepted and stored; False if it was rejected.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 
