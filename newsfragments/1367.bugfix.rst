@@ -1,0 +1,1 @@
+Fixed python×python TLS interop failures with ``TLSV1_ALERT_UNKNOWN_CA`` when using self-signed libp2p identity certificates. The TLS transport now requests peer certificates during the handshake while skipping PKIX CA verification at the OpenSSL layer, deferring identity checks to libp2p extension verification per the libp2p TLS specification.

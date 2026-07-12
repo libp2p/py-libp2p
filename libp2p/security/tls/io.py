@@ -442,7 +442,7 @@ class TLSReadWriter(EncryptedMsgReadWriter):
         Perform TLS handshake.
 
         Raises:
-            HandshakeFailure: If handshake fails due to protocol errors
+            TLSHandshakeFailure: If handshake fails due to protocol errors
             RuntimeError: If handshake timeout or connection errors occur
             ssl.SSLError: For SSL-specific errors not related to want read/write
 

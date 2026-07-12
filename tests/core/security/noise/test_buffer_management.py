@@ -85,13 +85,14 @@ class TestBufferManagement:
 
             # Read in chunks
             chunk_size = 5
-            received_data = b""
+            received_buf = bytearray()
 
-            while len(received_data) < len(test_data):
-                chunk = await remote_conn.read(chunk_size)
-                received_data += chunk
+            while len(received_buf) < len(test_data):
+                remain = len(test_data) - len(received_buf)
+                chunk = await remote_conn.read(min(chunk_size, remain))
+                received_buf.extend(chunk)
 
-            assert received_data == test_data
+            assert bytes(received_buf) == test_data
 
     @pytest.mark.trio
     async def test_empty_buffer_handling(self, nursery):
