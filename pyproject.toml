@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "libp2p"
-version = "0.6.0"
+version = "0.7.0"
 description = "libp2p: The Python implementation of the libp2p networking stack"
 readme = "README.md"
 requires-python = ">=3.10, <4.0"
@@ -31,7 +31,7 @@ dependencies = [
     "miniupnpc>=2.3,<3.0",
     "requests>=2.28.0",
     "types-requests",
-    "multiaddr==0.0.11",
+    "multiaddr>=0.2.0",
     "mypy-protobuf>=3.0.0",
     "noiseprotocol>=0.3.0",
     "protobuf>=4.25.0,<7.0.0",
@@ -45,7 +45,7 @@ dependencies = [
     "trio-typing>=0.0.4",
     "trio-websocket>=0.11.0",
     "trio>=0.26.0",
-    "zeroconf (>=0.147.0,<0.148.0)",
+    "zeroconf>=0.149.16,<0.151.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -61,6 +61,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/libp2p/py-libp2p"
 
+[project.optional-dependencies]
+webrtc = ["aiortc>=1.5.0,<2.0"]
+
 [project.scripts]
 chat-demo = "examples.chat.chat:main"
 echo-demo = "examples.echo.echo:main"
@@ -70,6 +73,10 @@ autotls-demo = "examples.autotls.autotls:main"
 identify-demo = "examples.identify.identify:main"
 identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
 identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
+request-response-demo = "examples.request_response.request_response_demo:main"
+agentic-request-response-demo = "examples.request_response.agentic_request_response_demo:main"
+a2a-payment-demo = "examples.request_response.a2a_payment_demo:main"
+a2a-http-payment-demo = "examples.request_response.a2a_http_payment_demo:main"
 pubsub-demo = "examples.pubsub.pubsub:main"
 floodsub-demo = "examples.pubsub.floodsub:main"
 mdns-demo = "examples.mDNS.mDNS:main"
@@ -94,6 +101,7 @@ dev = [
     "tox>=4.0.0",
     "ruff>=0.11.10",
     "pyrefly (>=0.17.1,<0.18.0)",
+    "uvicorn>=0.30.0",
 ]
 docs = [
     "sphinx>=6.0.0",
@@ -103,13 +111,17 @@ docs = [
 ]
 test = [
     "factory-boy>=2.12.0,<3.0.0",
-    "p2pclient>=0.2.1",
+    "p2pclient>=0.3.0",
     "pytest>=7.0.0",
     "pytest-timeout>=2.4.0",
     "pytest-trio>=0.5.2",
     "pytest-xdist>=2.4.0",
     "pytest-mock>=3.15.1",
     "pytest-rerunfailures>=12.0",
+]
+a2a-demo = [
+    "a2a-sdk[http-server]>=1.0.0",
+    "uvicorn>=0.30.0",
 ]
 release = [
     "build>=0.9.0",
@@ -310,8 +322,15 @@ project_excludes = [
     "**/.project-template/**",
     "**/docs/conf.py",
     "**/*pb2.py",
+    "**/*pb2_grpc.py",
     "**/*.pyi",
     ".venv/**",
     "./tests/interop/nim_libp2p",
+    "./tests/core/transport/webrtc",
+    "./libp2p/transport/webrtc/_asyncio_bridge.py",
+    "./libp2p/transport/webrtc/_aiortc_helpers.py",
+    "./libp2p/transport/webrtc/certificate.py",
+    "./libp2p/transport/webrtc/transport.py",
+    "./libp2p/transport/webrtc/listener.py",
 ]
 search_path = ["stubs"]

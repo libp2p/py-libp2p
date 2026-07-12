@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import logging
 from pathlib import Path
 import sys
@@ -16,6 +17,7 @@ from libp2p import new_host
 from libp2p.bitswap import BitswapClient
 from libp2p.bitswap.cid import cid_to_bytes, format_cid_for_display
 from libp2p.bitswap.dag import MerkleDag
+from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.utils.address_validation import (
     find_free_port,
@@ -35,6 +37,23 @@ logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LISTEN_PORT = 4013
+
+
+def select_preferred_listen_addr(addrs: list[Multiaddr], port: int) -> Multiaddr:
+    """Pick a stable, local-friendly address for copy/paste commands."""
+    preferred_v4 = f"/ip4/127.0.0.1/tcp/{port}"
+    for addr in addrs:
+        if str(addr) == preferred_v4:
+            return addr
+
+    preferred_v6 = f"/ip6/::1/tcp/{port}"
+    for addr in addrs:
+        if str(addr) == preferred_v6:
+            return addr
+
+    return addrs[0]
+
 
 def format_size(size_bytes: int) -> str:
     """Format size in human-readable form."""
@@ -46,13 +65,14 @@ def format_size(size_bytes: int) -> str:
     return f"{size:.1f} TB"
 
 
-async def run_provider(file_path: str, port: int = 0):
+async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
     """
     Run the provider node to share a file.
 
     Args:
         file_path: Path to the file to share
         port: TCP port to listen on (0 for auto)
+        seed: Optional seed string for deterministic peer ID generation
 
     """
     file_path_obj = Path(file_path)
@@ -73,12 +93,19 @@ async def run_provider(file_path: str, port: int = 0):
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
-    # Create host
-    host = new_host()
 
-    async with host.run(listen_addrs=listen_addrs):
-        peer_id = host.get_id()
-        logger.info(f"Peer ID: {peer_id}")
+    # Create host with optional seed for deterministic peer ID
+    key_pair = None
+    if seed:
+        # Convert seed string to bytes (must be 32 bytes for Ed25519)
+        seed_bytes = hashlib.sha256(seed.encode()).digest()
+        key_pair = create_new_key_pair(seed=seed_bytes)
+        logger.info("Using deterministic peer ID from seed")
+
+    host = new_host(key_pair=key_pair)
+
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
+        logger.info(f"Peer ID: {host.get_id()}")
 
         # Get actual listening addresses
         addrs = host.get_addrs()
@@ -91,7 +118,8 @@ async def run_provider(file_path: str, port: int = 0):
         await bitswap.start()
         logger.info("✓ Bitswap started")
 
-        # Create Merkle DAG
+        # Set nursery so bitswap can spawn background tasks
+        bitswap.set_nursery(nursery)
         dag = MerkleDag(bitswap)
 
         logger.info("")
@@ -109,7 +137,7 @@ async def run_provider(file_path: str, port: int = 0):
         # Add file with directory wrapper for filename preservation
         # Always uses Merkle DAG regardless of file size
         root_cid = await dag.add_file(
-            file_path, progress_callback=progress_callback, wrap_with_directory=True
+            file_path, progress_callback=progress_callback, wrap_with_directory=False
         )
 
         # Get all blocks that were stored
@@ -131,8 +159,10 @@ async def run_provider(file_path: str, port: int = 0):
         logger.info("FILE READY TO SHARE!")
         logger.info("=" * 70)
 
-        # Get the first address (clean multiaddr without duplicate /p2p/)
-        provider_addr = host.get_addrs()[0]
+        # Prefer a deterministic local address for copy/paste commands.
+        transport_addrs = host.get_transport_addrs()
+        provider_addr = select_preferred_listen_addr(transport_addrs, port)
+        provider_addr = provider_addr.encapsulate(Multiaddr(f"/p2p/{host.get_id()}"))
         root_cid_text = format_cid_for_display(root_cid)
         logger.info(f"Root CID:  {root_cid_text}")
         logger.info("")
@@ -161,6 +191,7 @@ async def run_client(
     root_cid_input: str,
     output_dir: str = "/tmp",
     port: int = 0,
+    seed: str | None = None,
 ):
     """
     Run the client node to fetch a file.
@@ -170,6 +201,7 @@ async def run_client(
         root_cid_input: Root CID (canonical text, /ipfs/... path, or hex string)
         output_dir: Directory to save the file
         port: TCP port to listen on (0 for auto)
+        seed: Optional seed string for deterministic peer ID generation
 
     """
     output_path = Path(output_dir)
@@ -195,16 +227,24 @@ async def run_client(
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
 
-    # Create host
-    host = new_host()
+    # Create host with optional seed for deterministic peer ID
+    key_pair = None
+    if seed:
+        # Convert seed string to bytes (must be 32 bytes for Ed25519)
+        seed_bytes = hashlib.sha256(seed.encode()).digest()
+        key_pair = create_new_key_pair(seed=seed_bytes)
+        logger.info("Using deterministic peer ID from seed")
 
-    async with host.run(listen_addrs=listen_addrs):
+    host = new_host(key_pair=key_pair)
+
+    async with host.run(listen_addrs=listen_addrs), trio.open_nursery() as nursery:
         logger.info(f"Client Peer ID: {host.get_id()}")
 
         # Start Bitswap
         bitswap = BitswapClient(host)
         await bitswap.start()
         logger.info("✓ Bitswap started")
+        bitswap.set_nursery(nursery)
 
         try:
             # Connect to provider
@@ -214,7 +254,6 @@ async def run_client(
             await host.connect(peer_info)
             logger.info("✓ Connected")
 
-            # Create Merkle DAG
             dag = MerkleDag(bitswap)
 
             logger.info("")
@@ -232,7 +271,7 @@ async def run_client(
             # Fetch file with automatic filename extraction
             try:
                 file_data, filename = await dag.fetch_file(
-                    root_cid, progress_callback=progress_callback
+                    root_cid, progress_callback=progress_callback, timeout=120.0
                 )
 
                 # Show fetch statistics
@@ -284,18 +323,18 @@ async def run_client(
             logger.info("=" * 70)
             logger.info(f"Size: {format_size(len(file_data))}")
 
-            # Determine output filename
+            # Determine output filename (priority: metadata > generated)
             if filename:
-                output_filename = filename
-                logger.info(f"Filename: {filename} (from metadata)")
+                final_filename = filename
+                logger.info(f"Filename: {final_filename} (from metadata)")
             else:
-                output_filename = (
+                final_filename = (
                     f"file_{format_cid_for_display(root_cid, max_len=16)}.bin"
                 )
-                logger.info(f"Filename: {output_filename} (no metadata)")
+                logger.info(f"Filename: {final_filename} (generated from CID)")
 
             # Handle filename conflicts
-            output_file = output_path / output_filename
+            output_file = output_path / final_filename
             if output_file.exists():
                 stem = output_file.stem
                 suffix = output_file.suffix
@@ -315,7 +354,9 @@ async def run_client(
         except Exception as e:
             logger.error(f"Failed: {e}")
             logger.exception("Full traceback:")
+            raise
         finally:
+            pass  # Nursery will cleanup background tasks
             await bitswap.stop()
 
 
@@ -333,8 +374,8 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=int,
-        default=0,
-        help="Port to listen on (0 for random, provider mode only)",
+        default=DEFAULT_LISTEN_PORT,
+        help=("Port to listen on (default: 4012). Use 0 to auto-select a random port."),
     )
     parser.add_argument(
         "--file",
@@ -364,6 +405,14 @@ def parse_args():
         "--verbose",
         action="store_true",
         help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--seed",
+        type=str,
+        help=(
+            "Seed string for deterministic peer ID generation "
+            "(same seed = same peer ID)"
+        ),
     )
 
     args = parser.parse_args()
@@ -395,9 +444,11 @@ def main():
         )
 
         if args.mode == "provider":
-            trio.run(run_provider, args.file, args.port)
+            trio.run(run_provider, args.file, args.port, args.seed)
         elif args.mode == "client":
-            trio.run(run_client, args.provider, args.cid, args.output, args.port)
+            trio.run(
+                run_client, args.provider, args.cid, args.output, args.port, args.seed
+            )
     except Exception as e:
         logger.critical(f"Script failed: {e}", exc_info=True)
         sys.exit(1)
