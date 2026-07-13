@@ -7,6 +7,7 @@ based on the Kademlia protocol.
 
 from .kad_dht import (
     KadDHT,
+    DHTMode,
 )
 from .peer_routing import (
     PeerRouting,
@@ -35,6 +36,7 @@ from .value_store import (
 
 __all__ = [
     "KadDHT",
+    "DHTMode",
     "RoutingTable",
     "PeerRouting",
     "ValueStore",
