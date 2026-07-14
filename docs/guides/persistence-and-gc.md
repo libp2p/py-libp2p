@@ -169,8 +169,8 @@ async def main():
 
     # Run GC — deletes all blocks not reachable from a pin
     stats = await peer.gc()
-    print(f"Reclaimed: {stats.get('reclaimed_blocks')} blocks")
-    print(f"Retained:  {stats.get('retained_blocks')} blocks")
+    print(f"Reclaimed: {stats.reclaimed_blocks} blocks")
+    print(f"Retained:  {stats.retained_blocks} blocks")
 
     # Verify
     keep_present = await peer.blockstore.has(parse_cid(cid_keep))

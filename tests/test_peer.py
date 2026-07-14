@@ -333,3 +333,15 @@ async def test_peer_close_closes_routing(memory_config):
     await peer.close()
 
     assert mock_routing.closed is True
+
+
+@pytest.mark.trio
+async def test_peer_context_manager(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+
+    with pytest.raises(ValueError, match="simulated crash"):
+        async with peer:
+            assert peer._started is True
+            raise ValueError("simulated crash")
+
+    assert peer._started is False

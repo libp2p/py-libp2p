@@ -342,6 +342,14 @@ class Peer:
                     logger.debug(f"Error in connection pruner: {e}")
             await trio.sleep(15.0)
 
+    async def __aenter__(self) -> "Peer":
+        if not self._started:
+            await self.start()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
+
     async def close(self) -> None:
         if not self._started:
             return
