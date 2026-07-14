@@ -1,0 +1,1 @@
+Fixed a denial-of-service vulnerability where remote pubsub peers could exhaust memory by flooding unique topic subscriptions.
