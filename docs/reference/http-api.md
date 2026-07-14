@@ -65,7 +65,7 @@ Returns the node version.
 
 ```json
 {
-  "Version": "0.1.0",
+  "Version": "0.1.1",
   "Commit": "",
   "System": "py-ipfs-lite"
 }

@@ -261,7 +261,7 @@ async def refs_local(request: Request) -> Any:
 async def api_version() -> Any:
     """Get the version of py-ipfs-lite."""
     return JSONResponse(
-        content={"Version": "0.1.0", "Commit": "", "System": "py-ipfs-lite"}
+        content={"Version": "0.1.1", "Commit": "", "System": "py-ipfs-lite"}
     )
 
 

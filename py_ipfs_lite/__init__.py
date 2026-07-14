@@ -20,4 +20,4 @@ __all__ = [
     "default_bootstrap_peers",
     "new_in_memory_datastore",
 ]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
