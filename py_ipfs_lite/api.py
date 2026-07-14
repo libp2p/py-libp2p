@@ -339,7 +339,9 @@ async def swarm_peers(request: Request) -> Any:
                         }
                     )
     except Exception as e:
-        logger.warning(f"Failed to list swarm peers: {e}")
+        if isinstance(e, IPFSLiteError):
+            raise
+        raise HTTPException(status_code=500, detail=str(e))
 
     return JSONResponse(content={"Peers": peers_data})
 
