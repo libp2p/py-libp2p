@@ -268,8 +268,12 @@ class Peer:
             def __init__(self, exchange: Any) -> None:
                 self._exchange = exchange
 
-            async def get_block(self, cid: Any) -> Any:
-                data = await self._exchange.get_block(cid)
+            async def get_block(
+                self, cid: Any, peer_id: Any = None, timeout: float = 90
+            ) -> Any:
+                data = await self._exchange.get_block(
+                    cid, peer_id=peer_id, timeout=timeout
+                )
                 if data:
                     IPFS_BITSWAP_BYTES_RECEIVED_TOTAL.inc(len(data))
                 return data

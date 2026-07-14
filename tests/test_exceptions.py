@@ -36,7 +36,7 @@ async def started_peer():
 
 @pytest.mark.trio
 async def test_block_not_found_error(started_peer):
-    async def mock_get_block(cid):
+    async def mock_get_block(cid, peer_id=None, timeout=90):
         return None
 
     started_peer._exchange.get_block = mock_get_block
@@ -63,7 +63,7 @@ async def client(started_peer):
 
 @pytest.mark.trio
 async def test_api_404_for_block_not_found(client, started_peer):
-    async def mock_get_block(cid):
+    async def mock_get_block(cid, peer_id=None, timeout=90):
         return None
 
     started_peer._exchange.get_block = mock_get_block

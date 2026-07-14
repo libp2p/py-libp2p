@@ -20,7 +20,12 @@ class BlockStore(Protocol):
 
 
 class Exchange(Protocol):
-    async def get_block(self, cid: bytes) -> bytes | None: ...
+    async def get_block(
+        self,
+        cid: bytes,
+        peer_id: Any = None,
+        timeout: float = 90,
+    ) -> bytes | None: ...
     async def get_blocks(
         self, cids: list[bytes]
     ) -> AsyncIterator[tuple[bytes, bytes]]: ...
