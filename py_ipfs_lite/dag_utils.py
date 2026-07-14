@@ -49,7 +49,7 @@ async def walk_dag(
         visited.add(curr_cid)
         yield curr_cid
 
-        if not recursive and curr_cid != root_cid_bytes:
+        if not recursive:
             continue
 
         data = await get_block(curr_cid)

@@ -286,3 +286,29 @@ async def test_add_file_stream(memory_config):
     content = b"".join(chunks)
     assert content == b"hello from stream"
     await peer.close()
+
+
+@pytest.mark.trio
+async def test_direct_pin_does_not_protect_children(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    try:
+        child_cid = await peer.add_node({"msg": "child leaf"}, codec="dag-cbor")
+        parent_cid = await peer.add_node(
+            {"link": {"/": child_cid}, "msg": "parent"}, codec="dag-cbor"
+        )
+
+        # Pin directly
+        await peer.add_pin(parent_cid, recursive=False)
+
+        # Run GC
+        await peer.gc()
+
+        # The parent should survive because it is directly pinned
+        parent_data = await peer.get_node(parent_cid)
+        assert parent_data["msg"] == "parent"
+
+        # The child should NOT survive because the pin was not recursive
+        assert not await peer.has_block(child_cid)
+    finally:
+        await peer.close()
