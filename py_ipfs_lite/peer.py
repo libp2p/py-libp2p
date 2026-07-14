@@ -365,20 +365,21 @@ class Peer:
 
     async def add_file(
         self,
-        path_or_stream: str | BinaryIO,
+        path_or_stream: str | bytes | BinaryIO,
         params: AddParams | None = None,
         timeout: float | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> str:
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
-        kwargs: dict[str, Any] = {"wrap_with_directory": False}
+        chunk_size: int | None = None
         if params is not None and params.chunker and params.chunker.startswith("size-"):
             try:
-                kwargs["chunk_size"] = int(params.chunker.split("-")[1])
+                chunk_size = int(params.chunker.split("-")[1])
             except ValueError:
                 pass
 
+        wrapped_callback = None
         if progress_callback is not None:
 
             def _wrapped_callback(
@@ -386,13 +387,28 @@ class Peer:
             ) -> None:
                 progress_callback(bytes_written, total_bytes)
 
-            kwargs["progress_callback"] = _wrapped_callback
+            wrapped_callback = _wrapped_callback
 
         async with self._gc_lock.read_lock():
             if isinstance(path_or_stream, str):
-                cid = await self.dag_service.add_file(path_or_stream, **kwargs)  # type: ignore[union-attr]
+                cid = await self.dag_service.add_file(  # type: ignore[union-attr]
+                    path_or_stream,
+                    chunk_size=chunk_size,
+                    progress_callback=wrapped_callback,
+                    wrap_with_directory=False,
+                )
+            elif isinstance(path_or_stream, bytes):
+                cid = await self.dag_service.add_bytes(  # type: ignore[union-attr]
+                    path_or_stream,
+                    chunk_size=chunk_size,
+                    progress_callback=wrapped_callback,
+                )
             else:
-                cid = await self.dag_service.add_stream(path_or_stream, **kwargs)  # type: ignore[union-attr]
+                cid = await self.dag_service.add_stream(  # type: ignore[union-attr]
+                    path_or_stream,
+                    chunk_size=chunk_size,
+                    progress_callback=wrapped_callback,
+                )
         cid_str = format_cid_for_display(cid)
         if self.routing:
             try:

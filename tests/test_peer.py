@@ -243,3 +243,46 @@ def test_peer_accessors(memory_config):
     assert peer.session() == peer
     assert peer.block_store() is not None
     assert peer.exchange() == "dummy_exchange"
+
+
+@pytest.mark.trio
+async def test_add_file_bytes(memory_config):
+    from py_ipfs_lite.peer import Peer
+
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+
+    data = b"hello from bytes"
+    cid_str = await peer.add_file(data)
+    assert cid_str is not None
+
+    content_iter = await peer.get_file(cid_str, stream=True)
+    chunks = []
+    async for chunk in content_iter:
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    assert content == b"hello from bytes"
+    await peer.close()
+
+
+@pytest.mark.trio
+async def test_add_file_stream(memory_config):
+    import io
+
+    from py_ipfs_lite.peer import Peer
+
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+
+    data = b"hello from stream"
+    stream = io.BytesIO(data)
+    cid_str = await peer.add_file(stream)
+    assert cid_str is not None
+
+    content_iter = await peer.get_file(cid_str, stream=True)
+    chunks = []
+    async for chunk in content_iter:
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    assert content == b"hello from stream"
+    await peer.close()
