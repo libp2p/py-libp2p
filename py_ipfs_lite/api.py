@@ -157,12 +157,10 @@ async def block_stat(
 
     try:
         cid = parse_cid(arg)
-        has = await peer.blockstore.has(cid)  # type: ignore[union-attr]
-        if not has:
+        data = await peer.blockstore.get(cid)  # type: ignore[union-attr]
+        if data is None:
             raise HTTPException(status_code=404, detail="Block not found locally")
 
-        # To get size we must read it
-        data = await peer.blockstore.get(cid)  # type: ignore[union-attr]
         return JSONResponse(content={"Key": arg, "Size": len(data)})  # type: ignore[arg-type]
     except HTTPException:
         raise
