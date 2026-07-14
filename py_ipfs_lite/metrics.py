@@ -59,7 +59,7 @@ class MetricsBlockStore:
     async def delete_block(self, cid: bytes) -> None:
         size = 0
         try:
-            size = self.get_size(cid)
+            size = await self.get_size(cid)
         except Exception:
             pass
 
@@ -72,8 +72,15 @@ class MetricsBlockStore:
         except Exception:
             pass
 
-    def get_size(self, cid: bytes) -> int:
-        return self._store.get_size(cid)
+    async def get_size(self, cid: bytes) -> int:
+        if hasattr(self._store, "get_size"):
+            import inspect
+
+            if inspect.iscoroutinefunction(self._store.get_size):
+                return await self._store.get_size(cid)
+            return self._store.get_size(cid)
+        data = await self.get_block(cid)
+        return len(data) if data else 0
 
     def get_all_cids(self) -> Any:
         return self._store.get_all_cids()

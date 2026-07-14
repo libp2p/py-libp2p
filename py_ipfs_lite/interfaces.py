@@ -15,7 +15,7 @@ class BlockStore(Protocol):
     async def get(self, cid: bytes) -> bytes | None: ...
     async def has(self, cid: bytes) -> bool: ...
     async def delete(self, cid: bytes) -> None: ...
-    def get_size(self, cid: bytes) -> int: ...
+    async def get_size(self, cid: bytes) -> int: ...
     def all_keys(self) -> list[str]: ...
 
 
@@ -111,8 +111,15 @@ class BlockStoreAdapter:
     async def delete(self, cid: bytes) -> None:
         return await self._store.delete_block(cid)
 
-    def get_size(self, cid: bytes) -> int:
-        return self._store.get_size(cid)
+    async def get_size(self, cid: bytes) -> int:
+        if hasattr(self._store, "get_size"):
+            import inspect
+
+            if inspect.iscoroutinefunction(self._store.get_size):
+                return await self._store.get_size(cid)
+            return self._store.get_size(cid)
+        data = await self.get(cid)
+        return len(data) if data else 0
 
     def all_keys(self) -> list[str]:
         from libp2p.bitswap.cid import format_cid_for_display, parse_cid

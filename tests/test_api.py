@@ -40,9 +40,16 @@ async def test_api_id(client):
 
 @pytest.mark.trio
 async def test_api_repo_stat(client):
+    from py_ipfs_lite.api import app
+
+    peer = app.state.peer
+    await peer.add_node({"msg": "test"}, codec="dag-cbor")
+
     res = await client.post("/api/v0/repo/stat")
     assert res.status_code == 200
     assert "NumObjects" in res.json()
+    assert res.json()["NumObjects"] > 0
+    assert res.json()["RepoSize"] > 0
 
 
 @pytest.mark.trio

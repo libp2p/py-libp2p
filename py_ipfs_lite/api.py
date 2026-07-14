@@ -285,11 +285,10 @@ async def repo_stat(request: Request) -> Any:
 
         keys = peer.blockstore.all_keys()  # type: ignore[union-attr]
         num_objects = len(keys)
-        # get_size can be called synchronously in the underlying memory/fs blockstore in py_ipfs_lite
-        repo_size = sum(
-            peer.blockstore.get_size(cid_to_bytes(parse_cid(k)))  # type: ignore[union-attr, misc]
-            for k in keys
-        )
+        repo_size = 0
+        for k in keys:
+            cid_bytes = cid_to_bytes(parse_cid(k))
+            repo_size += await peer.blockstore.get_size(cid_bytes)  # type: ignore[union-attr, misc]
 
         path = peer.config.blockstore_path
         if peer.config.blockstore_type == "memory":
