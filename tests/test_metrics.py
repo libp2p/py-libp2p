@@ -36,7 +36,7 @@ async def test_metrics_idempotent_put():
 
     before_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
 
-    config = Config(offline=True)
+    config = Config(offline=True, blockstore_type="memory")
     async with Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"]) as peer:
         # Add the same file twice
         await peer.add_file(b"idempotent content test")

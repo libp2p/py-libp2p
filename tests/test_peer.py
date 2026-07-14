@@ -55,7 +55,7 @@ async def test_add_get_remove_node(memory_config):
     await peer.remove_node(cid_str)
     from libp2p.bitswap.cid import parse_cid
 
-    assert not await peer.blockstore.has(parse_cid(cid_str))
+    assert not await peer.blockstore.has(parse_cid(cid_str).buffer)
 
     await peer.close()
 
@@ -103,8 +103,8 @@ async def test_pin_and_gc(memory_config):
     # cid1 should exist, cid2 should be gone
     from libp2p.bitswap.cid import parse_cid
 
-    assert await peer.blockstore.has(parse_cid(cid1))
-    assert not await peer.blockstore.has(parse_cid(cid2))
+    assert await peer.blockstore.has(parse_cid(cid1).buffer)
+    assert not await peer.blockstore.has(parse_cid(cid2).buffer)
 
     await peer.close()
 
