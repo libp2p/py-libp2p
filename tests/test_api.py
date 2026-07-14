@@ -57,3 +57,47 @@ async def test_api_swarm_peers(client):
     res = await client.post("/api/v0/swarm/peers")
     assert res.status_code == 200
     assert isinstance(res.json()["Peers"], list)
+
+
+@pytest.mark.trio
+async def test_api_swarm_peers_error_handling(client):
+    from unittest.mock import PropertyMock
+
+    from py_ipfs_lite.api import app
+
+    peer = app.state.peer
+    network = peer.host.get_network()
+    type(network).connections = PropertyMock(side_effect=Exception("mock error"))
+    try:
+        res = await client.post("/api/v0/swarm/peers")
+        assert res.status_code == 500
+        assert "mock error" in res.text
+    finally:
+        del type(network).connections
+
+
+@pytest.mark.trio
+async def test_api_block_stat_missing(client):
+    res = await client.post(
+        "/api/v0/block/stat?arg=bafkreicwbc3r3ivsekh26gvj7t67zjucmbyelvsqwouyjnghkkmr7f5ynu"
+    )
+    assert res.status_code == 404
+
+
+@pytest.mark.trio
+async def test_api_lifespan_bootstraps():
+    from unittest.mock import AsyncMock
+
+    from py_ipfs_lite.api import app, lifespan
+    from py_ipfs_lite.config import Config
+    from py_ipfs_lite.peer import Peer
+
+    config = Config(offline=False, use_ipni=False)
+    peer = Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    peer.bootstrap = AsyncMock()
+    app.state.peer = peer
+
+    async with lifespan(app):
+        assert peer.bootstrap.called
+        assert len(peer.bootstrap.call_args[0][0]) > 0
+    await peer.close()
