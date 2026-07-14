@@ -86,13 +86,13 @@ curl -X POST "http://127.0.0.1:5001/api/v0/dag/get?arg=bafy..."
 
 | I want to…                                                      | Go to…                                                                         |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Understand how `py-ipfs-lite` is structured internally          | [docs/architecture.md](docs/architecture.md)                                   |
-| Build verifiable AI agent memory / RAG pipelines                | [docs/guides/ai-agents-and-rag.md](docs/guides/ai-agents-and-rag.md)           |
-| Export a DAG as a CAR file for Filecoin storage                 | [docs/guides/car-files-and-filecoin.md](docs/guides/car-files-and-filecoin.md) |
-| Use IPNS mutable pointers and understand the trust model        | [docs/guides/ipns.md](docs/guides/ipns.md)                                     |
-| Interoperate with a live Kubo daemon over Bitswap               | [docs/guides/interop-with-kubo.md](docs/guides/interop-with-kubo.md)           |
-| See the full list of all 21 examples with one-line descriptions | [docs/reference/examples-index.md](docs/reference/examples-index.md)           |
-| Browse all documentation                                        | [docs/index.md](docs/index.md)                                                 |
+| Understand how `py-ipfs-lite` is structured internally          | [docs/architecture.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/architecture.md)                                   |
+| Build verifiable AI agent memory / RAG pipelines                | [docs/guides/ai-agents-and-rag.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/ai-agents-and-rag.md)           |
+| Export a DAG as a CAR file for Filecoin storage                 | [docs/guides/car-files-and-filecoin.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/car-files-and-filecoin.md) |
+| Use IPNS mutable pointers and understand the trust model        | [docs/guides/ipns.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/ipns.md)                                     |
+| Interoperate with a live Kubo daemon over Bitswap               | [docs/guides/interop-with-kubo.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/interop-with-kubo.md)           |
+| See the full list of all 21 examples with one-line descriptions | [docs/reference/examples-index.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/reference/examples-index.md)           |
+| Browse all documentation                                        | [docs/index.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/index.md)                                                 |
 
 ## License
 
