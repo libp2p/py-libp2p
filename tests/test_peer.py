@@ -312,3 +312,24 @@ async def test_direct_pin_does_not_protect_children(memory_config):
         assert not await peer.has_block(child_cid)
     finally:
         await peer.close()
+
+
+@pytest.mark.trio
+async def test_peer_close_closes_routing(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+
+    class MockRouting:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    mock_routing = MockRouting()
+    await peer.start()
+
+    peer.routing = mock_routing
+
+    await peer.close()
+
+    assert mock_routing.closed is True

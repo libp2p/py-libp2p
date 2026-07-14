@@ -355,6 +355,10 @@ class Peer:
             await self._auto_connector.stop()
         if self._connection_pruner:
             await self._connection_pruner.stop()
+
+        if self.routing and hasattr(self.routing, "close"):
+            await self.routing.close()
+
         await self._exit_stack.aclose()
         self._started = False
 
