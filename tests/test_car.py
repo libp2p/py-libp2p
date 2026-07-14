@@ -70,3 +70,39 @@ async def test_car_export_import(fs_config):
     finally:
         os.unlink(temp_path)
         await peer.close()
+
+
+@pytest.mark.trio
+async def test_car_export_partial_dag(fs_config, tmp_path):
+    peer = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+
+    try:
+        child_cid = await peer.add_node({"msg": "child"}, codec="dag-cbor")
+        parent_cid = await peer.add_node({"link": {"/": child_cid}}, codec="dag-cbor")
+
+        from libp2p.bitswap.cid import cid_to_bytes, parse_cid
+
+        child_cid_bytes = cid_to_bytes(parse_cid(child_cid))
+
+        # Capture the child bytes
+        child_data = await peer.blockstore.get(child_cid_bytes)
+
+        # Delete child from local blockstore
+        await peer.blockstore.delete(child_cid_bytes)
+
+        # Mock the exchange to return the child block successfully
+        async def mock_get_block(cid_bytes, *args, **kwargs):
+            if cid_bytes == child_cid_bytes:
+                return child_data
+            return None
+
+        peer._exchange.get_block = mock_get_block
+
+        car_path = tmp_path / "partial.car"
+        await peer.export_car(parent_cid, str(car_path))
+
+        assert car_path.exists()
+        assert car_path.stat().st_size > 0
+    finally:
+        await peer.close()

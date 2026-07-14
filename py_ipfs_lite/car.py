@@ -104,7 +104,7 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
 
             data = await peer.blockstore.get(curr_cid_bytes)
             if data is None:
-                data = await peer.exchange.get_block(curr_cid_bytes)
+                data = await peer.exchange().get_block(curr_cid_bytes)
                 if data is None:
                     continue
 
