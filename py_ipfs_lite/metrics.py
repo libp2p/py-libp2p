@@ -41,16 +41,28 @@ class MetricsBlockStore:
         self._store = store
 
     async def put_block(self, cid: bytes, data: bytes) -> None:
+        exists = await self.has_block(cid)
         await self._store.put_block(cid, data)
-        IPFS_BLOCKSTORE_BLOCKS_TOTAL.inc()
-        IPFS_BLOCKSTORE_SIZE_BYTES.inc(len(data))
+        if not exists:
+            IPFS_BLOCKSTORE_BLOCKS_TOTAL.inc()
+            IPFS_BLOCKSTORE_SIZE_BYTES.inc(len(data))
 
     async def put_many(self, blocks: Any) -> None:
+        blocks_list = list(blocks)
+        new_blocks = []
+        for cid, data in blocks_list:
+            if not await self.has_block(cid):
+                new_blocks.append((cid, data))
+
         if hasattr(self._store, "put_many"):
-            await self._store.put_many(blocks)
+            await self._store.put_many(blocks_list)
         else:
-            for cid, data in blocks:
-                await self.put_block(cid, data)
+            for cid, data in blocks_list:
+                await self._store.put_block(cid, data)
+
+        for _, data in new_blocks:
+            IPFS_BLOCKSTORE_BLOCKS_TOTAL.inc()
+            IPFS_BLOCKSTORE_SIZE_BYTES.inc(len(data))
 
     async def get_block(self, cid: bytes) -> Any:
         return await self._store.get_block(cid)

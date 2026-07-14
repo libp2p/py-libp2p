@@ -84,8 +84,8 @@ curl -X POST "http://127.0.0.1:5001/api/v0/dag/get?arg=bafy..."
 
 ## What's Next
 
-| I want to…                                                      | Go to…                                                                         |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| I want to…                                                      | Go to…                                                                                                                                |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | Understand how `py-ipfs-lite` is structured internally          | [docs/architecture.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/architecture.md)                                   |
 | Build verifiable AI agent memory / RAG pipelines                | [docs/guides/ai-agents-and-rag.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/ai-agents-and-rag.md)           |
 | Export a DAG as a CAR file for Filecoin storage                 | [docs/guides/car-files-and-filecoin.md](https://github.com/IPFS-Meshkit/py-ipfs-lite/blob/main/docs/guides/car-files-and-filecoin.md) |

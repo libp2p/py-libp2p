@@ -26,3 +26,22 @@ def test_metrics_endpoint(client):
     assert "ipfs_dht_query_latency_seconds" in content
     assert "ipfs_bitswap_bytes_received_total" in content
     assert "ipfs_swarm_peers" in content
+
+
+@pytest.mark.trio
+async def test_metrics_idempotent_put():
+    from py_ipfs_lite.config import Config
+    from py_ipfs_lite.metrics import IPFS_BLOCKSTORE_BLOCKS_TOTAL
+    from py_ipfs_lite.peer import Peer
+
+    before_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
+
+    config = Config(offline=True)
+    async with Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"]) as peer:
+        # Add the same file twice
+        await peer.add_file(b"idempotent content test")
+        await peer.add_file(b"idempotent content test")
+
+    after_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
+    # Adding a file adds exactly 1 block in this case, but adding it twice should still be just 1 block added.
+    assert after_count == before_count + 1

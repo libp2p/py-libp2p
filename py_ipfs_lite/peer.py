@@ -592,7 +592,7 @@ class Peer:
     async def remove_node(self, cid_str: str) -> None:
         self._ensure_started()
         cid = parse_cid(cid_str)
-        await self.blockstore.delete(cid)  # type: ignore[union-attr]
+        await self.blockstore.delete(cid.buffer)  # type: ignore[union-attr]
 
     async def add_pin(self, cid_str: str, recursive: bool = True) -> None:
         self._ensure_started()
@@ -741,7 +741,7 @@ class Peer:
     async def has_block(self, cid_str: str) -> bool:
         self._ensure_started()
         cid = parse_cid(cid_str)
-        return await self.blockstore.has(cid)  # type: ignore[union-attr]
+        return await self.blockstore.has(cid.buffer)  # type: ignore[union-attr]
 
     def block_store(self) -> Any:
         return self.blockstore

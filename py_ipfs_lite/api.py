@@ -316,10 +316,10 @@ async def repo_stat(request: Request) -> Any:
 async def swarm_peers(request: Request) -> Any:
     """List peers with open connections."""
     peer: Peer = request.app.state.peer
-    network = peer.host.get_network()  # type: ignore[union-attr]
     peers_data = []
 
     try:
+        network = peer.host.get_network()  # type: ignore[union-attr]
         if hasattr(network, "connections"):
             conns_dict = network.connections
             for peer_id_obj, conns in conns_dict.items():
