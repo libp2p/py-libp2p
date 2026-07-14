@@ -31,6 +31,8 @@ IPFS_GC_RECLAIMED_BLOCKS_TOTAL = Counter(
     "Total number of blocks reclaimed during garbage collection",
 )
 
+IPFS_SWARM_PEERS = Gauge("ipfs_swarm_peers", "Number of connected swarm peers")
+
 
 class MetricsBlockStore:
     """Wraps a libp2p BlockStore to record prometheus metrics on put/delete."""

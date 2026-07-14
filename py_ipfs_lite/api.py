@@ -352,8 +352,23 @@ async def swarm_peers(request: Request) -> Any:
 
 
 @app.get("/debug/metrics/prometheus")
-async def metrics() -> Any:
+async def metrics(request: Request) -> Any:
     """Expose Prometheus metrics."""
+    peer: Peer = request.app.state.peer
+    network = peer.host.get_network()  # type: ignore[union-attr]
+
+    from py_ipfs_lite.metrics import IPFS_SWARM_PEERS
+
+    conn_count = 0
+    if hasattr(network, "connections"):
+        conns_dict = network.connections
+        for conns in conns_dict.values():
+            if isinstance(conns, list):
+                conn_count += len(conns)
+            else:
+                conn_count += 1
+
+    IPFS_SWARM_PEERS.set(conn_count)
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
