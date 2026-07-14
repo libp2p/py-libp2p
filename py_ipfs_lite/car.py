@@ -183,6 +183,18 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
             cid_bytes = block_data_full[:cid_len]
             data = block_data_full[cid_len:]
 
+            # Verify block hash
+            cid = parse_cid(cid_bytes)
+            import multihash
+
+            mh = multihash.decode(cid.multihash)
+            try:
+                actual_mh = multihash.digest(data, mh.code, length=mh.length)
+                if actual_mh.digest != mh.digest:
+                    raise ValueError(f"Hash mismatch for block {cid}")
+            except Exception as e:
+                raise ValueError(f"Failed to verify block {cid}: {e}")
+
             await peer.blockstore.put(cid_bytes, data)
 
     return roots

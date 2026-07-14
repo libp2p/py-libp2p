@@ -106,3 +106,32 @@ async def test_car_export_partial_dag(fs_config, tmp_path):
         assert car_path.stat().st_size > 0
     finally:
         await peer.close()
+
+
+@pytest.mark.trio
+async def test_import_car_invalid_hash(fs_config, tmp_path):
+    peer = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+
+    try:
+        node_cid = await peer.add_node({"msg": "test data"}, codec="dag-cbor")
+
+        # export the CAR
+        car_path = tmp_path / "valid.car"
+        await peer.export_car(node_cid, str(car_path))
+
+        # tamper with the CAR data manually by flipping a byte at the end
+        car_bytes = bytearray(car_path.read_bytes())
+        car_bytes[-1] ^= 0xFF
+        corrupted_path = tmp_path / "corrupted.car"
+        corrupted_path.write_bytes(car_bytes)
+
+        peer2 = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+        await peer2.start()
+        try:
+            with pytest.raises(ValueError, match="Hash mismatch"):
+                await peer2.import_car(str(corrupted_path))
+        finally:
+            await peer2.close()
+    finally:
+        await peer.close()
