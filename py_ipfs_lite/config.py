@@ -10,7 +10,7 @@ class Config:
     conn_mgr_low_water: int = 600
     blockstore_type: str = "filesystem"
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
-    use_ipni: bool = True
+    use_ipni: bool = False
     ipni_endpoint: str = "https://cid.contact"
     default_timeout: float = 30.0
 
