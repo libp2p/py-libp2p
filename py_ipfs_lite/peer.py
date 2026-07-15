@@ -444,6 +444,8 @@ class Peer:
         timeout: float | None = None,
         stream: bool = False,
     ) -> bytes | AsyncIterator[bytes] | None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
@@ -552,6 +554,8 @@ class Peer:
         provider_addr: str | None = None,
         timeout: float | None = None,
     ) -> dict[Any, Any] | list[Any] | str | int | bytes:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
@@ -592,16 +596,22 @@ class Peer:
         return decode_node(data, codec)
 
     async def remove_node(self, cid_str: str) -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         cid = parse_cid(cid_str)
         await self.blockstore.delete(cid.buffer)  # type: ignore[union-attr]
 
     async def add_pin(self, cid_str: str, recursive: bool = True) -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         pin_type = "recursive" if recursive else "direct"
         self.pin_store.add_pin(cid_str, pin_type)
 
     async def remove_pin(self, cid_str: str) -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         self.pin_store.remove_pin(cid_str)
 
@@ -726,6 +736,8 @@ class Peer:
         return self.host.id().to_base58()  # type: ignore[union-attr]
 
     async def export_car(self, cid_str: str, output_path: str) -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         from py_ipfs_lite.car import export_car as _export_car
 
@@ -741,6 +753,8 @@ class Peer:
         return self
 
     async def has_block(self, cid_str: str) -> bool:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         self._ensure_started()
         cid = parse_cid(cid_str)
         return await self.blockstore.has(cid.buffer)  # type: ignore[union-attr]

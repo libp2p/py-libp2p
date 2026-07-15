@@ -16,6 +16,19 @@ def memory_config():
     )
 
 
+@pytest.mark.trio
+async def test_peer_rejects_bytes_cid(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    try:
+        with pytest.raises(TypeError, match="cid_str must be a string"):
+            await peer.get_node(
+                b"bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+            )
+    finally:
+        await peer.close()
+
+
 @pytest.fixture
 def fs_config():
     with tempfile.TemporaryDirectory() as tmpdirname:

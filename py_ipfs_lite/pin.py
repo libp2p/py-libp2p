@@ -53,6 +53,9 @@ class PinStore:
                     pass
 
     def add_pin(self, cid_str: str, pin_type: str = "recursive") -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
+
         from libp2p.bitswap.cid import parse_cid
 
         parse_cid(cid_str)
@@ -63,6 +66,9 @@ class PinStore:
         self._save()
 
     def remove_pin(self, cid_str: str) -> None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
+
         if cid_str not in self._pins:
             from py_ipfs_lite.exceptions import PinNotFoundError
 
@@ -71,9 +77,13 @@ class PinStore:
         self._save()
 
     def is_pinned(self, cid_str: str) -> bool:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         return cid_str in self._pins
 
     def get_pin_type(self, cid_str: str) -> str | None:
+        if not isinstance(cid_str, str):
+            raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
         return self._pins.get(cid_str)
 
     def get_pins(self, type_filter: str = "all") -> dict[str, str]:
