@@ -775,11 +775,11 @@ class Peer:
 
         await _export_car(self, cid_str, output_path)
 
-    async def import_car(self, input_path: str) -> list[str]:
+    async def import_car(self, input_path: str, strict: bool = False) -> list[str]:
         self._ensure_started()
         from py_ipfs_lite.car import import_car as _import_car
 
-        return await _import_car(self, input_path)
+        return await _import_car(self, input_path, strict=strict)
 
     def session(self) -> Any:
         return self

@@ -114,10 +114,15 @@ async def cat_file(
     """Fetch a file by its CID."""
     peer: Peer = request.app.state.peer
     try:
+        # Buffer all chunks so that errors (timeout, missing block) are caught
+        # here before we commit to a StreamingResponse and lose the ability to
+        # return a proper error status code.
         content_iter = await peer.get_file(arg, stream=True)
-        from fastapi.responses import StreamingResponse
-
-        return StreamingResponse(content_iter, media_type="application/octet-stream")  # type: ignore[arg-type]
+        chunks = []
+        async for chunk in content_iter:  # type: ignore[union-attr]
+            chunks.append(chunk)
+        body = b"".join(chunks)
+        return Response(content=body, media_type="application/octet-stream")
     except Exception as e:
         if isinstance(e, (ValueError, TypeError, json.JSONDecodeError, RecursionError)):
             raise HTTPException(status_code=400, detail=str(e))
