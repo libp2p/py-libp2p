@@ -52,6 +52,41 @@ async def test_ipns_publish_resolve():
     assert resolved == val
 
 
+def _create_expired_ipns_record(private_key, value: str, sequence: int) -> bytes:
+    from datetime import datetime, timedelta, timezone
+
+    import cbor2
+
+    from py_ipfs_lite.ipns import SIGNATURE_PREFIX, IpnsEntry, _format_rfc3339
+
+    value_bytes = value.encode("utf-8")
+    now = datetime.now(timezone.utc)
+    validity_dt = now - timedelta(hours=1)
+    validity_bytes = _format_rfc3339(validity_dt).encode("utf-8")
+
+    cbor_data_dict = {
+        "Value": value_bytes,
+        "Validity": validity_bytes,
+        "ValidityType": 0,
+        "Sequence": sequence,
+    }
+    cbor_bytes = cbor2.dumps(cbor_data_dict)
+    signature_v2 = private_key.sign(SIGNATURE_PREFIX + cbor_bytes)
+    signature_v1 = private_key.sign(value_bytes + validity_bytes + b"0")
+
+    entry = IpnsEntry()
+    entry.value = value_bytes
+    entry.validity = validity_bytes
+    entry.validityType = 0
+    entry.signatureV1 = signature_v1
+    entry.signatureV2 = signature_v2
+    entry.sequence = sequence
+    entry.data = cbor_bytes
+    entry.pubKey = private_key.get_public_key().serialize()
+
+    return entry.SerializeToString()
+
+
 @pytest.mark.trio
 async def test_ipns_validation_failures():
     from py_ipfs_lite.exceptions import RoutingError
@@ -61,9 +96,7 @@ async def test_ipns_validation_failures():
     routing = MockRouting()
 
     # 1. Test expired record
-    expired_bytes = create_ipns_record(
-        keypair.private_key, "expired", 1, lifetime_hours=-1
-    )
+    expired_bytes = _create_expired_ipns_record(keypair.private_key, "expired", 1)
     await routing.put_value(f"/ipns/{peer_id.to_base58()}", expired_bytes)
     with pytest.raises(RoutingError, match="expired"):
         await resolve_name(routing, peer_id)
@@ -139,6 +172,21 @@ def test_ipns_sequence_bounds():
     # Valid edge cases should not raise
     create_ipns_record(private_key, "/ipfs/QmTest", 0)
     create_ipns_record(private_key, "/ipfs/QmTest", 0xFFFFFFFFFFFFFFFF)
+
+
+def test_ipns_lifetime_bounds():
+    from libp2p.crypto.ed25519 import create_new_key_pair
+
+    from py_ipfs_lite.ipns import create_ipns_record
+
+    keypair = create_new_key_pair()
+    private_key = keypair.private_key
+
+    with pytest.raises(ValueError, match="lifetime_hours must be between 1 and 876000"):
+        create_ipns_record(private_key, "/ipfs/QmTest", 1, lifetime_hours=0)
+
+    with pytest.raises(ValueError, match="lifetime_hours must be between 1 and 876000"):
+        create_ipns_record(private_key, "/ipfs/QmTest", 1, lifetime_hours=10**18)
 
 
 @pytest.mark.trio

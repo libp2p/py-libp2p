@@ -21,6 +21,21 @@ class Config:
     default_timeout: float = 30.0
 
     def __post_init__(self) -> None:
+        if self.reprovide_interval_seconds == 0:
+            raise ValueError(
+                "reprovide_interval_seconds cannot be 0. Use < 0 to disable."
+            )
+        if self.reprovider_strategy not in ("all", "pinned", "roots"):
+            raise ValueError(
+                f"Unknown reprovider_strategy: '{self.reprovider_strategy}'"
+            )
+        if self.conn_mgr_low_water < 0 or self.conn_mgr_high_water < 0:
+            raise ValueError("Connection watermarks cannot be negative.")
+        if self.conn_mgr_low_water > self.conn_mgr_high_water:
+            raise ValueError(
+                "conn_mgr_low_water cannot be greater than " "conn_mgr_high_water."
+            )
+
         try:
             self.blockstore_type = BlockStoreType(self.blockstore_type)
         except ValueError:
@@ -36,6 +51,17 @@ class AddParams:
     chunker: str = "size-262144"
     raw_leaves: bool = True
     hash_fun: str = "sha2-256"
+
+    def __post_init__(self) -> None:
+        if not self.chunker.startswith("size-"):
+            raise ValueError(
+                f"Invalid chunker '{self.chunker}'. Must start with 'size-'."
+            )
+        chunk_size_str = self.chunker[5:]
+        if not chunk_size_str.isdigit() or int(chunk_size_str) <= 0:
+            raise ValueError(
+                f"Invalid chunker '{self.chunker}'. Size must be a positive integer."
+            )
 
 
 @dataclass(slots=True)
