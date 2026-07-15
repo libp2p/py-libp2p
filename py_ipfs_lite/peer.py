@@ -53,7 +53,7 @@ from libp2p.security.noise.transport import Transport as NoiseTransport
 
 def encode_node(node: Any, codec: str) -> bytes:
     if codec == "dag-json":
-        return json.dumps(node, separators=(",", ":")).encode("utf-8")
+        return json.dumps(node, separators=(",", ":"), allow_nan=False).encode("utf-8")
     elif codec in ("dag-cbor", "cbor"):
         return cbor2.dumps(node)
     elif codec == "raw":

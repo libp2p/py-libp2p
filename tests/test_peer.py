@@ -345,3 +345,12 @@ async def test_peer_context_manager(memory_config):
             raise ValueError("simulated crash")
 
     assert peer._started is False
+
+
+@pytest.mark.trio
+async def test_dag_json_rejects_nan(memory_config):
+    async with Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"]) as peer:
+        with pytest.raises(ValueError, match="Out of range float values"):
+            await peer.add_node({"value": float("nan")}, codec="dag-json")
+        with pytest.raises(ValueError, match="Out of range float values"):
+            await peer.add_node({"value": float("inf")}, codec="dag-json")
