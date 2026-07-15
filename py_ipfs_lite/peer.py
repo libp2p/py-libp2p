@@ -244,7 +244,9 @@ class Peer:
         return dht_adapter
 
     def _create_blockstore(self) -> Any:
-        if self.config.blockstore_type == "filesystem":
+        from py_ipfs_lite.config import BlockStoreType
+
+        if self.config.blockstore_type == BlockStoreType.FILESYSTEM:
             if not self.config.blockstore_path:
                 raise ValueError(
                     "blockstore_path must be provided when blockstore_type is 'filesystem'"
