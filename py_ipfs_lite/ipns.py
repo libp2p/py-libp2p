@@ -152,6 +152,9 @@ def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry
         if "+" in frac_tz:
             frac, tz = frac_tz.split("+", 1)
             tz = "+" + tz
+        elif "-" in frac_tz:
+            frac, tz = frac_tz.split("-", 1)
+            tz = "-" + tz
         else:
             frac = frac_tz
             tz = ""
