@@ -378,3 +378,19 @@ async def test_add_node_raw_rejects_dict(memory_config):
             await peer.add_node({"data": "invalid"}, codec="raw")
     finally:
         await peer.close()
+
+
+@pytest.mark.trio
+async def test_offline_ipns_methods_raise_error():
+    from py_ipfs_lite.config import Config
+    from py_ipfs_lite.exceptions import RoutingError
+    from py_ipfs_lite.peer import Peer
+
+    config = Config(offline=True, blockstore_type="memory")
+    async with Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"]) as peer:
+        with pytest.raises(RoutingError, match="peer is offline"):
+            await peer.resolve_name(
+                "12D3KooWCvVxG5SBv5fZNVULQGpJuhBCiRNAABs24QqyxtEYy1Pv"
+            )
+        with pytest.raises(RoutingError, match="peer is offline"):
+            await peer.publish_name("/ipfs/x")

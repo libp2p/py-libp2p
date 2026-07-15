@@ -704,6 +704,12 @@ class Peer:
     async def resolve_name(self, peer_id_str: str, timeout: float | None = None) -> str:
         """Resolve an IPNS name (PeerID) to its value."""
         self._ensure_started()
+
+        from py_ipfs_lite.exceptions import RoutingError
+
+        if self.routing is None:
+            raise RoutingError("IPNS requires network routing; this peer is offline")
+
         t_val = timeout if timeout is not None else self.config.default_timeout
         from libp2p.peer.id import ID
 
@@ -719,6 +725,12 @@ class Peer:
     ) -> str:
         """Publish an IPNS record pointing to `value` using this node's private key."""
         self._ensure_started()
+
+        from py_ipfs_lite.exceptions import RoutingError
+
+        if self.routing is None:
+            raise RoutingError("IPNS requires network routing; this peer is offline")
+
         t_val = timeout if timeout is not None else self.config.default_timeout
         # Sequence number could be maintained in datastore or retrieved from DHT first.
         # For a basic implementation, we just use a timestamp for sequence to ensure it's monotonically increasing

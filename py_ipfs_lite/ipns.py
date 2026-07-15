@@ -162,7 +162,7 @@ def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry
         validity_dt = datetime.fromisoformat(validity_str)
         if validity_dt < datetime.now(timezone.utc):
             raise RoutingError("IPNS record has expired")
-    except ValueError:
+    except (ValueError, TypeError):
         logger.warning(
             f"Failed to parse IPNS validity date: {entry.validity.decode('utf-8')}"
         )
