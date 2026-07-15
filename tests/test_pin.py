@@ -89,3 +89,46 @@ async def test_atomic_save():
                 "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
                 in data["pins"]
             )
+
+
+def test_pin_upgrade_and_downgrade(tmp_path):
+    from py_ipfs_lite.pin import PinStore
+
+    db_path = tmp_path / "pins.json"
+    store = PinStore(str(db_path))
+    from py_ipfs_lite.exceptions import PinError
+
+    # Test upgrade (direct -> recursive)
+    store.add_pin(
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", "direct"
+    )
+    assert (
+        store.get_pin_type(
+            "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+        )
+        == "direct"
+    )
+    store.add_pin(
+        "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", "recursive"
+    )
+    assert (
+        store.get_pin_type(
+            "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+        )
+        == "recursive"
+    )
+
+    # Test downgrade rejection (recursive -> direct)
+    import pytest
+
+    with pytest.raises(PinError, match="already pinned recursively"):
+        store.add_pin(
+            "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", "direct"
+        )
+    # Remains recursive
+    assert (
+        store.get_pin_type(
+            "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+        )
+        == "recursive"
+    )

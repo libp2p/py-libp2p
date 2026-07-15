@@ -16,6 +16,12 @@ class PinNotFoundError(IPFSLiteError):
     pass
 
 
+class PinError(IPFSLiteError):
+    """Raised when an invalid pin operation is attempted (e.g., downgrading a pin)."""
+
+    pass
+
+
 class PeerNotStartedError(IPFSLiteError):
     """Raised when attempting to use a Peer that has not been started."""
 

@@ -62,6 +62,16 @@ class PinStore:
 
         if pin_type not in ("direct", "recursive"):
             raise ValueError(f"Invalid pin type: {pin_type}")
+
+        if cid_str in self._pins:
+            existing = self._pins[cid_str]
+            if existing == pin_type:
+                return
+            if existing == "recursive" and pin_type == "direct":
+                from py_ipfs_lite.exceptions import PinError
+
+                raise PinError(f"'{cid_str}' already pinned recursively")
+
         self._pins[cid_str] = pin_type
         self._save()
 
