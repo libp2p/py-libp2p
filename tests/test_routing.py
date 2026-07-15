@@ -54,3 +54,25 @@ async def test_tiered_routing():
 
     provided = await tiered.provide("test")
     assert provided is True
+
+
+@pytest.mark.trio
+async def test_tiered_routing_put_value_failure():
+    from py_ipfs_lite.routing import TieredRouting
+
+    class FailingRouter:
+        async def put_value(self, key, value):
+            raise ValueError("Simulated failure")
+
+    class SuccessRouter:
+        async def put_value(self, key, value):
+            pass
+
+    # Total failure raises an exception
+    tiered_fail = TieredRouting([FailingRouter(), FailingRouter()])
+    with pytest.raises(RuntimeError, match="Failed to put value in all routers"):
+        await tiered_fail.put_value("test", b"data")
+
+    # Partial success swallows the failure and returns normally
+    tiered_partial = TieredRouting([FailingRouter(), SuccessRouter()])
+    await tiered_partial.put_value("test", b"data")  # Should not raise

@@ -181,11 +181,18 @@ class TieredRouting:
         return None
 
     async def put_value(self, key: str, value: bytes) -> None:
+        success = False
+        last_err = None
         for r in self.routers:
             try:
                 await r.put_value(key, value)
+                success = True
             except Exception as e:
+                last_err = e
                 logger.debug(f"TieredRouting put_value failed on {r}: {type(e)} {e}")
+
+        if not success and last_err is not None:
+            raise RuntimeError("Failed to put value in all routers") from last_err
 
     async def close(self) -> None:
         for r in self.routers:
