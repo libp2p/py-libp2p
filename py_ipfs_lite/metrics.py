@@ -71,6 +71,10 @@ class MetricsBlockStore:
         return await self._store.has_block(cid)
 
     async def delete_block(self, cid: bytes) -> None:
+        if not await self.has_block(cid):
+            await self._store.delete_block(cid)
+            return
+
         size = 0
         try:
             size = await self.get_size(cid)

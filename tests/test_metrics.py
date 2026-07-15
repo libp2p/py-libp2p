@@ -45,3 +45,24 @@ async def test_metrics_idempotent_put():
     after_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
     # Adding a file adds exactly 1 block in this case, but adding it twice should still be just 1 block added.
     assert after_count == before_count + 1
+
+
+@pytest.mark.trio
+async def test_metrics_idempotent_delete():
+    from py_ipfs_lite.config import Config
+    from py_ipfs_lite.metrics import IPFS_BLOCKSTORE_BLOCKS_TOTAL
+    from py_ipfs_lite.peer import Peer
+
+    before_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
+
+    config = Config(offline=True, blockstore_type="memory")
+    async with Peer(config, listen_addrs=["/ip4/127.0.0.1/tcp/0"]) as peer:
+        # Attempt to remove a CID that doesn't exist
+        fake_cid_str = "bafyreigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+        try:
+            await peer.remove_node(fake_cid_str)
+        except Exception:
+            pass
+
+    after_count = IPFS_BLOCKSTORE_BLOCKS_TOTAL._value.get()
+    assert after_count == before_count
