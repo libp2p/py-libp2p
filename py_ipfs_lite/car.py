@@ -66,7 +66,7 @@ class BufferedAsyncReader:
 
 
 def get_cid_len(data: bytes) -> int:
-    if data[0] == 0x12 and data[1] == 0x20:
+    if len(data) >= 34 and data[0] == 0x12 and data[1] == 0x20:
         return 34
 
     stream = io.BytesIO(data)
@@ -147,6 +147,10 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
 
 
 async def import_car(peer: Any, input_path: str) -> list[str]:
+    from cbor2 import CBORError
+
+    from py_ipfs_lite.exceptions import CarParseError
+
     roots = []  # type: ignore[var-annotated]
     async with await trio.open_file(input_path, "rb") as raw_f:
         f = BufferedAsyncReader(raw_f)
@@ -156,48 +160,51 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
         except TypeError:
             return roots
 
-        header_bytes = await f.read_exactly(header_len)
-        header = loads(header_bytes)
-        if header.get("version") != 1:
-            raise ValueError(f"Unsupported CAR version: {header.get('version')}")
+        try:
+            header_bytes = await f.read_exactly(header_len)
+            header = loads(header_bytes)
+            if header.get("version") != 1:
+                raise CarParseError(f"Unsupported CAR version: {header.get('version')}")
 
-        for root in header.get("roots", []):
-            if isinstance(root, CBORTag) and root.tag == 42:
-                cid_bytes = root.value[1:]
+            for root in header.get("roots", []):
+                if isinstance(root, CBORTag) and root.tag == 42:
+                    cid_bytes = root.value[1:]
+                    cid = parse_cid(cid_bytes)
+                    roots.append(format_cid_for_display(cid))
+
+            # Read blocks
+            while True:
+                try:
+                    block_len = await f.read_varint()
+                except TypeError:
+                    break
+
+                block_data_full = await f.read_exactly(block_len)
+                if not block_data_full:
+                    break
+
+                cid_len = get_cid_len(block_data_full)
+                cid_bytes = block_data_full[:cid_len]
+                data = block_data_full[cid_len:]
+
+                # Verify block hash
                 cid = parse_cid(cid_bytes)
-                roots.append(format_cid_for_display(cid))
+                import multihash
 
-        # Read blocks
-        while True:
-            try:
-                block_len = await f.read_varint()
-            except TypeError:
-                break
+                mh = multihash.decode(cid.multihash)
+                try:
+                    actual_mh = multihash.digest(data, mh.code, length=mh.length)
+                    if actual_mh.digest != mh.digest:
+                        raise ValueError(f"Hash mismatch for block {cid}")
+                except Exception as e:
+                    raise ValueError(f"Failed to verify block {cid}: {e}")
 
-            block_data_full = await f.read_exactly(block_len)
-            if not block_data_full:
-                break
+                await peer.blockstore.put(cid_bytes, data)
 
-            cid_len = get_cid_len(block_data_full)
-            cid_bytes = block_data_full[:cid_len]
-            data = block_data_full[cid_len:]
-
-            # Verify block hash
-            cid = parse_cid(cid_bytes)
-            import multihash
-
-            mh = multihash.decode(cid.multihash)
-            try:
-                actual_mh = multihash.digest(data, mh.code, length=mh.length)
-                if actual_mh.digest != mh.digest:
-                    raise ValueError(f"Hash mismatch for block {cid}")
-            except Exception as e:
-                raise ValueError(f"Failed to verify block {cid}: {e}")
-
-            await peer.blockstore.put(cid_bytes, data)
-
-        for root in roots:
-            if not await peer.has_block(root):
-                raise ValueError(f"CAR file is missing root block {root}")
+            for root in roots:
+                if not await peer.has_block(root):
+                    raise CarParseError(f"CAR file is missing root block {root}")
+        except (CBORError, TypeError, IndexError, EOFError, ValueError) as e:
+            raise CarParseError(f"Failed to parse CAR file: {e}") from e
 
     return roots

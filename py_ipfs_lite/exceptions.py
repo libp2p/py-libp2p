@@ -26,3 +26,9 @@ class RoutingError(IPFSLiteError):
     """Raised when a routing operation (e.g., DHT publish/resolve) fails."""
 
     pass
+
+
+class CarParseError(IPFSLiteError):
+    """Raised when a CAR file is malformed, truncated, or cannot be parsed."""
+
+    pass

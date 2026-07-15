@@ -129,7 +129,11 @@ async def test_import_car_invalid_hash(fs_config, tmp_path):
         peer2 = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
         await peer2.start()
         try:
-            with pytest.raises(ValueError, match="Hash mismatch"):
+            from py_ipfs_lite.exceptions import CarParseError
+
+            with pytest.raises(
+                CarParseError, match="Failed to parse CAR file: Failed to verify block"
+            ):
                 await peer2.import_car(str(corrupted_path))
         finally:
             await peer2.close()
@@ -173,10 +177,17 @@ async def test_import_car_truncated(fs_config, tmp_path):
         peer2 = Peer(config2, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
         await peer2.start()
         try:
-            with pytest.raises(EOFError, match="Unexpected EOF"):
+            from py_ipfs_lite.exceptions import CarParseError
+
+            with pytest.raises(
+                CarParseError, match="Failed to parse CAR file: Unexpected EOF"
+            ):
                 await peer2.import_car(str(truncated_path1))
 
-            with pytest.raises(ValueError, match="CAR file is missing root block"):
+            with pytest.raises(
+                CarParseError,
+                match="CAR file is missing root block",
+            ):
                 await peer2.import_car(str(truncated_path2))
         finally:
             await peer2.close()
