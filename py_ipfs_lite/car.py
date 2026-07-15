@@ -16,53 +16,31 @@ from libp2p.bitswap.dag import decode_dag_pb
 from py_ipfs_lite.dag_utils import decode_node
 
 
-class BufferedAsyncReader:
-    def __init__(self, f: Any, buffer_size: Any = 65536) -> None:
-        self.f = f
-        self.buffer_size = buffer_size
-        self.buffer = bytearray()
-        self.offset = 0
+async def _read_exactly(f: Any, n: int) -> bytes:
+    data = bytearray()
+    while len(data) < n:
+        chunk = await f.read(n - len(data))
+        if not chunk:
+            raise EOFError("Unexpected EOF")
+        data.extend(chunk)
+    return bytes(data)
 
-    async def read_exactly(self, n: int) -> bytes:
-        while len(self.buffer) - self.offset < n:
-            chunk = await self.f.read(self.buffer_size)
-            if not chunk:
-                raise EOFError("Unexpected EOF")
-                break
-            self.buffer.extend(chunk)
 
-        data = self.buffer[self.offset : self.offset + n]
-        self.offset += n
-        if self.offset > self.buffer_size * 2:
-            self.buffer = self.buffer[self.offset :]
-            self.offset = 0
-        return bytes(data)
-
-    async def read_varint(self) -> int:
-        shift = 0
-        result = 0
-        while True:
-            if self.offset >= len(self.buffer):
-                chunk = await self.f.read(self.buffer_size)
-                if not chunk:
-                    if shift == 0:
-                        raise TypeError("EOF")
-                    raise EOFError("Unexpected EOF reading varint")
-                self.buffer.extend(chunk)
-
-            val = self.buffer[self.offset]
-            self.offset += 1
-
-            result |= (val & 0x7F) << shift
-            if not (val & 0x80):
-                break
-            shift += 7
-
-            if self.offset > self.buffer_size * 2:
-                self.buffer = self.buffer[self.offset :]
-                self.offset = 0
-
-        return result
+async def _read_varint(f: Any) -> int:
+    shift = 0
+    result = 0
+    while True:
+        chunk = await f.read(1)
+        if not chunk:
+            if shift == 0:
+                raise TypeError("EOF")
+            raise EOFError("Unexpected EOF reading varint")
+        val = chunk[0]
+        result |= (val & 0x7F) << shift
+        if not (val & 0x80):
+            break
+        shift += 7
+    return result
 
 
 def get_cid_len(data: bytes) -> int:
@@ -152,16 +130,15 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
     from py_ipfs_lite.exceptions import CarParseError
 
     roots = []  # type: ignore[var-annotated]
-    async with await trio.open_file(input_path, "rb") as raw_f:
-        f = BufferedAsyncReader(raw_f)
+    async with await trio.open_file(input_path, "rb") as f:
         # Header length
         try:
-            header_len = await f.read_varint()
+            header_len = await _read_varint(f)
         except TypeError:
             return roots
 
         try:
-            header_bytes = await f.read_exactly(header_len)
+            header_bytes = await _read_exactly(f, header_len)
             header = loads(header_bytes)
             if header.get("version") != 1:
                 raise CarParseError(f"Unsupported CAR version: {header.get('version')}")
@@ -175,11 +152,11 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
             # Read blocks
             while True:
                 try:
-                    block_len = await f.read_varint()
+                    block_len = await _read_varint(f)
                 except TypeError:
                     break
 
-                block_data_full = await f.read_exactly(block_len)
+                block_data_full = await _read_exactly(f, block_len)
                 if not block_data_full:
                     break
 
