@@ -1,8 +1,6 @@
-import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-import cbor2
 from libp2p.bitswap.cid import (
     CODEC_DAG_PB,
     _normalise_codec,
@@ -12,27 +10,7 @@ from libp2p.bitswap.cid import (
 )
 from libp2p.bitswap.dag import decode_dag_pb
 
-
-def encode_node(node: dict[Any, Any], codec: str) -> bytes:
-    if codec == "dag-cbor":
-        return cbor2.dumps(node)
-    elif codec == "dag-json":
-        return json.dumps(node).encode("utf-8")
-    else:
-        # Fallback to json for testing if codec unknown but dict provided
-        return json.dumps(node).encode("utf-8")
-
-
-def decode_node(data: bytes, codec: str) -> dict[Any, Any]:
-    if codec == "dag-cbor":
-        return cbor2.loads(data)
-    elif codec == "dag-json":
-        return json.loads(data.decode("utf-8"))
-    else:
-        try:
-            return json.loads(data.decode("utf-8"))
-        except:
-            raise ValueError(f"Unsupported codec for decoding: {codec}")
+from py_ipfs_lite.peer import decode_node
 
 
 async def walk_dag(
