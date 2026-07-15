@@ -116,6 +116,31 @@ async def client(memory_config):
         await peer.close()
 
 
+def test_ipns_sequence_bounds():
+    from libp2p.crypto.ed25519 import create_new_key_pair
+
+    from py_ipfs_lite.ipns import create_ipns_record
+
+    keypair = create_new_key_pair()
+    private_key = keypair.private_key
+
+    # Negative
+    with pytest.raises(
+        ValueError, match="Sequence number must be a 64-bit unsigned integer"
+    ):
+        create_ipns_record(private_key, "/ipfs/QmTest", -1)
+
+    # Overflow
+    with pytest.raises(
+        ValueError, match="Sequence number must be a 64-bit unsigned integer"
+    ):
+        create_ipns_record(private_key, "/ipfs/QmTest", 0xFFFFFFFFFFFFFFFF + 1)
+
+    # Valid edge cases should not raise
+    create_ipns_record(private_key, "/ipfs/QmTest", 0)
+    create_ipns_record(private_key, "/ipfs/QmTest", 0xFFFFFFFFFFFFFFFF)
+
+
 @pytest.mark.trio
 async def test_ipns_peer_methods(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])

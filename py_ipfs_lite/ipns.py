@@ -25,6 +25,11 @@ def create_ipns_record(
     private_key: PrivateKey, value: str, sequence: int, lifetime_hours: int = 24
 ) -> bytes:
     """Create a signed IPNS record."""
+    if not (0 <= sequence <= 0xFFFFFFFFFFFFFFFF):
+        raise ValueError(
+            "Sequence number must be a 64-bit unsigned integer " "(0 to 2^64-1)"
+        )
+
     value_bytes = value.encode("utf-8")
 
     # Calculate validity
