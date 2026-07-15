@@ -101,3 +101,15 @@ async def test_api_lifespan_bootstraps():
         assert peer.bootstrap.called
         assert len(peer.bootstrap.call_args[0][0]) > 0
     await peer.close()
+
+
+@pytest.mark.trio
+async def test_api_400_for_malformed_input(client):
+    # Test bad CID
+    res = await client.post("/api/v0/dag/get?arg=not-a-valid-cid")
+    assert res.status_code == 400
+    assert "not-a-valid-cid" in res.text
+
+    # Test bad JSON body
+    res = await client.post("/api/v0/dag/put", content=b"{bad json")
+    assert res.status_code == 400

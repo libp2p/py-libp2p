@@ -90,6 +90,8 @@ async def add_file(request: Request, file: UploadFile = File(...)) -> Any:
             content={"Name": file.filename, "Hash": cid_str, "Size": str(len(content))}
         )
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -111,6 +113,8 @@ async def cat_file(
 
         return StreamingResponse(content_iter, media_type="application/octet-stream")  # type: ignore[arg-type]
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -128,6 +132,8 @@ async def dag_put(
         cid_str = await peer.add_node(node_data, codec=store_codec)
         return JSONResponse(content={"Cid": {"/": cid_str}})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -144,6 +150,8 @@ async def dag_get(
         node_data = await peer.get_node(arg)
         return JSONResponse(content=node_data)
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -170,6 +178,8 @@ async def block_stat(
     except HTTPException:
         raise
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -186,6 +196,8 @@ async def block_rm(
         await peer.remove_node(arg)
         return JSONResponse(content={"Hash": arg, "Error": ""})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -203,6 +215,8 @@ async def pin_add(
         await peer.add_pin(arg, recursive=recursive)
         return JSONResponse(content={"Pins": [arg]})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -219,6 +233,8 @@ async def pin_rm(
         await peer.remove_pin(arg)
         return JSONResponse(content={"Pins": [arg]})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -234,6 +250,8 @@ async def repo_gc(request: Request) -> Any:
         stats = await peer.gc()
         return JSONResponse(content=dataclasses.asdict(stats))
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -251,6 +269,8 @@ async def refs_local(request: Request) -> Any:
         # Kubo streams this as NDJSON, but returning a JSON array of objects is easier for testing
         return JSONResponse(content={"Refs": results})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -306,6 +326,8 @@ async def repo_stat(request: Request) -> Any:
             }
         )
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -344,6 +366,8 @@ async def swarm_peers(request: Request) -> Any:
                         }
                     )
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -400,6 +424,8 @@ async def name_publish(
         name = await peer.publish_name(arg, lifetime_hours=24)
         return JSONResponse(content={"Name": name, "Value": arg})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
@@ -416,6 +442,8 @@ async def name_resolve(
         value = await peer.resolve_name(arg)
         return JSONResponse(content={"Path": value})
     except Exception as e:
+        if isinstance(e, (ValueError, TypeError, json.JSONDecodeError)):
+            raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
             raise
         raise HTTPException(status_code=500, detail=str(e))
