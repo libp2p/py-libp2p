@@ -53,6 +53,10 @@ class PinStore:
                     pass
 
     def add_pin(self, cid_str: str, pin_type: str = "recursive") -> None:
+        from libp2p.bitswap.cid import parse_cid
+
+        parse_cid(cid_str)
+
         if pin_type not in ("direct", "recursive"):
             raise ValueError(f"Invalid pin type: {pin_type}")
         self._pins[cid_str] = pin_type

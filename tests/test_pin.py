@@ -12,6 +12,17 @@ def memory_config():
 
 
 @pytest.mark.trio
+async def test_add_pin_validation(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    try:
+        with pytest.raises(ValueError, match="Invalid CID string"):
+            await peer.add_pin("not-a-valid-cid")
+    finally:
+        await peer.close()
+
+
+@pytest.mark.trio
 async def test_pin_types(memory_config):
     peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
     await peer.start()
