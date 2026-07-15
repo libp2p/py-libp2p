@@ -135,3 +135,50 @@ async def test_import_car_invalid_hash(fs_config, tmp_path):
             await peer2.close()
     finally:
         await peer.close()
+
+
+@pytest.mark.trio
+async def test_import_car_truncated(fs_config, tmp_path):
+    peer = Peer(fs_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+
+    try:
+        node_cid = await peer.add_node({"msg": "test data"}, codec="dag-cbor")
+
+        car_path = tmp_path / "valid.car"
+        await peer.export_car(node_cid, str(car_path))
+
+        car_bytes = bytearray(car_path.read_bytes())
+
+        # Test 1: truncated in middle of a block
+        truncated_path1 = tmp_path / "truncated1.car"
+        truncated_path1.write_bytes(car_bytes[:-10])
+
+        # Find the exact length of the header
+        import io
+
+        import varint
+
+        stream = io.BytesIO(car_bytes)
+        header_len = varint.decode_stream(stream)
+        header_end = stream.tell() + header_len
+        truncated_path2 = tmp_path / "truncated2.car"
+        truncated_path2.write_bytes(car_bytes[:header_end])
+
+        config2 = Config(
+            blockstore_type="filesystem",
+            blockstore_path=str(tmp_path / "peer2"),
+            reprovide_interval_seconds=-1,
+        )
+        peer2 = Peer(config2, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+        await peer2.start()
+        try:
+            with pytest.raises(EOFError, match="Unexpected EOF"):
+                await peer2.import_car(str(truncated_path1))
+
+            with pytest.raises(ValueError, match="CAR file is missing root block"):
+                await peer2.import_car(str(truncated_path2))
+        finally:
+            await peer2.close()
+    finally:
+        await peer.close()

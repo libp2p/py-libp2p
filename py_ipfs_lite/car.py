@@ -27,8 +27,7 @@ class BufferedAsyncReader:
         while len(self.buffer) - self.offset < n:
             chunk = await self.f.read(self.buffer_size)
             if not chunk:
-                if len(self.buffer) - self.offset == 0 and n > 0:
-                    raise EOFError("Unexpected EOF")
+                raise EOFError("Unexpected EOF")
                 break
             self.buffer.extend(chunk)
 
@@ -196,5 +195,9 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
                 raise ValueError(f"Failed to verify block {cid}: {e}")
 
             await peer.blockstore.put(cid_bytes, data)
+
+        for root in roots:
+            if not await peer.has_block(root):
+                raise ValueError(f"CAR file is missing root block {root}")
 
     return roots
