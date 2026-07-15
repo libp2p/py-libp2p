@@ -113,3 +113,12 @@ async def test_api_400_for_malformed_input(client):
     # Test bad JSON body
     res = await client.post("/api/v0/dag/put", content=b"{bad json")
     assert res.status_code == 400
+
+
+@pytest.mark.trio
+async def test_api_400_for_deeply_nested_json(client):
+    depth = 100000
+    body = "[" * depth + "1" + "]" * depth
+    res = await client.post("/api/v0/dag/put", content=body)
+    assert res.status_code == 400
+    assert "recursion" in res.text.lower()
