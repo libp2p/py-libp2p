@@ -367,3 +367,14 @@ async def test_dag_json_rejects_nan(memory_config):
             await peer.add_node({"value": float("nan")}, codec="dag-json")
         with pytest.raises(ValueError, match="Out of range float values"):
             await peer.add_node({"value": float("inf")}, codec="dag-json")
+
+
+@pytest.mark.trio
+async def test_add_node_raw_rejects_dict(memory_config):
+    peer = Peer(memory_config, listen_addrs=["/ip4/127.0.0.1/tcp/0"])
+    await peer.start()
+    try:
+        with pytest.raises(TypeError, match="only supports bytes or str"):
+            await peer.add_node({"data": "invalid"}, codec="raw")
+    finally:
+        await peer.close()

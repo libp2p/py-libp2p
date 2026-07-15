@@ -57,7 +57,11 @@ def encode_node(node: Any, codec: str) -> bytes:
     elif codec in ("dag-cbor", "cbor"):
         return cbor2.dumps(node)
     elif codec == "raw":
-        return node if isinstance(node, bytes) else node.encode("utf-8")
+        if isinstance(node, bytes):
+            return node
+        elif isinstance(node, str):
+            return node.encode("utf-8")
+        raise TypeError("The 'raw' codec only supports bytes or str inputs")
     else:
         raise ValueError(f"Unsupported codec for encode_node: {codec}")
 
