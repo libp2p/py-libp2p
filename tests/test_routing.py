@@ -2,6 +2,7 @@ import pytest
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
+from py_ipfs_lite.exceptions import RoutingError
 from py_ipfs_lite.routing import DelegatedHTTPRouting, TieredRouting
 
 
@@ -70,7 +71,7 @@ async def test_tiered_routing_put_value_failure():
 
     # Total failure raises an exception
     tiered_fail = TieredRouting([FailingRouter(), FailingRouter()])
-    with pytest.raises(RuntimeError, match="Failed to put value in all routers"):
+    with pytest.raises(RoutingError, match="Failed to put value"):
         await tiered_fail.put_value("test", b"data")
 
     # Partial success swallows the failure and returns normally

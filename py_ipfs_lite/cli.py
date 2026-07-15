@@ -180,113 +180,120 @@ def main() -> None:
     logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
     logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
 
-    if parsed_args.command == "daemon":
-        config = Config(
-            offline=parsed_args.offline,
-            reprovide_interval_seconds=parsed_args.reprovide_interval_seconds,
-            blockstore_type=parsed_args.blockstore_type,
-            blockstore_path=parsed_args.blockstore_path,
-            use_ipni=parsed_args.use_ipni,
-            ipni_endpoint=parsed_args.ipni_endpoint,
-        )
-
-        if parsed_args.api:
-            import hypercorn.config
-            import hypercorn.trio
-
-            from py_ipfs_lite.api import app
-
-            port = parsed_args.port
-            if port <= 0:
-                port = find_free_port()
-            listen_addrs = get_available_interfaces(port)
-            key_pair = _get_key_pair(parsed_args.seed)
-
-            peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
-            app.state.peer = peer
-
-            hyperconfig = hypercorn.config.Config()
-            hyperconfig.bind = [f"{parsed_args.api_host}:{parsed_args.api_port}"]
-
-            logger.info(
-                f"Starting py-ipfs-lite HTTP API daemon at http://{parsed_args.api_host}:{parsed_args.api_port}"
+    try:
+        if parsed_args.command == "daemon":
+            config = Config(
+                offline=parsed_args.offline,
+                reprovide_interval_seconds=parsed_args.reprovide_interval_seconds,
+                blockstore_type=parsed_args.blockstore_type,
+                blockstore_path=parsed_args.blockstore_path,
+                use_ipni=parsed_args.use_ipni,
+                ipni_endpoint=parsed_args.ipni_endpoint,
             )
-            trio.run(hypercorn.trio.serve, app, hyperconfig)
-        else:
-            trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
 
-    elif parsed_args.command == "add":
-        config = Config(
-            offline=parsed_args.offline,
-            blockstore_type=parsed_args.blockstore_type,
-            blockstore_path=parsed_args.blockstore_path,
-            use_ipni=parsed_args.use_ipni,
-            ipni_endpoint=parsed_args.ipni_endpoint,
-        )
-        add_params = AddParams(
-            chunker=parsed_args.chunker,
-            hash_fun=parsed_args.hash_fun,
-            raw_leaves=parsed_args.raw_leaves,
-        )
-        trio.run(
-            run_add,
-            parsed_args.file,
-            parsed_args.port,
-            parsed_args.seed,
-            config,
-            add_params,
-        )
+            if parsed_args.api:
+                import hypercorn.config
+                import hypercorn.trio
 
-    elif parsed_args.command == "get":
-        config = Config(
-            offline=parsed_args.offline,
-            blockstore_type=parsed_args.blockstore_type,
-            blockstore_path=parsed_args.blockstore_path,
-            use_ipni=parsed_args.use_ipni,
-            ipni_endpoint=parsed_args.ipni_endpoint,
-        )
-        trio.run(
-            run_get,
-            parsed_args.cid,
-            parsed_args.provider,
-            parsed_args.out,
-            parsed_args.port,
-            parsed_args.seed,
-            config,
-        )
+                from py_ipfs_lite.api import app
 
-    elif parsed_args.command == "dag-export":
-        config = Config(
-            offline=parsed_args.offline,
-            blockstore_type=parsed_args.blockstore_type,
-            blockstore_path=parsed_args.blockstore_path,
-            use_ipni=parsed_args.use_ipni,
-            ipni_endpoint=parsed_args.ipni_endpoint,
-        )
-        trio.run(
-            run_dag_export,
-            parsed_args.cid,
-            parsed_args.out,
-            parsed_args.port,
-            parsed_args.seed,
-            config,
-        )
+                port = parsed_args.port
+                if port <= 0:
+                    port = find_free_port()
+                listen_addrs = get_available_interfaces(port)
+                key_pair = _get_key_pair(parsed_args.seed)
 
-    elif parsed_args.command == "dag-import":
-        config = Config(
-            offline=parsed_args.offline,
-            blockstore_type=parsed_args.blockstore_type,
-            blockstore_path=parsed_args.blockstore_path,
-            use_ipni=parsed_args.use_ipni,
-            ipni_endpoint=parsed_args.ipni_endpoint,
-        )
-        trio.run(
-            run_dag_import,
-            parsed_args.file,
-            parsed_args.port,
-            parsed_args.seed,
-            config,
-        )
+                peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
+                app.state.peer = peer
+
+                hyperconfig = hypercorn.config.Config()
+                hyperconfig.bind = [f"{parsed_args.api_host}:{parsed_args.api_port}"]
+
+                logger.info(
+                    f"Starting py-ipfs-lite HTTP API daemon at http://{parsed_args.api_host}:{parsed_args.api_port}"
+                )
+                trio.run(hypercorn.trio.serve, app, hyperconfig)
+            else:
+                trio.run(run_daemon, parsed_args.port, parsed_args.seed, config)
+
+        elif parsed_args.command == "add":
+            config = Config(
+                offline=parsed_args.offline,
+                blockstore_type=parsed_args.blockstore_type,
+                blockstore_path=parsed_args.blockstore_path,
+                use_ipni=parsed_args.use_ipni,
+                ipni_endpoint=parsed_args.ipni_endpoint,
+            )
+            add_params = AddParams(
+                chunker=parsed_args.chunker,
+                hash_fun=parsed_args.hash_fun,
+                raw_leaves=parsed_args.raw_leaves,
+            )
+            trio.run(
+                run_add,
+                parsed_args.file,
+                parsed_args.port,
+                parsed_args.seed,
+                config,
+                add_params,
+            )
+
+        elif parsed_args.command == "get":
+            config = Config(
+                offline=parsed_args.offline,
+                blockstore_type=parsed_args.blockstore_type,
+                blockstore_path=parsed_args.blockstore_path,
+                use_ipni=parsed_args.use_ipni,
+                ipni_endpoint=parsed_args.ipni_endpoint,
+            )
+            trio.run(
+                run_get,
+                parsed_args.cid,
+                parsed_args.provider,
+                parsed_args.out,
+                parsed_args.port,
+                parsed_args.seed,
+                config,
+            )
+
+        elif parsed_args.command == "dag-export":
+            config = Config(
+                offline=parsed_args.offline,
+                blockstore_type=parsed_args.blockstore_type,
+                blockstore_path=parsed_args.blockstore_path,
+                use_ipni=parsed_args.use_ipni,
+                ipni_endpoint=parsed_args.ipni_endpoint,
+            )
+            trio.run(
+                run_dag_export,
+                parsed_args.cid,
+                parsed_args.out,
+                parsed_args.port,
+                parsed_args.seed,
+                config,
+            )
+
+        elif parsed_args.command == "dag-import":
+            config = Config(
+                offline=parsed_args.offline,
+                blockstore_type=parsed_args.blockstore_type,
+                blockstore_path=parsed_args.blockstore_path,
+                use_ipni=parsed_args.use_ipni,
+                ipni_endpoint=parsed_args.ipni_endpoint,
+            )
+            trio.run(
+                run_dag_import,
+                parsed_args.file,
+                parsed_args.port,
+                parsed_args.seed,
+                config,
+            )
+
+    except ValueError as e:
+        import sys
+
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

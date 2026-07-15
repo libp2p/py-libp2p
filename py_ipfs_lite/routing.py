@@ -8,6 +8,8 @@ from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 from multiaddr import Multiaddr
 
+from py_ipfs_lite.exceptions import RoutingError
+
 logger = logging.getLogger("py_ipfs_lite.routing")
 
 
@@ -191,8 +193,8 @@ class TieredRouting:
                 last_err = e
                 logger.debug(f"TieredRouting put_value failed on {r}: {type(e)} {e}")
 
-        if not success and last_err is not None:
-            raise RuntimeError("Failed to put value in all routers") from last_err
+        if last_err is not None and not success:
+            raise RoutingError("Failed to put value in all routers") from last_err
 
     async def close(self) -> None:
         for r in self.routers:

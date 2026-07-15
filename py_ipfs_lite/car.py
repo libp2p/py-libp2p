@@ -124,7 +124,7 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
                     pass
 
 
-async def import_car(peer: Any, input_path: str) -> list[str]:
+async def import_car(peer: Any, input_path: str, strict: bool = True) -> list[str]:
     from cbor2 import CBORError
 
     from py_ipfs_lite.exceptions import CarParseError
@@ -181,7 +181,25 @@ async def import_car(peer: Any, input_path: str) -> list[str]:
             for root in roots:
                 if not await peer.has_block(root):
                     raise CarParseError(f"CAR file is missing root block {root}")
-        except (CBORError, TypeError, IndexError, EOFError, ValueError) as e:
+                if strict:
+                    try:
+                        from py_ipfs_lite.dag_utils import walk_dag
+
+                        root_cid_bytes = cid_to_bytes(parse_cid(root))
+                        async for _ in walk_dag(root_cid_bytes, peer.blockstore.get):
+                            pass
+                    except Exception as e:
+                        raise CarParseError(
+                            f"CAR file is missing blocks for DAG root {root}: {e}"
+                        )
+        except (
+            CBORError,
+            TypeError,
+            IndexError,
+            EOFError,
+            ValueError,
+            AttributeError,
+        ) as e:
             raise CarParseError(f"Failed to parse CAR file: {e}") from e
 
     return roots

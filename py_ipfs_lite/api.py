@@ -13,8 +13,10 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from py_ipfs_lite.config import Config
 from py_ipfs_lite.exceptions import (
     BlockNotFoundError,
+    CarParseError,
     IPFSLiteError,
     PeerNotStartedError,
+    PinError,
     PinNotFoundError,
     RoutingError,
 )
@@ -70,6 +72,10 @@ async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError) -> A
         status_code = 404
     elif isinstance(exc, PeerNotStartedError):
         status_code = 503
+    elif isinstance(exc, PinError):
+        status_code = 409
+    elif isinstance(exc, CarParseError):
+        status_code = 400
     return JSONResponse(status_code=status_code, content={"detail": str(exc)})
 
 

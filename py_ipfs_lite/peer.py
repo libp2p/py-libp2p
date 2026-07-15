@@ -51,7 +51,23 @@ from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.security.noise.transport import Transport as NoiseTransport
 
 
+def _check_nan(node: Any) -> None:
+    import math
+
+    if isinstance(node, float) and (math.isnan(node) or math.isinf(node)):
+        raise ValueError(f"Out of range float values are not JSON compliant: {node}")
+    elif isinstance(node, dict):
+        for v in node.values():
+            _check_nan(v)
+    elif isinstance(node, list):
+        for item in node:
+            _check_nan(item)
+
+
 def encode_node(node: Any, codec: str) -> bytes:
+    if codec in ("dag-json", "dag-cbor", "cbor"):
+        _check_nan(node)
+
     if codec == "dag-json":
         return json.dumps(node, separators=(",", ":"), allow_nan=False).encode("utf-8")
     elif codec in ("dag-cbor", "cbor"):
@@ -448,9 +464,9 @@ class Peer:
         timeout: float | None = None,
         stream: bool = False,
     ) -> bytes | AsyncIterator[bytes] | None:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
         has_root = await self.blockstore.has(cid_to_bytes(cid))  # type: ignore[union-attr]
@@ -558,9 +574,9 @@ class Peer:
         provider_addr: str | None = None,
         timeout: float | None = None,
     ) -> dict[Any, Any] | list[Any] | str | int | bytes:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         t_val = timeout if timeout is not None else self.config.default_timeout
         cid = parse_cid(cid_str)
 
@@ -600,23 +616,23 @@ class Peer:
         return decode_node(data, codec)
 
     async def remove_node(self, cid_str: str) -> None:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         cid = parse_cid(cid_str)
         await self.blockstore.delete(cid.buffer)  # type: ignore[union-attr]
 
     async def add_pin(self, cid_str: str, recursive: bool = True) -> None:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         pin_type = "recursive" if recursive else "direct"
         self.pin_store.add_pin(cid_str, pin_type)
 
     async def remove_pin(self, cid_str: str) -> None:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         self.pin_store.remove_pin(cid_str)
 
     async def list_pins(self, type_filter: str = "all") -> dict[str, str]:
@@ -752,9 +768,9 @@ class Peer:
         return self.host.id().to_base58()  # type: ignore[union-attr]
 
     async def export_car(self, cid_str: str, output_path: str) -> None:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         from py_ipfs_lite.car import export_car as _export_car
 
         await _export_car(self, cid_str, output_path)
@@ -769,9 +785,9 @@ class Peer:
         return self
 
     async def has_block(self, cid_str: str) -> bool:
+        self._ensure_started()
         if not isinstance(cid_str, str):
             raise TypeError(f"cid_str must be a string, got {type(cid_str).__name__}")
-        self._ensure_started()
         cid = parse_cid(cid_str)
         return await self.blockstore.has(cid.buffer)  # type: ignore[union-attr]
 
