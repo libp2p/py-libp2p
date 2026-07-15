@@ -8,6 +8,9 @@ REPO_VERSION = "1"
 
 def init_repo_version(repo_path: str) -> None:
     """Initialize or verify the repo version in the given blockstore path."""
+    if not repo_path or not repo_path.strip():
+        raise ValueError("Invalid repo path: cannot be empty")
+
     if not os.path.exists(repo_path):
         os.makedirs(repo_path, exist_ok=True)
 

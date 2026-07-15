@@ -42,6 +42,14 @@ def test_init_repo_version_existing_mismatch(caplog):
         assert "Repo version mismatch!" in caplog.text
 
 
+def test_init_repo_version_empty_path():
+    with pytest.raises(ValueError, match="cannot be empty"):
+        init_repo_version("")
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        init_repo_version("   ")
+
+
 from httpx import ASGITransport, AsyncClient
 
 from py_ipfs_lite.api import app
