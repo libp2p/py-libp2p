@@ -1,0 +1,4 @@
+Re-enable the ``test_ipv6_tcp_listen_and_dial`` integration test. The skip was
+added when ``listen()`` took an external nursery; PR #1308 switched to an
+internal system task, making IPv6 listen/dial work correctly. The test now
+passes without modification.
