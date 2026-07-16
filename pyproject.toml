@@ -95,6 +95,7 @@ dev = [
     { include-group = "docs" },
     { include-group = "test" },
     { include-group = "release" },
+    { include-group = "p2pcalc" },
     "ipython",
     "mypy>=1.15.0",
     "pre-commit>=3.4.0",
@@ -129,6 +130,10 @@ release = [
     "setuptools>=42",
     "twine",
     "wheel",
+]
+p2pcalc = [
+    "msgpack>=1.0.7",
+    "redis[asyncio]>=5.0.4",
 ]
 
 [tool.setuptools]
@@ -172,6 +177,7 @@ log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
 markers = [
     "slow: mark test as slow",
     "flaky: mark test as flaky (may fail intermittently)",
+    "serial_only: mark test to run outside pytest-xdist parallel workers",
     "benchmark: performance/sanity benchmarks (deselect with -m 'not benchmark')",
     "integration: mark test as integration (requires external service or proxy)",
 ]

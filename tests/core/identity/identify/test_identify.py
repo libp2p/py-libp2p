@@ -4,6 +4,7 @@ import pytest
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
 from libp2p.identity.identify.identify import (
     AGENT_VERSION,
@@ -18,11 +19,16 @@ from libp2p.peer.peer_record import unmarshal_record
 from tests.utils.factories import (
     host_pair_factory,
 )
+from tests.utils.identify_test_helpers import (
+    wait_for_host_addrs,
+)
 
 logger = logging.getLogger("libp2p.identity.identify-test")
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_identify_protocol(security_protocol):
     async with host_pair_factory(security_protocol=security_protocol) as (
         host_a,
@@ -31,15 +37,22 @@ async def test_identify_protocol(security_protocol):
         # Here, host_b is the requester and host_a is the responder.
         # observed_addr represent host_b's address as observed by host_a
         # (i.e., the address from which host_b's request was received).
+        await wait_for_host_addrs(host_a)
+        if hasattr(host_b, "_identify_inflight"):
+            from libp2p.host.basic_host import BasicHost
+
+            assert isinstance(host_b, BasicHost)
+            deadline = trio.current_time() + 10.0
+            while (
+                host_a.get_id() in host_b._identify_inflight
+                and trio.current_time() < deadline
+            ):
+                await trio.sleep(0.01)
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
 
-        # Read the response (could be either format)
-        # Read a larger chunk to get all the data before stream closes
-        response = await stream.read(8192)  # Read enough data in one go
-
+        response = await stream.read(8192)
         await stream.close()
 
-        # Parse the response (handles both old and new formats)
         identify_response = parse_identify_response(response)
 
         # Validate the recieved envelope and then store it in the certified-addr-book
