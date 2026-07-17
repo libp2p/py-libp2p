@@ -1,0 +1,1 @@
+kad-dht: filter our own peer ID out of the ``closerPeers`` returned by a ``FIND_NODE`` response, and never open a ``FIND_NODE`` stream to ourselves. A responder may legitimately include the requester among the ``k`` closest peers to the target; querying ourselves stalled the lookup until timeout.
