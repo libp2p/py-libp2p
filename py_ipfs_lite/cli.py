@@ -7,6 +7,10 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.utils.address_validation import find_free_port, get_available_interfaces
@@ -23,6 +27,7 @@ def _get_key_pair(seed: str | None, config: Config | None = None) -> Any:
     if seed is None:
         # 2. Check Environment Variable (for .env / docker compat)
         seed = os.environ.get("IPFS_LITE_SEED")
+        logger.info(f"Using seed from environment variable: {seed}")
 
     # 3. Check persistent file in the data directory
     if seed is None and config and config.blockstore_path:

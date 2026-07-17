@@ -30,6 +30,7 @@ dependencies = [
   "hypercorn>=0.18.0",
   "libp2p >=0.7.0",
   "prometheus-client>=0.25.0",
+  "python-dotenv>=1.2.2",
   "python-multipart>=0.0.32",
 ]
 
