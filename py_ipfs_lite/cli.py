@@ -13,7 +13,8 @@ load_dotenv()
 
 import trio
 from libp2p.crypto.ed25519 import create_new_key_pair
-from libp2p.utils.address_validation import find_free_port, get_available_interfaces
+from libp2p.utils.address_validation import find_free_port
+from multiaddr import Multiaddr
 
 from py_ipfs_lite.config import AddParams, Config
 from py_ipfs_lite.parser import get_parser
@@ -69,7 +70,12 @@ async def create_and_start_peer(
 ) -> AsyncGenerator[Any, None]:
     if port <= 0:
         port = find_free_port()
-    listen_addrs = get_available_interfaces(port)
+    # Build listen addresses for all three transports on the SAME port
+    listen_addrs = [
+        Multiaddr(f"/ip4/0.0.0.0/tcp/{port}"),  # plain TCP
+        Multiaddr(f"/ip4/0.0.0.0/tcp/{port}/ws"),  # WebSocket over TCP
+        Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic-v1"),  # QUIC-v1
+    ]
     key_pair = _get_key_pair(seed, config)
 
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
@@ -215,6 +221,9 @@ def main() -> None:
     logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
     logging.getLogger("multiaddr.codecs.cid").setLevel(logging.WARNING)
     logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
+    # Suppress "no transport found" spam for unsupported protocols
+    # (WebRTC, WebTransport) — these are expected, not errors
+    logging.getLogger("libp2p.network.swarm").setLevel(logging.ERROR)
 
     try:
         if parsed_args.command == "daemon":
@@ -236,7 +245,12 @@ def main() -> None:
                 port = parsed_args.port
                 if port <= 0:
                     port = find_free_port()
-                listen_addrs = get_available_interfaces(port)
+                # Build listen addresses for all three transports on the SAME port
+                listen_addrs = [
+                    Multiaddr(f"/ip4/0.0.0.0/tcp/{port}"),  # plain TCP
+                    Multiaddr(f"/ip4/0.0.0.0/tcp/{port}/ws"),  # WebSocket over TCP
+                    Multiaddr(f"/ip4/0.0.0.0/udp/{port}/quic-v1"),  # QUIC-v1
+                ]
                 key_pair = _get_key_pair(parsed_args.seed, config)
 
                 peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)

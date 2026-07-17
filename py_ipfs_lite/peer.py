@@ -130,7 +130,13 @@ async def setup_libp2p(
     sec_opt = {
         "/noise": NoiseTransport(host_key, noise_privkey=noise_key_pair.private_key),
     }
-    raw_host = new_host(key_pair=host_key, listen_addrs=maddrs, sec_opt=sec_opt)  # type: ignore[arg-type]
+    has_quic = any("quic" in str(a) for a in maddrs)
+    raw_host = new_host(
+        key_pair=host_key,
+        listen_addrs=maddrs,
+        sec_opt=sec_opt,  # type: ignore[arg-type]
+        enable_quic=has_quic,
+    )
 
     if not offline:
         raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)
@@ -244,10 +250,12 @@ class Peer:
                 self._host_key, noise_privkey=noise_key_pair.private_key
             ),
         }
+        has_quic = any("quic" in str(a) for a in maddrs)
         raw_host = new_host(
             key_pair=self._host_key,
             listen_addrs=maddrs,
             sec_opt=sec_opt,  # type: ignore[arg-type]
+            enable_quic=has_quic,
         )
         return HostAdapter(raw_host)
 
