@@ -186,7 +186,11 @@ async def import_car(peer: Any, input_path: str, strict: bool = True) -> list[st
                         from py_ipfs_lite.dag_utils import walk_dag
 
                         root_cid_bytes = cid_to_bytes(parse_cid(root))
-                        async for _ in walk_dag(root_cid_bytes, peer.blockstore.get):
+                        async for _ in walk_dag(
+                            root_cid_bytes, 
+                            peer.blockstore.get,
+                            strict_missing=True
+                        ):
                             pass
                     except Exception as e:
                         raise CarParseError(

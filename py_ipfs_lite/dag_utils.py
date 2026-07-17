@@ -17,6 +17,7 @@ async def walk_dag(
     root_cid_bytes: bytes,
     get_block: Callable[[bytes], Awaitable[bytes | None]],
     recursive: bool = True,
+    strict_missing: bool = False,
 ) -> AsyncIterator[bytes]:
     queue = [root_cid_bytes]
     visited = set()
@@ -32,6 +33,13 @@ async def walk_dag(
 
         data = await get_block(curr_cid)
         if data is None:
+            if strict_missing:
+                from libp2p.bitswap.cid import format_cid_for_display
+
+                from py_ipfs_lite.exceptions import BlockNotFoundError
+
+                cid_str = format_cid_for_display(parse_cid(curr_cid))
+                raise BlockNotFoundError(f"Missing block: {cid_str}")
             continue
 
         codec = parse_cid_codec(curr_cid)
@@ -44,6 +52,8 @@ async def walk_dag(
                     if hasattr(link, "cid"):
                         queue.append(link.cid)
             except Exception:
+                if strict_missing:
+                    raise
                 pass
         elif str(norm_codec) in ("dag-json", "dag-cbor", "dag-jose", "ipld"):
             try:
@@ -56,6 +66,8 @@ async def walk_dag(
                                 link_cid = parse_cid(obj["/"])
                                 queue.append(cid_to_bytes(link_cid))
                             except Exception:
+                                if strict_missing:
+                                    raise
                                 pass
                         for v in obj.values():
                             extract_links(v)
@@ -65,4 +77,6 @@ async def walk_dag(
 
                 extract_links(decoded)
             except Exception:
+                if strict_missing:
+                    raise
                 pass
