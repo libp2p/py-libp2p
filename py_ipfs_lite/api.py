@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from py_ipfs_lite.config import Config
@@ -111,19 +111,30 @@ async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError) -> A
 async def add_file(request: Request, file: UploadFile = File(...)) -> Any:
     """Add a file to the local blockstore and announce it."""
     peer: Peer = request.app.state.peer
+    
+    max_upload_size = getattr(peer.config, "max_upload_size", 100 * 1024 * 1024)
+    if "content-length" in request.headers:
+        if int(request.headers["content-length"]) > max_upload_size:
+            raise HTTPException(status_code=413, detail="Payload Too Large")
 
     # Save the uploaded file to a temporary file, then add it via peer
     fd, path = tempfile.mkstemp()
     try:
+        size = 0
         with os.fdopen(fd, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            while chunk := await file.read(65536):
+                size += len(chunk)
+                if size > max_upload_size:
+                    raise HTTPException(status_code=413, detail="Payload Too Large")
+                f.write(chunk)
 
         cid_str = await peer.add_file(path)
         return JSONResponse(
-            content={"Name": file.filename, "Hash": cid_str, "Size": str(len(content))}
+            content={"Name": file.filename, "Hash": cid_str, "Size": str(size)}
         )
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         if isinstance(e, (ValueError, TypeError, json.JSONDecodeError, RecursionError)):
             raise HTTPException(status_code=400, detail=str(e))
         if isinstance(e, IPFSLiteError):
@@ -142,15 +153,30 @@ async def cat_file(
     """Fetch a file by its CID."""
     peer: Peer = request.app.state.peer
     try:
-        # Buffer all chunks so that errors (timeout, missing block) are caught
-        # here before we commit to a StreamingResponse and lose the ability to
-        # return a proper error status code.
         content_iter = await peer.get_file(arg, stream=True)
-        chunks = []
-        async for chunk in content_iter:  # type: ignore[union-attr]
-            chunks.append(chunk)
-        body = b"".join(chunks)
-        return Response(content=body, media_type="application/octet-stream")
+        max_download_size = getattr(peer.config, "max_download_size", 100 * 1024 * 1024)
+        
+        try:
+            first_chunk = await content_iter.__anext__()
+        except StopAsyncIteration:
+            first_chunk = b""
+
+        async def stream_generator():
+            size = len(first_chunk)
+            if size > 0:
+                yield first_chunk
+                
+            try:
+                async for chunk in content_iter:
+                    size += len(chunk)
+                    if size > max_download_size:
+                        logger.error("Download exceeded max_download_size.")
+                        break
+                    yield chunk
+            except Exception as e:
+                logger.error(f"Error streaming file: {e}")
+
+        return StreamingResponse(stream_generator(), media_type="application/octet-stream")
     except Exception as e:
         if isinstance(e, (ValueError, TypeError, json.JSONDecodeError, RecursionError)):
             raise HTTPException(status_code=400, detail=str(e))

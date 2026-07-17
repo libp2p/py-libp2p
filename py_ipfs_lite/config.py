@@ -19,6 +19,8 @@ class Config:
     use_ipni: bool = False
     ipni_endpoint: str = "https://cid.contact"
     default_timeout: float = 30.0
+    max_upload_size: int = 104857600    # 100MB
+    max_download_size: int = 104857600  # 100MB
 
     def __post_init__(self) -> None:
         if self.reprovide_interval_seconds == 0:
