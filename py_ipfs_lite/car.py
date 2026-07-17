@@ -57,71 +57,88 @@ def get_cid_len(data: bytes) -> int:
 
 
 async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
+    import os
+    import tempfile
+
+    from py_ipfs_lite.exceptions import BlockNotFoundError
+
     root_cid = parse_cid(cid_str)
 
-    async with await trio.open_file(output_path, "wb") as f:
-        # Header
-        header_dict = {
-            "version": 1,
-            "roots": [CBORTag(42, b"\x00" + cid_to_bytes(root_cid))],
-        }
-        header_bytes = dumps(header_dict)
-        await f.write(varint.encode(len(header_bytes)))
-        await f.write(header_bytes)
+    dir_name = os.path.dirname(output_path) or "."
+    fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix="car_tmp_")
+    os.close(fd)
 
-        # Traverse
-        queue = [cid_to_bytes(root_cid)]
-        visited = set()
+    try:
+        async with await trio.open_file(temp_path, "wb") as f:
+            # Header
+            header_dict = {
+                "version": 1,
+                "roots": [CBORTag(42, b"\x00" + cid_to_bytes(root_cid))],
+            }
+            header_bytes = dumps(header_dict)
+            await f.write(varint.encode(len(header_bytes)))
+            await f.write(header_bytes)
 
-        while queue:
-            curr_cid_bytes = queue.pop(0)
-            if curr_cid_bytes in visited:
-                continue
-            visited.add(curr_cid_bytes)
+            # Traverse
+            queue = [cid_to_bytes(root_cid)]
+            visited = set()
 
-            data = await peer.blockstore.get(curr_cid_bytes)
-            if data is None:
-                data = await peer.exchange().get_block(curr_cid_bytes)
-                if data is None:
+            while queue:
+                curr_cid_bytes = queue.pop(0)
+                if curr_cid_bytes in visited:
                     continue
+                visited.add(curr_cid_bytes)
 
-            block_len = len(curr_cid_bytes) + len(data)
-            await f.write(varint.encode(block_len))
-            await f.write(curr_cid_bytes)
-            await f.write(data)
+                data = await peer.blockstore.get(curr_cid_bytes)
+                if data is None:
+                    data = await peer.exchange().get_block(curr_cid_bytes)
+                    if data is None:
+                        cid_str_missing = format_cid_for_display(parse_cid(curr_cid_bytes))
+                        raise BlockNotFoundError(f"Missing block: {cid_str_missing}")
 
-            codec = parse_cid_codec(curr_cid_bytes)
-            norm_codec = _normalise_codec(codec)
+                block_len = len(curr_cid_bytes) + len(data)
+                await f.write(varint.encode(block_len))
+                await f.write(curr_cid_bytes)
+                await f.write(data)
 
-            if str(norm_codec) == "dag-pb":
-                try:
-                    node_links, _ = decode_dag_pb(data)
-                    for link in node_links:
-                        if hasattr(link, "cid"):
-                            queue.append(link.cid)
-                except Exception:
-                    pass
-            elif str(norm_codec) in ("dag-json", "dag-cbor", "ipld", "dag-jose"):
-                try:
-                    decoded = decode_node(data, codec)
+                codec = parse_cid_codec(curr_cid_bytes)
+                norm_codec = _normalise_codec(codec)
 
-                    def extract_links(obj: Any) -> None:
-                        if isinstance(obj, dict):
-                            if "/" in obj and isinstance(obj["/"], (str, bytes)):
-                                try:
-                                    link_cid = parse_cid(obj["/"])
-                                    queue.append(cid_to_bytes(link_cid))
-                                except Exception:
-                                    pass
-                            for v in obj.values():
-                                extract_links(v)
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                extract_links(item)
+                if str(norm_codec) == "dag-pb":
+                    try:
+                        node_links, _ = decode_dag_pb(data)
+                        for link in node_links:
+                            if hasattr(link, "cid"):
+                                queue.append(link.cid)
+                    except Exception:
+                        pass
+                elif str(norm_codec) in ("dag-json", "dag-cbor", "ipld", "dag-jose"):
+                    try:
+                        decoded = decode_node(data, codec)
 
-                    extract_links(decoded)
-                except Exception:
-                    pass
+                        def extract_links(obj: Any) -> None:
+                            if isinstance(obj, dict):
+                                if "/" in obj and isinstance(obj["/"], (str, bytes)):
+                                    try:
+                                        link_cid = parse_cid(obj["/"])
+                                        queue.append(cid_to_bytes(link_cid))
+                                    except Exception:
+                                        pass
+                                for v in obj.values():
+                                    extract_links(v)
+                            elif isinstance(obj, list):
+                                for item in obj:
+                                    extract_links(item)
+
+                        extract_links(decoded)
+                    except Exception:
+                        pass
+
+        os.replace(temp_path, output_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
 
 
 async def import_car(peer: Any, input_path: str, strict: bool = True) -> list[str]:
