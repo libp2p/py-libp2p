@@ -130,7 +130,9 @@ def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry
             if entry.validity != cbor_dict.get("Validity"):
                 raise RoutingError("IPNS V2 signature is invalid: validity mismatch")
             if entry.validityType != cbor_dict.get("ValidityType"):
-                raise RoutingError("IPNS V2 signature is invalid: validityType mismatch")
+                raise RoutingError(
+                    "IPNS V2 signature is invalid: validityType mismatch"
+                )
             if entry.sequence != cbor_dict.get("Sequence"):
                 raise RoutingError("IPNS V2 signature is invalid: sequence mismatch")
             if "TTL" in cbor_dict and entry.ttl != cbor_dict["TTL"]:

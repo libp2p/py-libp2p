@@ -93,7 +93,9 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
                 if data is None:
                     data = await peer.exchange().get_block(curr_cid_bytes)
                     if data is None:
-                        cid_str_missing = format_cid_for_display(parse_cid(curr_cid_bytes))
+                        cid_str_missing = format_cid_for_display(
+                            parse_cid(curr_cid_bytes)
+                        )
                         raise BlockNotFoundError(f"Missing block: {cid_str_missing}")
 
                 block_len = len(curr_cid_bytes) + len(data)
@@ -115,7 +117,7 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
                 elif str(norm_codec) in ("dag-json", "dag-cbor", "ipld", "dag-jose"):
                     try:
                         from py_ipfs_lite.dag_utils import extract_cids
-                        
+
                         decoded = decode_node(data, codec)
                         for cid_bytes in extract_cids(decoded, strict_missing=False):
                             queue.append(cid_bytes)
@@ -192,9 +194,7 @@ async def import_car(peer: Any, input_path: str, strict: bool = True) -> list[st
 
                         root_cid_bytes = cid_to_bytes(parse_cid(root))
                         async for _ in walk_dag(
-                            root_cid_bytes, 
-                            peer.blockstore.get,
-                            strict_missing=True
+                            root_cid_bytes, peer.blockstore.get, strict_missing=True
                         ):
                             pass
                     except Exception as e:

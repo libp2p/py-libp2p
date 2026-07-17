@@ -23,21 +23,24 @@ from py_ipfs_lite.exceptions import (
 )
 from py_ipfs_lite.peer import Peer
 
+
 class DAGJSONEncoder(json.JSONEncoder):
     def default(self, obj: Any) -> Any:
         if isinstance(obj, bytes):
             return {"/": {"bytes": base64.b64encode(obj).decode("ascii")}}
-            
+
         obj_type = type(obj).__name__
-        
+
         if obj_type == "CBORTag" and getattr(obj, "tag", None) == 42:
             from py_ipfs_lite.peer import format_cid_for_display, parse_cid
+
             cid_bytes = obj.value[1:]
             link_cid = parse_cid(cid_bytes)
             return {"/": format_cid_for_display(link_cid)}
-            
+
         if obj_type == "PBLink":
             from py_ipfs_lite.peer import format_cid_for_display, parse_cid
+
             res = {}
             if getattr(obj, "Hash", None):
                 res["Hash"] = {"/": format_cid_for_display(parse_cid(obj.Hash))}
@@ -46,8 +49,9 @@ class DAGJSONEncoder(json.JSONEncoder):
             if getattr(obj, "Tsize", None) is not None:
                 res["Tsize"] = obj.Tsize
             return res
-            
+
         return super().default(obj)
+
 
 logger = logging.getLogger("py_ipfs_lite.api")
 # The actual instantiation of the peer depends on how the daemon is run,
@@ -111,7 +115,7 @@ async def ipfs_lite_exception_handler(request: Request, exc: IPFSLiteError) -> A
 async def add_file(request: Request, file: UploadFile = File(...)) -> Any:
     """Add a file to the local blockstore and announce it."""
     peer: Peer = request.app.state.peer
-    
+
     max_upload_size = getattr(peer.config, "max_upload_size", 100 * 1024 * 1024)
     if "content-length" in request.headers:
         if int(request.headers["content-length"]) > max_upload_size:
@@ -155,7 +159,7 @@ async def cat_file(
     try:
         content_iter = await peer.get_file(arg, stream=True)
         max_download_size = getattr(peer.config, "max_download_size", 100 * 1024 * 1024)
-        
+
         try:
             first_chunk = await content_iter.__anext__()
         except StopAsyncIteration:
@@ -165,7 +169,7 @@ async def cat_file(
             size = len(first_chunk)
             if size > 0:
                 yield first_chunk
-                
+
             try:
                 async for chunk in content_iter:
                     size += len(chunk)
@@ -176,7 +180,9 @@ async def cat_file(
             except Exception as e:
                 logger.error(f"Error streaming file: {e}")
 
-        return StreamingResponse(stream_generator(), media_type="application/octet-stream")
+        return StreamingResponse(
+            stream_generator(), media_type="application/octet-stream"
+        )
     except Exception as e:
         if isinstance(e, (ValueError, TypeError, json.JSONDecodeError, RecursionError)):
             raise HTTPException(status_code=400, detail=str(e))
@@ -213,6 +219,7 @@ async def dag_get(
     peer: Peer = request.app.state.peer
     try:
         from py_ipfs_lite.peer import parse_cid
+
         cid = parse_cid(arg)
         node_data = await peer.get_node(arg)
 
@@ -222,7 +229,10 @@ async def dag_get(
         accept = request.headers.get("accept", "")
         if cid.codec in ("dag-cbor", "cbor") and "application/cbor" in accept:
             import cbor2
-            return Response(content=cbor2.dumps(node_data), media_type="application/cbor")
+
+            return Response(
+                content=cbor2.dumps(node_data), media_type="application/cbor"
+            )
 
         encoded = json.dumps(node_data, cls=DAGJSONEncoder)
         return Response(content=encoded, media_type="application/json")

@@ -16,7 +16,7 @@ from py_ipfs_lite.peer import decode_node
 def extract_cids(obj: Any, strict_missing: bool = False) -> list[bytes]:
     """Recursively extract CIDs from a decoded IPLD node."""
     from cbor2 import CBORTag
-    from libp2p.bitswap.cid import parse_cid, cid_to_bytes
+    from libp2p.bitswap.cid import parse_cid
 
     cids = []
 
@@ -36,7 +36,8 @@ def extract_cids(obj: Any, strict_missing: bool = False) -> list[bytes]:
                 _extract(item)
         elif isinstance(curr, CBORTag) and curr.tag == 42:
             try:
-                # CBOR tag 42 contains bytes, with a leading \x00 byte for multibase identity
+                # CBOR tag 42 contains bytes, with a leading \x00
+                # byte for multibase identity
                 cid_bytes = curr.value[1:]
                 link_cid = parse_cid(cid_bytes)
                 cids.append(cid_to_bytes(link_cid))

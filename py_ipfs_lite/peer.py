@@ -171,7 +171,10 @@ class RWLock:
             yield
         finally:
             self._write_lock.release()
+
+
 from enum import Enum, auto
+
 
 class PeerState(Enum):
     STOPPED = auto()
@@ -335,10 +338,14 @@ class Peer:
             if self.dag_service is None:
                 self.dag_service = self._create_dag_service()
 
-            maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
+            maddrs = [
+                Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs
+            ]
             await self._exit_stack.enter_async_context(self.host.run(maddrs))  # type: ignore[union-attr]
 
-            self._nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
+            self._nursery = await self._exit_stack.enter_async_context(
+                trio.open_nursery()
+            )
             if hasattr(self._exchange, "set_nursery"):
                 self._exchange.set_nursery(self._nursery)
 
@@ -347,8 +354,12 @@ class Peer:
             # Initialize and start connection managers
             raw_swarm = self.host._host.get_network()  # type: ignore[union-attr]
             if hasattr(raw_swarm, "connection_config") and raw_swarm.connection_config:
-                raw_swarm.connection_config.high_watermark = self.config.conn_mgr_high_water
-                raw_swarm.connection_config.low_watermark = self.config.conn_mgr_low_water
+                raw_swarm.connection_config.high_watermark = (
+                    self.config.conn_mgr_high_water
+                )
+                raw_swarm.connection_config.low_watermark = (
+                    self.config.conn_mgr_low_water
+                )
                 raw_swarm.connection_config.max_connections = (
                     self.config.conn_mgr_high_water
                 )
@@ -374,7 +385,7 @@ class Peer:
         """Periodically trigger connection pruning."""
         if hasattr(self, "_started_event"):
             await self._started_event.wait()
-            
+
         while self._started:
             if self._connection_pruner:
                 try:
@@ -395,7 +406,7 @@ class Peer:
         if self._state in (PeerState.STOPPED, PeerState.STOPPING):
             return
 
-        is_running = (self._state == PeerState.RUNNING)
+        is_running = self._state == PeerState.RUNNING
         self._state = PeerState.STOPPING
 
         try:
@@ -774,8 +785,9 @@ class Peer:
 
         t_val = timeout if timeout is not None else self.config.default_timeout
         import time
-        from py_ipfs_lite.ipns import publish_name as ipns_publish
+
         from py_ipfs_lite.ipns import _resolve_entry
+        from py_ipfs_lite.ipns import publish_name as ipns_publish
 
         last_sequence = 0
         seq_key = b"/ipns_seq/" + self.host.id().to_bytes()  # type: ignore[union-attr]
