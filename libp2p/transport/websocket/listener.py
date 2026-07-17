@@ -31,6 +31,26 @@ from .tls_config import WebSocketTLSConfig
 logger = logging.getLogger(__name__)
 
 
+def _extract_host_port_from_sockname(
+    sock_name: object,
+) -> tuple[str, int] | None:
+    """
+    Return ``(host, port)`` from a ``socket.getsockname()`` return value, or
+    ``None`` if the value is not recognised.
+
+    ``socket.getsockname()`` yields a 2-tuple ``(host, port)`` for IPv4 and a
+    4-tuple ``(host, port, flowinfo, scopeid)`` for IPv6. Only the first two
+    fields are meaningful for multiaddr reconstruction, so we accept any
+    tuple of length ≥ 2 where the first two elements are a string and an int.
+    """
+    if not isinstance(sock_name, tuple) or len(sock_name) < 2:
+        return None
+    host, port = sock_name[0], sock_name[1]
+    if not isinstance(host, str) or not isinstance(port, int):
+        return None
+    return host, port
+
+
 @dataclass
 class WebsocketListenerConfig:
     """Configuration for WebSocket listener."""
@@ -297,9 +317,19 @@ class WebsocketListener(IListener):
                 if hasattr(server_info, "socket"):
                     sock = server_info.socket
                     if hasattr(sock, "getsockname"):
-                        sock_addr, sock_port = sock.getsockname()
-                        actual_host = sock_addr
-                        actual_port = sock_port
+                        sock_name = sock.getsockname()
+                        host_port = _extract_host_port_from_sockname(sock_name)
+                        if host_port is not None:
+                            actual_host, actual_port = host_port
+                        else:
+                            # Explicitly restore the requested host/port so the
+                            # fallback mentioned in the warning is self-contained.
+                            actual_host, actual_port = host, port
+                            logger.warning(
+                                "Unexpected getsockname() result %r; "
+                                "falling back to requested host/port",
+                                sock_name,
+                            )
                 elif hasattr(server_info, "port"):
                     # If we can't get socket, at least get the port
                     actual_port = server_info.port
