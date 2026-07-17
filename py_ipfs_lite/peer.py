@@ -174,6 +174,13 @@ class RWLock:
                 yield
             finally:
                 pass
+from enum import Enum, auto
+
+class PeerState(Enum):
+    STOPPED = auto()
+    STARTING = auto()
+    RUNNING = auto()
+    STOPPING = auto()
 
 
 class Peer:
@@ -210,7 +217,7 @@ class Peer:
         self.reprovider = Reprovider(self)
 
         self._gc_lock = RWLock()
-        self._started = False
+        self._state = PeerState.STOPPED
         self._exit_stack = contextlib.AsyncExitStack()
         self._auto_connector = None
         self._connection_pruner = None
@@ -308,54 +315,63 @@ class Peer:
     def _create_dag_service(self) -> Any:
         return MerkleDag(self._exchange)  # type: ignore[arg-type]
 
+    @property
+    def _started(self) -> bool:
+        return self._state == PeerState.RUNNING
+
     async def start(self) -> None:
-        if self._started:
+        if self._state in (PeerState.RUNNING, PeerState.STARTING):
             return
 
-        self._started_event = trio.Event()
+        self._state = PeerState.STARTING
+        try:
+            self._started_event = trio.Event()
 
-        if self.host is None:
-            self.host = await self._create_host()
-        if self.routing is None:
-            self.routing = await self._create_routing()
-        if self.blockstore is None:
-            self.blockstore = self._create_blockstore()
-        if self._exchange is None:
-            self._exchange = self._create_exchange()
-        if self.dag_service is None:
-            self.dag_service = self._create_dag_service()
+            if self.host is None:
+                self.host = await self._create_host()
+            if self.routing is None:
+                self.routing = await self._create_routing()
+            if self.blockstore is None:
+                self.blockstore = self._create_blockstore()
+            if self._exchange is None:
+                self._exchange = self._create_exchange()
+            if self.dag_service is None:
+                self.dag_service = self._create_dag_service()
 
-        maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
-        await self._exit_stack.enter_async_context(self.host.run(maddrs))  # type: ignore[union-attr]
+            maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
+            await self._exit_stack.enter_async_context(self.host.run(maddrs))  # type: ignore[union-attr]
 
-        self._nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
-        if hasattr(self._exchange, "set_nursery"):
-            self._exchange.set_nursery(self._nursery)
+            self._nursery = await self._exit_stack.enter_async_context(trio.open_nursery())
+            if hasattr(self._exchange, "set_nursery"):
+                self._exchange.set_nursery(self._nursery)
 
-        self._nursery.start_soon(self.reprovider.start)
+            self._nursery.start_soon(self.reprovider.start)
 
-        # Initialize and start connection managers
-        raw_swarm = self.host._host.get_network()  # type: ignore[union-attr]
-        if hasattr(raw_swarm, "connection_config") and raw_swarm.connection_config:
-            raw_swarm.connection_config.high_watermark = self.config.conn_mgr_high_water
-            raw_swarm.connection_config.low_watermark = self.config.conn_mgr_low_water
-            raw_swarm.connection_config.max_connections = (
-                self.config.conn_mgr_high_water
-            )
+            # Initialize and start connection managers
+            raw_swarm = self.host._host.get_network()  # type: ignore[union-attr]
+            if hasattr(raw_swarm, "connection_config") and raw_swarm.connection_config:
+                raw_swarm.connection_config.high_watermark = self.config.conn_mgr_high_water
+                raw_swarm.connection_config.low_watermark = self.config.conn_mgr_low_water
+                raw_swarm.connection_config.max_connections = (
+                    self.config.conn_mgr_high_water
+                )
 
-            self._auto_connector = AutoConnector(raw_swarm)  # type: ignore[assignment]
-            self._connection_pruner = ConnectionPruner(raw_swarm)  # type: ignore[assignment]
+                self._auto_connector = AutoConnector(raw_swarm)  # type: ignore[assignment]
+                self._connection_pruner = ConnectionPruner(raw_swarm)  # type: ignore[assignment]
 
-            await self._auto_connector.start()  # type: ignore[attr-defined]
-            await self._connection_pruner.start()  # type: ignore[attr-defined]
+                await self._auto_connector.start()  # type: ignore[attr-defined]
+                await self._connection_pruner.start()  # type: ignore[attr-defined]
 
-            await self._auto_connector.run_background_task(self._nursery)  # type: ignore[attr-defined]
-            self._nursery.start_soon(self._periodic_pruner_task)
+                await self._auto_connector.run_background_task(self._nursery)  # type: ignore[attr-defined]
+                self._nursery.start_soon(self._periodic_pruner_task)
 
-        await self._exchange.start()
+            await self._exchange.start()
 
-        self._started = True
-        self._started_event.set()
+            self._state = PeerState.RUNNING
+            self._started_event.set()
+        except Exception:
+            await self.close()
+            raise
 
     async def _periodic_pruner_task(self) -> None:
         """Periodically trigger connection pruning."""
@@ -379,24 +395,30 @@ class Peer:
         await self.close()
 
     async def close(self) -> None:
-        if not self._started:
+        if self._state in (PeerState.STOPPED, PeerState.STOPPING):
             return
 
-        if hasattr(self, "_nursery") and self._nursery:
-            self._nursery.cancel_scope.cancel()
+        is_running = (self._state == PeerState.RUNNING)
+        self._state = PeerState.STOPPING
 
-        await self.reprovider.stop()
-        await self._exchange.stop()  # type: ignore[union-attr]
-        if self._auto_connector:
-            await self._auto_connector.stop()
-        if self._connection_pruner:
-            await self._connection_pruner.stop()
+        try:
+            if hasattr(self, "_nursery") and self._nursery:
+                self._nursery.cancel_scope.cancel()
 
-        if self.routing and hasattr(self.routing, "close"):
-            await self.routing.close()
+            if is_running:
+                await self.reprovider.stop()
+                if self._exchange:
+                    await self._exchange.stop()  # type: ignore[union-attr]
+                if self._auto_connector:
+                    await self._auto_connector.stop()
+                if self._connection_pruner:
+                    await self._connection_pruner.stop()
 
-        await self._exit_stack.aclose()
-        self._started = False
+                if self.routing and hasattr(self.routing, "close"):
+                    await self.routing.close()
+        finally:
+            await self._exit_stack.aclose()
+            self._state = PeerState.STOPPED
 
     async def bootstrap(self, peers: list[str]) -> None:
         """Connect to bootstrap peers and join the DHT network."""

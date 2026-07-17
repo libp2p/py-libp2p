@@ -56,10 +56,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     for addr in peer.host.addrs():  # type: ignore[union-attr]
         logger.info(f"  P2P Listening on: {addr}")
 
-    yield
-
-    # Clean up on shutdown
-    await peer.close()
+    try:
+        yield
+    finally:
+        # Clean up on shutdown
+        await peer.close()
 
 
 app = FastAPI(title="py-ipfs-lite HTTP API", lifespan=lifespan)
