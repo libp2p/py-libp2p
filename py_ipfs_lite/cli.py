@@ -1,5 +1,8 @@
 import hashlib
 import logging
+import os
+import secrets
+import string
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
@@ -15,10 +18,33 @@ from py_ipfs_lite.peer import Peer
 logger = logging.getLogger("py_ipfs_lite.cli")
 
 
-def _get_key_pair(seed: str | None) -> Any:
+def _get_key_pair(seed: str | None, config: Config | None = None) -> Any:
+    # 1. CLI argument has highest priority
+    if seed is None:
+        # 2. Check Environment Variable (for .env / docker compat)
+        seed = os.environ.get("IPFS_LITE_SEED")
+
+    # 3. Check persistent file in the data directory
+    if seed is None and config and config.blockstore_path:
+        base_path = os.path.dirname(config.blockstore_path)
+        seed_file = os.path.join(base_path, "seed")
+
+        if os.path.exists(seed_file):
+            with open(seed_file) as f:
+                seed = f.read().strip()
+        else:
+            # Generate a new random seed, save it to persist identity
+            seed = "".join(
+                secrets.choice(string.ascii_letters + string.digits) for _ in range(32)
+            )
+            os.makedirs(base_path, exist_ok=True)
+            with open(seed_file, "w") as f:
+                f.write(seed)
+
     if seed:
         seed_bytes = hashlib.sha256(seed.encode()).digest()
         return create_new_key_pair(seed=seed_bytes)
+
     return None
 
 
@@ -39,7 +65,7 @@ async def create_and_start_peer(
     if port <= 0:
         port = find_free_port()
     listen_addrs = get_available_interfaces(port)
-    key_pair = _get_key_pair(seed)
+    key_pair = _get_key_pair(seed, config)
 
     peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
     try:
@@ -201,7 +227,7 @@ def main() -> None:
                 if port <= 0:
                     port = find_free_port()
                 listen_addrs = get_available_interfaces(port)
-                key_pair = _get_key_pair(parsed_args.seed)
+                key_pair = _get_key_pair(parsed_args.seed, config)
 
                 peer = Peer(config, host_key=key_pair, listen_addrs=listen_addrs)
                 app.state.peer = peer
