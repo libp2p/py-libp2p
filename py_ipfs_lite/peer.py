@@ -312,6 +312,8 @@ class Peer:
         if self._started:
             return
 
+        self._started_event = trio.Event()
+
         if self.host is None:
             self.host = await self._create_host()
         if self.routing is None:
@@ -353,9 +355,13 @@ class Peer:
         await self._exchange.start()
 
         self._started = True
+        self._started_event.set()
 
     async def _periodic_pruner_task(self) -> None:
         """Periodically trigger connection pruning."""
+        if hasattr(self, "_started_event"):
+            await self._started_event.wait()
+            
         while self._started:
             if self._connection_pruner:
                 try:
