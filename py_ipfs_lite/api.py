@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -21,6 +22,32 @@ from py_ipfs_lite.exceptions import (
     RoutingError,
 )
 from py_ipfs_lite.peer import Peer
+
+class DAGJSONEncoder(json.JSONEncoder):
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, bytes):
+            return {"/": {"bytes": base64.b64encode(obj).decode("ascii")}}
+            
+        obj_type = type(obj).__name__
+        
+        if obj_type == "CBORTag" and getattr(obj, "tag", None) == 42:
+            from py_ipfs_lite.peer import format_cid_for_display, parse_cid
+            cid_bytes = obj.value[1:]
+            link_cid = parse_cid(cid_bytes)
+            return {"/": format_cid_for_display(link_cid)}
+            
+        if obj_type == "PBLink":
+            from py_ipfs_lite.peer import format_cid_for_display, parse_cid
+            res = {}
+            if getattr(obj, "Hash", None):
+                res["Hash"] = {"/": format_cid_for_display(parse_cid(obj.Hash))}
+            if getattr(obj, "Name", None):
+                res["Name"] = obj.Name
+            if getattr(obj, "Tsize", None) is not None:
+                res["Tsize"] = obj.Tsize
+            return res
+            
+        return super().default(obj)
 
 logger = logging.getLogger("py_ipfs_lite.api")
 # The actual instantiation of the peer depends on how the daemon is run,
@@ -159,8 +186,20 @@ async def dag_get(
     """Retrieve a generic DAG node."""
     peer: Peer = request.app.state.peer
     try:
+        from py_ipfs_lite.peer import parse_cid
+        cid = parse_cid(arg)
         node_data = await peer.get_node(arg)
-        return JSONResponse(content=node_data)
+
+        if cid.codec == "raw":
+            return Response(content=node_data, media_type="application/octet-stream")
+
+        accept = request.headers.get("accept", "")
+        if cid.codec in ("dag-cbor", "cbor") and "application/cbor" in accept:
+            import cbor2
+            return Response(content=cbor2.dumps(node_data), media_type="application/cbor")
+
+        encoded = json.dumps(node_data, cls=DAGJSONEncoder)
+        return Response(content=encoded, media_type="application/json")
     except Exception as e:
         if isinstance(e, (ValueError, TypeError, json.JSONDecodeError, RecursionError)):
             raise HTTPException(status_code=400, detail=str(e))
