@@ -146,34 +146,31 @@ class RWLock:
     """A trio-compatible read-write lock to allow concurrent reads but exclusive writes."""
 
     def __init__(self) -> None:
-        self._write_lock = trio.Lock()
+        self._write_lock = trio.Semaphore(1)
         self._read_count = 0
         self._read_count_lock = trio.Lock()
-        self._read_cond = trio.Condition(self._read_count_lock)
 
     @contextlib.asynccontextmanager
     async def read_lock(self) -> AsyncGenerator[Any, None]:
-        async with self._write_lock:
-            async with self._read_count_lock:
-                self._read_count += 1
+        async with self._read_count_lock:
+            self._read_count += 1
+            if self._read_count == 1:
+                await self._write_lock.acquire()
         try:
             yield
         finally:
             async with self._read_count_lock:
                 self._read_count -= 1
                 if self._read_count == 0:
-                    self._read_cond.notify_all()
+                    self._write_lock.release()
 
     @contextlib.asynccontextmanager
     async def write_lock(self) -> AsyncGenerator[Any, None]:
-        async with self._write_lock:
-            async with self._read_count_lock:
-                while self._read_count > 0:
-                    await self._read_cond.wait()
-            try:
-                yield
-            finally:
-                pass
+        await self._write_lock.acquire()
+        try:
+            yield
+        finally:
+            self._write_lock.release()
 from enum import Enum, auto
 
 class PeerState(Enum):
