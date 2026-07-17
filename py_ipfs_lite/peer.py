@@ -748,13 +748,39 @@ class Peer:
             raise RoutingError("IPNS requires network routing; this peer is offline")
 
         t_val = timeout if timeout is not None else self.config.default_timeout
-        # Sequence number could be maintained in datastore or retrieved from DHT first.
-        # For a basic implementation, we just use a timestamp for sequence to ensure it's monotonically increasing
         import time
-
         from py_ipfs_lite.ipns import publish_name as ipns_publish
+        from py_ipfs_lite.ipns import _resolve_entry
 
-        sequence = int(time.time())
+        last_sequence = 0
+        seq_key = b"/ipns_seq/" + self.host.id().to_bytes()  # type: ignore[union-attr]
+
+        if self.datastore:
+            try:
+                seq_bytes = await self.datastore.get(seq_key)
+                if seq_bytes:
+                    last_sequence = int(seq_bytes.decode("utf-8"))
+            except Exception:
+                pass
+
+        remote_sequence = 0
+        try:
+            with trio.fail_after(t_val):
+                entry = await _resolve_entry(self.routing, self.host.id())  # type: ignore[union-attr]
+                if entry and hasattr(entry, "sequence"):
+                    remote_sequence = entry.sequence
+        except Exception:
+            pass
+
+        # Use time as base to ensure we don't start at 0 if both datastore and DHT are empty
+        base_seq = max(last_sequence, remote_sequence, int(time.time()))
+        sequence = base_seq + 1
+
+        if self.datastore:
+            try:
+                await self.datastore.put(seq_key, str(sequence).encode("utf-8"))
+            except Exception:
+                pass
 
         with trio.fail_after(t_val):
             await ipns_publish(

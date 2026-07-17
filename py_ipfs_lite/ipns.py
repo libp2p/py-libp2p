@@ -180,12 +180,15 @@ def validate_ipns_record(record_bytes: bytes, expected_peer_id: ID) -> IpnsEntry
     return entry
 
 
-async def resolve_name(routing: Any, peer_id: ID) -> str:
-    """Resolve an IPNS record from the DHT and verify its signature."""
+async def _resolve_entry(routing: Any, peer_id: ID) -> IpnsEntry:
     dht_key = f"/ipns/{peer_id.to_base58()}"
     record_bytes = await routing.get_value(dht_key)
     if not record_bytes:
         raise RoutingError(f"Could not resolve name: {peer_id.to_base58()}")
+    return validate_ipns_record(record_bytes, peer_id)
 
-    entry = validate_ipns_record(record_bytes, peer_id)
+
+async def resolve_name(routing: Any, peer_id: ID) -> str:
+    """Resolve an IPNS record from the DHT and verify its signature."""
+    entry = await _resolve_entry(routing, peer_id)
     return entry.value.decode("utf-8")
