@@ -352,6 +352,7 @@ class Pubsub(Service, IPubsub):
         validation_cache_ttl: int = 300,
         validation_cache_size: int = 1000,
         validation_timeout: float = 5.0,
+        max_msg_size: int = 1 * 1024 * 1024,
     ) -> None:
         """
         Construct a new Pubsub object, which is responsible for handling all
@@ -434,6 +435,9 @@ class Pubsub(Service, IPubsub):
         # Set of blacklisted peer IDs
         self.blacklisted_peers = set()
 
+        # Large Message Segmentation
+        self.max_msg_size = max_msg_size
+
         # Event-based waiting: maps for trio.Event instances
         # Used by wait_for_peer / wait_for_subscription to avoid busy-waiting
         self._peer_added_events: dict[ID, trio.Event] = {}
@@ -497,6 +501,14 @@ class Pubsub(Service, IPubsub):
                     logger.error(
                         "Received an invalid-signed-record, ignoring the incoming msg"
                     )
+                    continue
+
+                # -- Large Message Segmentation: route segments to router ----
+                if rpc_incoming.HasField("largeMessageSegmentation"):
+                    if hasattr(self.router, "handle_rpc"):
+                        self.manager.run_task(
+                            self.router.handle_rpc, rpc_incoming, peer_id
+                        )
                     continue
 
                 if rpc_incoming.publish:
@@ -789,7 +801,7 @@ class Pubsub(Service, IPubsub):
         self.peers[peer_id] = stream
 
         # Create per-peer outbound queue and spawn sending task
-        queue = RpcQueue()
+        queue = RpcQueue(max_message_size=self.max_msg_size)
         self.peer_queues[peer_id] = queue
         self.manager.run_task(self.handle_sending_messages, peer_id, stream, queue)
 

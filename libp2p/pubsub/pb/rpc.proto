@@ -2,143 +2,143 @@
 // Updated with GossipSub v1.3 Extensions Control Message support.
 // Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
 // extensions.proto: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/extensions/extensions.proto
-//
-// Interop note: The Topic Observation extension (observe/unobserve, topicObservation)
-// is not yet in the upstream libp2p/specs extensions.proto. Field numbers
-// follow the go-libp2p reference implementation for cross-client interop.
-// See: https://ethresear.ch/t/gossipsub-topic-observation-proposed-gossipsub-1-3/20907
 
 syntax = "proto2";
 
 package pubsub.pb;
 
 message RPC {
-	repeated SubOpts subscriptions = 1;
-	repeated Message publish = 2;
+    repeated SubOpts subscriptions = 1;
+    repeated Message publish = 2;
 
-	message SubOpts {
-		optional bool subscribe = 1; // subscribe or unsubscribe
-		optional string topicid = 2;
-	}
+    message SubOpts {
+        optional bool subscribe = 1;
+        optional string topicid = 2;
+    }
 
-	optional ControlMessage control = 3;
-	optional bytes senderRecord = 4;
+    optional ControlMessage control = 3;
+    optional bytes senderRecord = 4;
 
-	// Canonical Extensions register their top-level RPC messages here.
+    // Canonical Extensions register their top-level RPC messages here.
+    // Experimental Extensions MUST use field numbers larger than 0x200000
+    // so they are encoded with at least 4 bytes (per GossipSub v1.3 spec).
+    optional TestExtension testExtension = 6492434;
 
-	// Experimental Extensions MUST use field numbers larger than 0x200000
-	// so they are encoded with at least 4 bytes (per GossipSub v1.3 spec).
-	optional TestExtension testExtension = 6492434;
+    // Large Message Segmentation Extension (experimental).
+    // Spec: ../gossipsub/extensions/experimental/large-message-segmentation.md
+    optional LargeMessageSegmentationExtension largeMessageSegmentation = 6492435;
 }
 
 message Message {
-	optional bytes from_id = 1;
-	optional bytes data = 2;
-	optional bytes seqno = 3;
-	repeated string topicIDs = 4;
-	optional bytes signature = 5;
-	optional bytes key = 6;
+    optional bytes from_id = 1;
+    optional bytes data = 2;
+    optional bytes seqno = 3;
+    repeated string topicIDs = 4;
+    optional bytes signature = 5;
+    optional bytes key = 6;
 }
 
 message ControlMessage {
-	repeated ControlIHave ihave = 1;
-	repeated ControlIWant iwant = 2;
-	repeated ControlGraft graft = 3;
-	repeated ControlPrune prune = 4;
-	repeated ControlIDontWant idontwant = 5;
-
-	// GossipSub v1.3: Extensions control message (MUST be in first message,
-	// MUST NOT be sent more than once per peer).
-	// Spec: https://github.com/libp2p/specs/blob/master/pubsub/gossipsub/gossipsub-v1.3.md
-	optional ControlExtensions extensions = 6;
-
-	// Topic Observation extension control messages.
-	repeated ControlObserve observe = 7;
-	repeated ControlUnobserve unobserve = 8;
+    repeated ControlIHave ihave = 1;
+    repeated ControlIWant iwant = 2;
+    repeated ControlGraft graft = 3;
+    repeated ControlPrune prune = 4;
+    repeated ControlIDontWant idontwant = 5;
+    optional ControlExtensions extensions = 6;    // GossipSub v1.3
+    repeated ControlObserve observe = 7;          // Topic Observation extension
+    repeated ControlUnobserve unobserve = 8;      // Topic Observation extension
 }
 
 // ControlExtensions advertises which v1.3 extensions the sending peer supports.
 // Peers MUST ignore unknown fields (forward-compatible per spec).
-// Field numbers for experimental extensions MUST be > 0x200000.
 message ControlExtensions {
-	// Set to true if the peer supports the Topic Observation extension.
-	optional bool topicObservation = 1;
+    optional bool topicObservation = 1;
+    optional bool testExtension = 6492434;
 
-	// Experimental extensions use field numbers > 0x200000.
-	// testExtension: used for cross-implementation interop testing (go-libp2p compat).
-	optional bool testExtension = 6492434;
+    // Large Message Segmentation Extension capability flag.
+    optional bool largeMessageSegmentation = 6492435;
+}
+
+// LargeMessageSegmentationExtension carries a single segment of a large
+// message that was split across multiple RPC frames. The receiver buffers
+// segments by messageID and reassembles when all are received.
+//
+// Fields:
+//   messageID     - Opaque identifier linking segments of the same original message.
+//                   Must be unique per (sender, topic) scope to avoid collisions.
+//   segmentIndex  - Zero-based position of this segment in the ordered sequence.
+//   totalSegments - Total number of segments comprising the original message.
+//   payload       - Raw bytes for this segment.
+//   checksum      - Optional SHA-256 hash of the full pre-segmentation payload.
+//                   When present, receivers MUST verify after reassembly.
+message LargeMessageSegmentationExtension {
+    optional bytes  messageID     = 1;
+    optional uint32 segmentIndex  = 2;
+    optional uint32 totalSegments = 3;
+    optional bytes  payload       = 4;
+    optional bytes  checksum      = 5;
 }
 
 message ControlIHave {
-	optional string topicID = 1;
-	repeated string messageIDs = 2;
+    optional string topicID = 1;
+    repeated string messageIDs = 2;
 }
 
 message ControlIWant {
-	repeated string messageIDs = 1;
+    repeated string messageIDs = 1;
 }
 
 message ControlGraft {
-	optional string topicID = 1;
+    optional string topicID = 1;
 }
 
 message ControlPrune {
-	optional string topicID = 1;
-	repeated PeerInfo peers = 2;
-	optional uint64 backoff = 3;
+    optional string topicID = 1;
+    repeated PeerInfo peers = 2;
+    optional uint64 backoff = 3;
 }
 
 message ControlIDontWant {
-	repeated bytes messageIDs = 1;
+    repeated bytes messageIDs = 1;
 }
 
-// ControlObserve: Topic Observation extension.
-// Sent by an observer to start receiving IHAVE notifications for a topic
-// without being a full subscriber. (GossipSub v1.3 Topic Observation extension)
 message ControlObserve {
-	optional string topicID = 1;
+    optional string topicID = 1;
 }
 
-// ControlUnobserve: Topic Observation extension.
-// Sent by an observer to stop receiving IHAVE notifications for a topic.
 message ControlUnobserve {
-	optional string topicID = 1;
+    optional string topicID = 1;
 }
 
-// TestExtension: used for interoperability testing of the v1.3 extension
-// mechanism between implementations (go-libp2p, rust-libp2p, py-libp2p).
-// An empty message — its presence on the wire is the signal.
 message TestExtension {}
 
 message PeerInfo {
-	optional bytes peerID = 1;
-	optional bytes signedPeerRecord = 2;
+    optional bytes peerID = 1;
+    optional bytes signedPeerRecord = 2;
 }
 
 message TopicDescriptor {
-	optional string name = 1;
-	optional AuthOpts auth = 2;
-	optional EncOpts enc = 3;
+    optional string name = 1;
+    optional AuthOpts auth = 2;
+    optional EncOpts enc = 3;
 
-	message AuthOpts {
-		optional AuthMode mode = 1;
-		repeated bytes keys = 2; // root keys to trust
+    message AuthOpts {
+        optional AuthMode mode = 1;
+        repeated bytes keys = 2;
+        enum AuthMode {
+            NONE = 0;
+            KEY = 1;
+            WOT = 2;
+        }
+    }
 
-		enum AuthMode {
-			NONE = 0; // no authentication, anyone can publish
-			KEY = 1; // only messages signed by keys in the topic descriptor are accepted
-			WOT = 2; // web of trust, certificates can allow publisher set to grow
-		}
-	}
-
-	message EncOpts {
-		optional EncMode mode = 1;
-		repeated bytes keyHashes = 2; // the hashes of the shared keys used (salted)
-
-		enum EncMode {
-			NONE = 0; // no encryption, anyone can read
-			SHAREDKEY = 1; // messages are encrypted with shared key
-			WOT = 2; // web of trust, certificates can allow publisher set to grow
-		}
-	}
+    message EncOpts {
+        optional EncMode mode = 1;
+        repeated bytes keyHashes = 2;
+        enum EncMode {
+            NONE = 0;
+            SHAREDKEY = 1;
+            WOT = 2;
+        }
+    }
 }
