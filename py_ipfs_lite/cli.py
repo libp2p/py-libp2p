@@ -226,8 +226,6 @@ def main() -> None:
             )
             add_params = AddParams(
                 chunker=parsed_args.chunker,
-                hash_fun=parsed_args.hash_fun,
-                raw_leaves=parsed_args.raw_leaves,
             )
             trio.run(
                 run_add,

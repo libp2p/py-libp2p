@@ -160,18 +160,27 @@ async def cat_file(
         content_iter = await peer.get_file(arg, stream=True)
         max_download_size = getattr(peer.config, "max_download_size", 100 * 1024 * 1024)
 
+        from collections.abc import AsyncGenerator, AsyncIterator
+        from typing import cast
+
+        if not hasattr(content_iter, "__aiter__"):
+            # Should not happen since stream=True
+            raise ValueError("Expected an async iterator for streaming")
+
+        iterator = cast(AsyncIterator[bytes], content_iter)
+
         try:
-            first_chunk = await content_iter.__anext__()
+            first_chunk = await iterator.__anext__()
         except StopAsyncIteration:
             first_chunk = b""
 
-        async def stream_generator():
+        async def stream_generator() -> AsyncGenerator[bytes, None]:
             size = len(first_chunk)
             if size > 0:
                 yield first_chunk
 
             try:
-                async for chunk in content_iter:
+                async for chunk in iterator:
                     size += len(chunk)
                     if size > max_download_size:
                         logger.error("Download exceeded max_download_size.")
