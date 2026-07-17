@@ -15,6 +15,12 @@ def get_parser() -> argparse.ArgumentParser:
         default=cli_defaults.debug,
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Path to a file to store logs instead of stdout",
+    )
 
     # Common arguments parser
     common_parser = argparse.ArgumentParser(add_help=False)

@@ -201,10 +201,14 @@ def main() -> None:
     parsed_args = parser.parse_args()
 
     # Configure logging
-    logging.basicConfig(
-        level=logging.DEBUG if parsed_args.debug else logging.INFO,
-        format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    )
+    log_kwargs: dict[str, Any] = {
+        "level": logging.DEBUG if parsed_args.debug else logging.INFO,
+        "format": "%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    }
+    if hasattr(parsed_args, "log_file") and parsed_args.log_file:
+        log_kwargs["filename"] = parsed_args.log_file
+
+    logging.basicConfig(**log_kwargs)
 
     # Silence verbose loggers
     logging.getLogger("multiaddr.transforms").setLevel(logging.WARNING)
