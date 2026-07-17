@@ -14,7 +14,7 @@ class Config:
     reprovider_strategy: str = "all"
     conn_mgr_high_water: int = 900
     conn_mgr_low_water: int = 600
-    blockstore_type: BlockStoreType | str = BlockStoreType.FILESYSTEM
+    blockstore_type: BlockStoreType | str = "filesystem"
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
     use_ipni: bool = False
     ipni_endpoint: str = "https://cid.contact"

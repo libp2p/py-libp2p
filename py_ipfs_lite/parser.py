@@ -36,7 +36,9 @@ def get_parser() -> argparse.ArgumentParser:
     common_parser.add_argument(
         "--blockstore-type",
         type=str,
-        default=core_defaults.blockstore_type,
+        default=getattr(
+            core_defaults.blockstore_type, "value", core_defaults.blockstore_type
+        ),
         choices=["memory", "filesystem"],
     )
     common_parser.add_argument(
