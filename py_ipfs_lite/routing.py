@@ -127,7 +127,7 @@ class DelegatedHTTPRouting:
         return None
 
     async def put_value(self, key: str, value: bytes) -> None:
-        pass
+        raise NotImplementedError("DelegatedHTTPRouting does not support put_value")
 
     async def close(self) -> None:
         await self.client.aclose()
