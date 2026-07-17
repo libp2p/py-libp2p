@@ -114,23 +114,11 @@ async def export_car(peer: Any, cid_str: str, output_path: str) -> None:
                         pass
                 elif str(norm_codec) in ("dag-json", "dag-cbor", "ipld", "dag-jose"):
                     try:
+                        from py_ipfs_lite.dag_utils import extract_cids
+                        
                         decoded = decode_node(data, codec)
-
-                        def extract_links(obj: Any) -> None:
-                            if isinstance(obj, dict):
-                                if "/" in obj and isinstance(obj["/"], (str, bytes)):
-                                    try:
-                                        link_cid = parse_cid(obj["/"])
-                                        queue.append(cid_to_bytes(link_cid))
-                                    except Exception:
-                                        pass
-                                for v in obj.values():
-                                    extract_links(v)
-                            elif isinstance(obj, list):
-                                for item in obj:
-                                    extract_links(item)
-
-                        extract_links(decoded)
+                        for cid_bytes in extract_cids(decoded, strict_missing=False):
+                            queue.append(cid_bytes)
                     except Exception:
                         pass
 
