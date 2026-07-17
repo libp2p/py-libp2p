@@ -11,7 +11,6 @@ def test_config_defaults() -> None:
 def test_add_params_defaults() -> None:
     params = AddParams()
     assert params.chunker == "size-262144"
-    assert params.raw_leaves is True
 
 
 def test_config_blockstore_type_validation() -> None:

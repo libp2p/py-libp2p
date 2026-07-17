@@ -43,11 +43,11 @@ def get_parser() -> argparse.ArgumentParser:
         "--blockstore-path", type=str, default=core_defaults.blockstore_path
     )
     common_parser.add_argument(
-        "--no-ipni",
-        action="store_false",
+        "--ipni",
+        action=argparse.BooleanOptionalAction,
         dest="use_ipni",
         default=core_defaults.use_ipni,
-        help="Disable IPNI HTTP delegated routing",
+        help="Enable/Disable IPNI HTTP delegated routing",
     )
     common_parser.add_argument(
         "--ipni-endpoint",
@@ -90,19 +90,6 @@ def get_parser() -> argparse.ArgumentParser:
         default=add_defaults.chunker,
         help="Chunking algorithm (e.g., size-262144)",
     )
-    add_parser.add_argument(
-        "--hash-fun",
-        type=str,
-        default=add_defaults.hash_fun,
-        help="Hash function (e.g., sha2-256)",
-    )
-    add_parser.add_argument(
-        "--raw-leaves",
-        action=argparse.BooleanOptionalAction,
-        default=add_defaults.raw_leaves,
-        help="Use raw leaves",
-    )
-
     # Get command
     get_parser = subparsers.add_parser(
         "get", help="Get a file by CID", parents=[common_parser]

@@ -51,8 +51,6 @@ class Config:
 @dataclass(slots=True)
 class AddParams:
     chunker: str = "size-262144"
-    raw_leaves: bool = True
-    hash_fun: str = "sha2-256"
 
     def __post_init__(self) -> None:
         if not self.chunker.startswith("size-"):
