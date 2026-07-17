@@ -372,7 +372,6 @@ class TestPeerRouting:
     async def test_query_peer_for_closest_filters_self_from_response(
         self, peer_routing, mock_host, sample_peer_info
     ):
-        """Test that our own ID is dropped from a response's closerPeers."""
         target_key = b"target_key"
 
         mock_stream = AsyncMock()
@@ -381,7 +380,6 @@ class TestPeerRouting:
         response_msg = Message()
         response_msg.type = Message.MessageType.FIND_NODE
 
-        # The responder hands us back our own ID alongside a real peer
         self_proto = response_msg.closerPeers.add()
         self_proto.id = mock_host.get_id().to_bytes()
         self_proto.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8000").to_bytes())
@@ -405,12 +403,17 @@ class TestPeerRouting:
         )
 
         assert result == [other_peer_id]
+        poisoned = [
+            call.args[0]
+            for call in mock_host.get_peerstore().add_addrs.call_args_list
+            if call.args[0] == mock_host.get_id()
+        ]
+        assert poisoned == []
 
     @pytest.mark.trio
     async def test_query_peer_for_closest_skips_self_dial(
         self, peer_routing, mock_host
     ):
-        """Test that we never open a FIND_NODE stream to ourselves."""
         result = await peer_routing._query_peer_for_closest(
             mock_host.get_id(), b"target_key"
         )

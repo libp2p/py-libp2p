@@ -19,12 +19,15 @@ import uuid
 import pytest
 import multiaddr
 import trio
+import varint
 
 from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.kad_dht.common import PROTOCOL_ID
 from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
+from libp2p.kad_dht.pb.kademlia_pb2 import Message
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import ID
 from libp2p.peer.peer_record import PeerRecord
@@ -38,6 +41,7 @@ from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.anyio_service import (
     background_trio_service,
 )
+from libp2p.utils.varint import read_varint_prefixed_bytes
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -679,3 +683,26 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
 
         # Reset to default
         dht_a.validator.strict_validation = False
+
+
+@pytest.mark.trio
+async def test_find_node_reply_includes_requester_asking_for_itself(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = a_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert a_id.to_bytes() in [p.id for p in resp.closerPeers]

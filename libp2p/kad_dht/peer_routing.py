@@ -387,8 +387,6 @@ class PeerRouting(IPeerRouting):
                         return []
 
                     new_peer_id = ID(peer_data.id)
-                    # A responder may include us among the k closest to the
-                    # target; querying ourselves would stall the lookup.
                     if new_peer_id == local_id:
                         continue
                     if new_peer_id not in results:
