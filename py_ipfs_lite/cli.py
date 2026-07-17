@@ -204,6 +204,7 @@ def main() -> None:
     log_kwargs: dict[str, Any] = {
         "level": logging.DEBUG if parsed_args.debug else logging.INFO,
         "format": "%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+        "force": True,
     }
     if hasattr(parsed_args, "log_file") and parsed_args.log_file:
         log_kwargs["filename"] = parsed_args.log_file
