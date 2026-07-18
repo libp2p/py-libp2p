@@ -1076,7 +1076,7 @@ wheels = [
 [[package]]
 name = "libp2p"
 version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1388#5d9c0e5a0436b97bad5879b5fdfc97b0a43fc578" }
 dependencies = [
     { name = "aioquic" },
     { name = "anyio" },
@@ -1092,6 +1092,7 @@ dependencies = [
     { name = "multiaddr" },
     { name = "mypy-protobuf" },
     { name = "noiseprotocol" },
+    { name = "prometheus-client" },
     { name = "protobuf" },
     { name = "py-cid" },
     { name = "py-multibase" },
@@ -1106,10 +1107,6 @@ dependencies = [
     { name = "trio-websocket" },
     { name = "types-requests" },
     { name = "zeroconf" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/a2/f16c5d2dc5bfb5413f4cb734f0da0d1f14af0614832aa7091f54c35031e4/libp2p-0.7.0.tar.gz", hash = "sha256:143923498adbd05d55546d59c522b297dd914035f2dd30a3df682096bef4ba00", size = 2130362, upload-time = "2026-07-09T17:35:28.862Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/52/0f964cc80f7a45b74207974c1ae013dcfd435967f7a437e160ab4fbffed5/libp2p-0.7.0-py3-none-any.whl", hash = "sha256:3989d2dc3432c478833eb6aaa0d2a18627e08e56164644fdf0739af258bf39c4", size = 1085260, upload-time = "2026-07-09T17:35:26.863Z" },
 ]
 
 [[package]]
@@ -2054,7 +2051,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.137.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypercorn", specifier = ">=0.18.0" },
-    { name = "libp2p", specifier = ">=0.7.0" },
+    { name = "libp2p", git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1388" },
     { name = "mdformat", marker = "extra == 'dev'", specifier = ">=0.7.22" },
     { name = "mdformat-gfm", marker = "extra == 'dev'" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0.0" },
