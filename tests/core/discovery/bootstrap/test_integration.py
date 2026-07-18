@@ -37,9 +37,9 @@ async def test_bootstrap_integration():
     assert isinstance(host, BasicHost), "Host should be a BasicHost instance"
     assert hasattr(host, "bootstrap"), "Host should have bootstrap attribute"
     assert host.bootstrap is not None, "Bootstrap discovery should be initialized"
-    assert len(host.bootstrap.bootstrap_addrs) == len(bootstrap_addrs), (
-        "Bootstrap addresses should match"
-    )
+    assert len(host.bootstrap.bootstrap_addrs) == len(
+        bootstrap_addrs
+    ), "Bootstrap addresses should match"
 
 
 @pytest.mark.trio
@@ -59,9 +59,9 @@ async def test_bootstrap_integration_with_dns_addresses():
     assert isinstance(host, BasicHost)
     assert host.bootstrap is not None
     # After validation, all four addresses are valid (parseable + have p2p)
-    assert len(host.bootstrap.bootstrap_addrs) == len(bootstrap_addrs), (
-        "Bootstrap should accept IP and DNS (dns4, dns6, dnsaddr) addresses"
-    )
+    assert len(host.bootstrap.bootstrap_addrs) == len(
+        bootstrap_addrs
+    ), "Bootstrap should accept IP and DNS (dns4, dns6, dnsaddr) addresses"
 
 
 def test_bootstrap_no_addresses():
@@ -74,9 +74,9 @@ def test_bootstrap_no_addresses():
 
     # Verify bootstrap is not initialized
     assert isinstance(host, BasicHost)
-    assert not hasattr(host, "bootstrap") or host.bootstrap is None, (
-        "Bootstrap should not be initialized when no addresses provided"
-    )
+    assert (
+        not hasattr(host, "bootstrap") or host.bootstrap is None
+    ), "Bootstrap should not be initialized when no addresses provided"
 
 
 @pytest.mark.trio

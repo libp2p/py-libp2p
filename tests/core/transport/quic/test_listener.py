@@ -267,22 +267,22 @@ async def test_connection_id_tracking_with_real_connection():
             assert connection_established, "Connection handler should have been called"
 
             # Verify at least one Connection ID was tracked
-            assert len(initial_connection_ids) > 0, (
-                "At least one Connection ID should be tracked initially"
-            )
+            assert (
+                len(initial_connection_ids) > 0
+            ), "At least one Connection ID should be tracked initially"
 
             # Verify Connection ID mappings exist in listener
             # Use the connection object from the handler
-            assert connection_from_handler is not None, (
-                "Connection should be established"
-            )
+            assert (
+                connection_from_handler is not None
+            ), "Connection should be established"
 
             # Verify all initial Connection IDs are in mappings
             for cid in initial_connection_ids:
                 conn, _, _ = await listener._registry.find_by_connection_id(cid)
-                assert conn is not None, (
-                    f"Connection ID {cid.hex()[:8]} should map to a connection"
-                )
+                assert (
+                    conn is not None
+                ), f"Connection ID {cid.hex()[:8]} should map to a connection"
                 # Check that it's the same connection (same address and properties)
                 assert conn._remote_addr == connection_from_handler._remote_addr, (
                     f"Connection ID {cid.hex()[:8]} should map to same connection "
@@ -292,9 +292,9 @@ async def test_connection_id_tracking_with_real_connection():
             # Verify new Connection IDs (if any) are also tracked
             for cid in new_connection_ids:
                 conn, _, _ = await listener._registry.find_by_connection_id(cid)
-                assert conn is not None, (
-                    f"New Connection ID {cid.hex()[:8]} should map to a connection"
-                )
+                assert (
+                    conn is not None
+                ), f"New Connection ID {cid.hex()[:8]} should map to a connection"
                 # Check that it's the same connection (same address and properties)
                 # Note: Connection objects may be different instances but represent
                 # the same logical connection, so we check by address
@@ -429,18 +429,18 @@ class TestQUICListenerRaceConditions:
                 await trio.sleep(0.1)
 
                 # Verify only one connection object was created
-                assert len(set(connection_objects)) <= 1, (
-                    "Multiple connection objects created"
-                )
-                assert len(listener._conn_by_quic_id) <= 1, (
-                    "Multiple entries in _conn_by_quic_id"
-                )
+                assert (
+                    len(set(connection_objects)) <= 1
+                ), "Multiple connection objects created"
+                assert (
+                    len(listener._conn_by_quic_id) <= 1
+                ), "Multiple entries in _conn_by_quic_id"
 
         # Verify only one connection object was created
         assert len(set(connection_objects)) <= 1, "Multiple connection objects created"
-        assert len(listener._conn_by_quic_id) <= 1, (
-            "Multiple entries in _conn_by_quic_id"
-        )
+        assert (
+            len(listener._conn_by_quic_id) <= 1
+        ), "Multiple entries in _conn_by_quic_id"
 
     @pytest.mark.trio
     async def test_handler_invocation_once_per_connection(
@@ -488,12 +488,12 @@ class TestQUICListenerRaceConditions:
                 # Verify handler was called at most once
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                assert connection_obj is not None, (
-                    "Connection should be promoted with mock TLS certificate"
-                )
-                assert quic_key in listener._handler_invoked_quic_ids, (
-                    "Handler should be marked as invoked when connection is created"
-                )
+                assert (
+                    connection_obj is not None
+                ), "Connection should be promoted with mock TLS certificate"
+                assert (
+                    quic_key in listener._handler_invoked_quic_ids
+                ), "Handler should be marked as invoked when connection is created"
                 assert connection_handler.call_count() <= 1
 
     @pytest.mark.trio
@@ -532,9 +532,9 @@ class TestQUICListenerRaceConditions:
 
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                assert connection_obj is not None, (
-                    "Connection should be promoted with mock TLS certificate"
-                )
+                assert (
+                    connection_obj is not None
+                ), "Connection should be promoted with mock TLS certificate"
 
                 # Register additional CIDs for the same connection
                 await listener._registry.register_new_connection_id_for_existing_conn(

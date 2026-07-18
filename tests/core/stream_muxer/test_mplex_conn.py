@@ -131,9 +131,9 @@ async def test_mplex_on_close_callback():
         nursery.cancel_scope.cancel()
 
     # Verify callback was called exactly once
-    assert callback_called_count[0] == 1, (
-        "on_close callback should be called exactly once"
-    )
+    assert (
+        callback_called_count[0] == 1
+    ), "on_close callback should be called exactly once"
     assert on_close_called.is_set(), "on_close callback should have been invoked"
     assert mplex_conn.is_closed, "Connection should be marked as closed"
 
@@ -172,9 +172,9 @@ async def test_mplex_on_close_callback_with_error():
     # Verify callback was called (error was raised)
     assert error_raised, "on_close callback should have been called"
     # Connection should still be closed despite callback error
-    assert mplex_conn.is_closed, (
-        "Connection should be marked as closed even if callback errors"
-    )
+    assert (
+        mplex_conn.is_closed
+    ), "Connection should be marked as closed even if callback errors"
 
 
 @pytest.mark.trio

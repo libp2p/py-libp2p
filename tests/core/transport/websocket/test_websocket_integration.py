@@ -160,9 +160,9 @@ async def test_websocket_echo_protocol_plaintext():
             # Verify connection established
             await trio.sleep(0.1)
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None and len(connections) > 0, (
-                "Connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Connection should be established"
 
             # Send echo message with timeouts
             test_message = b"Hello, WebSocket P2P!"
@@ -201,12 +201,12 @@ async def test_websocket_echo_protocol_plaintext():
                     pass  # Handler may have timed out, continue to assertions
 
                 # Verify results
-                assert response == test_message, (
-                    f"Response mismatch: expected {test_message!r}, got {response!r}"
-                )
-                assert len(received_messages) == 1, (
-                    f"Expected 1 message, got {len(received_messages)}"
-                )
+                assert (
+                    response == test_message
+                ), f"Response mismatch: expected {test_message!r}, got {response!r}"
+                assert (
+                    len(received_messages) == 1
+                ), f"Expected 1 message, got {len(received_messages)}"
                 expected = test_message
                 received = received_messages[0]
                 assert received == test_message, (
@@ -270,9 +270,9 @@ async def test_websocket_echo_protocol_noise():
             # Verify connection
             await trio.sleep(0.1)
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None and len(connections) > 0, (
-                "Noise connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Noise connection should be established"
 
             # Send message with timeouts
             test_message = b"Secure WebSocket with Noise!"
@@ -308,12 +308,12 @@ async def test_websocket_echo_protocol_noise():
                 except trio.TooSlowError:
                     pass
 
-                assert response == test_message, (
-                    f"Response mismatch: expected {test_message!r}, got {response!r}"
-                )
-                assert len(received_messages) == 1, (
-                    f"Expected 1 message, got {len(received_messages)}"
-                )
+                assert (
+                    response == test_message
+                ), f"Response mismatch: expected {test_message!r}, got {response!r}"
+                assert (
+                    len(received_messages) == 1
+                ), f"Expected 1 message, got {len(received_messages)}"
             except Exception:
                 try:
                     if stream is not None:
@@ -392,9 +392,9 @@ async def test_websocket_bidirectional_communication():
             await trio.sleep(0.1)
             # Verify connection
             connections = host2.get_network().connections.get(peer_id_1)
-            assert connections is not None and len(connections) > 0, (
-                "Connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Connection should be established"
 
             # Host2 sends to Host1 (using the established connection)
             stream1 = None
@@ -456,18 +456,18 @@ async def test_websocket_bidirectional_communication():
                     pass
 
                 # Verify results
-                assert resp1 == b"Response from host1", (
-                    f"Expected 'Response from host1', got {resp1!r}"
-                )
-                assert resp2 == b"Response from host2", (
-                    f"Expected 'Response from host2', got {resp2!r}"
-                )
-                assert len(messages_from_host2) == 1, (
-                    f"Expected 1 message from host2, got {len(messages_from_host2)}"
-                )
-                assert len(messages_from_host1) == 1, (
-                    f"Expected 1 message from host1, got {len(messages_from_host1)}"
-                )
+                assert (
+                    resp1 == b"Response from host1"
+                ), f"Expected 'Response from host1', got {resp1!r}"
+                assert (
+                    resp2 == b"Response from host2"
+                ), f"Expected 'Response from host2', got {resp2!r}"
+                assert (
+                    len(messages_from_host2) == 1
+                ), f"Expected 1 message from host2, got {len(messages_from_host2)}"
+                assert (
+                    len(messages_from_host1) == 1
+                ), f"Expected 1 message from host1, got {len(messages_from_host1)}"
             except Exception:
                 try:
                     if stream1 is not None:
@@ -537,9 +537,9 @@ async def test_websocket_multiple_streams():
 
             await trio.sleep(0.1)
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None and len(connections) > 0, (
-                "Connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Connection should be established"
 
             # Open multiple streams with timeout
             streams = []
@@ -589,9 +589,9 @@ async def test_websocket_multiple_streams():
 
                 # Verify all messages were echoed
                 assert len(results) == 5, f"Expected 5 results, got {len(results)}"
-                assert message_count == 5, (
-                    f"Expected 5 handler calls, got {message_count}"
-                )
+                assert (
+                    message_count == 5
+                ), f"Expected 5 handler calls, got {message_count}"
             except Exception:
                 # Cleanup all streams on failure
                 for stream in streams:
@@ -644,9 +644,9 @@ async def test_websocket_ping_protocol():
 
             await trio.sleep(0.1)
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None and len(connections) > 0, (
-                "Connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Connection should be established"
 
             # Send ping with timeouts
             stream = None
@@ -735,9 +735,9 @@ async def test_websocket_large_message():
 
             await trio.sleep(0.1)
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None and len(connections) > 0, (
-                "Connection should be established"
-            )
+            assert (
+                connections is not None and len(connections) > 0
+            ), "Connection should be established"
 
             # Send large message (100KB) with timeouts
             large_message = b"x" * (100 * 1024)
@@ -819,12 +819,12 @@ async def test_websocket_connection_lifecycle():
 
             # Verify connection exists
             connections = host2.get_network().connections.get(peer_id)
-            assert connections is not None, (
-                "Connection should exist in connection table"
-            )
-            assert len(connections) > 0, (
-                f"Connection list should not be empty, got {len(connections)}"
-            )
+            assert (
+                connections is not None
+            ), "Connection should exist in connection table"
+            assert (
+                len(connections) > 0
+            ), f"Connection list should not be empty, got {len(connections)}"
 
             # Send message with timeouts
             stream = None
@@ -946,9 +946,9 @@ async def test_websocket_multiple_connections():
 
                     await trio.sleep(0.1)
                     connections = client.get_network().connections.get(peer_id)
-                    assert connections is not None and len(connections) > 0, (
-                        f"Client {client_idx} should have connection"
-                    )
+                    assert (
+                        connections is not None and len(connections) > 0
+                    ), f"Client {client_idx} should have connection"
 
                     with trio.fail_after(10.0):
                         stream = await client.new_stream(peer_id, [ECHO_PROTOCOL])
@@ -971,9 +971,9 @@ async def test_websocket_multiple_connections():
                             except Exception:
                                 pass
 
-                    assert response == b"ack", (
-                        f"Client {client_idx}: Expected 'ack', got {response!r}"
-                    )
+                    assert (
+                        response == b"ack"
+                    ), f"Client {client_idx}: Expected 'ack', got {response!r}"
                 except Exception as e:
                     # Ensure cleanup
                     try:
@@ -996,9 +996,9 @@ async def test_websocket_multiple_connections():
             await trio.sleep(0.5)
 
             # Verify all messages received
-            assert received_count == 3, (
-                f"Expected 3 messages received, got {received_count}"
-            )
+            assert (
+                received_count == 3
+            ), f"Expected 3 messages received, got {received_count}"
 
 
 if __name__ == "__main__":

@@ -126,9 +126,9 @@ async def run_echo_test(server_addr: str, messages: list[str]):
                 responses.append(response)
 
                 # Verify echo
-                assert message == response, (
-                    f"Echo failed: sent {message!r}, got {response!r}"
-                )
+                assert (
+                    message == response
+                ), f"Echo failed: sent {message!r}, got {response!r}"
 
             await stream.close()
             logger.info("✅ All messages echoed correctly")

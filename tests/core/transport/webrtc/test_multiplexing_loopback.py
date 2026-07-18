@@ -230,9 +230,9 @@ async def test_open_accept_echo_large_payload() -> None:
                 payload = (bytes(range(256)) * (MAX_PAYLOAD_SIZE // 256 + 2))[
                     : MAX_PAYLOAD_SIZE + 4096
                 ]
-                assert len(payload) > MAX_PAYLOAD_SIZE, (
-                    "payload must cross the chunk boundary to exercise framing"
-                )
+                assert (
+                    len(payload) > MAX_PAYLOAD_SIZE
+                ), "payload must cross the chunk boundary to exercise framing"
 
                 # A → B
                 await stream_a.write(payload)

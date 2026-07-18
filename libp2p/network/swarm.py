@@ -572,6 +572,16 @@ class Swarm(Service, INetworkService):
                 f"All addresses for peer {peer_id} blocked by connection gate"
             )
 
+        # Filter out loopback addresses if public addresses are available
+        # This prevents the node from dialing itself when DHT peers advertise localhost
+        public_addrs = [
+            a
+            for a in allowed_addrs
+            if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+        ]
+        if public_addrs:
+            allowed_addrs = public_addrs
+
         connections = []
         exceptions: list[SwarmException] = []
 

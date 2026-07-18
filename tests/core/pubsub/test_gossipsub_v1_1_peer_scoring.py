@@ -312,9 +312,9 @@ class TestGossipSubScoringIntegration:
             )
 
             # Initially, peer should have low score and be blocked
-            assert not scorer.allow_publish(peer_id, [topic]), (
-                "Peer with low score should not be allowed to publish"
-            )
+            assert not scorer.allow_publish(
+                peer_id, [topic]
+            ), "Peer with low score should not be allowed to publish"
 
             # Simulate peer joining mesh to increase score
             # Add enough score to exceed threshold
@@ -324,14 +324,14 @@ class TestGossipSubScoringIntegration:
 
             # Verify the score is now above threshold
             new_score = scorer.topic_score(peer_id, topic)
-            assert new_score >= score_params.publish_threshold, (
-                f"New score {new_score} should be >= {score_params.publish_threshold}"
-            )
+            assert (
+                new_score >= score_params.publish_threshold
+            ), f"New score {new_score} should be >= {score_params.publish_threshold}"
 
             # Now peer should be allowed to publish
-            assert scorer.allow_publish(peer_id, [topic]), (
-                "Peer with high score should be allowed to publish"
-            )
+            assert scorer.allow_publish(
+                peer_id, [topic]
+            ), "Peer with high score should be allowed to publish"
 
     @pytest.mark.trio
     async def test_gossip_gate(self):

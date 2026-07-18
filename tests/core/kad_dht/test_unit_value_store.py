@@ -540,12 +540,12 @@ class TestValueStore:
             sent_msg.ParseFromString(written[1])
 
             assert sent_msg.HasField("record"), "Outbound message must contain a record"
-            assert sent_msg.record.signature == local_record.signature, (
-                "Outbound record must carry the signature from the signed record"
-            )
-            assert sent_msg.record.author == local_record.author, (
-                "Outbound record must carry the author from the signed record"
-            )
+            assert (
+                sent_msg.record.signature == local_record.signature
+            ), "Outbound record must carry the signature from the signed record"
+            assert (
+                sent_msg.record.author == local_record.author
+            ), "Outbound record must carry the author from the signed record"
         finally:
             vs_module.env_to_send_in_RPC = original_env  # type: ignore[attr-defined]
 

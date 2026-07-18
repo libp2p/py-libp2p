@@ -37,9 +37,9 @@ async def test_multi_port_demux():
             else:
                 tcp_port = port
 
-        assert tcp_port == ws_port, (
-            f"Expected same port for TCP and WS, got {tcp_port} and {ws_port}"
-        )
+        assert (
+            tcp_port == ws_port
+        ), f"Expected same port for TCP and WS, got {tcp_port} and {ws_port}"
 
     # Now listen on two explicitly different ports to ensure they don't overwrite
     # each other or silently break.

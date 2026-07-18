@@ -44,9 +44,9 @@ def test_encode_uvarint():
 
     for value, expected in test_cases:
         result = encode_uvarint(value)
-        assert result == expected, (
-            f"Failed for value {value}: expected {expected.hex()}, got {result.hex()}"
-        )
+        assert (
+            result == expected
+        ), f"Failed for value {value}: expected {expected.hex()}, got {result.hex()}"
 
 
 def test_decode_varint_from_bytes():
@@ -66,9 +66,9 @@ def test_decode_varint_from_bytes():
 
     for data, expected in test_cases:
         result = decode_varint_from_bytes(data)
-        assert result == expected, (
-            f"Failed for data {data.hex()}: expected {expected}, got {result}"
-        )
+        assert (
+            result == expected
+        ), f"Failed for data {data.hex()}: expected {expected}, got {result}"
 
 
 def test_decode_varint_from_bytes_invalid():
@@ -113,9 +113,9 @@ async def test_read_varint_prefixed_bytes():
         reader = MockReader(prefixed_data)
 
         result = await read_varint_prefixed_bytes(reader)
-        assert result == expected, (
-            f"Failed for message {message}: expected {expected}, got {result}"
-        )
+        assert (
+            result == expected
+        ), f"Failed for message {message}: expected {expected}, got {result}"
 
 
 @pytest.mark.trio
@@ -142,9 +142,9 @@ def test_varint_roundtrip():
     for value in test_values:
         encoded = encode_uvarint(value)
         decoded = decode_varint_from_bytes(encoded)
-        assert decoded == value, (
-            f"Roundtrip failed for {value}: encoded={encoded.hex()}, decoded={decoded}"
-        )
+        assert (
+            decoded == value
+        ), f"Roundtrip failed for {value}: encoded={encoded.hex()}, decoded={decoded}"
 
 
 def test_varint_prefixed_roundtrip():
@@ -162,9 +162,9 @@ def test_varint_prefixed_roundtrip():
 
         # Decode the length
         length = decode_varint_from_bytes(prefixed)
-        assert length == len(message), (
-            f"Length mismatch for {message}: expected {len(message)}, got {length}"
-        )
+        assert length == len(
+            message
+        ), f"Length mismatch for {message}: expected {len(message)}, got {length}"
 
         # Extract the message
         varint_len = 0
@@ -174,9 +174,9 @@ def test_varint_prefixed_roundtrip():
                 break
 
         extracted_message = prefixed[varint_len:]
-        assert extracted_message == message, (
-            f"Message mismatch: expected {message}, got {extracted_message}"
-        )
+        assert (
+            extracted_message == message
+        ), f"Message mismatch: expected {message}, got {extracted_message}"
 
 
 def test_large_varint_values():

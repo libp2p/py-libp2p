@@ -483,30 +483,40 @@ class BasicHost(IHost):
                 async with trio.open_nursery() as nursery:
 
                     async def keepalive_loop() -> None:
+                        active_ping_tasks: set[ID] = set()
+
+                        async def hold_ping_stream(peer_id: ID) -> None:
+                            try:
+                                import secrets
+
+                                stream = await self.new_stream(
+                                    peer_id, ["/ipfs/ping/1.0.0"]
+                                )
+                                try:
+                                    while True:
+                                        ping_bytes = secrets.token_bytes(32)
+                                        await stream.write(ping_bytes)
+                                        await stream.read(32)
+                                        await trio.sleep(15.0)
+                                finally:
+                                    await stream.close()
+                            except Exception as e:
+                                logger.debug(
+                                    f"Keepalive stream ended for {peer_id}: {e}"
+                                )
+                                await trio.sleep(10.0)  # Delay before allowing retry
+                            finally:
+                                active_ping_tasks.discard(peer_id)
+
                         while True:
                             try:
-                                peer_ids = list(self._network.connections.keys())
-                                for peer_id in peer_ids:
-                                    for conn in self._network.connections.get(
-                                        peer_id, []
-                                    ):
-                                        muxed = getattr(conn, "muxed_conn", None)
-                                        if (
-                                            muxed
-                                            and type(muxed).__name__ == "QUICConnection"
-                                        ):
-                                            try:
-                                                # Send a transport-level PING frame to keep the connection alive
-                                                muxed._quic.send_ping(0)
-                                                # Use start_soon for transmit to not block the loop
-                                                nursery.start_soon(muxed._transmit)
-                                            except Exception as e:
-                                                logger.debug(
-                                                    f"QUIC ping failed for {peer_id}: {e}"
-                                                )
+                                for peer_id in list(self._network.connections.keys()):
+                                    if peer_id not in active_ping_tasks:
+                                        active_ping_tasks.add(peer_id)
+                                        nursery.start_soon(hold_ping_stream, peer_id)
                             except Exception as e:
                                 logger.debug(f"Error in keepalive loop: {e}")
-                            await trio.sleep(15.0)
+                            await trio.sleep(5.0)
 
                     nursery.start_soon(keepalive_loop)
 

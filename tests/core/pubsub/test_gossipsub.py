@@ -653,12 +653,12 @@ async def test_connect_some_degree_limit_enforced():
         peer_counts = [len(pubsub.peers) for pubsub in pubsubs_fsub]
 
         # First and last hosts should have exactly degree connections
-        assert peer_counts[0] == degree, (
-            f"Host 0 should have {degree} peers, got {peer_counts[0]}"
-        )
-        assert peer_counts[-1] <= degree, (
-            f"Last host should have ≤ {degree} peers, got {peer_counts[-1]}"
-        )
+        assert (
+            peer_counts[0] == degree
+        ), f"Host 0 should have {degree} peers, got {peer_counts[0]}"
+        assert (
+            peer_counts[-1] <= degree
+        ), f"Last host should have ≤ {degree} peers, got {peer_counts[-1]}"
 
         # Middle hosts may have more due to bidirectional connections
         # but the pattern should be consistent with degree limit
@@ -768,9 +768,9 @@ async def test_single_host():
 
         # Single host should have no connections
         connected_peers = len(pubsubs_fsub[0].peers)
-        assert connected_peers == 0, (
-            f"Single host has {connected_peers} connections, expected 0"
-        )
+        assert (
+            connected_peers == 0
+        ), f"Single host has {connected_peers} connections, expected 0"
 
 
 @pytest.mark.trio
