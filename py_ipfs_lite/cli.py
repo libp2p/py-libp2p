@@ -223,7 +223,7 @@ def main() -> None:
     logging.getLogger("libp2p.tools.anyio_service").setLevel(logging.WARNING)
     # Suppress "no transport found" spam for unsupported protocols
     # (WebRTC, WebTransport) — these are expected, not errors
-    logging.getLogger("libp2p.network.swarm").setLevel(logging.ERROR)
+    logging.getLogger("libp2p.transport.manager").setLevel(logging.ERROR)
 
     try:
         if parsed_args.command == "daemon":
