@@ -608,7 +608,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
 
         async def run(self) -> None:
             try:
-                ready_cancel.set()
+                _ = ready_cancel.set()
                 await self.manager.wait_finished()
             finally:
                 with CancelScope(shield=True):

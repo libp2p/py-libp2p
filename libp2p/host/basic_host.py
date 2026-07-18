@@ -325,32 +325,36 @@ class BasicHost(IHost):
         """
         Detect negotiate timeout from transport configuration.
 
-        Checks if the network uses a QUIC transport and returns its
-        NEGOTIATE_TIMEOUT config value for coordination.
+        Iterates all registered transports in the swarm's
+        :attr:`~libp2p.network.swarm.Swarm.transport_manager` and returns the
+        ``NEGOTIATE_TIMEOUT`` value from the first transport that exposes it
+        (currently QUIC).
 
-        :return: Negotiate timeout from transport config, or None if not available
+        :return: Negotiate timeout in seconds from transport config, or None.
         """
         try:
-            # Check if network has a transport attribute (Swarm pattern)
-            # Type ignore: transport exists on Swarm but not in INetworkService
-            if hasattr(self._network, "transport"):
-                transport = getattr(self._network, "transport", None)  # type: ignore
-                # Check if it's a QUIC transport
-                if (
-                    transport is not None
-                    and hasattr(transport, "_config")
-                    and hasattr(transport._config, "NEGOTIATE_TIMEOUT")
-                ):
-                    timeout = getattr(transport._config, "NEGOTIATE_TIMEOUT", None)  # type: ignore
-                    if timeout is not None:
-                        logger.debug(
-                            f"Detected negotiate timeout {timeout}s "
-                            "from QUIC transport config"
-                        )
-                        return float(timeout)
+            # Prefer the new multi-transport API (transport_manager).
+            if hasattr(self._network, "transport_manager"):
+                tm = getattr(self._network, "transport_manager", None)
+                if tm is not None:
+                    for transport in tm.get_transports():
+                        if hasattr(transport, "_config") and hasattr(
+                            transport._config, "NEGOTIATE_TIMEOUT"
+                        ):
+                            timeout = getattr(
+                                transport._config, "NEGOTIATE_TIMEOUT", None
+                            )
+                            if timeout is not None:
+                                logger.debug(
+                                    "Detected negotiate timeout %ss from %s config",
+                                    timeout,
+                                    type(transport).__name__,
+                                )
+                                return float(timeout)
+
         except Exception as e:
-            # Silently fail - this is optional coordination
-            logger.debug(f"Could not detect negotiate timeout from transport: {e}")
+            # Silently fail — this is optional coordination.
+            logger.debug("Could not detect negotiate timeout from transport: %s", e)
 
         return None
 

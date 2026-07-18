@@ -1091,7 +1091,7 @@ class KadDHT(Service):
             values = [rec.value for _p, rec in valid_records]
             best_idx = self.validator.select(key, values)
             logger.debug(
-                f"Selected best value at index {best_idx}using validator.select()"
+                f"Selected best value at index {best_idx} using validator.select()"
             )
 
             best_peer, best_rec = valid_records[best_idx]
@@ -1107,7 +1107,7 @@ class KadDHT(Service):
 
             if outdated_peers:
                 logger.debug(
-                    f"Propagating best value to {len(outdated_peers)}"
+                    f"Propagating best value to {len(outdated_peers)} "
                     "peers with outdated values"
                 )
 

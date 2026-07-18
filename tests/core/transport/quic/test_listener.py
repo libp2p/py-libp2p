@@ -8,11 +8,13 @@ import trio
 from libp2p.crypto.ed25519 import (
     create_new_key_pair,
 )
+from libp2p.peer.id import ID
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.exceptions import (
     QUICListenError,
 )
 from libp2p.transport.quic.listener import QUICListener
+from libp2p.transport.quic.security import QUICTLSConfigManager
 from libp2p.transport.quic.transport import (
     QUICTransport,
     QUICTransportConfig,
@@ -359,11 +361,17 @@ class TestQUICListenerRaceConditions:
         return listener_obj
 
     @pytest.fixture
-    def mock_quic_connection(self):
-        """Create mock aioquic QuicConnection."""
+    def mock_quic_connection(self, private_key):
+        """Create mock aioquic QuicConnection with TLS handshake state."""
+        peer_id = ID.from_pubkey(private_key.get_public_key())
+        manager = QUICTLSConfigManager(libp2p_private_key=private_key, peer_id=peer_id)
+
         mock = Mock()
         mock.configuration = Mock()
         mock.configuration.is_client = False
+        mock._handshake_complete = True
+        mock.tls = Mock()
+        mock.tls._peer_certificate = manager.tls_config.certificate
         mock.next_event.return_value = None
         mock.datagrams_to_send.return_value = []
         mock.get_timer.return_value = None
@@ -478,16 +486,15 @@ class TestQUICListenerRaceConditions:
                 await trio.sleep(0.2)
 
                 # Verify handler was called at most once
-                # (if connection was successfully created)
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                if connection_obj is not None:
-                    # If connection was created, handler should have been invoked
-                    assert quic_key in listener._handler_invoked_quic_ids, (
-                        "Handler should be marked as invoked when connection is created"
-                    )
-                # Note: connection_handler.call_count() would work
-                # if we had a proper mock. For now, we verify the tracking set
+                assert connection_obj is not None, (
+                    "Connection should be promoted with mock TLS certificate"
+                )
+                assert quic_key in listener._handler_invoked_quic_ids, (
+                    "Handler should be marked as invoked when connection is created"
+                )
+                assert connection_handler.call_count() <= 1
 
     @pytest.mark.trio
     async def test_multiple_cid_routing_concurrent_load(
@@ -519,23 +526,15 @@ class TestQUICListenerRaceConditions:
 
             # Patch before any connections are created
             with patch.object(QUICConnection, "connect", new=mock_connect):
-                # Promote the connection first
-                try:
-                    await listener._promote_pending_connection(
-                        mock_quic_connection, addr, primary_cid
-                    )
-                except Exception:
-                    # Promotion may fail due to mock limitations, skip test if so
-                    pytest.skip("Connection promotion failed due to mock limitations")
+                await listener._promote_pending_connection(
+                    mock_quic_connection, addr, primary_cid
+                )
 
-                # Get the connection object
                 quic_key = id(mock_quic_connection)
                 connection_obj = listener._conn_by_quic_id.get(quic_key)
-                if connection_obj is None:
-                    # If connection wasn't created, skip the test
-                    pytest.skip(
-                        "Connection not created, likely due to mock limitations"
-                    )
+                assert connection_obj is not None, (
+                    "Connection should be promoted with mock TLS certificate"
+                )
 
                 # Register additional CIDs for the same connection
                 await listener._registry.register_new_connection_id_for_existing_conn(

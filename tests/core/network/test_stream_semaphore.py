@@ -28,7 +28,7 @@ def _make_swarm(
     upgrader = Mock()
     transport = Mock()
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport])
     rm = ResourceManager(limits=ResourceLimits(max_streams=max_streams))
     swarm.set_resource_manager(rm, enable_stream_semaphore=enable_semaphore)
     return swarm
