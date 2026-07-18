@@ -482,22 +482,28 @@ class BasicHost(IHost):
 
                 async with trio.open_nursery() as nursery:
 
-                    async def safe_ping(p_id: ID) -> None:
-                        try:
-                            if not hasattr(self, "_ping_service"):
-                                from libp2p.host.ping import PingService
-
-                                self._ping_service = PingService(self)
-                            await self._ping_service.ping(p_id, 1)
-                        except Exception as e:
-                            logger.debug(f"Keepalive ping failed for {p_id}: {e}")
-
                     async def keepalive_loop() -> None:
                         while True:
                             try:
                                 peer_ids = list(self._network.connections.keys())
                                 for peer_id in peer_ids:
-                                    nursery.start_soon(safe_ping, peer_id)
+                                    for conn in self._network.connections.get(
+                                        peer_id, []
+                                    ):
+                                        muxed = getattr(conn, "muxed_conn", None)
+                                        if (
+                                            muxed
+                                            and type(muxed).__name__ == "QUICConnection"
+                                        ):
+                                            try:
+                                                # Send a transport-level PING frame to keep the connection alive
+                                                muxed._quic.send_ping(0)
+                                                # Use start_soon for transmit to not block the loop
+                                                nursery.start_soon(muxed._transmit)
+                                            except Exception as e:
+                                                logger.debug(
+                                                    f"QUIC ping failed for {peer_id}: {e}"
+                                                )
                             except Exception as e:
                                 logger.debug(f"Error in keepalive loop: {e}")
                             await trio.sleep(15.0)
