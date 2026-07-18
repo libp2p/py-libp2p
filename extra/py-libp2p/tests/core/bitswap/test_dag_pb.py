@@ -177,9 +177,9 @@ class TestEncodeDecode:
         encoded = encode_dag_pb(links=links, unixfs_data=unixfs_data)
 
         # Link tag (field 2, wire type 2) is 0x12.
-        assert encoded[0] == 0x12, (
-            f"Expected first byte to be 0x12 (link tag), got 0x{encoded[0]:02x}"
-        )
+        assert (
+            encoded[0] == 0x12
+        ), f"Expected first byte to be 0x12 (link tag), got 0x{encoded[0]:02x}"
 
 
 class TestFileNode:

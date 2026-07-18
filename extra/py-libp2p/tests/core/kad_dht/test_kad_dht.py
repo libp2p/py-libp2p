@@ -169,12 +169,12 @@ async def dht_pair(security_protocol):
 
             # Verify both nodes know about each other in their routing tables
             # This ensures the test won't have race conditions
-            assert dht_a.routing_table.peer_in_table(dht_b.host.get_id()), (
-                "Node A should know about Node B"
-            )
-            assert dht_b.routing_table.peer_in_table(dht_a.host.get_id()), (
-                "Node B should know about Node A"
-            )
+            assert dht_a.routing_table.peer_in_table(
+                dht_b.host.get_id()
+            ), "Node A should know about Node B"
+            assert dht_b.routing_table.peer_in_table(
+                dht_a.host.get_id()
+            ), "Node B should know about Node A"
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
@@ -442,9 +442,9 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
             providers = await dht_b.find_providers(content_id)
             # Verify that we found the first node as a provider
             assert providers, "No providers found"
-            assert any(p.peer_id == dht_a.local_peer_id for p in providers), (
-                "Expected provider not found"
-            )
+            assert any(
+                p.peer_id == dht_a.local_peer_id for p in providers
+            ), "Expected provider not found"
             return providers
 
         # Retry with verification to handle race conditions
@@ -473,9 +473,9 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     # Retrieve the content using the provider information
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(content_id)
-        assert retrieved_value == content, (
-            "Retrieved content does not match the original"
-        )
+        assert (
+            retrieved_value == content
+        ), "Retrieved content does not match the original"
 
     # These are the record state of each peer aftet the GET_VALUE execution
     envelope_a_get_value = dht_a.host.get_peerstore().get_peer_record(

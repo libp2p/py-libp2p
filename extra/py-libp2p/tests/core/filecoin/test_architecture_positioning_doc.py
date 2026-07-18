@@ -33,6 +33,6 @@ def test_architecture_positioning_sections_have_normative_links() -> None:
             SECTION_HEADINGS[index + 1] if index + 1 < len(SECTION_HEADINGS) else None
         )
         body = _section_body(content, heading, next_heading)
-        assert "https://" in body, (
-            f"missing normative source link in section: {heading}"
-        )
+        assert (
+            "https://" in body
+        ), f"missing normative source link in section: {heading}"

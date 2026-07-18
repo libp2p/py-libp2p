@@ -575,7 +575,8 @@ class Swarm(Service, INetworkService):
         # Filter out loopback addresses if public addresses are available
         # This prevents the node from dialing itself when DHT peers advertise localhost
         public_addrs = [
-            a for a in allowed_addrs
+            a
+            for a in allowed_addrs
             if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
         ]
         if public_addrs:

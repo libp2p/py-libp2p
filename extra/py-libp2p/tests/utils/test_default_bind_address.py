@@ -61,9 +61,9 @@ class TestAddressParadigm:
         # Available interfaces should not include wildcard by default
         # (wildcard is available as a feature through get_wildcard_address())
         wildcard_found = any("0.0.0.0" in str(addr) for addr in interfaces)
-        assert not wildcard_found, (
-            "Wildcard should not be in default available interfaces"
-        )
+        assert (
+            not wildcard_found
+        ), "Wildcard should not be in default available interfaces"
 
     def test_host_default_listen_address(self):
         """Test that new hosts use secure default addresses"""
@@ -128,15 +128,15 @@ class TestAddressParadigm:
         # But should not be in default available interfaces
         interfaces = get_available_interfaces(port)
         wildcard_in_interfaces = any("0.0.0.0" in str(addr) for addr in interfaces)
-        assert not wildcard_in_interfaces, (
-            "Wildcard should not be in default interfaces"
-        )
+        assert (
+            not wildcard_in_interfaces
+        ), "Wildcard should not be in default interfaces"
 
         # Optimal address should not be wildcard by default
         optimal = get_optimal_binding_address(port)
-        assert "0.0.0.0" not in str(optimal), (
-            "Optimal address should not be wildcard by default"
-        )
+        assert "0.0.0.0" not in str(
+            optimal
+        ), "Optimal address should not be wildcard by default"
 
     def test_loopback_is_always_available(self):
         """Test that loopback address is always available as an option"""
@@ -151,9 +151,9 @@ class TestAddressParadigm:
         loopback_with_port = [
             addr for addr in loopback_addrs if f"/tcp/{port}" in str(addr)
         ]
-        assert len(loopback_with_port) > 0, (
-            f"Loopback address with port {port} should be available"
-        )
+        assert (
+            len(loopback_with_port) > 0
+        ), f"Loopback address with port {port} should be available"
 
     def test_optimal_address_selection_behavior(self):
         """Test that optimal address selection works correctly"""
@@ -164,9 +164,9 @@ class TestAddressParadigm:
         # Should return one of the available interfaces
         optimal_str = str(optimal)
         interface_strs = [str(addr) for addr in interfaces]
-        assert optimal_str in interface_strs, (
-            f"Optimal address {optimal_str} should be in available interfaces"
-        )
+        assert (
+            optimal_str in interface_strs
+        ), f"Optimal address {optimal_str} should be in available interfaces"
 
         # Should prefer non-loopback when available, fallback to loopback
         non_loopback_interfaces = [
@@ -174,14 +174,14 @@ class TestAddressParadigm:
         ]
         if non_loopback_interfaces:
             # Should prefer non-loopback when available
-            assert "127.0.0.1" not in str(optimal), (
-                "Should prefer non-loopback when available"
-            )
+            assert "127.0.0.1" not in str(
+                optimal
+            ), "Should prefer non-loopback when available"
         else:
             # Should use loopback when no other interfaces available
-            assert "127.0.0.1" in str(optimal), (
-                "Should use loopback when no other interfaces available"
-            )
+            assert "127.0.0.1" in str(
+                optimal
+            ), "Should use loopback when no other interfaces available"
 
     def test_address_paradigm_completeness(self):
         """Test that the address paradigm provides all necessary functionality"""
@@ -201,6 +201,6 @@ class TestAddressParadigm:
 
         # Test optimal selection
         optimal = get_optimal_binding_address(port)
-        assert optimal in interfaces, (
-            "Optimal address should be from available interfaces"
-        )
+        assert (
+            optimal in interfaces
+        ), "Optimal address should be from available interfaces"

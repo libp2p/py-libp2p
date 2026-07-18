@@ -185,9 +185,9 @@ class TestBitswapProtocolVersions:
 
                 # Verify multiple chunks created
                 provider_cids = provider_store.get_all_cids()
-                assert len(provider_cids) > 1, (
-                    f"Expected chunking for {protocol_version}"
-                )
+                assert (
+                    len(provider_cids) > 1
+                ), f"Expected chunking for {protocol_version}"
 
                 # Connect nodes
                 provider_addrs = provider_host.get_addrs()

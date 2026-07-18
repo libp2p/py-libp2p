@@ -129,7 +129,7 @@ async def open_stream(self, timeout: float | None = None) -> QUICStream:
 From the CI logs, we see:
 
 - Stream #40 timed out after 30s
-- Error: "response timed out after 30s, protocols tried: ['/ipfs/ping/1.0.0']"
+- Error: "response timed out after 30s, protocols tried: \['/ipfs/ping/1.0.0'\]"
 
 This means the **server** couldn't respond in time. Why?
 
@@ -246,7 +246,7 @@ The trade-off is that each stream needs protocol negotiation, which adds overhea
 From the CI logs:
 
 - Stream #40 timed out after 30s waiting for server response
-- Error: "response timed out after 30s, protocols tried: ['/ipfs/ping/1.0.0']"
+- Error: "response timed out after 30s, protocols tried: \['/ipfs/ping/1.0.0'\]"
 
 **What's actually happening**:
 

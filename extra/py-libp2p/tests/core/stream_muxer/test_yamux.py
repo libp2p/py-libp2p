@@ -251,9 +251,9 @@ async def test_yamux_stream_close(yamux_pair):
     await trio.sleep(0.1)
 
     # Now both directions are closed, so stream should be fully closed
-    assert client_stream.closed, (
-        "Client stream should be fully closed after bidirectional close"
-    )
+    assert (
+        client_stream.closed
+    ), "Client stream should be fully closed after bidirectional close"
 
     # Writing should still fail
     with pytest.raises(MuxedStreamError):
@@ -329,9 +329,9 @@ async def test_yamux_flow_control(yamux_pair):
 
     # Window was reduced by the send; ACK may have already restored some,
     # but it should differ from the initial value.
-    assert client_stream.send_window != initial_window, (
-        "Window should have changed after sending data and receiving ACK"
-    )
+    assert (
+        client_stream.send_window != initial_window
+    ), "Window should have changed after sending data and receiving ACK"
 
     # Read the data on the server side
     received = b""
@@ -367,9 +367,9 @@ async def test_yamux_flow_control(yamux_pair):
         f" {client_stream.send_window},"
         f"initial half: {initial_window // 2}"
     )
-    assert client_stream.send_window > initial_window // 2, (
-        "Window should be increased after update"
-    )
+    assert (
+        client_stream.send_window > initial_window // 2
+    ), "Window should be increased after update"
 
     await client_stream.close()
     await server_stream.close()
@@ -409,17 +409,17 @@ async def test_yamux_half_close(yamux_pair):
     test_data = b"server response after client close"
 
     # The server shouldn't be marked as send_closed yet
-    assert not server_stream.send_closed, (
-        "Server stream shouldn't be marked as send_closed"
-    )
+    assert (
+        not server_stream.send_closed
+    ), "Server stream shouldn't be marked as send_closed"
 
     await server_stream.write(test_data)
 
     # Client can still read
     received = await client_stream.read(len(test_data))
-    assert received == test_data, (
-        "Client should still be able to read after sending FIN"
-    )
+    assert (
+        received == test_data
+    ), "Client should still be able to read after sending FIN"
 
     # Now server closes its sending side
     await server_stream.close()
@@ -466,9 +466,9 @@ async def test_yamux_go_away_with_error(yamux_pair):
     await trio.sleep(0.2)
 
     # Verify server recognized shutdown
-    assert server_yamux.event_shutting_down.is_set(), (
-        "Server should be shutting down after GO_AWAY"
-    )
+    assert (
+        server_yamux.event_shutting_down.is_set()
+    ), "Server should be shutting down after GO_AWAY"
 
     logging.debug("test_yamux_go_away_with_error complete")
 
@@ -606,9 +606,9 @@ async def test_yamux_accept_stream_unblocks_on_close(yamux_pair):
         nursery.start_soon(close_connection)
 
     # Assert that the exception was raised (test didn't hang)
-    assert exception_raised.is_set(), (
-        "accept_stream() should have raised MuxedConnUnavailable"
-    )
+    assert (
+        exception_raised.is_set()
+    ), "accept_stream() should have raised MuxedConnUnavailable"
     logging.debug("test_yamux_accept_stream_unblocks_on_close complete")
 
 
@@ -659,9 +659,9 @@ async def test_yamux_accept_stream_unblocks_on_error(yamux_pair):
         nursery.start_soon(trigger_error)
 
     # Assert that the exception was raised (test didn't hang)
-    assert exception_raised.is_set(), (
-        "accept_stream() should have raised MuxedConnUnavailable"
-    )
+    assert (
+        exception_raised.is_set()
+    ), "accept_stream() should have raised MuxedConnUnavailable"
     logging.debug("test_yamux_accept_stream_unblocks_on_error complete")
 
 
@@ -887,9 +887,9 @@ async def test_yamux_syn_with_window_update(yamux_pair):
     with trio.move_on_after(2) as cancel_scope:
         server_stream = await server_yamux.accept_stream()
 
-    assert not cancel_scope.cancelled_caught, (
-        "Server should have accepted the stream without hanging"
-    )
+    assert (
+        not cancel_scope.cancelled_caught
+    ), "Server should have accepted the stream without hanging"
     assert server_stream.stream_id == stream_id
 
     # Check if window increment was applied

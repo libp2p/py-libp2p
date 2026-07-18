@@ -455,13 +455,18 @@ async def swarm_peers(request: Request) -> Any:
                             addr_str = str(c.remote_addr)
                         elif hasattr(c, "get_remote_multiaddr"):
                             addr_str = str(c.get_remote_multiaddr())
-                        elif hasattr(c, "muxed_conn") and hasattr(c.muxed_conn, "get_remote_address"):
+                        elif hasattr(c, "muxed_conn") and hasattr(
+                            c.muxed_conn, "get_remote_address"
+                        ):
                             addr_str = str(c.muxed_conn.get_remote_address())
-                        elif hasattr(c, "get_transport_addresses") and c.get_transport_addresses():
+                        elif (
+                            hasattr(c, "get_transport_addresses")
+                            and c.get_transport_addresses()
+                        ):
                             addr_str = str(c.get_transport_addresses()[0])
                     except Exception:
                         pass
-                    
+
                     direction_val = 0
                     try:
                         if hasattr(c, "direction"):

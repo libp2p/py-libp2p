@@ -176,9 +176,9 @@ async def test_tcp_data_transfer():
             await transfer_complete.wait()
 
         # Verify data transfer
-        assert received_data == test_data, (
-            f"Data mismatch: {received_data} != {test_data}"
-        )
+        assert (
+            received_data == test_data
+        ), f"Data mismatch: {received_data} != {test_data}"
         assert echoed_data == test_data, f"Echo mismatch: {echoed_data} != {test_data}"
 
         print("✅ TCP P2P data transfer successful!")
@@ -363,9 +363,9 @@ async def test_tcp_bidirectional_transfer():
             None,
         )
 
-        assert tcp_addr_a and tcp_addr_b, (
-            f"TCP addresses not found: A={addrs_a}, B={addrs_b}"
-        )
+        assert (
+            tcp_addr_a and tcp_addr_b
+        ), f"TCP addresses not found: A={addrs_a}, B={addrs_b}"
         print(f"🔗 Host A listening on: {tcp_addr_a}")
         print(f"🔗 Host B listening on: {tcp_addr_b}")
 

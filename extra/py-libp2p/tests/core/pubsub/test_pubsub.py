@@ -441,9 +441,9 @@ async def test_validate_msg_with_throttle_condition(
                 with pytest.raises(ValidationError):
                     await pubsubs_fsub[0].validate_msg(pubsubs_fsub[0].my_id, msg)
 
-    assert state["max_observed"] <= CONCURRENCY_LIMIT, (
-        f"Max concurrency observed: {state['max_observed']}"
-    )
+    assert (
+        state["max_observed"] <= CONCURRENCY_LIMIT
+    ), f"Max concurrency observed: {state['max_observed']}"
 
 
 @pytest.mark.trio
@@ -918,15 +918,15 @@ async def test_publish_push_msg_is_called(monkeypatch):
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
             await pubsubs_fsub[0].publish(TESTING_TOPIC, TESTING_DATA)
 
-            assert len(msgs) == 2, (
-                "`push_msg` should be called every time `publish` is called"
-            )
+            assert (
+                len(msgs) == 2
+            ), "`push_msg` should be called every time `publish` is called"
             assert (msg_forwarders[0] == msg_forwarders[1]) and (
                 msg_forwarders[1] == pubsubs_fsub[0].my_id
             )
-            assert msgs[0].seqno != msgs[1].seqno, (
-                "`seqno` should be different every time"
-            )
+            assert (
+                msgs[0].seqno != msgs[1].seqno
+            ), "`seqno` should be different every time"
 
 
 @pytest.mark.trio
@@ -1069,9 +1069,9 @@ async def test_strict_signing_failed_validation(monkeypatch):
             seqno=b"\x00" * 8,
         )
         priv_key = pubsubs_fsub[0].sign_key
-        assert priv_key is not None, (
-            "Private key should not be None when strict_signing=True"
-        )
+        assert (
+            priv_key is not None
+        ), "Private key should not be None when strict_signing=True"
         signature = priv_key.sign(
             PUBSUB_SIGNING_PREFIX.encode() + msg.SerializeToString()
         )
@@ -1216,15 +1216,15 @@ async def test_blacklist_blocks_new_peer_connections(monkeypatch):
             await pubsub._handle_new_peer(blacklisted_peer)
 
             # Verify that both new_stream and router.add_peer was not called
-            assert not new_stream_called, (
-                "new_stream should be not be called to get hello packet"
-            )
-            assert not router_add_peer_called, (
-                "Router.add_peer should not be called for blacklisted peer"
-            )
-            assert blacklisted_peer not in pubsub.peers, (
-                "Blacklisted peer should not be in peers dict"
-            )
+            assert (
+                not new_stream_called
+            ), "new_stream should be not be called to get hello packet"
+            assert (
+                not router_add_peer_called
+            ), "Router.add_peer should not be called for blacklisted peer"
+            assert (
+                blacklisted_peer not in pubsub.peers
+            ), "Blacklisted peer should not be in peers dict"
 
 
 @pytest.mark.trio
@@ -1264,12 +1264,12 @@ async def test_blacklist_blocks_messages_from_blacklisted_originator():
             await pubsub.push_msg(blacklisted_originator, msg)
 
             # Verify message was rejected
-            assert not router_publish_called, (
-                "Router.publish should not be called for blacklisted originator"
-            )
-            assert not pubsub._is_msg_seen(msg), (
-                "Message from blacklisted originator should not be marked as seen"
-            )
+            assert (
+                not router_publish_called
+            ), "Router.publish should not be called for blacklisted originator"
+            assert not pubsub._is_msg_seen(
+                msg
+            ), "Message from blacklisted originator should not be marked as seen"
 
         finally:
             pubsub.router.publish = original_router_publish
@@ -1322,15 +1322,15 @@ async def test_blacklist_allows_non_blacklisted_peers():
             await pubsub.push_msg(allowed_peer, msg_from_blacklisted)
 
             # Verify only allowed message was processed
-            assert len(router_publish_calls) == 1, (
-                "Only one message should be processed"
-            )
-            assert pubsub._is_msg_seen(msg_from_allowed), (
-                "Allowed message should be marked as seen"
-            )
-            assert not pubsub._is_msg_seen(msg_from_blacklisted), (
-                "Blacklisted message should not be marked as seen"
-            )
+            assert (
+                len(router_publish_calls) == 1
+            ), "Only one message should be processed"
+            assert pubsub._is_msg_seen(
+                msg_from_allowed
+            ), "Allowed message should be marked as seen"
+            assert not pubsub._is_msg_seen(
+                msg_from_blacklisted
+            ), "Blacklisted message should not be marked as seen"
 
             # Verify subscription received the allowed message
             received_msg = await sub.get()
@@ -1383,9 +1383,9 @@ async def test_blacklist_integration_with_existing_functionality():
 
         try:
             await pubsub.push_msg(other_peer, msg)
-            assert not router_publish_called, (
-                "Duplicate message should be rejected by seen cache"
-            )
+            assert (
+                not router_publish_called
+            ), "Duplicate message should be rejected by seen cache"
         finally:
             pubsub.router.publish = original_router_publish
 
@@ -1427,12 +1427,12 @@ async def test_blacklist_blocks_messages_from_blacklisted_source():
             await pubsub.push_msg(blacklisted_forwarder, msg)
 
             # Verify message was rejected
-            assert not router_publish_called, (
-                "Router.publish should not be called for blacklisted forwarder"
-            )
-            assert not pubsub._is_msg_seen(msg), (
-                "Message from blacklisted forwarder should not be marked as seen"
-            )
+            assert (
+                not router_publish_called
+            ), "Router.publish should not be called for blacklisted forwarder"
+            assert not pubsub._is_msg_seen(
+                msg
+            ), "Message from blacklisted forwarder should not be marked as seen"
 
         finally:
             pubsub.router.publish = original_router_publish
@@ -1540,8 +1540,8 @@ async def test_handle_peer_queue_exception_handling():
         await pubsub._handle_new_peer_safe(test_peer)
 
         # The key test: service should still be running despite the exception
-        assert pubsub.manager.is_running, (
-            "Pubsub service should continue running even when peer negotiation fails"
-        )
+        assert (
+            pubsub.manager.is_running
+        ), "Pubsub service should continue running even when peer negotiation fails"
 
         pubsub._handle_new_peer = original_handle_new_peer

@@ -699,10 +699,10 @@ class TestPeerRouting:
                 await peer_routing.find_closest_peers_network(target_key)
 
         # All 9 peers should be queried across 3+ rounds.
-        assert len(queried_peers) == 9, (
-            f"Expected 9 total queries, got {len(queried_peers)}"
-        )
+        assert (
+            len(queried_peers) == 9
+        ), f"Expected 9 total queries, got {len(queried_peers)}"
         # First ALPHA queries must be from group 1 (round 1 admission).
-        assert set(queried_peers[:ALPHA]) == set(group1), (
-            "Round 1 should admit exactly the initial ALPHA peers"
-        )
+        assert set(queried_peers[:ALPHA]) == set(
+            group1
+        ), "Round 1 should admit exactly the initial ALPHA peers"

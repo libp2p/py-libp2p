@@ -66,9 +66,9 @@ class TestExamplesAddressParadigm:
 
             # Check that the file uses the new paradigm functions
             for func in paradigm_functions:
-                assert func in content, (
-                    f"{filepath} should use {func} from the new address paradigm"
-                )
+                assert (
+                    func in content
+                ), f"{filepath} should use {func} from the new address paradigm"
 
     def test_wildcard_available_as_feature(self):
         """Test that wildcard is available as a feature when needed"""
@@ -86,12 +86,12 @@ class TestExamplesAddressParadigm:
                 content = f.read()
 
             # Should demonstrate wildcard expansion
-            assert "0.0.0.0" in content, (
-                f"{network_discover_file} should demonstrate wildcard usage"
-            )
-            assert "expand_wildcard_address" in content, (
-                f"{network_discover_file} should use expand_wildcard_address"
-            )
+            assert (
+                "0.0.0.0" in content
+            ), f"{network_discover_file} should demonstrate wildcard usage"
+            assert (
+                "expand_wildcard_address" in content
+            ), f"{network_discover_file} should use expand_wildcard_address"
 
     def test_doc_examples_use_paradigm(self):
         """Test that documentation examples use the new address paradigm"""
@@ -112,6 +112,6 @@ class TestExamplesAddressParadigm:
 
             # Check that doc examples use the new paradigm
             for func in paradigm_functions:
-                assert func in content, (
-                    f"Documentation example {filepath} should use {func}"
-                )
+                assert (
+                    func in content
+                ), f"Documentation example {filepath} should use {func}"
