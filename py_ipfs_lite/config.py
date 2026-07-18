@@ -66,6 +66,7 @@ class AddParams:
 
 @dataclass(slots=True)
 class CLIConfig:
-    port: int = 0
+    port: int = 4001
+    api_port: int = 5001
     seed: str | None = None
     debug: bool = False

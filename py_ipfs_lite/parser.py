@@ -77,7 +77,7 @@ def get_parser() -> argparse.ArgumentParser:
         "--api-host", type=str, default="127.0.0.1", help="API server host"
     )
     daemon_parser.add_argument(
-        "--api-port", type=int, default=5001, help="API server port"
+        "--api-port", type=int, default=cli_defaults.api_port, help="API server port"
     )
     daemon_parser.add_argument(
         "--reprovide-interval",
