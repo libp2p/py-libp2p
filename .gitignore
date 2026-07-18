@@ -44,3 +44,4 @@ test.car
 !API_SPEC_*.txt
 *.pdf
 copy_of_readme.md
+.env
