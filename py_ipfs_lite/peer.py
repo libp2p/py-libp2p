@@ -139,7 +139,9 @@ async def setup_libp2p(
     )
 
     if not offline:
-        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True)
+        raw_routing = KadDHT(
+            host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True
+        )
         return HostAdapter(raw_host), RoutingAdapter(raw_routing)
     return HostAdapter(raw_host), None
 
@@ -264,7 +266,9 @@ class Peer:
             return None
 
         raw_host = getattr(self.host, "_host", self.host)
-        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True)  # type: ignore[arg-type]
+        raw_routing = KadDHT(
+            host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True
+        )  # type: ignore[arg-type]
         dht_adapter = RoutingAdapter(raw_routing)
 
         if getattr(self.config, "use_ipni", False):
@@ -444,7 +448,7 @@ class Peer:
             bootstrap_addrs=peers,  # type: ignore[union-attr]
         )
         await discovery.start()
-        
+
         # After bootstrap connections are established, force a routing table refresh
         # to discover more peers before the bootstrap nodes drop our idle connection.
         if self.routing and hasattr(self.routing, "refresh_routing_table"):
