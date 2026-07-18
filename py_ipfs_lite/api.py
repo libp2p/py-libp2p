@@ -81,7 +81,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     if not peer.config.offline:
         from py_ipfs_lite.cli import DEFAULT_BOOTSTRAP_PEERS
 
-        await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
+        # Start bootstrap in the background so we don't block the API server startup!
+        if hasattr(peer, "_nursery") and peer._nursery:
+            peer._nursery.start_soon(peer.bootstrap, DEFAULT_BOOTSTRAP_PEERS)
+        else:
+            await peer.bootstrap(DEFAULT_BOOTSTRAP_PEERS)
 
     logger.info(f"Daemon P2P Peer ID: {peer.host.id()}")  # type: ignore[union-attr]
     for addr in peer.host.addrs():  # type: ignore[union-attr]
