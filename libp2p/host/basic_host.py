@@ -480,11 +480,36 @@ class BasicHost(IHost):
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
 
-                try:
-                    yield
-                finally:
-                    if self.mDNS is not None:
-                        self.mDNS.stop()
+                async with trio.open_nursery() as nursery:
+
+                    async def safe_ping(p_id: ID) -> None:
+                        try:
+                            if not hasattr(self, "_ping_service"):
+                                from libp2p.host.ping import PingService
+
+                                self._ping_service = PingService(self)
+                            await self._ping_service.ping(p_id, 1)
+                        except Exception as e:
+                            logger.debug(f"Keepalive ping failed for {p_id}: {e}")
+
+                    async def keepalive_loop() -> None:
+                        while True:
+                            try:
+                                peer_ids = list(self._network.connections.keys())
+                                for peer_id in peer_ids:
+                                    nursery.start_soon(safe_ping, peer_id)
+                            except Exception as e:
+                                logger.debug(f"Error in keepalive loop: {e}")
+                            await trio.sleep(15.0)
+
+                    nursery.start_soon(keepalive_loop)
+
+                    try:
+                        yield
+                    finally:
+                        nursery.cancel_scope.cancel()
+                        if self.mDNS is not None:
+                            self.mDNS.stop()
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
