@@ -1076,7 +1076,7 @@ wheels = [
 [[package]]
 name = "libp2p"
 version = "0.7.0"
-source = { git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1388#5d9c0e5a0436b97bad5879b5fdfc97b0a43fc578" }
+source = { git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1390#8cbc45f0713d5848a1cfeab05c8704083dcd3562" }
 dependencies = [
     { name = "aioquic" },
     { name = "anyio" },
@@ -2051,7 +2051,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.137.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypercorn", specifier = ">=0.18.0" },
-    { name = "libp2p", git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1388" },
+    { name = "libp2p", git = "https://github.com/sumanjeet0012/py-libp2p.git?rev=fix-1390" },
     { name = "mdformat", marker = "extra == 'dev'", specifier = ">=0.7.22" },
     { name = "mdformat-gfm", marker = "extra == 'dev'" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0.0" },
