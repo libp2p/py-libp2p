@@ -1,0 +1,1 @@
+Replaced the legacy async_service implementation with a new anyio_service framework built on AnyIO for better maintainability and structured concurrency. Import paths change from ``libp2p.tools.async_service`` to ``libp2p.tools.anyio_service``; the public API (``Service``, ``background_trio_service``) is unchanged.

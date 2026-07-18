@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package autonat.pb;
+
+// AutoNAT service definition
+service AutoNAT {
+  rpc Dial (Message) returns (Message) {}
+}
+
+// Message types
+enum Type {
+  UNKNOWN = 0;
+  DIAL = 1;
+  DIAL_RESPONSE = 2;
+}
+
+// Status codes
+enum Status {
+  OK = 0;
+  E_DIAL_ERROR = 1;
+  E_DIAL_REFUSED = 2;
+  E_DIAL_FAILED = 3;
+  E_INTERNAL_ERROR = 100;
+}
+
+// Main message
+message Message {
+  Type type = 1;
+  DialRequest dial = 2;
+  DialResponse dial_response = 3;
+}
+
+// Dial request
+message DialRequest {
+  repeated PeerInfo peers = 1;
+}
+
+// Dial response
+message DialResponse {
+  Status status = 1;
+  repeated PeerInfo peers = 2;
+}
+
+// Peer information
+message PeerInfo {
+  bytes id = 1;
+  repeated bytes addrs = 2;
+  bool success = 3;
+}

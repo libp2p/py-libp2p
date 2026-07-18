@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package bitswap.pb;
+
+// Bitswap message format supporting v1.0.0, v1.1.0, and v1.2.0
+// Based on https://specs.ipfs.tech/bitswap-protocol/
+message Message {
+  message Wantlist {
+    // v1.2.0: WantType enum
+    enum WantType {
+      Block = 0;  // Request the full block
+      Have = 1;   // Request only if peer has the block
+    }
+
+    message Entry {
+      bytes block = 1;              // CID of the block (CIDv0 in v1.0.0, CIDv0/v1 in v1.1.0+)
+      int32 priority = 2;           // the priority (normalized). default to 1
+      bool cancel = 3;              // whether this revokes an entry
+      WantType wantType = 4;        // v1.2.0: Block or Have. default to Block (0)
+      bool sendDontHave = 5;        // v1.2.0: whether to send DontHave if block not found. default to false
+    }
+
+    repeated Entry entries = 1;     // a list of wantlist entries
+    bool full = 2;                  // whether this is the full wantlist. default to false
+  }
+
+  // v1.1.0: Block message with CID prefix
+  message Block {
+    bytes prefix = 1;               // CID prefix (all CID components except the digest of the multihash)
+    bytes data = 2;                 // block data
+  }
+
+  // v1.2.0: BlockPresence for Have/DontHave responses
+  enum BlockPresenceType {
+    Have = 0;
+    DontHave = 1;
+  }
+
+  message BlockPresence {
+    bytes cid = 1;                  // CID of the block
+    BlockPresenceType type = 2;     // Have or DontHave
+  }
+
+  Wantlist wantlist = 1;
+  repeated bytes blocks = 2;        // v1.0.0: deprecated in v1.1.0, but still supported for compatibility
+  repeated Block payload = 3;       // v1.1.0+: blocks with CID prefix
+  repeated BlockPresence blockPresences = 4;  // v1.2.0: Have/DontHave responses
+  int32 pendingBytes = 5;           // v1.2.0: number of bytes queued to send to the peer
+}

@@ -1,0 +1,1 @@
+Added explicit ``wait_for_peer()`` and ``wait_for_subscription()`` methods to the pubsub API. These methods allow tests and applications to wait for actual state changes (peer stream establishment and topic subscriptions) instead of using arbitrary ``trio.sleep()`` calls, eliminating race conditions when dealing with new peers and pubsub subscriptions.

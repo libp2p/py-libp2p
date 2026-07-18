@@ -1,0 +1,25 @@
+version: 2
+
+build:
+  os: ubuntu-22.04
+  apt_packages:
+    - libgmp-dev
+  tools:
+    python: "3.10"
+  jobs:
+    post_install:
+      - python -m pip install --upgrade pip
+      - python -m pip install --group docs --group test -e .
+
+sphinx:
+  configuration: docs/conf.py
+  fail_on_warning: true
+
+python:
+  install:
+    - method: pip
+      path: .
+
+formats:
+  - epub
+  - htmlzip

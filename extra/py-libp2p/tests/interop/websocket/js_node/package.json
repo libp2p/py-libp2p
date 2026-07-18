@@ -1,0 +1,17 @@
+{
+  "name": "py-libp2p-websocket-interop-js",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "JavaScript node for py-libp2p WebSocket interop testing",
+  "main": "js_websocket_node.js",
+  "scripts": {
+    "test:server": "node js_websocket_node.js server 8002 false 30000",
+    "test:client": "node js_websocket_node.js client /ip4/127.0.0.1/tcp/8001 'Hello'",
+    "test:js-to-py": "node test_js_to_py.js"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

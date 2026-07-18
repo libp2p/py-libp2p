@@ -1,0 +1,1 @@
+Bitswap CID handling now uses the py-cid library. Existing byte-returning APIs are unchanged; new helpers and object-returning APIs are available for new code.

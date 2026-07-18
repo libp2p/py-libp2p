@@ -1,0 +1,1 @@
+Added GossipSub protocol versions 1.3 and 1.4 support, including extensions framework, adaptive gossip dissemination, enhanced peer scoring (P5-P7), rate limiting for IWANT/IHAVE/GRAFT, IP colocation tracking, and configurable message ID generators.

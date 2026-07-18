@@ -1,0 +1,344 @@
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libp2p"
+version = "0.7.0"
+description = "libp2p: The Python implementation of the libp2p networking stack"
+readme = "README.md"
+requires-python = ">=3.10, <4.0"
+license = "MIT AND Apache-2.0"
+keywords = ["libp2p", "p2p"]
+maintainers = [
+    { name = "pacrob", email = "pacrob-py-libp2p@proton.me" },
+    { name = "Manu Sheel Gupta", email = "manu@seeta.in" },
+    { name = "Dave Grantham", email = "dwg@linuxprogrammer.org" },
+    { name = "Luca (acul71)" },
+]
+dependencies = [
+    "aioquic>=1.2.0",
+    "anyio>=4.0",
+    "base58>=1.0.3",
+    "cbor2>=5.4.0",
+    "coincurve==21.0.0",
+    "exceptiongroup>=1.2.0; python_version < '3.11'",
+    "fastecdsa==2.3.2; sys_platform != 'win32'",
+    "grpcio>=1.41.0",
+    "httpx>=0.25.0",
+    "lru-dict>=1.1.6",
+    "miniupnpc>=2.3,<3.0",
+    "requests>=2.28.0",
+    "types-requests",
+    "multiaddr>=0.2.0",
+    "mypy-protobuf>=3.0.0",
+    "noiseprotocol>=0.3.0",
+    "protobuf>=4.25.0,<7.0.0",
+    "pycryptodome>=3.9.2",
+    "py-multibase>=2.0.0",
+    "py-multihash>=3.0.0",
+    "py-multicodec>=1.0.0",
+    "py-cid>=0.5.0",
+    "pynacl>=1.3.0",
+    "rpcudp>=3.0.0",
+    "prometheus-client>=0.24.1",
+    "trio-typing>=0.0.4",
+    "trio-websocket>=0.11.0",
+    "trio>=0.26.0",
+    "zeroconf>=0.149.16,<0.151.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/libp2p/py-libp2p"
+
+[project.optional-dependencies]
+webrtc = ["aiortc>=1.5.0,<2.0"]
+
+[project.scripts]
+chat-demo = "examples.chat.chat:main"
+echo-demo = "examples.echo.echo:main"
+echo-quic-demo = "examples.echo.echo_quic:main"
+ping-demo = "examples.ping.ping:main"
+autotls-demo = "examples.autotls.autotls:main"
+identify-demo = "examples.identify.identify:main"
+identify-push-demo = "examples.identify_push.identify_push_demo:run_main"
+identify-push-listener-dialer-demo = "examples.identify_push.identify_push_listener_dialer:main"
+request-response-demo = "examples.request_response.request_response_demo:main"
+agentic-request-response-demo = "examples.request_response.agentic_request_response_demo:main"
+a2a-payment-demo = "examples.request_response.a2a_payment_demo:main"
+a2a-http-payment-demo = "examples.request_response.a2a_http_payment_demo:main"
+pubsub-demo = "examples.pubsub.pubsub:main"
+floodsub-demo = "examples.pubsub.floodsub:main"
+mdns-demo = "examples.mDNS.mDNS:main"
+circuit-relay-demo = "examples.circuit_relay.relay_example:main"
+tls-demo = "examples.tls.example_tls_server:main"
+tls-client-demo = "examples.tls.example_tls_client:main"
+path-handling = "examples.path_handling.path_handling_demo:main"
+metrics-demo = "examples.metrics.runner:cli"
+oso-health-report = "libp2p.observability.oso.cli:main"
+filecoin-dx = "libp2p.filecoin.cli:main"
+filecoin-connect-demo = "examples.filecoin.filecoin_connect_demo:main"
+filecoin-ping-identify-demo = "examples.filecoin.filecoin_ping_identify_demo:main"
+filecoin-pubsub-demo = "examples.filecoin.filecoin_pubsub_demo:main"
+
+[dependency-groups]
+dev = [
+    { include-group = "docs" },
+    { include-group = "test" },
+    { include-group = "release" },
+    { include-group = "p2pcalc" },
+    "ipython",
+    "mypy>=1.15.0",
+    "pre-commit>=3.4.0",
+    "tox>=4.0.0",
+    "ruff>=0.11.10",
+    "pyrefly (>=0.17.1,<0.18.0)",
+    "uvicorn>=0.30.0",
+]
+docs = [
+    "sphinx>=6.0.0",
+    "sphinx_rtd_theme>=1.0.0",
+    "towncrier>=25,<26",
+    "tomli; python_version < '3.11'",
+]
+test = [
+    "factory-boy>=2.12.0,<3.0.0",
+    "p2pclient>=0.3.0",
+    "pytest>=7.0.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-trio>=0.5.2",
+    "pytest-xdist>=2.4.0",
+    "pytest-mock>=3.15.1",
+    "pytest-rerunfailures>=12.0",
+]
+a2a-demo = [
+    "a2a-sdk[http-server]>=1.0.0",
+    "uvicorn>=0.30.0",
+]
+release = [
+    "build>=0.9.0",
+    "bump_my_version>=0.19.0",
+    "setuptools>=42",
+    "twine",
+    "wheel",
+]
+p2pcalc = [
+    "msgpack>=1.0.7",
+    "redis[asyncio]>=5.0.4",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+exclude = ["scripts*", "tests*"]
+
+[tool.setuptools.package-data]
+libp2p = ["py.typed"]
+
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = false
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+incremental = false
+strict_equality = true
+strict_optional = true
+warn_redundant_casts = true
+warn_return_any = false
+warn_unused_configs = true
+warn_unused_ignores = false
+
+
+# Explanation:
+# D400 - Enabling this error code seems to make it a requirement that the first
+# sentence in a docstring is not split across two lines.  It also makes it a
+# requirement that no docstring can have a multi-sentence description without a
+# summary line.  Neither one of those requirements seem appropriate.
+
+[tool.pytest.ini_options]
+addopts = "-v --showlocals --durations 50 --maxfail 10"
+log_date_format = "%m-%d %H:%M:%S"
+log_format = "%(levelname)8s  %(asctime)s  %(filename)20s  %(message)s"
+markers = [
+    "slow: mark test as slow",
+    "flaky: mark test as flaky (may fail intermittently)",
+    "serial_only: mark test to run outside pytest-xdist parallel workers",
+    "benchmark: performance/sanity benchmarks (deselect with -m 'not benchmark')",
+    "integration: mark test as integration (requires external service or proxy)",
+]
+xfail_strict = true
+trio_mode = true
+
+[tool.towncrier]
+# Read https://github.com/libp2p/py-libp2p/blob/main/newsfragments/README.md for instructions
+directory = "newsfragments"
+filename = "docs/release_notes.rst"
+issue_format = "`#{issue} <https://github.com/libp2p/py-libp2p/issues/{issue}>`__"
+package = "libp2p"
+title_format = "py-libp2p v{version} ({project_date})"
+underlines = ["-", "~", "^"]
+
+[[tool.towncrier.type]]
+directory = "breaking"
+name = "Breaking Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bugfixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecation"
+name = "Deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "docs"
+name = "Improved Documentation"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "internal"
+name = "Internal Changes - for py-libp2p Contributors"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "misc"
+name = "Miscellaneous Changes"
+showcontent = false
+
+[[tool.towncrier.type]]
+directory = "performance"
+name = "Performance Improvements"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "removal"
+name = "Removals"
+showcontent = true
+
+[tool.bumpversion]
+current_version = "0.6.0"
+parse = """
+    (?P<major>\\d+)
+    \\.(?P<minor>\\d+)
+    \\.(?P<patch>\\d+)
+		(-
+			(?P<stage>[^.]*)
+			\\.(?P<devnum>\\d+)
+		)?
+"""
+serialize = [
+    "{major}.{minor}.{patch}-{stage}.{devnum}",
+    "{major}.{minor}.{patch}",
+]
+search = "{current_version}"
+replace = "{new_version}"
+regex = false
+ignore_missing_version = false
+tag = true
+sign_tags = true
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} → {new_version}"
+allow_dirty = false
+commit = true
+message = "Bump version: {current_version} → {new_version}"
+
+[tool.bumpversion.parts.stage]
+optional_value = "stable"
+first_value = "stable"
+values = ["alpha", "beta", "stable"]
+
+[tool.bumpversion.part.devnum]
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
+
+[tool.ruff]
+line-length = 88
+exclude = ["__init__.py", "*_pb2*.py", "*.pyi"]
+
+[tool.ruff.lint]
+select = [
+    "F", # Pyflakes
+    "E", # pycodestyle errors
+    "W", # pycodestyle warnings
+    "I", # isort
+    "D", # pydocstyle
+]
+# Ignores from pydocstyle and any other desired ones
+ignore = [
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D105",
+    "D106",
+    "D107",
+    "D200",
+    "D203",
+    "D204",
+    "D205",
+    "D212",
+    "D400",
+    "D401",
+    "D412",
+    "D415",
+]
+
+[tool.ruff.lint.isort]
+force-wrap-aliases = true
+combine-as-imports = true
+extra-standard-library = []
+force-sort-within-sections = true
+known-first-party = ["libp2p", "tests"]
+known-third-party = ["anyio", "factory", "lru", "p2pclient", "pytest", "noise"]
+force-to-top = ["pytest"]
+
+[tool.ruff.format]
+# Using Ruff's Black-compatible formatter.
+# Options like quote-style = "double" or indent-style = "space" can be set here if needed.
+
+[tool.pyrefly]
+project_includes = ["libp2p", "examples", "tests"]
+project_excludes = [
+    "**/.project-template/**",
+    "**/docs/conf.py",
+    "**/*pb2.py",
+    "**/*pb2_grpc.py",
+    "**/*.pyi",
+    ".venv/**",
+    "./tests/interop/nim_libp2p",
+    "./tests/core/transport/webrtc",
+    "./libp2p/transport/webrtc/_asyncio_bridge.py",
+    "./libp2p/transport/webrtc/_aiortc_helpers.py",
+    "./libp2p/transport/webrtc/certificate.py",
+    "./libp2p/transport/webrtc/transport.py",
+    "./libp2p/transport/webrtc/listener.py",
+]
+search_path = ["stubs"]

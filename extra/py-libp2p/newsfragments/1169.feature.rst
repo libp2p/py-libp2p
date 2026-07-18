@@ -1,0 +1,9 @@
+Added implementation of the libp2p perf protocol for measuring transfer performance.
+
+The perf protocol allows benchmarking data transfer speeds between libp2p nodes. It includes:
+- ``PerfService`` class for perf protocol server/client operations
+- ``measure_performance()`` method to measure upload/download throughput to a remote peer
+- Server-side handling for responding to perf protocol requests
+- Detailed metrics output including latency, upload/download times, and throughput in bytes/second
+
+See the spec at https://github.com/libp2p/specs/blob/master/perf/perf.md

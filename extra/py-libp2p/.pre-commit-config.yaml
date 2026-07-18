@@ -1,0 +1,59 @@
+exclude: '.project-template|docs/conf.py|.*pb2\..*'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.20.0
+    hooks:
+      - id: pyupgrade
+        args: [--py310-plus]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.10
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+  - repo: local
+    hooks:
+      - id: mypy-local
+        name: run mypy with all dev dependencies present
+        entry: mypy -p libp2p
+        language: system
+        always_run: true
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: pyrefly-local
+        name: run pyrefly typecheck locally
+        entry: pyrefly check
+        language: system
+        always_run: true
+        pass_filenames: false
+
+  - repo: local
+    hooks:
+      - id: check-rst-files
+        name: Check for .rst files in the top-level directory
+        entry: python -c "import glob, sys; rst_files = glob.glob('*.rst'); sys.exit(1) if rst_files else sys.exit(0)"
+        language: system
+        always_run: true
+        pass_filenames: false
+  - repo: local
+    hooks:
+      - id: path-audit
+        name: Cross-platform path handling audit (P0/P1)
+        entry: python scripts/audit_paths.py --summary-only --fail-on-p1
+        language: system
+        always_run: true
+        pass_filenames: false

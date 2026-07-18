@@ -1,0 +1,8 @@
+nimble.develop
+nimble.paths
+
+*.nimble
+nim-libp2p/
+
+nim_echo_server
+config.nims

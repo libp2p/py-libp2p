@@ -1,0 +1,13 @@
+include LICENSE-APACHE
+include LICENSE-MIT
+include README.md
+
+recursive-include scripts *
+recursive-include tests *
+
+global-include *.pyi
+
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+prune .tox
+prune venv*

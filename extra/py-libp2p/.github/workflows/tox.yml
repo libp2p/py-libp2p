@@ -1,0 +1,137 @@
+name: Run tox
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - github-actions
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # 1 hour timeout
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        toxenv: [core, demos, interop, lint, utils, wheel]
+        include:
+          - python: "3.10"
+            toxenv: docs
+      fail-fast: false
+    steps:
+      - env:
+          python: ${{ matrix.python }}
+          toxenv: ${{ matrix.toxenv }}
+        run: |
+          if [[ "$toxenv" == 'docs' ]]; then
+            echo 'TOXENV=docs' | tee -a $GITHUB_ENV
+          else
+            echo "TOXENV=py${python}-${toxenv}" | tr -d '.' | tee -a $GITHUB_ENV
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install GMP headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev
+
+      - name: Install Nim for interop testing
+        if: matrix.toxenv == 'interop'
+        run: |
+          echo "Installing Nim for nim-libp2p interop testing..."
+          curl -sSf https://nim-lang.org/choosenim/init.sh | sh -s -- -y --firstInstall
+          echo "$HOME/.nimble/bin" >> $GITHUB_PATH
+          echo "$HOME/.choosenim/toolchains/nim-stable/bin" >> $GITHUB_PATH
+
+      - name: Cache nimble packages
+        if: matrix.toxenv == 'interop'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nimble
+            ~/.choosenim/toolchains/*/lib
+          key: ${{ runner.os }}-nimble-${{ hashFiles('**/nim_echo_server.nim') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Build nim interop binaries
+        if: matrix.toxenv == 'interop'
+        run: |
+          export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"
+          cd tests/interop/nim_libp2p
+          ./scripts/setup_nim_echo.sh
+
+      - name: Setup Node.js for interop testing
+        if: matrix.toxenv == 'interop'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: |
+          uv venv venv
+          source venv/bin/activate
+          uv pip install --upgrade pip
+          uv pip install tox
+
+      - name: Run Tests or Generate Docs
+        run: |
+          source venv/bin/activate
+          if [[ "${{ matrix.toxenv }}" == 'docs' ]]; then
+            export TOXENV=docs
+          else
+            export TOXENV=$(echo "py${{ matrix.python }}-${{ matrix.toxenv }}" | tr -d '.')
+          fi
+          # Set PATH for nim commands during tox
+          if [[ "${{ matrix.toxenv }}" == 'interop' ]]; then
+            export PATH="$HOME/.nimble/bin:$HOME/.choosenim/toolchains/nim-stable/bin:$PATH"
+          fi
+          python -m tox run -r
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60  # 1 hour timeout
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        toxenv: [core, demos, utils, wheel]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv venv venv
+          source venv/Scripts/activate
+          uv pip install --upgrade pip
+          uv pip install tox
+      - name: Test with tox
+        shell: bash
+        run: |
+          source venv/Scripts/activate
+          if [[ "${{ matrix.toxenv }}" == "wheel" ]]; then
+            python -m tox run -e windows-wheel
+          else
+            tox_python="py${{ matrix.python-version }}"
+            tox_python="${tox_python//./}"
+            python -m tox run -e "${tox_python}-${{ matrix.toxenv }}"
+          fi

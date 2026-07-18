@@ -1,0 +1,1 @@
+Replaced lock-step batch querying in DHT operations with semaphore-based sliding window concurrency, so a new query starts as soon as any in-flight query completes instead of waiting for the whole batch.

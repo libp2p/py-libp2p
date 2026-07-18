@@ -1,0 +1,2 @@
+Moved the ``connection_config`` parameter in ``libp2p.new_host()`` to the end of the function signature.
+This is a breaking API change for callers that pass arguments positionally; use keyword arguments for ``connection_config``.

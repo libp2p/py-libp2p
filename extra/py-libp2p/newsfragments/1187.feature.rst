@@ -1,0 +1,5 @@
+Enhanced DNS support in bootstrap discovery.
+
+- Bootstrap now treats ``dns``, ``dns4``, ``dns6``, and ``dnsaddr`` as DNS addresses (previously only ``dnsaddr`` was recognized), enabling IPv4/IPv6-specific bootstrap entries.
+- DNS resolution is wrapped in exception handling; failed or empty resolutions are logged and bootstrap continues with the next address.
+- User-facing documentation and examples for DNS bootstrap addresses were added in the Getting Started guide and the bootstrap discovery API docs.

@@ -1,0 +1,1986 @@
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
+import ipaddress
+import logging
+import random
+from typing import TYPE_CHECKING, Any, cast
+
+from libp2p.metrics.swarm import SwarmEvent
+from libp2p.rcmgr import Direction
+
+if TYPE_CHECKING:
+    from libp2p.network.connection.swarm_connection import SwarmConn
+
+from multiaddr import (
+    Multiaddr,
+)
+from multiaddr.resolvers import DNSResolver
+import trio
+
+from libp2p.abc import (
+    IListener,
+    IMuxedConn,
+    INetConn,
+    INetStream,
+    INetworkService,
+    INotifee,
+    IPeerStore,
+    IRawConnection,
+    ISecureConn,
+    ITransport,
+)
+from libp2p.custom_types import (
+    StreamHandlerFn,
+)
+from libp2p.io.abc import (
+    ReadWriteCloser,
+)
+from libp2p.network.auto_connector import AutoConnector
+from libp2p.network.config import ConnectionConfig, RetryConfig
+from libp2p.network.connection_gate import ConnectionGate
+from libp2p.network.connection_pruner import ConnectionPruner
+from libp2p.network.tag_store import TagInfo, TagStore
+from libp2p.peer.id import (
+    ID,
+)
+from libp2p.peer.peerstore import (
+    PeerStoreError,
+)
+from libp2p.rcmgr.manager import ResourceManager
+from libp2p.security.pnet.protector import new_protected_conn
+from libp2p.tools.anyio_service import (
+    Service,
+)
+from libp2p.transport.exceptions import (
+    MuxerUpgradeFailure,
+    OpenConnectionError,
+    SecurityUpgradeFailure,
+)
+from libp2p.transport.manager import TransportManager
+from libp2p.transport.quic.config import QUICTransportConfig
+from libp2p.transport.upgrader import (
+    TransportUpgrader,
+)
+from libp2p.utils.multiaddr_utils import (
+    extract_ip_from_multiaddr,
+)
+
+from ..exceptions import (
+    MultiError,
+)
+from .connection.raw_connection import (
+    RawConnection,
+)
+
+# SwarmConn is imported conditionally above
+from .exceptions import (
+    SwarmDialAllFailedError,
+    SwarmException,
+)
+
+logger = logging.getLogger(__name__)
+
+_HAPPY_EYEBALLS_DELAY = 0.250
+_MAX_PARALLEL_DIALS = 8
+
+
+def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
+    async def stream_handler(stream: INetStream) -> None:
+        await network.get_manager().wait_finished()
+
+    return stream_handler
+
+
+class Swarm(Service, INetworkService):
+    self_id: ID
+    peerstore: IPeerStore
+    upgrader: TransportUpgrader
+    transport_manager: TransportManager
+    connections: dict[ID, list[INetConn]]
+    listeners: dict[str, IListener]
+    common_stream_handler: StreamHandlerFn
+    # Background nursery used for transport-level background tasks (QUIC /
+    # WebSocket set_background_nursery, auto-connector).  Listeners no longer
+    # need a caller-supplied nursery — they manage their own internally.
+    background_nursery: trio.Nursery | None
+    event_background_nursery_created: trio.Event
+
+    notifees: list[INotifee]
+
+    # Enhanced: New configuration
+    retry_config: RetryConfig
+    connection_config: ConnectionConfig | QUICTransportConfig
+    _round_robin_index: dict[ID, int]
+    _resource_manager: ResourceManager | None
+
+    # Connection management components (go-libp2p style)
+    connection_gate: ConnectionGate
+    dns_resolver: DNSResolver
+    connection_pruner: ConnectionPruner
+    auto_connector: AutoConnector
+    tag_store: TagStore
+
+    def __init__(
+        self,
+        peer_id: ID,
+        peerstore: IPeerStore,
+        upgrader: TransportUpgrader,
+        transports: list[ITransport] | None = None,
+        retry_config: RetryConfig | None = None,
+        connection_config: ConnectionConfig | QUICTransportConfig | None = None,
+        psk: str | None = None,
+        metric_send_channel: trio.MemorySendChannel[Any] | None = None,
+        *,
+        # Optional pre-built TransportManager (e.g. with a PortDemultiplexer attached
+        # for shared-port TCP+WS demultiplexing).  When supplied, it is used as-is
+        # and transports are appended to it; when omitted a fresh one is created.
+        transport_manager: TransportManager | None = None,
+        **kwargs: Any,
+    ):
+        if kwargs.pop("transport", None):
+            raise TypeError(
+                "Swarm() no longer accepts 'transport='. Use transports=[...] instead."
+            )
+        if kwargs:
+            keys = list(kwargs.keys())
+            raise TypeError(
+                f"Swarm.__init__() got unexpected keyword arguments: {keys}"
+            )
+
+        self.self_id = peer_id
+        self.peerstore = peerstore
+        self.upgrader = upgrader
+        self.psk = psk
+
+        # Use the pre-built TransportManager when provided (e.g. from new_swarm()
+        # which wires in a PortDemultiplexer for shared-port TCP+WS).  Otherwise create
+        # a fresh one (preserves backward compatibility for direct Swarm() callers).
+        self.transport_manager = (
+            transport_manager if transport_manager is not None else TransportManager()
+        )
+
+        # Backward-compat: callers that still pass a single ITransport
+        # positionally (e.g. Swarm(peer_id, ps, upgrader, tcp_transport) or
+        # Swarm(peer_id, ps, upgrader, Mock())) will land in `transports`.
+        # Detect this by checking whether `transports` is actually a list.
+        if isinstance(transports, list):
+            self.transport_manager.add_transports(transports)
+        elif transports is not None:
+            self.transport_manager.add_transport(transports)
+
+        # Enhanced: Initialize retry and connection configuration
+        self.retry_config = retry_config or RetryConfig()
+        self.connection_config = connection_config or ConnectionConfig()
+
+        # Enhanced: Initialize connections as 1:many mapping
+        self.connections = {}
+        self.listeners = dict()
+
+        # Create Notifee array
+        self.notifees = []
+
+        self.common_stream_handler = create_default_stream_handler(self)
+
+        self.background_nursery = None
+        self.event_background_nursery_created = trio.Event()
+
+        # Load balancing state
+        self._round_robin_index = {}
+        self._resource_manager = None
+        self._stream_semaphore: trio.Semaphore | None = None
+
+        # Metrics
+        self.metric_send_channel = metric_send_channel
+
+        # Initialize connection management components
+        self._init_connection_management()
+
+    def _init_connection_management(self) -> None:
+        """
+        Initialize connection management components (go-libp2p style).
+
+        This sets up the connection management infrastructure including:
+        - ConnectionGate: IP allow/deny lists (InterceptAccept, InterceptAddrDial)
+        - ConnectionPruner: Trims connections when high watermark exceeded
+        - AutoConnector: Maintains minimum connections (low watermark)
+        - TagStore: Peer tagging and protection
+        - DNS resolver: For multiaddr resolution
+        """
+        # Initialize connection gate (go-libp2p ConnectionGater)
+        self.connection_gate = ConnectionGate(
+            allow_list=self.connection_config.allow_list,
+            deny_list=self.connection_config.deny_list,
+        )
+
+        # Initialize DNS resolver
+        self.dns_resolver = DNSResolver()
+
+        # Initialize connection pruner (go-libp2p TrimOpenConns)
+        self.connection_pruner = ConnectionPruner(
+            swarm=self,
+            allow_list=self.connection_config.allow_list,
+        )
+
+        # Initialize auto-connector for maintaining minimum connections
+        self.auto_connector = AutoConnector(
+            swarm=self,
+            auto_connect_interval=self.connection_config.auto_connect_interval,
+        )
+
+        # Initialize tag store for peer tagging/protection (go-libp2p TagPeer, Protect)
+        self.tag_store = TagStore()
+
+    def set_resource_manager(
+        self,
+        resource_manager: ResourceManager | None,
+        enable_stream_semaphore: bool = True,
+    ) -> None:
+        """Attach a ResourceManager to wire connection/stream scopes."""
+        self._resource_manager = resource_manager
+        if resource_manager is not None and enable_stream_semaphore:
+            self._stream_semaphore = trio.Semaphore(resource_manager.limits.max_streams)
+        else:
+            self._stream_semaphore = None
+
+    async def run(self) -> None:
+        async with trio.open_nursery() as nursery:
+            # This nursery hosts transport-level background tasks (QUIC /
+            # WebSocket) and the auto-connector.  Listeners own their own
+            # internal nurseries and no longer use this one.
+            self.background_nursery = nursery
+
+            # Wire the background nursery and swarm reference to ALL
+            # registered transports that need them (QUIC, WebSocket, etc.).
+            # This replaces the old isinstance(self.transport, QUICTransport)
+            # special-cases — the TransportManager delegates generically.
+            self.transport_manager.set_background_nursery(nursery)
+            self.transport_manager.set_swarm(self)
+
+            # Signal that the background nursery is available.
+            self.event_background_nursery_created.set()
+
+            # Start connection management components (go-libp2p style)
+            try:
+                await self.connection_pruner.start()
+                await self.auto_connector.start()
+                # Start auto-connector background task
+                await self.auto_connector.run_background_task(nursery)
+            except Exception as e:
+                logger.error(f"Error starting connection management components: {e}")
+                raise
+
+            try:
+                await self.manager.wait_finished()
+            finally:
+                # Stop connection management components
+                try:
+                    await self.connection_pruner.stop()
+                    await self.auto_connector.stop()
+                except Exception as e:
+                    logger.warning(
+                        f"Error stopping connection management components: {e}"
+                    )
+
+                # Close all listeners so their internal nurseries are
+                # cancelled and system tasks finish cleanly.
+                for listener in list(self.listeners.values()):
+                    try:
+                        await listener.close()
+                    except Exception as e:
+                        logger.debug("Error closing listener during shutdown: %s", e)
+
+                # Cancel the background nursery (transport / auto-connector).
+                nursery.cancel_scope.cancel()
+                self.background_nursery = None
+
+    def get_peer_id(self) -> ID:
+        return self.self_id
+
+    def set_stream_handler(self, stream_handler: StreamHandlerFn) -> None:
+        self.common_stream_handler = stream_handler
+
+    def get_connections(self, peer_id: ID | None = None) -> list[INetConn]:
+        """
+        Get connections for peer (like JS getConnections, Go ConnsToPeer).
+
+        Parameters
+        ----------
+        peer_id : ID | None
+            The peer ID to get connections for. If None, returns all connections.
+
+        Returns
+        -------
+        list[INetConn]
+            List of connections to the specified peer, or all connections
+            if peer_id is None.
+
+        """
+        if peer_id is not None:
+            return self.connections.get(peer_id, [])
+
+        # Return all connections from all peers
+        all_conns = []
+        for conns in self.connections.values():
+            all_conns.extend(conns)
+        return all_conns
+
+    def get_total_connections(self) -> int:
+        """
+        Get total number of connections (inbound + outbound).
+
+        Returns
+        -------
+        int
+            Total number of active connections
+
+        """
+        return len(self.get_connections())
+
+    def get_connections_map(self) -> dict[ID, list[INetConn]]:
+        """
+        Get all connections map (like JS getConnectionsMap).
+
+        Returns
+        -------
+        dict[ID, list[INetConn]]
+            The complete mapping of peer IDs to their connection lists.
+
+        """
+        return self.connections.copy()
+
+    def get_connection(self, peer_id: ID) -> INetConn | None:
+        """
+        Get single connection for backward compatibility.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to get a connection for.
+
+        Returns
+        -------
+        INetConn | None
+            The first available connection, or None if no connections exist.
+
+        """
+        conns = self.get_connections(peer_id)
+        return conns[0] if conns else None
+
+    def get_metrics(self) -> dict[str, int]:
+        """
+        Get connection metrics (go-libp2p style).
+
+        Returns a simple dict with connection counts.
+        For detailed metrics, use ResourceManager.
+
+        Returns
+        -------
+        dict[str, int]
+            Connection metrics including total, inbound, and outbound counts.
+
+        """
+        total = 0
+        inbound = 0
+        outbound = 0
+
+        for conns in self.connections.values():
+            for conn in conns:
+                total += 1
+                # Check direction if available
+                direction = getattr(conn, "direction", None)
+                if direction is not None:
+                    from libp2p.rcmgr import Direction
+
+                    is_inbound = (
+                        direction == Direction.INBOUND
+                        or direction == Direction.INBOUND.value
+                    )
+                    is_outbound = (
+                        direction == Direction.OUTBOUND
+                        or direction == Direction.OUTBOUND.value
+                    )
+                    if is_inbound:
+                        inbound += 1
+                    elif is_outbound:
+                        outbound += 1
+
+        return {
+            "total": total,
+            "inbound": inbound,
+            "outbound": outbound,
+            "peers": len(self.connections),
+        }
+
+    # ============ Tagging Methods (like go-libp2p ConnManager) ============
+
+    def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
+        """
+        Tag a peer with a string, associating a weight with the tag.
+
+        Tags are used for connection management decisions. Peers with higher
+        total tag values are less likely to have their connections pruned.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to tag.
+        tag : str
+            The tag name.
+        value : int
+            The weight/value associated with the tag.
+
+        """
+        self.tag_store.tag_peer(peer_id, tag, value)
+
+    def untag_peer(self, peer_id: ID, tag: str) -> None:
+        """
+        Remove the tagged value from the peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to untag.
+        tag : str
+            The tag name to remove.
+
+        """
+        self.tag_store.untag_peer(peer_id, tag)
+
+    def get_tag_info(self, peer_id: ID) -> TagInfo | None:
+        """
+        Get the metadata associated with a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to get info for.
+
+        Returns
+        -------
+        TagInfo | None
+            The tag info for the peer, or None if no tags recorded.
+
+        """
+        return self.tag_store.get_tag_info(peer_id)
+
+    def protect(self, peer_id: ID, tag: str) -> None:
+        """
+        Protect a peer from having its connection(s) pruned.
+
+        Protected peers will never be disconnected during connection pruning,
+        regardless of their tag values.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to protect.
+        tag : str
+            Protection tag (different components can use different tags).
+
+        """
+        self.tag_store.protect(peer_id, tag)
+
+    def unprotect(self, peer_id: ID, tag: str) -> bool:
+        """
+        Remove a protection that may have been placed on a peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to unprotect.
+        tag : str
+            The protection tag to remove.
+
+        Returns
+        -------
+        bool
+            True if the peer is still protected by other tags, False otherwise.
+
+        """
+        return self.tag_store.unprotect(peer_id, tag)
+
+    def is_protected(self, peer_id: ID, tag: str = "") -> bool:
+        """
+        Check if a peer is protected.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to check.
+        tag : str
+            If provided, check if protected by this specific tag.
+            If empty string, check if protected by any tag.
+
+        Returns
+        -------
+        bool
+            True if the peer is protected.
+
+        """
+        return self.tag_store.is_protected(peer_id, tag)
+
+    async def dial_peer(self, peer_id: ID) -> list[INetConn]:
+        """
+        Try to create connections to peer_id (go-libp2p style).
+
+        This method directly dials the peer using known addresses from peerstore.
+        Connection gating is applied to filter addresses.
+
+        :param peer_id: peer if we want to dial
+        :raises SwarmException: raised when an error occurs
+        :return: list of muxed connections
+        """
+        # Emit metric-event for dial-attempt
+        event = SwarmEvent()
+        event.peer_id = peer_id.pretty()
+        event.dial_attempt = True
+
+        if self.metric_send_channel is not None:
+            await self.metric_send_channel.send(event)
+
+        # Check if we already have connections
+        existing_connections = self.get_connections(peer_id)
+        if existing_connections:
+            # Filter out closed connections
+            valid_connections = [c for c in existing_connections if not c.is_closed]
+            if valid_connections:
+                logger.debug(f"Reusing existing connections to peer {peer_id}")
+                return valid_connections
+
+        logger.debug("attempting to dial peer %s", peer_id)
+
+        try:
+            # Get peer info from peer store
+            addrs = self.peerstore.addrs(peer_id)
+        except PeerStoreError as error:
+            raise SwarmException(f"No known addresses to peer {peer_id}") from error
+
+        if not addrs:
+            raise SwarmException(f"No known addresses to peer {peer_id}")
+
+        # Filter addresses through connection gate (InterceptAddrDial)
+        gate = self.connection_gate
+        allowed_addrs = []
+        for addr in addrs:
+            if await gate.is_allowed(addr):
+                allowed_addrs.append(addr)
+
+        if not allowed_addrs:
+            raise SwarmException(
+                f"All addresses for peer {peer_id} blocked by connection gate"
+            )
+
+        # Filter out loopback addresses if public addresses are available
+        # This prevents the node from dialing itself when DHT peers advertise localhost
+        public_addrs = [
+            a for a in allowed_addrs
+            if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+        ]
+        if public_addrs:
+            allowed_addrs = public_addrs
+
+        connections = []
+        exceptions: list[SwarmException] = []
+
+        # Try allowed addresses using Happy Eyeballs algorithm
+        with trio.CancelScope() as cancel_scope:
+            async with trio.open_nursery() as nursery:
+                for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
+                    failed_event = trio.Event()
+
+                    async def dial_task(
+                        addr: Multiaddr = multiaddr, ev: trio.Event = failed_event
+                    ) -> None:
+                        try:
+                            connection = await self._dial_with_retry(addr, peer_id)
+                            connections.append(connection)
+                            # Limit number of connections per peer
+                            if (
+                                len(connections)
+                                >= self.connection_config.max_connections_per_peer
+                            ):
+                                cancel_scope.cancel()
+                        except SwarmException as e:
+                            exceptions.append(e)
+                            logger.debug(
+                                "encountered exception when trying to connect to %s",
+                                addr,
+                                exc_info=e,
+                            )
+                            ev.set()
+
+                    nursery.start_soon(dial_task)
+
+                    # Start next dial immediately if this one fails, or after 250ms
+                    with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
+                        await failed_event.wait()
+
+        if not connections:
+            # Tried all addresses, raising exception.
+
+            # Emit metric-event for dial_attempt failure
+            event = SwarmEvent()
+            event.peer_id = peer_id.pretty()
+            event.dial_attempt_error = True
+
+            if self.metric_send_channel is not None:
+                await self.metric_send_channel.send(event)
+
+            raise SwarmDialAllFailedError(
+                f"unable to connect to {peer_id}, no addresses established a "
+                "successful connection (with exceptions)",
+                peer_id=peer_id,
+                num_addrs_tried=len(exceptions),
+            ) from MultiError(exceptions)
+
+        return connections
+
+    async def _dial_with_retry(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+        """
+        Enhanced: Dial with retry logic and exponential backoff.
+
+        :param addr: the address to dial
+        :param peer_id: the peer we want to connect to
+        :raises SwarmException: raised when all retry attempts fail
+        :return: network connection
+        """
+        last_exception = None
+
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                return await self._dial_addr_single_attempt(addr, peer_id)
+            except Exception as e:
+                last_exception = e
+                if attempt < self.retry_config.max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.debug(
+                        f"Connection attempt {attempt + 1} failed, "
+                        f"retrying in {delay:.2f}s: {e}"
+                    )
+                    await trio.sleep(delay)
+                else:
+                    logger.debug(f"All {self.retry_config.max_retries} attempts failed")
+
+        # Convert the last exception to SwarmException for consistency
+        if last_exception is not None:
+            if isinstance(last_exception, SwarmException):
+                raise last_exception
+            else:
+                raise SwarmException(
+                    f"Failed to connect after {self.retry_config.max_retries} attempts"
+                ) from last_exception
+
+        # This should never be reached, but mypy requires it
+        raise SwarmException("Unexpected error in retry logic")
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """
+        Enhanced: Calculate backoff delay with jitter to prevent thundering herd.
+
+        :param attempt: the current attempt number (0-based)
+        :return: delay in seconds
+        """
+        delay = min(
+            self.retry_config.initial_delay
+            * (self.retry_config.backoff_multiplier**attempt),
+            self.retry_config.max_delay,
+        )
+
+        # Add jitter to prevent synchronized retries
+        jitter = delay * self.retry_config.jitter_factor
+        return delay + random.uniform(-jitter, jitter)
+
+    async def _dial_addr_single_attempt(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+        """
+        Single attempt to dial an address.
+
+        Routes the dial to the correct transport via :attr:`transport_manager`
+        rather than using a fixed ``self.transport``.  Transports that return
+        a pre-multiplexed connection (e.g. QUIC) are detected generically via
+        the :class:`~libp2p.abc.IMuxedConn` interface and skip the security +
+        muxer upgrade pipeline.
+
+        :param addr: the address we want to connect with
+        :param peer_id: the peer we want to connect to
+        :raises SwarmException: raised when an error occurs
+        :return: network connection
+        """
+        # For the dial to be successful, there needs to be a registered transport
+        # that can dial the provided `maddr`
+        transport = self.transport_manager.transport_for_dialing(addr)
+        if transport is None:
+            raise SwarmException(
+                f"No registered transport can dial {addr}. "
+                f"Registered transports: "
+                f"{[type(t).__name__ for t in self.transport_manager.get_transports()]}"
+            )
+
+        # Optional pre-upgrade admission on outbound using endpoint from multiaddr
+        pre_scope = None
+        if self._resource_manager is not None:
+            try:
+                ep = extract_ip_from_multiaddr(addr)
+                pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
+                if pre_scope is None:
+                    raise SwarmException("Connection denied by resource manager")
+            except Exception as e:
+                # Fail-open if rate/cidr checks error; keep pre_scope None
+                if isinstance(e, SwarmException):
+                    raise
+                pre_scope = None
+
+        # Dial peer via the selected transport (returns a raw connection).
+        raw_conn = None
+        try:
+            # Ensure the multiaddr has the target peer ID, but don't append if
+            # already present
+            try:
+                existing_p2p = addr.value_for_protocol("p2p")
+            except Exception:
+                existing_p2p = None
+
+            if not existing_p2p:
+                addr = Multiaddr(f"{addr}/p2p/{peer_id}")
+
+            raw_conn = await transport.dial(addr)
+
+            # Enable PNET if psk is provided
+            if self.psk is not None:
+                raw_conn = new_protected_conn(raw_conn, self.psk)
+        except OpenConnectionError as error:
+            logger.debug("fail to dial peer %s over base transport", peer_id)
+            # Release pre-upgrade scope on failure
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                f"fail to open connection to peer {peer_id}"
+            ) from error
+        except Exception as e:
+            # Clean up on any unexpected exception during dial
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
+
+        # Detect pre-multiplexed connections generically via the IMuxedConn
+        # interface instead of isinstance(transport, QUICTransport).
+        # This works for QUIC today and any future transport with built-in
+        # multiplexing (e.g. WebTransport).
+        if isinstance(raw_conn, IMuxedConn):
+            logger.info(
+                "Skipping upgrade: connection is already multiplexed (transport=%s)",
+                type(transport).__name__,
+            )
+            try:
+                swarm_conn = await self.add_conn(raw_conn, direction="outbound")
+                return swarm_conn
+            except Exception:
+                # Clean up on failure
+                try:
+                    await raw_conn.close()
+                except Exception:
+                    pass
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                except Exception:
+                    pass
+                raise
+
+        logger.debug("dialed peer %s over base transport", peer_id)
+        if not isinstance(raw_conn, IRawConnection):
+            raise TypeError("Expected an IRawConnection to upgrade")
+        try:
+            swarm_conn = await self.upgrade_outbound_raw_conn(
+                raw_conn, peer_id, pre_scope
+            )
+        except Exception:
+            # Ensure raw_conn is closed if upgrade fails
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            raise
+
+        logger.debug("successfully dialed peer %s", peer_id)
+
+        return swarm_conn
+
+    async def upgrade_outbound_raw_conn(
+        self, raw_conn: IRawConnection, peer_id: ID, pre_scope: Any = None
+    ) -> "SwarmConn":
+        """
+        Secure the outgoing raw connection and upgrade it to a multiplexed connection.
+
+        :param raw_conn: the raw connection to upgrade
+        :param peer_id: the peer this connection is to
+        :param pre_scope: pre-upgrade resource scope (if any)
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        secured_conn = None
+        try:
+            secured_conn = await self.upgrader.upgrade_security(raw_conn, True, peer_id)
+        except SecurityUpgradeFailure as error:
+            logger.error("failed to upgrade security for peer %s: %s", peer_id, error)
+            await raw_conn.close()
+            raise SwarmException(
+                f"failed to upgrade security for peer {peer_id}: {error}"
+            ) from error
+        logger.debug("Swarm: security upgrade completed for peer %s", peer_id)
+
+        try:
+            # Apply outbound upgrade timeout for muxer upgrade
+            with trio.fail_after(self.connection_config.outbound_upgrade_timeout):
+                muxed_conn = await self.upgrader.upgrade_connection(
+                    secured_conn, peer_id
+                )
+        except trio.TooSlowError:
+            timeout_val = self.connection_config.outbound_upgrade_timeout
+            logger.debug(
+                f"Outbound muxer upgrade timeout ({timeout_val}s) "
+                f"exceeded for peer {peer_id}"
+            )
+            # Clean up secured connection
+            try:
+                await secured_conn.close()
+            except Exception:
+                pass
+            # Clean up pre-scope
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(
+                f"Outbound muxer upgrade timeout exceeded for peer {peer_id}"
+            )
+        except MuxerUpgradeFailure as error:
+            logger.debug("failed to upgrade mux for peer %s", peer_id)
+            # Clean up secured connection
+            try:
+                await secured_conn.close()
+            except Exception:
+                pass
+            # Clean up pre-scope
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
+        except Exception:
+            # Ensure cleanup on any unexpected exception
+            if secured_conn is not None:
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise
+
+        logger.debug("Swarm: muxer upgrade completed for peer %s", peer_id)
+        logger.debug("upgraded mux for peer %s", peer_id)
+
+        # Pass endpoint IP to resource manager for outbound
+        if self._resource_manager is not None:
+            try:
+                ep = None
+                if hasattr(secured_conn, "get_remote_address"):
+                    _endpoint = secured_conn.get_remote_address()
+                    if _endpoint is not None:
+                        ep = _endpoint[0]
+                conn_scope = self._resource_manager.open_connection(
+                    peer_id, endpoint_ip=ep
+                )
+                if conn_scope is None:
+                    # Clean up connections
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
+                    # Release pre-upgrade scope
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                            pre_scope = None
+                    except Exception:
+                        pass
+                    raise SwarmException("Connection denied by resource manager")
+                try:
+                    setattr(muxed_conn, "_resource_scope", conn_scope)
+                except Exception:
+                    pass
+                # Release pre-upgrade scope after acquiring real scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                        pre_scope = None
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        swarm_conn = await self.add_conn(muxed_conn, direction="outbound")
+        # swarm_conn._metric_send_channel = self.metric_send_channel
+
+        logger.debug("successfully dialed peer %s", peer_id)
+        return swarm_conn
+
+    async def dial_addr(self, addr: Multiaddr, peer_id: ID) -> INetConn:
+        """
+        Enhanced: Try to create a connection to peer_id with addr using retry logic.
+
+        :param addr: the address we want to connect with
+        :param peer_id: the peer we want to connect to
+        :raises SwarmException: raised when an error occurs
+        :return: network connection
+        """
+        return await self._dial_with_retry(addr, peer_id)
+
+    async def new_stream(self, peer_id: ID) -> INetStream:
+        """
+        Enhanced: Create a new stream with load balancing across multiple connections.
+
+        When a stream semaphore is configured (via ``set_resource_manager``), this
+        method awaits an available slot instead of raising immediately when the
+        stream limit is reached.
+
+        :param peer_id: peer_id of destination
+        :raises SwarmException: raised when an error occurs
+        :return: net stream instance
+        """
+        logger.debug("attempting to open a stream to peer %s", peer_id)
+
+        # Await semaphore slot (queues if at capacity)
+        semaphore_acquired = False
+        if self._stream_semaphore is not None:
+            await self._stream_semaphore.acquire()
+            semaphore_acquired = True
+
+        rm_acquired = False
+        try:
+            # Hard-cap safety check via ResourceManager
+            if self._resource_manager is not None:
+                if not self._resource_manager.acquire_stream(
+                    str(peer_id), Direction.OUTBOUND
+                ):
+                    logger.warning("Stream limit exceeded for peer %s", peer_id)
+                    raise SwarmException("Stream limit exceeded")
+                rm_acquired = True
+
+            # Get existing connections or dial new ones
+            connections = self.get_connections(peer_id)
+            if not connections:
+                connections = await self.dial_peer(peer_id)
+
+            # Filter out closed/invalid connections
+            connections = self._filter_valid_connections(connections)
+
+            if not connections:
+                raise SwarmException(
+                    f"No valid connections available for peer {peer_id}"
+                )
+
+            # Ensure connections are ready (wait briefly if needed)
+            ready_connections = await self._ensure_connections_ready(
+                connections, peer_id
+            )
+
+            if not ready_connections:
+                raise SwarmException(
+                    f"No ready connections available for peer {peer_id}"
+                )
+
+            # Load balancing strategy at interface level
+            connection = self._select_connection(ready_connections, peer_id)
+
+            # Final validation before using connection
+            if connection is None:
+                raise SwarmException(
+                    f"Failed to select a connection for peer {peer_id}"
+                )
+
+            if connection.is_closed:
+                # Connection was closed between selection and use, try again
+                logger.debug(f"Selected connection for {peer_id} was closed, retrying")
+                connections = await self._ensure_connections_ready(
+                    self._filter_valid_connections(self.get_connections(peer_id)),
+                    peer_id,
+                )
+                if not connections:
+                    raise SwarmException(
+                        f"No ready connections available for peer {peer_id}"
+                    )
+                connection = self._select_connection(connections, peer_id)
+                if connection is None or connection.is_closed:
+                    raise SwarmException(
+                        f"Failed to get a valid connection for peer {peer_id}"
+                    )
+
+            net_stream = await self._open_stream_on_connection(
+                connection, connections, peer_id
+            )
+            # Tag stream with direction so notify_closed_stream can release it
+            net_stream._direction = Direction.OUTBOUND  # type: ignore[attr-defined]
+            # RM resource now owned by the stream; cleared via notify_closed_stream
+            rm_acquired = False
+            return net_stream
+
+        except BaseException:
+            # Release RM resource if we acquired but never handed off to a stream
+            if rm_acquired and self._resource_manager is not None:
+                self._resource_manager.release_stream(str(peer_id), Direction.OUTBOUND)
+            # Release semaphore on any failure so waiters are not starved
+            if semaphore_acquired and self._stream_semaphore is not None:
+                self._stream_semaphore.release()
+            raise
+
+    async def _open_stream_on_connection(
+        self,
+        connection: INetConn,
+        connections: list[INetConn],
+        peer_id: ID,
+    ) -> INetStream:
+        """Try to open a stream on *connection*, falling back to alternatives."""
+        try:
+            if connection is not None:
+                conn = cast("SwarmConn", connection)
+                stream = await conn.new_stream()
+            else:
+                stream = await connection.new_stream()  # type: ignore[assignment]
+            logger.debug("successfully opened a stream to peer %s", peer_id)
+            return stream
+        except Exception as e:
+            logger.debug(f"Failed to create stream on connection: {e}")
+
+            # Try other connections if available
+            for other_conn in connections:
+                if other_conn != connection:
+                    try:
+                        net_stream = await other_conn.new_stream()
+                        logger.debug(
+                            f"Successfully opened a stream to peer {peer_id} "
+                            "using alternative connection"
+                        )
+                        return net_stream
+                    except Exception:
+                        continue
+
+            # All connections failed, raise exception
+            raise SwarmException(f"Failed to create stream to peer {peer_id}") from e
+
+    def _filter_valid_connections(self, connections: list[INetConn]) -> list[INetConn]:
+        """
+        Filter out closed/invalid connections from a list.
+
+        Parameters
+        ----------
+        connections : list[INetConn]
+            List of connections to filter
+
+        Returns
+        -------
+        list[INetConn]
+            List of valid (non-closed) connections
+
+        """
+        valid_connections = []
+        for conn in connections:
+            try:
+                if conn is None:
+                    continue
+
+                # Check if connection is closed
+                if conn.is_closed:
+                    # Connection is closed, skip it
+                    continue
+
+                # Connection is potentially valid
+                valid_connections.append(conn)
+            except Exception as e:
+                # If checking connection state fails, skip this connection
+                logger.debug(f"Skipping connection due to error checking state: {e}")
+                continue
+        return valid_connections
+
+    async def _ensure_connections_ready(
+        self, connections: list[INetConn], peer_id: ID
+    ) -> list[INetConn]:
+        """
+        Ensure connections are ready for use (started and not closed).
+
+        Parameters
+        ----------
+        connections : list[INetConn]
+            List of connections to check
+        peer_id : ID
+            Peer ID for logging
+
+        Returns
+        -------
+        list[INetConn]
+            List of ready connections
+
+        """
+        ready_connections = []
+        for conn in connections:
+            try:
+                # Double-check connection is not closed
+                if conn.is_closed:
+                    continue
+
+                # Wait for connection to be ready if it has event_started
+                # (connections should already be started, but handle race conditions)
+                if hasattr(conn, "event_started") and not conn.event_started.is_set():
+                    try:
+                        # Wait briefly for connection to start (with timeout)
+                        with trio.fail_after(0.5):  # 500ms timeout
+                            await conn.event_started.wait()
+                    except trio.TooSlowError:
+                        logger.debug(
+                            f"Connection for {peer_id} didn't start in time, skipping"
+                        )
+                        continue
+
+                # Final check - connection might have closed while waiting
+                if conn.is_closed:
+                    continue
+
+                ready_connections.append(conn)
+            except Exception as e:
+                logger.debug(f"Error checking connection readiness: {e}")
+                continue
+
+        return ready_connections
+
+    def _select_connection(self, connections: list[INetConn], peer_id: ID) -> INetConn:
+        """
+        Select connection based on load balancing strategy.
+
+        Parameters
+        ----------
+        connections : list[INetConn]
+            List of available connections.
+        peer_id : ID
+            The peer ID for round-robin tracking.
+        strategy : str
+            Load balancing strategy ("round_robin", "least_loaded", etc.).
+
+        Returns
+        -------
+        INetConn
+            Selected connection.
+
+        """
+        if not connections:
+            raise ValueError("No connections available")
+
+        strategy = self.connection_config.load_balancing_strategy
+
+        if strategy == "round_robin":
+            # Simple round-robin selection
+            if peer_id not in self._round_robin_index:
+                self._round_robin_index[peer_id] = 0
+
+            index = self._round_robin_index[peer_id] % len(connections)
+            self._round_robin_index[peer_id] += 1
+            return connections[index]
+
+        elif strategy == "least_loaded":
+            # Find connection with least streams
+            return min(connections, key=lambda c: len(c.get_streams()))
+
+        else:
+            # Default to first connection
+            return connections[0]
+
+    async def listen(self, *multiaddrs: Multiaddr) -> bool:
+        """
+        :param multiaddrs: one or many multiaddrs to start listening on
+        :return: true if at least one success
+
+        For each multiaddr:
+
+          - Route to the transport that can handle the address via
+            :attr:`transport_manager`.
+          - Check if a listener for this multiaddr already exists.
+          - Create a listener on the matched transport and start it.
+          - Map multiaddr string to the listener for future reference.
+
+        When a :class:`~libp2p.transport.cmux.PortDemultiplexer` is attached to the
+        :attr:`transport_manager`, all TCP-based transports (TCP and WebSocket)
+        register :class:`~libp2p.transport.cmux.DemultiplexedListener` objects
+        instead of opening their own sockets.  After every address has been
+        processed, a single ``port_demux.listen()`` call binds the shared socket
+        and starts the 3-byte demultiplexing loop — mirroring the go-libp2p
+        pattern where the physical listener is created once by ``PortDemultiplexer`` and
+        each transport only receives a virtual channel.
+        """
+        logger.debug(f"Swarm.listen called with multiaddrs: {multiaddrs}")
+        # Wait until the background nursery is available so that transports
+        # which need it (QUIC, WebSocket) can reach it via their transport
+        # reference.  Listeners themselves no longer require a nursery.
+        logger.debug("Starting to listen")
+        await self.event_background_nursery_created.wait()
+
+        # ── 1. Start PortDemultiplexer FIRST so the OS socket is bound ──────────
+        port_demuxers = getattr(self.transport_manager, "_port_demuxers", {})
+        if not port_demuxers:
+            port_demux = getattr(self.transport_manager, "_port_demux", None)
+            if port_demux:
+                port_demuxers = {(port_demux.host, port_demux.port): port_demux}
+
+        for (host, port), port_demux in port_demuxers.items():
+            tcp_maddr = next(
+                (
+                    m
+                    for m in multiaddrs
+                    if "tcp" in {p.name for p in m.protocols()}
+                    and "ws" not in {p.name for p in m.protocols()}
+                    and "wss" not in {p.name for p in m.protocols()}
+                    and str(m.value_for_protocol("tcp")) == str(port)
+                ),
+                None,
+            )
+            if tcp_maddr is not None:
+                try:
+                    port_demux.background_nursery = self.background_nursery
+                    await port_demux.listen(tcp_maddr)
+                except Exception as exc:
+                    logger.error(
+                        "PortDemultiplexer.listen failed for %s:%s: %s", host, port, exc
+                    )
+                    return False
+
+        # ── 2. Start all listeners in parallel ──────────────────────────────────
+        results: list[tuple[Multiaddr, bool]] = []
+        results_lock = trio.Lock()
+
+        async def _start_one(maddr: Multiaddr) -> None:
+            if str(maddr) in self.listeners:
+                async with results_lock:
+                    results.append((maddr, True))
+                return
+
+            transport = self.transport_manager.transport_for_listening(maddr)
+            if transport is None:
+                logger.warning(
+                    "Swarm.listen: no transport for %s (registered: %s). Skipping.",
+                    maddr,
+                    [type(t).__name__ for t in self.transport_manager.get_transports()],
+                )
+                async with results_lock:
+                    results.append((maddr, False))
+                return
+
+            async def conn_handler(
+                read_write_closer: ReadWriteCloser, _maddr: Multiaddr = maddr
+            ) -> None:
+                await self._handle_inbound_connection(read_write_closer, _maddr)
+
+            try:
+                listener = self.transport_manager.add_listen_addr(maddr, conn_handler)
+                if listener is None:
+                    async with results_lock:
+                        results.append((maddr, False))
+                    return
+                self.listeners[str(maddr)] = listener
+
+                if self.background_nursery is None:
+                    raise SwarmException("swarm instance hasn't been run")
+
+                setattr(listener, "background_nursery", self.background_nursery)
+                await listener.listen(maddr)
+                await self.notify_listen(maddr)
+                logger.debug("successfully started listening on: %s", maddr)
+                async with results_lock:
+                    results.append((maddr, True))
+            except (OSError, OpenConnectionError, SwarmException) as exc:
+                logger.debug("fail to listen on %s: %s", maddr, exc)
+                self.listeners.pop(str(maddr), None)
+                async with results_lock:
+                    results.append((maddr, False))
+
+        async with trio.open_nursery() as nursery:
+            for maddr in multiaddrs:
+                nursery.start_soon(_start_one, maddr)
+
+        return any(ok for _, ok in results)
+
+    async def _handle_inbound_connection(
+        self, read_write_closer: ReadWriteCloser, maddr: Multiaddr
+    ) -> None:
+        """
+        Unified inbound connection handler for all transports.
+
+        Replaces the inline ``conn_handler`` closures that previously had
+        separate code paths for QUIC vs. non-QUIC connections.  Transport
+        detection is now done via the :class:`~libp2p.abc.IMuxedConn`
+        interface rather than an ``isinstance(self.transport, QUICTransport)``
+        class check, so any future transport with built-in multiplexing
+        (e.g. WebTransport) will be handled automatically.
+
+        :param read_write_closer: The raw stream from the listener.
+        :param maddr: The multiaddr of the listener that accepted this connection.
+        """
+        logger.debug(
+            "[_handle_inbound_connection] Handling inbound connection on listener %s",
+            maddr,
+        )
+
+        # Emit a metric-event that we received an inbound connection
+        inbound_notification = SwarmEvent()
+        inbound_notification.conn_incoming = True
+        if self.metric_send_channel is not None:
+            await self.metric_send_channel.send(inbound_notification)
+
+        # Metric event for inbound connection failure
+        failure_event = SwarmEvent()
+
+        # Enforce connection gate on inbound connections.
+        remote_maddr = self._build_remote_multiaddr(read_write_closer)
+        logger.debug(
+            "[_handle_inbound_connection] Built remote_maddr: %s", remote_maddr
+        )
+
+        if remote_maddr is not None:
+            if not await self.connection_gate.is_allowed(remote_maddr):
+                logger.debug(
+                    "Inbound connection from %s denied by connection gate",
+                    remote_maddr,
+                )
+                try:
+                    await read_write_closer.close()
+                    # Emit event for incoming conn failure
+                    failure_event.conn_incoming_error = True
+                    if self.metric_send_channel is not None:
+                        await self.metric_send_channel.send(failure_event)
+                except Exception:
+                    pass
+                return
+
+        # If the incoming connection is already fully multiplexed (e.g. QUIC,
+        # WebTransport), skip the security + muxer upgrade entirely.
+        # Detection is via the IMuxedConn interface, not a class check.
+        if isinstance(read_write_closer, IMuxedConn):
+            try:
+                muxed_conn = cast(IMuxedConn, read_write_closer)
+                await self.add_conn(muxed_conn, direction="inbound")
+                peer_id = getattr(muxed_conn, "peer_id", None)
+                logger.debug(
+                    "successfully opened pre-multiplexed inbound connection (peer=%s)",
+                    peer_id,
+                )
+                # Intentional barrier: keep handler alive so the connection
+                # stays open for the duration of the swarm's lifetime.
+                await self.manager.wait_finished()
+            except Exception:
+                await read_write_closer.close()
+                # Emit event for incoming conn failure
+                failure_event.conn_incoming_error = True
+                if self.metric_send_channel is not None:
+                    await self.metric_send_channel.send(failure_event)
+            return
+
+        # Standard upgrade path (TCP, WebSocket): wrap in RawConnection then
+        # run the security + muxer upgrade pipeline.
+        raw_conn = None
+        try:
+            raw_conn = RawConnection(read_write_closer, False)
+            await self.upgrade_inbound_raw_conn(raw_conn, maddr)
+            # Intentional barrier: keep handler alive.
+            await self.manager.wait_finished()
+        except Exception as e:
+            logger.debug("Error handling incoming connection: %s", e)
+            try:
+                if raw_conn is not None:
+                    await raw_conn.close()
+                else:
+                    await read_write_closer.close()
+                    # Emit event for incoming conn failure
+                    failure_event.conn_incoming_error = True
+                    if self.metric_send_channel is not None:
+                        await self.metric_send_channel.send(failure_event)
+            except Exception:
+                pass
+
+    async def upgrade_inbound_raw_conn(
+        self, raw_conn: IRawConnection, maddr: Multiaddr
+    ) -> IMuxedConn:
+        """
+        Secure the inbound raw connection and upgrade it to a multiplexed connection.
+
+        :param raw_conn: the inbound raw connection to upgrade
+        :raises SwarmException: raised when security or muxer upgrade fails
+        :return: network connection with security and multiplexing established
+        """
+        # Check global connection limit
+        total_connections = len(self.get_connections())
+        if total_connections >= self.connection_config.max_connections:
+            logger.debug(
+                f"Rejecting incoming connection: max_connections "
+                f"({self.connection_config.max_connections}) reached"
+            )
+            await raw_conn.close()
+            raise SwarmException("Maximum connections limit reached")
+
+        logger.debug("upgrade_inbound_raw_conn: starting for %s", maddr)
+
+        # Enable PNET is psk is provided
+        if self.psk is not None:
+            raw_conn = new_protected_conn(raw_conn, self.psk)
+
+        # Optional pre-upgrade admission using ResourceManager
+        # This handles rate limiting and resource constraints
+        pre_scope = None
+        if self._resource_manager is not None:
+            try:
+                endpoint_ip = None
+                if hasattr(raw_conn, "get_remote_address"):
+                    ra = raw_conn.get_remote_address()
+                    if ra is not None:
+                        endpoint_ip = ra[0]
+                # Perform a preliminary connection admission to guard early
+                pre_scope = self._resource_manager.open_connection(
+                    None, endpoint_ip=endpoint_ip
+                )
+                if pre_scope is None:
+                    # Denied before upgrade; close socket and raise exception
+                    await raw_conn.close()
+                    raise SwarmException(
+                        "Connection denied by resource manager (pre-upgrade admission)"
+                    )
+            except SwarmException:
+                # Re-raise SwarmException (connection denied)
+                raise
+            except Exception:
+                # Fail-open on admission errors; guard later in add_conn
+                pre_scope = None
+
+        # secure the conn and then mux the conn
+        secured_conn: ISecureConn | None = None
+        muxed_conn: IMuxedConn | None = None
+        inbound_timeout = self.connection_config.inbound_upgrade_timeout
+
+        async def _cleanup_inbound_upgrade() -> None:
+            """Clean up all resources from a failed inbound upgrade."""
+            if muxed_conn is not None:
+                try:
+                    await muxed_conn.close()
+                except Exception:
+                    pass
+            if secured_conn is not None:
+                try:
+                    await secured_conn.close()
+                except Exception:
+                    pass
+            try:
+                await raw_conn.close()
+            except Exception:
+                pass
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+
+        try:
+            # Apply inbound_upgrade_timeout so a stalled security/muxer
+            # handshake cannot hang indefinitely.
+            with trio.fail_after(inbound_timeout):
+                try:
+                    secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
+                except SecurityUpgradeFailure as exc:
+                    logger.error(
+                        "failed to upgrade security for peer at %s: %s",
+                        maddr,
+                        exc,
+                        exc_info=True,
+                    )
+                    await _cleanup_inbound_upgrade()
+                    raise SwarmException(
+                        f"failed to upgrade security for peer at {maddr}"
+                    ) from exc
+                peer_id = secured_conn.get_remote_peer()
+
+                try:
+                    muxed_conn = await self.upgrader.upgrade_connection(
+                        secured_conn, peer_id
+                    )
+                except MuxerUpgradeFailure as error:
+                    logger.error("fail to upgrade mux for peer %s", peer_id)
+                    await _cleanup_inbound_upgrade()
+                    raise SwarmException(
+                        f"fail to upgrade mux for peer {peer_id}"
+                    ) from error
+                logger.debug("upgraded mux for peer %s", peer_id)
+        except trio.TooSlowError:
+            logger.debug(
+                "Inbound upgrade timeout (%.1fs) exceeded for %s",
+                inbound_timeout,
+                maddr,
+            )
+            await _cleanup_inbound_upgrade()
+            raise SwarmException(f"Inbound upgrade timeout exceeded for {maddr}")
+        except Exception:
+            await _cleanup_inbound_upgrade()
+            raise
+        # Pass endpoint IP to resource manager, if available
+        if self._resource_manager is not None:
+            try:
+                ep = None
+                if hasattr(secured_conn, "get_remote_address"):
+                    _endpoint = secured_conn.get_remote_address()
+                    if _endpoint is not None:
+                        ep = _endpoint[0]
+                # open_connection will enforce cidr/rate if configured
+                conn_scope = self._resource_manager.open_connection(
+                    peer_id, endpoint_ip=ep
+                )
+                if conn_scope is None:
+                    # Clean up connections
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await raw_conn.close()
+                    except Exception:
+                        pass
+                    # Clean up pre-scope
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                    except Exception:
+                        pass
+                    raise SwarmException("Connection denied by resource manager")
+                # Store on muxed_conn if possible for cleanup propagation
+                try:
+                    setattr(muxed_conn, "_resource_scope", conn_scope)
+                except Exception:
+                    pass
+                # Release any pre-upgrade scope now that we have a real scope
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                        pre_scope = None
+                except Exception:
+                    pass
+            except SwarmException:
+                # Re-raise SwarmExceptions (connection denied)
+                raise
+            except Exception:
+                # Let add_conn perform final guard if needed
+                pass
+
+        await self.add_conn(muxed_conn, direction="inbound")
+        logger.debug("successfully opened connection to peer %s", peer_id)
+
+        return muxed_conn
+
+    async def close(self) -> None:
+        """
+        Close the swarm instance and cleanup resources.
+        """
+        # Check if manager exists before trying to stop it
+        if hasattr(self, "_manager") and self._manager is not None:
+            await self._manager.stop()
+        else:
+            # Perform alternative cleanup if the manager isn't initialized
+            # Close all connections manually
+            if hasattr(self, "connections"):
+                for peer_id, conns in list(self.connections.items()):
+                    for conn in conns:
+                        await conn.close()
+
+                # Clear connection tracking dictionary
+                self.connections.clear()
+
+            # Close all listeners
+            if hasattr(self, "listeners"):
+                for maddr_str, listener in self.listeners.items():
+                    await listener.close()
+                    # Notify about listener closure
+                    try:
+                        multiaddr = Multiaddr(maddr_str)
+                        await self.notify_listen_close(multiaddr)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to notify listen_close for {maddr_str}: {e}"
+                        )
+                self.listeners.clear()
+
+            # Close all transports
+            await self.transport_manager.close_all()
+
+        logger.debug("swarm successfully closed")
+
+    async def close_peer(self, peer_id: ID) -> None:
+        """
+        Close all connections to the specified peer.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer ID to close connections for.
+
+        """
+        connections = self.get_connections(peer_id)
+        if not connections:
+            return
+
+        # Close all connections
+        for connection in connections:
+            try:
+                await connection.close()
+            except Exception as e:
+                logger.warning(f"Error closing connection to {peer_id}: {e}")
+
+        # Release stream resources for this peer
+        if self._resource_manager is not None:
+            # Release all streams for this peer (both inbound and outbound)
+            # Note: This is a simplified approach - in a real implementation,
+            # we would track individual streams and release them specifically
+            logger.debug("Releasing stream resources for peer %s", peer_id)
+
+        # Remove from connections dict
+        self.connections.pop(peer_id, None)
+
+        logger.debug("successfully close the connection to peer %s", peer_id)
+
+    async def add_conn(
+        self, muxed_conn: IMuxedConn, direction: str = "unknown"
+    ) -> "SwarmConn":
+        """
+        Add a `IMuxedConn` to `Swarm` as a `SwarmConn`, notify "connected",
+        and start to monitor the connection for its new streams and
+        disconnection.
+
+        Parameters
+        ----------
+        muxed_conn : IMuxedConn
+            The muxed connection to add
+        direction : str
+            Connection direction: "inbound" or "outbound". Default: "unknown"
+
+        """
+        # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
+        conn_scope = None
+        if self._resource_manager is not None:
+            try:
+                # Extract peer_id from any muxed connection type
+                peer_id_for_scope = muxed_conn.peer_id
+                conn_scope = self._resource_manager.open_connection(
+                    peer_id=peer_id_for_scope,
+                )
+                if conn_scope is None:
+                    # Resource manager denied the connection.
+                    # Keep the message concise so it fits within the
+                    # project's line-length limit.
+                    raise SwarmException(
+                        "Connection denied by resource manager: resource limit exceeded"
+                    )
+                # QUICConnection provides a hook to set scope and ensure cleanup
+                if hasattr(muxed_conn, "set_resource_scope"):
+                    # Type ignore: we've checked the attribute exists
+                    muxed_conn.set_resource_scope(conn_scope)  # type: ignore
+            except Exception as e:
+                # If resource guard denies, close connection and rethrow
+                try:
+                    await muxed_conn.close()
+                except Exception:
+                    pass
+                raise SwarmException(f"Connection denied by resource manager: {e}")
+
+        from .connection.swarm_connection import SwarmConn
+
+        swarm_conn = SwarmConn(
+            muxed_conn,
+            self,
+            direction=direction,
+        )
+        swarm_conn._metric_send_channel = self.metric_send_channel
+
+        # Set actual transport addresses and connection type from the muxed connection.
+        # This captures the real transport info (IP/port, direct vs relayed)
+        # to ensure it's available via the SwarmConn interface without
+        # needing to access raw_conn properties.
+        try:
+            addresses = muxed_conn.get_transport_addresses()
+            conn_type = muxed_conn.get_connection_type()
+            swarm_conn.set_transport_info(addresses, conn_type)
+        except (AttributeError, TypeError, ValueError) as e:
+            # Log expected errors at debug level (e.g., missing methods, invalid data)
+            logger.debug(
+                "Failed to set transport info for peer %s: %s",
+                muxed_conn.peer_id,
+                e,
+            )
+        except Exception as e:
+            # Log unexpected errors at warning level for investigation
+            logger.warning(
+                "Unexpected error setting transport info for peer %s: %s",
+                muxed_conn.peer_id,
+                e,
+                exc_info=True,
+            )
+
+        # For non-QUIC connections, set the resource scope on SwarmConn
+        if conn_scope is not None and not hasattr(muxed_conn, "set_resource_scope"):
+            swarm_conn.set_resource_scope(conn_scope)  # type: ignore
+        logger.debug("Swarm::add_conn | starting muxed connection")
+        self.manager.run_task(muxed_conn.start)
+        await muxed_conn.event_started.wait()
+        logger.debug(
+            f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
+        )
+        # Verify connection is fully established before proceeding.
+        # For QUIC connections, wait for the connected event.
+        # For other muxers (like Yamux/Mplex), check the is_established property.
+        # For some muxers (e.g. QUIC), wait for the connected event.
+        # For others (like Yamux/Mplex), check the is_established property.
+        if hasattr(muxed_conn, "_connected_event") and hasattr(
+            muxed_conn, "is_established"
+        ):
+            if not getattr(muxed_conn, "is_established"):
+                await getattr(muxed_conn, "_connected_event").wait()
+        elif not muxed_conn.is_established:
+            logger.warning(
+                f"Swarm::add_conn | muxer event_started set but "
+                f"is_established=False for peer {muxed_conn.peer_id}"
+            )
+        logger.debug("Swarm::add_conn | starting swarm connection")
+        self.manager.run_task(swarm_conn.start)
+        await swarm_conn.event_started.wait()
+
+        # Add to connections dict with deduplication
+        peer_id = muxed_conn.peer_id
+        if peer_id not in self.connections:
+            self.connections[peer_id] = []
+
+        # Check for duplicate connections by comparing the underlying muxed connection
+        for existing_conn in self.connections[peer_id]:
+            if existing_conn.muxed_conn == muxed_conn:
+                logger.debug(f"Connection already exists for peer {peer_id}")
+                # existing_conn is a SwarmConn since it's stored in the connections list
+                return existing_conn  # type: ignore[return-value]
+
+        self.connections[peer_id].append(swarm_conn)
+
+        # Trim if we exceed max connections per peer
+        max_conns = self.connection_config.max_connections_per_peer
+        if len(self.connections[peer_id]) > max_conns:
+            self._trim_connections(peer_id)
+
+        # Trigger connection pruning if global limit is exceeded
+        await self.connection_pruner.maybe_prune_connections()
+
+        # Call notifiers since event occurred
+        await self.notify_connected(swarm_conn)
+        return swarm_conn
+
+    def _build_remote_multiaddr(
+        self, read_write_closer: ReadWriteCloser
+    ) -> Multiaddr | None:
+        """
+        Build a Multiaddr from the remote address of a connection.
+
+        Parameters
+        ----------
+        read_write_closer : ReadWriteCloser
+            The connection to get the remote address from
+
+        Returns
+        -------
+        Multiaddr | None
+            The remote peer's multiaddr, or None if unavailable
+
+        """
+        remote_addr = read_write_closer.get_remote_address()
+        logger.debug(
+            f"[_build_remote_multiaddr] raw remote_addr from "
+            f"get_remote_address(): {remote_addr}"
+        )
+
+        if remote_addr is None:
+            logger.debug(
+                "[_build_remote_multiaddr] remote_addr is None, returning None"
+            )
+            return None
+
+        host, port = remote_addr
+        logger.debug(f"[_build_remote_multiaddr] host={host}, port={port}")
+
+        # Determine if IPv4 or IPv6
+        try:
+            ip = ipaddress.ip_address(host)
+            if isinstance(ip, ipaddress.IPv6Address):
+                result = Multiaddr(f"/ip6/{host}/tcp/{port}")
+                logger.debug(
+                    f"[_build_remote_multiaddr] Built IPv6 multiaddr: {result}"
+                )
+                return result
+            else:
+                result = Multiaddr(f"/ip4/{host}/tcp/{port}")
+                logger.debug(
+                    f"[_build_remote_multiaddr] Built IPv4 multiaddr: {result}"
+                )
+                return result
+        except ValueError:
+            # If not a valid IP address, assume IPv4
+            result = Multiaddr(f"/ip4/{host}/tcp/{port}")
+            logger.debug(
+                f"[_build_remote_multiaddr] Invalid IP (ValueError), "
+                f"assuming IPv4: {result}"
+            )
+            return result
+
+    def _trim_connections(self, peer_id: ID) -> None:
+        """
+        Remove oldest connections when limit is exceeded.
+        """
+        connections = self.connections[peer_id]
+        if len(connections) <= self.connection_config.max_connections_per_peer:
+            return
+
+        # Sort by creation time and remove oldest
+        # For now, just keep the most recent connections
+        max_conns = self.connection_config.max_connections_per_peer
+        connections_to_remove = connections[:-max_conns]
+
+        for conn in connections_to_remove:
+            logger.debug(f"Trimming old connection for peer {peer_id}")
+            trio.lowlevel.spawn_system_task(self._close_connection_async, conn)
+
+        # Keep only the most recent connections
+        max_conns = self.connection_config.max_connections_per_peer
+        self.connections[peer_id] = connections[-max_conns:]
+
+    async def _close_connection_async(self, connection: INetConn) -> None:
+        """Close a connection asynchronously."""
+        try:
+            await connection.close()
+        except Exception as e:
+            logger.warning(f"Error closing connection: {e}")
+
+    def remove_conn(self, swarm_conn: "SwarmConn") -> None:
+        """
+        Simply remove the connection from Swarm's records, without closing
+        the connection.
+        """
+        peer_id = swarm_conn.muxed_conn.peer_id
+
+        if peer_id in self.connections:
+            self.connections[peer_id] = [
+                conn for conn in self.connections[peer_id] if conn != swarm_conn
+            ]
+            if not self.connections[peer_id]:
+                del self.connections[peer_id]
+
+    # Notifee
+
+    def register_notifee(self, notifee: INotifee) -> None:
+        """
+        :param notifee: object implementing Notifee interface
+        :return: true if notifee registered successfully, false otherwise
+        """
+        self.notifees.append(notifee)
+
+    async def notify_opened_stream(self, stream: INetStream) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.opened_stream, self, stream)
+
+    async def notify_connected(self, conn: INetConn) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.connected, self, conn)
+
+    async def notify_disconnected(self, conn: INetConn) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.disconnected, self, conn)
+
+    async def notify_listen(self, multiaddr: Multiaddr) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.listen, self, multiaddr)
+
+    async def notify_closed_stream(self, stream: INetStream) -> None:
+        # Release RM + semaphore resources exactly once per stream
+        if not getattr(stream, "_resource_released", False):
+            stream._resource_released = True  # type: ignore[attr-defined]
+            direction = getattr(stream, "_direction", Direction.UNKNOWN)
+            if direction != Direction.UNKNOWN:
+                if self._resource_manager is not None:
+                    try:
+                        peer_id_str = str(stream.muxed_conn.peer_id)
+                        self._resource_manager.release_stream(peer_id_str, direction)
+                    except Exception:
+                        logger.debug(
+                            "failed to release RM stream resource", exc_info=True
+                        )
+                if self._stream_semaphore is not None:
+                    try:
+                        self._stream_semaphore.release()
+                    except Exception:
+                        logger.debug(
+                            "failed to release stream semaphore", exc_info=True
+                        )
+
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.closed_stream, self, stream)
+
+    async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifee.listen_close, self, multiaddr)
+
+    # Generic notifier used by NetStream._notify_closed
+    async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
+        async with trio.open_nursery() as nursery:
+            for notifee in self.notifees:
+                nursery.start_soon(notifier, notifee)
+
+    # Backward compatibility properties
+    @property
+    def connections_legacy(self) -> dict[ID, INetConn]:
+        """
+        Legacy 1:1 mapping for backward compatibility.
+
+        Returns
+        -------
+        dict[ID, INetConn]
+            Legacy mapping with only the first connection per peer.
+
+        """
+        legacy_conns = {}
+        for peer_id, conns in self.connections.items():
+            if conns:
+                legacy_conns[peer_id] = conns[0]
+        return legacy_conns

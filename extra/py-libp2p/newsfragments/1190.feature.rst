@@ -1,0 +1,1 @@
+Added AutoTLS support for QUIC transport, including QUIC address handling in the AutoTLS flow and loading cached ACME certificates for QUIC TLS configuration. Also propagated ``enable_autotls`` through normal host/swarm QUIC transport construction so QUIC nodes created via ``new_host`` can use AutoTLS when enabled.

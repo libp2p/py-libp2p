@@ -1,0 +1,21 @@
+{
+  "name": "js-libp2p-interop-test",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "ws_ping_node.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "JS libp2p node for py-libp2p interop testing",
+  "dependencies": {
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.0",
+    "@libp2p/ping": "^3.0.2",
+    "@libp2p/plaintext": "^2.0.29",
+    "@libp2p/websockets": "^10.0.3",
+    "libp2p": "^3.0.3"
+  }
+}
