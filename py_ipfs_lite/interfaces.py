@@ -143,6 +143,11 @@ class RoutingAdapter:
             elif hasattr(self._routing, "refresh_routing_table"):
                 return await self._routing.refresh_routing_table()
 
+    async def refresh_routing_table(self) -> None:
+        with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
+            if hasattr(self._routing, "refresh_routing_table"):
+                return await self._routing.refresh_routing_table()
+
     async def find_providers(self, key: str, count: int = 20) -> list[Any]:
         with IPFS_DHT_QUERY_LATENCY_SECONDS.time():
             return await self._routing.find_providers(key, count)

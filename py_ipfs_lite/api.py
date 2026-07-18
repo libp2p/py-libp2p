@@ -451,6 +451,22 @@ async def swarm_peers(request: Request) -> Any:
                             addr_str = str(c.remote_addr)
                         elif hasattr(c, "get_remote_multiaddr"):
                             addr_str = str(c.get_remote_multiaddr())
+                        elif hasattr(c, "muxed_conn") and hasattr(c.muxed_conn, "get_remote_address"):
+                            addr_str = str(c.muxed_conn.get_remote_address())
+                        elif hasattr(c, "get_transport_addresses") and c.get_transport_addresses():
+                            addr_str = str(c.get_transport_addresses()[0])
+                    except Exception:
+                        pass
+                    
+                    direction_val = 0
+                    try:
+                        if hasattr(c, "direction"):
+                            # Kubo: 0=Unknown, 1=Inbound, 2=Outbound
+                            dir_str = str(c.direction).upper()
+                            if "INBOUND" in dir_str:
+                                direction_val = 1
+                            elif "OUTBOUND" in dir_str:
+                                direction_val = 2
                     except Exception:
                         pass
 
@@ -458,7 +474,7 @@ async def swarm_peers(request: Request) -> Any:
                         {
                             "Peer": peer_id_obj.to_base58(),
                             "Addr": addr_str,
-                            "Direction": 0,
+                            "Direction": direction_val,
                         }
                     )
     except Exception as e:

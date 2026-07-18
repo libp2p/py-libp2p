@@ -144,6 +144,11 @@ class TieredRouting:
             elif hasattr(r, "refresh_routing_table"):
                 await r.refresh_routing_table()
 
+    async def refresh_routing_table(self) -> None:
+        for r in self.routers:
+            if hasattr(r, "refresh_routing_table"):
+                await r.refresh_routing_table()
+
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         all_providers = []
         seen_ids = set()

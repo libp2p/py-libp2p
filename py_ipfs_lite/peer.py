@@ -444,6 +444,14 @@ class Peer:
             bootstrap_addrs=peers,  # type: ignore[union-attr]
         )
         await discovery.start()
+        
+        # After bootstrap connections are established, force a routing table refresh
+        # to discover more peers before the bootstrap nodes drop our idle connection.
+        if self.routing and hasattr(self.routing, "refresh_routing_table"):
+            try:
+                await self.routing.refresh_routing_table()
+            except Exception as e:
+                logger.error(f"Failed to refresh routing table after bootstrap: {e}")
 
     async def add_file(
         self,
