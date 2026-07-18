@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from enum import Enum
 
@@ -66,7 +67,7 @@ class AddParams:
 
 @dataclass(slots=True)
 class CLIConfig:
-    port: int = 4001
-    api_port: int = 5001
+    port: int = int(os.getenv("IPFS_LITE_PORT", "4001"))
+    api_port: int = int(os.getenv("IPFS_LITE_API_PORT", "5001"))
     seed: str | None = None
     debug: bool = False
