@@ -16,11 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
+# Install uv
+RUN pip install uv
+
 # Copy project files
 COPY . .
 
 # Install the application
-RUN pip install uv && uv pip install --system .
+RUN uv pip install --system .
 
 # Expose the API and Swarm ports
 EXPOSE 5001
