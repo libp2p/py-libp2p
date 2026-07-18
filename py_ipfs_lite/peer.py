@@ -139,7 +139,7 @@ async def setup_libp2p(
     )
 
     if not offline:
-        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)
+        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True)
         return HostAdapter(raw_host), RoutingAdapter(raw_routing)
     return HostAdapter(raw_host), None
 
@@ -264,7 +264,7 @@ class Peer:
             return None
 
         raw_host = getattr(self.host, "_host", self.host)
-        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER)  # type: ignore[arg-type]
+        raw_routing = KadDHT(host=raw_host, mode=DHTMode.SERVER, enable_random_walk=True)  # type: ignore[arg-type]
         dht_adapter = RoutingAdapter(raw_routing)
 
         if getattr(self.config, "use_ipni", False):
