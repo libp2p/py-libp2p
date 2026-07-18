@@ -44,7 +44,7 @@ def _mock_net_stream(swarm_conn: Mock | None = None) -> NetStream:
     muxed_stream.close = AsyncMock()
     muxed_stream.reset = AsyncMock()
 
-    ns = NetStream(muxed_stream, swarm_conn)
+    ns = NetStream(muxed_stream, swarm_conn, None)
     return ns
 
 

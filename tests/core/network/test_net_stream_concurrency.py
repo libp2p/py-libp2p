@@ -5,11 +5,13 @@ This module tests the _state_lock functionality to ensure thread-safe
 access to stream state and prevent race conditions.
 """
 
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 import trio
 
+from libp2p.abc import IMuxedStream
 from libp2p.network.stream.net_stream import NetStream, StreamState
 
 
@@ -59,7 +61,11 @@ class MockMuxedStream:
 def mock_stream():
     """Create a mock NetStream for testing."""
     muxed_stream = MockMuxedStream()
-    stream = NetStream(muxed_stream=muxed_stream, swarm_conn=Mock())  # type: ignore[arg-type]
+    stream = NetStream(
+        muxed_stream=cast(IMuxedStream, muxed_stream),
+        swarm_conn=Mock(),
+        metric_send_channel=None,
+    )  # type: ignore[arg-type]
     return stream, muxed_stream
 
 
