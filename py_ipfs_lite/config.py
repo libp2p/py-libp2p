@@ -13,8 +13,8 @@ class Config:
     offline: bool = False
     reprovide_interval_seconds: int = 43200
     reprovider_strategy: str = "all"
-    conn_mgr_high_water: int = 900
-    conn_mgr_low_water: int = 600
+    conn_mgr_high_water: int = 300
+    conn_mgr_low_water: int = 100
     blockstore_type: BlockStoreType | str = "filesystem"
     blockstore_path: str | None = ".py_ipfs_lite/blocks"
     use_ipni: bool = False
