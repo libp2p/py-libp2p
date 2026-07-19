@@ -854,6 +854,11 @@ class Swarm(Service, INetworkService):
         except SecurityUpgradeFailure as error:
             logger.error("failed to upgrade security for peer %s: %s", peer_id, error)
             await raw_conn.close()
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
             raise SwarmException(
                 f"failed to upgrade security for peer {peer_id}: {error}"
             ) from error
@@ -1809,6 +1814,7 @@ class Swarm(Service, INetworkService):
         for existing_conn in self.connections[peer_id]:
             if existing_conn.muxed_conn == muxed_conn:
                 logger.debug(f"Connection already exists for peer {peer_id}")
+                await swarm_conn.close()
                 # existing_conn is a SwarmConn since it's stored in the connections list
                 return existing_conn  # type: ignore[return-value]
 

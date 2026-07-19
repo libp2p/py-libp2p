@@ -762,6 +762,8 @@ class ResourceManager:
             # Preserve endpoint on scope for release, then override close()
 
             def _close_with_endpoint() -> None:
+                if scope.closed:
+                    return
                 ep = getattr(scope, "_endpoint_ip", None)
                 self.release_connection(peer_id_str, endpoint_ip=ep)
                 scope.closed = True
