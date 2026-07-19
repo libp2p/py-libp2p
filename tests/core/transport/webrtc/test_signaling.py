@@ -13,14 +13,16 @@ from __future__ import annotations
 import pytest
 import trio
 
-from libp2p.transport.webrtc._varint import encode_uvarint as _encode_uvarint
 from libp2p.transport.webrtc.signaling import (
     SignalingSession,
-    _read_uvarint,
     read_signaling_message,
     write_signaling_message,
 )
 from libp2p.transport.webrtc.signaling_pb.signaling_pb2 import SignalingMessage
+from libp2p.utils.varint import (
+    decode_uvarint_from_stream as _read_uvarint,
+    encode_uvarint as _encode_uvarint,
+)
 
 
 class MockStream:

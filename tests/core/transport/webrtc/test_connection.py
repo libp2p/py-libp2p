@@ -124,8 +124,8 @@ class TestMessageRouting:
     async def test_on_channel_message_routes_to_stream(self):
         conn = _make_connection()
         stream = await conn.open_stream()
-        from libp2p.transport.webrtc._varint import encode_uvarint
         from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
+        from libp2p.utils.varint import encode_uvarint
 
         proto = Message(message=b"test-data").SerializeToString()
         framed = encode_uvarint(len(proto)) + proto
