@@ -454,7 +454,8 @@ class Peer:
                             from libp2p.peer.peerinfo import info_from_p2p_addr
 
                             info = info_from_p2p_addr(Multiaddr(addr_str))
-                            await self.host.connect(info)
+                            with trio.move_on_after(5):
+                                await self.host.connect(info)
                         except Exception as dial_err:
                             logger.debug(
                                 f"[ConnectionKeeper] Bootstrap dial failed: {dial_err}"
@@ -468,13 +469,20 @@ class Peer:
                         ) or self.routing
                         if hasattr(raw_routing, "refresh_routing_table"):
                             try:
-                                await raw_routing.refresh_routing_table()
+                                async def _do_refresh() -> None:
+                                    try:
+                                        await raw_routing.refresh_routing_table()
+                                        logger.info("[ConnectionKeeper] DHT routing table refresh finished")
+                                    except Exception as dht_err:
+                                        logger.debug(f"[ConnectionKeeper] DHT refresh error: {dht_err}")
+                                
+                                self._nursery.start_soon(_do_refresh)
                                 logger.info(
-                                    "[ConnectionKeeper] DHT routing table refresh triggered"
+                                    "[ConnectionKeeper] DHT routing table refresh triggered in background"
                                 )
                             except Exception as dht_err:
                                 logger.debug(
-                                    f"[ConnectionKeeper] DHT refresh error: {dht_err}"
+                                    f"[ConnectionKeeper] DHT refresh trigger error: {dht_err}"
                                 )
 
             except Exception as e:
