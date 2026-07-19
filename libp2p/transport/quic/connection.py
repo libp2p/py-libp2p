@@ -1385,10 +1385,32 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed = True
         self._closed_event.set()
 
+        # Release resource scope if present (mirrors close())
+        try:
+            scope = getattr(self, "_resource_scope", None)
+            if scope is not None:
+                if hasattr(scope, "close"):
+                    scope.close()
+                elif hasattr(scope, "release"):
+                    scope.release()
+                elif hasattr(scope, "done"):
+                    scope.done()
+                self._resource_scope = None
+        except Exception as e:
+            logger.debug(f"Error releasing resource scope: {e}")
+
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
 
         await self._notify_parent_of_termination()
+
+        # Notify swarm/on_close listeners so peer bookkeeping is cleaned up too —
+        # close() does this but this termination path bypassed it entirely.
+        if self.on_close:
+            try:
+                await self.on_close()
+            except Exception as e:
+                logger.debug(f"Error in on_close during termination: {e}")
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
         """Handle stream data events - create streams and add to accept queue."""
