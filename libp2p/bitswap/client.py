@@ -980,6 +980,8 @@ class BitswapClient:
                 blocks_to_send_v110,
                 presences_to_send,
             )
+        except Exception as e:
+            logger.error(f"Failed to send wantlist responses to {peer_id}: {e}")
         finally:
             await outbound_stream.close()
 
