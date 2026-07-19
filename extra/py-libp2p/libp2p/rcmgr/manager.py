@@ -376,6 +376,10 @@ class ResourceManager:
 
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
+                
+                # Recover gracefully degraded limits if resources are freed
+                if self.graceful_degradation:
+                    self.graceful_degradation.recover()
 
     # ---------------------------
     # Memory resources
@@ -459,6 +463,10 @@ class ResourceManager:
 
             # Update Prometheus metrics
             self._update_prometheus_metrics()
+            
+            # Recover gracefully degraded limits if resources are freed
+            if self.graceful_degradation:
+                self.graceful_degradation.recover()
 
     # ---------------------------
     # Stream resources (global)
@@ -526,6 +534,10 @@ class ResourceManager:
 
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
+                
+                # Recover gracefully degraded limits if resources are freed
+                if self.graceful_degradation:
+                    self.graceful_degradation.recover()
 
     # ---------------------------
     # Hierarchical scoped stream limits

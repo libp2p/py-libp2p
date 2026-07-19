@@ -133,6 +133,7 @@ RTT_MEASURE_INTERVAL = 30  # seconds between RTT measurements
 GO_AWAY_NORMAL = 0x0
 GO_AWAY_PROTOCOL_ERROR = 0x1
 GO_AWAY_INTERNAL_ERROR = 0x2
+GO_AWAY_CONN_GARBAGE_COLLECTED = 4101  # 0x1005 in go-libp2p
 
 
 class YamuxStream(IMuxedStream):
@@ -1270,11 +1271,16 @@ class Yamux(IMuxedConn):
                             f"Received GO_AWAY for peer{self.peer_id}: Protocol error"
                         )
                     elif error_code == GO_AWAY_INTERNAL_ERROR:
-                        logger.error(
+                        logger.debug(
                             f"Received GO_AWAY for peer {self.peer_id}: Internal error"
                         )
+                    elif error_code == GO_AWAY_CONN_GARBAGE_COLLECTED:
+                        # go-libp2p connection manager prunes idle connections after grace period
+                        logger.debug(
+                            f"Received GO_AWAY for peer {self.peer_id}: ConnGarbageCollected (Peer connection manager pruned idle connection)"
+                        )
                     else:
-                        logger.error(
+                        logger.warning(
                             f"Received GO_AWAY for peer {self.peer_id}"
                             f"with unknown error code: {error_code}"
                         )
