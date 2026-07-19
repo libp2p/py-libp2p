@@ -463,6 +463,8 @@ class BasicHost(IHost):
 
         @asynccontextmanager
         async def _run() -> AsyncIterator[None]:
+            import sys
+            sys.stderr.write("BASIC HOST _RUN CALLED\\n")
             network = self.get_network()
             async with background_trio_service(network):
                 await network.listen(*listen_addrs)
@@ -481,46 +483,23 @@ class BasicHost(IHost):
                     await self.bootstrap.start()
 
                 async with trio.open_nursery() as nursery:
+                    from libp2p.host.ping import PingService
+                    ping_service = PingService(self)
 
-                    async def keepalive_loop() -> None:
-                        active_ping_tasks: set[ID] = set()
+                    async def _safe_ping(peer_id: ID) -> None:
+                        import sys
+                        sys.stderr.write(f"SENDING KEEPALIVE PING TO {peer_id}\\n")
+                        try:
+                            with trio.fail_after(10.0):
+                                await ping_service.ping(peer_id, 1)
+                            sys.stderr.write(f"KEEPALIVE PING SUCCEEDED FOR {peer_id}\\n")
+                        except Exception as e:
+                            sys.stderr.write(f"KEEPALIVE PING FAILED FOR {peer_id}: {type(e)} {e}\\n")
 
-                        async def hold_ping_stream(peer_id: ID) -> None:
-                            try:
-                                import secrets
-
-                                stream = await self.new_stream(
-                                    peer_id, ["/ipfs/ping/1.0.0"]
-                                )
-                                try:
-                                    while True:
-                                        ping_bytes = secrets.token_bytes(32)
-                                        await stream.write(ping_bytes)
-                                        await stream.read(32)
-                                        await trio.sleep(15.0)
-                                finally:
-                                    await stream.close()
-                            except Exception as e:
-                                logger.debug(
-                                    f"Keepalive stream ended for {peer_id}: {e}"
-                                )
-                                await trio.sleep(10.0)  # Delay before allowing retry
-                            finally:
-                                active_ping_tasks.discard(peer_id)
-
-                        while True:
-                            try:
-                                for peer_id in list(self._network.connections.keys()):
-                                    if peer_id not in active_ping_tasks:
-                                        active_ping_tasks.add(peer_id)
-                                        nursery.start_soon(hold_ping_stream, peer_id)
-                            except Exception as e:
-                                logger.debug(f"Error in keepalive loop: {e}")
-                            await trio.sleep(5.0)
-
-                    nursery.start_soon(keepalive_loop)
 
                     try:
+                        import sys
+                        sys.stderr.write("BASIC HOST YIELDING\\n")
                         yield
                     finally:
                         nursery.cancel_scope.cancel()

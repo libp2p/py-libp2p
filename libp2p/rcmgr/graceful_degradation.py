@@ -79,7 +79,7 @@ class GracefulDegradation:
             return False
 
         self.degradation_level += 1
-        reduction_factor = 1.0 - (self.degradation_level * self.degradation_factor)
+        reduction_factor = max(0.5, 1.0 - (self.degradation_level * self.degradation_factor))
 
         if resource_type == "connections":
             return self._degrade_connections(reduction_factor)
@@ -201,7 +201,7 @@ class GracefulDegradation:
         if self.original_limits is None:
             return
 
-        reduction_factor = 1.0 - (self.degradation_level * self.degradation_factor)
+        reduction_factor = max(0.5, 1.0 - (self.degradation_level * self.degradation_factor))
 
         self.rm.limits.max_connections = int(
             self.original_limits.max_connections * reduction_factor

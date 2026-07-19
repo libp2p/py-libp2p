@@ -143,35 +143,38 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        connected = 0
-        for peer_id in candidates:
-            if connected >= needed:
-                break
+        # We need to limit concurrency to avoid OS "Too many open files" errors (e.g. limit to 20 concurrent dials)
+        dial_limiter = trio.CapacityLimiter(20)
 
-            if self._should_skip_peer(peer_id):
-                continue
+        async def _dial_candidate(peer_id: ID) -> None:
+            async with dial_limiter:
+                try:
+                    # Mark that we're attempting to connect
+                    self._last_connect_attempt[peer_id] = time.time()
+                    logger.debug(f"Auto-connecting to peer {peer_id}")
+                    with trio.move_on_after(self.swarm.connection_config.dial_timeout):
+                        await self.swarm.dial_peer(peer_id)
+                    logger.info(f"Auto-connected to peer {peer_id}")
+                except Exception as e:
+                    logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
 
-            try:
-                # Mark that we're attempting to connect
-                self._last_connect_attempt[peer_id] = time.time()
+        try:
+            async with trio.open_nursery() as dial_nursery:
+                dialed = 0
+                for peer_id in candidates:
+                    if dialed >= needed:
+                        break
 
-                # Get addresses for the peer
-                addrs = self.swarm.peerstore.addrs(peer_id)
-                if not addrs:
-                    logger.debug(f"No addresses for peer {peer_id}")
-                    continue
+                    if self._should_skip_peer(peer_id):
+                        continue
+                        
+                    dial_nursery.start_soon(_dial_candidate, peer_id)
+                    dialed += 1
+        except Exception as e:
+            logger.error(f"Error in auto_connect dial nursery: {e}")
 
-                # Try to connect
-                logger.debug(f"Auto-connecting to peer {peer_id}")
-                await self.swarm.dial_peer(peer_id)
-                connected += 1
-                logger.info(f"Auto-connected to peer {peer_id}")
-
-            except Exception as e:
-                logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
-
-        if connected > 0:
-            logger.info(f"Auto-connected to {connected} new peers")
+        if dialed > 0:
+            logger.info(f"Auto-connected to {dialed} new peers")
 
     async def _get_candidate_peers(self) -> list[ID]:
         """
