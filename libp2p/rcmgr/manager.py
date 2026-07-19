@@ -374,6 +374,10 @@ class ResourceManager:
                     except Exception:
                         pass
 
+                # Attempt to recover degraded limits when resources free up
+                if self.graceful_degradation:
+                    self.graceful_degradation.recover()
+
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
 
