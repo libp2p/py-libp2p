@@ -447,43 +447,21 @@ async def swarm_peers(request: Request) -> Any:
             for peer_id_obj, conns in conns_dict.items():
                 if not isinstance(conns, list):
                     conns = [conns]
-
-                for c in conns:
-                    addr_str = ""
+                for conn in conns:
+                    addr_str = "unknown"
                     try:
-                        if hasattr(c, "remote_addr"):
-                            addr_str = str(c.remote_addr)
-                        elif hasattr(c, "get_remote_multiaddr"):
-                            addr_str = str(c.get_remote_multiaddr())
-                        elif hasattr(c, "muxed_conn") and hasattr(
-                            c.muxed_conn, "get_remote_address"
-                        ):
-                            addr_str = str(c.muxed_conn.get_remote_address())
-                        elif (
-                            hasattr(c, "get_transport_addresses")
-                            and c.get_transport_addresses()
-                        ):
-                            addr_str = str(c.get_transport_addresses()[0])
+                        if hasattr(conn, "remote_addr"):
+                            addr_str = str(conn.remote_addr)
+                        elif hasattr(conn, "get_remote_multiaddr"):
+                            addr_str = str(conn.get_remote_multiaddr())
                     except Exception:
                         pass
-
-                    direction_val = 0
-                    try:
-                        if hasattr(c, "direction"):
-                            # Kubo: 0=Unknown, 1=Inbound, 2=Outbound
-                            dir_str = str(c.direction).upper()
-                            if "INBOUND" in dir_str:
-                                direction_val = 1
-                            elif "OUTBOUND" in dir_str:
-                                direction_val = 2
-                    except Exception:
-                        pass
-
+                    
                     peers_data.append(
                         {
                             "Peer": peer_id_obj.to_base58(),
                             "Addr": addr_str,
-                            "Direction": direction_val,
+                            "Direction": 0,
                         }
                     )
     except Exception as e:

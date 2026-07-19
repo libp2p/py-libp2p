@@ -245,6 +245,8 @@ class Peer:
         return peer
 
     async def _create_host(self) -> Any:
+        from libp2p.transport.quic.config import QUICTransportConfig
+
         maddrs = [Multiaddr(a) if isinstance(a, str) else a for a in self._listen_addrs]
         noise_key_pair = create_new_x25519_key_pair()
         sec_opt = {
@@ -253,13 +255,18 @@ class Peer:
             ),
         }
         has_quic = any("quic" in str(a) for a in maddrs)
+        # Use a 600-second idle timeout to match go-libp2p defaults.
+        # 30s (the old default) caused connections to die while idle between DHT queries.
+        quic_cfg = QUICTransportConfig(idle_timeout=600.0) if has_quic else None
         raw_host = new_host(
             key_pair=self._host_key,
             listen_addrs=maddrs,
             sec_opt=sec_opt,  # type: ignore[arg-type]
             enable_quic=has_quic,
+            connection_config=quic_cfg,
         )
         return HostAdapter(raw_host)
+
 
     async def _create_routing(self) -> Any:
         if self.config.offline:
@@ -384,6 +391,7 @@ class Peer:
 
                 await self._auto_connector.run_background_task(self._nursery)  # type: ignore[attr-defined]
                 self._nursery.start_soon(self._periodic_pruner_task)
+                self._nursery.start_soon(self._connection_keeper_task)
 
             await self._exchange.start()
 
@@ -405,6 +413,74 @@ class Peer:
                 except Exception as e:
                     logger.debug(f"Error in connection pruner: {e}")
             await trio.sleep(15.0)
+
+    async def _connection_keeper_task(self) -> None:
+        """
+        Proactively maintain connections in [low_water, high_water] range.
+
+        Runs every 30 seconds. If active connections drop below low_watermark (100),
+        re-dials bootstrap peers and triggers a DHT random walk to discover new peers.
+        This ensures the node actively builds up its peer set rather than passively
+        waiting for inbound connections.
+        """
+        if hasattr(self, "_started_event"):
+            await self._started_event.wait()
+
+        # Give the node 20 seconds to connect to initial bootstrap peers first
+        await trio.sleep(20.0)
+
+        while self._started:
+            try:
+                raw_swarm = getattr(self.host, "_host", self.host).get_network()
+                total = raw_swarm.get_total_connections()
+                low = self.config.conn_mgr_low_water
+
+                logger.info(
+                    f"[ConnectionKeeper] {total} active connections "
+                    f"(low_water={low}, high_water={self.config.conn_mgr_high_water})"
+                )
+
+                if total < low:
+                    logger.info(
+                        f"[ConnectionKeeper] Below low watermark ({total} < {low}), "
+                        "re-dialing bootstrap peers and triggering DHT walk"
+                    )
+
+                    # Step 1: Re-dial a handful of bootstrap peers.
+                    # They are always reachable and hand us fresh peer addresses.
+                    bootstrap_addrs = default_bootstrap_peers()[:6]
+                    for addr_str in bootstrap_addrs:
+                        try:
+                            from libp2p.peer.peerinfo import info_from_p2p_addr
+
+                            info = info_from_p2p_addr(Multiaddr(addr_str))
+                            await self.host.connect(info)
+                        except Exception as dial_err:
+                            logger.debug(
+                                f"[ConnectionKeeper] Bootstrap dial failed: {dial_err}"
+                            )
+
+                    # Step 2: Trigger a DHT random walk so we discover peers
+                    # not in the peerstore yet.
+                    if self.routing:
+                        raw_routing = getattr(self.routing, "_routing", None) or getattr(
+                            self.routing, "_delegate", None
+                        ) or self.routing
+                        if hasattr(raw_routing, "refresh_routing_table"):
+                            try:
+                                await raw_routing.refresh_routing_table()
+                                logger.info(
+                                    "[ConnectionKeeper] DHT routing table refresh triggered"
+                                )
+                            except Exception as dht_err:
+                                logger.debug(
+                                    f"[ConnectionKeeper] DHT refresh error: {dht_err}"
+                                )
+
+            except Exception as e:
+                logger.debug(f"[ConnectionKeeper] Unexpected error: {e}")
+
+            await trio.sleep(30.0)
 
     async def __aenter__(self) -> "Peer":
         if not self._started:
