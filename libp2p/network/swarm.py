@@ -781,6 +781,15 @@ class Swarm(Service, INetworkService):
             )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
+                
+                # Release pre-upgrade scope now that we have a real scope in add_conn
+                try:
+                    if pre_scope is not None and hasattr(pre_scope, "close"):
+                        pre_scope.close()
+                        pre_scope = None
+                except Exception:
+                    pass
+                    
                 return swarm_conn
             except Exception:
                 # Clean up on failure
