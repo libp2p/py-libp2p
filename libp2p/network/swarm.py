@@ -769,6 +769,14 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
             raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
+        except BaseException as e:
+            # Clean up on BaseException like trio.Cancelled
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
+            except Exception:
+                pass
+            raise
 
         # Detect pre-multiplexed connections generically via the IMuxedConn
         # interface instead of isinstance(transport, QUICTransport).
@@ -791,8 +799,8 @@ class Swarm(Service, INetworkService):
                     pass
                     
                 return swarm_conn
-            except Exception:
-                # Clean up on failure
+            except BaseException:
+                # Clean up on failure or cancellation
                 try:
                     await raw_conn.close()
                 except Exception:
@@ -811,10 +819,15 @@ class Swarm(Service, INetworkService):
             swarm_conn = await self.upgrade_outbound_raw_conn(
                 raw_conn, peer_id, pre_scope
             )
-        except Exception:
-            # Ensure raw_conn is closed if upgrade fails
+        except BaseException:
+            # Ensure raw_conn is closed if upgrade fails or is cancelled
             try:
                 await raw_conn.close()
+            except Exception:
+                pass
+            try:
+                if pre_scope is not None and hasattr(pre_scope, "close"):
+                    pre_scope.close()
             except Exception:
                 pass
             raise
@@ -886,8 +899,8 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
             raise SwarmException(f"failed to upgrade mux for peer {peer_id}") from error
-        except Exception:
-            # Ensure cleanup on any unexpected exception
+        except BaseException:
+            # Ensure cleanup on any unexpected exception or cancellation
             if secured_conn is not None:
                 try:
                     await secured_conn.close()
@@ -1552,7 +1565,7 @@ class Swarm(Service, INetworkService):
             )
             await _cleanup_inbound_upgrade()
             raise SwarmException(f"Inbound upgrade timeout exceeded for {maddr}")
-        except Exception:
+        except BaseException:
             await _cleanup_inbound_upgrade()
             raise
         # Pass endpoint IP to resource manager, if available
