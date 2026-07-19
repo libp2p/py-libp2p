@@ -1621,11 +1621,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Release resource scope if present
             try:
                 scope = getattr(self, "_resource_scope", None)
-                if scope is not None and hasattr(scope, "done"):
-                    scope.done()
+                if scope is not None:
+                    if hasattr(scope, "close"):
+                        scope.close()
+                    elif hasattr(scope, "release"):
+                        scope.release()
+                    elif hasattr(scope, "done"):
+                        scope.done()
                     self._resource_scope = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error releasing resource scope: {e}")
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")
