@@ -62,7 +62,9 @@ class QUICTransportConfig(ConnectionConfig):
     """Configuration for QUIC transport."""
 
     # Connection settings
-    idle_timeout: float = 30.0  # Seconds before an idle connection is closed.
+    idle_timeout: float = 600.0  # Seconds before an idle connection is closed.
+                                  # Matches go-libp2p default (10 minutes).
+
     max_datagram_size: int = (
         1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
     )
