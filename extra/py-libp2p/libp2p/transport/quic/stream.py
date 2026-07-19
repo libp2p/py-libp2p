@@ -728,11 +728,16 @@ class QUICStream(IMuxedStream):
         # before surfacing EOF/reset.
 
         # Release resource scope if present
-        if self._resource_scope and hasattr(self._resource_scope, "done"):
+        if self._resource_scope:
             try:
-                self._resource_scope.done()
+                if hasattr(self._resource_scope, "close"):
+                    self._resource_scope.close()
+                elif hasattr(self._resource_scope, "release"):
+                    self._resource_scope.release()
+                elif hasattr(self._resource_scope, "done"):
+                    self._resource_scope.done()
             except Exception as e:
-                logger.warning(f"Error releasing resource scope: {e}")
+                logger.warning(f"Error releasing stream resource scope: {e}")
             self._resource_scope = None
 
         # Remove from connection's stream registry
