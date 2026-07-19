@@ -220,6 +220,11 @@ class SwarmConn(INetConn):
                 except MuxedConnUnavailable:
                     await self.close()
                     break
+                except Exception as e:
+                    # Catch QUICConnectionClosedError and other unexpected disconnects
+                    logging.debug(f"Connection closed for peer {self.muxed_conn.peer_id}: {e}")
+                    await self.close()
+                    break
                 # Asynchronously handle the accepted stream, to avoid blocking
                 # the next stream.
                 nursery.start_soon(self._handle_muxed_stream, stream)
