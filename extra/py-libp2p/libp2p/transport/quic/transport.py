@@ -292,6 +292,8 @@ class QUICTransport(ITransport):
                 client_tls_config = self._security_manager.create_client_config()
                 self._apply_tls_configuration(config, client_tls_config)
 
+            config.is_client = True
+
             # Debug log to verify certificate is present
             logger.info(
                 f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
