@@ -1712,8 +1712,8 @@ class Swarm(Service, INetworkService):
 
         """
         # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
-        conn_scope = None
-        if self._resource_manager is not None:
+        conn_scope = getattr(muxed_conn, "_resource_scope", None)
+        if self._resource_manager is not None and conn_scope is None:
             try:
                 # Extract peer_id from any muxed connection type
                 peer_id_for_scope = muxed_conn.peer_id
