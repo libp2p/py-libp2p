@@ -59,7 +59,6 @@ class RTRefreshManager:
             query_function: Function to query for closest peers given target key bytes
             enable_auto_refresh: Whether to enable automatic refresh
             refresh_interval: Interval between refreshes in seconds
-            min_refresh_threshold: Minimum RT size before triggering refresh
 
         """
         self.host = host
