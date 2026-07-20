@@ -20,6 +20,7 @@ from .exceptions import (
     QUICStreamResetError,
     QUICStreamTimeoutError,
 )
+from libp2p.stream_muxer.exceptions import MuxedStreamEOF
 
 try:
     from aioquic.quic.connection import (
@@ -42,7 +43,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class _QUICStreamEOF(IOException, EOFError):
+class _QUICStreamEOF(IOException, EOFError, MuxedStreamEOF):
     """
     Raised by QUICStream.read() when the stream has reached EOF (FIN received)
     and the receive buffer is empty.
