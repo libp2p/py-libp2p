@@ -557,10 +557,13 @@ class RoutingTable:
         for bucket in self.buckets:
             all_peers.extend(bucket.peer_ids())
 
+        # Hash the target key to map it into the DHT keyspace
+        target_hash = hashlib.sha256(key).digest()
+
         # Sort by XOR distance to the key
         def distance_to_key(peer_id: ID) -> int:
             peer_key = peer_id_to_key(peer_id)
-            return xor_distance(peer_key, key)
+            return xor_distance(peer_key, target_hash)
 
         all_peers.sort(key=distance_to_key)
 

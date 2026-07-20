@@ -190,13 +190,15 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
         List[ID]: Sorted list of peer IDs from closest to furthest
 
     """
+    # Hash the target key to map it into the DHT keyspace
+    target_hash = hashlib.sha256(target_key).digest()
 
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
         digest = hashlib.sha256(peer_id.to_bytes()).digest()
         mh_bytes = multihash.encode(digest, "sha2-256")
         peer_hash = multihash.decode(mh_bytes).digest
-        return xor_distance(target_key, peer_hash)
+        return xor_distance(target_hash, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
 
