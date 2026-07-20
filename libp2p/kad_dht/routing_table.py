@@ -127,31 +127,26 @@ class KBucket:
             return False
 
         # Check if the old peer is responsive to ping request
-        try:
-            # Try to ping the oldest peer, not the new peer
-            response = await self._ping_peer(oldest_peer_id)
-            if response:
-                # If the old peer is still alive, we will not add the new peer
-                logger.debug(
-                    "Old peer %s is still alive, cannot add new peer %s",
-                    oldest_peer_id,
-                    peer_id,
-                )
-                return False
-        except Exception as e:
-            # If the old peer is unresponsive, we can replace it with the new peer
+        # Try to ping the oldest peer, not the new peer
+        response = await self._ping_peer(oldest_peer_id)
+        if response:
+            # If the old peer is still alive, we will not add the new peer
             logger.debug(
-                "Old peer %s is unresponsive, replacing with new peer %s: %s",
+                "Old peer %s is still alive, cannot add new peer %s",
                 oldest_peer_id,
                 peer_id,
-                str(e),
+            )
+            return False
+        else:
+            # If the old peer is unresponsive, we can replace it with the new peer
+            logger.debug(
+                "Old peer %s is unresponsive, replacing with new peer %s",
+                oldest_peer_id,
+                peer_id,
             )
             self.peers.popitem(last=False)  # Remove oldest peer
             self.peers[peer_id] = (peer_info, current_time)
             return True
-
-        # If we got here, the oldest peer responded but we couldn't add the new peer
-        return False
 
     def remove_peer(self, peer_id: ID) -> bool:
         """
@@ -333,7 +328,6 @@ class KBucket:
 
             finally:
                 await stream.close()
-                return result
 
         except Exception as e:
             logger.error(f"Error pinging peer {peer_id}: {str(e)}")
