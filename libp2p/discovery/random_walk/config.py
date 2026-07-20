@@ -7,7 +7,6 @@ REFRESH_INTERVAL: Final[float] = 300.0  # 5 minutes
 SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD: Final[float] = 60.0  # 1 minute
 
 # Routing table thresholds
-MIN_RT_REFRESH_THRESHOLD: Final[int] = 4  # Minimum peers before triggering refresh
 MAX_N_BOOTSTRAPPERS: Final[int] = 2  # Maximum bootstrap peers to try
 
 # Random walk specific

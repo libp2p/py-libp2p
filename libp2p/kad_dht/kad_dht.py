@@ -146,7 +146,6 @@ class KadDHT(Service):
         enable_providers: bool = True,
         enable_values: bool = True,
         strict_validation: bool = False,
-        random_walk_peer_target: int | None = None,
     ):
         """
         Initialize a new Kademlia DHT node.
@@ -234,17 +233,12 @@ class KadDHT(Service):
         # Initialize RT Refresh Manager (only if random walk is enabled)
         self.rt_refresh_manager: RTRefreshManager | None = None
         if self.enable_random_walk:
-            kwargs = {}
-            if random_walk_peer_target is not None:
-                kwargs["min_refresh_threshold"] = random_walk_peer_target
-
             self.rt_refresh_manager = RTRefreshManager(
                 host=self.host,
                 routing_table=self.routing_table,
                 local_peer_id=self.local_peer_id,
                 query_function=self._create_query_function(),
                 enable_auto_refresh=True,
-                **kwargs
             )
 
         # Set protocol handlers

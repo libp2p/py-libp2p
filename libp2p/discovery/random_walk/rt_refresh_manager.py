@@ -7,7 +7,6 @@ import trio
 
 from libp2p.abc import IHost
 from libp2p.discovery.random_walk.config import (
-    MIN_RT_REFRESH_THRESHOLD,
     RANDOM_WALK_CONCURRENCY,
     RANDOM_WALK_ENABLED,
     REFRESH_INTERVAL,
@@ -49,7 +48,6 @@ class RTRefreshManager:
         query_function: Callable[[bytes], Awaitable[list[ID]]],
         enable_auto_refresh: bool = RANDOM_WALK_ENABLED,
         refresh_interval: float = REFRESH_INTERVAL,
-        min_refresh_threshold: int = MIN_RT_REFRESH_THRESHOLD,
     ):
         """
         Initialize RT Refresh Manager.
@@ -71,7 +69,6 @@ class RTRefreshManager:
 
         self.enable_auto_refresh = enable_auto_refresh
         self.refresh_interval = refresh_interval
-        self.min_refresh_threshold = min_refresh_threshold
 
         # Initialize random walk module
         self.random_walk = RandomWalk(
@@ -153,10 +150,6 @@ class RTRefreshManager:
             if not force:
                 if current_time - self._last_refresh_time < self.refresh_interval:
                     logger.debug("Skipping refresh: interval not elapsed")
-                    return
-
-                if self.routing_table.size() >= self.min_refresh_threshold:
-                    logger.debug("Skipping refresh: routing table size above threshold")
                     return
 
             logger.info(f"Starting routing table refresh (force={force})")
