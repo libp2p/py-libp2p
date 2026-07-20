@@ -732,15 +732,40 @@ class WebsocketTransport(ITransport):
                     "WebSocket transport requires Swarm to set background nursery."
                 )
 
-            # Create the WebSocket connection using the Swarm's background nursery
-            # This nursery stays alive for the lifetime of the Swarm service
-            ws = await connect_websocket_url(
-                self._background_nursery,
-                ws_url,
-                ssl_context=ssl_context,
-                message_queue_size=1024,
-                max_message_size=self._config.max_message_size,
-            )
+            # We use a dedicated nursery for each websocket connection.
+            # trio-websocket's connect_websocket_url spawns background tasks (reader/writer).
+            # If those fail (e.g. Handshake fails, or server sends HTTP 200 instead of 101),
+            # they raise exceptions that would otherwise crash the global Swarm nursery.
+            send_channel, receive_channel = trio.open_memory_channel(0)
+            
+            async def _connect_and_run():
+                try:
+                    async with trio.open_nursery() as ws_nursery:
+                        ws_conn = await connect_websocket_url(
+                            ws_nursery,
+                            ws_url,
+                            ssl_context=ssl_context,
+                            message_queue_size=1024,
+                            max_message_size=self._config.max_message_size,
+                        )
+                        await send_channel.send(ws_conn)
+                        # The nursery blocks here while the connection is alive,
+                        # managing the background reader/writer tasks.
+                except BaseException as e:
+                    with trio.CancelScope(shield=True):
+                        try:
+                            await send_channel.send(e)
+                        except trio.BrokenResourceError:
+                            # Channel was closed (e.g., dial completed, connection dropped later)
+                            pass
+                            
+            self._background_nursery.start_soon(_connect_and_run)
+            
+            result = await receive_channel.receive()
+            if isinstance(result, BaseException):
+                raise OpenConnectionError(f"WebSocket handshake failed: {result}") from result
+                
+            ws = result
 
             # Create our connection wrapper
             conn = P2PWebSocketConnection(
