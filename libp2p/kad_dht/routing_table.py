@@ -481,41 +481,28 @@ class RoutingTable:
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
 
-            # Try to add to the bucket
+            # Keep splitting the bucket if it's full, we don't already have the peer,
+            # and it contains our local ID. We might need to split multiple times
+            # if all peers in the bucket happen to fall into the same half.
+            while bucket.size() >= bucket.bucket_size and not bucket.has_peer(peer_id):
+                if self._should_split_bucket(bucket):
+                    logger.debug(f"Bucket full, attempting to split for peer {peer_id}")
+                    if self._split_bucket(bucket):
+                        # Re-find the bucket for this peer after the split
+                        bucket = self.find_bucket(peer_id)
+                    else:
+                        break
+                else:
+                    break
+
+            # Now try to add to the bucket. If it's still full (couldn't split),
+            # this will ping the oldest peer and replace it if unresponsive.
             success = await bucket.add_peer(peer_info)
             if success:
                 logger.debug(f"Successfully added peer {peer_id} to routing table")
                 return True
-
-            # If bucket is full and couldn't add peer, try splitting the bucket
-            # Only split if the bucket contains our Peer ID
-            if self._should_split_bucket(bucket):
-                logger.debug(
-                    f"Bucket is full, attempting to split bucket for peer {peer_id}"
-                )
-                split_success = self._split_bucket(bucket)
-                if split_success:
-                    # After splitting,
-                    # find the appropriate bucket for the peer and try to add it
-                    target_bucket = self.find_bucket(peer_info.peer_id)
-                    success = await target_bucket.add_peer(peer_info)
-                    if success:
-                        logger.debug(
-                            f"Successfully added peer {peer_id} after bucket split"
-                        )
-                        return True
-                    else:
-                        logger.debug(
-                            f"Failed to add peer {peer_id} even after bucket split"
-                        )
-                        return False
-                else:
-                    logger.debug(f"Failed to split bucket for peer {peer_id}")
-                    return False
             else:
-                logger.debug(
-                    f"Bucket is full and cannot be split, peer {peer_id} not added"
-                )
+                logger.debug(f"Bucket full and cannot split, peer {peer_id} dropped")
                 return False
 
         except Exception as e:
