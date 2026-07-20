@@ -161,9 +161,9 @@ class AutoConnector:
         try:
             async with trio.open_nursery() as dial_nursery:
                 dialed = 0
-                # We overdial (needed * 5) because in a P2P network, most dials will fail
+                # We overdial (needed * 2) because in a P2P network, most dials will fail
                 # due to offline peers, NAT traversal issues, or obsolete addresses.
-                dial_target = needed * 5
+                dial_target = needed * 2
                 
                 for peer_id in candidates:
                     if dialed >= dial_target:
