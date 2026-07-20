@@ -687,7 +687,20 @@ class RoutingTable:
             f"local_key_int: {local_key_int}, contains_local: {contains_local_id}"
         )
 
-        return contains_local_id
+        # Strict Kademlia only splits if it contains the local ID.
+        # However, to improve discovery and routing table size for nodes
+        # that don't receive many incoming connections, we relax this rule
+        # and allow splitting far buckets until we reach a reasonable depth.
+        if contains_local_id:
+            return True
+            
+        # Allow splitting any bucket if we have fewer than MAXIMUM_BUCKETS / 2 buckets.
+        # This allows the routing table to grow and store more peers even if they
+        # are not close to our local ID.
+        if len(self.buckets) < (MAXIMUM_BUCKETS // 2):
+            return True
+
+        return False
 
     def _split_bucket(self, bucket: KBucket) -> bool:
         """
