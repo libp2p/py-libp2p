@@ -769,7 +769,7 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
             raise SwarmException(f"Unexpected error dialing peer {peer_id}") from e
-        except BaseException as e:
+        except BaseException:
             # Clean up on BaseException like trio.Cancelled
             try:
                 if pre_scope is not None and hasattr(pre_scope, "close"):
@@ -789,7 +789,7 @@ class Swarm(Service, INetworkService):
             )
             try:
                 swarm_conn = await self.add_conn(raw_conn, direction="outbound")
-                
+
                 # Release pre-upgrade scope now that we have a real scope in add_conn
                 try:
                     if pre_scope is not None and hasattr(pre_scope, "close"):
@@ -797,7 +797,7 @@ class Swarm(Service, INetworkService):
                         pre_scope = None
                 except Exception:
                     pass
-                    
+
                 return swarm_conn
             except BaseException:
                 # Clean up on failure or cancellation

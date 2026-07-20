@@ -14,9 +14,9 @@ def test_miniupnpc_api_surface() -> None:
     )
     for method_name in required_methods:
         assert hasattr(gateway, method_name), f"UPnP missing method: {method_name}"
-        assert callable(
-            getattr(gateway, method_name)
-        ), f"UPnP attribute is not callable: {method_name}"
+        assert callable(getattr(gateway, method_name)), (
+            f"UPnP attribute is not callable: {method_name}"
+        )
 
     assert hasattr(gateway, "lanaddr"), "UPnP missing attribute: lanaddr"
     lanaddr = gateway.lanaddr

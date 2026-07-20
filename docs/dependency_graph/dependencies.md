@@ -12,8 +12,8 @@ Total: 28 dependencies
 - **base58** (>=1.0.3)
 - **cbor2** (>=5.4.0)
 - **coincurve** (==21.0.0)
-- **exceptiongroup** (>=1.2.0) \[python_version \< '3.11'\]
-- **fastecdsa** (==2.3.2) \[sys_platform != 'win32'\]
+- **exceptiongroup** (>=1.2.0) [python_version < '3.11']
+- **fastecdsa** (==2.3.2) [sys_platform != 'win32']
 - **grpcio** (>=1.41.0)
 - **httpx** (>=0.25.0)
 - **lru-dict** (>=1.1.6)

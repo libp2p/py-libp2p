@@ -137,9 +137,9 @@ async def test_dcutr_through_relay_connection():
                         await trio.sleep(0.2)
 
                         # Verify that the DCUtR stream handler was called on peer2
-                        assert (
-                            handler2_called
-                        ), "DCUtR stream handler should have been called on peer2"
+                        assert handler2_called, (
+                            "DCUtR stream handler should have been called on peer2"
+                        )
 
                         # Close the stream
                         await stream.close()
@@ -261,15 +261,15 @@ async def test_dcutr_relay_to_direct_upgrade():
                         await trio.sleep(0.2)
 
                         # Verify that the CONNECT message was received
-                        assert (
-                            len(messages_received) == 1
-                        ), "Should have received one message"
-                        assert (
-                            messages_received[0].type == HolePunch.CONNECT
-                        ), "Should have received CONNECT message"
-                        assert (
-                            len(messages_received[0].ObsAddrs) == 2
-                        ), "Should have received 2 observed addresses"
+                        assert len(messages_received) == 1, (
+                            "Should have received one message"
+                        )
+                        assert messages_received[0].type == HolePunch.CONNECT, (
+                            "Should have received CONNECT message"
+                        )
+                        assert len(messages_received[0].ObsAddrs) == 2, (
+                            "Should have received 2 observed addresses"
+                        )
 
                         # Close the stream
                         await stream.close()
@@ -350,9 +350,9 @@ async def test_dcutr_hole_punch_through_relay():
                     )
 
                     assert result is not None, "Hole punch result should not be None"
-                    assert isinstance(
-                        result, bool
-                    ), "Hole punch result should be a boolean"
+                    assert isinstance(result, bool), (
+                        "Hole punch result should be a boolean"
+                    )
 
                     # Wait a bit more
                     await trio.sleep(0.1)
@@ -417,12 +417,12 @@ async def test_dcutr_relay_connection_verification():
                     assert isinstance(observed_addrs2, list)
 
                     # Should contain the hosts' actual addresses
-                    assert (
-                        len(observed_addrs1) > 0
-                    ), "Peer1 should have observed addresses"
-                    assert (
-                        len(observed_addrs2) > 0
-                    ), "Peer2 should have observed addresses"
+                    assert len(observed_addrs1) > 0, (
+                        "Peer1 should have observed addresses"
+                    )
+                    assert len(observed_addrs2) > 0, (
+                        "Peer2 should have observed addresses"
+                    )
 
                     # Test decoding observed addresses
                     test_addrs = [
@@ -555,9 +555,9 @@ async def test_dcutr_relay_attempt_limiting():
 
                     # Try to initiate hole punch - should succeed immediately
                     result = await dcutr1.initiate_hole_punch(peer2.get_id())
-                    assert (
-                        result is True
-                    ), "Hole punch should succeed for already connected peers"
+                    assert result is True, (
+                        "Hole punch should succeed for already connected peers"
+                    )
 
                     # Wait a bit more
                     await trio.sleep(0.1)

@@ -227,23 +227,23 @@ async def test_peerstore_unchanged_when_handshake_fails():
         await trio.sleep(0.1)
 
     # Verify that at least one side encountered an error
-    assert (
-        "local_error" in nursery_results or "remote_error" in nursery_results
-    ), "Expected handshake to fail due to peer ID mismatch"
+    assert "local_error" in nursery_results or "remote_error" in nursery_results, (
+        "Expected handshake to fail due to peer ID mismatch"
+    )
 
     # Verify that the peerstore remains unchanged
     current_peer_ids = set(peerstore.peer_ids())
-    assert (
-        current_peer_ids == initial_peer_ids
-    ), "Peerstore should remain unchanged when handshake fails"
+    assert current_peer_ids == initial_peer_ids, (
+        "Peerstore should remain unchanged when handshake fails"
+    )
 
     # Verify that neither the remote_peer_id nor mismatch_peer_id was added
-    assert (
-        remote_peer_id not in peerstore.peer_ids()
-    ), "Remote peer ID should not be added on handshake failure"
-    assert (
-        mismatch_peer_id not in peerstore.peer_ids()
-    ), "Mismatch peer ID should not be added on handshake failure"
+    assert remote_peer_id not in peerstore.peer_ids(), (
+        "Remote peer ID should not be added on handshake failure"
+    )
+    assert mismatch_peer_id not in peerstore.peer_ids(), (
+        "Mismatch peer ID should not be added on handshake failure"
+    )
 
 
 @pytest.mark.trio

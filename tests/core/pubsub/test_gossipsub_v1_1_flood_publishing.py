@@ -183,9 +183,9 @@ async def test_flood_publish_reliability():
             # Verify that all peers received all messages
             for peer_msgs in received_messages:
                 for msg_data in messages:
-                    assert any(
-                        msg.data == msg_data for msg in peer_msgs
-                    ), f"Message {msg_data} not received by a peer"
+                    assert any(msg.data == msg_data for msg in peer_msgs), (
+                        f"Message {msg_data} not received by a peer"
+                    )
 
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()
@@ -242,9 +242,9 @@ async def test_flood_publish_with_disconnected_peers():
             # Verify that peers 0, 1, 2 received the message
             # (peers 3, 4 might not receive it due to network topology)
             for i in range(3):
-                assert any(
-                    msg.data == message_data for msg in received_messages[i]
-                ), f"Peer {i} did not receive the message"
+                assert any(msg.data == message_data for msg in received_messages[i]), (
+                    f"Peer {i} did not receive the message"
+                )
 
             # Publish from peer 4
             message_data = b"message from peer 4"
@@ -256,9 +256,9 @@ async def test_flood_publish_with_disconnected_peers():
             # Verify that peers 2, 3, 4 received the message
             # (peers 0, 1 might not receive it due to network topology)
             for i in [2, 3, 4]:
-                assert any(
-                    msg.data == message_data for msg in received_messages[i]
-                ), f"Peer {i} did not receive the message"
+                assert any(msg.data == message_data for msg in received_messages[i]), (
+                    f"Peer {i} did not receive the message"
+                )
 
             # Cancel all background tasks before exiting
             nursery.cancel_scope.cancel()

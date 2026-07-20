@@ -74,12 +74,12 @@ def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
     # Check that the multiaddr contains the p2p protocol
     try:
         peer_id_from_multiaddr = ma.value_for_protocol("p2p")
-        assert (
-            peer_id_from_multiaddr is not None
-        ), "Multiaddr missing p2p protocol value"
-        assert (
-            peer_id_from_multiaddr == peer_id
-        ), f"Peer ID mismatch: {peer_id_from_multiaddr} != {peer_id}"
+        assert peer_id_from_multiaddr is not None, (
+            "Multiaddr missing p2p protocol value"
+        )
+        assert peer_id_from_multiaddr == peer_id, (
+            f"Peer ID mismatch: {peer_id_from_multiaddr} != {peer_id}"
+        )
     except Exception as e:
         raise AssertionError(f"Failed to extract p2p protocol value: {e}")
 
@@ -87,9 +87,9 @@ def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
     protocols = ma.protocols()
 
     # Should have at least IP, TCP, and P2P protocols
-    assert any(
-        p.code == P_IP4 or p.code == P_IP6 for p in protocols
-    ), "Missing IP protocol"
+    assert any(p.code == P_IP4 or p.code == P_IP6 for p in protocols), (
+        "Missing IP protocol"
+    )
     assert any(p.code == P_TCP for p in protocols), "Missing TCP protocol"
     assert any(p.code == P_P2P for p in protocols), "Missing P2P protocol"
 
@@ -100,9 +100,9 @@ def test_echo_example_starts_and_prints_thin_waist(monkeypatch, tmp_path):
         transport_addr = ma.decapsulate(p2p_part)
         # Verify the decapsulated address doesn't contain p2p
         transport_protocols = transport_addr.protocols()
-        assert not any(
-            p.code == P_P2P for p in transport_protocols
-        ), "Decapsulation failed - still contains p2p"
+        assert not any(p.code == P_P2P for p in transport_protocols), (
+            "Decapsulation failed - still contains p2p"
+        )
         # Verify the original multiaddr can be reconstructed
         reconstructed = transport_addr.encapsulate(p2p_part)
         assert str(reconstructed) == str(ma), "Reconstruction failed"

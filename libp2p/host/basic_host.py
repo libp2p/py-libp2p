@@ -464,6 +464,7 @@ class BasicHost(IHost):
         @asynccontextmanager
         async def _run() -> AsyncIterator[None]:
             import sys
+
             sys.stderr.write("BASIC HOST _RUN CALLED\\n")
             network = self.get_network()
             async with background_trio_service(network):
@@ -484,21 +485,27 @@ class BasicHost(IHost):
 
                 async with trio.open_nursery() as nursery:
                     from libp2p.host.ping import PingService
+
                     ping_service = PingService(self)
 
                     async def _safe_ping(peer_id: ID) -> None:
                         import sys
+
                         sys.stderr.write(f"SENDING KEEPALIVE PING TO {peer_id}\\n")
                         try:
                             with trio.fail_after(10.0):
                                 await ping_service.ping(peer_id, 1)
-                            sys.stderr.write(f"KEEPALIVE PING SUCCEEDED FOR {peer_id}\\n")
+                            sys.stderr.write(
+                                f"KEEPALIVE PING SUCCEEDED FOR {peer_id}\\n"
+                            )
                         except Exception as e:
-                            sys.stderr.write(f"KEEPALIVE PING FAILED FOR {peer_id}: {type(e)} {e}\\n")
-
+                            sys.stderr.write(
+                                f"KEEPALIVE PING FAILED FOR {peer_id}: {type(e)} {e}\\n"
+                            )
 
                     try:
                         import sys
+
                         sys.stderr.write("BASIC HOST YIELDING\\n")
                         yield
                     finally:

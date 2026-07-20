@@ -56,4 +56,3 @@ class MultiselectCommunicator(IMultiselectCommunicator):
                 "fail to read from multiselect communicator"
             ) from error
         return data.decode()
-

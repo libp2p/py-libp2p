@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 import trio
 
 from libp2p.io.exceptions import IOException
+from libp2p.stream_muxer.exceptions import MuxedStreamEOF
 
 from .exceptions import (
     QUICStreamBackpressureError,
@@ -20,7 +21,6 @@ from .exceptions import (
     QUICStreamResetError,
     QUICStreamTimeoutError,
 )
-from libp2p.stream_muxer.exceptions import MuxedStreamEOF
 
 try:
     from aioquic.quic.connection import (
@@ -53,7 +53,6 @@ class _QUICStreamEOF(MuxedStreamEOF, IOException, EOFError):
     incomplete reads) both handle it correctly.  Also inherits EOFError to be
     semantically compatible with libp2p.network.stream.exceptions.StreamEOF.
     """
-
 
 
 class StreamState(Enum):

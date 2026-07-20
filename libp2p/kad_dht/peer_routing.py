@@ -399,7 +399,9 @@ class PeerRouting(IPeerRouting):
                         addrs = [Multiaddr(addr) for addr in peer_data.addrs]
                         self.host.get_peerstore().add_addrs(new_peer_id, addrs, 3600)
                         try:
-                            await self.routing_table.add_peer(PeerInfo(new_peer_id, addrs))
+                            await self.routing_table.add_peer(
+                                PeerInfo(new_peer_id, addrs)
+                            )
                         except Exception as e:
                             logger.debug(
                                 f"Failed to add discovered peer {new_peer_id} to routing table: {e}"

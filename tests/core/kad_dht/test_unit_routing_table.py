@@ -248,9 +248,9 @@ class TestRoutingTable:
         for pid in peer_ids:
             assert routing_table.peer_in_table(pid), f"Peer {pid} not found after split"
         all_peer_ids = routing_table.get_peer_ids()
-        assert set(peer_ids).issubset(
-            set(all_peer_ids)
-        ), "Not all peers present after split"
+        assert set(peer_ids).issubset(set(all_peer_ids)), (
+            "Not all peers present after split"
+        )
 
     @pytest.fixture
     def mock_host(self):

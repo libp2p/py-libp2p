@@ -799,16 +799,16 @@ def test_wss_multiaddr_validation():
         ma = Multiaddr(addr_str)
         if "/ws" in addr_str and "/wss" not in addr_str and "/tls" not in addr_str:
             # Regular WS should be valid but not WSS
-            assert is_valid_websocket_multiaddr(
-                ma
-            ), f"Address {addr_str} should be valid"
+            assert is_valid_websocket_multiaddr(ma), (
+                f"Address {addr_str} should be valid"
+            )
             parsed = parse_websocket_multiaddr(ma)
             assert not parsed.is_wss, f"Address {addr_str} should not be parsed as WSS"
         else:
             # Invalid addresses should fail validation
-            assert not is_valid_websocket_multiaddr(
-                ma
-            ), f"Address {addr_str} should be invalid"
+            assert not is_valid_websocket_multiaddr(ma), (
+                f"Address {addr_str} should be invalid"
+            )
 
 
 def test_wss_multiaddr_parsing():
@@ -1092,9 +1092,9 @@ def test_wss_error_handling():
 
     for addr_str in invalid_addresses:
         ma = Multiaddr(addr_str)
-        assert not is_valid_websocket_multiaddr(
-            ma
-        ), f"Address {addr_str} should be invalid"
+        assert not is_valid_websocket_multiaddr(ma), (
+            f"Address {addr_str} should be invalid"
+        )
 
         # Should raise ValueError when parsing invalid addresses
         with pytest.raises(ValueError):
@@ -1353,9 +1353,9 @@ async def test_websocket_transport_can_dial():
     for addr_str in valid_addresses:
         maddr = Multiaddr(addr_str)
         # All these should be valid WebSocket multiaddrs
-        assert is_valid_websocket_multiaddr(
-            maddr
-        ), f"Address {addr_str} should be valid"
+        assert is_valid_websocket_multiaddr(maddr), (
+            f"Address {addr_str} should be valid"
+        )
 
     # Test invalid addresses that should not be dialable
     invalid_addresses = [
@@ -1366,6 +1366,6 @@ async def test_websocket_transport_can_dial():
     for addr_str in invalid_addresses:
         maddr = Multiaddr(addr_str)
         # These should not be valid WebSocket multiaddrs
-        assert not is_valid_websocket_multiaddr(
-            maddr
-        ), f"Address {addr_str} should be invalid"
+        assert not is_valid_websocket_multiaddr(maddr), (
+            f"Address {addr_str} should be invalid"
+        )

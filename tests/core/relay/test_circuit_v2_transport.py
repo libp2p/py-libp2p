@@ -146,9 +146,9 @@ async def test_circuit_v2_transport_initialization():
         assert transport.host == host, "Host not set correctly"
         assert transport.protocol == protocol, "Protocol not set correctly"
         assert transport.config == config, "Config not set correctly"
-        assert hasattr(
-            transport, "discovery"
-        ), "Transport should have a discovery instance"
+        assert hasattr(transport, "discovery"), (
+            "Transport should have a discovery instance"
+        )
 
 
 @pytest.mark.trio
@@ -192,9 +192,9 @@ async def test_circuit_v2_transport_add_relay():
         discovery._discovered_relays[relay_id] = relay_info
 
         # Verify relay was added
-        assert (
-            relay_id in discovery._discovered_relays
-        ), "Relay should be in discovery's relay list"
+        assert relay_id in discovery._discovered_relays, (
+            "Relay should be in discovery's relay list"
+        )
 
 
 @pytest.mark.trio
@@ -249,12 +249,12 @@ async def test_circuit_v2_transport_dial_through_relay():
                 logger.info("Connecting client host to relay host")
                 await connect(client_host, relay_host)
                 # Verify connection
-                assert (
-                    relay_host.get_id() in client_host.get_network().connections
-                ), "Client not connected to relay"
-                assert (
-                    client_host.get_id() in relay_host.get_network().connections
-                ), "Relay not connected to client"
+                assert relay_host.get_id() in client_host.get_network().connections, (
+                    "Client not connected to relay"
+                )
+                assert client_host.get_id() in relay_host.get_network().connections, (
+                    "Relay not connected to client"
+                )
                 logger.info("Client-Relay connection verified")
 
                 # Wait to ensure connection is fully established
@@ -263,12 +263,12 @@ async def test_circuit_v2_transport_dial_through_relay():
                 logger.info("Connecting relay host to target host")
                 await connect(relay_host, target_host)
                 # Verify connection
-                assert (
-                    target_host.get_id() in relay_host.get_network().connections
-                ), "Relay not connected to target"
-                assert (
-                    relay_host.get_id() in target_host.get_network().connections
-                ), "Target not connected to relay"
+                assert target_host.get_id() in relay_host.get_network().connections, (
+                    "Relay not connected to target"
+                )
+                assert relay_host.get_id() in target_host.get_network().connections, (
+                    "Target not connected to relay"
+                )
                 logger.info("Relay-Target connection verified")
 
                 # Wait to ensure connection is fully established
@@ -503,23 +503,23 @@ async def test_circuit_v2_transport_relay_limits():
             raise
 
         # Verify connections
-        assert (
-            relay_host.get_id() in client1_host.get_network().connections
-        ), "Client1 not connected to relay"
-        assert (
-            relay_host.get_id() in client2_host.get_network().connections
-        ), "Client2 not connected to relay"
-        assert (
-            target_host.get_id() in relay_host.get_network().connections
-        ), "Relay not connected to target"
+        assert relay_host.get_id() in client1_host.get_network().connections, (
+            "Client1 not connected to relay"
+        )
+        assert relay_host.get_id() in client2_host.get_network().connections, (
+            "Client2 not connected to relay"
+        )
+        assert target_host.get_id() in relay_host.get_network().connections, (
+            "Relay not connected to target"
+        )
 
         # Verify the resource limits
-        assert (
-            relay_protocol.resource_manager.limits.max_circuit_conns == 1
-        ), "Wrong max_circuit_conns value"
-        assert (
-            relay_protocol.resource_manager.limits.max_reservations == 2
-        ), "Wrong max_reservations value"
+        assert relay_protocol.resource_manager.limits.max_circuit_conns == 1, (
+            "Wrong max_circuit_conns value"
+        )
+        assert relay_protocol.resource_manager.limits.max_reservations == 2, (
+            "Wrong max_reservations value"
+        )
 
         # Test successful - transports were initialized with the correct limits
         logger.info("Transport limit test successful")
@@ -735,9 +735,9 @@ async def test_circuit_v2_transport_relay_selection_prioritizes_reservations():
 
         # All selections should now prefer relay2 (the one with reservation)
         selected1 = await client_transport._select_relay(target_info)
-        assert (
-            selected1 == relay_id2
-        ), "Should select relay2 (has reservation) over relay1"
+        assert selected1 == relay_id2, (
+            "Should select relay2 (has reservation) over relay1"
+        )
 
         selected2 = await client_transport._select_relay(target_info)
         assert selected2 == relay_id2, "Should keep selecting relay2 (has reservation)"
@@ -813,14 +813,14 @@ async def test_circuit_v2_transport_relay_selection_multiple_reservations():
 
         # Should round-robin only among relays with reservations (1 and 3)
         selected1 = await client_transport._select_relay(target_info)
-        assert (
-            selected1 == relay_id1
-        ), "First selection should be relay1 (has reservation)"
+        assert selected1 == relay_id1, (
+            "First selection should be relay1 (has reservation)"
+        )
 
         selected2 = await client_transport._select_relay(target_info)
-        assert (
-            selected2 == relay_id3
-        ), "Second selection should be relay3 (has reservation)"
+        assert selected2 == relay_id3, (
+            "Second selection should be relay3 (has reservation)"
+        )
 
         selected3 = await client_transport._select_relay(target_info)
         assert selected3 == relay_id1, "Third selection should cycle back to relay1"
@@ -828,9 +828,9 @@ async def test_circuit_v2_transport_relay_selection_multiple_reservations():
         # Relay2 should never be selected since it doesn't have a reservation
         for _ in range(10):
             selected = await client_transport._select_relay(target_info)
-            assert (
-                selected != relay_id2
-            ), "relay2 (no reservation) should not be selected"
+            assert selected != relay_id2, (
+                "relay2 (no reservation) should not be selected"
+            )
 
         logger.info("Multiple reservations round-robin test passed")
 
@@ -1877,18 +1877,18 @@ def test_circuit_multiaddr_format():
     circuit_ma = multiaddr.Multiaddr(circuit_ma_str)
 
     ma_str = str(circuit_ma)
-    assert (
-        "/p2p-circuit/" in ma_str
-    ), f"Multiaddr should contain /p2p-circuit/: {ma_str}"
+    assert "/p2p-circuit/" in ma_str, (
+        f"Multiaddr should contain /p2p-circuit/: {ma_str}"
+    )
 
     parts = ma_str.split("/")
     try:
         p2p_circuit_idx = parts.index("p2p-circuit")
         assert p2p_circuit_idx > 2, "p2p-circuit should not be at the beginning"
         assert parts[p2p_circuit_idx - 2] == "p2p", "Should have p2p before relay id"
-        assert p2p_circuit_idx + 2 < len(
-            parts
-        ), "Should have destination peer after p2p-circuit"
+        assert p2p_circuit_idx + 2 < len(parts), (
+            "Should have destination peer after p2p-circuit"
+        )
         assert parts[p2p_circuit_idx + 1] == "p2p", "Should have p2p after p2p-circuit"
     except ValueError:
         pytest.fail(f"Multiaddr does not contain p2p-circuit: {ma_str}")

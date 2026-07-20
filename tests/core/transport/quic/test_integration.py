@@ -245,13 +245,13 @@ class TestBasicQUICFlow:
         assert server_connection_established, "Server connection handler was not called"
         assert client_connected, "Client failed to connect"
         assert client_sent_data, "Client failed to send data"
-        assert (
-            server_received_data == "Hello QUIC Server!"
-        ), f"Server received wrong data: '{server_received_data}'"
+        assert server_received_data == "Hello QUIC Server!", (
+            f"Server received wrong data: '{server_received_data}'"
+        )
         assert echo_sent, "Server failed to send echo"
-        assert (
-            client_received_echo == "ECHO: Hello QUIC Server!"
-        ), f"Client received wrong echo: '{client_received_echo}'"
+        assert client_received_echo == "ECHO: Hello QUIC Server!", (
+            f"Client received wrong echo: '{client_received_echo}'"
+        )
 
         logger.debug("Basic echo test passed")
 
@@ -334,9 +334,9 @@ class TestBasicQUICFlow:
         logger.debug(f"  accept_stream timeout: {accept_stream_timeout}")
 
         assert accept_stream_called, "accept_stream should have been called"
-        assert (
-            accept_stream_timeout
-        ), "accept_stream should have timed out when no stream was opened"
+        assert accept_stream_timeout, (
+            "accept_stream should have timed out when no stream was opened"
+        )
 
         logger.debug("Timeout test passed")
 
@@ -463,9 +463,9 @@ async def test_yamux_stress_ping():
                 else:
                     logger.warning("  Automatic identify did not cache ping")
 
-            assert (
-                identify_cached
-            ), "Automatic identify should cache ping before running stress test"
+            assert identify_cached, (
+                "Automatic identify should cache ping before running stress test"
+            )
 
             # Stress test still opens 100 streams at once; even though the QUIC
             # transport allows 32 concurrent negotiations on Linux, aioquic will
@@ -658,9 +658,9 @@ async def test_yamux_stress_ping():
             f"Expected {min_success_rate:.0%} success rate, got {success_rate:.1%} "
             f"({len(latencies)}/{STREAM_COUNT} streams succeeded)"
         )
-        assert all(
-            isinstance(x, int) and x >= 0 for x in latencies
-        ), "Invalid latencies"
+        assert all(isinstance(x, int) and x >= 0 for x in latencies), (
+            "Invalid latencies"
+        )
 
         avg_latency = sum(latencies) / len(latencies)
         logger.info(f"Average Latency: {avg_latency:.2f} ms")

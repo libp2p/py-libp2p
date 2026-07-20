@@ -693,7 +693,7 @@ class RoutingTable:
         # and allow splitting far buckets until we reach a reasonable depth.
         if contains_local_id:
             return True
-            
+
         # Allow splitting any bucket if we have fewer than MAXIMUM_BUCKETS / 2 buckets.
         # This allows the routing table to grow and store more peers even if they
         # are not close to our local ID.

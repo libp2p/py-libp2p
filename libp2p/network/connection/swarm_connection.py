@@ -222,7 +222,9 @@ class SwarmConn(INetConn):
                     break
                 except Exception as e:
                     # Catch QUICConnectionClosedError and other unexpected disconnects
-                    logging.debug(f"Connection closed for peer {self.muxed_conn.peer_id}: {e}")
+                    logging.debug(
+                        f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                    )
                     await self.close()
                     break
                 # Asynchronously handle the accepted stream, to avoid blocking

@@ -325,9 +325,9 @@ async def test_stress_test_multiple_runs():
             consistency_ratio = std_dev / mean_score if mean_score > 0 else 0
 
             # Allow up to 15% variation for simulation consistency
-            assert (
-                consistency_ratio < 0.15
-            ), f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
+            assert consistency_ratio < 0.15, (
+                f"Scenario {scenario} shows inconsistency: {consistency_ratio:.3f}"
+            )
 
     logger.debug(f"Stress test complete: {len(all_results)} scenarios run")
     logger.debug("All scenarios show consistent behavior across multiple runs")

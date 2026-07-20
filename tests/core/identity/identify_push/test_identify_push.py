@@ -511,9 +511,9 @@ async def test_push_identify_to_peers_respects_concurrency_limit():
         new=mock_push_identify_to_peer,
     ):
         await push_identify_to_peers(host)
-    assert (
-        state["max_observed"] <= CONCURRENCY_LIMIT
-    ), f"Max concurrency observed: {state['max_observed']}"
+    assert state["max_observed"] <= CONCURRENCY_LIMIT, (
+        f"Max concurrency observed: {state['max_observed']}"
+    )
 
 
 @pytest.mark.trio
@@ -769,6 +769,6 @@ async def test_identify_push_rejects_mismatched_peer_id(security_protocol):
             # Also verify that host_c's peer ID is still not in peerstore
             # (or if it was already there, it wasn't added by this operation)
             peer_id_c_in_peerstore_after = peer_id_c in peerstore_b.peer_ids()
-            assert (
-                peer_id_c_in_peerstore_after == peer_id_c_in_peerstore_before
-            ), "Peer ID should not be added to peerstore when validation fails"
+            assert peer_id_c_in_peerstore_after == peer_id_c_in_peerstore_before, (
+                "Peer ID should not be added to peerstore when validation fails"
+            )

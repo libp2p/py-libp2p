@@ -34,9 +34,9 @@ async def test_client_upload_small_size(security_protocol):
 
             final = results[-1]
             assert final["type"] == "final"
-            assert (
-                final["upload_bytes"] == send_bytes
-            ), f"Expected upload_bytes={send_bytes}, got {final['upload_bytes']}"
+            assert final["upload_bytes"] == send_bytes, (
+                f"Expected upload_bytes={send_bytes}, got {final['upload_bytes']}"
+            )
 
 
 @pytest.mark.trio
@@ -65,9 +65,9 @@ async def test_client_download_small_size(security_protocol):
 
             final = results[-1]
             assert final["type"] == "final"
-            assert (
-                final["download_bytes"] == recv_bytes
-            ), f"Expected download_bytes={recv_bytes}, got {final['download_bytes']}"
+            assert final["download_bytes"] == recv_bytes, (
+                f"Expected download_bytes={recv_bytes}, got {final['download_bytes']}"
+            )
 
 
 @pytest.mark.trio

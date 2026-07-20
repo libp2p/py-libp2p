@@ -113,9 +113,9 @@ def test_required_symbols_have_upstream_lineage_path() -> None:
             if nodes_by_id[node_id]["project"] == "py-libp2p"
         ]
         assert matching_ids, f"missing py-libp2p node for symbol {symbol}"
-        assert any(
-            has_upstream_lineage(node_id) for node_id in matching_ids
-        ), f"missing upstream lineage path for symbol {symbol}"
+        assert any(has_upstream_lineage(node_id) for node_id in matching_ids), (
+            f"missing upstream lineage path for symbol {symbol}"
+        )
 
 
 def test_parity_matrix_rows_have_upstream_references() -> None:
@@ -137,9 +137,9 @@ def test_parity_matrix_rows_have_upstream_references() -> None:
 
     data_rows = rows[1:]
     for row in data_rows:
-        assert (
-            "node/" in row or "chain/" in row or "build/" in row or "src/" in row
-        ), f"row lacks Lotus/Forest reference: {row}"
+        assert "node/" in row or "chain/" in row or "build/" in row or "src/" in row, (
+            f"row lacks Lotus/Forest reference: {row}"
+        )
 
 
 def test_dependency_tree_doc_contains_required_mermaid_sections() -> None:

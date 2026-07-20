@@ -47,14 +47,14 @@ def test_certificate_extensions_are_noncritical():
     for ext in cert.extensions:
         if isinstance(ext.value, x509.BasicConstraints):
             basic_constraints_found = True
-            assert (
-                ext.critical is False
-            ), "BasicConstraints must be non-critical for Rust interop"
+            assert ext.critical is False, (
+                "BasicConstraints must be non-critical for Rust interop"
+            )
         elif isinstance(ext.value, x509.KeyUsage):
             key_usage_found = True
-            assert (
-                ext.critical is False
-            ), "KeyUsage must be non-critical for Rust interop"
+            assert ext.critical is False, (
+                "KeyUsage must be non-critical for Rust interop"
+            )
 
     assert basic_constraints_found, "BasicConstraints extension missing"
     assert key_usage_found, "KeyUsage extension missing"

@@ -161,17 +161,17 @@ class AutoConnector:
         try:
             async with trio.open_nursery() as dial_nursery:
                 dialed = 0
-                # We overdial (needed * 2) because in a P2P network, most dials will fail
-                # due to offline peers, NAT traversal issues, or obsolete addresses.
+                # We overdial (needed * 2) because in a P2P network, most dials will
+                # fail due to offline peers, NAT traversal issues, or obsolete addresses.
                 dial_target = needed * 2
-                
+
                 for peer_id in candidates:
                     if dialed >= dial_target:
                         break
 
                     if self._should_skip_peer(peer_id):
                         continue
-                        
+
                     dial_nursery.start_soon(_dial_candidate, peer_id)
                     dialed += 1
         except Exception as e:

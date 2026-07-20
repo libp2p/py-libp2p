@@ -164,7 +164,14 @@ def identify_handler_for(
             return  # Exit early if stream is closed
         except Exception as e:
             import traceback
-            logger.error("Error sending identify response to %s: %s (type: %s)\n%s", peer_id, e, type(e), traceback.format_exc())
+
+            logger.error(
+                "Error sending identify response to %s: %s (type: %s)\n%s",
+                peer_id,
+                e,
+                type(e),
+                traceback.format_exc(),
+            )
             return  # Exit early on any error
         else:
             # Only close the stream after all writes are successful

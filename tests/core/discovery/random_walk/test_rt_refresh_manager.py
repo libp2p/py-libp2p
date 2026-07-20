@@ -313,7 +313,6 @@ async def test_do_refresh_skip_due_to_interval(
             )
 
 
-
 @pytest.mark.trio
 async def test_refresh_done_callbacks(mock_host, local_peer_id, dummy_query_function):
     """Test refresh completion callbacks functionality."""

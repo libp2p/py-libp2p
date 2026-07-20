@@ -286,12 +286,12 @@ async def test_concurrent_stream_operations():
         opened_count_0 = events_0.count(Event.OpenedStream)
         opened_count_1 = events_1.count(Event.OpenedStream)
 
-        assert (
-            opened_count_0 > 0
-        ), f"Expected some OpenedStream events, got {opened_count_0}"
-        assert (
-            opened_count_1 > 0
-        ), f"Expected some OpenedStream events, got {opened_count_1}"
+        assert opened_count_0 > 0, (
+            f"Expected some OpenedStream events, got {opened_count_0}"
+        )
+        assert opened_count_1 > 0, (
+            f"Expected some OpenedStream events, got {opened_count_1}"
+        )
 
         # Close peer to trigger disconnection events
         await swarms[0].close_peer(swarms[1].get_peer_id())

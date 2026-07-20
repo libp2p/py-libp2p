@@ -49,17 +49,17 @@ async def test_prune_backoff():
         # try to graft again immediately (should be rejected due to backoff)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(0.5)
-        assert (
-            host_0.get_id() not in gsub1.mesh[topic]
-        ), "peer should be backoffed and not re-added"
+        assert host_0.get_id() not in gsub1.mesh[topic], (
+            "peer should be backoffed and not re-added"
+        )
 
         # try to graft again (should succeed after backoff)
         await trio.sleep(2)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(1)
-        assert (
-            host_0.get_id() in gsub1.mesh[topic]
-        ), "peer should be able to rejoin after backoff"
+        assert host_0.get_id() in gsub1.mesh[topic], (
+            "peer should be able to rejoin after backoff"
+        )
 
 
 @pytest.mark.trio
@@ -102,18 +102,18 @@ async def test_unsubscribe_backoff():
         # try to graft again immediately (should be rejected due to backoff)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(0.5)
-        assert (
-            host_0.get_id() not in gsub1.mesh[topic]
-        ), "peer should be backoffed and not re-added"
+        assert host_0.get_id() not in gsub1.mesh[topic], (
+            "peer should be backoffed and not re-added"
+        )
 
         # try to graft again (should succeed after backoff)
         # Wait longer than unsubscribe_back_off (4 seconds) + some buffer
         await trio.sleep(4.5)
         await gsub0.emit_graft(topic, host_1.get_id())
         await trio.sleep(1)
-        assert (
-            host_0.get_id() in gsub1.mesh[topic]
-        ), "peer should be able to rejoin after backoff"
+        assert host_0.get_id() in gsub1.mesh[topic], (
+            "peer should be able to rejoin after backoff"
+        )
 
 
 @pytest.mark.trio
@@ -219,12 +219,12 @@ async def test_topics_are_isolated():
         await gsub0.emit_graft(topic1, host_1.get_id())
         await gsub0.emit_graft(topic2, host_1.get_id())
         await trio.sleep(0.5)
-        assert (
-            host_0.get_id() not in gsub1.mesh[topic1]
-        ), "peer should be backoffed and not re-added"
-        assert (
-            host_0.get_id() in gsub1.mesh[topic2]
-        ), "peer should be able to join a different topic"
+        assert host_0.get_id() not in gsub1.mesh[topic1], (
+            "peer should be backoffed and not re-added"
+        )
+        assert host_0.get_id() in gsub1.mesh[topic2], (
+            "peer should be able to join a different topic"
+        )
 
 
 @pytest.mark.trio
@@ -282,6 +282,6 @@ async def test_stress_churn():
             assert backoff is not None, "router missing backoff table"
             # only a small number of entries should remain (ideally 0)
             total_entries = sum(len(peers) for peers in backoff.values())
-            assert (
-                total_entries < NUM_PEERS * 2
-            ), f"backoff table grew too large: {total_entries} entries"
+            assert total_entries < NUM_PEERS * 2, (
+                f"backoff table grew too large: {total_entries} entries"
+            )

@@ -255,9 +255,9 @@ async def test_custom_log_file(clean_env):
         content = _wait_for_file_operation(log_file, "read")
         assert content is not None, "Failed to read log file content"
         assert isinstance(content, str), "Content should be a string"
-        assert (
-            "Test message" in content
-        ), f"Expected 'Test message' in log content, got: {content}"
+        assert "Test message" in content, (
+            f"Expected 'Test message' in log content, got: {content}"
+        )
 
 
 @pytest.mark.trio
@@ -310,9 +310,9 @@ async def test_default_log_file(clean_env):
         content = _wait_for_file_operation(mock_temp_file, "read")
         assert content is not None, "Failed to read log file content"
         assert isinstance(content, str), "Content should be a string"
-        assert (
-            "Test message" in content
-        ), f"Expected 'Test message' in log content, got: {content}"
+        assert "Test message" in content, (
+            f"Expected 'Test message' in log content, got: {content}"
+        )
 
 
 def test_invalid_log_level(clean_env):

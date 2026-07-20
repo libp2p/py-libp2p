@@ -737,7 +737,7 @@ class WebsocketTransport(ITransport):
             # If those fail (e.g. Handshake fails, or server sends HTTP 200 instead of 101),
             # they raise exceptions that would otherwise crash the global Swarm nursery.
             send_channel, receive_channel = trio.open_memory_channel(0)
-            
+
             async def _connect_and_run():
                 try:
                     async with trio.open_nursery() as ws_nursery:
@@ -758,13 +758,15 @@ class WebsocketTransport(ITransport):
                         except trio.BrokenResourceError:
                             # Channel was closed (e.g., dial completed, connection dropped later)
                             pass
-                            
+
             self._background_nursery.start_soon(_connect_and_run)
-            
+
             result = await receive_channel.receive()
             if isinstance(result, BaseException):
-                raise OpenConnectionError(f"WebSocket handshake failed: {result}") from result
-                
+                raise OpenConnectionError(
+                    f"WebSocket handshake failed: {result}"
+                ) from result
+
             ws = result
 
             # Create our connection wrapper

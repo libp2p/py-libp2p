@@ -268,12 +268,12 @@ async def test_tcp_yamux_stress_ping():
             logger.warning(f"Failed stream indices: {failures}")
 
         # === Assertions ===
-        assert (
-            len(latencies) == STREAM_COUNT
-        ), f"Expected {STREAM_COUNT} successful streams, got {len(latencies)}"
-        assert all(
-            isinstance(x, int) and x >= 0 for x in latencies
-        ), "Invalid latencies"
+        assert len(latencies) == STREAM_COUNT, (
+            f"Expected {STREAM_COUNT} successful streams, got {len(latencies)}"
+        )
+        assert all(isinstance(x, int) and x >= 0 for x in latencies), (
+            "Invalid latencies"
+        )
 
         avg_latency = sum(latencies) / len(latencies)
         logger.info(f"Average Latency: {avg_latency:.2f} ms")

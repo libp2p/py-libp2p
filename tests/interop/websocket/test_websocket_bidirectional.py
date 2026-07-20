@@ -63,9 +63,9 @@ async def test_bidirectional_communication():
 
         await py_node.stop()
 
-        assert successful_exchanges == len(
-            test_messages
-        ), f"Only {successful_exchanges}/{len(test_messages)} exchanges successful"
+        assert successful_exchanges == len(test_messages), (
+            f"Only {successful_exchanges}/{len(test_messages)} exchanges successful"
+        )
 
     finally:
         if js_process:

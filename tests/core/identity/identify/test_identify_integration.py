@@ -331,6 +331,6 @@ async def test_identify_multi_transport_host_addresses(security_protocol):
 
         # Verify response contains all addresses
         for addr in host_a_addrs:
-            assert (
-                _multiaddr_to_bytes(addr) in result.listen_addrs
-            ), f"Address {addr} not advertised by host_a"
+            assert _multiaddr_to_bytes(addr) in result.listen_addrs, (
+                f"Address {addr} not advertised by host_a"
+            )

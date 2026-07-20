@@ -136,12 +136,12 @@ class TestLargePayloads:
                 assert received_data == test_data
 
                 # Performance assertions (should complete within reasonable time)
-                assert (
-                    send_time < 1.0
-                ), f"Send time for {description} too slow: {send_time}s"
-                assert (
-                    receive_time < 1.0
-                ), f"Receive time for {description} too slow: {receive_time}s"
+                assert send_time < 1.0, (
+                    f"Send time for {description} too slow: {send_time}s"
+                )
+                assert receive_time < 1.0, (
+                    f"Receive time for {description} too slow: {receive_time}s"
+                )
 
     @pytest.mark.trio
     async def test_large_payload_error_handling(self, nursery):

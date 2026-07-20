@@ -76,9 +76,9 @@ class TestScoreGates:
             )
 
             # Now test that peer is blocked
-            assert not scorer.allow_publish(
-                peer_id, [topic]
-            ), "Peer with low score should not be allowed to publish"
+            assert not scorer.allow_publish(peer_id, [topic]), (
+                "Peer with low score should not be allowed to publish"
+            )
 
             # Publish message - should be blocked for low-scoring peer
             await gsub0.publish(host0.get_id(), msg)
@@ -94,14 +94,14 @@ class TestScoreGates:
 
             # Verify the score is now above threshold
             new_score = scorer.topic_score(peer_id, topic)
-            assert (
-                new_score >= score_params.publish_threshold
-            ), f"New score {new_score} should be >= {score_params.publish_threshold}"
+            assert new_score >= score_params.publish_threshold, (
+                f"New score {new_score} should be >= {score_params.publish_threshold}"
+            )
 
             # Now peer should be allowed to publish
-            assert scorer.allow_publish(
-                peer_id, [topic]
-            ), "Peer with high score should be allowed to publish"
+            assert scorer.allow_publish(peer_id, [topic]), (
+                "Peer with high score should be allowed to publish"
+            )
 
             # Publish message again - should now be sent
             await gsub0.publish(host0.get_id(), msg)
@@ -384,12 +384,12 @@ class TestScoreGates:
 
             # Now test the gates with the verified scores
             # Test publish gate
-            assert scorer.allow_publish(
-                peer_id, ["topic1"]
-            ), "Should allow publish for topic1 with high score"
-            assert not scorer.allow_publish(
-                peer_id, ["topic2"]
-            ), "Should not allow publish for topic2 with low score"
+            assert scorer.allow_publish(peer_id, ["topic1"]), (
+                "Should allow publish for topic1 with high score"
+            )
+            assert not scorer.allow_publish(peer_id, ["topic2"]), (
+                "Should not allow publish for topic2 with low score"
+            )
 
             # Test combined score (should be above threshold)
             combined_score = scorer.score(peer_id, topics)
@@ -397,20 +397,20 @@ class TestScoreGates:
                 f"Combined score {combined_score} should be >= "
                 f"{score_params.publish_threshold}"
             )
-            assert scorer.allow_publish(
-                peer_id, topics
-            ), "Should allow publish for combined topics"
+            assert scorer.allow_publish(peer_id, topics), (
+                "Should allow publish for combined topics"
+            )
 
             # Test gossip gate
-            assert scorer.allow_gossip(
-                peer_id, ["topic1"]
-            ), "Should allow gossip for topic1 with high score"
-            assert not scorer.allow_gossip(
-                peer_id, ["topic2"]
-            ), "Should not allow gossip for topic2 with low score"
-            assert scorer.allow_gossip(
-                peer_id, topics
-            ), "Should allow gossip for combined topics"
+            assert scorer.allow_gossip(peer_id, ["topic1"]), (
+                "Should allow gossip for topic1 with high score"
+            )
+            assert not scorer.allow_gossip(peer_id, ["topic2"]), (
+                "Should not allow gossip for topic2 with low score"
+            )
+            assert scorer.allow_gossip(peer_id, topics), (
+                "Should allow gossip for combined topics"
+            )
 
     @pytest.mark.trio
     async def test_score_gates_with_behavior_penalty(self):

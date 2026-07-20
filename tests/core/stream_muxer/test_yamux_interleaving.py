@@ -195,27 +195,27 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
         nursery.start_soon(reader, client_stream, client_received, "client")
         nursery.start_soon(reader, server_stream, server_received, "server")
 
-    assert (
-        len(client_received) == MSG_COUNT
-    ), f"Client received {len(client_received)} messages, expected {MSG_COUNT}"
-    assert (
-        len(server_received) == MSG_COUNT
-    ), f"Server received {len(server_received)} messages, expected {MSG_COUNT}"
-    assert (
-        client_received == server_msgs
-    ), "Client did not receive server messages in order or intact!"
-    assert (
-        server_received == client_msgs
-    ), "Server did not receive client messages in order or intact!"
+    assert len(client_received) == MSG_COUNT, (
+        f"Client received {len(client_received)} messages, expected {MSG_COUNT}"
+    )
+    assert len(server_received) == MSG_COUNT, (
+        f"Server received {len(server_received)} messages, expected {MSG_COUNT}"
+    )
+    assert client_received == server_msgs, (
+        "Client did not receive server messages in order or intact!"
+    )
+    assert server_received == client_msgs, (
+        "Server did not receive client messages in order or intact!"
+    )
     for i, msg in enumerate(client_received):
-        assert (
-            len(msg) == MSG_SIZE
-        ), f"Client message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        assert len(msg) == MSG_SIZE, (
+            f"Client message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        )
 
     for i, msg in enumerate(server_received):
-        assert (
-            len(msg) == MSG_SIZE
-        ), f"Server message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        assert len(msg) == MSG_SIZE, (
+            f"Server message {i} has wrong size: {len(msg)} != {MSG_SIZE}"
+        )
 
     await client_stream.close()
     await server_stream.close()

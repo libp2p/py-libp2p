@@ -134,9 +134,9 @@ class TestGetValueQuorumEarlyStop:
             result = await dht.get_value("test-key", quorum=0)
 
         assert result == b"val"
-        assert (
-            query_count[0] == 5
-        ), f"All 5 peers should be queried, got {query_count[0]}"
+        assert query_count[0] == 5, (
+            f"All 5 peers should be queried, got {query_count[0]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -181,9 +181,9 @@ class TestPutValueSlidingWindow:
         ):
             await dht.put_value("test-key", b"test-value")
 
-        assert (
-            len(started_at) == 5
-        ), f"All 5 peers should be stored to, got {len(started_at)}"
+        assert len(started_at) == 5, (
+            f"All 5 peers should be stored to, got {len(started_at)}"
+        )
         assert started_at[3] < started_at[2] + 0.3, (
             f"Peer 3 started at {started_at[3]:.3f}, "
             f"peer 2 at {started_at[2]:.3f}. "
@@ -218,9 +218,9 @@ class TestPutValueSlidingWindow:
         ):
             await dht.put_value("test-key", b"test-value")
 
-        assert (
-            call_count[0] == 4
-        ), f"All 4 peers should be attempted, got {call_count[0]}"
+        assert call_count[0] == 4, (
+            f"All 4 peers should be attempted, got {call_count[0]}"
+        )
 
 
 # ---------------------------------------------------------------------------

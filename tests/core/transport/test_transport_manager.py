@@ -307,6 +307,6 @@ class TestTransportManagerPreFilter:
 
         # QUIC address has no "tcp" protocol -> pre-filter should block it
         mgr.transport_for_dialing(Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"))
-        assert (
-            call_count[0] == 0
-        ), "can_dial should NOT be called when no protocol overlap"
+        assert call_count[0] == 0, (
+            "can_dial should NOT be called when no protocol overlap"
+        )

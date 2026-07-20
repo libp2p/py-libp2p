@@ -358,9 +358,9 @@ async def test_circuit_v2_protocol_initialization():
             try:
                 with trio.fail_after(STREAM_TIMEOUT):
                     test_stream = await host.new_stream(host.get_id(), [PROTOCOL_ID])
-                    assert (
-                        test_stream is not None
-                    ), "HOP protocol handler not registered"
+                    assert test_stream is not None, (
+                        "HOP protocol handler not registered"
+                    )
             except Exception:
                 pass
             finally:
@@ -371,17 +371,17 @@ async def test_circuit_v2_protocol_initialization():
                     test_stream = await host.new_stream(
                         host.get_id(), [STOP_PROTOCOL_ID]
                     )
-                    assert (
-                        test_stream is not None
-                    ), "STOP protocol handler not registered"
+                    assert test_stream is not None, (
+                        "STOP protocol handler not registered"
+                    )
             except Exception:
                 pass
             finally:
                 await close_stream(test_stream)
 
-            assert (
-                len(protocol.resource_manager._reservations) == 0
-            ), "Reservations should be empty"
+            assert len(protocol.resource_manager._reservations) == 0, (
+                "Reservations should be empty"
+            )
 
 
 @pytest.mark.trio
@@ -468,9 +468,9 @@ async def test_circuit_v2_voucher_verification_complete():
         is_valid_wrong_peer = resource_manager.verify_reservation(
             other_peer_id, pb_reservation
         )
-        assert (
-            is_valid_wrong_peer is False
-        ), "Reservation for different peer should fail verification"
+        assert is_valid_wrong_peer is False, (
+            "Reservation for different peer should fail verification"
+        )
         logger.info("Reservation for wrong peer correctly rejected")
 
         # Test with missing signature (should fail)
@@ -483,9 +483,9 @@ async def test_circuit_v2_voucher_verification_complete():
         is_valid_no_sig = resource_manager.verify_reservation(
             client_peer_id, no_sig_reservation
         )
-        assert (
-            is_valid_no_sig is False
-        ), "Reservation without signature should fail verification"
+        assert is_valid_no_sig is False, (
+            "Reservation without signature should fail verification"
+        )
         logger.info("Reservation without signature correctly rejected")
 
         # Test with expired reservation
@@ -508,16 +508,16 @@ async def test_circuit_v2_voucher_verification_complete():
         assert temp_reservation is not None, "Temp reservation should exist"
 
         temp_pb_reservation = temp_reservation.to_proto()
-        assert (
-            temp_pb_reservation.signature == b""
-        ), "Should have empty signature without host"
+        assert temp_pb_reservation.signature == b"", (
+            "Should have empty signature without host"
+        )
 
         is_valid_no_host = resource_manager_no_host.verify_reservation(
             temp_peer_id, temp_pb_reservation
         )
-        assert (
-            is_valid_no_host is False
-        ), "Reservation verification should fail when no host available"
+        assert is_valid_no_host is False, (
+            "Reservation verification should fail when no host available"
+        )
         logger.info("Reservation correctly rejected when no host available")
 
         logger.info("All voucher verification tests passed successfully!")
@@ -645,9 +645,9 @@ async def test_circuit_v2_reservation_basic():
             with trio.fail_after(CONNECT_TIMEOUT):
                 logger.info("Connecting client host to relay host")
                 await connect(client_host, relay_host)
-                assert relay_host.get_network().connections[
-                    client_host.get_id()
-                ], "Peers not connected"
+                assert relay_host.get_network().connections[client_host.get_id()], (
+                    "Peers not connected"
+                )
                 logger.info("Connection established between peers")
         except Exception as e:
             logger.error("Failed to connect peers: %s", str(e))
@@ -694,23 +694,23 @@ async def test_circuit_v2_reservation_basic():
                 response.ParseFromString(response_bytes)
 
                 # Verify response
-                assert (
-                    response.type == proto.HopMessage.RESERVE
-                ), f"Wrong response type: {response.type}"
+                assert response.type == proto.HopMessage.RESERVE, (
+                    f"Wrong response type: {response.type}"
+                )
                 assert response.HasField("status"), "No status field"
-                assert (
-                    response.status.code == proto.Status.OK
-                ), f"Wrong status code: {response.status.code}"
+                assert response.status.code == proto.Status.OK, (
+                    f"Wrong status code: {response.status.code}"
+                )
 
                 # Verify reservation details
                 assert response.HasField("reservation"), "No reservation field"
                 assert response.HasField("limit"), "No limit field"
-                assert (
-                    response.limit.duration == 3600
-                ), f"Wrong duration: {response.limit.duration}"
-                assert (
-                    response.limit.data == 1024 * 1024 * 1024
-                ), f"Wrong data limit: {response.limit.data}"
+                assert response.limit.duration == 3600, (
+                    f"Wrong duration: {response.limit.duration}"
+                )
+                assert response.limit.data == 1024 * 1024 * 1024, (
+                    f"Wrong data limit: {response.limit.data}"
+                )
                 logger.info("Verified reservation details in response")
 
         except Exception as e:
@@ -866,12 +866,12 @@ async def test_circuit_v2_reservation_limit():
                 await connect(client1_host, relay_host)
                 logger.info("Connecting client2 to relay")
                 await connect(client2_host, relay_host)
-                assert relay_host.get_network().connections[
-                    client1_host.get_id()
-                ], "Client1 not connected"
-                assert relay_host.get_network().connections[
-                    client2_host.get_id()
-                ], "Client2 not connected"
+                assert relay_host.get_network().connections[client1_host.get_id()], (
+                    "Client1 not connected"
+                )
+                assert relay_host.get_network().connections[client2_host.get_id()], (
+                    "Client2 not connected"
+                )
                 logger.info("All connections established")
         except Exception as e:
             logger.error("Failed to connect peers: %s", str(e))
@@ -915,23 +915,23 @@ async def test_circuit_v2_reservation_limit():
                 response1.ParseFromString(response_bytes)
 
                 # Verify response
-                assert (
-                    response1.type == proto.HopMessage.RESERVE
-                ), f"Wrong response type: {response1.type}"
+                assert response1.type == proto.HopMessage.RESERVE, (
+                    f"Wrong response type: {response1.type}"
+                )
                 assert response1.HasField("status"), "No status field"
-                assert (
-                    response1.status.code == proto.Status.OK
-                ), f"Wrong status code: {response1.status.code}"
+                assert response1.status.code == proto.Status.OK, (
+                    f"Wrong status code: {response1.status.code}"
+                )
 
                 # Verify reservation details
                 assert response1.HasField("reservation"), "No reservation field"
                 assert response1.HasField("limit"), "No limit field"
-                assert (
-                    response1.limit.duration == 3600
-                ), f"Wrong duration: {response1.limit.duration}"
-                assert (
-                    response1.limit.data == 1024 * 1024 * 1024
-                ), f"Wrong data limit: {response1.limit.data}"
+                assert response1.limit.duration == 3600, (
+                    f"Wrong duration: {response1.limit.duration}"
+                )
+                assert response1.limit.data == 1024 * 1024 * 1024, (
+                    f"Wrong data limit: {response1.limit.data}"
+                )
                 logger.info("Verified reservation details for client1")
 
                 # Close stream1 before opening stream2
@@ -974,9 +974,9 @@ async def test_circuit_v2_reservation_limit():
                 response2.ParseFromString(response_bytes)
 
                 # Verify response
-                assert (
-                    response2.type == proto.HopMessage.RESERVE
-                ), f"Wrong response type: {response2.type}"
+                assert response2.type == proto.HopMessage.RESERVE, (
+                    f"Wrong response type: {response2.type}"
+                )
                 assert response2.HasField("status"), "No status field"
                 assert response2.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED, (
                     f"Wrong status code: {response2.status.code}, "
@@ -986,12 +986,12 @@ async def test_circuit_v2_reservation_limit():
 
                 # Verify reservation tracking is correct
                 assert len(reserved_clients) == 1, "Should have exactly one reservation"
-                assert (
-                    client1_host.get_id() in reserved_clients
-                ), "Client1 should be reserved"
-                assert (
-                    client2_host.get_id() not in reserved_clients
-                ), "Client2 should not be reserved"
+                assert client1_host.get_id() in reserved_clients, (
+                    "Client1 should be reserved"
+                )
+                assert client2_host.get_id() not in reserved_clients, (
+                    "Client2 should not be reserved"
+                )
                 logger.info("Verified reservation tracking state")
 
         except Exception as e:
@@ -1077,9 +1077,9 @@ async def test_circuit_v2_fails_with_invalid_SPR():
                 response.ParseFromString(response_bytes)
 
                 assert response.HasField("status"), "No status field"
-                assert (
-                    response.status.code == proto.Status.MALFORMED_MESSAGE
-                ), f"Expected MALFORMED_MESSAGE, got {response.status.code}"
+                assert response.status.code == proto.Status.MALFORMED_MESSAGE, (
+                    f"Expected MALFORMED_MESSAGE, got {response.status.code}"
+                )
                 logger.info("Successfully verified invalid SPR rejection")
         finally:
             if stream:
@@ -1208,9 +1208,9 @@ async def test_reservation_fails_with_invalid_record_transfer():
             # Verify relay's peerstore wasn't corrupted by invalid SPR
             try:
                 current_addrs = relay_peerstore.addrs(client_id)
-                assert (
-                    current_addrs == original_addrs
-                ), "Relay's peerstore should not be updated with invalid SPR data"
+                assert current_addrs == original_addrs, (
+                    "Relay's peerstore should not be updated with invalid SPR data"
+                )
                 logger.info("Verified: Relay's peerstore not corrupted by invalid SPR")
             except Exception as e:
                 # If we can't get current addrs, just verify the request was rejected
@@ -1280,9 +1280,9 @@ async def test_circuit_v2_connect_fails_without_reservation():
                     # Verify stream is reset (or EOF)
                     try:
                         next_data = await stream.read(MAX_READ_LEN)
-                        assert (
-                            not next_data
-                        ), "Stream should be closed/reset after error status"
+                        assert not next_data, (
+                            "Stream should be closed/reset after error status"
+                        )
                     except (StreamEOF, StreamReset, StreamError):
                         pass
 
@@ -1371,9 +1371,9 @@ async def test_circuit_v2_connect_fails_when_source_limit_exceeded():
 
                     try:
                         next_data = await stream.read(MAX_READ_LEN)
-                        assert (
-                            not next_data
-                        ), "Stream should be closed/reset after error status"
+                        assert not next_data, (
+                            "Stream should be closed/reset after error status"
+                        )
                     except (StreamEOF, StreamReset, StreamError):
                         pass
 

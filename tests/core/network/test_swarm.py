@@ -408,9 +408,9 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
                 # This address successfully started listening
                 listener = swarm.listeners[addr_str]
                 listener_addrs = listener.get_addrs()
-                assert (
-                    len(listener_addrs) > 0
-                ), f"Listener for {addr} should have addresses"
+                assert len(listener_addrs) > 0, (
+                    f"Listener for {addr} should have addresses"
+                )
 
                 # Check that listener address matches the expected address
                 # (port might be different if we used port 0)
@@ -426,9 +426,9 @@ async def test_swarm_listen_multiple_addresses(security_protocol):
                         ):
                             found_matching = True
                             break
-                    assert (
-                        found_matching
-                    ), f"Listener for {addr} should have matching IP"
+                    assert found_matching, (
+                        f"Listener for {addr} should have matching IP"
+                    )
 
         assert successful_count == len(listen_addrs), (
             f"All {len(listen_addrs)} addresses should be listening, "
@@ -481,12 +481,12 @@ async def test_swarm_listen_multiple_addresses_connectivity(security_protocol):
                         await swarm2.dial_peer(peer_info.peer_id)
 
                         # Verify connection was established
-                        assert (
-                            peer_info.peer_id in swarm2.connections
-                        ), f"Connection to {full_addr} should be established"
-                        assert (
-                            swarm2.get_peer_id() in swarm1.connections
-                        ), f"Connection from {full_addr} should be established"
+                        assert peer_info.peer_id in swarm2.connections, (
+                            f"Connection to {full_addr} should be established"
+                        )
+                        assert swarm2.get_peer_id() in swarm1.connections, (
+                            f"Connection from {full_addr} should be established"
+                        )
 
                     except Exception as e:
                         pytest.fail(
@@ -557,9 +557,9 @@ async def test_swarm_listener_resilience_on_upgrade_failure(security_protocol):
             await trio.sleep(0.2)
 
             # Verify listener is still active by checking it has listeners
-            assert (
-                len(listener_swarm.listeners) > 0
-            ), "Listener crashed after upgrade failure!"
+            assert len(listener_swarm.listeners) > 0, (
+                "Listener crashed after upgrade failure!"
+            )
 
         # Now verify the listener can still accept new connections
         # (upgrade_security is no longer patched, so this should succeed)

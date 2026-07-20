@@ -78,6 +78,6 @@ async def test_server_sends_correct_byte_count(perf_service):
         stream = MockNetStream(header)
         await perf_service._handle_message(stream)
 
-        assert (
-            len(stream._write_buffer) == recv_bytes
-        ), f"Expected {recv_bytes} bytes, got {len(stream._write_buffer)}"
+        assert len(stream._write_buffer) == recv_bytes, (
+            f"Expected {recv_bytes} bytes, got {len(stream._write_buffer)}"
+        )
