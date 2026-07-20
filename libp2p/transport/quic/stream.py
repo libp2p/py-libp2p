@@ -43,7 +43,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class _QUICStreamEOF(IOException, EOFError, MuxedStreamEOF):
+class _QUICStreamEOF(MuxedStreamEOF, IOException, EOFError):
     """
     Raised by QUICStream.read() when the stream has reached EOF (FIN received)
     and the receive buffer is empty.
