@@ -353,7 +353,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         if self._closed:
-            raise QUICConnectionError("Cannot start a closed connection")
+            logger.debug("Cannot start a closed connection (shutdown race), silencing.")
+            self.event_started.set()
+            return
 
         self._started = True
         logger.debug(f"QUIC connection ready for Swarm: {self._remote_peer_id}")

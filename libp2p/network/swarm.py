@@ -1783,6 +1783,9 @@ class Swarm(Service, INetworkService):
         logger.debug("Swarm::add_conn | starting muxed connection")
         self.manager.run_task(muxed_conn.start)
         await muxed_conn.event_started.wait()
+
+        if muxed_conn.is_closed:
+            raise SwarmException("Connection closed while starting")
         logger.debug(
             f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
         )
