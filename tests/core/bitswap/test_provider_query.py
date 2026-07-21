@@ -359,7 +359,7 @@ class TestBitswapClientProviderQueryIntegration:
 
         async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
             captured["peer_id"] = peer_id
-            return block_data
+            return block_data, peer_id
 
         client._request_block = _fake_request  # type: ignore[method-assign]
 
@@ -387,7 +387,7 @@ class TestBitswapClientProviderQueryIntegration:
 
         async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
             captured["peer_id"] = peer_id
-            return block_data
+            return block_data, peer_id
 
         client._request_block = _fake_request  # type: ignore[method-assign]
 
@@ -410,7 +410,7 @@ class TestBitswapClientProviderQueryIntegration:
 
         async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
             captured["peer_id"] = peer_id
-            return block_data
+            return block_data, peer_id
 
         client._request_block = _fake_request  # type: ignore[method-assign]
 
@@ -440,7 +440,7 @@ class TestBitswapClientProviderQueryIntegration:
 
         async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
             captured["peer_id"] = peer_id
-            return block_data
+            return block_data, peer_id
 
         client._request_block = _fake_request  # type: ignore[method-assign]
 

@@ -104,6 +104,9 @@ class BitswapClient:
         self._expected_blocks: dict[
             PeerID, set[CIDObject]
         ] = {}  # peer -> expected CIDs
+        self._delivery_peers: dict[
+            CIDObject, PeerID
+        ] = {}  # cid -> peer_id that delivered it
         self._nursery: trio.Nursery | None = None
         self._started = False
 
@@ -280,40 +283,21 @@ class BitswapClient:
 
         return results
 
-    async def get_block(
+    async def get_block_with_peer(
         self,
         cid: CIDInput,
         peer_id: PeerID | None = None,
         timeout: float = DEFAULT_TIMEOUT,
-    ) -> bytes:
+    ) -> tuple[bytes, PeerID]:
         """
-        Get a block, fetching from peers if not available locally.
-
-        If a ``ProviderQueryManager`` was supplied at construction time and no
-        explicit ``peer_id`` is given, the manager is consulted first to
-        discover which peers have the block via the DHT.  The first discovered
-        provider is used; if none is found the request falls back to
-        broadcasting to all connected peers.
-
-        Args:
-            cid: The CID of the block to fetch
-            peer_id: Optional peer to request from; DHT discovery is skipped when set.
-            timeout: Timeout in seconds
-
-        Returns:
-            The block data
-
-        Raises:
-            BlockNotFoundError: If the block cannot be found
-            BitswapTimeoutError: If the request times out
-
+        Get a block and return the peer that delivered it.
         """
         cid_obj = parse_cid(cid)
 
         # 1. Check local store first
         data = await self.block_store.get_block(cid_obj)
         if data is not None:
-            return data
+            return data, PeerID(b"local")
 
         # 2. If no explicit peer given, try DHT provider discovery
         if peer_id is None and self.provider_query_manager is not None:
@@ -336,6 +320,18 @@ class BitswapClient:
 
         # 3. Request from network (specific peer or broadcast)
         return await self._request_block(cid_obj, peer_id, timeout)
+
+    async def get_block(
+        self,
+        cid: CIDInput,
+        peer_id: PeerID | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> bytes:
+        """
+        Get a block, fetching from peers if not available locally.
+        """
+        data, _ = await self.get_block_with_peer(cid, peer_id, timeout)
+        return data
 
     async def want_block(
         self,
@@ -368,38 +364,46 @@ class BitswapClient:
 
     async def have_block(self, cid: CIDInput, peer_id: PeerID | None = None) -> bool:
         """
-        Check if a peer has a block (v1.2.0 feature).
-
-        Args:
-            cid: The CID of the block to check
-            peer_id: Optional specific peer to query
-
-        Returns:
-            True if peer has the block, False otherwise
-
+        Check if a peer has a block (v1.2.0 feature), without fetching it.
         """
         cid_obj = parse_cid(cid)
-
-        # Add to wantlist with Have type
         await self.want_block(cid_obj, want_type=1, send_dont_have=True)
 
-        # Send wantlist to peer(s)
         if peer_id:
             await self._send_wantlist_to_peer(peer_id, [cid_obj])
         else:
             await self._broadcast_wantlist([cid_obj])
 
-        # Wait for response (simplified - in production, track Have/DontHave responses)
-        # For now, check if block appeared in store
         result = False
         try:
             with trio.fail_after(5.0):
-                while not await self.block_store.has_block(cid_obj):
+                while True:
+                    # Block already local (e.g. someone else fetched it meanwhile)
+                    if await self.block_store.has_block(cid_obj):
+                        result = True
+                        break
+                    # A HAVE presence was recorded for the peer(s) we asked
+                    if peer_id is not None:
+                        if cid_obj in self._expected_blocks.get(peer_id, set()):
+                            result = True
+                            break
+                    elif any(
+                        cid_obj in have_set
+                        for have_set in list(self._expected_blocks.values())
+                    ):
+                        result = True
+                        break
+                    # An explicit DontHave from the peer we asked short-circuits the wait
+                    if peer_id is not None and peer_id in self._dont_have_responses.get(
+                        cid_obj, set()
+                    ):
+                        break
                     await trio.sleep(0.1)
-            result = True
         except trio.TooSlowError:
             result = False
         finally:
+            # Don't clear entries other pending get_block() calls may still need
+            self._expected_blocks.get(peer_id or PeerID(b""), set()).discard(cid_obj)
             await self.cancel_want(cid_obj)
 
         return result
@@ -425,7 +429,7 @@ class BitswapClient:
 
     async def _request_block(
         self, cid: CIDObject, peer_id: PeerID | None, timeout: float
-    ) -> bytes:
+    ) -> tuple[bytes, PeerID]:
         """Request a block from the network."""
         logger.info(f"📤 Requesting block: {format_cid_for_display(cid)}")
 
@@ -478,10 +482,12 @@ class BitswapClient:
             if cid in self._dont_have_responses:
                 del self._dont_have_responses[cid]
 
-        if error:
+        if error is not None:
             raise error
+
+        delivered_by = self._delivery_peers.pop(cid, peer_id or PeerID(b""))
         assert result is not None
-        return result
+        return result, delivered_by
 
     async def _send_wantlist_to_peer(
         self, peer_id: PeerID, cids: list[CIDObject]
@@ -593,7 +599,7 @@ class BitswapClient:
         peers_to_notify = []
 
         # Find peers who want this block
-        for peer_id, wantlist in self._peer_wantlists.items():
+        for peer_id, wantlist in list(self._peer_wantlists.items()):
             if cid in wantlist:
                 want_info = wantlist[cid]
                 peers_to_notify.append((peer_id, want_info))
@@ -1123,7 +1129,7 @@ class BitswapClient:
                 logger.info("  ✓ Stored successfully")
 
                 # Remove from expected blocks for all peers
-                for pid in self._expected_blocks:
+                for pid in list(self._expected_blocks.keys()):
                     if matched_cid in self._expected_blocks[pid]:
                         self._expected_blocks[pid].discard(matched_cid)
                         pid_str = (
@@ -1136,6 +1142,7 @@ class BitswapClient:
                 # Notify pending requests
                 if matched_cid in self._pending_requests:
                     logger.info("  ✓ Notifying pending request")
+                    self._delivery_peers[matched_cid] = peer_id
                     self._pending_requests[matched_cid].set()
             else:
                 logger.error("  ✗ NO MATCH FOUND!")
@@ -1177,7 +1184,7 @@ class BitswapClient:
             )
 
             # Remove from expected blocks for all peers
-            for peer_id in self._expected_blocks:
+            for peer_id in list(self._expected_blocks.keys()):
                 self._expected_blocks[peer_id].discard(cid)
 
             # Notify pending requests
