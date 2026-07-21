@@ -339,38 +339,25 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
     async def start(self) -> None:
         """
-        Start the connection and its background tasks.
+        Signal that this connection is ready for use by the Swarm.
 
-        This method implements the IMuxedConn.start() interface.
-        It should be called to begin processing connection events.
+        This method implements the IMuxedConn.start() interface and is the
+        EXCLUSIVE responsibility of Swarm.add_conn(). All raw transport
+        setup (handshake, background tasks, peer verification) is handled
+        by connect(), which sets _started=True when the connection is
+        operational. start() then completes the Swarm lifecycle by setting
+        event_started, which add_conn() waits on.
         """
-        if self._started:
-            logger.warning("Connection already started")
+        if self.event_started.is_set():
+            logger.debug("Connection already signalled to Swarm")
             return
 
         if self._closed:
             raise QUICConnectionError("Cannot start a closed connection")
 
         self._started = True
-        logger.debug(f"Starting QUIC connection to {self._remote_peer_id}")
-
-        try:
-            # If this is a client connection, we need to establish the connection
-            if self._is_initiator:
-                await self._initiate_connection()
-                # event_started will be set in connect() after connection is established
-            else:
-                # For server connections, we're already connected via the listener
-                self._established = True
-                self._connected_event.set()
-                # Set event_started after connection is established for server
-                self.event_started.set()
-
-            logger.debug(f"QUIC connection to {self._remote_peer_id} started")
-
-        except Exception as e:
-            logger.error(f"Failed to start connection: {e}")
-            raise QUICConnectionError(f"Connection start failed: {e}") from e
+        logger.debug(f"QUIC connection ready for Swarm: {self._remote_peer_id}")
+        self.event_started.set()
 
     async def _initiate_connection(self) -> None:
         """Initiate client-side connection, reusing listener socket if available."""
@@ -399,6 +386,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
         """
         Establish the QUIC connection using trio nursery for background tasks.
 
+        This method handles all raw transport setup: physical connection
+        initiation (for clients), background event-loop tasks, TLS handshake
+        completion, and peer identity verification. It intentionally does NOT
+        call start() or set event_started — those are exclusively owned by
+        Swarm.add_conn() to maintain a uniform lifecycle contract across all
+        transports.
+
         Args:
             nursery: Trio nursery for managing connection background tasks
 
@@ -410,15 +404,21 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         try:
             with QUICErrorContext("connection_establishment", "connection"):
-                # Start the connection if not already started
-                if not self._started:
-                    await self.start()
+                # Raw transport setup — inlined directly instead of delegating
+                # to start(), so that start() remains a pure Swarm signal.
+                if self._is_initiator:
+                    # Client: initiate the UDP handshake
+                    await self._initiate_connection()
+                else:
+                    # Server: already physically connected via the listener socket
+                    self._established = True
+                    self._connected_event.set()
 
                 # Start background event processing
                 if not self._background_tasks_started:
                     await self._start_background_tasks()
 
-                # Wait for handshake completion with timeout
+                # Wait for TLS handshake completion with timeout
                 with trio.move_on_after(
                     self.CONNECTION_HANDSHAKE_TIMEOUT
                 ) as cancel_scope:
@@ -441,11 +441,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 logger.debug(f"QUICConnection {id(self)}: Peer identity verified")
                 self._established = True
+                self._started = True  # Connection is fully set up and operational
                 logger.debug(f"QUIC connection established with {self._remote_peer_id}")
-
-                # Set event_started after connection is fully established for initiator
-                if self._is_initiator:
-                    self.event_started.set()
+                # NOTE: event_started is NOT set here. Swarm.add_conn() calls
+                # start() which is the sole setter of event_started for the
+                # Swarm lifecycle contract.
 
         except Exception as e:
             logger.error(f"Failed to establish connection: {e}")
