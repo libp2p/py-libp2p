@@ -6,9 +6,16 @@ from collections import (
     OrderedDict,
 )
 import hashlib
+from ipaddress import (
+    ip_address,
+    ip_network,
+)
 import logging
 import time
 
+from multiaddr.exceptions import (
+    ProtocolLookupError,
+)
 import multihash
 import trio
 
@@ -27,10 +34,13 @@ from libp2p.peer.peerinfo import (
 
 from .common import (
     BUCKET_SIZE,
+    MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
     PEER_REFRESH_INTERVAL,
     PROTOCOL_ID,
     STALE_PEER_THRESHOLD,
+    SUBNET_PREFIX_LEN_V4,
+    SUBNET_PREFIX_LEN_V6,
 )
 from .pb.kademlia_pb2 import (
     Message,
@@ -55,6 +65,43 @@ def peer_id_to_key(peer_id: ID) -> bytes:
 def key_to_int(key: bytes) -> int:
     """Convert a 256-bit key to an integer for range calculations."""
     return int.from_bytes(key, byteorder="big")
+
+
+def _subnet_key(peer_info: PeerInfo) -> str | None:
+    """
+    Return a stable subnet key for a peer's first globally-routable IP address,
+    used to enforce IP/subnet diversity in k-buckets (issue #1383).
+
+    Returns ``None`` (peer exempt from the diversity check) when the peer has no
+    globally-routable IP literal — this covers loopback, private (RFC1918/ULA),
+    CGNAT (100.64.0.0/10), link-local, documentation ranges, DNS-named peers,
+    and relayed (``p2p-circuit``) addresses. Only ``ip4``/``ip6`` literals on
+    non-relayed multiaddrs are grouped; ``is_global`` is used as the routable
+    predicate so behaviour is stable regardless of the exact private-range set.
+
+    A relayed address carries the *relay's* IP, not the peer's, so it is skipped
+    to avoid grouping distinct peers behind a shared relay.
+    """
+    for addr in peer_info.addrs:
+        # Relayed addrs expose the relay's IP, not the peer's — never group them.
+        if "p2p-circuit" in str(addr):
+            continue
+        for proto, prefix_len in (
+            ("ip4", SUBNET_PREFIX_LEN_V4),
+            ("ip6", SUBNET_PREFIX_LEN_V6),
+        ):
+            try:
+                value = addr.value_for_protocol(proto)
+                if value is None:
+                    continue
+                ip = ip_address(value)
+            except (ProtocolLookupError, ValueError):
+                continue
+            if not ip.is_global:
+                # loopback / private / CGNAT / link-local / doc range → exempt
+                continue
+            return str(ip_network(f"{ip}/{prefix_len}", strict=False))
+    return None
 
 
 class KBucket:
@@ -114,6 +161,24 @@ class KBucket:
             self.refresh_peer_last_seen(peer_id)
             return True
 
+        # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
+        # globally-routable subnet already holds MAX_PEERS_PER_SUBNET peers in
+        # this bucket. Exempt peers (subnet is None) are never grouped. Disabled
+        # when MAX_PEERS_PER_SUBNET <= 0.
+        if MAX_PEERS_PER_SUBNET > 0:
+            subnet = _subnet_key(peer_info)
+            if (
+                subnet is not None
+                and self._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+            ):
+                logger.debug(
+                    "Subnet %s at capacity (%d), rejecting peer %s",
+                    subnet,
+                    MAX_PEERS_PER_SUBNET,
+                    peer_id,
+                )
+                return False
+
         # If bucket has space, add the peer
         if len(self.peers) < self.bucket_size:
             self.peers[peer_id] = (peer_info, current_time)
@@ -152,6 +217,15 @@ class KBucket:
 
         # If we got here, the oldest peer responded but we couldn't add the new peer
         return False
+
+    def _peers_in_subnet(self, subnet: str) -> int:
+        """
+        Count resident peers whose subnet key matches ``subnet`` (issue #1383).
+
+        Recomputes ``_subnet_key`` for each resident peer; O(k) with k bounded
+        by ``bucket_size`` (default 20), so the per-add cost is negligible.
+        """
+        return sum(1 for info, _ in self.peers.values() if _subnet_key(info) == subnet)
 
     def remove_peer(self, peer_id: ID) -> bool:
         """
@@ -688,6 +762,12 @@ class RoutingTable:
         :param bucket: The bucket to check
         :return: True if the bucket should be split
         """
+        # Only full buckets should ever split. A non-full bucket can now return
+        # False from add_peer for reasons other than fullness (e.g. a subnet
+        # diversity rejection, issue #1383), which must not trigger a split.
+        if len(bucket.peers) < bucket.bucket_size:
+            return False
+
         # Check if we've exceeded maximum buckets
         if len(self.buckets) >= MAXIMUM_BUCKETS:
             logger.debug("Maximum number of buckets reached, cannot split")
