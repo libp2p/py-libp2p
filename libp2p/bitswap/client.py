@@ -288,7 +288,7 @@ class BitswapClient:
         cid: CIDInput,
         peer_id: PeerID | None = None,
         timeout: float = DEFAULT_TIMEOUT,
-    ) -> tuple[bytes, PeerID]:
+    ) -> tuple[bytes, PeerID | None]:
         """
         Get a block and return the peer that delivered it.
         """
@@ -297,7 +297,7 @@ class BitswapClient:
         # 1. Check local store first
         data = await self.block_store.get_block(cid_obj)
         if data is not None:
-            return data, PeerID(b"local")
+            return data, None
 
         # 2. If no explicit peer given, try DHT provider discovery
         if peer_id is None and self.provider_query_manager is not None:
@@ -429,7 +429,7 @@ class BitswapClient:
 
     async def _request_block(
         self, cid: CIDObject, peer_id: PeerID | None, timeout: float
-    ) -> tuple[bytes, PeerID]:
+    ) -> tuple[bytes, PeerID | None]:
         """Request a block from the network."""
         logger.info(f"📤 Requesting block: {format_cid_for_display(cid)}")
 
@@ -485,9 +485,9 @@ class BitswapClient:
         if error is not None:
             raise error
 
-        delivered_by = self._delivery_peers.pop(cid, peer_id or PeerID(b""))
+        delivering_peer = self._delivery_peers.pop(cid, None)
         assert result is not None
-        return result, delivered_by
+        return result, delivering_peer
 
     async def _send_wantlist_to_peer(
         self, peer_id: PeerID, cids: list[CIDObject]
@@ -800,7 +800,7 @@ class BitswapClient:
             await self._process_blocks_v100(list(msg.blocks), peer_id)
 
         if msg.payload:
-            await self._process_blocks_v110(msg.payload)
+            await self._process_blocks_v110(msg.payload, peer_id)
 
         if msg.blockPresences:
             await self._process_block_presences(msg.blockPresences, peer_id)
@@ -1165,7 +1165,7 @@ class BitswapClient:
             logger.info("  ✓ All blocks received from this peer!")
         logger.info("=" * 70)
 
-    async def _process_blocks_v110(self, blocks: Sequence[Any]) -> None:
+    async def _process_blocks_v110(self, blocks: Sequence[Any], peer_id: PeerID) -> None:
         """Process received blocks (v1.1.0+ format with prefix)."""
         logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
         for block in blocks:
@@ -1193,6 +1193,7 @@ class BitswapClient:
                     f"Notifying pending request for "
                     f"{format_cid_for_display(cid, max_len=16)}..."
                 )
+                self._delivery_peers[cid] = peer_id
                 self._pending_requests[cid].set()
             else:
                 logger.debug(
