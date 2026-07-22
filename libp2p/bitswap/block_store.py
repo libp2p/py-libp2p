@@ -157,6 +157,7 @@ class FilesystemBlockStore(BlockStore):
         cid_str = str(_normalize_cid(cid))
         if len(cid_str) < 3:
             from .errors import InvalidCIDError
+
             raise InvalidCIDError(f"CID string too short to create path: {cid_str!r}")
         # e.g. bafybeiabc... → <base>/ba/fybeiabc...
         return self._path / cid_str[:2] / cid_str[2:]

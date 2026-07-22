@@ -24,8 +24,6 @@ for dag-jose, dag-json, and experimental codecs.
 import hashlib
 from typing import TypeAlias
 
-from .errors import InvalidCIDError
-
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
 from multicodec import Code, is_codec
@@ -38,6 +36,8 @@ from multicodec.code_table import (
     RAW,
     SHA2_256,
 )
+
+from .errors import InvalidCIDError
 
 # Simplified CID version constants
 CID_V0 = 0
@@ -229,12 +229,12 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
             # make_cid(bytes) fails for raw CIDv0 buffers (multihash bytes).
             # CIDv0 is simply a bare multihash, so try constructing directly.
             import multihash
-            
+
             try:
                 multihash.decode(value)
             except ValueError as e:
                 raise InvalidCIDError(f"Invalid CID multihash bytes: {e}")
-                
+
             try:
                 return CIDv0(value)
             except Exception:

@@ -322,7 +322,10 @@ class BitswapMessageHandler:
 
         for idx, block_data in enumerate(blocks):
             if len(block_data) > MAX_BLOCK_SIZE:
-                logger.warning(f"Rejecting block from {peer_id_str}: size {len(block_data)} exceeds limit {MAX_BLOCK_SIZE}")
+                logger.warning(
+                    f"Rejecting block from {peer_id_str}: "
+                    f"size {len(block_data)} exceeds limit {MAX_BLOCK_SIZE}"
+                )
                 continue
             matched_cid = None
             for prefix in unique_prefixes.values():
@@ -360,7 +363,10 @@ class BitswapMessageHandler:
             data = block.data
 
             if len(data) > MAX_BLOCK_SIZE:
-                logger.warning(f"Rejecting block from {peer_id}: size {len(data)} exceeds limit {MAX_BLOCK_SIZE}")
+                logger.warning(
+                    f"Rejecting block from {peer_id}: "
+                    f"size {len(data)} exceeds limit {MAX_BLOCK_SIZE}"
+                )
                 continue
 
             cid_bytes = reconstruct_cid_from_prefix_and_data(prefix, data)
