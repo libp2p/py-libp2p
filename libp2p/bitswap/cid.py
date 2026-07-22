@@ -24,6 +24,8 @@ for dag-jose, dag-json, and experimental codecs.
 import hashlib
 from typing import TypeAlias
 
+from .errors import InvalidCIDError
+
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
 from multicodec import Code, is_codec
@@ -138,7 +140,7 @@ def get_cid_prefix(cid: CIDInput) -> bytes:
     # CIDv0 - no prefix needed for v1.0.0.
     try:
         cid_obj = parse_cid(cid)
-    except ValueError:
+    except (ValueError, InvalidCIDError):
         return b""
 
     if cid_obj.version != CID_V1:
@@ -194,7 +196,7 @@ def verify_cid(cid: CIDInput, data: bytes) -> bool:
     logger.debug(f"        Data size: {len(data)} bytes")
     try:
         cid_obj = parse_cid(cid)
-    except ValueError:
+    except (ValueError, InvalidCIDError):
         logger.debug("        No valid CID format detected")
         return False
 
@@ -226,6 +228,13 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
         except ValueError:
             # make_cid(bytes) fails for raw CIDv0 buffers (multihash bytes).
             # CIDv0 is simply a bare multihash, so try constructing directly.
+            import multihash
+            
+            try:
+                multihash.decode(value)
+            except ValueError as e:
+                raise InvalidCIDError(f"Invalid CID multihash bytes: {e}")
+                
             try:
                 return CIDv0(value)
             except Exception:
@@ -271,7 +280,7 @@ def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:
     """Return CID text for display, with hex fallback and optional truncation."""
     try:
         result = cid_to_text(cid)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, InvalidCIDError):
         # Best-effort fallback: hex for raw bytes, str() for anything else.
         result = cid.hex() if isinstance(cid, bytes) else str(cid)
 

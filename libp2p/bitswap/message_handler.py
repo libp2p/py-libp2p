@@ -18,7 +18,7 @@ from .cid import (
     reconstruct_cid_from_prefix_and_data,
     verify_cid,
 )
-from .config import BITSWAP_PROTOCOL_V100
+from .config import BITSWAP_PROTOCOL_V100, MAX_BLOCK_SIZE
 from .pb.bitswap_pb2 import Message
 
 if TYPE_CHECKING:
@@ -321,6 +321,9 @@ class BitswapMessageHandler:
                 pass
 
         for idx, block_data in enumerate(blocks):
+            if len(block_data) > MAX_BLOCK_SIZE:
+                logger.warning(f"Rejecting block from {peer_id_str}: size {len(block_data)} exceeds limit {MAX_BLOCK_SIZE}")
+                continue
             matched_cid = None
             for prefix in unique_prefixes.values():
                 try:
@@ -355,6 +358,10 @@ class BitswapMessageHandler:
         for block in blocks:
             prefix = block.prefix
             data = block.data
+
+            if len(data) > MAX_BLOCK_SIZE:
+                logger.warning(f"Rejecting block from {peer_id}: size {len(data)} exceeds limit {MAX_BLOCK_SIZE}")
+                continue
 
             cid_bytes = reconstruct_cid_from_prefix_and_data(prefix, data)
             cid = parse_cid(cid_bytes)
