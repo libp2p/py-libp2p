@@ -338,12 +338,17 @@ class BitswapMessage:
         if proto.HasField("wantlist") and proto.wantlist.entries:
             wl = Wantlist(full=proto.wantlist.full)
             for e in proto.wantlist.entries:
+                try:
+                    wt = WantType(e.wantType)
+                except ValueError:
+                    # Skip unrecognized want types to gracefully degrade
+                    continue
                 wl.entries.append(
                     WantlistEntry(
                         cid=bytes(e.block),
                         priority=e.priority,
                         cancel=e.cancel,
-                        want_type=WantType(e.wantType),
+                        want_type=wt,
                         send_dont_have=e.sendDontHave,
                     )
                 )
@@ -356,10 +361,15 @@ class BitswapMessage:
             msg.blocks.append((cid_bytes, bytes(pb_block.data)))
 
         for pb_presence in proto.blockPresences:
+            try:
+                pt = BlockPresenceType(pb_presence.type)
+            except ValueError:
+                # Fallback to DontHave for unrecognized presence types
+                pt = BlockPresenceType.DontHave
             msg.block_presences.append(
                 BlockPresence(
                     cid=bytes(pb_presence.cid),
-                    type=BlockPresenceType(pb_presence.type),
+                    type=pt,
                 )
             )
 

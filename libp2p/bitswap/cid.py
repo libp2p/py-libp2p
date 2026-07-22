@@ -306,8 +306,10 @@ def compute_cid(
     """
     if version == CID_V0:
         return compute_cid_v0(data)
-    else:
+    elif version == CID_V1:
         return compute_cid_v1(data, codec)
+    else:
+        raise ValueError(f"Invalid CID version: {version}")
 
 
 def compute_cid_obj(
@@ -316,7 +318,10 @@ def compute_cid_obj(
     """Compute a CID object for data with specified version."""
     if version == CID_V0:
         return compute_cid_v0_obj(data)
-    return compute_cid_v1_obj(data, codec)
+    elif version == CID_V1:
+        return compute_cid_v1_obj(data, codec)
+    else:
+        raise ValueError(f"Invalid CID version: {version}")
 
 
 def parse_cid_codec(cid: bytes) -> str:

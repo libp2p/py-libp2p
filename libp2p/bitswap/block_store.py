@@ -155,6 +155,9 @@ class FilesystemBlockStore(BlockStore):
     def _cid_to_path(self, cid: CIDInput) -> Path:
         """Convert a CID to a filesystem path using 2-char prefix directories."""
         cid_str = str(_normalize_cid(cid))
+        if len(cid_str) < 3:
+            from .errors import InvalidCIDError
+            raise InvalidCIDError(f"CID string too short to create path: {cid_str!r}")
         # e.g. bafybeiabc... → <base>/ba/fybeiabc...
         return self._path / cid_str[:2] / cid_str[2:]
 
