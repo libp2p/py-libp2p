@@ -65,7 +65,7 @@ class TestBitswapIntegration:
                     root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                     # Verify provider has all blocks
-                    provider_cids = provider_store.get_all_cids()
+                    provider_cids = await provider_store.get_all_cids()
                     assert len(provider_cids) > 0
                     assert root_cid in provider_cids
 
@@ -95,7 +95,7 @@ class TestBitswapIntegration:
                     assert retrieved_data == test_data
 
                     # Verify client now has all blocks
-                    client_cids = client_store.get_all_cids()
+                    client_cids = await client_store.get_all_cids()
                     assert len(client_cids) == len(provider_cids)
                     assert root_cid in client_cids
 
@@ -162,7 +162,7 @@ class TestBitswapIntegration:
                         assert retrieved == data
 
                     # Verify client has all blocks
-                    client_cids = client_store.get_all_cids()
+                    client_cids = await client_store.get_all_cids()
                     assert len(client_cids) == len(blocks)
 
                 finally:
@@ -273,7 +273,7 @@ class TestBitswapIntegration:
                     root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                     # Verify multiple blocks were created
-                    provider_cids = provider_store.get_all_cids()
+                    provider_cids = await provider_store.get_all_cids()
                     assert len(provider_cids) > 1  # Should be chunked
 
                     # Connect nodes
@@ -296,7 +296,7 @@ class TestBitswapIntegration:
                     assert retrieved_data == large_data
 
                     # Verify all blocks transferred
-                    client_cids = client_store.get_all_cids()
+                    client_cids = await client_store.get_all_cids()
                     assert len(client_cids) == len(provider_cids)
 
                 finally:
@@ -362,8 +362,8 @@ class TestBitswapIntegration:
                     assert retrieved_a == block_a
 
                     # Both nodes should now have both blocks
-                    node1_cids = node1_store.get_all_cids()
-                    node2_cids = node2_store.get_all_cids()
+                    node1_cids = await node1_store.get_all_cids()
+                    node2_cids = await node2_store.get_all_cids()
 
                     assert cid_a in node1_cids and cid_b in node1_cids
                     assert cid_a in node2_cids and cid_b in node2_cids
@@ -444,9 +444,9 @@ class TestBitswapIntegration:
                     assert retrieved_b == block_b
 
                     # Now verify client has these blocks
-                    assert len(client_store.get_all_cids()) == 2
-                    assert cid_a in client_store.get_all_cids()
-                    assert cid_b in client_store.get_all_cids()
+                    assert len(await client_store.get_all_cids()) == 2
+                    assert cid_a in await client_store.get_all_cids()
+                    assert cid_b in await client_store.get_all_cids()
 
                     # Step 4: Request a non-existent block and verify we
                     # get a DontHave response
@@ -502,7 +502,7 @@ class TestBitswapIntegration:
                     # Verify we didn't get the nonexistent block
                     assert not await client_store.has_block(nonexistent_cid)
                     # And still have only the 2 blocks we successfully retrieved
-                    assert len(client_store.get_all_cids()) == 2
+                    assert len(await client_store.get_all_cids()) == 2
 
                 finally:
                     await provider_bitswap.stop()

@@ -12,6 +12,7 @@ BITSWAP_PROTOCOL_V130 = TProtocol("/ipfs/bitswap/1.3.0")
 
 # All supported protocols (ordered from newest to oldest for negotiation)
 BITSWAP_PROTOCOLS = [
+    BITSWAP_PROTOCOL_V130,
     BITSWAP_PROTOCOL_V120,
     BITSWAP_PROTOCOL_V110,
     BITSWAP_PROTOCOL_V100,
@@ -23,9 +24,7 @@ DEFAULT_PRIORITY = 1
 # Maximum message size (4MiB as per spec)
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
-# Maximum block size (63 KB - after DAG-PB/UnixFS encoding)
-# py-libp2p stream limit is ~64 KB, so we use 63 KB to be safe
-# Note: Raw chunk data should be smaller to account for DAG-PB overhead (~14 bytes)
+# Maximum block size (512 KB - py-libp2p default stream limit)
 MAX_BLOCK_SIZE = 512 * 1024
 
 # Default timeout for operations (in seconds)

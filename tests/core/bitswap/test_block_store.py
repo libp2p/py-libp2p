@@ -13,7 +13,7 @@ class TestMemoryBlockStore:
     async def test_init_empty(self):
         """Test initializing an empty block store."""
         store = MemoryBlockStore()
-        cids = store.get_all_cids()
+        cids = await store.get_all_cids()
         assert len(cids) == 0
 
     @pytest.mark.trio
@@ -97,7 +97,7 @@ class TestMemoryBlockStore:
         await store.put_block(cid3, data3)
 
         # Get all CIDs
-        cids = store.get_all_cids()
+        cids = await store.get_all_cids()
         assert len(cids) == 3
         assert cid1 in cids
         assert cid2 in cids
@@ -115,7 +115,7 @@ class TestMemoryBlockStore:
         await store.put_block(cid, data)
 
         # Should only have one copy
-        cids = store.get_all_cids()
+        cids = await store.get_all_cids()
         assert len(cids) == 1
         assert cid in cids
 
@@ -142,7 +142,7 @@ class TestMemoryBlockStore:
             assert retrieved == data
 
         # Verify count
-        all_cids = store.get_all_cids()
+        all_cids = await store.get_all_cids()
         assert len(all_cids) == len(blocks)
 
     @pytest.mark.trio

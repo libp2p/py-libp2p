@@ -164,7 +164,7 @@ class PaymentExtension(IBitswapExtension):
 
         # Handle PaymentRequired block presences (1.3.0 type=2)
         if msg_1_3.blockPresences:
-            await self.client._process_block_presences_1_3(
+            await self.client.message_handler.process_block_presences_1_3(
                 msg_1_3.blockPresences, peer_id
             )
 

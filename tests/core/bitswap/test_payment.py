@@ -9,33 +9,37 @@ from libp2p.bitswap.pricing_engine import BlockPricingEngine
 
 def test_block_pricing_engine_size_based():
     from libp2p.bitswap.cid import compute_cid_v1
+
     pricing = BlockPricingEngine(strategy="size_based", units_per_kb=10.0)
     # 500 KB = 512000 bytes
-    price = pricing.compute_price(compute_cid_v1(b"cid1"), 512000)
+    price = pricing.compute_price(compute_cid_v1(b"cid1").hex(), 512000)
     assert price == 5000
 
 
 def test_block_pricing_engine_fixed():
     from libp2p.bitswap.cid import compute_cid_v1
+
     pricing = BlockPricingEngine(strategy="fixed", fixed_price=123)
-    price = pricing.compute_price(compute_cid_v1(b"cid1"), 512000)
+    price = pricing.compute_price(compute_cid_v1(b"cid1").hex(), 512000)
     assert price == 123
 
 
 def test_block_pricing_engine_free():
     from libp2p.bitswap.cid import compute_cid_v1
+
     pricing = BlockPricingEngine(strategy="free")
-    price = pricing.compute_price(compute_cid_v1(b"cid1"), 512000)
+    price = pricing.compute_price(compute_cid_v1(b"cid1").hex(), 512000)
     assert price == 0
 
 
 def test_block_pricing_engine_overrides():
     from libp2p.bitswap.cid import compute_cid_v1
+
     pricing = BlockPricingEngine(strategy="fixed", fixed_price=100)
     cid1 = compute_cid_v1(b"cid1")
     cid2 = compute_cid_v1(b"cid2")
     cid3 = compute_cid_v1(b"cid3")
-    
+
     pricing.set_price(cid2, 50)
     pricing.set_free(cid3)
 
@@ -47,6 +51,7 @@ def test_block_pricing_engine_overrides():
 @pytest.mark.trio
 async def test_payment_ledger_registration_and_payment():
     from libp2p.bitswap.cid import compute_cid_v1
+
     ledger = PaymentLedger()
 
     root_cid = compute_cid_v1(b"root")
@@ -72,6 +77,7 @@ async def test_payment_ledger_registration_and_payment():
 @pytest.mark.trio
 async def test_payment_ledger_nonce_replay():
     from libp2p.bitswap.cid import compute_cid_v1
+
     ledger = PaymentLedger()
     root_cid = compute_cid_v1(b"root")
 
@@ -98,8 +104,9 @@ async def test_gated_decision_engine_auth():
     )
 
     from libp2p.bitswap.cid import compute_cid_v1
+
     cid1 = compute_cid_v1(b"cid1")
-    
+
     auth = MagicMock()
     auth.cid = cid1
     auth.value = 50

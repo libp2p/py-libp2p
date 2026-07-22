@@ -11,7 +11,7 @@ from libp2p.bitswap.config import (
     BITSWAP_PROTOCOL_V100,
     BITSWAP_PROTOCOL_V120,
 )
-from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
+from libp2p.bitswap.errors import BitswapTimeoutError
 from libp2p.peer.id import ID as PeerID
 
 
@@ -343,7 +343,7 @@ class TestBitswapClientMultipleBlocks:
             await client.add_block(cid, data)
 
         # Get all CIDs
-        all_cids = client.block_store.get_all_cids()
+        all_cids = await client.block_store.get_all_cids()
 
         assert len(all_cids) == len(blocks)
         for cid in blocks.keys():

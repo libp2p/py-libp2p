@@ -1,7 +1,7 @@
 """
 Bitswap protocol implementation for py-libp2p.
 
-This module provides Bitswap v1.0.0, v1.1.0, and v1.2.0 implementations
+This module provides Bitswap v1.0.0, v1.1.0, v1.2.0, and v1.3.0 implementations
 for content discovery and file sharing, allowing peers to exchange
 content-addressed blocks in a peer-to-peer network.
 
@@ -68,7 +68,7 @@ from .errors import (
     InvalidBlockError,
     InvalidCIDError,
     MessageTooLargeError,
-    TimeoutError,
+    BitswapTimeoutError,
 )
 from .wantlist import (
     BitswapMessage,
@@ -126,7 +126,7 @@ __all__ = [
     "InvalidBlockError",
     "BlockTooLargeError",
     "MessageTooLargeError",
-    "TimeoutError",
+    "BitswapTimeoutError",
     "BlockNotFoundError",
     "BlockUnavailableError",
     "InvalidCIDError",

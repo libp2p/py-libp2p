@@ -3,9 +3,8 @@ Bitswap client implementation for block exchange.
 Supports v1.0.0, v1.1.0, v1.2.0, and v1.3.0 protocols.
 """
 
-from collections.abc import Sequence
-import hashlib
 import logging
+import traceback
 from typing import TYPE_CHECKING, Any
 
 import trio
@@ -14,7 +13,6 @@ from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.id import ID as PeerID
-from libp2p.peer.peerinfo import PeerInfo  # noqa: F401
 
 if TYPE_CHECKING:
     from .extension import IBitswapExtension
@@ -25,8 +23,6 @@ from .cid import (
     format_cid_for_display,
     get_cid_prefix,
     parse_cid,
-    reconstruct_cid_from_prefix_and_data,
-    verify_cid,
 )
 from .config import (
     BITSWAP_PROTOCOL_V100,
@@ -38,14 +34,16 @@ from .config import (
     MAX_MESSAGE_SIZE,
 )
 from .errors import (
+    BitswapTimeoutError,
     BlockNotFoundError,
     BlockTooLargeError,
     MessageTooLargeError,
-    TimeoutError as BitswapTimeoutError,
 )
+from .message_handler import BitswapMessageHandler
 from .messages import create_message, create_wantlist_entry
 from .pb.bitswap_pb2 import Message
 from .provider_query import ProviderQueryManager
+from .response_sender import BitswapResponseSender
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +106,9 @@ class BitswapClient:
         ] = {}  # cid -> peer_id that delivered it
         self._nursery: trio.Nursery | None = None
         self._started = False
+        self._stream_limiter = trio.CapacityLimiter(50)
+        self.response_sender = BitswapResponseSender(self)
+        self.message_handler = BitswapMessageHandler(self, self.response_sender)
 
     def register_extension(self, protocol: str, extension: "IBitswapExtension") -> None:
         """Register an extension for a specific protocol."""
@@ -125,7 +126,7 @@ class BitswapClient:
         for protocol in self.supported_protocols:
             self.host.set_stream_handler(
                 TProtocol(protocol),
-                self._handle_stream,
+                self.message_handler.handle_stream,
             )
 
         self._started = True
@@ -392,7 +393,8 @@ class BitswapClient:
                     ):
                         result = True
                         break
-                    # An explicit DontHave from the peer we asked short-circuits the wait
+                    # An explicit DontHave from the peer we asked
+                    # short-circuits the wait
                     if peer_id is not None and peer_id in self._dont_have_responses.get(
                         cid_obj, set()
                     ):
@@ -461,18 +463,19 @@ class BitswapClient:
             # Get the block from store
             data = await self.block_store.get_block(cid)
             if data is None:
-                error = BlockNotFoundError(
-                    f"Block {format_cid_for_display(cid, max_len=16)} not found"
+                raise BlockNotFoundError(
+                    f"Block {format_cid_for_display(cid)} delivered but not in store"
                 )
-            else:
-                result = data
-                logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
+            result = data
+            logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
         except trio.TooSlowError as e:
             logger.error(f"  ✗ TIMEOUT waiting for block {format_cid_for_display(cid)}")
             error = BitswapTimeoutError(
-                f"Timeout waiting for block {format_cid_for_display(cid, max_len=16)}"
+                f"Timeout waiting for block {format_cid_for_display(cid, max_len=16)} "
+                f"after {timeout}s"
             )
             error.__cause__ = e
+            raise error
         finally:
             # Cleanup
             await self.cancel_want(cid)
@@ -480,9 +483,6 @@ class BitswapClient:
                 del self._pending_requests[cid]
             if cid in self._dont_have_responses:
                 del self._dont_have_responses[cid]
-
-        if error is not None:
-            raise error
 
         delivering_peer = self._delivery_peers.pop(cid, None)
         assert result is not None
@@ -541,10 +541,11 @@ class BitswapClient:
                 protocols = [TProtocol(p) for p in self.supported_protocols]  # Try all
 
             # Open stream and send message
-            stream = await self.host.new_stream(
-                peer_id,
-                protocols,
-            )
+            async with self._stream_limiter:
+                stream = await self.host.new_stream(
+                    peer_id,
+                    protocols,
+                )
 
             # Store negotiated protocol
             protocol = stream.get_protocol()
@@ -558,10 +559,10 @@ class BitswapClient:
             # This allows the provider to send blocks back on the same stream
             if self._nursery:
                 self._nursery.start_soon(
-                    self._read_responses_from_stream, stream, peer_id
+                    self.message_handler.read_responses_from_stream, stream, peer_id
                 )
             else:
-                await self._read_responses_from_stream(stream, peer_id)
+                await self.message_handler.read_responses_from_stream(stream, peer_id)
             return True
 
         except Exception as e:
@@ -637,627 +638,24 @@ class BitswapClient:
             except Exception as e:
                 logger.error(f"Failed to send block to peer {peer_id}: {e}")
 
-    async def _read_responses_from_stream(
-        self, stream: INetStream, peer_id: PeerID
-    ) -> None:
-        """
-        Read responses from a stream after sending a wantlist.
-
-        This keeps the stream open so the provider can send blocks back.
-        Stops reading once all expected blocks are received.
-        """
-        try:
-            peer_id_str = str(peer_id)
-            logger.info(f"📡 Reading responses from {peer_id_str} on stream")
-            message_count = 0
-
-            while True:
-                # Check if we've received all expected blocks from this peer
-                if peer_id in self._expected_blocks:
-                    remaining = len(self._expected_blocks[peer_id])
-                    if remaining == 0:
-                        logger.info(
-                            f"✓ All expected blocks received from "
-                            f"{peer_id_str}, closing stream"
-                        )
-                        break
-                    else:
-                        logger.debug(
-                            f"Still expecting {remaining} blocks from {peer_id_str}"
-                        )
-
-                # Read message from provider WITHOUT timeout
-                # We rely on expected_blocks tracking to know when to stop
-                logger.debug(f"Waiting for message from {peer_id_str}...")
-                msg = await self._read_message(stream)
-                if msg is None:
-                    logger.warning(f"Stream from {peer_id_str} closed by remote")
-                    break
-
-                message_count += 1
-                logger.info(f"📨 Received message #{message_count} from {peer_id_str}")
-
-                # Process the response (blocks, presences, etc.)
-                await self._process_message(msg, peer_id, stream)
-
-        except Exception as e:
-            peer_id_str = str(peer_id)
-            logger.error(f"Stream from {peer_id_str} ended with error: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-        finally:
-            # Clean up expected blocks for this peer
-            if peer_id in self._expected_blocks:
-                peer_id_str = str(peer_id)
-                remaining = len(self._expected_blocks[peer_id])
-                if remaining > 0:
-                    logger.error("")
-                    logger.error("=" * 70)
-                    logger.error("⚠️  STREAM CLOSED WITH MISSING BLOCKS")
-                    logger.error("=" * 70)
-                    logger.error(f"Peer: {peer_id_str}")
-                    logger.error(f"Missing {remaining} blocks:")
-                    for i, cid in enumerate(self._expected_blocks[peer_id]):
-                        logger.error(f"  {i + 1}. {format_cid_for_display(cid)}")
-                    logger.error("=" * 70)
-                    logger.error("")
-                del self._expected_blocks[peer_id]
-            try:
-                await stream.close()
-            except Exception as e:
-                # Stream might already be closed
-                logger.debug(f"Error closing stream: {e}")
-
-    async def _handle_stream(self, stream: INetStream) -> None:
-        """Handle incoming Bitswap stream."""
-        peer_id = stream.muxed_conn.peer_id
-        logger.debug(f"Handling Bitswap stream from peer {peer_id}")
-
-        # Detect negotiated protocol and store it immediately so that
-        # _process_message can use the correct protocol for responses.
-        protocol = stream.get_protocol()
-        if protocol:
-            self._peer_protocols[peer_id] = str(protocol)
-
-        try:
-            # Read the first message from this stream
-            msg = await self._read_message(stream)
-            if msg is None:
-                return
-
-            # If the peer sent a WANT_HAVE and we have blocks, reply with
-            # a proactive HAVE so Kubo's session scores us highly and sends
-            # WANT_BLOCK immediately on the same stream.
-            await self._process_message(msg, peer_id, stream)
-
-            # Continue reading further messages on the same stream
-            # (Kubo sends WANT_BLOCK as a follow-up after receiving HAVE)
-            while True:
-                msg = await self._read_message(stream)
-                if msg is None:
-                    break
-                await self._process_message(msg, peer_id, stream)
-
-        except Exception as e:
-            logger.error(f"Error handling stream from {peer_id}: {e}")
-        finally:
-            await stream.close()
-
-    async def _process_message(
-        self, msg: Message, peer_id: PeerID, stream: INetStream
-    ) -> None:
-        """Process a received Bitswap message."""
-        peer_id_str = str(peer_id)[:16]
-        if msg.HasField("wantlist"):
-            logger.warning("=" * 70)
-            logger.warning(f"📥 RECEIVED WANTLIST from peer {peer_id_str}")
-            logger.warning(f"   Entries: {len(msg.wantlist.entries)}")
-            logger.warning(f"   Full: {msg.wantlist.full}")
-            for _i, _e in enumerate(msg.wantlist.entries):
-                _cid_hex = bytes(_e.block).hex()[:20] if _e.block else "N/A"
-                _wt = "WANT_HAVE" if _e.wantType == 1 else "WANT_BLOCK"
-                logger.warning(
-                    f"   [{_i + 1}] cid={_cid_hex}... type={_wt} cancel={_e.cancel}"
-                )
-            logger.warning("=" * 70)
-            logger.debug(
-                f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with "
-                f"{len(msg.wantlist.entries)} entries"
-            )
-
-        # Detect peer protocol version from stream
-        protocol = stream.get_protocol()
-        if protocol:
-            self._peer_protocols[peer_id] = str(protocol)
-
-        peer_protocol = str(protocol) if protocol else BITSWAP_PROTOCOL_V100
-        logger.info(
-            f"[FLOW] Negotiated protocol for peer {str(peer_id)[:20]}...: "
-            f"{peer_protocol}"
-        )
-
-        # ── Protocol Extension Handling ─────────────────────────────────────
-        if peer_protocol in self.protocol_handlers:
-            handled = await self.protocol_handlers[peer_protocol].process_message(
-                peer_id, msg.SerializeToString(), stream
-            )
-            if handled:
-                return
-
-        # ── Standard 1.0.0–1.2.0 message handling (always runs) ─────────
-        if msg.HasField("wantlist"):
-            handled = False
-            if peer_protocol in self.protocol_handlers:
-                handled = await self.protocol_handlers[peer_protocol].process_wantlist(
-                    msg.wantlist, peer_id, stream
-                )
-            if not handled:
-                await self._process_wantlist(msg.wantlist, peer_id, stream)
-
-        if msg.blocks:
-            await self._process_blocks_v100(list(msg.blocks), peer_id)
-
-        if msg.payload:
-            await self._process_blocks_v110(msg.payload, peer_id)
-
-        if msg.blockPresences:
-            await self._process_block_presences(msg.blockPresences, peer_id)
-
-    async def _process_wantlist(
-        self, wantlist: Message.Wantlist, peer_id: PeerID, stream: INetStream
-    ) -> None:
-        """Process a wantlist from a peer."""
-        # Initialize peer wantlist if needed
-        if peer_id not in self._peer_wantlists:
-            self._peer_wantlists[peer_id] = {}
-
-        peer_wantlist = self._peer_wantlists[peer_id]
-        # Update based on full or incremental wantlist
-        if wantlist.full:
-            peer_wantlist.clear()
-
-        # Get peer protocol for response format
-        peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
-
-        logger.warning("=" * 70)
-        logger.warning(
-            f"[STEP 1] SERVER PROCESSING WANTLIST from {str(peer_id)[:20]}..."
-        )
-        logger.warning(f"   entries={len(wantlist.entries)}  protocol={peer_protocol}")
-        logger.warning("=" * 70)
-
-        # ── Standard 1.0.0–1.2.0 wantlist handling ────────────────────────
-        # Process entries
-        blocks_to_send_v100 = []  # For v1.0.0
-        blocks_to_send_v110 = []  # For v1.1.0+
-        presences_to_send = []  # For v1.2.0
-
-        for entry in wantlist.entries:
-            try:
-                logger.warning(f"  -> Processing entry: {bytes(entry.block).hex()}")
-                entry_cid = parse_cid(entry.block)
-                logger.warning(f"  -> Parsed CID: {entry_cid}")
-            except Exception as e:
-                logger.warning(f"  -> EXCEPTION in parse_cid: {e}")
-                continue
-
-            if entry.cancel:
-                # Remove from peer's wantlist
-                if entry_cid in peer_wantlist:
-                    del peer_wantlist[entry_cid]
-            else:
-                # Add to peer's wantlist with full info (v1.2.0)
-                peer_wantlist[entry_cid] = {
-                    "priority": entry.priority,
-                    "want_type": entry.wantType,
-                    "send_dont_have": entry.sendDontHave,
-                }
-
-                # Check if we have this block
-                logger.warning(f"  -> Checking if we have block {entry_cid}")
-                try:
-                    has_block = await self.block_store.has_block(entry_cid)
-                    logger.warning(f"  -> has_block result: {has_block}")
-                except Exception as e:
-                    logger.warning(f"  -> EXCEPTION in has_block: {e}")
-                    has_block = False
-
-                logger.warning(
-                    f"[WANTLIST ENTRY] "
-                    f"cid={format_cid_for_display(entry_cid, max_len=16)} "
-                    f"wantType={entry.wantType} cancel={entry.cancel} "
-                    f"has_block={has_block}"
-                )
-
-                # Handle based on want type (v1.2.0)
-                if entry.wantType == 1:  # Have request (WANT_HAVE)
-                    if has_block:
-                        # Send the block directly — do NOT send a separate HAVE
-                        # presence. Sending HAVE causes Go's bitswap session to
-                        # open a NEW outbound WANT_BLOCK stream to Python. That
-                        # stream fails due to Python TLS limitations, so Go never
-                        # receives the block. Sending the block directly (implicit
-                        # HAVE) is the correct interop approach.
-                        data = await self.block_store.get_block(entry_cid)
-                        if data:
-                            logger.debug(
-                                f"\n[WANT_HAVE] Sending block directly "
-                                f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}"
-                            )
-                            logger.warning(
-                                f"[WANT_HAVE] Sending block directly "
-                                f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)} "
-                                f"(skipping HAVE presence to avoid Go re-request)"
-                            )
-                            if peer_protocol == BITSWAP_PROTOCOL_V100:
-                                blocks_to_send_v100.append(data)
-                            else:
-                                prefix = get_cid_prefix(entry_cid)
-                                blocks_to_send_v110.append((prefix, data))
-                    else:
-                        # Don't have the block — send DontHave so requester
-                        # knows to look elsewhere.
-                        logger.debug(
-                            f"\n[WANT_HAVE] DontHave for "
-                            f"{format_cid_for_display(entry_cid, max_len=16)}"
-                        )
-                        logger.warning(
-                            f"[WANT_HAVE] Sending DontHave for "
-                            f"{format_cid_for_display(entry_cid, max_len=16)}"
-                        )
-                        presences_to_send.append((entry_cid, False))
-                else:  # Block request (WANT_BLOCK)
-                    if has_block:
-                        data = await self.block_store.get_block(entry_cid)
-                        if data:
-                            logger.debug(
-                                f"\n[WANT_BLOCK] Sending block directly "
-                                f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}"
-                            )
-                            logger.warning(
-                                f"[WANT_BLOCK] Sending block for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}"
-                            )
-                            if peer_protocol == BITSWAP_PROTOCOL_V100:
-                                blocks_to_send_v100.append(data)
-                            else:
-                                prefix = get_cid_prefix(entry_cid)
-                                blocks_to_send_v110.append((prefix, data))
-                    else:
-                        # Always send DontHave when we don't have the block,
-                        # regardless of sendDontHave flag. This prevents the
-                        # requester from stalling waiting for a response.
-                        presences_to_send.append((entry_cid, False))
-
-        # Send responses in batches to stay under MAX_MESSAGE_SIZE
-        # and Noise protocol limit (65535 bytes)
-        if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
-            if self._nursery is not None:
-                self._nursery.start_soon(
-                    self._send_wantlist_responses_bg,  # type: ignore
-                    peer_id,
-                    str(peer_protocol),
-                    blocks_to_send_v100,
-                    blocks_to_send_v110,
-                    presences_to_send,
-                )
-            else:
-                # Fallback to writing to the inbound stream if nursery is not available.
-                # This works for Python-to-Python tests, but may fail for
-                # Go-libp2p interop.
-                await self._send_wantlist_responses_inline(
-                    stream,
-                    peer_id,
-                    blocks_to_send_v100,
-                    blocks_to_send_v110,
-                    presences_to_send,
-                )
-
-    async def _send_wantlist_responses_bg(
-        self,
-        peer_id: PeerID,
-        peer_protocol: str,
-        blocks_to_send_v100: list[bytes],
-        blocks_to_send_v110: list[tuple[bytes, bytes]],
-        presences_to_send: list[tuple[CIDObject, bool]],
-    ) -> None:
-        """Background task to send responses over a new outbound stream."""
-        # We MUST open a new stream to the client to send the blocks.
-        # Writing to the inbound stream that the client opened for their WANTLIST
-        # is often ignored by the client (Kubo), as it expects dial back.
-        try:
-            outbound_stream = await self.host.new_stream(
-                peer_id, [TProtocol(peer_protocol)]
-            )
-        except Exception as e:
-            logger.error(f"Failed to open outbound stream to send response: {e}")
-            return
-
-        try:
-            await self._send_wantlist_responses_inline(
-                outbound_stream,
-                peer_id,
-                blocks_to_send_v100,
-                blocks_to_send_v110,
-                presences_to_send,
-            )
-        except Exception as e:
-            logger.error(f"Failed to send wantlist responses to {peer_id}: {e}")
-        finally:
-            await outbound_stream.close()
-
-    async def _send_wantlist_responses_inline(
-        self,
-        stream: INetStream,
-        peer_id: PeerID,
-        blocks_to_send_v100: list[bytes],
-        blocks_to_send_v110: list[tuple[bytes, bytes]],
-        presences_to_send: list[tuple[CIDObject, bool]],
-    ) -> None:
-        """Helper to send blocks on a specific stream."""
-        # Send blocks in batches
-        if blocks_to_send_v100:
-            await self._send_blocks_in_batches_v100(
-                blocks_to_send_v100, peer_id, stream
-            )
-        if blocks_to_send_v110:
-            await self._send_blocks_in_batches_v110(
-                blocks_to_send_v110, peer_id, stream
-            )
-        # Send presences (usually small, can send all at once)
-        if presences_to_send:
-            presence_msg = create_message(block_presences=presences_to_send)
-            await self._write_message(stream, presence_msg)
-
-    async def _send_blocks_in_batches_v100(
-        self, blocks: list[bytes], peer_id: PeerID, stream: INetStream
-    ) -> None:
-        """Send blocks in batches to stay under message size limit."""
-        # Noise protocol limit is 65535 bytes per message
-        # Reserve some space for protobuf overhead
-        MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
-
-        batch: list[bytes] = []
-        batch_size = 0
-
-        for block_data in blocks:
-            block_size = len(block_data)
-
-            # If adding this block would exceed limit, send current batch first
-            if batch and (batch_size + block_size > MAX_BATCH_SIZE):
-                msg = create_message(blocks_v100=batch)
-                await self._write_message(stream, msg)
-                logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
-                batch = []
-                batch_size = 0
-
-            batch.append(block_data)
-            batch_size += block_size
-
-        # Send remaining blocks
-        if batch:
-            msg = create_message(blocks_v100=batch)
-            await self._write_message(stream, msg)
-            logger.debug(f"Sent final batch of {len(batch)} blocks to peer {peer_id}")
-
-    async def _send_blocks_in_batches_v110(
-        self,
-        blocks: list[tuple[bytes, bytes]],
-        peer_id: PeerID,
-        stream: INetStream,
-    ) -> None:
-        """Send blocks (v1.1.0+ format) in batches to stay under message size limit."""
-        # Noise protocol limit is 65535 bytes per message
-        # Reserve some space for protobuf overhead
-        MAX_BATCH_SIZE = 60000  # ~60KB per message for safety
-
-        batch: list[tuple[bytes, bytes]] = []
-        batch_size = 0
-
-        for prefix, block_data in blocks:
-            block_size = len(prefix) + len(block_data)
-
-            # If adding this block would exceed limit, send current batch first
-            if batch and (batch_size + block_size > MAX_BATCH_SIZE):
-                msg = create_message(blocks_v110=batch)
-                await self._write_message(stream, msg)
-                logger.debug(f"Sent batch of {len(batch)} blocks to peer {peer_id}")
-                batch = []
-                batch_size = 0
-
-            batch.append((prefix, block_data))
-            batch_size += block_size
-
-        # Send remaining blocks
-        if batch:
-            msg = create_message(blocks_v110=batch)
-            await self._write_message(stream, msg)
-            logger.debug(f"Sent final batch of {len(batch)} blocks to peer {peer_id}")
-
-    async def _process_blocks_v100(self, blocks: list[bytes], peer_id: PeerID) -> None:
-        """
-        Process received blocks (v1.0.0 format).
-
-        For v1.0.0, we can't reliably recompute CIDs from block data alone
-        because we don't know which codec was used. Instead, we verify the
-        block data against the CIDs we're expecting.
-        """
-        peer_id_str = str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
-        logger.info("=" * 70)
-        logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
-
-        # Get the CIDs we're expecting from this peer
-        expected_cids = self._expected_blocks.get(peer_id, set()).copy()
-        logger.info(f"Expected {len(expected_cids)} blocks from this peer")
-        logger.info("Expected CIDs:")
-        for i, cid in enumerate(expected_cids):
-            logger.info(f"  {i + 1}. {format_cid_for_display(cid)}")
-        logger.info("=" * 70)
-
-        for idx, block_data in enumerate(blocks):
-            block_hash = hashlib.sha256(block_data).hexdigest()
-            logger.info("")
-            logger.info(f"Block {idx + 1}/{len(blocks)}:")
-            logger.info(f"  Size: {len(block_data)} bytes")
-            logger.info(f"  SHA-256: {block_hash}")
-            logger.info(f"  First 64 bytes: {block_data[:64].hex()}")
-
-            # Find which expected CID matches this block data
-            matched_cid = None
-            logger.info(f"  Checking against {len(expected_cids)} expected CIDs...")
-            for i, cid in enumerate(expected_cids):
-                logger.info(
-                    f"    Attempt {i + 1}: Checking CID {format_cid_for_display(cid)}"
-                )
-                if verify_cid(cid, block_data):
-                    matched_cid = cid
-                    logger.info(
-                        f"  ✓ MATCHED CID: {format_cid_for_display(matched_cid)}"
-                    )
-                    break
-                else:
-                    logger.info("    -> No match")
-
-            if matched_cid:
-                # Store the block with the correct CID
-                await self.block_store.put_block(matched_cid, block_data)
-                logger.info("  ✓ Stored successfully")
-
-                # Remove from expected blocks for all peers
-                for pid in list(self._expected_blocks.keys()):
-                    if matched_cid in self._expected_blocks[pid]:
-                        self._expected_blocks[pid].discard(matched_cid)
-                        pid_str = (
-                            str(pid)[:16] if hasattr(pid, "__str__") else "unknown"
-                        )
-                        logger.info(
-                            f"  ✓ Removed from expected blocks for peer {pid_str}"
-                        )
-
-                # Notify pending requests
-                if matched_cid in self._pending_requests:
-                    logger.info("  ✓ Notifying pending request")
-                    self._delivery_peers[matched_cid] = peer_id
-                    self._pending_requests[matched_cid].set()
-            else:
-                logger.error("  ✗ NO MATCH FOUND!")
-                logger.error("  Block doesn't match any expected CID")
-                logger.error(f"  Expected CIDs ({len(expected_cids)}):")
-                for i, cid in enumerate(list(expected_cids)[:5]):
-                    logger.error(f"    {i + 1}. {format_cid_for_display(cid)}")
-                if len(expected_cids) > 5:
-                    logger.error(f"    ... and {len(expected_cids) - 5} more")
-
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("Block processing complete. Remaining expected blocks:")
-        remaining = self._expected_blocks.get(peer_id, set())
-        if remaining:
-            logger.warning(f"  Still waiting for {len(remaining)} blocks:")
-            for i, cid in enumerate(remaining):
-                logger.warning(f"    {i + 1}. {format_cid_for_display(cid)}")
-        else:
-            logger.info("  ✓ All blocks received from this peer!")
-        logger.info("=" * 70)
-
-    async def _process_blocks_v110(self, blocks: Sequence[Any], peer_id: PeerID) -> None:
-        """Process received blocks (v1.1.0+ format with prefix)."""
-        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
-        for block in blocks:
-            prefix = block.prefix
-            data = block.data
-
-            # Decode CID from prefix and data, then convert to CID object
-            cid_bytes = reconstruct_cid_from_prefix_and_data(prefix, data)
-            cid = parse_cid(cid_bytes)
-
-            # Store the block
-            await self.block_store.put_block(cid, data)
-            logger.debug(
-                f"Received and stored block {format_cid_for_display(cid, max_len=16)} "
-                f"(v1.1.0+)"
-            )
-
-            # Remove from expected blocks for all peers
-            for peer_id in list(self._expected_blocks.keys()):
-                self._expected_blocks[peer_id].discard(cid)
-
-            # Notify pending requests
-            if cid in self._pending_requests:
-                logger.debug(
-                    f"Notifying pending request for "
-                    f"{format_cid_for_display(cid, max_len=16)}..."
-                )
-                self._delivery_peers[cid] = peer_id
-                self._pending_requests[cid].set()
-            else:
-                logger.debug(
-                    f"No pending request for "
-                    f"{format_cid_for_display(cid, max_len=16)}..."
-                )
-
-    async def _process_block_presences(
-        self, presences: Sequence[Any], peer_id: PeerID
-    ) -> None:
-        """
-        Process received block presences (v1.2.0).
-
-        Tracks both Have and DontHave messages for optimization and logging.
-        DontHave messages help us know which peers don't have blocks, but we
-        don't fail the request - we continue waiting for other peers or timeout.
-        This matches IPFS Bitswap behavior.
-        """
-        for presence in presences:
-            cid = parse_cid(presence.cid)
-            has_block = presence.type == Message.Have
-
-            logger.debug(
-                f"Received presence from {peer_id} for "
-                f"{format_cid_for_display(cid, max_len=16)}: "
-                f"{'Have' if has_block else 'DontHave'}"
-            )
-
-            if has_block:
-                # Peer has the block - we can expect it to arrive soon
-                # Track which peer has it
-                if peer_id not in self._expected_blocks:
-                    self._expected_blocks[peer_id] = set()
-                self._expected_blocks[peer_id].add(cid)
-            else:
-                # DontHave - peer confirms they don't have this block
-                # Track DontHave responses for metrics/optimization
-                if cid not in self._dont_have_responses:
-                    self._dont_have_responses[cid] = set()
-                self._dont_have_responses[cid].add(peer_id)
-
-                logger.info(
-                    f"  ℹ️  Peer {peer_id} doesn't have block "
-                    f"{format_cid_for_display(cid, max_len=16)} "
-                    f"(DontHave response) - will try other peers or timeout"
-                )
-
     async def _read_message(self, stream: INetStream) -> Message | None:
         """Read a length-prefixed message from the stream."""
+        from libp2p.io.exceptions import IncompleteReadError
+        from libp2p.io.utils import read_exactly
+        from libp2p.utils.varint import decode_uvarint_from_stream
+
         try:
-            from libp2p.utils.varint import decode_uvarint_from_stream
-            from libp2p.io.utils import read_exactly
-            from libp2p.io.exceptions import IncompleteReadError
-            
             # Read length
             try:
                 length = await decode_uvarint_from_stream(stream)
             except (IncompleteReadError, EOFError):
                 return None
-                
+
             if length > MAX_MESSAGE_SIZE:
                 raise MessageTooLargeError(
                     f"Message size {length} exceeds maximum {MAX_MESSAGE_SIZE}"
                 )
-                
+
             # Read message data
             msg_data = await read_exactly(stream, length)
 
@@ -1272,30 +670,14 @@ class BitswapClient:
             return None
         except Exception as e:
             logger.error(f"Error reading message: {e}")
-            import traceback
-
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(traceback.format_exc())
             return None
 
     async def _write_message(self, stream: INetStream, msg: Message) -> None:
         """
         Write a length-prefixed message to the stream.
-
-        Since blocks are already chunked at 63 KB (below the stream write limit
-        of ~64 KB), we can write messages directly without additional chunking.
         """
-        # Serialize message
-        msg_bytes = msg.SerializeToString()
-
-        if len(msg_bytes) > MAX_MESSAGE_SIZE:
-            raise MessageTooLargeError(
-                f"Message size {len(msg_bytes)} exceeds maximum {MAX_MESSAGE_SIZE}"
-            )
-
-        # Write length prefix and message
-        from libp2p.utils.varint import encode_uvarint
-        length_prefix = encode_uvarint(len(msg_bytes))
-        await stream.write(length_prefix + msg_bytes)
+        await self._write_message_bytes(stream, msg.SerializeToString())
 
     async def _write_message_bytes(self, stream: INetStream, msg_bytes: bytes) -> None:
         """
@@ -1306,46 +688,6 @@ class BitswapClient:
                 f"Message size {len(msg_bytes)} exceeds maximum {MAX_MESSAGE_SIZE}"
             )
         from libp2p.utils.varint import encode_uvarint
+
         length_prefix = encode_uvarint(len(msg_bytes))
         await stream.write(length_prefix + msg_bytes)
-
-    async def _process_block_presences_1_3(
-        self, presences: Any, peer_id: PeerID
-    ) -> None:
-        """
-        Process block presences from a 1.3.0 message.
-        Handles PaymentRequired (type=2) in addition to Have/DontHave.
-        """
-        for presence in presences:
-            cid_bytes = bytes(presence.cid)
-            try:
-                cid = parse_cid(cid_bytes)
-            except Exception:
-                continue
-
-            presence_type = presence.type
-
-            if presence_type == 0:  # Have
-                if peer_id not in self._expected_blocks:
-                    self._expected_blocks[peer_id] = set()
-                self._expected_blocks[peer_id].add(cid)
-                logger.debug(
-                    f"[1.3.0] Peer {peer_id} has block "
-                    f"{format_cid_for_display(cid, max_len=16)}"
-                )
-            elif presence_type == 1:  # DontHave
-                if cid not in self._dont_have_responses:
-                    self._dont_have_responses[cid] = set()
-                self._dont_have_responses[cid].add(peer_id)
-                logger.info(
-                    f"[1.3.0] Peer {peer_id} doesn't have block "
-                    f"{format_cid_for_display(cid, max_len=16)}"
-                )
-            elif presence_type == 2:  # PaymentRequired
-                logger.info(
-                    f"[1.3.0] Peer {peer_id} requires payment for block "
-                    f"{format_cid_for_display(cid, max_len=16)} "
-                    f"(PaymentTerms will follow in same message)"
-                )
-                # The payment_client will handle PaymentTerms
-                # in process_incoming_message

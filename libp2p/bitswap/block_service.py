@@ -73,8 +73,8 @@ class BlockService:
             Block data bytes, or None if not found anywhere
 
         """
-        cid_bytes = cid_to_bytes(cid)
-        cid_obj = parse_cid(cid_bytes)
+        cid_obj = parse_cid(cid)
+        cid_bytes = cid_to_bytes(cid_obj)
 
         # 1. Local lookup — instant, no network cost
         data = await self.store.get_block(cid_obj)
@@ -118,7 +118,7 @@ class BlockService:
             data: The block data bytes
 
         """
-        cid_obj = parse_cid(cid_to_bytes(cid))
+        cid_obj = parse_cid(cid)
 
         # Write to our local store
         await self.store.put_block(cid_obj, data)
@@ -159,8 +159,8 @@ class BlockService:
 
         # Local pass first
         for cid in cids:
-            cid_bytes = cid_to_bytes(cid)
-            cid_obj = parse_cid(cid_bytes)
+            cid_obj = parse_cid(cid)
+            cid_bytes = cid_to_bytes(cid_obj)
             data = await self.store.get_block(cid_obj)
             if data is not None:
                 results[cid_bytes] = data

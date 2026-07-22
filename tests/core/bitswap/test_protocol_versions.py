@@ -95,7 +95,7 @@ class TestBitswapProtocolVersions:
                 root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                 # Verify provider has blocks
-                provider_cids = provider_store.get_all_cids()
+                provider_cids = await provider_store.get_all_cids()
                 assert len(provider_cids) > 0
                 assert root_cid in provider_cids
 
@@ -118,7 +118,7 @@ class TestBitswapProtocolVersions:
                 assert len(retrieved_data) == len(test_data)
 
                 # Verify all blocks transferred
-                client_cids = client_store.get_all_cids()
+                client_cids = await client_store.get_all_cids()
                 assert len(client_cids) == len(provider_cids)
                 assert root_cid in client_cids
 
@@ -184,7 +184,7 @@ class TestBitswapProtocolVersions:
                 root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                 # Verify multiple chunks created
-                provider_cids = provider_store.get_all_cids()
+                provider_cids = await provider_store.get_all_cids()
                 assert len(provider_cids) > 1, (
                     f"Expected chunking for {protocol_version}"
                 )
@@ -208,7 +208,7 @@ class TestBitswapProtocolVersions:
                 assert retrieved_data == large_data
 
                 # Verify all chunks transferred
-                client_cids = client_store.get_all_cids()
+                client_cids = await client_store.get_all_cids()
                 assert len(client_cids) == len(provider_cids)
 
                 # Cleanup
@@ -291,8 +291,8 @@ class TestBitswapProtocolVersions:
                 assert retrieved_a == block_a
 
                 # Both nodes should have both blocks
-                node1_cids = node1_store.get_all_cids()
-                node2_cids = node2_store.get_all_cids()
+                node1_cids = await node1_store.get_all_cids()
+                node2_cids = await node2_store.get_all_cids()
 
                 assert cid_a in node1_cids and cid_b in node1_cids
                 assert cid_a in node2_cids and cid_b in node2_cids
@@ -401,7 +401,7 @@ class TestProtocolNegotiation:
 
                 # Verify successful transfer despite version difference
                 assert retrieved == test_data
-                assert cid in client_store.get_all_cids()
+                assert cid in await client_store.get_all_cids()
 
                 # Cleanup
                 await provider_bitswap.stop()
@@ -469,7 +469,7 @@ class TestProtocolFeatures:
                     assert retrieved == data
 
                 # Verify all blocks received
-                client_cids = client_store.get_all_cids()
+                client_cids = await client_store.get_all_cids()
                 assert len(client_cids) == len(test_blocks)
 
                 # Cleanup

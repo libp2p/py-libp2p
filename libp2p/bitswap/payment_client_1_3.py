@@ -105,12 +105,18 @@ class BitswapPaymentClient_1_3:
             valid_before=terms.valid_before,
         )
 
+        return self._build_auth_from_terms(terms, terms.amount, v, r, s)
+
+    def _build_auth_from_terms(
+        self, terms: Any, amount: int, v: int, r: bytes, s: bytes
+    ) -> Message_1_3:
+        """Helper to build a PaymentAuthorization message from PaymentTerms."""
         msg = Message_1_3()
         auth = msg.payment_authorizations.add()  # type: ignore[attr-defined]
         auth.cid = bytes(terms.cid)
-        auth.from_address = self.signer.address
+        auth.from_address = getattr(self.signer, "address", b"")
         auth.to_address = terms.pay_to
-        auth.value = terms.amount
+        auth.value = amount
         auth.valid_after = 0
         auth.valid_before = terms.valid_before
         auth.nonce = bytes(terms.nonce)
@@ -196,19 +202,7 @@ class BitswapPaymentClient_1_3:
             return None
 
         # Build PaymentAuthorization message
-        response = Message_1_3()
-        auth = response.payment_authorizations.add()  # type: ignore[attr-defined]
-        auth.cid = bytes(terms.cid)
-        auth.from_address = self.signer.address
-        auth.to_address = terms.pay_to
-        auth.value = amount
-        auth.valid_after = 0
-        auth.valid_before = terms.valid_before
-        auth.nonce = bytes(terms.nonce)
-        auth.v = v
-        auth.r = r
-        auth.s = s
-        auth.scheme = terms.scheme
+        response = self._build_auth_from_terms(terms, amount, v, r, s)
 
         # Track pending payment
         nonce_hex = bytes(terms.nonce).hex()

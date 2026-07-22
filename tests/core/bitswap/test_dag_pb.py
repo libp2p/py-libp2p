@@ -21,7 +21,7 @@ class TestLink:
 
     def test_link_creation(self):
         """Test creating a Link."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test", codec=CODEC_RAW)
         link = Link(cid=cid, name="file.txt", size=1024)
 
         assert link.cid == cid
@@ -30,7 +30,7 @@ class TestLink:
 
     def test_link_optional_fields(self):
         """Test Link with optional fields."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test", codec=CODEC_RAW)
         link = Link(cid=cid)
 
         assert link.cid == cid

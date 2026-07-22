@@ -899,7 +899,10 @@ class KadDHT(Service):
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
         logger.debug("Refreshing routing table")
-        await self.peer_routing.refresh_routing_table()
+        if getattr(self, "rt_refresh_manager", None) is not None:
+            await self.rt_refresh_manager._do_refresh(force=True)  # type: ignore
+        else:
+            await self.peer_routing.refresh_routing_table()
 
     # Peer routing methods
 

@@ -27,7 +27,7 @@ class MessageTooLargeError(BitswapError):
     pass
 
 
-class TimeoutError(BitswapError):
+class BitswapTimeoutError(BitswapError):
     """Raised when an operation times out."""
 
     pass

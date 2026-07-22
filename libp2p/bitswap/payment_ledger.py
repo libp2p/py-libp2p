@@ -276,4 +276,5 @@ class PaymentLedger:
 def _cid_to_hex(cid: str | bytes) -> str:
     """Convert CID to hex string for consistent storage."""
     from .cid import cid_to_bytes
+
     return cid_to_bytes(cid).hex()

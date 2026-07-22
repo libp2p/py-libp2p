@@ -736,9 +736,9 @@ class WebsocketTransport(ITransport):
             # trio-websocket's connect_websocket_url spawns background tasks (reader/writer).
             # If those fail (e.g. Handshake fails, or server sends HTTP 200 instead of 101),
             # they raise exceptions that would otherwise crash the global Swarm nursery.
-            send_channel, receive_channel = trio.open_memory_channel(0)
+            send_channel, receive_channel = trio.open_memory_channel[Any](0)
 
-            async def _connect_and_run():
+            async def _connect_and_run() -> None:
                 try:
                     async with trio.open_nursery() as ws_nursery:
                         ws_conn = await connect_websocket_url(

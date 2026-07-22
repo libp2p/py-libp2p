@@ -155,7 +155,7 @@ class PaymentGatedDecisionEngine:
         # Check blockstore
         logger.info(
             "All CIDs in blockstore: "
-            + ", ".join([c.hex() for c in self.blockstore.get_all_cids()])
+            + ", ".join([c.hex() for c in await self.blockstore.get_all_cids()])
         )
         block_data = await self.blockstore.get_block(cid_obj)
 

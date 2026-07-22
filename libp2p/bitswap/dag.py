@@ -32,10 +32,8 @@ from .chunker import (
 )
 from .cid import (
     CODEC_DAG_CBOR,
-    CODEC_DAG_JOSE,
     CODEC_DAG_JSON,
     CODEC_DAG_PB,
-    CODEC_IPLD,
     CODEC_RAW,
     CIDInput,
     _normalise_codec,
@@ -87,7 +85,7 @@ def get_codec_from_cid(cid: CIDInput) -> str:
 
 def encode_node(node: Any, codec: Code | str | int) -> bytes:
     norm = _normalise_codec(codec)
-    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
+    if norm == CODEC_DAG_JSON:
         return json.dumps(node, separators=(",", ":")).encode("utf-8")
     if norm == CODEC_DAG_CBOR:
         return cbor2.dumps(node)
@@ -96,7 +94,7 @@ def encode_node(node: Any, codec: Code | str | int) -> bytes:
 
 def decode_node(data: bytes, codec: Code | str | int) -> Any:
     norm = _normalise_codec(codec)
-    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
+    if norm == CODEC_DAG_JSON:
         return json.loads(data.decode("utf-8"))
     if norm == CODEC_DAG_CBOR:
         return cbor2.loads(data)
@@ -131,8 +129,10 @@ class MerkleDag:
         ...         print(f"Share: {cid_to_text(root_cid)}")
         ...
         ...         # Fetch file (auto-resolves all chunks)
-        ...         data = await dag.fetch_file(root_cid)
-        ...         open('downloaded.mp4', 'wb').write(data)
+        ...         # Note: fetch_file returns bytes in memory. For huge files,
+        ...         # consider using a streaming approach or trio.Path
+        ...         data, filename = await dag.fetch_file(root_cid)
+        ...         await trio.Path('downloaded.mp4').write_bytes(data)
         ...
         >>> trio.run(main)
 

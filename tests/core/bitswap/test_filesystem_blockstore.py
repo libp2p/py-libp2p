@@ -115,7 +115,7 @@ async def test_get_all_cids(store_path: str) -> None:
     for cid, data in blocks:
         await store.put_block(cid, data)
 
-    all_cids = store.get_all_cids()
+    all_cids = await store.get_all_cids()
     pass_fail(f"get_all_cids returns {len(blocks)} CIDs", len(all_cids) == len(blocks))
 
     stored_set = {bytes(c) for c in all_cids}
