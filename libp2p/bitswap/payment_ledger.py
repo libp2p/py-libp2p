@@ -275,15 +275,5 @@ class PaymentLedger:
 
 def _cid_to_hex(cid: str | bytes) -> str:
     """Convert CID to hex string for consistent storage."""
-    if isinstance(cid, bytes):
-        return cid.hex()
-    elif isinstance(cid, str):
-        # If already hex, return as-is; otherwise try to decode
-        try:
-            bytes.fromhex(cid)
-            return cid
-        except ValueError:
-            # Assume it's a base58/base32 encoded CID string
-            return cid.encode().hex()
-    else:
-        raise TypeError(f"CID must be str or bytes, got {type(cid)}")
+    from .cid import cid_to_bytes
+    return cid_to_bytes(cid).hex()

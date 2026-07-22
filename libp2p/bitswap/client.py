@@ -9,7 +9,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import trio
-import varint
 
 from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
@@ -1244,44 +1243,23 @@ class BitswapClient:
     async def _read_message(self, stream: INetStream) -> Message | None:
         """Read a length-prefixed message from the stream."""
         try:
-            # Read length prefix byte-by-byte (varint encoding)
-            length_bytes = b""
-            while True:
-                byte = await stream.read(1)
-                if not byte:
-                    return None  # Stream closed
-                length_bytes += byte
-                # Check if this is the last byte of the varint (high bit not set)
-                if byte[0] & 0x80 == 0:
-                    break
-                # Limit to max varint length (10 bytes for 64-bit values)
-                if len(length_bytes) >= 10:
-                    logger.error("Varint length prefix too long")
-                    return None
-
-            # Decode length
-            length = varint.decode_bytes(length_bytes)
-
+            from libp2p.utils.varint import decode_uvarint_from_stream
+            from libp2p.io.utils import read_exactly
+            from libp2p.io.exceptions import IncompleteReadError
+            
+            # Read length
+            try:
+                length = await decode_uvarint_from_stream(stream)
+            except (IncompleteReadError, EOFError):
+                return None
+                
             if length > MAX_MESSAGE_SIZE:
                 raise MessageTooLargeError(
                     f"Message size {length} exceeds maximum {MAX_MESSAGE_SIZE}"
                 )
-
+                
             # Read message data
-            msg_data = b""
-            remaining = length
-
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    break
-                msg_data += chunk
-                remaining -= len(chunk)
-
-            # Verify we read all expected bytes
-            if len(msg_data) != length:
-                logger.error(f"Expected {length} bytes but got {len(msg_data)}")
-                return None
+            msg_data = await read_exactly(stream, length)
 
             # Parse message
             msg = Message()
@@ -1315,7 +1293,8 @@ class BitswapClient:
             )
 
         # Write length prefix and message
-        length_prefix = varint.encode(len(msg_bytes))
+        from libp2p.utils.varint import encode_uvarint
+        length_prefix = encode_uvarint(len(msg_bytes))
         await stream.write(length_prefix + msg_bytes)
 
     async def _write_message_bytes(self, stream: INetStream, msg_bytes: bytes) -> None:
@@ -1326,7 +1305,8 @@ class BitswapClient:
             raise MessageTooLargeError(
                 f"Message size {len(msg_bytes)} exceeds maximum {MAX_MESSAGE_SIZE}"
             )
-        length_prefix = varint.encode(len(msg_bytes))
+        from libp2p.utils.varint import encode_uvarint
+        length_prefix = encode_uvarint(len(msg_bytes))
         await stream.write(length_prefix + msg_bytes)
 
     async def _process_block_presences_1_3(

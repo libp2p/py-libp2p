@@ -19,14 +19,7 @@ MAX_LINKS_PER_NODE = 174
 logger = logging.getLogger(__name__)
 
 
-def _encode_varint(value: int) -> bytes:
-    """Encode an unsigned integer as a protobuf varint."""
-    buf = []
-    while value > 0x7F:
-        buf.append((value & 0x7F) | 0x80)
-        value >>= 7
-    buf.append(value & 0x7F)
-    return bytes(buf)
+from libp2p.utils.varint import encode_uvarint as _encode_varint
 
 
 def _normalize_link_cid(cid: CIDInput) -> bytes:
