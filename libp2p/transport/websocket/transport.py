@@ -752,7 +752,7 @@ class WebsocketTransport(ITransport):
                         # The nursery blocks here while the connection is alive,
                         # managing the background reader/writer tasks.
                 except BaseException as e:
-                    with trio.CancelScope(shield=True):
+                    with trio.CancelScope(shield=True):  # type: ignore
                         try:
                             await send_channel.send(e)
                         except trio.BrokenResourceError:

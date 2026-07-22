@@ -592,7 +592,7 @@ class Swarm(Service, INetworkService):
                     failed_event = trio.Event()
 
                     async def dial_task(
-                        addr: Multiaddr = multiaddr, ev: trio.Event = failed_event
+                        addr: Any = multiaddr, ev: Any = failed_event
                     ) -> None:
                         try:
                             connection = await self._dial_with_retry(addr, peer_id)

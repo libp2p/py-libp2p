@@ -333,6 +333,8 @@ class KBucket:
             logger.error(f"Error pinging peer {peer_id}: {str(e)}")
             return False
 
+        return False
+
     def refresh_peer_last_seen(self, peer_id: ID) -> bool:
         """
         Update the last-seen timestamp for a peer in the bucket.
