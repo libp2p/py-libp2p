@@ -8,6 +8,7 @@ resource exhaustion scenarios in production environments.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -47,8 +48,12 @@ class GracefulDegradation:
         self.rm = resource_manager
         self.max_degradation_levels = max_degradation_levels
         self.degradation_factor = degradation_factor
+        self.degradation_factor = degradation_factor
         self.degradation_level = 0
         self.original_limits: ResourceLimits | None = None
+        self._last_max_log_time: float = 0.0
+        self._escalation_cooldown: float = 10.0   # seconds between escalations
+        self._last_escalation_time: float = 0.0
         self._store_original_limits()
 
     def _store_original_limits(self) -> None:
@@ -75,8 +80,21 @@ class GracefulDegradation:
 
         """
         if self.degradation_level >= self.max_degradation_levels:
-            logger.warning("Maximum degradation level reached for %s", resource_type)
+            now = time.monotonic()
+            if now - self._last_max_log_time >= 60.0:
+                logger.warning(
+                    "Maximum degradation level reached for %s "
+                    "(suppressing repeated warnings for 60s)",
+                    resource_type,
+                )
+                self._last_max_log_time = now
             return False
+
+        # Cooldown: don't escalate more than once every N seconds
+        now = time.monotonic()
+        if now - self._last_escalation_time < self._escalation_cooldown:
+            return False
+        self._last_escalation_time = now
 
         self.degradation_level += 1
         reduction_factor = max(
@@ -260,3 +278,16 @@ class GracefulDegradation:
                 ),
             },
         }
+
+    async def run_periodic_recovery(self, interval: float = 30.0) -> None:
+        """Background task: attempt recovery every `interval` seconds."""
+        import trio
+        while True:
+            await trio.sleep(interval)
+            if self.degradation_level > 0:
+                recovered = self.recover()
+                if recovered:
+                    logger.info(
+                        "Periodic recovery succeeded (level now %d)",
+                        self.degradation_level,
+                    )

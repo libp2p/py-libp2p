@@ -428,7 +428,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 if cancel_scope.cancelled_caught:
                     raise QUICConnectionTimeoutError(
-                        "Connection handshake timed out after"
+                        "Connection handshake timed out after "
                         f"{self.CONNECTION_HANDSHAKE_TIMEOUT}s"
                     )
 

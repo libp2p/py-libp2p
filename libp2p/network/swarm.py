@@ -93,6 +93,44 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
     return stream_handler
 
 
+import time
+
+class _NegativePeerCache:
+    """Short-lived cache of peers whose all addresses recently failed."""
+
+    def __init__(self, ttl: float = 300.0) -> None:  # 5 minutes default
+        self._cache: dict[str, float] = {}  # peer_id -> expiry timestamp
+        self._ttl = ttl
+
+    def mark_failed(self, peer_id: str) -> None:
+        self._cache[peer_id] = time.monotonic() + self._ttl
+
+    def is_blocked(self, peer_id: str) -> bool:
+        expiry = self._cache.get(peer_id)
+        if expiry is None:
+            return False
+        if time.monotonic() >= expiry:
+            del self._cache[peer_id]
+            return False
+        return True
+
+    def evict(self, peer_id: str) -> None:
+        """Remove from cache when a peer successfully connects."""
+        self._cache.pop(peer_id, None)
+
+_UNPARSEABLE_ADDRS: set[bytes] = set()
+
+def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
+    if raw in _UNPARSEABLE_ADDRS:
+        return None
+    try:
+        return Multiaddr(raw)
+    except Exception:
+        _UNPARSEABLE_ADDRS.add(raw)
+        logger.debug("Skipping permanently unparseable multiaddr (cached): %r", raw[:64])
+        return None
+
+
 class Swarm(Service, INetworkService):
     self_id: ID
     peerstore: IPeerStore
@@ -196,6 +234,7 @@ class Swarm(Service, INetworkService):
 
         # Initialize connection management components
         self._init_connection_management()
+        self._negative_peer_cache = _NegativePeerCache()
 
     def _init_connection_management(self) -> None:
         """
@@ -267,6 +306,14 @@ class Swarm(Service, INetworkService):
                 await self.auto_connector.start()
                 # Start auto-connector background task
                 await self.auto_connector.run_background_task(nursery)
+                # Start graceful degradation recovery task
+                if (
+                    self._resource_manager is not None
+                    and self._resource_manager.graceful_degradation is not None
+                ):
+                    nursery.start_soon(
+                        self._resource_manager.graceful_degradation.run_periodic_recovery
+                    )
             except Exception as e:
                 logger.error(f"Error starting connection management components: {e}")
                 raise
@@ -540,6 +587,10 @@ class Swarm(Service, INetworkService):
         if self.metric_send_channel is not None:
             await self.metric_send_channel.send(event)
 
+        if self._negative_peer_cache.is_blocked(str(peer_id)):
+            logger.debug("Peer %s recently failed all addresses (negative cache)", peer_id)
+            raise SwarmException(f"Peer {peer_id} recently failed all addresses (negative cache)")
+
         # Check if we already have connections
         existing_connections = self.get_connections(peer_id)
         if existing_connections:
@@ -581,6 +632,10 @@ class Swarm(Service, INetworkService):
         ]
         if public_addrs:
             allowed_addrs = public_addrs
+
+        from libp2p.utils.address_validation import is_ipv6_available
+        if not is_ipv6_available():
+            allowed_addrs = [a for a in allowed_addrs if not str(a).startswith("/ip6/")]
 
         connections = []
         exceptions: list[SwarmException] = []
@@ -629,6 +684,7 @@ class Swarm(Service, INetworkService):
             if self.metric_send_channel is not None:
                 await self.metric_send_channel.send(event)
 
+            self._negative_peer_cache.mark_failed(str(peer_id))
             raise SwarmDialAllFailedError(
                 f"unable to connect to {peer_id}, no addresses established a "
                 "successful connection (with exceptions)",
@@ -636,6 +692,7 @@ class Swarm(Service, INetworkService):
                 num_addrs_tried=len(exceptions),
             ) from MultiError(exceptions)
 
+        self._negative_peer_cache.evict(str(peer_id))
         return connections
 
     async def _dial_with_retry(self, addr: Multiaddr, peer_id: ID) -> INetConn:
@@ -723,7 +780,9 @@ class Swarm(Service, INetworkService):
         if self._resource_manager is not None:
             try:
                 ep = extract_ip_from_multiaddr(addr)
-                pre_scope = self._resource_manager.open_connection(None, endpoint_ip=ep)
+                pre_scope = self._resource_manager.open_connection(
+                    None, endpoint_ip=ep, direction="outbound"
+                )
                 if pre_scope is None:
                     raise SwarmException("Connection denied by resource manager")
             except Exception as e:
@@ -934,7 +993,7 @@ class Swarm(Service, INetworkService):
                     if _endpoint is not None:
                         ep = _endpoint[0]
                 conn_scope = self._resource_manager.open_connection(
-                    peer_id, endpoint_ip=ep
+                    peer_id, endpoint_ip=ep, direction="outbound"
                 )
                 if conn_scope is None:
                     # Clean up connections
@@ -1012,7 +1071,7 @@ class Swarm(Service, INetworkService):
                 if not self._resource_manager.acquire_stream(
                     str(peer_id), Direction.OUTBOUND
                 ):
-                    logger.warning("Stream limit exceeded for peer %s", peer_id)
+                    logger.debug("Stream limit exceeded for peer %s", peer_id)
                     raise SwarmException("Stream limit exceeded")
                 rm_acquired = True
 
@@ -1490,7 +1549,7 @@ class Swarm(Service, INetworkService):
                         endpoint_ip = ra[0]
                 # Perform a preliminary connection admission to guard early
                 pre_scope = self._resource_manager.open_connection(
-                    None, endpoint_ip=endpoint_ip
+                    None, endpoint_ip=endpoint_ip, direction="inbound"
                 )
                 if pre_scope is None:
                     # Denied before upgrade; close socket and raise exception
@@ -1583,7 +1642,7 @@ class Swarm(Service, INetworkService):
                         ep = _endpoint[0]
                 # open_connection will enforce cidr/rate if configured
                 conn_scope = self._resource_manager.open_connection(
-                    peer_id, endpoint_ip=ep
+                    peer_id, endpoint_ip=ep, direction="inbound"
                 )
                 if conn_scope is None:
                     # Clean up connections
@@ -1723,7 +1782,7 @@ class Swarm(Service, INetworkService):
                 # Extract peer_id from any muxed connection type
                 peer_id_for_scope = muxed_conn.peer_id
                 conn_scope = self._resource_manager.open_connection(
-                    peer_id=peer_id_for_scope,
+                    peer_id=peer_id_for_scope, direction=direction
                 )
                 if conn_scope is None:
                     # Resource manager denied the connection.

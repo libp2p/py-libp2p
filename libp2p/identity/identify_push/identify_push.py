@@ -47,6 +47,18 @@ PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
 CONCURRENCY_LIMIT = 10
 
+_UNPARSEABLE_ADDRS_CACHE: set[bytes] = set()
+
+def _safe_parse_multiaddr_cached(raw: bytes) -> Multiaddr | None:
+    if raw in _UNPARSEABLE_ADDRS_CACHE:
+        return None
+    try:
+        return Multiaddr(raw)
+    except Exception:
+        _UNPARSEABLE_ADDRS_CACHE.add(raw)
+        logger.debug("Skipping unparseable multiaddr in identify: %r", raw[:64])
+        return None
+
 
 def identify_push_handler_for(
     host: IHost, use_varint_format: bool = True
@@ -124,7 +136,39 @@ async def _update_peerstore_from_identify(
     # Update listen addresses if present
     if identify_msg.listen_addrs:
         try:
-            addrs = [Multiaddr(addr) for addr in identify_msg.listen_addrs]
+            addrs = []
+            for addr_bytes in identify_msg.listen_addrs:
+                ma = _safe_parse_multiaddr_cached(addr_bytes)
+                if ma is not None:
+                    addrs.append(ma)
+            
+            # P1 Fix: Filter out unroutable/loopback addrs if there are public ones
+            public_addrs = [
+                a for a in addrs 
+                if "/ip4/127." not in str(a) 
+                and "/ip6/::1" not in str(a)
+                and "/ip4/10." not in str(a)
+                and "/ip4/192.168." not in str(a)
+            ]
+            
+            # Further filter 172.16.x.x - 172.31.x.x
+            def _is_private_172(a: Multiaddr) -> bool:
+                s = str(a)
+                if "/ip4/172." not in s:
+                    return False
+                try:
+                    ip = s.split("/")[2]
+                    parts = [int(p) for p in ip.split(".")]
+                    return parts[0] == 172 and 16 <= parts[1] <= 31
+                except Exception:
+                    return False
+                    
+            public_addrs = [a for a in public_addrs if not _is_private_172(a)]
+            
+            # If they gave us some public addresses, only keep the public ones
+            if public_addrs:
+                addrs = public_addrs
+                
             for addr in addrs:
                 peerstore.add_addr(peer_id, addr, 7200)  # 2 hours TTL
         except Exception as e:

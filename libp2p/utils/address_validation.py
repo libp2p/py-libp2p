@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import functools
+import logging
 
 from multiaddr import Multiaddr
+
+logger = logging.getLogger(__name__)
 from multiaddr.utils import get_network_addrs, get_thin_waist_addresses
 
 
@@ -85,6 +89,20 @@ def _safe_expand(addr: Multiaddr, port: int | None = None) -> list[Multiaddr]:
         return [addr]
 
 
+@functools.lru_cache(maxsize=1)
+def is_ipv6_available() -> bool:
+    """
+    Probe once at startup whether the OS has usable IPv6.
+    Caches the result for the lifetime of the process.
+    """
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as s:
+            s.bind(("::1", 0))
+        return True
+    except OSError:
+        return False
+
+
 def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr]:
     """
     Discover available network interfaces (IPv4 + IPv6 if supported) for binding.
@@ -106,6 +124,10 @@ def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr
     # Ensure IPv4 loopback is always included when IPv4 interfaces are discovered
     if seen_v4 and "127.0.0.1" not in seen_v4:
         addrs.append(Multiaddr(f"/ip4/127.0.0.1/{protocol}/{port}"))
+
+    if not is_ipv6_available():
+        logger.debug("IPv6 not available on this host — skipping ip6 listen addrs")
+        return addrs
 
     seen_v6: set[str] = set()
     for ip in _safe_get_network_addrs(6):
