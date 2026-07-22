@@ -132,7 +132,13 @@ class TestScoreGates:
             topic = "test_gossip_gate"
             for pubsub in pubsubs:
                 await pubsub.subscribe(topic)
-            await trio.sleep(0.2)
+            # Wait for pubsubs[0] to actually receive both peers' subscriptions
+            # instead of a fixed sleep. _get_peers_to_send skips a topic entirely
+            # until it appears in pubsub.peer_topics, which is only populated when
+            # a SUBSCRIBE RPC is received; a fixed 0.2s sleep raced on slow CI and
+            # left peers_to_send empty. See Pubsub.wait_for_subscription.
+            await pubsubs[0].wait_for_subscription(hosts[1].get_id(), topic)
+            await pubsubs[0].wait_for_subscription(hosts[2].get_id(), topic)
 
             # Test gossip filtering in _get_peers_to_send
             gsub0 = cast(GossipSub, gsubs[0])

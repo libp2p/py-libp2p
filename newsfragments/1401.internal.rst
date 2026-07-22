@@ -1,0 +1,1 @@
+De-flaked the GossipSub v1.1 score-gate test ``test_gossip_gate_filters_peers`` by waiting for event-driven subscription readiness (``Pubsub.wait_for_subscription``) instead of a fixed ``trio.sleep``, which raced on slow CI runners.
