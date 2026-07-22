@@ -143,7 +143,7 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        # We need to limit concurrency to avoid OS "Too many open files" errors (e.g. limit to 50 concurrent dials)
+        # We need to limit concurrency to avoid OS "Too many open files" errors (e.g. limit to 50 concurrent dials)  # noqa: E501
         dial_limiter = trio.CapacityLimiter(50)
 
         async def _dial_candidate(peer_id: ID) -> None:
@@ -162,7 +162,7 @@ class AutoConnector:
             async with trio.open_nursery() as dial_nursery:
                 dialed = 0
                 # We overdial (needed * 2) because in a P2P network, most dials will
-                # fail due to offline peers, NAT traversal issues, or obsolete addresses.
+                # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
                 dial_target = needed * 2
 
                 for peer_id in candidates:

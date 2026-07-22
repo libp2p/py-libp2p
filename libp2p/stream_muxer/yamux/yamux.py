@@ -1306,9 +1306,9 @@ class Yamux(IMuxedConn):
                             f"Received GO_AWAY for peer {self.peer_id}: Internal error"
                         )
                     elif error_code == GO_AWAY_CONN_GARBAGE_COLLECTED:
-                        # go-libp2p connection manager prunes idle connections after grace period
+                        # go-libp2p connection manager prunes idle connections after grace period  # noqa: E501
                         logger.debug(
-                            f"Received GO_AWAY for peer {self.peer_id}: ConnGarbageCollected (Peer connection manager pruned idle connection)"
+                            f"Received GO_AWAY for peer {self.peer_id}: ConnGarbageCollected (Peer connection manager pruned idle connection)"  # noqa: E501
                         )
                     else:
                         logger.warning(

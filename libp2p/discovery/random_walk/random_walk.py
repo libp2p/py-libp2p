@@ -158,7 +158,7 @@ class RandomWalk:
 
         result = list(unique_peers.values())
         logger.info(
-            f"Concurrent random walks completed: found {len(all_validated_peers)} total peers, "
+            f"Concurrent random walks completed: found {len(all_validated_peers)} total peers, "  # noqa: E501
             f"{len(result)} unique peers discovered"
         )
         return result

@@ -733,8 +733,8 @@ class WebsocketTransport(ITransport):
                 )
 
             # We use a dedicated nursery for each websocket connection.
-            # trio-websocket's connect_websocket_url spawns background tasks (reader/writer).
-            # If those fail (e.g. Handshake fails, or server sends HTTP 200 instead of 101),
+            # trio-websocket's connect_websocket_url spawns background tasks (reader/writer).  # noqa: E501
+            # If those fail (e.g. Handshake fails, or server sends HTTP 200 instead of 101),  # noqa: E501
             # they raise exceptions that would otherwise crash the global Swarm nursery.
             send_channel, receive_channel = trio.open_memory_channel[object](0)
 
@@ -756,7 +756,7 @@ class WebsocketTransport(ITransport):
                         try:
                             await send_channel.send(e)
                         except trio.BrokenResourceError:
-                            # Channel was closed (e.g., dial completed, connection dropped later)
+                            # Channel was closed (e.g., dial completed, connection dropped later)  # noqa: E501
                             pass
 
             self._background_nursery.start_soon(_connect_and_run)
