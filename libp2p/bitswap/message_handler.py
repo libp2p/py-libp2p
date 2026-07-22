@@ -379,6 +379,9 @@ class BitswapMessageHandler:
                 if peer_id not in self.client._expected_blocks:
                     self.client._expected_blocks[peer_id] = set()
                 self.client._expected_blocks[peer_id].add(cid)
+                if cid not in self.client._have_confirmed:
+                    self.client._have_confirmed[cid] = set()
+                self.client._have_confirmed[cid].add(peer_id)
             else:
                 if cid not in self.client._dont_have_responses:
                     self.client._dont_have_responses[cid] = set()
@@ -410,6 +413,9 @@ class BitswapMessageHandler:
                 if peer_id not in self.client._expected_blocks:
                     self.client._expected_blocks[peer_id] = set()
                 self.client._expected_blocks[peer_id].add(cid)
+                if cid not in self.client._have_confirmed:
+                    self.client._have_confirmed[cid] = set()
+                self.client._have_confirmed[cid].add(peer_id)
                 logger.debug(
                     f"[1.3.0] Peer {peer_id} has block "
                     f"{format_cid_for_display(cid, max_len=16)}"

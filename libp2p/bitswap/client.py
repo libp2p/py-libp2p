@@ -101,6 +101,9 @@ class BitswapClient:
         self._expected_blocks: dict[
             PeerID, set[CIDObject]
         ] = {}  # peer -> expected CIDs
+        self._have_confirmed: dict[
+            CIDObject, set[PeerID]
+        ] = {}  # cid -> peers who sent Have
         self._delivery_peers: dict[
             CIDObject, PeerID
         ] = {}  # cid -> peer_id that delivered it
@@ -384,13 +387,10 @@ class BitswapClient:
                         break
                     # A HAVE presence was recorded for the peer(s) we asked
                     if peer_id is not None:
-                        if cid_obj in self._expected_blocks.get(peer_id, set()):
+                        if peer_id in self._have_confirmed.get(cid_obj, set()):
                             result = True
                             break
-                    elif any(
-                        cid_obj in have_set
-                        for have_set in list(self._expected_blocks.values())
-                    ):
+                    elif len(self._have_confirmed.get(cid_obj, set())) > 0:
                         result = True
                         break
                     # An explicit DontHave from the peer we asked
