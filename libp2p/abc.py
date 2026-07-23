@@ -3266,6 +3266,37 @@ class IPubsubRouter(ABC):
 
         """
 
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Send messages the router queued while the peer was still connecting.
+
+        Optional hook, invoked once the outbound stream for the peer is
+        registered and again when the peer announces a new subscription.
+        Routers that do not queue during connection setup keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose queued messages should be sent.
+
+        """
+
+    async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Replay recently seen messages for a topic to a peer.
+
+        Optional hook, invoked when a peer that is subscribed to the topic
+        becomes writable. Routers without a message cache keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to replay messages to.
+        topic : str
+            The topic to replay messages for.
+
+        """
+
 
 class IPubsub(ServiceAPI):
     """
