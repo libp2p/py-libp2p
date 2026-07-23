@@ -229,13 +229,7 @@ async def _update_peerstore_from_identify(
                 "Error updating the certified addr book for peer %s: %s", peer_id, e
             )
 
-    # Update observed address if present
-    if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
-        try:
-            observed_addr = Multiaddr(identify_msg.observed_addr)
-            peerstore.add_addr(peer_id, observed_addr, 7200)
-        except Exception as e:
-            logger.error("Error updating observed address for peer %s: %s", peer_id, e)
+
 
 
 async def push_identify_to_peer(

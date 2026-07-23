@@ -16,7 +16,9 @@ from libp2p.custom_types import (
 )
 from libp2p.network.stream.exceptions import (
     StreamClosed,
+    StreamReset,
 )
+from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.utils import (
     decode_varint_with_size,
@@ -160,8 +162,8 @@ def identify_handler_for(
                 await stream.write(response)
             await stream.close()
             logger.debug("successfully handled request for %s from %s", ID, peer_id)
-        except StreamClosed:
-            logger.debug("Fail to respond to %s request: stream closed", ID)
+        except (StreamClosed, StreamReset, MuxedStreamError):
+            logger.debug("Fail to respond to %s request: stream closed or reset", ID)
         except Exception as e:
             logger.error(
                 "Error sending identify response to %s: %s (type: %s)\n%s",
