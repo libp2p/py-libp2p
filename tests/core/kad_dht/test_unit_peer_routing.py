@@ -369,6 +369,59 @@ class TestPeerRouting:
         mock_stream.close.assert_called_once()
 
     @pytest.mark.trio
+    async def test_query_peer_for_closest_filters_self_from_response(
+        self, peer_routing, mock_host, sample_peer_info
+    ):
+        target_key = b"target_key"
+
+        mock_stream = AsyncMock()
+        mock_host.new_stream.return_value = mock_stream
+
+        response_msg = Message()
+        response_msg.type = Message.MessageType.FIND_NODE
+
+        self_proto = response_msg.closerPeers.add()
+        self_proto.id = mock_host.get_id().to_bytes()
+        self_proto.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8000").to_bytes())
+
+        other_proto = response_msg.closerPeers.add()
+        other_peer_id = create_valid_peer_id("other_peer")
+        other_proto.id = other_peer_id.to_bytes()
+        other_proto.addrs.append(Multiaddr("/ip4/127.0.0.1/tcp/8003").to_bytes())
+
+        response_bytes = response_msg.SerializeToString()
+        mock_stream.read.side_effect = [
+            varint.encode(len(response_bytes)),
+            response_bytes,
+        ]
+
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+        mock_host.get_peerstore().add_addrs = Mock()
+
+        result = await peer_routing._query_peer_for_closest(
+            sample_peer_info.peer_id, target_key
+        )
+
+        assert result == [other_peer_id]
+        poisoned = [
+            call.args[0]
+            for call in mock_host.get_peerstore().add_addrs.call_args_list
+            if call.args[0] == mock_host.get_id()
+        ]
+        assert poisoned == []
+
+    @pytest.mark.trio
+    async def test_query_peer_for_closest_skips_self_dial(
+        self, peer_routing, mock_host
+    ):
+        result = await peer_routing._query_peer_for_closest(
+            mock_host.get_id(), b"target_key"
+        )
+
+        assert result == []
+        mock_host.new_stream.assert_not_called()
+
+    @pytest.mark.trio
     async def test_query_peer_for_closest_stream_failure(self, peer_routing, mock_host):
         """Test peer query when stream creation fails."""
         target_key = b"target_key"

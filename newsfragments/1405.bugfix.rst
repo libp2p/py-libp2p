@@ -1,0 +1,1 @@
+kad-dht: never dial ourselves during a ``FIND_NODE`` lookup, and drop our own peer ID from a response's ``closerPeers`` instead of queueing it as a candidate. A responder may legitimately return the requester -- it is the closest key to itself -- and querying ourselves stalled the lookup until timeout.
