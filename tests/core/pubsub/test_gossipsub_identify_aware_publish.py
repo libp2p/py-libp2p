@@ -12,7 +12,7 @@ once the peer is fully registered.
 
 import logging
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import trio
@@ -187,6 +187,125 @@ class TestPendingMessageQueue:
         assert peer not in gs._pending_messages
 
 
+class TestRecentMessageReplayGate:
+    """
+    The mcache replay must run once per subscription, not once per event.
+
+    These drive the real ``GossipSub.send_recent_messages`` over a seeded
+    mcache and count the RPCs that reach the wire, so the assertions are about
+    messages delivered rather than about the gate's own bookkeeping.
+    """
+
+    TOPIC = "replay-gate-topic"
+
+    def _seed_mcache(self, pubsub: Pubsub) -> AsyncMock:
+        """Put one message in the mcache and capture what gets written out."""
+        msg = rpc_pb2.Message(
+            from_id=pubsub.my_id.to_bytes(),
+            seqno=b"\x00" * 8,
+            data=b"cached-payload",
+            topicIDs=[self.TOPIC],
+        )
+        gossipsub = pubsub.router
+        assert isinstance(gossipsub, GossipSub)
+        gossipsub.mcache.put(msg)
+
+        writes = AsyncMock()
+        pubsub.write_msg = writes  # type: ignore[method-assign]
+        return writes
+
+    def _register_subscribed_peer(self, pubsub: Pubsub) -> ID:
+        peer_id = IDFactory()
+        pubsub.peers[peer_id] = MagicMock()
+        pubsub.peer_topics[self.TOPIC] = {peer_id}
+        return peer_id
+
+    @pytest.mark.trio
+    async def test_replay_runs_once_per_subscription(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_replay_deferred_until_peer_is_writable(self):
+        """Before the outbound stream exists the replay is a no-op, not spent."""
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = IDFactory()
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+
+            await pubsub._replay_recent_messages(peer_id, self.TOPIC)
+            assert writes.await_count == 0
+
+            pubsub.peers[peer_id] = MagicMock()
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_failed_replay_is_retried(self):
+        """A replay that raises must not burn the peer's one chance."""
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            gossipsub = pubsub.router
+            assert isinstance(gossipsub, GossipSub)
+            with patch.object(
+                gossipsub, "send_recent_messages", side_effect=ConnectionError("boom")
+            ):
+                await pubsub._send_recent_messages_to_new_peer(peer_id)
+            assert writes.await_count == 0
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_replay_gate_cleared_on_unsubscribe(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            pubsub.handle_subscription(
+                peer_id, rpc_pb2.RPC.SubOpts(subscribe=False, topicid=self.TOPIC)
+            )
+            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 2
+
+    @pytest.mark.trio
+    async def test_replay_gate_cleared_on_reconnect(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            pubsub._handle_dead_peer(peer_id)
+            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub._replayed_recent_topics
+
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+            pubsub.peers[peer_id] = MagicMock()
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 2
+
+
 # ---------------------------------------------------------------------------
 # Integration tests – full pubsub stack
 # ---------------------------------------------------------------------------
@@ -290,11 +409,14 @@ async def test_publish_before_identify_with_subscription_before_stream(monkeypat
         await connect(pubsubs[0].host, pubsubs[1].host)
         await pubsubs[0].publish(topic, data)
 
-        # Outlast the publisher's own stream setup, then leave room to propagate.
-        await trio.sleep(publisher_stream_delay + 4)
+        # The replay fires as soon as the publisher's outbound stream is
+        # registered, so wait for that instead of the worst-case setup time.
+        await pubsubs[0].wait_for_peer(
+            pubsubs[1].my_id, timeout=publisher_stream_delay + 3
+        )
 
         received = False
-        with trio.move_on_after(2):
+        with trio.move_on_after(3):
             async for msg in sub_1:
                 if msg.data == data:
                     received = True

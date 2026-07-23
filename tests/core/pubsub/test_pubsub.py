@@ -5,7 +5,7 @@ import inspect
 from typing import (
     NamedTuple,
 )
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import multiaddr
@@ -758,6 +758,42 @@ async def test_announce_retry_key_cleared_on_dead_peer(monkeypatch):
 
             assert key not in pubsub._pending_announce_retries
             assert peer_id not in pubsub.peer_queues
+
+
+@pytest.mark.trio
+async def test_dead_peer_clears_subscriptions_of_half_registered_peer():
+    """A peer dropping before its outbound stream exists must not leak state."""
+    async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+
+        # Subscriptions arrive on the peer's inbound stream, so `peer_topics`
+        # can hold a peer that never made it into `peers`.
+        pubsub.handle_subscription(
+            peer_id, rpc_pb2.RPC.SubOpts(subscribe=True, topicid=TESTING_TOPIC)
+        )
+        assert peer_id in pubsub.peer_topics[TESTING_TOPIC]
+        assert peer_id not in pubsub.peers
+
+        pubsub._handle_dead_peer(peer_id)
+
+        assert peer_id not in pubsub.peer_topics[TESTING_TOPIC]
+
+
+@pytest.mark.trio
+async def test_router_replay_hooks_default_to_noop():
+    """A router that implements neither hook (floodsub) sends nothing."""
+    async with PubsubFactory.create_batch_with_floodsub(1) as pubsubs_fsub:
+        pubsub = pubsubs_fsub[0]
+        peer_id = IDFactory()
+        pubsub.peers[peer_id] = MagicMock()
+        pubsub.peer_topics[TESTING_TOPIC] = {peer_id}
+
+        with patch.object(pubsub, "write_msg", new=AsyncMock()) as write_msg:
+            await pubsub.router.flush_pending_messages(peer_id)
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+        write_msg.assert_not_awaited()
 
 
 @pytest.mark.trio
