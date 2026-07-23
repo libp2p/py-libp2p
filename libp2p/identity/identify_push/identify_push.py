@@ -47,24 +47,13 @@ PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
 CONCURRENCY_LIMIT = 10
 
-from collections import deque
+import functools
 
-_MAX_UNPARSEABLE_CACHE = 512
-_UNPARSEABLE_ADDRS_CACHE: set[bytes] = set()
-_UNPARSEABLE_ADDRS_ORDER: deque[bytes] = deque()
-
-
+@functools.lru_cache(maxsize=1000)
 def _safe_parse_multiaddr_cached(raw: bytes) -> Multiaddr | None:
-    if raw in _UNPARSEABLE_ADDRS_CACHE:
-        return None
     try:
         return Multiaddr(raw)
     except Exception:
-        if len(_UNPARSEABLE_ADDRS_CACHE) >= _MAX_UNPARSEABLE_CACHE:
-            oldest = _UNPARSEABLE_ADDRS_ORDER.popleft()
-            _UNPARSEABLE_ADDRS_CACHE.discard(oldest)
-        _UNPARSEABLE_ADDRS_CACHE.add(raw)
-        _UNPARSEABLE_ADDRS_ORDER.append(raw)
         logger.debug("Skipping unparseable multiaddr in identify: %r", raw[:64])
         return None
 
@@ -89,7 +78,8 @@ def identify_push_handler_for(
 
         try:
             # Use the utility function to read the protobuf message
-            data = await read_length_prefixed_protobuf(stream, use_varint_format)
+            with trio.fail_after(10.0):
+                data = await read_length_prefixed_protobuf(stream, use_varint_format)
 
             identify_msg = Identify()
             identify_msg.ParseFromString(data)
@@ -228,12 +218,12 @@ async def _update_peerstore_from_identify(
                     record.peer_id,
                     peer_id,
                 )
-                return  # Reject forged record - peer ID mismatch
-
-            if not peerstore.consume_peer_record(envelope, 7200):
-                logger.error(
-                    "Updating Certified-Addr-Book was unsuccessful for %s", peer_id
-                )
+                # Reject forged record - peer ID mismatch, but continue parsing the rest
+            else:
+                if not peerstore.consume_peer_record(envelope, 7200):
+                    logger.error(
+                        "Updating Certified-Addr-Book was unsuccessful for %s", peer_id
+                    )
         except Exception as e:
             logger.error(
                 "Error updating the certified addr book for peer %s: %s", peer_id, e
@@ -252,7 +242,7 @@ async def push_identify_to_peer(
     host: IHost,
     peer_id: ID,
     observed_multiaddr: Multiaddr | None = None,
-    limit: trio.Semaphore = trio.Semaphore(CONCURRENCY_LIMIT),
+    limit: trio.Semaphore | None = None,
     use_varint_format: bool = True,
 ) -> bool:
     """
@@ -272,6 +262,8 @@ async def push_identify_to_peer(
         bool: True if the push was successful, False otherwise.
 
     """
+    if limit is None:
+        limit = trio.Semaphore(CONCURRENCY_LIMIT)
     async with limit:
         try:
             # Create a new stream to the peer using the identify/push protocol

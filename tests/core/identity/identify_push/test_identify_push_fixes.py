@@ -4,9 +4,6 @@ from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.identity.identify_push.identify_push import (
     _update_peerstore_from_identify,
-    _UNPARSEABLE_ADDRS_CACHE,
-    _MAX_UNPARSEABLE_CACHE,
-    _UNPARSEABLE_ADDRS_ORDER,
 )
 from multiaddr import Multiaddr
 from libp2p.peer.peerstore import PeerStore
@@ -27,22 +24,6 @@ async def test_pubkey_update_preserves_protocols():
 
     assert "/foo/1.0.0" in peerstore.get_protocols(peer_id)
 
-
-@pytest.mark.trio
-async def test_unparseable_addr_cache_bounded():
-    """Bug 3: Unparseable cache should not exceed MAX limit."""
-    peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
-    peerstore = PeerStore()
-
-    # Create lots of fake invalid addrs
-    identify_msg = Identify()
-    for i in range(_MAX_UNPARSEABLE_CACHE + 100):
-        identify_msg.listen_addrs.append(f"/invalid/addr/{i}".encode("utf-8"))
-
-    await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
-
-    assert len(_UNPARSEABLE_ADDRS_CACHE) <= _MAX_UNPARSEABLE_CACHE
-    assert len(_UNPARSEABLE_ADDRS_ORDER) <= _MAX_UNPARSEABLE_CACHE
 
 
 @pytest.mark.trio

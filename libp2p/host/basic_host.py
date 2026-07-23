@@ -992,52 +992,7 @@ class BasicHost(IHost):
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
 
-    async def _run_identify(self, peer_id: ID) -> None:
-        """
-        Run identify protocol with a peer to discover supported protocols.
 
-        This method opens an identify stream, receives the peer's information,
-        and stores the supported protocols in the peerstore for later use.
-        This enables protocol caching to skip multiselect negotiation.
-
-        :param peer_id: ID of the peer to identify
-        """
-        try:
-            # Import here to avoid circular dependency
-            from libp2p.identity.identify.identify import (
-                ID as IDENTIFY_ID,
-            )
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
-                read_length_prefixed_protobuf,
-            )
-
-            # Open identify stream (this will use multiselect negotiation)
-            stream = await self.new_stream(peer_id, [IDENTIFY_ID])
-
-            # Read identify response (length-prefixed protobuf)
-            response = await read_length_prefixed_protobuf(
-                stream, use_varint_format=True
-            )
-            await stream.close()
-
-            # Parse the identify message
-            from libp2p.identity.identify.pb.identify_pb2 import Identify
-
-            identify_msg = Identify()
-            identify_msg.ParseFromString(response)
-
-            # Store protocols in peerstore
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-
-            logger.debug(
-                f"Identify completed for peer {peer_id}, "
-                f"protocols: {list(identify_msg.protocols)}"
-            )
-        except Exception as e:
-            # Don't fail the connection if identify fails
-            # Protocol caching just won't be available for this peer
-            logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
 
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
@@ -1107,7 +1062,8 @@ class BasicHost(IHost):
             return
 
         try:
-            data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+            with trio.fail_after(10.0):
+                data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
             await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
@@ -1194,6 +1150,7 @@ class BasicHost(IHost):
         if peer_id is None:
             return
         self._identified_peers.discard(peer_id)
+        self._identify_inflight.discard(peer_id)
         self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:

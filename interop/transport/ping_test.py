@@ -18,6 +18,7 @@ import ssl
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from typing import Any
 
 from cryptography import x509

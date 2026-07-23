@@ -138,7 +138,7 @@ def identify_handler_for(
 
         # Under heavy parallel test load, listeners may not yet appear in
         # get_addrs() when the identify stream opens immediately after connect.
-        deadline = trio.current_time() + 5.0
+        deadline = trio.current_time() + 0.5
         while (
             not host.get_addrs()
             and trio.current_time() < deadline

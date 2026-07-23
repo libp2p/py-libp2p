@@ -11,6 +11,7 @@ from __future__ import annotations
 from enum import Enum
 import ipaddress
 import logging
+import weakref
 from typing import TYPE_CHECKING, cast
 
 from multiaddr import Multiaddr
@@ -149,8 +150,8 @@ class ObservedAddrManager:
     def __init__(self) -> None:
         # local_tw_str -> external_tw_str -> observer group key -> count
         self._external_addrs: dict[str, dict[str, dict[str, int]]] = {}
-        # id(conn) -> (local_tw_str, external_tw_str, observer_group_key)
-        self._conn_observations: dict[int, tuple[str, str, str]] = {}
+        # id(conn) -> (local_tw_str, external_tw_str, observer_group_key, weakref to conn)
+        self._conn_observations: dict[int, tuple[str, str, str, weakref.ReferenceType[INetConn]]] = {}
         # local_tw_str -> set of "rest" suffixes seen on listen addresses
         self._local_addr_rests: dict[str, set[str]] = {}
         # Cache: full_addr_str → Multiaddr object (avoids repeated construction)
@@ -235,15 +236,20 @@ class ObservedAddrManager:
 
         # If this connection already had an observation, check if it changed.
         if conn_id in self._conn_observations:
-            old_local, old_ext, old_obs = self._conn_observations[conn_id]
-            if old_local == local_tw_str and old_ext == external_tw_str:
-                logger.debug(
-                    "ObservedAddrManager: skip record_observation "
-                    "(duplicate observation on same connection for %s)",
-                    external_tw_str,
-                )
-                return
-            self._remove_observation(old_local, old_ext, old_obs)
+            old_local, old_ext, old_obs, wref = self._conn_observations[conn_id]
+            if wref() is not conn:
+                # Stale entry from reused memory address; evict it
+                self._remove_observation(old_local, old_ext, old_obs)
+                del self._conn_observations[conn_id]
+            else:
+                if old_local == local_tw_str and old_ext == external_tw_str:
+                    logger.debug(
+                        "ObservedAddrManager: skip record_observation "
+                        "(duplicate observation on same connection for %s)",
+                        external_tw_str,
+                    )
+                    return
+                self._remove_observation(old_local, old_ext, old_obs)
 
         # Store the observation.
         if local_tw_str not in self._external_addrs:
@@ -256,6 +262,7 @@ class ObservedAddrManager:
             local_tw_str,
             external_tw_str,
             obs_group,
+            weakref.ref(conn),
         )
 
         distinct_observers = len(observers)
@@ -283,8 +290,10 @@ class ObservedAddrManager:
         conn_id = id(conn)
         if conn_id not in self._conn_observations:
             return
-        local_tw, ext_tw, obs = self._conn_observations.pop(conn_id)
-        self._remove_observation(local_tw, ext_tw, obs)
+        old_local, old_ext, old_obs, wref = self._conn_observations[conn_id]
+        if wref() is conn:
+            self._conn_observations.pop(conn_id)
+            self._remove_observation(old_local, old_ext, old_obs)
 
     def addrs(self, min_observers: int = ACTIVATION_THRESHOLD) -> list[Multiaddr]:
         """

@@ -16,14 +16,11 @@ _PING_TEST_PATH = _REPO_ROOT / "interop" / "transport" / "ping_test.py"
 
 
 def _load_ping_test_module():
-    spec = importlib.util.spec_from_file_location(
-        "interop_transport_ping_test", _PING_TEST_PATH
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["interop_transport_ping_test"] = module
-    spec.loader.exec_module(module)
-    return module
+    import sys
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    import interop.transport.ping_test as ping_test_mod
+    return ping_test_mod
 
 
 ping_test = _load_ping_test_module()

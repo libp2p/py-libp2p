@@ -160,7 +160,7 @@ def read_varint_prefixed_bytes_sync(
     """
     # Read the varint length prefix
     length_bytes = b""
-    while True:
+    for _ in range(10): # max 10 bytes for 64-bit int
         byte_data = stream.read(1)
         if not byte_data:
             raise EOFError("Stream ended while reading varint length prefix")
@@ -168,6 +168,8 @@ def read_varint_prefixed_bytes_sync(
         length_bytes += byte_data
         if byte_data[0] & 0x80 == 0:
             break
+    else:
+        raise ValueError("Varint decoding error: integer exceeds maximum size of 64 bits")
 
     # Decode the length
     length = decode_uvarint(length_bytes)
@@ -191,7 +193,7 @@ async def read_length_prefixed_protobuf(
         # Read length-prefixed protobuf message from the stream
         # First read the varint length prefix
         length_bytes = b""
-        while True:
+        for _ in range(10):
             b = await stream.read(1)
             if not b:
                 raise Exception("No length prefix received")
@@ -199,6 +201,8 @@ async def read_length_prefixed_protobuf(
             length_bytes += b
             if b[0] & 0x80 == 0:
                 break
+        else:
+            raise Exception("Varint decoding error: integer exceeds maximum size of 64 bits")
 
         msg_length = decode_varint_from_bytes(length_bytes)
 
