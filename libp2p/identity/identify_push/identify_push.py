@@ -47,7 +47,12 @@ PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
 CONCURRENCY_LIMIT = 10
 
+from collections import deque
+
+_MAX_UNPARSEABLE_CACHE = 512
 _UNPARSEABLE_ADDRS_CACHE: set[bytes] = set()
+_UNPARSEABLE_ADDRS_ORDER: deque[bytes] = deque()
+
 
 def _safe_parse_multiaddr_cached(raw: bytes) -> Multiaddr | None:
     if raw in _UNPARSEABLE_ADDRS_CACHE:
@@ -55,7 +60,11 @@ def _safe_parse_multiaddr_cached(raw: bytes) -> Multiaddr | None:
     try:
         return Multiaddr(raw)
     except Exception:
+        if len(_UNPARSEABLE_ADDRS_CACHE) >= _MAX_UNPARSEABLE_CACHE:
+            oldest = _UNPARSEABLE_ADDRS_ORDER.popleft()
+            _UNPARSEABLE_ADDRS_CACHE.discard(oldest)
         _UNPARSEABLE_ADDRS_CACHE.add(raw)
+        _UNPARSEABLE_ADDRS_ORDER.append(raw)
         logger.debug("Skipping unparseable multiaddr in identify: %r", raw[:64])
         return None
 
@@ -112,6 +121,35 @@ def identify_push_handler_for(
     return handle_identify_push
 
 
+def _is_public_addr(a: Multiaddr) -> bool:
+    """Return True if the multiaddr is a globally routable address."""
+    s = str(a)
+    # IPv4 private/loopback/link-local
+    if "/ip4/127." in s:
+        return False
+    if "/ip4/10." in s:
+        return False
+    if "/ip4/192.168." in s:
+        return False
+    if "/ip4/169.254." in s:   # link-local (RFC 3927)
+        return False
+    # 172.16.0.0/12
+    if "/ip4/172." in s:
+        try:
+            ip = s.split("/")[2]
+            parts = [int(p) for p in ip.split(".")]
+            if parts[0] == 172 and 16 <= parts[1] <= 31:
+                return False
+        except Exception:
+            pass
+    # IPv6 loopback and link-local
+    if "/ip6/::1" in s:
+        return False
+    if "/ip6/fe80" in s.lower():  # fe80::/10 link-local
+        return False
+    return True
+
+
 async def _update_peerstore_from_identify(
     peerstore: IPeerStore, peer_id: ID, identify_msg: Identify
 ) -> None:
@@ -127,8 +165,16 @@ async def _update_peerstore_from_identify(
     # Update public key if present
     if identify_msg.HasField("public_key"):
         try:
-            peerstore.add_protocols(peer_id, [])
             pubkey = deserialize_public_key(identify_msg.public_key)
+            # Security: verify the key hashes to the claimed peer ID
+            derived_id = ID.from_pubkey(pubkey)
+            if derived_id != peer_id:
+                logger.warning(
+                    "Public key from %s does not hash to their peer ID (got %s). Ignoring.",
+                    peer_id,
+                    derived_id,
+                )
+                return
             peerstore.add_pubkey(peer_id, pubkey)
         except Exception as e:
             logger.error("Error updating public key for peer %s: %s", peer_id, e)
@@ -136,38 +182,23 @@ async def _update_peerstore_from_identify(
     # Update listen addresses if present
     if identify_msg.listen_addrs:
         try:
+            MAX_LISTEN_ADDRS = 1000
+            raw_addrs = identify_msg.listen_addrs
+            if len(raw_addrs) > MAX_LISTEN_ADDRS:
+                logger.warning(
+                    "Peer %s sent %d listen addresses; truncating to %d",
+                    peer_id, len(raw_addrs), MAX_LISTEN_ADDRS,
+                )
+                raw_addrs = raw_addrs[:MAX_LISTEN_ADDRS]
+
             addrs = []
-            for addr_bytes in identify_msg.listen_addrs:
+            for addr_bytes in raw_addrs:
                 ma = _safe_parse_multiaddr_cached(addr_bytes)
                 if ma is not None:
                     addrs.append(ma)
             
-            # P1 Fix: Filter out unroutable/loopback addrs if there are public ones
-            public_addrs = [
-                a for a in addrs 
-                if "/ip4/127." not in str(a) 
-                and "/ip6/::1" not in str(a)
-                and "/ip4/10." not in str(a)
-                and "/ip4/192.168." not in str(a)
-            ]
-            
-            # Further filter 172.16.x.x - 172.31.x.x
-            def _is_private_172(a: Multiaddr) -> bool:
-                s = str(a)
-                if "/ip4/172." not in s:
-                    return False
-                try:
-                    ip = s.split("/")[2]
-                    parts = [int(p) for p in ip.split(".")]
-                    return parts[0] == 172 and 16 <= parts[1] <= 31
-                except Exception:
-                    return False
-                    
-            public_addrs = [a for a in public_addrs if not _is_private_172(a)]
-            
-            # If they gave us some public addresses, only keep the public ones
-            if public_addrs:
-                addrs = public_addrs
+            # Always filter private/loopback/link-local addresses
+            addrs = [a for a in addrs if _is_public_addr(a)]
                 
             for addr in addrs:
                 peerstore.add_addr(peer_id, addr, 7200)  # 2 hours TTL

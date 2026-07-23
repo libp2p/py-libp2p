@@ -1,4 +1,5 @@
 import logging
+import traceback
 
 from multiaddr import (
     Multiaddr,
@@ -62,8 +63,7 @@ def _mk_identify_protobuf(
     public_key = host.get_public_key()
     laddrs = host.get_addrs()
     if not laddrs:
-        p2p_part = Multiaddr(f"/p2p/{host.get_id()!s}")
-        laddrs = [addr.encapsulate(p2p_part) for addr in host.get_transport_addrs()]
+        laddrs = list(host.get_transport_addrs())   # plain transport addrs, matching go-libp2p
     protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
 
     # Create a signed peer-record for the remote peer
@@ -92,13 +92,13 @@ def parse_identify_response(response: bytes) -> Identify:
     # Try new format first: length-prefixed protobuf
     if len(response) >= 1:
         length, varint_size = decode_varint_with_size(response)
-        if varint_size > 0 and length > 0 and varint_size + length <= len(response):
+        if varint_size > 0 and length > 0 and varint_size + length == len(response):
             protobuf_data = response[varint_size : varint_size + length]
             try:
                 identify_response = Identify()
                 identify_response.ParseFromString(protobuf_data)
-                # Sanity check: must have agent_version (protocol_version is optional)
-                if identify_response.agent_version:
+                # Use public_key as the sanity check: every compliant peer must have one
+                if identify_response.HasField("public_key"):
                     return identify_response
             except Exception:
                 pass  # Fall through to old format
@@ -141,7 +141,6 @@ def identify_handler_for(
         deadline = trio.current_time() + 5.0
         while (
             not host.get_addrs()
-            and not host.get_transport_addrs()
             and trio.current_time() < deadline
         ):
             await trio.sleep(0.01)
@@ -159,12 +158,11 @@ def identify_handler_for(
             else:
                 # Send raw protobuf message (old format for backward compatibility)
                 await stream.write(response)
+            await stream.close()
+            logger.debug("successfully handled request for %s from %s", ID, peer_id)
         except StreamClosed:
             logger.debug("Fail to respond to %s request: stream closed", ID)
-            return  # Exit early if stream is closed
         except Exception as e:
-            import traceback
-
             logger.error(
                 "Error sending identify response to %s: %s (type: %s)\n%s",
                 peer_id,
@@ -172,13 +170,10 @@ def identify_handler_for(
                 type(e),
                 traceback.format_exc(),
             )
-            return  # Exit early on any error
-        else:
-            # Only close the stream after all writes are successful
+        finally:
             try:
                 await stream.close()
-                logger.debug("successfully handled request for %s from %s", ID, peer_id)
-            except Exception as e:
-                logger.debug("Error closing stream: %s", e)
+            except Exception:
+                pass
 
     return handle_identify

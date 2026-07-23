@@ -1,5 +1,6 @@
 import logging
 
+from libp2p.network.stream.exceptions import StreamEOF
 import pytest
 import trio
 
@@ -113,7 +114,16 @@ async def test_identify_default_format_behavior(security_protocol):
 
         # Make identify request
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         # Parse response
@@ -139,7 +149,16 @@ async def test_identify_cross_format_compatibility_varint_to_raw(security_protoc
 
         # Host B makes request (will automatically detect format)
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         # Parse response (should work with automatic format detection)
@@ -165,7 +184,16 @@ async def test_identify_cross_format_compatibility_raw_to_varint(security_protoc
 
         # Host B makes request (will automatically detect format)
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         # Parse response (should work with automatic format detection)
@@ -192,7 +220,16 @@ async def test_identify_format_detection_robustness(security_protocol):
 
             # Make identify request
             stream = await host_b.new_stream(host_a.get_id(), (ID,))
-            response = await stream.read(8192)
+            response = bytearray()
+            try:
+                while True:
+                    chunk = await stream.read(8192)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+            except StreamEOF:
+                pass
+            response = bytes(response)
             await stream.close()
 
             # Parse response
@@ -224,7 +261,16 @@ async def test_identify_large_message_handling(security_protocol):
 
         # Make identify request
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         # Parse response

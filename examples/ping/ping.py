@@ -4,12 +4,14 @@ import logging
 import multiaddr
 import trio
 
-from examples.advanced.network_discover import get_optimal_binding_address
 from libp2p import (
     new_host,
 )
-from libp2p.custom_types import (
-    TProtocol,
+from libp2p.host.ping import (
+    ID as PING_PROTOCOL_ID,
+    PING_LENGTH,
+    RESP_TIMEOUT,
+    handle_ping,
 )
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -23,26 +25,11 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("multiaddr").setLevel(logging.WARNING)
 logging.getLogger("libp2p").setLevel(logging.WARNING)
 
-PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
-PING_LENGTH = 32
-RESP_TIMEOUT = 60
+
 PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
 
 
-async def handle_ping(stream: INetStream) -> None:
-    while True:
-        try:
-            payload = await stream.read(PING_LENGTH)
-            peer_id = stream.muxed_conn.peer_id
-            if payload is not None:
-                print(f"received ping from {peer_id}")
 
-                await stream.write(payload)
-                print(f"responded with pong to {peer_id}")
-
-        except Exception:
-            await stream.reset()
-            break
 
 
 async def send_ping(stream: INetStream) -> None:
@@ -71,8 +58,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     if port <= 0:
         port = find_free_port()
 
-    _ = get_available_interfaces(8000)
-    _ = get_optimal_binding_address(8000)
+
 
     if transport == "tcp":
         listen_addrs = get_available_interfaces(port)

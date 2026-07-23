@@ -1,5 +1,6 @@
 import logging
 
+from libp2p.network.stream.exceptions import StreamEOF
 import pytest
 from multiaddr import (
     Multiaddr,
@@ -50,7 +51,16 @@ async def test_identify_protocol(security_protocol):
                 await trio.sleep(0.01)
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
 
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         identify_response = parse_identify_response(response)

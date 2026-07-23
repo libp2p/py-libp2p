@@ -51,13 +51,8 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     except StreamEOF:
         logger.debug("Other side closed while waiting for ping from %s", peer_id)
         return False
-    except StreamReset as error:
-        logger.debug(
-            "Other side reset while waiting for ping from %s: %s", peer_id, error
-        )
-        raise
-    except Exception as error:
-        logger.debug("Error while waiting to read ping for %s: %s", peer_id, error)
+    except (StreamReset, Exception) as error:
+        logger.debug("Error while waiting for ping from %s: %s", peer_id, error)
         raise
 
     logger.debug("Received ping from %s with data: 0x%s", peer_id, payload.hex())
@@ -90,32 +85,43 @@ async def handle_ping(stream: INetStream) -> None:
 
 async def _ping(stream: INetStream) -> int:
     """
-    Helper function to perform a single ping operation on a given stream,
-    returns integer value rtt - which denotes round trip time for a ping request in ms
+    Perform a single ping and return the RTT in **milliseconds**.
+
+    Matches go-libp2p's Result.RTT.Milliseconds() convention.
+    Raises ValueError if the pong payload does not match the sent ping.
+    Raises trio.TooSlowError if the peer takes longer than RESP_TIMEOUT seconds.
     """
     ping_bytes = secrets.token_bytes(PING_LENGTH)
 
-    start = time.time()
+    start = time.monotonic()
     await stream.write(ping_bytes)
-    pong_bytes = await stream.read(PING_LENGTH)
-    end = time.time()
+    with trio.fail_after(RESP_TIMEOUT):
+        pong_bytes = await stream.read(PING_LENGTH)
 
-    rtt = int((end - start) * (10**6))  # in microseconds
+    rtt = int((time.monotonic() - start) * 1000)  # in milliseconds
 
     if ping_bytes != pong_bytes:
         logger.debug("invalid pong response")
-        raise
+        raise ValueError(
+            f"Ping payload mismatch: sent {ping_bytes.hex()!r}, "
+            f"got {pong_bytes.hex()!r}"
+        )
 
     return rtt
 
 
 class PingService:
-    """PingService executes pings and returns RTT in miliseconds."""
+    """PingService executes pings and returns RTT in milliseconds (ms).
+
+    Matches go-libp2p convention: Result.RTT.Milliseconds().
+    """
 
     def __init__(self, host: IHost):
         self._host = host
 
     async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
+        if ping_amt < 1:
+            raise ValueError(f"ping_amt must be >= 1, got {ping_amt!r}")
         stream = await self._host.new_stream(peer_id, [ID])
 
         rtts: list[int]
