@@ -706,3 +706,52 @@ async def test_find_node_reply_includes_requester_asking_for_itself(
     await stream.close()
 
     assert a_id.to_bytes() in [p.id for p in resp.closerPeers]
+
+
+@pytest.mark.trio
+async def test_find_node_reply_excludes_requester_when_not_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+    b_id = dht_b.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = b_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    closer_ids = [p.id for p in resp.closerPeers]
+    assert a_id.to_bytes() not in closer_ids
+    assert b_id.to_bytes() in closer_ids
+
+
+@pytest.mark.trio
+async def test_find_node_reply_does_not_prepend_unknown_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    unknown_key = b"content-key-not-in-peerstore-" + os.urandom(16)
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = unknown_key
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert unknown_key not in [p.id for p in resp.closerPeers]
