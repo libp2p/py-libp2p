@@ -218,6 +218,7 @@ class Swarm(Service, INetworkService):
 
         # Create Notifee array
         self.notifees = []
+        self._ongoing_dials: dict[ID, trio.Event] = {}
 
         self.common_stream_handler = create_default_stream_handler(self)
 
@@ -600,100 +601,117 @@ class Swarm(Service, INetworkService):
                 logger.debug(f"Reusing existing connections to peer {peer_id}")
                 return valid_connections
 
-        logger.debug("attempting to dial peer %s", peer_id)
+        # Prevent concurrent duplicate dials
+        if peer_id in self._ongoing_dials:
+            logger.debug(f"Waiting for in-flight dial to peer {peer_id} to finish")
+            await self._ongoing_dials[peer_id].wait()
+            # Re-check connections after the previous dial finished
+            existing_connections = self.get_connections(peer_id)
+            if existing_connections:
+                valid_connections = [c for c in existing_connections if not c.is_closed]
+                if valid_connections:
+                    return valid_connections
 
+        dial_event = trio.Event()
+        self._ongoing_dials[peer_id] = dial_event
         try:
-            # Get peer info from peer store
-            addrs = self.peerstore.addrs(peer_id)
-        except PeerStoreError as error:
-            raise SwarmException(f"No known addresses to peer {peer_id}") from error
-
-        if not addrs:
-            raise SwarmException(f"No known addresses to peer {peer_id}")
-
-        # Filter addresses through connection gate (InterceptAddrDial)
-        gate = self.connection_gate
-        allowed_addrs = []
-        for addr in addrs:
-            if await gate.is_allowed(addr):
-                allowed_addrs.append(addr)
-
-        if not allowed_addrs:
-            raise SwarmException(
-                f"All addresses for peer {peer_id} blocked by connection gate"
-            )
-
-        # Filter out loopback addresses if public addresses are available
-        # This prevents the node from dialing itself when DHT peers advertise localhost
-        public_addrs = [
-            a
-            for a in allowed_addrs
-            if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
-        ]
-        if public_addrs:
-            allowed_addrs = public_addrs
-
-        from libp2p.utils.address_validation import is_ipv6_available
-        if not is_ipv6_available():
-            allowed_addrs = [a for a in allowed_addrs if not str(a).startswith("/ip6/")]
-
-        connections = []
-        exceptions: list[SwarmException] = []
-
-        # Try allowed addresses using Happy Eyeballs algorithm
-        with trio.CancelScope() as cancel_scope:
-            async with trio.open_nursery() as nursery:
-                for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
-                    failed_event = trio.Event()
-
-                    async def dial_task(
-                        addr: Any = multiaddr, ev: Any = failed_event
-                    ) -> None:
-                        try:
-                            connection = await self._dial_with_retry(addr, peer_id)
-                            connections.append(connection)
-                            # Limit number of connections per peer
-                            if (
-                                len(connections)
-                                >= self.connection_config.max_connections_per_peer
-                            ):
-                                cancel_scope.cancel()
-                        except SwarmException as e:
-                            exceptions.append(e)
-                            logger.debug(
-                                "encountered exception when trying to connect to %s",
-                                addr,
-                                exc_info=e,
-                            )
-                            ev.set()
-
-                    nursery.start_soon(dial_task)
-
-                    # Start next dial immediately if this one fails, or after 250ms
-                    with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
-                        await failed_event.wait()
-
-        if not connections:
-            # Tried all addresses, raising exception.
-
-            # Emit metric-event for dial_attempt failure
-            event = SwarmEvent()
-            event.peer_id = peer_id.pretty()
-            event.dial_attempt_error = True
-
-            if self.metric_send_channel is not None:
-                await self.metric_send_channel.send(event)
-
-            self._negative_peer_cache.mark_failed(str(peer_id))
-            raise SwarmDialAllFailedError(
-                f"unable to connect to {peer_id}, no addresses established a "
-                "successful connection (with exceptions)",
-                peer_id=peer_id,
-                num_addrs_tried=len(exceptions),
-            ) from MultiError(exceptions)
-
-        self._negative_peer_cache.evict(str(peer_id))
-        return connections
+            logger.debug("attempting to dial peer %s", peer_id)
+    
+            try:
+                # Get peer info from peer store
+                addrs = self.peerstore.addrs(peer_id)
+            except PeerStoreError as error:
+                raise SwarmException(f"No known addresses to peer {peer_id}") from error
+    
+            if not addrs:
+                raise SwarmException(f"No known addresses to peer {peer_id}")
+    
+            # Filter addresses through connection gate (InterceptAddrDial)
+            gate = self.connection_gate
+            allowed_addrs = []
+            for addr in addrs:
+                if await gate.is_allowed(addr):
+                    allowed_addrs.append(addr)
+    
+            if not allowed_addrs:
+                raise SwarmException(
+                    f"All addresses for peer {peer_id} blocked by connection gate"
+                )
+    
+            # Filter out loopback addresses if public addresses are available
+            # This prevents the node from dialing itself when DHT peers advertise localhost
+            public_addrs = [
+                a
+                for a in allowed_addrs
+                if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+            ]
+            if public_addrs:
+                allowed_addrs = public_addrs
+    
+            from libp2p.utils.address_validation import is_ipv6_available
+            if not is_ipv6_available():
+                allowed_addrs = [a for a in allowed_addrs if not str(a).startswith("/ip6/")]
+    
+            connections = []
+            exceptions: list[SwarmException] = []
+    
+            # Try allowed addresses using Happy Eyeballs algorithm
+            with trio.CancelScope() as cancel_scope:
+                async with trio.open_nursery() as nursery:
+                    for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
+                        failed_event = trio.Event()
+    
+                        async def dial_task(
+                            addr: Any = multiaddr, ev: Any = failed_event
+                        ) -> None:
+                            try:
+                                connection = await self._dial_with_retry(addr, peer_id)
+                                connections.append(connection)
+                                # Limit number of connections per peer
+                                if (
+                                    len(connections)
+                                    >= self.connection_config.max_connections_per_peer
+                                ):
+                                    cancel_scope.cancel()
+                            except SwarmException as e:
+                                exceptions.append(e)
+                                logger.debug(
+                                    "encountered exception when trying to connect to %s",
+                                    addr,
+                                    exc_info=e,
+                                )
+                                ev.set()
+    
+                        nursery.start_soon(dial_task)
+    
+                        # Start next dial immediately if this one fails, or after 250ms
+                        with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
+                            await failed_event.wait()
+    
+            if not connections:
+                # Tried all addresses, raising exception.
+    
+                # Emit metric-event for dial_attempt failure
+                event = SwarmEvent()
+                event.peer_id = peer_id.pretty()
+                event.dial_attempt_error = True
+    
+                if self.metric_send_channel is not None:
+                    await self.metric_send_channel.send(event)
+    
+                self._negative_peer_cache.mark_failed(str(peer_id))
+                raise SwarmDialAllFailedError(
+                    f"unable to connect to {peer_id}, no addresses established a "
+                    "successful connection (with exceptions)",
+                    peer_id=peer_id,
+                    num_addrs_tried=len(exceptions),
+                ) from MultiError(exceptions)
+    
+            self._negative_peer_cache.evict(str(peer_id))
+            return connections
+        finally:
+            dial_event.set()
+            self._ongoing_dials.pop(peer_id, None)
 
     async def _dial_with_retry(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
