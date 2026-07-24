@@ -831,7 +831,37 @@ class Pubsub(Service, IPubsub):
                     error,
                 )
 
+        await self._send_recent_messages_to_new_peer(peer_id)
+
         logger.debug("added new peer %s", peer_id)
+
+    async def _send_recent_messages_to_new_peer(self, peer_id: ID) -> None:
+        """
+        Replay recent messages to a peer whose subscriptions we already hold.
+
+        ``handle_subscription`` normally does this, but it runs off the inbound
+        stream and can fire before ``_handle_new_peer`` has registered the
+        outbound stream in ``peers``. Its catch-up is a no-op in that ordering,
+        so the messages are lost unless the replay also runs here.
+
+        :param peer_id: the peer that just became writable
+        """
+        if not hasattr(self.router, "send_recent_messages"):
+            return
+
+        subscribed_topics = [
+            topic for topic, peers in self.peer_topics.items() if peer_id in peers
+        ]
+        for topic in subscribed_topics:
+            try:
+                await self.router.send_recent_messages(peer_id, topic)  # type: ignore[attr-defined]
+            except Exception as error:
+                logger.debug(
+                    "failed to send recent messages for topic %s to peer %s: %s",
+                    topic,
+                    peer_id,
+                    error,
+                )
 
     async def _handle_new_peer_safe(self, peer_id: ID) -> None:
         """
