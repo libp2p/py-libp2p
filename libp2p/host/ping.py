@@ -1,6 +1,7 @@
 import logging
 import secrets
 import time
+from collections.abc import AsyncIterator
 
 import trio
 
@@ -25,8 +26,9 @@ from libp2p.network.stream.exceptions import (
 from libp2p.peer.id import ID as PeerID
 
 ID = TProtocol("/ipfs/ping/1.0.0")
+SERVICE_NAME = "libp2p.ping"
 PING_LENGTH = 32
-RESP_TIMEOUT = 60
+RESP_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
 
@@ -86,50 +88,18 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     logger.debug("Received ping from %s with data: 0x%s", peer_id, payload.hex())
 
     try:
-        await stream.write(payload)
+        with trio.fail_after(RESP_TIMEOUT):
+            await stream.write(payload)
+    except trio.TooSlowError:
+        logger.debug("Timed out writing ping response to %s", peer_id)
+        raise
     except StreamClosed:
         logger.debug("Fail to respond to ping from %s: stream closed", peer_id)
         raise
     return True
 
 
-async def handle_ping(stream: INetStream) -> None:
-    """
-    Respond to incoming ping requests until one side errors
-    or closes the ``stream``.
-    """
-    peer_id = stream.muxed_conn.peer_id
-
-    while True:
-        try:
-            should_continue = await _handle_ping(stream, peer_id)
-            if not should_continue:
-                await stream.close()
-                return
-        except trio.TooSlowError:
-            # The peer simply stopped pinging within RESP_TIMEOUT -- this is
-            # not a protocol violation. go-libp2p's handler closes the
-            # stream when its own idle timer fires (rather than resetting),
-            # so match that: Reset signals an abnormal/error termination to
-            # the remote peer, which an idle timeout is not.
-            logger.debug(
-                "Idle timeout waiting for ping from %s, closing stream", peer_id
-            )
-            try:
-                await stream.close()
-            except Exception as close_error:
-                logger.debug(
-                    "Error closing idle ping stream to %s: %s",
-                    peer_id,
-                    close_error,
-                )
-            return
-        except Exception:
-            await stream.reset()
-            return
-
-
-async def _ping(stream: INetStream) -> int:
+async def _ping(stream: INetStream, cancel_scope: trio.CancelScope | None = None) -> int:
     """
     Perform a single ping and return the RTT in **milliseconds**.
 
@@ -140,19 +110,22 @@ async def _ping(stream: INetStream) -> int:
     ping_bytes = secrets.token_bytes(PING_LENGTH)
 
     start = time.monotonic()
-    await stream.write(ping_bytes)
-    with trio.fail_after(RESP_TIMEOUT):
-        # See the matching note in _handle_ping: stream.read(n) may return
-        # fewer than n bytes even on a healthy connection, so a naive
-        # single read() here can misreport a short-but-correct pong as a
-        # payload mismatch. read_exactly() blocks until PING_LENGTH bytes
-        # are collected (or the connection genuinely closes/resets).
-        pong_bytes = await read_exactly(stream, PING_LENGTH)
+    
+    with cancel_scope or trio.CancelScope():
+        with trio.fail_after(RESP_TIMEOUT):
+            await stream.write(ping_bytes)
+            # See the matching note in _handle_ping: stream.read(n) may return
+            # fewer than n bytes even on a healthy connection, so a naive
+            # single read() here can misreport a short-but-correct pong as a
+            # payload mismatch. read_exactly() blocks until PING_LENGTH bytes
+            # are collected (or the connection genuinely closes/resets).
+            pong_bytes = await read_exactly(stream, PING_LENGTH)
 
     rtt = int((time.monotonic() - start) * 1000)  # in milliseconds
 
     if ping_bytes != pong_bytes:
         logger.debug("invalid pong response")
+        await stream.reset()
         raise ValueError(
             f"Ping payload mismatch: sent {ping_bytes.hex()!r}, "
             f"got {pong_bytes.hex()!r}"
@@ -167,51 +140,93 @@ class PingService:
     Matches go-libp2p convention: Result.RTT.Milliseconds().
     """
 
-    def __init__(self, host: IHost):
+    def __init__(self, host: IHost, rcmgr=None):
         self._host = host
+        self._rcmgr = rcmgr
+        self._outbound_streams: dict[PeerID, INetStream] = {}
+        self._inbound_streams: dict[PeerID, set[INetStream]] = {}
+        self._lock = trio.Lock()
 
-    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
-        if ping_amt < 1:
-            raise ValueError(f"ping_amt must be >= 1, got {ping_amt!r}")
-        stream = await self._host.new_stream(peer_id, [ID])
+    async def handle_ping(self, stream: INetStream) -> None:
+        """
+        Respond to incoming ping requests until one side errors
+        or closes the ``stream``.
+        """
+        peer_id = stream.muxed_conn.peer_id
 
-        rtts: list[int]
-        # `event` must be assigned *before* the try block. `except Exception`
-        # below deliberately does not catch trio.Cancelled (a BaseException,
-        # by design, so structured concurrency can't be accidentally
-        # swallowed) -- if a cancellation fires before `_ping` returns,
-        # execution jumps straight to `finally` without ever assigning
-        # `event`. finally still runs, though, and referencing an unbound
-        # `event` there raises UnboundLocalError *in place of* the
-        # propagating Cancelled, which corrupts the enclosing cancel scope's
-        # bookkeeping (Trio never sees its own cancellation delivered).
-        event: PingEvent | None = None
+        async with self._lock:
+            peer_streams = self._inbound_streams.setdefault(peer_id, set())
+            if len(peer_streams) >= 2:
+                logger.debug("Rejecting ping stream from %s: max 2 reached", peer_id)
+                await stream.reset()
+                return
+            peer_streams.add(stream)
 
         try:
-            rtts = [await _ping(stream) for _ in range(ping_amt)]
-            event = PingEvent(
-                peer_id=peer_id,
-                rtts=rtts,
-                failure_error=None,
-            )
+            while True:
+                try:
+                    should_continue = await _handle_ping(stream, peer_id)
+                    if not should_continue:
+                        await stream.close()
+                        return
+                except trio.TooSlowError:
+                    # The peer simply stopped pinging within RESP_TIMEOUT -- this is
+                    # not a protocol violation. go-libp2p's handler closes the
+                    # stream when its own idle timer fires (rather than resetting),
+                    # so match that: Reset signals an abnormal/error termination to
+                    # the remote peer, which an idle timeout is not.
+                    logger.debug(
+                        "Idle timeout waiting for ping from %s, closing stream", peer_id
+                    )
+                    try:
+                        await stream.close()
+                    except Exception as close_error:
+                        logger.debug(
+                            "Error closing idle ping stream to %s: %s",
+                            peer_id,
+                            close_error,
+                        )
+                    return
+                except Exception:
+                    await stream.reset()
+                    return
+        finally:
+            async with self._lock:
+                self._inbound_streams.get(peer_id, set()).discard(stream)
 
+
+    async def ping_iter(self, peer_id: PeerID, ping_amt: int = 1, cancel_scope: trio.CancelScope | None = None) -> AsyncIterator[int]:
+        if ping_amt < 1:
+            raise ValueError(f"ping_amt must be >= 1, got {ping_amt!r}")
+
+        async with self._lock:
+            stream = self._outbound_streams.get(peer_id)
+            if stream is None or stream.is_closed():
+                stream = await self._host.new_stream(peer_id, [ID])
+                self._outbound_streams[peer_id] = stream
+
+        event: PingEvent | None = None
+        rtts: list[int] = []
+
+        try:
+            for _ in range(ping_amt):
+                rtt = await _ping(stream, cancel_scope=cancel_scope)
+                rtts.append(rtt)
+                yield rtt
+            event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
         except Exception as error:
             event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
             raise
-
         finally:
-            try:
-                await stream.close()
-            except Exception as close_error:
-                # A failure here must never replace/mask whatever exception
-                # (or lack thereof) is already propagating out of this
-                # `finally` -- swallow it, but still log it for visibility.
-                logger.debug(
-                    "Error closing ping stream to %s after ping: %s",
-                    peer_id,
-                    close_error,
-                )
-            if event is not None and stream.metric_send_channel is not None:
-                await stream.metric_send_channel.send(event)
+            if event is not None and getattr(stream, 'metric_send_channel', None) is not None:
+                with trio.move_on_after(1):
+                    await stream.metric_send_channel.send(event)
 
+    async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
+        """
+        Legacy support for callers expecting a list of RTTs.
+        """
+        rtts = []
+        async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
+            rtts.append(rtt)
         return rtts

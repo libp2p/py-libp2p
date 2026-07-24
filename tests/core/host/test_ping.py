@@ -218,7 +218,7 @@ async def test_handle_ping_closes_gracefully_on_idle_timeout(monkeypatch):
     fake_stream.read = AsyncMock(side_effect=_hang)
     fake_stream.muxed_conn.peer_id = "peer"
 
-    await ping_mod.handle_ping(fake_stream)
+    await ping_mod.PingService(AsyncMock()).handle_ping(fake_stream)
 
     fake_stream.close.assert_awaited_once()
     fake_stream.reset.assert_not_called()
