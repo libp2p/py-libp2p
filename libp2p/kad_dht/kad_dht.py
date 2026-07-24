@@ -5,12 +5,18 @@ This module provides a complete Distributed Hash Table (DHT)
 implementation based on the Kademlia algorithm and protocol.
 """
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from enum import (
     Enum,
 )
 import logging
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .diagnostics import RoutingTableDiagnostics
 
 from multiaddr import (
     Multiaddr,
@@ -1241,3 +1247,27 @@ class KadDHT(Service):
 
         """
         return self.enable_random_walk
+
+    def get_diagnostics(self) -> "RoutingTableDiagnostics":
+        """
+        Return a diagnostics analyser for the routing table.
+
+        Use this to inspect bucket fill rates, keyspace coverage gaps,
+        peer freshness, and the composite health score — without touching
+        any application code.
+
+        Example::
+
+            report = dht.get_diagnostics().analyse()
+            print(report.summary())
+            print(f"Health score: {report.health_score}/100")
+
+        Returns
+        -------
+        RoutingTableDiagnostics
+            A read-only analyser bound to this node's routing table.
+
+        """
+        from .diagnostics import RoutingTableDiagnostics
+
+        return RoutingTableDiagnostics(self.routing_table)
