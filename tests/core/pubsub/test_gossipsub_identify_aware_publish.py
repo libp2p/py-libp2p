@@ -17,11 +17,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import trio
 
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
     GossipSub,
 )
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import (
+    Pubsub,
+)
 from libp2p.tools.utils import connect
 from tests.utils.factories import (
     IDFactory,
@@ -239,6 +245,68 @@ async def test_publish_before_identify_completes():
         assert received, (
             "Message published before identify was not delivered to the peer. "
             "The identify-aware publish queue may not be working."
+        )
+
+
+@pytest.mark.trio
+async def test_publish_before_identify_with_subscription_before_stream(monkeypatch):
+    """
+    Regression test for the ordering that makes
+    ``test_publish_before_identify_completes`` flaky under load.
+
+    When the publisher learns of the peer's subscription *before* its own
+    outbound pubsub stream is registered, nothing is queued at publish time
+    (the peer is in neither ``peers`` nor ``peer_topics``) and the mcache
+    catch-up in ``handle_subscription`` cannot write yet. The replay must
+    therefore also run once the stream becomes available.
+    """
+    topic = "test-subscription-before-stream"
+    data = b"hello-from-early-publish"
+
+    # The publisher's delay must be the longer one: the subscriber's stream, and
+    # so its subscription, has to reach the publisher while the publisher's own
+    # outbound stream is still pending. Equal or inverted delays make this test
+    # exercise the ordering that already worked.
+    publisher_stream_delay = 1.0
+    subscriber_stream_delay = 0.3
+
+    original_handle_new_peer = Pubsub._handle_new_peer
+    delays: dict[Pubsub, float] = {}
+
+    async def delayed_handle_new_peer(self: Pubsub, peer_id: ID) -> None:
+        await trio.sleep(delays.get(self, 0))
+        await original_handle_new_peer(self, peer_id)
+
+    monkeypatch.setattr(Pubsub, "_handle_new_peer", delayed_handle_new_peer)
+
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2,
+        degree=1,
+        degree_low=1,
+        degree_high=2,
+        heartbeat_interval=1,
+    ) as pubsubs:
+        delays[pubsubs[0]] = publisher_stream_delay
+        delays[pubsubs[1]] = subscriber_stream_delay
+
+        await pubsubs[0].subscribe(topic)
+        sub_1 = await pubsubs[1].subscribe(topic)
+
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await pubsubs[0].publish(topic, data)
+
+        # Outlast the publisher's own stream setup, then leave room to propagate.
+        await trio.sleep(publisher_stream_delay + 4)
+
+        received = False
+        with trio.move_on_after(2):
+            async for msg in sub_1:
+                if msg.data == data:
+                    received = True
+                    break
+        assert received, (
+            "Message published before identify was not delivered when the peer's "
+            "subscription arrived before the outbound pubsub stream was ready."
         )
 
 
