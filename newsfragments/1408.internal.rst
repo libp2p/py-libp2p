@@ -1,0 +1,1 @@
+De-flaked ``test_expiry_removal`` by polling until the background sweeper thread removes the expired entry instead of a fixed ``trio.sleep``, which raced on slow CI runners (integer-second TTL swept on a coarse ~1s thread cadence).
