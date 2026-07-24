@@ -28,6 +28,7 @@ from libp2p.kad_dht.routing_table import (
     BUCKET_SIZE,
     KBucket,
     RoutingTable,
+    _subnet_key,
 )
 from libp2p.kad_dht.utils import (
     create_key_from_binary,
@@ -398,3 +399,137 @@ class TestRoutingTable:
         initial_bucket = routing_table.buckets[0]
         assert initial_bucket.min_range == 0
         assert initial_bucket.max_range == 2**256
+
+
+def _peer_with_addrs(*addr_strs: str) -> PeerInfo:
+    """Build a PeerInfo with a fresh valid peer ID and the given multiaddrs."""
+    return PeerInfo(create_valid_peer_id("p"), [Multiaddr(a) for a in addr_strs])
+
+
+class TestKBucketSubnetDiversity:
+    """
+    IP/subnet diversity enforcement in KBucket.add_peer (issue #1383).
+
+    Uses genuinely globally-routable addresses (8.8.8.x, 1.1.1.x, 9.9.9.x,
+    2606:4700:4700::x); documentation/TEST-NET ranges (203.0.113.x etc.) are
+    ``is_global == False`` and would be exempted, so they are deliberately
+    avoided here.
+    """
+
+    @pytest.fixture
+    def mock_host(self):
+        host = Mock()
+        host.get_peerstore.return_value = Mock()
+        host.new_stream = AsyncMock()
+        return host
+
+    @pytest.mark.trio
+    async def test_subnet_saturation_rejects(self, mock_host):
+        """A third peer in an already-saturated /24 is rejected."""
+        bucket = KBucket(mock_host)  # default bucket_size=20, so space is free
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Same /24 (8.8.8.0/24), MAX_PEERS_PER_SUBNET=2 already reached → reject
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+        assert bucket.size() == 2
+
+    @pytest.mark.trio
+    async def test_subnet_different_subnets_allowed(self, mock_host):
+        """Peers in distinct /24s are all accepted past the per-subnet cap."""
+        bucket = KBucket(mock_host)
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        # Different /24s — not grouped with 8.8.8.0/24
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/1.1.1.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/9.9.9.9/tcp/1")) is True
+        assert bucket.size() == 4
+
+    @pytest.mark.trio
+    async def test_subnet_loopback_and_private_exempt(self, mock_host):
+        """Loopback and private peers are never grouped, regardless of count."""
+        bucket = KBucket(mock_host)
+        for i in range(5):
+            ok = await bucket.add_peer(
+                _peer_with_addrs(f"/ip4/127.0.0.1/tcp/{9000 + i}")
+            )
+            assert ok is True
+        # Private (RFC1918) also exempt
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.2/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/10.0.0.3/tcp/1")) is True
+        assert bucket.size() == 8
+
+    @pytest.mark.trio
+    async def test_subnet_opt_out_disables_check(self, mock_host):
+        """MAX_PEERS_PER_SUBNET <= 0 disables the gate entirely."""
+        bucket = KBucket(mock_host)
+        with patch("libp2p.kad_dht.routing_table.MAX_PEERS_PER_SUBNET", 0):
+            for i in range(1, 5):
+                ok = await bucket.add_peer(_peer_with_addrs(f"/ip4/8.8.8.{i}/tcp/1"))
+                assert ok is True
+        assert bucket.size() == 4
+
+    @pytest.mark.trio
+    async def test_subnet_ipv6_grouping(self, mock_host):
+        """IPv6 peers are grouped by /48."""
+        bucket = KBucket(mock_host)
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::1/tcp/1"))
+            is True
+        )
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::2/tcp/1"))
+            is True
+        )
+        # Same /48 → rejected
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4700::3/tcp/1"))
+            is False
+        )
+        # Different /48 → accepted
+        assert (
+            await bucket.add_peer(_peer_with_addrs("/ip6/2606:4700:4800::1/tcp/1"))
+            is True
+        )
+        assert bucket.size() == 3
+
+    @pytest.mark.trio
+    async def test_subnet_multihomed_counted_by_first_global(self, mock_host):
+        """A peer is grouped by its first globally-routable address."""
+        bucket = KBucket(mock_host)
+        # Both peers expose a private addr first, then the same global /24.
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.1/tcp/1", "/ip4/8.8.8.1/tcp/1")
+            )
+            is True
+        )
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.2/tcp/1", "/ip4/8.8.8.2/tcp/1")
+            )
+            is True
+        )
+        # Third shares the 8.8.8.0/24 group via its global addr → rejected
+        assert (
+            await bucket.add_peer(
+                _peer_with_addrs("/ip4/192.168.1.3/tcp/1", "/ip4/8.8.8.3/tcp/1")
+            )
+            is False
+        )
+        assert bucket.size() == 2
+
+    def test_subnet_key_helper(self):
+        """_subnet_key groups globals and exempts everything non-routable."""
+        assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.7/tcp/1")) == "8.8.8.0/24"
+        assert (
+            _subnet_key(_peer_with_addrs("/ip6/2606:4700:4700::1111/tcp/1"))
+            == "2606:4700:4700::/48"
+        )
+        # Exempt cases → None
+        assert _subnet_key(_peer_with_addrs("/ip4/127.0.0.1/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs("/ip4/10.0.0.1/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs("/dns4/example.com/tcp/1")) is None
+        assert _subnet_key(_peer_with_addrs()) is None
+        # Relayed address exposes the relay's IP, not the peer's → exempt
+        assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.9/tcp/1/p2p-circuit")) is None
