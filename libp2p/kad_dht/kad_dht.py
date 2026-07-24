@@ -514,10 +514,20 @@ class KadDHT(Service):
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
 
+                    target = ID(target_key)
+                    try:
+                        target_known = bool(self.host.get_peerstore().addrs(target))
+                    except Exception:
+                        target_known = False
+                    if target_known:
+                        closest_peers = [target] + [
+                            p for p in closest_peers if p != target
+                        ]
+
                     # Add closest peers to response
                     for peer in closest_peers:
                         # Skip if the peer is the requester
-                        if peer == peer_id:
+                        if peer == peer_id and peer != target:
                             continue
 
                         # Add peer to closerPeers field

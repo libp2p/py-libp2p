@@ -1251,3 +1251,43 @@ async def test_yamux_ping_uses_write_frame(yamux_pair):
     assert len(ping_frames) >= 1
     assert not direct_ping_writes
     logging.debug("test_yamux_ping_uses_write_frame complete")
+
+
+@pytest.mark.trio
+async def test_yamux_oversized_data_frame_closes_connection(yamux_pair):
+    """An oversized DATA frame must tear the connection down, not hang it."""
+    client_yamux, server_yamux = yamux_pair
+
+    # The connection is healthy first (mirrors the PoC's pre-attack ping).
+    client_stream = await client_yamux.open_stream()
+    server_stream = await server_yamux.accept_stream()
+    await client_stream.write(b"healthy")
+    assert await server_stream.read(7) == b"healthy"
+
+    # 12-byte DATA frame claiming a 4 GB body; no body bytes follow it.
+    assert 0xFFFFFFFF > MAX_WINDOW_SIZE
+    frame = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, 1, 0xFFFFFFFF)
+    await server_yamux.secured_conn.write(frame)
+
+    # The receiver must shut down rather than block. Bound the wait so a
+    # regression (infinite stall) fails here instead of hanging the suite.
+    with trio.move_on_after(5) as scope:
+        await client_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on oversized DATA frame"
+    assert client_yamux.event_shutting_down.is_set()
+
+
+@pytest.mark.trio
+async def test_yamux_withheld_data_body_times_out(yamux_pair, monkeypatch):
+    """A DATA body that is announced but never delivered must time out."""
+    monkeypatch.setenv("PY_YAMUX_DATA_READ_TIMEOUT", "0.5")
+    client_yamux, server_yamux = yamux_pair
+
+    # Legal-sized DATA frame (well under MAX_WINDOW_SIZE), but no body is sent.
+    frame = struct.pack(YAMUX_HEADER_FORMAT, 0, TYPE_DATA, 0, 1, 1024)
+    await server_yamux.secured_conn.write(frame)
+
+    with trio.move_on_after(5) as scope:
+        await client_yamux.event_shutting_down.wait()
+    assert not scope.cancelled_caught, "receiver hung on withheld DATA body"
+    assert client_yamux.event_shutting_down.is_set()
