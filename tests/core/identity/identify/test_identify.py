@@ -6,6 +6,10 @@ from multiaddr import (
 )
 import trio
 
+from libp2p.exceptions import (
+    ParseError,
+)
+from libp2p.identity.identify import identify as identify_module
 from libp2p.identity.identify.identify import (
     AGENT_VERSION,
     ID,
@@ -24,6 +28,27 @@ from tests.utils.identify_test_helpers import (
 )
 
 logger = logging.getLogger("libp2p.identity.identify-test")
+
+
+def test_parse_identify_response_falls_back_after_prefix_parse_error(monkeypatch):
+    raw_response = identify_module.Identify(
+        agent_version=AGENT_VERSION,
+        protocol_version=PROTOCOL_VERSION,
+    ).SerializeToString()
+
+    def raise_parse_error(data: bytes) -> tuple[int, int]:
+        raise ParseError("Unexpected end of data while decoding varint")
+
+    monkeypatch.setattr(
+        identify_module,
+        "decode_varint_with_size",
+        raise_parse_error,
+    )
+
+    identify_response = parse_identify_response(raw_response)
+
+    assert identify_response.agent_version == AGENT_VERSION
+    assert identify_response.protocol_version == PROTOCOL_VERSION
 
 
 @pytest.mark.trio

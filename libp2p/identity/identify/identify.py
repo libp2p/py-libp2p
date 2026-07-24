@@ -13,6 +13,9 @@ from libp2p.custom_types import (
     StreamHandlerFn,
     TProtocol,
 )
+from libp2p.exceptions import (
+    ParseError,
+)
 from libp2p.network.stream.exceptions import (
     StreamClosed,
 )
@@ -91,17 +94,21 @@ def parse_identify_response(response: bytes) -> Identify:
     """
     # Try new format first: length-prefixed protobuf
     if len(response) >= 1:
-        length, varint_size = decode_varint_with_size(response)
-        if varint_size > 0 and length > 0 and varint_size + length <= len(response):
-            protobuf_data = response[varint_size : varint_size + length]
-            try:
-                identify_response = Identify()
-                identify_response.ParseFromString(protobuf_data)
-                # Sanity check: must have agent_version (protocol_version is optional)
-                if identify_response.agent_version:
-                    return identify_response
-            except Exception:
-                pass  # Fall through to old format
+        try:
+            length, varint_size = decode_varint_with_size(response)
+        except ParseError:
+            pass  # Fall through to old format
+        else:
+            if varint_size > 0 and length > 0 and varint_size + length <= len(response):
+                protobuf_data = response[varint_size : varint_size + length]
+                try:
+                    identify_response = Identify()
+                    identify_response.ParseFromString(protobuf_data)
+                    # Sanity check: must have agent_version.
+                    if identify_response.agent_version:
+                        return identify_response
+                except Exception:
+                    pass  # Fall through to old format
 
     # Fall back to old format: raw protobuf
     try:
