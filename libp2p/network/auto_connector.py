@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
 
 logger = logging.getLogger("libp2p.network.auto_connector")
+logger.setLevel(logging.INFO)
 
 
 class AutoConnector:
