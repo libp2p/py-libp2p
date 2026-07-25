@@ -42,11 +42,7 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+# Library should not call basicConfig
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
