@@ -729,6 +729,20 @@ class Swarm(Service, INetworkService):
                 return await self._dial_addr_single_attempt(addr, peer_id)
             except Exception as e:
                 last_exception = e
+                
+                # Check for deterministic errors that should not be retried
+                error_msg = str(e)
+                if getattr(e, "__cause__", None):
+                    error_msg += f" {e.__cause__}"
+                    
+                if "Peer ID mismatch" in error_msg:
+                    logger.debug(f"Skipping retries for peer {peer_id} at {addr} due to identity mismatch")
+                    try:
+                        self.peerstore.clear_addrs(peer_id)
+                    except Exception:
+                        pass
+                    break
+
                 if attempt < self.retry_config.max_retries:
                     delay = self._calculate_backoff_delay(attempt)
                     logger.debug(

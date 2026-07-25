@@ -627,7 +627,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             elif self._remote_peer_id != verified_peer_id:
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {self._remote_peer_id}, "
-                    "got {verified_peer_id}"
+                    f"got {verified_peer_id}"
                 )
 
             self._peer_verified = True
