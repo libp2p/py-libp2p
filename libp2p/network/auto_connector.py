@@ -112,9 +112,8 @@ class AutoConnector:
         low_watermark = self.swarm.connection_config.low_watermark
         min_connections = self.swarm.connection_config.min_connections
 
-        logger.debug(
-            f"AutoConnector: {num_connections} connections, "
-            f"low_watermark={low_watermark}, min_connections={min_connections}"
+        logger.info(
+            f"AUTO_CONNECTOR_STATE: num_connections={num_connections}, low_watermark={low_watermark}, min_connections={min_connections}"
         )
 
         # Only connect if below low watermark
