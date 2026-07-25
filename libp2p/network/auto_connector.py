@@ -57,7 +57,7 @@ class AutoConnector:
         self._started = False
         self._shutdown_event = trio.Event()
         self._last_connect_attempt: dict[ID, float] = {}
-        self._connect_cooldown = 60.0  # Don't retry a peer for 60 seconds
+        self._connect_cooldown = 300.0  # Don't retry a peer for 5 minutes
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
