@@ -26,7 +26,7 @@ INBOUND_STREAM_PROTOCOL_NEGOTIATION_TIMEOUT = 10.0  # 10_000ms
 
 # Auto-connection settings
 AUTO_CONNECT_INTERVAL = 30.0  # Interval in seconds between auto-connect attempts
-GRACE_PERIOD = 600.0  # Grace period in seconds before pruning new connections
+GRACE_PERIOD = 20.0  # Grace period in seconds before pruning new connections
 
 
 @dataclass
