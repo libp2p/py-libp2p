@@ -765,14 +765,20 @@ class BitswapClient:
         # and Noise protocol limit (65535 bytes)
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
             if self._nursery is not None:
-                self._nursery.start_soon(
-                    self._send_wantlist_responses_bg,  # type: ignore
-                    peer_id,
-                    str(peer_protocol),
-                    blocks_to_send_v100,
-                    blocks_to_send_v110,
-                    presences_to_send,
-                )
+                try:
+                    self._nursery.start_soon(
+                        self._send_wantlist_responses_bg,  # type: ignore
+                        peer_id,
+                        str(peer_protocol),
+                        blocks_to_send_v100,
+                        blocks_to_send_v110,
+                        presences_to_send,
+                    )
+                except RuntimeError as e:
+                    if "Nursery is closed" in str(e):
+                        logger.debug("Skipping wantlist response; node is shutting down.")
+                    else:
+                        raise
             else:
                 # Fallback to writing to the inbound stream if nursery is not available.
                 # This works for Python-to-Python tests, but may fail for
