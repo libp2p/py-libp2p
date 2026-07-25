@@ -275,8 +275,10 @@ class QUICTransport(ITransport):
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
+            import copy
+            config = copy.copy(config)
             config.is_client = True
-            config.quic_logger = QuicLogger()
+            # Remove quic_logger to prevent "QuicLoggerTrace does not belong to QuicLogger" crash
 
             # Ensure client certificate is properly set for mutual authentication
             if not config.certificate or not config.private_key:
