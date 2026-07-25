@@ -142,8 +142,9 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        # We need to limit concurrency to avoid OS "Too many open files" errors (e.g. limit to 50 concurrent dials)  # noqa: E501
-        dial_limiter = trio.CapacityLimiter(50)
+        # We need to limit concurrency to avoid OS "Too many open files" errors 
+        # (Kubo default is 160 concurrent outbound dials)
+        dial_limiter = trio.CapacityLimiter(160)
 
         async def _dial_candidate(peer_id: ID) -> None:
             async with dial_limiter:
