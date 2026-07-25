@@ -128,7 +128,7 @@ class AutoConnector:
             return
 
         logger.info(
-            f"the connection is less the low limit so connection manager is initiating {needed} number of new connections"
+            f"the connection ({num_connections}) is less the low limit ({low_watermark}) so connection manager is initiating {needed} number of new connections"
         )
 
         # Get candidate peers from peerstore
