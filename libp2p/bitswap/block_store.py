@@ -75,7 +75,7 @@ class BlockStore(ABC):
         pass
 
     @abstractmethod
-    async def get_all_cids(self) -> list[bytes]:
+    def get_all_cids(self) -> list[bytes]:
         """
         Get all CIDs in the block store.
 
@@ -114,7 +114,7 @@ class MemoryBlockStore(BlockStore):
         if cid_obj in self._blocks:
             del self._blocks[cid_obj]
 
-    async def get_all_cids(self) -> list[bytes]:
+    def get_all_cids(self) -> list[bytes]:
         """Get all CIDs in the store as bytes (for caller compatibility)."""
         return [cid_obj.buffer for cid_obj in self._blocks]
 
@@ -155,10 +155,6 @@ class FilesystemBlockStore(BlockStore):
     def _cid_to_path(self, cid: CIDInput) -> Path:
         """Convert a CID to a filesystem path using 2-char prefix directories."""
         cid_str = str(_normalize_cid(cid))
-        if len(cid_str) < 3:
-            from .errors import InvalidCIDError
-
-            raise InvalidCIDError(f"CID string too short to create path: {cid_str!r}")
         # e.g. bafybeiabc... → <base>/ba/fybeiabc...
         return self._path / cid_str[:2] / cid_str[2:]
 
@@ -193,29 +189,24 @@ class FilesystemBlockStore(BlockStore):
         if path.exists():
             await trio.to_thread.run_sync(path.unlink)
 
-    async def get_all_cids(self) -> list[bytes]:
+    def get_all_cids(self) -> list[bytes]:
         """Return all stored CIDs as bytes by scanning the directory tree."""
-        import trio
-
-        def _scan() -> list[bytes]:
-            cids: list[bytes] = []
-            if not self._path.exists():
-                return cids
-            for subdir in self._path.iterdir():
-                if not subdir.is_dir():
-                    continue
-                for entry in subdir.iterdir():
-                    if not entry.is_file():
-                        continue
-                    cid_str = subdir.name + entry.name
-                    try:
-                        cid_obj = _normalize_cid(cid_str)
-                        cids.append(cid_obj.buffer)
-                    except Exception:
-                        pass  # skip files that aren't valid CIDs
+        cids: list[bytes] = []
+        if not self._path.exists():
             return cids
-
-        return await trio.to_thread.run_sync(_scan)
+        for subdir in self._path.iterdir():
+            if not subdir.is_dir():
+                continue
+            for entry in subdir.iterdir():
+                if not entry.is_file():
+                    continue
+                cid_str = subdir.name + entry.name
+                try:
+                    cid_obj = _normalize_cid(cid_str)
+                    cids.append(cid_obj.buffer)
+                except Exception:
+                    pass  # skip files that aren't valid CIDs
+        return cids
 
     def size(self) -> int:
         """Return the number of stored blocks."""

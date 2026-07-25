@@ -95,7 +95,7 @@ class TestBitswapProtocolVersions:
                 root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                 # Verify provider has blocks
-                provider_cids = await provider_store.get_all_cids()
+                provider_cids = provider_store.get_all_cids()
                 assert len(provider_cids) > 0
                 assert root_cid in provider_cids
 
@@ -118,7 +118,7 @@ class TestBitswapProtocolVersions:
                 assert len(retrieved_data) == len(test_data)
 
                 # Verify all blocks transferred
-                client_cids = await client_store.get_all_cids()
+                client_cids = client_store.get_all_cids()
                 assert len(client_cids) == len(provider_cids)
                 assert root_cid in client_cids
 
@@ -184,7 +184,7 @@ class TestBitswapProtocolVersions:
                 root_cid = await provider_dag.add_file(str(tmp_file_path))
 
                 # Verify multiple chunks created
-                provider_cids = await provider_store.get_all_cids()
+                provider_cids = provider_store.get_all_cids()
                 assert len(provider_cids) > 1, (
                     f"Expected chunking for {protocol_version}"
                 )
@@ -208,7 +208,7 @@ class TestBitswapProtocolVersions:
                 assert retrieved_data == large_data
 
                 # Verify all chunks transferred
-                client_cids = await client_store.get_all_cids()
+                client_cids = client_store.get_all_cids()
                 assert len(client_cids) == len(provider_cids)
 
                 # Cleanup
@@ -279,20 +279,20 @@ class TestBitswapProtocolVersions:
                 await trio.sleep(0.2)
 
                 # Node1 requests block B from Node2
-                retrieved_b = await node1_bitswap.get_block(
+                retrieved_b = await node1_bitswap.new_session().get_block(
                     cid_b, peer_id=node2_host.get_id(), timeout=2.0
                 )
                 assert retrieved_b == block_b
 
                 # Node2 requests block A from Node1
-                retrieved_a = await node2_bitswap.get_block(
+                retrieved_a = await node2_bitswap.new_session().get_block(
                     cid_a, peer_id=node1_host.get_id(), timeout=2.0
                 )
                 assert retrieved_a == block_a
 
                 # Both nodes should have both blocks
-                node1_cids = await node1_store.get_all_cids()
-                node2_cids = await node2_store.get_all_cids()
+                node1_cids = node1_store.get_all_cids()
+                node2_cids = node2_store.get_all_cids()
 
                 assert cid_a in node1_cids and cid_b in node1_cids
                 assert cid_a in node2_cids and cid_b in node2_cids
@@ -395,13 +395,13 @@ class TestProtocolNegotiation:
                 await trio.sleep(0.2)
 
                 # Client requests block
-                retrieved = await client_bitswap.get_block(
+                retrieved = await client_bitswap.new_session().get_block(
                     cid, peer_id=provider_host.get_id(), timeout=2.0
                 )
 
                 # Verify successful transfer despite version difference
                 assert retrieved == test_data
-                assert cid in await client_store.get_all_cids()
+                assert cid in client_store.get_all_cids()
 
                 # Cleanup
                 await provider_bitswap.stop()
@@ -463,13 +463,13 @@ class TestProtocolFeatures:
 
                 # Request all blocks
                 for data, cid in test_blocks:
-                    retrieved = await client_bitswap.get_block(
+                    retrieved = await client_bitswap.new_session().get_block(
                         cid, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved == data
 
                 # Verify all blocks received
-                client_cids = await client_store.get_all_cids()
+                client_cids = client_store.get_all_cids()
                 assert len(client_cids) == len(test_blocks)
 
                 # Cleanup
@@ -520,7 +520,7 @@ class TestProtocolFeatures:
                 await trio.sleep(0.2)
 
                 # Request existing block - should succeed
-                retrieved = await client_bitswap.get_block(
+                retrieved = await client_bitswap.new_session().get_block(
                     existing_cid, peer_id=provider_host.get_id(), timeout=2.0
                 )
                 assert retrieved == existing_data

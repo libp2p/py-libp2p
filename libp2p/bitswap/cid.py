@@ -37,8 +37,6 @@ from multicodec.code_table import (
     SHA2_256,
 )
 
-from .errors import InvalidCIDError
-
 # Simplified CID version constants
 CID_V0 = 0
 CID_V1 = 1
@@ -140,7 +138,7 @@ def get_cid_prefix(cid: CIDInput) -> bytes:
     # CIDv0 - no prefix needed for v1.0.0.
     try:
         cid_obj = parse_cid(cid)
-    except (ValueError, InvalidCIDError):
+    except ValueError:
         return b""
 
     if cid_obj.version != CID_V1:
@@ -196,7 +194,7 @@ def verify_cid(cid: CIDInput, data: bytes) -> bool:
     logger.debug(f"        Data size: {len(data)} bytes")
     try:
         cid_obj = parse_cid(cid)
-    except (ValueError, InvalidCIDError):
+    except ValueError:
         logger.debug("        No valid CID format detected")
         return False
 
@@ -228,13 +226,6 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
         except ValueError:
             # make_cid(bytes) fails for raw CIDv0 buffers (multihash bytes).
             # CIDv0 is simply a bare multihash, so try constructing directly.
-            import multihash
-
-            try:
-                multihash.decode(value)
-            except ValueError as e:
-                raise InvalidCIDError(f"Invalid CID multihash bytes: {e}")
-
             try:
                 return CIDv0(value)
             except Exception:
@@ -280,7 +271,7 @@ def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:
     """Return CID text for display, with hex fallback and optional truncation."""
     try:
         result = cid_to_text(cid)
-    except (TypeError, ValueError, InvalidCIDError):
+    except (TypeError, ValueError):
         # Best-effort fallback: hex for raw bytes, str() for anything else.
         result = cid.hex() if isinstance(cid, bytes) else str(cid)
 
@@ -306,10 +297,8 @@ def compute_cid(
     """
     if version == CID_V0:
         return compute_cid_v0(data)
-    elif version == CID_V1:
-        return compute_cid_v1(data, codec)
     else:
-        raise ValueError(f"Invalid CID version: {version}")
+        return compute_cid_v1(data, codec)
 
 
 def compute_cid_obj(
@@ -318,10 +307,7 @@ def compute_cid_obj(
     """Compute a CID object for data with specified version."""
     if version == CID_V0:
         return compute_cid_v0_obj(data)
-    elif version == CID_V1:
-        return compute_cid_v1_obj(data, codec)
-    else:
-        raise ValueError(f"Invalid CID version: {version}")
+    return compute_cid_v1_obj(data, codec)
 
 
 def parse_cid_codec(cid: bytes) -> str:

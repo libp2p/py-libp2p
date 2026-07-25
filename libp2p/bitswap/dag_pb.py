@@ -9,8 +9,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import logging
 
-from libp2p.utils.varint import encode_uvarint as _encode_varint
-
 from .cid import CODEC_DAG_PB, CIDInput, compute_cid_v1
 from .pb.dag_pb_pb2 import PBLink, PBNode
 from .pb.unixfs_pb2 import Data as PBUnixFSData
@@ -19,6 +17,16 @@ from .pb.unixfs_pb2 import Data as PBUnixFSData
 MAX_LINKS_PER_NODE = 174
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_varint(value: int) -> bytes:
+    """Encode an unsigned integer as a protobuf varint."""
+    buf = []
+    while value > 0x7F:
+        buf.append((value & 0x7F) | 0x80)
+        value >>= 7
+    buf.append(value & 0x7F)
+    return bytes(buf)
 
 
 def _normalize_link_cid(cid: CIDInput) -> bytes:

@@ -53,6 +53,7 @@ def make_service(network_blocks: dict | None = None):
     mock_bitswap.get_block = AsyncMock(side_effect=fake_get_block)
     mock_bitswap.add_block = AsyncMock(side_effect=fake_add_block)
     mock_bitswap.get_blocks_batch = AsyncMock(side_effect=fake_get_blocks_batch)
+    mock_bitswap.new_session = MagicMock(return_value=mock_bitswap)
 
     service = BlockService(store, mock_bitswap)
     return service, store, mock_bitswap
@@ -69,7 +70,7 @@ async def test_local_hit_no_network():
     # Pre-populate local store
     await store.put_block(cid, data)
 
-    result = await service.get_block(cid)
+    result = await service.get_block(cid, mock_bitswap)
     assert result == data
     ok("get_block returns local data")
 
@@ -82,7 +83,7 @@ async def test_local_miss_goes_to_network():
     cid, data = make_block(b"only on the network")
     service, store, mock_bitswap = make_service(network_blocks={bytes(cid): data})
 
-    result = await service.get_block(cid)
+    result = await service.get_block(cid, mock_bitswap)
     assert result == data
     ok("get_block returns network data")
 
@@ -96,7 +97,7 @@ async def test_auto_cache_after_network_fetch():
     service, store, mock_bitswap = make_service(network_blocks={bytes(cid): data})
 
     # First call: local miss → network fetch → auto-cache
-    result1 = await service.get_block(cid)
+    result1 = await service.get_block(cid, mock_bitswap)
     assert result1 == data
 
     # Verify it's now in the local store
@@ -105,7 +106,7 @@ async def test_auto_cache_after_network_fetch():
     ok("block is in local store after first network fetch")
 
     # Second call: must be a local hit, no second network call
-    result2 = await service.get_block(cid)
+    result2 = await service.get_block(cid, mock_bitswap)
     assert result2 == data
     assert mock_bitswap.get_block.call_count == 1  # still only 1 network call
     ok("second get_block is a local hit (network called only once total)")
@@ -138,7 +139,7 @@ async def test_get_blocks_batch_local_hits_skip_network():
         await store.put_block(cid, data)
 
     cids: list[bytes] = [cid for cid, _ in blocks]
-    results = await service.get_blocks_batch(cids)
+    results = await service.get_blocks_batch(cids, mock_bitswap)
 
     assert len(results) == 5
     ok("all 5 blocks returned from local store")
@@ -159,7 +160,7 @@ async def test_get_blocks_batch_partial_local():
         await store.put_block(cid, data)
 
     all_cids: list[bytes] = [cid for cid, _ in local_blocks + net_blocks]
-    results = await service.get_blocks_batch(all_cids)
+    results = await service.get_blocks_batch(all_cids, mock_bitswap)
 
     assert len(results) == 5
     ok("all 5 blocks returned (3 local + 2 network)")
@@ -178,7 +179,7 @@ async def test_missing_block_returns_none():
     cid, _ = make_block(b"this block does not exist")
     service, store, mock_bitswap = make_service(network_blocks={})  # empty network
 
-    result = await service.get_block(cid)
+    result = await service.get_block(cid, mock_bitswap)
     assert result is None
     ok("get_block returns None for unknown block")
 

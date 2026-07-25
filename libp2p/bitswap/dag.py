@@ -32,8 +32,10 @@ from .chunker import (
 )
 from .cid import (
     CODEC_DAG_CBOR,
+    CODEC_DAG_JOSE,
     CODEC_DAG_JSON,
     CODEC_DAG_PB,
+    CODEC_IPLD,
     CODEC_RAW,
     CIDInput,
     _normalise_codec,
@@ -52,6 +54,7 @@ from .dag_pb import (
     is_file_node,
 )
 from .errors import BlockNotFoundError
+from .session import BitswapSession
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ def get_codec_from_cid(cid: CIDInput) -> str:
 
 def encode_node(node: Any, codec: Code | str | int) -> bytes:
     norm = _normalise_codec(codec)
-    if norm == CODEC_DAG_JSON:
+    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
         return json.dumps(node, separators=(",", ":")).encode("utf-8")
     if norm == CODEC_DAG_CBOR:
         return cbor2.dumps(node)
@@ -94,7 +97,7 @@ def encode_node(node: Any, codec: Code | str | int) -> bytes:
 
 def decode_node(data: bytes, codec: Code | str | int) -> Any:
     norm = _normalise_codec(codec)
-    if norm == CODEC_DAG_JSON:
+    if norm in (CODEC_DAG_JSON, CODEC_DAG_JOSE, CODEC_IPLD):
         return json.loads(data.decode("utf-8"))
     if norm == CODEC_DAG_CBOR:
         return cbor2.loads(data)
@@ -129,10 +132,8 @@ class MerkleDag:
         ...         print(f"Share: {cid_to_text(root_cid)}")
         ...
         ...         # Fetch file (auto-resolves all chunks)
-        ...         # Note: fetch_file returns bytes in memory. For huge files,
-        ...         # consider using a streaming approach or trio.Path
-        ...         data, filename = await dag.fetch_file(root_cid)
-        ...         await trio.Path('downloaded.mp4').write_bytes(data)
+        ...         data = await dag.fetch_file(root_cid)
+        ...         open('downloaded.mp4', 'wb').write(data)
         ...
         >>> trio.run(main)
 
@@ -174,22 +175,26 @@ class MerkleDag:
     async def _get_block(
         self,
         cid: CIDInput,
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
     ) -> bytes:
         """Fetch a block. Routes through BlockService when available."""
         if self._service is not None:
-            data = await self._service.get_block(cid, peer_id=peer_id, timeout=timeout)
+            data = await self._service.get_block(
+                cid, session, peer_id=peer_id, timeout=timeout
+            )
             if data is None:
                 raise BlockNotFoundError(
                     f"Block not found: {format_cid_for_display(cid_to_bytes(cid))}"
                 )
             return data
-        return await self.bitswap.get_block(cid, peer_id, timeout)
+        return await session.get_block(cid, peer_id, timeout)
 
     async def _get_blocks_batch(
         self,
         cids: list[CIDInput],
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
         batch_size: int = 32,
@@ -197,9 +202,9 @@ class MerkleDag:
         """Batch-fetch blocks. Routes through BlockService when available."""
         if self._service is not None:
             return await self._service.get_blocks_batch(
-                cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
+                cids, session, peer_id=peer_id, timeout=timeout, batch_size=batch_size
             )
-        return await self.bitswap.get_blocks_batch(
+        return await session.get_blocks_batch(
             cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
         )
 
@@ -604,11 +609,12 @@ class MerkleDag:
             ... )
 
         """
+        session = self.bitswap.new_session()
         root_cid_bytes = cid_to_bytes(root_cid)
         logger.info(f"Fetching file: {format_cid_for_display(root_cid_bytes)}")
 
         # Step 1: Fetch the root block
-        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
         if not verify_cid(root_cid_bytes, root_data):
             root_cid_str = format_cid_for_display(root_cid_bytes)
             raise ValueError(f"Root block CID verification failed: {root_cid_str}")
@@ -629,7 +635,7 @@ class MerkleDag:
                 actual_file_cid = first_link.cid
                 logger.info(f"Filename from directory: {filename!r}")
                 actual_file_data = await self._get_block(
-                    actual_file_cid, peer_id, timeout
+                    actual_file_cid, session, peer_id, timeout
                 )
                 if not verify_cid(actual_file_cid, actual_file_data):
                     f_cid_str = format_cid_for_display(actual_file_cid)
@@ -681,7 +687,7 @@ class MerkleDag:
 
             # Batch-fetch this level's blocks
             level_blocks = await self._get_blocks_batch(
-                list(cid_list), peer_id=peer_id, timeout=timeout, batch_size=32
+                list(cid_list), session, peer_id=peer_id, timeout=timeout, batch_size=32
             )
             logger.info(f"[DAG] Depth {depth}: ✓ received {len(level_blocks)} blocks")
             all_blocks_map.update(level_blocks)
@@ -791,7 +797,7 @@ class MerkleDag:
         if missing_cids:
             logger.info(f"[DAG] Fetching {len(missing_cids)} missing leaves")
             fetched_blocks = await self._get_blocks_batch(
-                missing_cids, peer_id=peer_id, timeout=timeout, batch_size=32
+                missing_cids, session, peer_id=peer_id, timeout=timeout, batch_size=32
             )
             block_map.update(fetched_blocks)
 
@@ -881,9 +887,10 @@ class MerkleDag:
             >>> print(f"Chunks: {info['chunks']}")
 
         """
+        session = self.bitswap.new_session()
         # Get root block
         root_cid_bytes = cid_to_bytes(root_cid)
-        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
 
         # Check if it's a DAG-PB file node
         if is_file_node(root_data):
@@ -928,12 +935,13 @@ class MerkleDag:
 
     async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None) -> Any:
         """Fetches a CID and decodes the block back into a structured node."""
+        session = self.bitswap.new_session()
         cid_bytes = cid_to_bytes(cid)
         # Try to get the block
         data = None
         if self._service is not None:
             data = await self._service.get_block(
-                cid_bytes, peer_id=peer_id, timeout=30.0
+                cid_bytes, session, peer_id=peer_id, timeout=30.0
             )
         else:
             try:
@@ -943,7 +951,7 @@ class MerkleDag:
                 pass
 
             if data is None:
-                data = await self.bitswap.get_block(cid_bytes, peer_id)
+                data = await session.get_block(cid_bytes, peer_id)
 
         if data is None:
             raise BlockNotFoundError(cid_bytes)

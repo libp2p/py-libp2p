@@ -34,6 +34,7 @@ from .config import (
     BITSWAP_PROTOCOL_V120,
     BITSWAP_PROTOCOLS,
     DEFAULT_PRIORITY,
+    DEFAULT_TIMEOUT,
     MAX_BLOCK_SIZE,
     MAX_MESSAGE_SIZE,
 )
@@ -42,12 +43,12 @@ from .errors import (
     MessageTooLargeError,
 )
 from .messages import create_message, create_wantlist_entry
+
+from .sim import SessionInterestManager
+from .session import BitswapSession
 from .pb.bitswap_pb2 import Message
-from .peer_manager import BitswapPeerManager
 from .presence import BlockPresenceManager
 from .provider_query import ProviderQueryManager
-from .session import BitswapSession
-from .sim import SessionInterestManager
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +102,9 @@ class BitswapClient:
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
 
         self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
-        self.peer_manager = BitswapPeerManager()
 
         self._nursery: trio.Nursery | None = None
         self._started = False
-        self._cancel_scope: trio.CancelScope | None = None
 
     def register_extension(self, protocol: str, extension: "IBitswapExtension") -> None:
         """Register an extension for a specific protocol."""
@@ -127,17 +126,15 @@ class BitswapClient:
             )
 
         self._started = True
-        self._cancel_scope = trio.CancelScope()
         if self._nursery is not None:
             self._nursery.start_soon(self._presence_cleanup_loop)
         logger.info(f"Bitswap client started (protocol: {self.protocol_version})")
 
     async def _presence_cleanup_loop(self) -> None:
         """Periodic background task to clean up expired presence state."""
-        with self._cancel_scope:
-            while self._started:
-                await trio.sleep(10)
-                self.presence_manager.cleanup_expired()
+        while self._started:
+            await trio.sleep(10)
+            self.presence_manager.cleanup_expired()
 
     async def stop(self) -> None:
         """Stop the Bitswap client."""
@@ -145,8 +142,6 @@ class BitswapClient:
             return
 
         self._started = False
-        if self._cancel_scope is not None:
-            self._cancel_scope.cancel()
         # Unregister stream handlers for all supported Bitswap protocols
         for protocol in self.supported_protocols:
             self.host.remove_stream_handler(TProtocol(protocol))
@@ -164,11 +159,11 @@ class BitswapClient:
         """Set the nursery for background tasks."""
         self._nursery = nursery
 
+
     def new_session(self) -> BitswapSession:
         """Create a new Bitswap session for fetching blocks."""
         session_id = id(self) ^ id(trio.current_time())
         return BitswapSession(self, session_id)
-
     async def add_block(self, cid: CIDInput, data: bytes) -> None:
         """
         Add a block to the local store.
@@ -204,6 +199,210 @@ class BitswapClient:
 
         # Notify peers who wanted this block
         await self._notify_peers_about_block(cid_obj, data)
+
+    async def get_blocks_batch(
+        self,
+        cids: list[CIDInput],
+        peer_id: PeerID | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        batch_size: int = 32,
+    ) -> dict[bytes, bytes]:
+        """
+        Fetch multiple blocks in batches using a single wantlist per batch.
+
+        Sends all CIDs in one wantlist message, waits for all responses on the
+        same stream. This avoids opening hundreds of individual streams which
+        causes Kubo to send GO_AWAY.
+
+        Args:
+            cids: List of CIDs to fetch
+            peer_id: Optional specific peer to request from
+            timeout: Timeout per batch in seconds
+            batch_size: How many CIDs to request per wantlist message
+
+        Returns:
+            Dict mapping cid_bytes -> block_data for all successfully fetched blocks
+
+        """
+        results: dict[bytes, bytes] = {}
+        cid_objs = [parse_cid(c) for c in cids]
+
+        # Check local store first
+        remaining: list[CIDObject] = []
+        for cid_obj in cid_objs:
+            data = await self.block_store.get_block(cid_obj)
+            if data is not None:
+                results[cid_obj.buffer] = data
+            else:
+                remaining.append(cid_obj)
+
+        if not remaining:
+            return results
+
+        # Process in batches to avoid overwhelming the peer
+        for batch_start in range(0, len(remaining), batch_size):
+            batch = remaining[batch_start : batch_start + batch_size]
+
+            # Register pending events for all CIDs in batch
+            batch_events = {}
+            for cid_obj in batch:
+                event = trio.Event()
+                if cid_obj not in self._pending_requests:
+                    self._pending_requests[cid_obj] = set()
+                self._pending_requests[cid_obj].add(event)
+                batch_events[cid_obj] = event
+
+            import random
+            import time
+
+            start_time = time.time()
+            retry_interval = 1.0
+            requested_from: dict[CIDObject, set[PeerID]] = {cid: set() for cid in batch}
+
+            try:
+                while time.time() - start_time < timeout:
+                    remaining_total = timeout - (time.time() - start_time)
+                    if remaining_total <= 0:
+                        break
+
+                    still_pending = [
+                        cid for cid in batch if not batch_events[cid].is_set()
+                    ]
+                    if not still_pending:
+                        break  # All blocks in batch received!
+
+                    to_broadcast = []
+                    to_peer: dict[PeerID, list[CIDObject]] = {}
+
+                    for cid in still_pending:
+                        have_peers = self.presence_manager.get_expected_peers(cid)
+                        untried = have_peers - requested_from[cid]
+
+                        target = None
+                        if peer_id and peer_id not in requested_from[cid]:
+                            target = peer_id
+                        elif untried:
+                            target = random.choice(list(untried))
+
+                        if target:
+                            if target not in to_peer:
+                                to_peer[target] = []
+                            to_peer[target].append(cid)
+                            requested_from[cid].add(target)
+                            await self.want_block(cid, want_type=0, send_dont_have=True)
+                        else:
+                            to_broadcast.append(cid)
+                            await self.want_block(cid, want_type=1, send_dont_have=True)
+
+                    # Send targeted wantlists
+                    for p, cids in to_peer.items():
+                        logger.debug(
+                            f"Batch sending WANT-BLOCK to {p} for {len(cids)} CIDs"
+                        )
+                        await self._send_wantlist_to_peer(p, cids)
+
+                    # Send broadcast wantlists
+                    if to_broadcast:
+                        logger.debug(
+                            f"Batch broadcasting WANT-HAVE for {len(to_broadcast)} CIDs"
+                        )
+                        await self._broadcast_wantlist(to_broadcast)
+
+                    current_timeout = min(retry_interval, remaining_total)
+                    try:
+                        with trio.fail_after(current_timeout):
+                            for cid in still_pending:
+                                await batch_events[cid].wait()
+                    except trio.TooSlowError:
+                        retry_interval = min(retry_interval * 1.5, 10.0)
+                        msg = (
+                            f"Batch sub-timeout: {len(still_pending)} blocks "
+                            "still pending, retrying..."
+                        )
+                        logger.debug(msg)
+
+                # Collect results
+                for cid_obj in batch:
+                    data = await self.block_store.get_block(cid_obj)
+                    if data is not None:
+                        results[cid_obj.buffer] = data
+                    else:
+                        cid_str = format_cid_for_display(cid_obj)
+                        logger.warning(f"Block not received: {cid_str}")
+
+            finally:
+                # Cleanup
+                for cid_obj in batch:
+                    batch_event = batch_events.get(cid_obj)
+                    if batch_event and cid_obj in self._pending_requests:
+                        self._pending_requests[cid_obj].discard(batch_event)
+                        if not self._pending_requests[cid_obj]:
+                            del self._pending_requests[cid_obj]
+                    if cid_obj in self._wantlist:
+                        del self._wantlist[cid_obj]
+                    self.presence_manager.remove_dont_have(cid_obj)
+                    # Clean up expected_blocks for all peers
+                    for pid in self.presence_manager.get_expected_peers(cid_obj):
+                        self.presence_manager.remove_have(pid, cid_obj)
+
+        return results
+
+    async def get_block(
+        self,
+        cid: CIDInput,
+        peer_id: PeerID | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> bytes:
+        """
+        Get a block, fetching from peers if not available locally.
+
+        If a ``ProviderQueryManager`` was supplied at construction time and no
+        explicit ``peer_id`` is given, the manager is consulted first to
+        discover which peers have the block via the DHT.  The first discovered
+        provider is used; if none is found the request falls back to
+        broadcasting to all connected peers.
+
+        Args:
+            cid: The CID of the block to fetch
+            peer_id: Optional peer to request from; DHT discovery is skipped when set.
+            timeout: Timeout in seconds
+
+        Returns:
+            The block data
+
+        Raises:
+            BlockNotFoundError: If the block cannot be found
+            BitswapTimeoutError: If the request times out
+
+        """
+        cid_obj = parse_cid(cid)
+
+        # 1. Check local store first
+        data = await self.block_store.get_block(cid_obj)
+        if data is not None:
+            return data
+
+        # 2. If no explicit peer given, try DHT provider discovery
+        if peer_id is None and self.provider_query_manager is not None:
+            try:
+                providers = await self.provider_query_manager.find_providers_single(
+                    cid, timeout=min(5.0, timeout / 2)
+                )
+                if providers:
+                    peer_id = providers[0]
+                    logger.debug(
+                        "DHT discovered provider %s for %s",
+                        peer_id,
+                        format_cid_for_display(cid_obj, max_len=12),
+                    )
+            except Exception as exc:
+                logger.debug(
+                    "Provider query failed, falling back to broadcast: %s",
+                    exc,
+                )
+
+        # 3. Request from network (specific peer or broadcast)
+        return await self._request_block(cid_obj, peer_id, timeout)
 
     async def want_block(
         self,
@@ -290,6 +489,105 @@ class BitswapClient:
 
             # Send cancel message to all peers
             await self._broadcast_cancel(cid_obj)
+
+    async def _request_block(
+        self, cid: CIDObject, peer_id: PeerID | None, timeout: float
+    ) -> bytes:
+        """Request a block from network with two-phase optimization & retry logic."""
+        import random
+        import time
+
+        logger.info(f"📤 Requesting block: {format_cid_for_display(cid)}")
+
+        # Create pending request event
+        event = trio.Event()
+        if cid not in self._pending_requests:
+            self._pending_requests[cid] = set()
+        self._pending_requests[cid].add(event)
+
+        start_time = time.time()
+        retry_interval = 1.0  # Initial sub-timeout
+        requested_from: set[PeerID] = set()
+
+        result: bytes | None = None
+        error: Exception | None = None
+
+        try:
+            while time.time() - start_time < timeout:
+                remaining_total = timeout - (time.time() - start_time)
+                if remaining_total <= 0:
+                    break
+
+                # 1. Determine phase (WANT-HAVE vs WANT-BLOCK)
+                have_peers = self.presence_manager.get_expected_peers(cid)
+                untried_peers = have_peers - requested_from
+
+                target_peer = None
+                if peer_id and peer_id not in requested_from:
+                    # Explicit peer provided via DHT
+                    target_peer = peer_id
+                elif untried_peers:
+                    # We know who has it, pick one randomly
+                    target_peer = random.choice(list(untried_peers))
+
+                if target_peer:
+                    # Phase 2: Send WANT-BLOCK
+                    await self.want_block(cid, want_type=0, send_dont_have=True)
+                    logger.debug(f"Sending WANT-BLOCK to {target_peer}")
+                    await self._send_wantlist_to_peer(target_peer, [cid])
+                    requested_from.add(target_peer)
+                else:
+                    # Phase 1: Broadcast WANT-HAVE
+                    await self.want_block(cid, want_type=1, send_dont_have=True)
+                    logger.debug("Broadcasting WANT-HAVE")
+                    await self._broadcast_wantlist([cid])
+
+                # 2. Wait for block or sub-timeout
+                current_timeout = min(retry_interval, remaining_total)
+                try:
+                    with trio.fail_after(current_timeout):
+                        await event.wait()
+
+                        # Block arrived!
+                        data = await self.block_store.get_block(cid)
+                        if data is not None:
+                            result = data
+                            logger.info(f"  ✓ Block received! Size: {len(data)} bytes")
+                            break
+                        else:
+                            # Event set but block not in store, shouldn't happen usually
+                            event = trio.Event()  # Reset and retry
+                except trio.TooSlowError:
+                    # Sub-timeout reached. Exponential backoff
+                    retry_interval = min(retry_interval * 1.5, 10.0)
+                    msg = f"Sub-timeout reached, retry {retry_interval:.1f}s"
+                    logger.debug(msg)
+
+        except Exception as e:
+            logger.error(f"Error during block request: {e}")
+            error = e
+        finally:
+            if cid in self._pending_requests:
+                self._pending_requests[cid].discard(event)
+                if not self._pending_requests[cid]:
+                    del self._pending_requests[cid]
+            await self.cancel_want(cid)
+            self.presence_manager.remove_dont_have(cid)
+            # Clean up expected_blocks for all peers
+            for pid in self.presence_manager.get_expected_peers(cid):
+                self.presence_manager.remove_have(pid, cid)
+
+        if result is not None:
+            return result
+
+        if error:
+            raise error
+
+        from libp2p.bitswap.errors import TimeoutError as BitswapTimeoutError
+
+        raise BitswapTimeoutError(
+            f"Timeout waiting for block {format_cid_for_display(cid, max_len=16)}"
+        )
 
     async def _send_wantlist_to_peer(
         self, peer_id: PeerID, cids: list[CIDObject]
@@ -627,7 +925,7 @@ class BitswapClient:
             await self._process_blocks_v100(list(msg.blocks), peer_id)
 
         if msg.payload:
-            await self._process_blocks_v110(msg.payload, peer_id)
+            await self._process_blocks_v110(msg.payload)
 
         if msg.blockPresences:
             await self._process_block_presences(msg.blockPresences, peer_id)
@@ -953,17 +1251,6 @@ class BitswapClient:
                 await self.block_store.put_block(matched_cid, block_data)
                 logger.info("  ✓ Stored successfully")
 
-                # Record delivery for peer scoring
-                self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
-
-                # Tag high-performing peers (Connection Manager Integration)
-                stats = self.peer_manager._get_stats(peer_id)
-                if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
-                    try:
-                        self.host.get_network().tag_peer(peer_id, "bitswap", 5)
-                    except AttributeError:
-                        pass
-
                 # Remove from expected blocks for all peers
                 self.presence_manager.remove_have_from_all(matched_cid)
                 pid_str = (
@@ -971,12 +1258,12 @@ class BitswapClient:
                 )
                 logger.info(f"  ✓ Removed from expected blocks for peer {pid_str}")
 
-                # Notify sessions
-                sessions = self.sim.split_wanted_blocks(matched_cid)
-                if sessions:
-                    logger.info(f"  ✓ Notifying {len(sessions)} sessions")
-                    for session in sessions:
-                        await session.receive_block(matched_cid, block_data, peer_id)
+                # Notify pending requests
+                if matched_cid in self._pending_requests:
+                    pending_count = len(self._pending_requests[matched_cid])
+                    logger.info(f"  ✓ Notifying {pending_count} pending requests")
+                    for event in self._pending_requests[matched_cid]:
+                        event.set()
 
                     if self._started and self._nursery:
                         self._nursery.start_soon(self.cancel_want, matched_cid)
@@ -1001,11 +1288,9 @@ class BitswapClient:
             logger.info("  ✓ All blocks received from this peer!")
         logger.info("=" * 70)
 
-    async def _process_blocks_v110(
-        self, blocks: Sequence[Any], peer_id: PeerID
-    ) -> None:
+    async def _process_blocks_v110(self, blocks: Sequence[Any]) -> None:
         """Process received blocks (v1.1.0+ format with prefix)."""
-        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+) from peer {peer_id}")
+        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
         for block in blocks:
             prefix = block.prefix
             data = block.data
@@ -1021,29 +1306,18 @@ class BitswapClient:
                 f"(v1.1.0+)"
             )
 
-            # Record delivery for peer scoring
-            self.peer_manager.record_delivery(peer_id, cid, len(data))
-
-            # Tag high-performing peers (Connection Manager Integration)
-            stats = self.peer_manager._get_stats(peer_id)
-            if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
-                try:
-                    self.host.get_network().tag_peer(peer_id, "bitswap", 5)
-                except AttributeError:
-                    pass
-
             # Remove from expected blocks for all peers
             self.presence_manager.remove_have_from_all(cid)
 
-            # Notify sessions
-            sessions = self.sim.split_wanted_blocks(cid)
-            if sessions:
+            # Notify pending requests
+            if cid in self._pending_requests:
+                pending_count = len(self._pending_requests[cid])
                 logger.debug(
-                    f"Notifying {len(sessions)} sessions for "
+                    f"Notifying {pending_count} pending requests for "
                     f"{format_cid_for_display(cid, max_len=16)}..."
                 )
-                for session in sessions:
-                    await session.receive_block(cid, data, None)
+                for event in self._pending_requests[cid]:
+                    event.set()
 
                 if self._started and self._nursery:
                     self._nursery.start_soon(self.cancel_want, cid)
@@ -1080,7 +1354,7 @@ class BitswapClient:
             else:
                 # DontHave - peer confirms they don't have this block
                 # Track DontHave responses for metrics/optimization
-                self.presence_manager.add_dont_have(peer_id, cid)
+                self.presence_manager.add_dont_have(cid, peer_id)
 
                 logger.info(
                     f"  ℹ️  Peer {peer_id} doesn't have block "

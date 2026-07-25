@@ -357,13 +357,18 @@ class TestBitswapClientProviderQueryIntegration:
         # Patch _request_block so we can inspect the peer_id it receives
         captured: dict[str, object] = {}
 
-        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
-            captured["peer_id"] = peer_id
-            return block_data, peer_id
+        async def _fake_send(peer, cids):
+            captured["peer_id"] = peer
+            await client.add_block(cid, block_data)
 
-        client._request_block = _fake_request  # type: ignore[method-assign]
+        async def _fake_broadcast(cids):
+            captured["peer_id"] = None
+            await client.add_block(cid, block_data)
 
-        result = await client.get_block(cid)
+        client._send_wantlist_to_peer = _fake_send
+        client._broadcast_wantlist = _fake_broadcast
+
+        result = await client.new_session().get_block(cid)
 
         assert result == block_data
         assert captured["peer_id"] == discovered_peer
@@ -385,13 +390,18 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
-            captured["peer_id"] = peer_id
-            return block_data, peer_id
+        async def _fake_send(peer, cids):
+            captured["peer_id"] = peer
+            await client.add_block(cid, block_data)
 
-        client._request_block = _fake_request  # type: ignore[method-assign]
+        async def _fake_broadcast(cids):
+            captured["peer_id"] = None
+            await client.add_block(cid, block_data)
 
-        result = await client.get_block(cid)
+        client._send_wantlist_to_peer = _fake_send
+        client._broadcast_wantlist = _fake_broadcast
+
+        result = await client.new_session().get_block(cid)
 
         assert result == block_data
         assert captured["peer_id"] is None  # broadcast
@@ -408,13 +418,18 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
-            captured["peer_id"] = peer_id
-            return block_data, peer_id
+        async def _fake_send(peer, cids):
+            captured["peer_id"] = peer
+            await client.add_block(cid, block_data)
 
-        client._request_block = _fake_request  # type: ignore[method-assign]
+        async def _fake_broadcast(cids):
+            captured["peer_id"] = None
+            await client.add_block(cid, block_data)
 
-        await client.get_block(cid, peer_id=PEER_A)
+        client._send_wantlist_to_peer = _fake_send
+        client._broadcast_wantlist = _fake_broadcast
+
+        await client.new_session().get_block(cid, peer_id=PEER_A)
 
         # DHT must NOT have been called
         dht.provider_store.get_providers.assert_not_called()
@@ -438,13 +453,18 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
-            captured["peer_id"] = peer_id
-            return block_data, peer_id
+        async def _fake_send(peer, cids):
+            captured["peer_id"] = peer
+            await client.add_block(cid, block_data)
 
-        client._request_block = _fake_request  # type: ignore[method-assign]
+        async def _fake_broadcast(cids):
+            captured["peer_id"] = None
+            await client.add_block(cid, block_data)
 
-        result = await client.get_block(cid)
+        client._send_wantlist_to_peer = _fake_send
+        client._broadcast_wantlist = _fake_broadcast
+
+        result = await client.new_session().get_block(cid)
 
         assert result == block_data
         assert captured["peer_id"] is None  # graceful broadcast fallback

@@ -27,12 +27,12 @@ def chunk_bytes(data: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> list[bytes
         List of chunks
 
     Example:
-        >>> data = b"x" * (1024 * 1024)  # exactly 1 MiB
+        >>> data = b"x" * 1_000_000  # 1 MB
         >>> chunks = chunk_bytes(data, chunk_size=256*1024)
         >>> print(f"Split into {len(chunks)} chunks")
         Split into 4 chunks
         >>> print(f"Last chunk size: {len(chunks[-1])}")
-        Last chunk size: 262144
+        Last chunk size: 230400
 
     """
     if not data:

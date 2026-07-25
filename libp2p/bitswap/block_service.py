@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from libp2p.peer.id import ID as PeerID
 
     from .client import BitswapClient
+from .session import BitswapSession
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class BlockService:
     async def get_block(
         self,
         cid: CIDInput,
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
     ) -> bytes | None:
@@ -66,6 +68,7 @@ class BlockService:
 
         Args:
             cid: The CID of the block to retrieve
+            session: The BitswapSession to use for fetching
             peer_id: Optional specific peer to fetch from (passed to bitswap)
             timeout: Network timeout in seconds
 
@@ -73,8 +76,8 @@ class BlockService:
             Block data bytes, or None if not found anywhere
 
         """
-        cid_obj = parse_cid(cid)
-        cid_bytes = cid_to_bytes(cid_obj)
+        cid_bytes = cid_to_bytes(cid)
+        cid_obj = parse_cid(cid_bytes)
 
         # 1. Local lookup — instant, no network cost
         data = await self.store.get_block(cid_obj)
@@ -90,7 +93,7 @@ class BlockService:
             f"{format_cid_for_display(cid_obj, max_len=12)}"
         )
         try:
-            data = await self.bitswap.get_block(cid_bytes, peer_id, timeout)
+            data = await session.get_block(cid_bytes, peer_id, timeout)
         except Exception as e:
             logger.warning(f"BlockService: network fetch failed: {e}")
             return None
@@ -118,7 +121,7 @@ class BlockService:
             data: The block data bytes
 
         """
-        cid_obj = parse_cid(cid)
+        cid_obj = parse_cid(cid_to_bytes(cid))
 
         # Write to our local store
         await self.store.put_block(cid_obj, data)
@@ -135,6 +138,7 @@ class BlockService:
     async def get_blocks_batch(
         self,
         cids: Sequence[CIDInput],
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
         batch_size: int = 32,
@@ -145,10 +149,11 @@ class BlockService:
         are auto-cached locally.
 
         Args:
-            cids: List of CIDs to fetch
+            cids: Sequence of CIDs to fetch
+            session: The BitswapSession to use for fetching
             peer_id: Optional specific peer to fetch from
-            timeout: Network timeout in seconds
-            batch_size: Wantlist batch size passed to bitswap
+            timeout: Network timeout per batch
+            batch_size: How many CIDs to request at onceh size passed to bitswap
 
         Returns:
             Dict mapping cid_bytes -> block_data for all found blocks
@@ -159,8 +164,8 @@ class BlockService:
 
         # Local pass first
         for cid in cids:
-            cid_obj = parse_cid(cid)
-            cid_bytes = cid_to_bytes(cid_obj)
+            cid_bytes = cid_to_bytes(cid)
+            cid_obj = parse_cid(cid_bytes)
             data = await self.store.get_block(cid_obj)
             if data is not None:
                 results[cid_bytes] = data
@@ -178,7 +183,7 @@ class BlockService:
         )
 
         # Network pass for missing blocks
-        network_results = await self.bitswap.get_blocks_batch(
+        network_results = await session.get_blocks_batch(
             missing_cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
         )
 
