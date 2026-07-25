@@ -367,11 +367,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
             with QUICErrorContext("connection_initiation", "connection"):
                 if not self._socket:
                     logger.debug("Creating new socket for outbound connection")
+                    family = socket.AF_INET6 if ":" in self._remote_addr[0] else socket.AF_INET
                     self._socket = trio.socket.socket(
-                        family=socket.AF_INET, type=socket.SOCK_DGRAM
+                        family=family, type=socket.SOCK_DGRAM
                     )
 
-                await self._socket.bind(("0.0.0.0", 0))
+                bind_addr = "::" if family == socket.AF_INET6 else "0.0.0.0"
+                await self._socket.bind((bind_addr, 0))
 
                 self._quic.connect(self._remote_addr, now=time.time())
 
