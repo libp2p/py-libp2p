@@ -142,6 +142,12 @@ class BitswapSession:
                         f"retry {retry_interval:.1f}s"
                     )
                     logger.debug(msg)
+                    
+                    # Remove the peer we just tried from requested_from so we can retry them
+                    # if no other peers have the block. This fixes the issue where bitswap
+                    # gets stuck if the only peer with the block drops the request.
+                    if target_peer and target_peer in requested_from:
+                        requested_from.remove(target_peer)
 
         except Exception as e:
             logger.error(f"Session {self.id}: Error during block request: {e}")

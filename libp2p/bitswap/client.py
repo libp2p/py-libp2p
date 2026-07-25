@@ -978,7 +978,7 @@ class BitswapClient:
                     for session in sessions:
                         await session.receive_block(matched_cid, block_data, peer_id)
 
-                    if self._started and self._nursery:
+                    if self._started and hasattr(self, "_nursery") and self._nursery:
                         self._nursery.start_soon(self.cancel_want, matched_cid)
             else:
                 logger.error("  ✗ NO MATCH FOUND!")
@@ -1081,6 +1081,7 @@ class BitswapClient:
                 # DontHave - peer confirms they don't have this block
                 # Track DontHave responses for metrics/optimization
                 self.presence_manager.add_dont_have(peer_id, cid)
+                self.presence_manager.remove_have(peer_id, cid)
 
                 logger.info(
                     f"  ℹ️  Peer {peer_id} doesn't have block "
