@@ -13,7 +13,7 @@ import varint
 
 from libp2p.abc import IHost, INetStream
 from libp2p.custom_types import TProtocol
-from libp2p.network.stream.exceptions import StreamEOF
+from libp2p.network.stream.exceptions import StreamEOF, StreamError
 from libp2p.peer.id import ID as PeerID
 from libp2p.peer.peerinfo import PeerInfo  # noqa: F401
 
@@ -1151,9 +1151,9 @@ class BitswapClient:
             msg.ParseFromString(msg_data)
             return msg
 
-        except StreamEOF:
-            # Stream closed by remote peer - this is normal when transfer completes
-            logger.debug("Stream closed by remote peer")
+        except (StreamEOF, StreamError) as e:
+            # Stream closed or reset by remote peer - this is normal when transfer completes or connection drops
+            logger.debug(f"Stream closed or error by remote peer: {e}")
             return None
         except Exception as e:
             logger.error(f"Error reading message: {e}")
