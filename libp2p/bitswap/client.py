@@ -377,7 +377,10 @@ class BitswapClient:
                     await self._read_responses_from_stream(stream, peer_id)
                 return True
             except Exception as inner_e:
-                await stream.close()
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
                 raise inner_e
 
         except Exception as e:
@@ -570,7 +573,10 @@ class BitswapClient:
         except Exception as e:
             logger.error(f"Error handling stream from {peer_id}: {e}")
         finally:
-            await stream.close()
+            try:
+                await stream.close()
+            except Exception as e:
+                logger.debug(f"Error closing stream from {peer_id}: {e}")
 
     async def _process_message(
         self, msg: Message, peer_id: PeerID, stream: INetStream
@@ -820,7 +826,10 @@ class BitswapClient:
                 presences_to_send,
             )
         finally:
-            await outbound_stream.close()
+            try:
+                await outbound_stream.close()
+            except Exception as e:
+                logger.debug(f"Error closing outbound stream to {peer_id}: {e}")
 
     async def _send_wantlist_responses_inline(
         self,
