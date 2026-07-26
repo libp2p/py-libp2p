@@ -8,6 +8,7 @@ from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
 )
+from datetime import datetime, timezone
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -291,7 +292,7 @@ class BasicHost(IHost):
 
         # Automatic identify coordination
         self._identify_inflight: set[ID] = set()
-        self._identified_peers: set[ID] = set()
+        self._identified_peers: dict[ID, str] = {}
         self._network.register_notifee(_IdentifyNotifee(self))
 
         # Metrics
@@ -1067,7 +1068,7 @@ class BasicHost(IHost):
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
             await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-            self._identified_peers.add(peer_id)
+            self._identified_peers[peer_id] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
                 try:
