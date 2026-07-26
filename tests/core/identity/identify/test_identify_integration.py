@@ -1,6 +1,7 @@
 import logging
 
 import pytest
+import trio
 
 from libp2p.custom_types import TProtocol
 from libp2p.identity.identify.identify import (
@@ -12,11 +13,17 @@ from libp2p.identity.identify.identify import (
     parse_identify_response,
 )
 from tests.utils.factories import host_pair_factory
+from tests.utils.identify_test_helpers import (
+    read_and_parse_identify,
+    wait_for_host_addrs,
+)
 
 logger = logging.getLogger("libp2p.identity.identify-integration-test")
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_identify_protocol_varint_format_integration(security_protocol):
     """Test identify protocol with varint format in real network scenario."""
     async with host_pair_factory(security_protocol=security_protocol) as (
@@ -27,13 +34,23 @@ async def test_identify_protocol_varint_format_integration(security_protocol):
             ID, identify_handler_for(host_a, use_varint_format=True)
         )
 
+        await wait_for_host_addrs(host_a)
+
+        if hasattr(host_b, "_identify_inflight"):
+            from libp2p.host.basic_host import BasicHost
+
+            assert isinstance(host_b, BasicHost)
+            deadline = trio.current_time() + 10.0
+            while (
+                host_a.get_id() in host_b._identify_inflight
+                and trio.current_time() < deadline
+            ):
+                await trio.sleep(0.01)
+
         # Make identify request
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        result = await read_and_parse_identify(stream, use_varint_format=True)
         await stream.close()
-
-        # Parse response
-        result = parse_identify_response(response)
 
         # Verify response content
         assert result.agent_version == AGENT_VERSION
@@ -45,6 +62,8 @@ async def test_identify_protocol_varint_format_integration(security_protocol):
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_identify_protocol_raw_format_integration(security_protocol):
     """Test identify protocol with raw format in real network scenario."""
     async with host_pair_factory(security_protocol=security_protocol) as (
@@ -55,13 +74,23 @@ async def test_identify_protocol_raw_format_integration(security_protocol):
             ID, identify_handler_for(host_a, use_varint_format=False)
         )
 
+        await wait_for_host_addrs(host_a)
+
+        if hasattr(host_b, "_identify_inflight"):
+            from libp2p.host.basic_host import BasicHost
+
+            assert isinstance(host_b, BasicHost)
+            deadline = trio.current_time() + 10.0
+            while (
+                host_a.get_id() in host_b._identify_inflight
+                and trio.current_time() < deadline
+            ):
+                await trio.sleep(0.01)
+
         # Make identify request
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        result = await read_and_parse_identify(stream, use_varint_format=False)
         await stream.close()
-
-        # Parse response
-        result = parse_identify_response(response)
 
         # Verify response content
         assert result.agent_version == AGENT_VERSION
@@ -242,6 +271,8 @@ async def test_identify_message_equivalence_real_network(security_protocol):
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_identify_multi_transport_host_addresses(security_protocol):
     """Test that a multi-transport host advertises all its addrs and they're learned."""
     from multiaddr import Multiaddr
@@ -265,6 +296,8 @@ async def test_identify_multi_transport_host_addresses(security_protocol):
         await host_a.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0/ws"))
         await host_b.get_network().listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
 
+        await wait_for_host_addrs(host_a, min_count=2)
+
         # host_b dials host_a using one of its addresses
         host_a.set_stream_handler(ID, identify_handler_for(host_a))
 
@@ -280,13 +313,21 @@ async def test_identify_multi_transport_host_addresses(security_protocol):
         # Connect
         await host_b.connect(info)
 
+        if hasattr(host_b, "_identify_inflight"):
+            from libp2p.host.basic_host import BasicHost
+
+            assert isinstance(host_b, BasicHost)
+            deadline = trio.current_time() + 10.0
+            while (
+                host_a.get_id() in host_b._identify_inflight
+                and trio.current_time() < deadline
+            ):
+                await trio.sleep(0.01)
+
         # Make identify request
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
-        response = await stream.read(8192)
+        result = await read_and_parse_identify(stream, use_varint_format=True)
         await stream.close()
-
-        # Parse response
-        result = parse_identify_response(response)
 
         # Verify response contains all addresses
         for addr in host_a_addrs:

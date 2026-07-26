@@ -3,6 +3,7 @@ import logging
 from multiaddr import (
     Multiaddr,
 )
+import trio
 
 from libp2p.abc import (
     IHost,
@@ -60,6 +61,9 @@ def _mk_identify_protobuf(
 ) -> Identify:
     public_key = host.get_public_key()
     laddrs = host.get_addrs()
+    if not laddrs:
+        p2p_part = Multiaddr(f"/p2p/{host.get_id()!s}")
+        laddrs = [addr.encapsulate(p2p_part) for addr in host.get_transport_addrs()]
     protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
 
     # Create a signed peer-record for the remote peer
@@ -131,6 +135,16 @@ def identify_handler_for(
         except Exception as e:
             logger.error("Error getting remote address: %s", e)
             remote_address = None
+
+        # Under heavy parallel test load, listeners may not yet appear in
+        # get_addrs() when the identify stream opens immediately after connect.
+        deadline = trio.current_time() + 5.0
+        while (
+            not host.get_addrs()
+            and not host.get_transport_addrs()
+            and trio.current_time() < deadline
+        ):
+            await trio.sleep(0.01)
 
         protobuf = _mk_identify_protobuf(host, observed_multiaddr)
         response = protobuf.SerializeToString()

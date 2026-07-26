@@ -7,6 +7,7 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any, cast
 
+from libp2p.metrics.swarm import SwarmEvent
 from libp2p.rcmgr import Direction
 
 if TYPE_CHECKING:
@@ -130,6 +131,7 @@ class Swarm(Service, INetworkService):
         retry_config: RetryConfig | None = None,
         connection_config: ConnectionConfig | QUICTransportConfig | None = None,
         psk: str | None = None,
+        metric_send_channel: trio.MemorySendChannel[Any] | None = None,
         *,
         # Optional pre-built TransportManager (e.g. with a PortDemultiplexer attached
         # for shared-port TCP+WS demultiplexing).  When supplied, it is used as-is
@@ -188,6 +190,9 @@ class Swarm(Service, INetworkService):
         self._round_robin_index = {}
         self._resource_manager = None
         self._stream_semaphore: trio.Semaphore | None = None
+
+        # Metrics
+        self.metric_send_channel = metric_send_channel
 
         # Initialize connection management components
         self._init_connection_management()
@@ -527,6 +532,14 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when an error occurs
         :return: list of muxed connections
         """
+        # Emit metric-event for dial-attempt
+        event = SwarmEvent()
+        event.peer_id = peer_id.pretty()
+        event.dial_attempt = True
+
+        if self.metric_send_channel is not None:
+            await self.metric_send_channel.send(event)
+
         # Check if we already have connections
         existing_connections = self.get_connections(peer_id)
         if existing_connections:
@@ -597,6 +610,15 @@ class Swarm(Service, INetworkService):
 
         if not connections:
             # Tried all addresses, raising exception.
+
+            # Emit metric-event for dial_attempt failure
+            event = SwarmEvent()
+            event.peer_id = peer_id.pretty()
+            event.dial_attempt_error = True
+
+            if self.metric_send_channel is not None:
+                await self.metric_send_channel.send(event)
+
             raise SwarmDialAllFailedError(
                 f"unable to connect to {peer_id}, no addresses established a "
                 "successful connection (with exceptions)",
@@ -910,6 +932,8 @@ class Swarm(Service, INetworkService):
                 pass
 
         swarm_conn = await self.add_conn(muxed_conn, direction="outbound")
+        # swarm_conn._metric_send_channel = self.metric_send_channel
+
         logger.debug("successfully dialed peer %s", peer_id)
         return swarm_conn
 
@@ -1315,6 +1339,15 @@ class Swarm(Service, INetworkService):
             maddr,
         )
 
+        # Emit a metric-event that we received an inbound connection
+        inbound_notification = SwarmEvent()
+        inbound_notification.conn_incoming = True
+        if self.metric_send_channel is not None:
+            await self.metric_send_channel.send(inbound_notification)
+
+        # Metric event for inbound connection failure
+        failure_event = SwarmEvent()
+
         # Enforce connection gate on inbound connections.
         remote_maddr = self._build_remote_multiaddr(read_write_closer)
         logger.debug(
@@ -1329,6 +1362,10 @@ class Swarm(Service, INetworkService):
                 )
                 try:
                     await read_write_closer.close()
+                    # Emit event for incoming conn failure
+                    failure_event.conn_incoming_error = True
+                    if self.metric_send_channel is not None:
+                        await self.metric_send_channel.send(failure_event)
                 except Exception:
                     pass
                 return
@@ -1350,6 +1387,10 @@ class Swarm(Service, INetworkService):
                 await self.manager.wait_finished()
             except Exception:
                 await read_write_closer.close()
+                # Emit event for incoming conn failure
+                failure_event.conn_incoming_error = True
+                if self.metric_send_channel is not None:
+                    await self.metric_send_channel.send(failure_event)
             return
 
         # Standard upgrade path (TCP, WebSocket): wrap in RawConnection then
@@ -1367,6 +1408,10 @@ class Swarm(Service, INetworkService):
                     await raw_conn.close()
                 else:
                     await read_write_closer.close()
+                    # Emit event for incoming conn failure
+                    failure_event.conn_incoming_error = True
+                    if self.metric_send_channel is not None:
+                        await self.metric_send_channel.send(failure_event)
             except Exception:
                 pass
 
@@ -1669,6 +1714,7 @@ class Swarm(Service, INetworkService):
             self,
             direction=direction,
         )
+        swarm_conn._metric_send_channel = self.metric_send_channel
 
         # Set actual transport addresses and connection type from the muxed connection.
         # This captures the real transport info (IP/port, direct vs relayed)
