@@ -1150,7 +1150,7 @@ class BasicHost(IHost):
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
         if peer_id is None:
             return
-        self._identified_peers.discard(peer_id)
+        self._identified_peers.pop(peer_id, None)
         self._identify_inflight.discard(peer_id)
         self._observed_addr_manager.remove_conn(conn)
 
