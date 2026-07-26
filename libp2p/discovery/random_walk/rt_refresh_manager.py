@@ -10,6 +10,7 @@ from libp2p.discovery.random_walk.config import (
     RANDOM_WALK_CONCURRENCY,
     RANDOM_WALK_ENABLED,
     REFRESH_INTERVAL,
+    REFRESH_TOTAL_TIMEOUT,
 )
 from libp2p.discovery.random_walk.exceptions import RoutingTableRefreshError
 from libp2p.discovery.random_walk.random_walk import RandomWalk
@@ -154,13 +155,29 @@ class RTRefreshManager:
             logger.info(f"Starting routing table refresh (force={force})")
             start_time = current_time
 
-            # Perform random walks to discover new peers
+            # Perform random walks to discover new peers.
+            # Guard the whole batch with REFRESH_TOTAL_TIMEOUT so that slow or
+            # empty-routing-table peers (e.g. a freshly-started isolated Kubo
+            # node) cannot block the caller indefinitely. Each individual walk
+            # already has REFRESH_QUERY_TIMEOUT (60 s), but with
+            # RANDOM_WALK_CONCURRENCY=10 the worst-case is 10 × 60 = 600 s
+            # without this outer guard.
             logger.info("Running concurrent random walks to discover new peers")
             current_rt_size = self.routing_table.size()
-            discovered_peers = await self.random_walk.run_concurrent_random_walks(
-                count=RANDOM_WALK_CONCURRENCY,
-                current_routing_table_size=current_rt_size,
-            )
+            discovered_peers: list = []
+            with trio.move_on_after(REFRESH_TOTAL_TIMEOUT) as _refresh_scope:
+                discovered_peers = await self.random_walk.run_concurrent_random_walks(
+                    count=RANDOM_WALK_CONCURRENCY,
+                    current_routing_table_size=current_rt_size,
+                )
+            if _refresh_scope.cancelled_caught:
+                logger.debug(
+                    "Random-walk batch did not complete within %.0f s "
+                    "(bootstrap peer likely has an empty routing table); "
+                    "continuing with %d peer(s) discovered so far.",
+                    REFRESH_TOTAL_TIMEOUT,
+                    len(discovered_peers),
+                )
 
             # Add discovered peers to routing table
             added_count = 0

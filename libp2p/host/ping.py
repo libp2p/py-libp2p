@@ -201,7 +201,7 @@ class PingService:
 
         async with self._lock:
             stream = self._outbound_streams.get(peer_id)
-            if stream is None or stream.is_closed():
+            if stream is None or stream.is_closed:
                 stream = await self._host.new_stream(peer_id, [ID])
                 self._outbound_streams[peer_id] = stream
 

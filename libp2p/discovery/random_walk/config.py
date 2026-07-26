@@ -5,6 +5,10 @@ PEER_PING_TIMEOUT: Final[float] = 10.0  # seconds
 REFRESH_QUERY_TIMEOUT: Final[float] = 60.0  # seconds
 REFRESH_INTERVAL: Final[float] = 60.0  # 1 minute
 SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD: Final[float] = 60.0  # 1 minute
+# Wall-clock cap for one full random-walk batch inside _do_refresh().
+# With RANDOM_WALK_CONCURRENCY=10 and REFRESH_QUERY_TIMEOUT=60 s the
+# cumulative worst-case without this guard is 10 × 60 = 600 s.
+REFRESH_TOTAL_TIMEOUT: Final[float] = 30.0  # seconds
 
 # Routing table thresholds
 MAX_N_BOOTSTRAPPERS: Final[int] = 2  # Maximum bootstrap peers to try
