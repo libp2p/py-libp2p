@@ -261,9 +261,14 @@ class ValueStore:
         """
         stream = None
         try:
-            # Don't try to get from ourselves
+            # If querying ourselves, return the local value directly
             if peer_id == self.local_peer_id:
-                return None
+                local_record = self.get(key)
+                if local_record is None:
+                    return None
+                if return_record:
+                    return local_record
+                return local_record.value
 
             logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 
