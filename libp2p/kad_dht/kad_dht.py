@@ -308,7 +308,7 @@ class KadDHT(Service):
 
             # Check if it's time to republish provider records
             current_time = time.time()
-            # await self._republish_provider_records()
+            await self.provider_store._republish_provider_records()
             self._last_provider_republish = current_time
 
             # Clean up expired values and provider records
