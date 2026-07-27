@@ -198,7 +198,8 @@ class ValueStore:
         finally:
             if stream:
                 await stream.close()
-            return result
+
+        return result
 
     def get(self, key: bytes) -> Record | None:
         """

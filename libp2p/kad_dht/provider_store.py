@@ -302,7 +302,8 @@ class ProviderStore:
         finally:
             if stream is not None:
                 await stream.close()
-            return result
+
+        return result
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
