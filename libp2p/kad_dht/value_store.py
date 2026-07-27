@@ -58,8 +58,8 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param validity: validity in seconds before the value expires.
-         Defaults to `DEFAULT_TTL` if set to 0.0.
+        :param validity: Absolute Unix timestamp when the value expires.
+         Defaults to `time.time() + DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
