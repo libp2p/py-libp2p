@@ -421,7 +421,7 @@ class KadDHT(Service):
                 "Can only add namespaced validators to a NamespacedValidator"
             )
 
-        self.validator._validators["ns"] = val
+        self.validator._validators[ns] = val
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
