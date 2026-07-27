@@ -41,7 +41,8 @@ from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
-from libp2p.network.tag_store import TagInfo, TagStore
+from libp2p.network.decay import Decayer
+from libp2p.network.tag_store import TagInfo, TagStore, TagStoreNotifee
 from libp2p.peer.id import (
     ID,
 )
@@ -157,6 +158,7 @@ class Swarm(Service, INetworkService):
     connection_gate: ConnectionGate
     dns_resolver: DNSResolver
     connection_pruner: ConnectionPruner
+    decayer: Decayer
     auto_connector: AutoConnector
     tag_store: TagStore
 
@@ -270,7 +272,13 @@ class Swarm(Service, INetworkService):
         )
 
         # Initialize tag store for peer tagging/protection (go-libp2p TagPeer, Protect)
+        # TagStoreNotifee bridges real Connected/Disconnected events into the store
+        # so record_connection/remove_connection fire automatically on every dial/close.
         self.tag_store = TagStore()
+        self.register_notifee(TagStoreNotifee(self.tag_store))
+
+        # Initialize decayer for go-libp2p-style decaying tags (Phase 2)
+        self.decayer = Decayer(self.tag_store)
 
     def set_resource_manager(
         self,
@@ -307,6 +315,8 @@ class Swarm(Service, INetworkService):
                 await self.auto_connector.start()
                 # Start auto-connector background task
                 await self.auto_connector.run_background_task(nursery)
+                # Start decayer background task (Phase 2 — decaying tags)
+                await self.decayer.run_background_task(nursery)
                 # Start graceful degradation recovery task
                 if (
                     self._resource_manager is not None
@@ -326,6 +336,7 @@ class Swarm(Service, INetworkService):
                 try:
                     await self.connection_pruner.stop()
                     await self.auto_connector.stop()
+                    await self.decayer.stop()
                 except Exception as e:
                     logger.warning(
                         f"Error stopping connection management components: {e}"

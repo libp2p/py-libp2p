@@ -322,6 +322,27 @@ class BasicHost(IHost):
         """
         return self.peerstore
 
+    @property
+    def conn_manager(self) -> "TagStore":
+        """
+        Return the connection manager (TagStore) from the underlying network.
+
+        Delegates to the Swarm's tag_store, the same object — not a copy.
+        Protocol code can use ``host.conn_manager.tag_peer(...)`` without
+        navigating ``host.get_network().tag_store``, matching go-libp2p's
+        ``h.ConnManager()`` accessor.
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
+        """
+        from libp2p.network.tag_store import TagStore  # noqa: F401 (type reference)
+
+        return self._network.tag_store  # type: ignore[attr-defined]
+
+
     def _detect_negotiate_timeout_from_transport(self) -> float | None:
         """
         Detect negotiate timeout from transport configuration.

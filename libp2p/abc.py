@@ -53,6 +53,7 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
     from libp2p.peer.envelope import Envelope
     from libp2p.peer.peer_record import PeerRecord
     from libp2p.protocol_muxer.multiselect import Multiselect
@@ -2035,6 +2036,23 @@ class IHost(ABC):
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host
+        """
+
+    @property
+    @abstractmethod
+    def conn_manager(self) -> "TagStore":
+        """
+        Return the connection manager (TagStore) for this host.
+
+        Provides access to tag_peer, untag_peer, upsert_tag, protect,
+        unprotect, and is_protected without going through the network layer
+        — matching go-libp2p's h.ConnManager().
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
         """
 
     @abstractmethod
