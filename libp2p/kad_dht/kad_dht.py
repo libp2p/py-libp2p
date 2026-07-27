@@ -519,6 +519,8 @@ class KadDHT(Service):
                         target_known = bool(self.host.get_peerstore().addrs(target))
                     except Exception:
                         target_known = False
+                    if not target_known and target == self.host.get_id():
+                        target_known = True
                     if target_known:
                         closest_peers = [target] + [
                             p for p in closest_peers if p != target
@@ -527,7 +529,7 @@ class KadDHT(Service):
                     # Add closest peers to response
                     for peer in closest_peers:
                         # Skip if the peer is the requester
-                        if peer == peer_id and peer != target:
+                        if peer == peer_id:
                             continue
 
                         # Add peer to closerPeers field
