@@ -11,6 +11,7 @@ import time
 
 import multihash
 import trio
+import varint
 
 from libp2p.abc import (
     IHost,
@@ -265,23 +266,28 @@ class KBucket:
                 ping_msg = Message()
                 ping_msg.type = Message.PING  # Use correct enum
 
-                # Serialize and send with length prefix (4 bytes big-endian)
+                # Serialize and send with varint length prefix
                 msg_bytes = ping_msg.SerializeToString()
                 logger.debug(
                     f"Sending PING message to {peer_id}, size: {len(msg_bytes)} bytes"
                 )
-                await stream.write(len(msg_bytes).to_bytes(4, byteorder="big"))
+                await stream.write(varint.encode(len(msg_bytes)))
                 await stream.write(msg_bytes)
 
                 # Wait for response with timeout
                 with trio.move_on_after(2):  # 2 second timeout
-                    # Read response length (4 bytes)
-                    length_bytes = await stream.read(4)
-                    if not length_bytes or len(length_bytes) < 4:
-                        logger.warning(f"Peer {peer_id} disconnected during ping")
-                        return False
+                    # Read response length (varint)
+                    length_bytes = b""
+                    while True:
+                        b = await stream.read(1)
+                        if not b:
+                            logger.warning(f"Peer {peer_id} disconnected during ping")
+                            return False
+                        length_bytes += b
+                        if b[0] & 0x80 == 0:
+                            break
 
-                    msg_len = int.from_bytes(length_bytes, byteorder="big")
+                    msg_len = varint.decode_bytes(length_bytes)
                     if (
                         msg_len <= 0 or msg_len > 1024 * 1024
                     ):  # Sanity check on message size
