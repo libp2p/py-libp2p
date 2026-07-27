@@ -478,11 +478,12 @@ class ProviderStore:
 
             finally:
                 await stream.close()
-                return providers
 
         except Exception as e:
             logger.warning(f"Error getting providers from {peer_id}: {e}")
             return []
+
+        return providers
 
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
