@@ -903,6 +903,19 @@ class KadDHT(Service):
                         await stream.write(response_bytes)
                         logger.debug("Sent PUT_VALUE acknowledgement")
 
+                # Handle PUT_VALUE without record field
+                elif message.type == Message.MessageType.PUT_VALUE:
+                    logger.warning(
+                        f"Received PUT_VALUE without record from {peer_id}"
+                    )
+                    response = Message()
+                    response.type = Message.MessageType.PUT_VALUE
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+                    response_bytes = response.SerializeToString()
+                    await stream.write(varint.encode(len(response_bytes)))
+                    await stream.write(response_bytes)
+
             except Exception as proto_err:
                 logger.warning(f"Failed to parse protobuf message: {proto_err}")
 
