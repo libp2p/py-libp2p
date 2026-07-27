@@ -381,10 +381,10 @@ class PeerRouting(IPeerRouting):
                     # Consume the received closer_peers signed-records, peer-id is
                     # sent with the peer-data
                     if not maybe_consume_signed_record(peer_data, self.host):
-                        logger.error(
-                            "Received an invalid-signed-record,ignoring the response"
+                        logger.warning(
+                            "Received an invalid-signed-record, skipping peer"
                         )
-                        return []
+                        continue
 
                     new_peer_id = ID(peer_data.id)
                     if new_peer_id == local_id:
