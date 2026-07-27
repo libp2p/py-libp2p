@@ -10,6 +10,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from types import (
     TracebackType,
 )
@@ -1701,6 +1702,38 @@ class INetwork(ABC):
         """
 
 
+@dataclass
+class CMInfo:
+    """
+    Unified snapshot of connection manager state.
+
+    Equivalent to go-libp2p's connmgr.CMInfo snapshot returned by
+    BasicConnMgr.GetInfo() — providing a single call-site for all
+    watermark / live-count / grace / last-trim data needed by
+    operators and metrics exporters.
+
+    Attributes
+    ----------
+    low_watermark : int
+        Target connection count after pruning.
+    high_watermark : int
+        Connection count that triggers pruning.
+    connected_count : int
+        Current number of live connections.
+    grace_period : float
+        Seconds a new connection is exempt from pruning.
+    last_trim : float | None
+        Unix timestamp of the most recent prune cycle, or None if
+        the connection count has never exceeded the high watermark.
+    """
+
+    low_watermark: int
+    high_watermark: int
+    connected_count: int
+    grace_period: float
+    last_trim: float | None  # None if never trimmed
+
+
 class INetworkService(INetwork, ServiceAPI):
     """
     Interface for a network service with connection management capabilities.
@@ -1830,6 +1863,22 @@ class INetworkService(INetwork, ServiceAPI):
         -------
         bool
             True if the peer is protected.
+
+        """
+
+    @abstractmethod
+    def get_conn_mgr_info(self) -> CMInfo:
+        """
+        Return a unified snapshot of connection manager state.
+
+        Provides a single call-site for watermarks, live connection count,
+        grace period, and the timestamp of the last prune — matching
+        go-libp2p's BasicConnMgr.GetInfo().
+
+        Returns
+        -------
+        CMInfo
+            Snapshot of current connection manager state.
 
         """
 

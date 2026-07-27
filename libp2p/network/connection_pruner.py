@@ -177,6 +177,9 @@ class ConnectionPruner:
         else:
             self.allow_list = allow_list
         self._started = False
+        # Unix timestamp of the last successful prune; None if never trimmed.
+        # Read by Swarm.get_conn_mgr_info() to build CMInfo.last_trim.
+        self._last_trim_time: float | None = None
 
     async def start(self) -> None:
         """Start the connection pruner."""
@@ -297,6 +300,8 @@ class ConnectionPruner:
                     await connection.close()
                 except Exception as e:
                     logger.warning("Error closing connection during pruning: %s", e)
+            # Record the trim timestamp after the prune cycle completes.
+            self._last_trim_time = time.time()
 
     def _is_connection_within_grace_period(
         self, connection: INetConn, grace_period: float

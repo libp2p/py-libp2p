@@ -20,6 +20,7 @@ from multiaddr.resolvers import DNSResolver
 import trio
 
 from libp2p.abc import (
+    CMInfo,
     IListener,
     IMuxedConn,
     INetConn,
@@ -579,6 +580,29 @@ class Swarm(Service, INetworkService):
 
         """
         return self.tag_store.is_protected(peer_id, tag)
+
+    def get_conn_mgr_info(self) -> CMInfo:
+        """
+        Return a unified snapshot of connection manager state.
+
+        Reads watermarks and grace period from ``connection_config``, the live
+        connection count from ``get_total_connections()``, and the last prune
+        timestamp from ``connection_pruner._last_trim_time``.
+
+        Returns
+        -------
+        CMInfo
+            Snapshot of current connection manager state.
+
+        """
+        cfg = self.connection_config
+        return CMInfo(
+            low_watermark=cfg.low_watermark,
+            high_watermark=cfg.high_watermark,
+            connected_count=self.get_total_connections(),
+            grace_period=cfg.grace_period,
+            last_trim=self.connection_pruner._last_trim_time,
+        )
 
     async def dial_peer(self, peer_id: ID) -> list[INetConn]:
         """
