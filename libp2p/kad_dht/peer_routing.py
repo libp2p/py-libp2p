@@ -268,7 +268,7 @@ class PeerRouting(IPeerRouting):
                 break
 
             # Update our list of closest peers
-            all_candidates = closest_peers + new_peers
+            all_candidates = list(dict.fromkeys(closest_peers + new_peers))
             old_closest_peers = closest_peers[:]
             closest_peers = sort_peer_ids_by_distance(target_key, all_candidates)[
                 :count
