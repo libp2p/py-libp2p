@@ -574,9 +574,7 @@ class KadDHT(Service):
                     logger.debug(f"Received PING from {peer_id}")
 
                     # Update the last seen timestamp for this peer
-                    self.routing_table.add_peer(
-                        self.host.get_peerstore().peer_info(peer_id)
-                    )
+                    await self.add_peer(peer_id)
 
                     # Send PING response
                     response = Message()
