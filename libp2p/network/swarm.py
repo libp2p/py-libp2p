@@ -1048,7 +1048,21 @@ class Swarm(Service, INetworkService):
                 try:
                     setattr(muxed_conn, "_resource_scope", conn_scope)
                 except Exception:
-                    pass
+                    # setattr failed — release the scope we just acquired so
+                    # _current_connections does not leak.
+                    try:
+                        conn_scope.close()
+                    except Exception:
+                        pass
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                            pre_scope = None
+                    except Exception:
+                        pass
+                    raise SwarmException(
+                        "Failed to attach resource scope to muxed connection"
+                    )
                 # Release pre-upgrade scope after acquiring real scope
                 try:
                     if pre_scope is not None and hasattr(pre_scope, "close"):
@@ -1871,60 +1885,77 @@ class Swarm(Service, INetworkService):
         # For non-QUIC connections, set the resource scope on SwarmConn
         if conn_scope is not None and not hasattr(muxed_conn, "set_resource_scope"):
             swarm_conn.set_resource_scope(conn_scope)  # type: ignore
-        logger.debug("Swarm::add_conn | starting muxed connection")
-        self.manager.run_task(muxed_conn.start)
-        await muxed_conn.event_started.wait()
 
-        if muxed_conn.is_closed:
-            raise SwarmException("Connection closed while starting")
-        logger.debug(
-            f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
-        )
-        # Verify connection is fully established before proceeding.
-        # For QUIC connections, wait for the connected event.
-        # For other muxers (like Yamux/Mplex), check the is_established property.
-        # For some muxers (e.g. QUIC), wait for the connected event.
-        # For others (like Yamux/Mplex), check the is_established property.
-        if hasattr(muxed_conn, "_connected_event") and hasattr(
-            muxed_conn, "is_established"
-        ):
-            if not getattr(muxed_conn, "is_established"):
-                await getattr(muxed_conn, "_connected_event").wait()
-        elif not muxed_conn.is_established:
-            logger.warning(
-                f"Swarm::add_conn | muxer event_started set but "
-                f"is_established=False for peer {muxed_conn.peer_id}"
+        # All awaits below can be interrupted by trio.Cancelled or raise
+        # SwarmException.  In every failure path swarm_conn is NOT yet in
+        # self.connections, so the swarm's normal cleanup will never call
+        # swarm_conn.close().  We must do it ourselves to release the rcmgr
+        # _current_connections counter.
+        try:
+            logger.debug("Swarm::add_conn | starting muxed connection")
+            self.manager.run_task(muxed_conn.start)
+            await muxed_conn.event_started.wait()
+
+            if muxed_conn.is_closed:
+                raise SwarmException("Connection closed while starting")
+            logger.debug(
+                f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
             )
-        logger.debug("Swarm::add_conn | starting swarm connection")
-        self.manager.run_task(swarm_conn.start)
-        await swarm_conn.event_started.wait()
+            # Verify connection is fully established before proceeding.
+            # For QUIC connections, wait for the connected event.
+            # For other muxers (like Yamux/Mplex), check the is_established property.
+            # For some muxers (e.g. QUIC), wait for the connected event.
+            # For others (like Yamux/Mplex), check the is_established property.
+            if hasattr(muxed_conn, "_connected_event") and hasattr(
+                muxed_conn, "is_established"
+            ):
+                if not getattr(muxed_conn, "is_established"):
+                    await getattr(muxed_conn, "_connected_event").wait()
+            elif not muxed_conn.is_established:
+                logger.warning(
+                    f"Swarm::add_conn | muxer event_started set but "
+                    f"is_established=False for peer {muxed_conn.peer_id}"
+                )
+            logger.debug("Swarm::add_conn | starting swarm connection")
+            self.manager.run_task(swarm_conn.start)
+            await swarm_conn.event_started.wait()
 
-        # Add to connections dict with deduplication
-        peer_id = muxed_conn.peer_id
-        if peer_id not in self.connections:
-            self.connections[peer_id] = []
+            # Add to connections dict with deduplication
+            peer_id = muxed_conn.peer_id
+            if peer_id not in self.connections:
+                self.connections[peer_id] = []
 
-        # Check for duplicate connections by comparing the underlying muxed connection
-        for existing_conn in self.connections[peer_id]:
-            if existing_conn.muxed_conn == muxed_conn:
-                logger.debug(f"Connection already exists for peer {peer_id}")
+            # Check for duplicate connections by comparing the underlying muxed connection
+            for existing_conn in self.connections[peer_id]:
+                if existing_conn.muxed_conn == muxed_conn:
+                    logger.debug(f"Connection already exists for peer {peer_id}")
+                    await swarm_conn.close()
+                    # existing_conn is a SwarmConn since it's stored in the connections list
+                    return existing_conn  # type: ignore[return-value]
+
+            self.connections[peer_id].append(swarm_conn)
+
+            # Trim if we exceed max connections per peer
+            max_conns = self.connection_config.max_connections_per_peer
+            if len(self.connections[peer_id]) > max_conns:
+                self._trim_connections(peer_id)
+
+            # Trigger connection pruning if global limit is exceeded
+            await self.connection_pruner.maybe_prune_connections()
+
+            # Call notifiers since event occurred
+            await self.notify_connected(swarm_conn)
+            return swarm_conn
+
+        except BaseException:
+            # swarm_conn is not yet registered in self.connections — close it
+            # explicitly so its resource scope (rcmgr _current_connections slot)
+            # is always released, even under trio.Cancelled.
+            try:
                 await swarm_conn.close()
-                # existing_conn is a SwarmConn since it's stored in the connections list
-                return existing_conn  # type: ignore[return-value]
-
-        self.connections[peer_id].append(swarm_conn)
-
-        # Trim if we exceed max connections per peer
-        max_conns = self.connection_config.max_connections_per_peer
-        if len(self.connections[peer_id]) > max_conns:
-            self._trim_connections(peer_id)
-
-        # Trigger connection pruning if global limit is exceeded
-        await self.connection_pruner.maybe_prune_connections()
-
-        # Call notifiers since event occurred
-        await self.notify_connected(swarm_conn)
-        return swarm_conn
+            except Exception:
+                pass
+            raise
 
     def _build_remote_multiaddr(
         self, read_write_closer: ReadWriteCloser
