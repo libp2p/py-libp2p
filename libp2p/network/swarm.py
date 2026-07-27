@@ -1105,6 +1105,8 @@ class Swarm(Service, INetworkService):
                         pre_scope = None
                 except Exception:
                     pass
+            except SwarmException:
+                raise
             except Exception:
                 pass
 
@@ -1750,7 +1752,35 @@ class Swarm(Service, INetworkService):
                 try:
                     setattr(muxed_conn, "_resource_scope", conn_scope)
                 except Exception:
-                    pass
+                    # setattr failed — release the scope we just acquired so
+                    # _current_connections does not leak, and tear down the
+                    # half-built connection instead of letting add_conn
+                    # silently re-acquire a second scope for it.
+                    try:
+                        conn_scope.close()
+                    except Exception:
+                        pass
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await secured_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        await raw_conn.close()
+                    except Exception:
+                        pass
+                    try:
+                        if pre_scope is not None and hasattr(pre_scope, "close"):
+                            pre_scope.close()
+                            pre_scope = None
+                    except Exception:
+                        pass
+                    raise SwarmException(
+                        "Failed to attach resource scope to muxed connection"
+                    )
                 # Release any pre-upgrade scope now that we have a real scope
                 try:
                     if pre_scope is not None and hasattr(pre_scope, "close"):

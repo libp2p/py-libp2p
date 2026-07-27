@@ -57,7 +57,9 @@ class AutoConnector:
         self._started = False
         self._shutdown_event = trio.Event()
         self._last_connect_attempt: dict[ID, float] = {}
-        self._connect_cooldown = 300.0  # Don't retry a peer for 5 minutes
+        self._failure_counts: dict[ID, int] = {}
+        self._base_cooldown = 300.0   # base retry interval (seconds)
+        self._max_cooldown = 3600.0   # cap at 1 hour for persistent failures
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -220,11 +222,34 @@ class AutoConnector:
 
         return candidates
 
+    def _get_cooldown(self, peer_id: ID) -> float:
+        """
+        Calculate exponential backoff cooldown for a peer.
+
+        Returns base_cooldown * 2^(failures-1), capped at max_cooldown.
+        First failure: 300s, second: 600s, third: 1200s … cap: 3600s.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to calculate cooldown for
+
+        Returns
+        -------
+        float
+            Cooldown duration in seconds
+
+        """
+        n = self._failure_counts.get(peer_id, 0)
+        if n <= 0:
+            return self._base_cooldown
+        return min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+
     def _should_skip_peer(self, peer_id: ID) -> bool:
         """
         Check if we should skip connecting to a peer.
 
-        Skips peers that we recently tried to connect to (cooldown).
+        Skips peers that we recently tried to connect to (exponential backoff).
 
         Parameters
         ----------
@@ -239,7 +264,7 @@ class AutoConnector:
         """
         last_attempt = self._last_connect_attempt.get(peer_id)
         if last_attempt is not None:
-            if time.time() - last_attempt < self._connect_cooldown:
+            if time.time() - last_attempt < self._get_cooldown(peer_id):
                 return True
 
         return False
@@ -257,6 +282,7 @@ class AutoConnector:
 
         """
         self._last_connect_attempt.pop(peer_id, None)
+        self._failure_counts.pop(peer_id, None)
 
     def record_failed_connection(self, peer_id: ID) -> None:
         """
@@ -270,6 +296,7 @@ class AutoConnector:
             The peer we failed to connect to
 
         """
+        self._failure_counts[peer_id] = self._failure_counts.get(peer_id, 0) + 1
         self._last_connect_attempt[peer_id] = time.time()
 
     def clear_cooldown(self, peer_id: ID) -> None:
@@ -283,7 +310,9 @@ class AutoConnector:
 
         """
         self._last_connect_attempt.pop(peer_id, None)
+        self._failure_counts.pop(peer_id, None)
 
     def clear_all_cooldowns(self) -> None:
-        """Clear all peer cooldowns."""
+        """Clear all peer cooldowns and failure counts."""
         self._last_connect_attempt.clear()
+        self._failure_counts.clear()
