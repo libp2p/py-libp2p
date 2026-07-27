@@ -199,8 +199,6 @@ class ValueStore:
             if stream:
                 await stream.close()
 
-        return result
-
     def get(self, key: bytes) -> Record | None:
         """
         Retrieve a value from the DHT.

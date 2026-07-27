@@ -470,11 +470,16 @@ class KadDHT(Service):
             msg_length = varint.decode_bytes(length_prefix)
 
             # Read the message bytes
-            msg_bytes = await stream.read(msg_length)
-            if len(msg_bytes) < msg_length:
-                logger.warning("Failed to read full message from stream")
-                await stream.close()
-                return
+            msg_bytes = b""
+            remaining = msg_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.warning("Failed to read full message from stream")
+                    await stream.close()
+                    return
+                msg_bytes += chunk
+                remaining -= len(chunk)
 
             try:
                 # Parse as protobuf
@@ -572,9 +577,6 @@ class KadDHT(Service):
                 # Handle PING message
                 elif message.type == Message.MessageType.PING:
                     logger.debug(f"Received PING from {peer_id}")
-
-                    # Update the last seen timestamp for this peer
-                    await self.add_peer(peer_id)
 
                     # Send PING response
                     response = Message()

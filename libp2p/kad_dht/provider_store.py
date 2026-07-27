@@ -137,7 +137,6 @@ class ProviderStore:
             await self.provide(key)
 
         # Also check for any records that should be republished
-        time.time()
         for key, providers in self.providers.items():
             for peer_id_str, record in providers.items():
                 # Only republish records for our own peer

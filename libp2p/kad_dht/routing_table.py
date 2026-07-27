@@ -301,10 +301,15 @@ class KBucket:
                     )
 
                     # Read full message
-                    response_bytes = await stream.read(msg_len)
-                    if not response_bytes:
-                        logger.warning(f"Failed to read response from {peer_id}")
-                        return False
+                    response_bytes = b""
+                    remaining = msg_len
+                    while remaining > 0:
+                        chunk = await stream.read(remaining)
+                        if not chunk:
+                            logger.warning(f"Failed to read response from {peer_id}")
+                            return False
+                        response_bytes += chunk
+                        remaining -= len(chunk)
 
                     # Parse protobuf response
                     response = Message()
