@@ -445,7 +445,7 @@ class KadDHT(Service):
         Handle an incoming DHT stream using varint length prefixes.
         """
         if self.mode == DHTMode.CLIENT:
-            stream.close
+            await stream.close()
             return
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
