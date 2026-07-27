@@ -567,6 +567,23 @@ class KadDHT(Service):
                         f"Sent FIND_NODE response with{len(response.closerPeers)} peers"
                     )
 
+                # Handle PING message
+                elif message.type == Message.MessageType.PING:
+                    logger.debug(f"Received PING from {peer_id}")
+
+                    # Update the last seen timestamp for this peer
+                    self.routing_table.add_peer(
+                        self.host.get_peerstore().peer_info(peer_id)
+                    )
+
+                    # Send PING response
+                    response = Message()
+                    response.type = Message.MessageType.PING
+                    response_bytes = response.SerializeToString()
+                    await stream.write(varint.encode(len(response_bytes)))
+                    await stream.write(response_bytes)
+                    logger.debug(f"Sent PING response to {peer_id}")
+
                 # Handle ADD_PROVIDER message
                 elif message.type == Message.MessageType.ADD_PROVIDER:
                     # Process ADD_PROVIDER
