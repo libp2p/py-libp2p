@@ -150,15 +150,33 @@ class AutoConnector:
 
         async def _dial_candidate(peer_id: ID) -> None:
             async with dial_limiter:
+                connected = False
                 try:
-                    # Mark that we're attempting to connect
-                    self._last_connect_attempt[peer_id] = time.time()
                     logger.debug(f"Auto-connecting to peer {peer_id}")
-                    with trio.move_on_after(self.swarm.connection_config.dial_timeout):
+                    with trio.move_on_after(
+                        self.swarm.connection_config.dial_timeout
+                    ) as cancel_scope:
                         await self.swarm.dial_peer(peer_id)
-                    logger.info(f"Auto-connected to peer {peer_id}")
+                        connected = True  # only set if dial completes before timeout
+                    if cancel_scope.cancelled_caught:
+                        # Dial timed out — treat as failure, apply backoff
+                        logger.debug(f"Dial to {peer_id} timed out")
+                        self._failure_counts[peer_id] = (
+                            self._failure_counts.get(peer_id, 0) + 1
+                        )
+                        self._last_connect_attempt[peer_id] = time.time()
+                    elif connected:
+                        logger.info(f"Auto-connected to peer {peer_id}")
+                        # Success — clear cooldown so peer is immediately
+                        # re-dialable if it disconnects later
+                        self._last_connect_attempt.pop(peer_id, None)
+                        self._failure_counts.pop(peer_id, None)
                 except Exception as e:
                     logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
+                    self._failure_counts[peer_id] = (
+                        self._failure_counts.get(peer_id, 0) + 1
+                    )
+                    self._last_connect_attempt[peer_id] = time.time()
 
         try:
             async with trio.open_nursery() as dial_nursery:
