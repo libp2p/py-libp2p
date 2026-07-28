@@ -96,14 +96,17 @@ class TestBlockMessages:
     """Test block message creation."""
 
     def test_create_block_message_v100(self):
-        """Test creating v1.0.0 block message."""
+        """Test creating v1.0.0 block message uses the blocks field per spec."""
         blocks = [b"block1", b"block2", b"block3"]
         msg = create_block_message_v100(blocks)
 
-        assert len(msg.payload) == 3
-        assert msg.payload[0].data == b"block1"
-        assert msg.payload[1].data == b"block2"
-        assert msg.payload[2].data == b"block3"
+        # v1.0.0 spec: blocks go into `repeated bytes blocks = 2`
+        assert len(msg.blocks) == 3
+        assert msg.blocks[0] == b"block1"
+        assert msg.blocks[1] == b"block2"
+        assert msg.blocks[2] == b"block3"
+        # payload (field 3) must be empty for v1.0.0
+        assert len(msg.payload) == 0
 
     def test_create_block_message_v110(self):
         """Test creating v1.1.0 block message with prefixes."""
