@@ -430,7 +430,7 @@ class BitswapClient:
         entry = create_wantlist_entry(cid, cancel=True, want_type=want_type)
         msg = create_message(wantlist_entries=[entry])
 
-        peers = self.host.get_network().connections.keys()
+        peers = list(self.host.get_network().connections.keys())
         for peer_id in peers:
             try:
                 # Use the negotiated protocol for this peer
@@ -496,11 +496,12 @@ class BitswapClient:
         Read responses from a stream after sending a wantlist.
 
         This keeps the stream open so the provider can send blocks back.
-        Stops reading once all expected blocks are received.
+        Stops reading once all expected blocks are received or after a timeout.
         """
+        STREAM_READ_TIMEOUT = 30.0  # Close stream if no data for 30s
         try:
             peer_id_str = str(peer_id)
-            logger.info(f"📡 Reading responses from {peer_id_str} on stream")
+            logger.info(f"Reading responses from {peer_id_str} on stream")
             message_count = 0
 
             while True:
@@ -509,7 +510,7 @@ class BitswapClient:
                 remaining = len(expected_cids)
                 if remaining == 0:
                     logger.info(
-                        f"✓ All expected blocks received from "
+                        f"All expected blocks received from "
                         f"{peer_id_str}, closing stream"
                     )
                     break
@@ -518,16 +519,26 @@ class BitswapClient:
                         f"Still expecting {remaining} blocks from {peer_id_str}"
                     )
 
-                # Read message from provider WITHOUT timeout
-                # We rely on expected_blocks tracking to know when to stop
+                # Read message with timeout to avoid blocking forever
                 logger.debug(f"Waiting for message from {peer_id_str}...")
-                msg = await self._read_message(stream)
+                msg = None
+                try:
+                    with trio.move_on_after(STREAM_READ_TIMEOUT) as scope:
+                        msg = await self._read_message(stream)
+                except trio.Cancelled:
+                    pass
                 if msg is None:
-                    logger.warning(f"Stream from {peer_id_str} closed by remote")
+                    if scope and scope.cancelled_caught:
+                        logger.warning(
+                            f"Stream from {peer_id_str} timed out after "
+                            f"{STREAM_READ_TIMEOUT}s with {remaining} blocks pending"
+                        )
+                    else:
+                        logger.warning(f"Stream from {peer_id_str} closed by remote")
                     break
 
                 message_count += 1
-                logger.info(f"📨 Received message #{message_count} from {peer_id_str}")
+                logger.debug(f"Received message #{message_count} from {peer_id_str}")
 
                 # Process the response (blocks, presences, etc.)
                 await self._process_message(msg, peer_id, stream)
@@ -535,34 +546,21 @@ class BitswapClient:
         except Exception as e:
             peer_id_str = str(peer_id)
             logger.error(f"Stream from {peer_id_str} ended with error: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
         finally:
             # Clean up expected blocks for this peer
             expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
             remaining = len(expected_cids)
             if remaining > 0:
                 peer_id_str = str(peer_id)
-                logger.error("")
-                logger.error("=" * 70)
-                logger.error("⚠️  STREAM CLOSED WITH MISSING BLOCKS")
-                logger.error("=" * 70)
-                logger.error(f"Peer: {peer_id_str}")
-                logger.error(f"Missing {remaining} blocks:")
-                for i, cid in enumerate(expected_cids):
-                    logger.error(f"  {i + 1}. {format_cid_for_display(cid)}")
-                    self.presence_manager.remove_have(peer_id, cid)
-                logger.error("=" * 70)
-                logger.error("")
-            else:
-                for cid in list(expected_cids):
+                logger.warning(
+                    f"Stream closed with {remaining} missing blocks from {peer_id_str}"
+                )
+                for cid in expected_cids:
                     self.presence_manager.remove_have(peer_id, cid)
             try:
                 await stream.close()
-            except Exception as e:
-                # Stream might already be closed
-                logger.debug(f"Error closing stream: {e}")
+            except Exception:
+                pass
 
     async def _handle_stream(self, stream: INetStream) -> None:
         """Handle incoming Bitswap stream."""
@@ -819,6 +817,16 @@ class BitswapClient:
         # Try to reuse a cached stream; open a new one only if needed.
         outbound_stream = self._response_streams.get(peer_id)
 
+        # Validate cached stream is still usable
+        if outbound_stream is not None:
+            try:
+                if hasattr(outbound_stream, "is_closed") and outbound_stream.is_closed:
+                    outbound_stream = None
+                    self._response_streams.pop(peer_id, None)
+            except Exception:
+                outbound_stream = None
+                self._response_streams.pop(peer_id, None)
+
         if outbound_stream is None:
             try:
                 outbound_stream = await self.host.new_stream(
@@ -944,50 +952,31 @@ class BitswapClient:
         block data against the CIDs we're expecting.
         """
         peer_id_str = str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
-        logger.info("=" * 70)
-        logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
+        logger.debug(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
 
         # Get the CIDs we're expecting from this peer
         expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
-        logger.info(f"Expected {len(expected_cids)} blocks from this peer")
-        logger.info("Expected CIDs:")
-        for i, cid in enumerate(expected_cids):
-            logger.info(f"  {i + 1}. {format_cid_for_display(cid)}")
-        logger.info("=" * 70)
 
         for idx, block_data in enumerate(blocks):
-            block_hash = hashlib.sha256(block_data).hexdigest()
-            logger.info("")
-            logger.info(f"Block {idx + 1}/{len(blocks)}:")
-            logger.info(f"  Size: {len(block_data)} bytes")
-            logger.info(f"  SHA-256: {block_hash}")
-            logger.info(f"  First 64 bytes: {block_data[:64].hex()}")
-
             # Find which expected CID matches this block data
             matched_cid = None
-            logger.info(f"  Checking against {len(expected_cids)} expected CIDs...")
-            for i, cid in enumerate(expected_cids):
-                logger.info(
-                    f"    Attempt {i + 1}: Checking CID {format_cid_for_display(cid)}"
-                )
+            for cid in expected_cids:
                 if verify_cid(cid, block_data):
                     matched_cid = cid
-                    logger.info(
-                        f"  ✓ MATCHED CID: {format_cid_for_display(matched_cid)}"
-                    )
                     break
-                else:
-                    logger.info("    -> No match")
 
             if matched_cid:
                 # Store the block with the correct CID
                 await self.block_store.put_block(matched_cid, block_data)
-                logger.info("  ✓ Stored successfully")
+                logger.debug(
+                    f"Received and stored block "
+                    f"{format_cid_for_display(matched_cid, max_len=16)} (v1.0.0)"
+                )
 
                 # Record delivery for peer scoring
                 self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
 
-                # Tag high-performing peers (Connection Manager Integration)
+                # Tag high-performing peers
                 stats = self.peer_manager._get_stats(peer_id)
                 if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
                     try:
@@ -997,40 +986,19 @@ class BitswapClient:
 
                 # Remove from expected blocks for all peers
                 self.presence_manager.remove_have_from_all(matched_cid)
-                pid_str = (
-                    str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
-                )
-                logger.info(f"  ✓ Removed from expected blocks for peer {pid_str}")
 
                 # Notify sessions
                 sessions = self.sim.split_wanted_blocks(matched_cid)
                 if sessions:
-                    logger.info(f"  ✓ Notifying {len(sessions)} sessions")
                     for session in sessions:
                         await session.receive_block(matched_cid, block_data, peer_id)
 
                     if self._started and hasattr(self, "_nursery") and self._nursery:
                         self._nursery.start_soon(self.cancel_want, matched_cid)
             else:
-                logger.error("  ✗ NO MATCH FOUND!")
-                logger.error("  Block doesn't match any expected CID")
-                logger.error(f"  Expected CIDs ({len(expected_cids)}):")
-                for i, cid in enumerate(list(expected_cids)[:5]):
-                    logger.error(f"    {i + 1}. {format_cid_for_display(cid)}")
-                if len(expected_cids) > 5:
-                    logger.error(f"    ... and {len(expected_cids) - 5} more")
-
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("Block processing complete. Remaining expected blocks:")
-        remaining = self.presence_manager.get_expected_for_peer(peer_id)
-        if remaining:
-            logger.warning(f"  Still waiting for {len(remaining)} blocks:")
-            for i, cid in enumerate(remaining):
-                logger.warning(f"    {i + 1}. {format_cid_for_display(cid)}")
-        else:
-            logger.info("  ✓ All blocks received from this peer!")
-        logger.info("=" * 70)
+                logger.debug(
+                    f"Block {idx + 1}/{len(blocks)} doesn't match any expected CID"
+                )
 
     async def _process_blocks_v110(
         self, blocks: Sequence[Any], peer_id: PeerID

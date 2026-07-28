@@ -51,7 +51,7 @@ class BitswapSession:
             try:
                 providers = (
                     await self.client.provider_query_manager.find_providers_single(
-                        cid, timeout=min(5.0, timeout / 2)
+                        cid, timeout=min(60.0, timeout * 0.8)
                     )
                 )
                 if providers:
@@ -92,6 +92,7 @@ class BitswapSession:
 
         result: bytes | None = None
         error: Exception | None = None
+        MAX_RETRIES_PER_PEER = 3
 
         try:
             while time.time() - start_time < timeout:
@@ -129,7 +130,7 @@ class BitswapSession:
                         if data is not None:
                             result = data
                             logger.info(
-                                f"Session {self.id}: ✓ Block received! "
+                                f"Session {self.id}: Block received! "
                                 f"Size: {len(data)} bytes"
                             )
                             break
@@ -137,17 +138,21 @@ class BitswapSession:
                             event = trio.Event()
                 except trio.TooSlowError:
                     retry_interval = min(retry_interval * 1.5, 10.0)
-                    msg = (
+                    logger.debug(
                         f"Session {self.id}: Sub-timeout reached, "
                         f"retry {retry_interval:.1f}s"
                     )
-                    logger.debug(msg)
-                    
-                    # Remove the peer we just tried from requested_from so we can retry them
-                    # if no other peers have the block. This fixes the issue where bitswap
-                    # gets stuck if the only peer with the block drops the request.
-                    if target_peer and target_peer in requested_from:
-                        requested_from.remove(target_peer)
+
+                    # Track retry count per peer to avoid infinite retries
+                    if target_peer:
+                        if not hasattr(self, '_peer_retry_counts'):
+                            self._peer_retry_counts: dict = {}
+                        key = (target_peer, cid)
+                        count = self._peer_retry_counts.get(key, 0) + 1
+                        self._peer_retry_counts[key] = count
+                        if count >= MAX_RETRIES_PER_PEER:
+                            requested_from.add(target_peer)
+                            self._peer_retry_counts.pop(key, None)
 
         except Exception as e:
             logger.error(f"Session {self.id}: Error during block request: {e}")
@@ -314,7 +319,7 @@ class BitswapSession:
             finally:
                 for cid_obj in batch:
                     batch_event = batch_events.get(cid_obj)
-                    if batch_event and cid_obj in self._pending_requests:
+                    if batch_event is not None and cid_obj in self._pending_requests:
                         self._pending_requests[cid_obj].discard(batch_event)
                         if not self._pending_requests[cid_obj]:
                             del self._pending_requests[cid_obj]
