@@ -6,6 +6,7 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
+import os
 
 import trio
 import varint
@@ -520,6 +521,10 @@ class PeerRouting(IPeerRouting):
         """
         Refresh the routing table by performing lookups for random keys.
 
+        Per spec: "On every run, we generate a random peer ID for every
+        non-empty routing table's k-bucket and we look it up."
+        Also includes a lookup for the local peer ID.
+
         Returns
         -------
         None
@@ -540,3 +545,26 @@ class PeerRouting(IPeerRouting):
                     await self.routing_table.add_peer(peer_info)
             except Exception as e:
                 logger.debug(f"Failed to add discovered peer {peer_id}: {e}")
+
+        # Per spec: generate a random peer ID for every non-empty k-bucket
+        # and look it up to discover new peers
+        for bucket in self.routing_table.buckets:
+            if bucket.size() > 0:
+                # Generate a random peer ID that would fall in this bucket's range
+                random_key = os.urandom(32)
+                try:
+                    random_peers = await self.find_closest_peers_network(random_key)
+                    for peer_id in random_peers:
+                        try:
+                            addrs = self.host.get_peerstore().addrs(peer_id)
+                            if addrs:
+                                peer_info = PeerInfo(peer_id, addrs)
+                                await self.routing_table.add_peer(peer_info)
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to add peer {peer_id} during refresh: {e}"
+                            )
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to lookup random key for bucket refresh: {e}"
+                    )

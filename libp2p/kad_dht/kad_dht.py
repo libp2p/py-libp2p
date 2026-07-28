@@ -595,6 +595,23 @@ class KadDHT(Service):
                     key = message.key
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
+                    # Per spec: verify key is a valid CID
+                    try:
+                        from cid import make_cid
+                        make_cid(key)
+                    except Exception:
+                        logger.warning(
+                            f"ADD_PROVIDER key is not a valid CID: {key.hex()}, "
+                            "ignoring"
+                        )
+                        response = Message()
+                        response.type = Message.MessageType.ADD_PROVIDER
+                        response_bytes = response.SerializeToString()
+                        await stream.write(varint.encode(len(response_bytes)))
+                        await stream.write(response_bytes)
+                        await stream.close()
+                        return
+
                     # Consume the source signed-peer-record if sent
                     if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
@@ -789,11 +806,35 @@ class KadDHT(Service):
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
+                        # Per spec: also include closerPeers even when value is found
+                        closest_peers = self.routing_table.find_local_closest_peers(
+                            key, 20
+                        )
+                        for peer in closest_peers:
+                            if peer == peer_id:
+                                continue
+                            peer_proto = response.closerPeers.add()
+                            peer_proto.id = peer.to_bytes()
+                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
+                            try:
+                                addrs = self.host.get_peerstore().addrs(peer)
+                                for addr in addrs:
+                                    peer_proto.addrs.append(addr.to_bytes())
+                            except Exception:
+                                pass
+
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug("Sent GET_VALUE response")
+                        logger.debug("Sent GET_VALUE response with record and closer peers")
                     else:
                         logger.debug(f"No value found for key {key.hex()}")
 
@@ -889,11 +930,13 @@ class KadDHT(Service):
                             f"{key.hex()}: {e}"
                         )
                     finally:
-                        # Send acknowledgement
+                        # Send acknowledgement — echo the request per spec
                         response = Message()
                         response.type = Message.MessageType.PUT_VALUE
                         if success:
                             response.key = key
+                            # Echo the record back per spec requirement
+                            response.record.CopyFrom(message.record)
 
                         # Create sender_signed_peer_record for the response
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -1067,6 +1110,8 @@ class KadDHT(Service):
 
         # Collect valid records from peers: mapping peer -> Record
         valid_records: list[tuple[ID, Record]] = []
+        # Track peers that returned no valid record (for entry correction)
+        peers_with_no_record: set[ID] = set()
 
         # 3. Query peers using a semaphore-based sliding window (up to ALPHA
         #    concurrent queries). A new query starts as soon as any finishes.
@@ -1102,10 +1147,15 @@ class KadDHT(Service):
                                 )
                                 quorum_reached.set()
                         except Exception as e:
+                            peers_with_no_record.add(peer)
                             logger.debug(
                                 f"Received invalid record from {peer}, discarding: {e}"
                             )
+                    else:
+                        # Peer returned no record
+                        peers_with_no_record.add(peer)
             except Exception as e:
+                peers_with_no_record.add(peer)
                 logger.debug(f"Error querying peer {peer}: {e}")
             finally:
                 sem.release()
@@ -1175,6 +1225,36 @@ class KadDHT(Service):
                 async with trio.open_nursery() as nursery:
                     for p in outdated_peers:
                         nursery.start_soon(propagate, p)
+
+            # Entry correction: also update peers that returned no record
+            # but are among the k closest to the key (per spec requirement)
+            missing_peers = [
+                p for p in peers_with_no_record
+                if p in closest_peers[:BUCKET_SIZE]
+            ]
+            if missing_peers:
+                logger.debug(
+                    f"Entry correction: propagating value to {len(missing_peers)} "
+                    "peers that had no record among k closest"
+                )
+
+                async def propagate_to_missing(peer: ID) -> None:
+                    try:
+                        with trio.move_on_after(QUERY_TIMEOUT):
+                            await self.value_store._store_at_peer(
+                                peer, key_bytes, best_value
+                            )
+                            logger.debug(
+                                f"Propagated record to peer {peer} (had no record)"
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            f"Failed to propagate to peer {peer}: {e}"
+                        )
+
+                async with trio.open_nursery() as nursery:
+                    for p in missing_peers:
+                        nursery.start_soon(propagate_to_missing, p)
 
             # Store the best value locally
             self.value_store.put(key_bytes, best_value)
