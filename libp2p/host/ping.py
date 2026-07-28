@@ -109,11 +109,12 @@ async def _ping(stream: INetStream, cancel_scope: trio.CancelScope | None = None
     """
     ping_bytes = secrets.token_bytes(PING_LENGTH)
 
-    start = time.monotonic()
-    
     with cancel_scope or trio.CancelScope():
         with trio.fail_after(RESP_TIMEOUT):
             await stream.write(ping_bytes)
+            # Measure RTT from when the bytes were written (per spec: "from when
+            # it wrote the bytes to when it received them").
+            start = time.monotonic()
             # See the matching note in _handle_ping: stream.read(n) may return
             # fewer than n bytes even on a healthy connection, so a naive
             # single read() here can misreport a short-but-correct pong as a
@@ -216,6 +217,14 @@ class PingService:
             event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
         except Exception as error:
             event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
+            # Clean up the stream on error so the next ping creates a fresh one
+            async with self._lock:
+                self._outbound_streams.pop(peer_id, None)
+            if not stream.is_closed:
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
             raise
         finally:
             if event is not None and getattr(stream, 'metric_send_channel', None) is not None:
@@ -227,6 +236,27 @@ class PingService:
         Legacy support for callers expecting a list of RTTs.
         """
         rtts = []
-        async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
-            rtts.append(rtt)
+        stream = None
+        try:
+            async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
+                rtts.append(rtt)
+            # Per spec: "The dialing peer SHOULD close the write operation of
+            # the stream after sending the last payload."
+            async with self._lock:
+                stream = self._outbound_streams.pop(peer_id, None)
+            if stream is not None:
+                try:
+                    await stream.close()
+                except Exception:
+                    pass
+        except Exception:
+            # On error, reset the stream to signal abnormal termination
+            async with self._lock:
+                stream = self._outbound_streams.pop(peer_id, None)
+            if stream is not None:
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
+            raise
         return rtts
