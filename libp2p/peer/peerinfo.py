@@ -79,6 +79,8 @@ def peer_info_from_bytes(data: bytes) -> PeerInfo:
         peer_id = ID.from_string(lines[0])
         addrs = [multiaddr.Multiaddr(addr_str) for addr_str in lines[1:]]
         return PeerInfo(peer_id, addrs)
+    except InvalidAddrError:
+        raise
     except Exception as e:
         raise InvalidAddrError(f"failed to decode PeerInfo: {e}")
 

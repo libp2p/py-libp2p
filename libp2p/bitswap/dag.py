@@ -650,7 +650,7 @@ class MerkleDag:
         # Step 4: Parse the file node
         top_links, top_unixfs = decode_dag_pb(actual_file_data)
         filesize = top_unixfs.filesize if top_unixfs else 0
-        total_size = filesize or sum(lnk.size for lnk in top_links)
+        total_size = filesize if filesize else sum(lnk.size for lnk in top_links)
         msg = f"File node: {len(top_links)} top-level links, total size={total_size}"
         logger.info(f"{msg} bytes")
 
@@ -960,8 +960,22 @@ class MerkleDag:
         return decode_node(data, codec)
 
     async def remove_node(self, cid: CIDInput) -> None:
-        """Deletes a node from the local blockstore only."""
+        """Deletes a node and all its children from the local blockstore."""
         cid_bytes = cid_to_bytes(cid)
+
+        # Try to decode as DAG-PB to find child links
+        try:
+            block_data = await self.block_store.get_block(cid_bytes)
+            links, _ = decode_dag_pb(block_data)
+            # Recursively delete children
+            for link in links:
+                try:
+                    await self.remove_node(link.cid)
+                except Exception:
+                    pass  # Best-effort child deletion
+        except Exception:
+            pass  # Not a DAG node or not found — just delete root
+
         await self.block_store.delete_block(cid_bytes)
 
 

@@ -181,13 +181,16 @@ class FilesystemBlockStore(BlockStore):
 
     async def has_block(self, cid: CIDInput) -> bool:
         """Check if a block file exists on disk."""
-        return self._cid_to_path(cid).exists()
+        path = self._cid_to_path(cid)
+        return await trio.to_thread.run_sync(path.exists)
 
     async def delete_block(self, cid: CIDInput) -> None:
         """Delete a block file from disk."""
         path = self._cid_to_path(cid)
-        if path.exists():
-            await trio.to_thread.run_sync(path.unlink)
+        def _delete() -> None:
+            if path.exists():
+                path.unlink()
+        await trio.to_thread.run_sync(_delete)
 
     def get_all_cids(self) -> list[bytes]:
         """Return all stored CIDs as bytes by scanning the directory tree."""
