@@ -452,7 +452,8 @@ class KadDHT(Service):
             return
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
-        await self.add_peer(peer_id)
+        # Peer initiated a KAD stream, so they MUST support KAD server mode
+        await self.add_peer(peer_id, skip_server_mode_check=True)
         logger.debug(f"Added peer {peer_id} to routing table")
 
         closer_peer_envelope: Envelope | None = None
@@ -1269,11 +1270,14 @@ class KadDHT(Service):
 
     # Utility methods
 
-    async def add_peer(self, peer_id: ID) -> bool:
+    async def add_peer(
+        self, peer_id: ID, *, skip_server_mode_check: bool = False
+    ) -> bool:
         """
         Add a peer to the routing table.
 
         params: peer_id: The peer ID to add.
+        params: skip_server_mode_check: If True, skip the server-mode protocol check
 
         Returns
         -------
@@ -1281,7 +1285,9 @@ class KadDHT(Service):
             True if peer was added or updated, False otherwise.
 
         """
-        return await self.routing_table.add_peer(peer_id)
+        return await self.routing_table.add_peer(
+            peer_id, skip_server_mode_check=skip_server_mode_check
+        )
 
     async def provide(self, key: str) -> bool:
         """

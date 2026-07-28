@@ -240,8 +240,11 @@ class KBucket:
 
     async def _ping_peer(self, peer_id: ID) -> bool:
         """
-        Ping a peer using protobuf message to check
+        Ping a peer using the libp2p ping protocol to check
         if it's still alive and update last seen time.
+
+        Per spec: "Implementations must not actively send PING requests"
+        using the Kademlia protocol. We use the dedicated libp2p ping protocol.
 
         params: peer_id: The ID of the peer to ping
 
@@ -251,100 +254,21 @@ class KBucket:
             True if ping successful, False otherwise
 
         """
-        result = False
-        # Get peer info directly from the bucket
-        peer_info = self.get_peer_info(peer_id)
-        if not peer_info:
-            raise ValueError(f"Peer {peer_id} not in bucket")
+        from libp2p.host.ping import PingService
 
         try:
-            # Open a stream to the peer with the DHT protocol
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-
-            try:
-                # Create ping protobuf message
-                ping_msg = Message()
-                ping_msg.type = Message.PING  # Use correct enum
-
-                # Serialize and send with varint length prefix
-                msg_bytes = ping_msg.SerializeToString()
+            ping_service = PingService(self.host)
+            rtts = await ping_service.ping(peer_id, ping_amt=1)
+            if rtts:
                 logger.debug(
-                    f"Sending PING message to {peer_id}, size: {len(msg_bytes)} bytes"
+                    f"Successfully pinged peer {peer_id} "
+                    f"(RTT: {rtts[0]}ms via libp2p ping)"
                 )
-                await stream.write(varint.encode(len(msg_bytes)))
-                await stream.write(msg_bytes)
-
-                # Wait for response with timeout
-                with trio.move_on_after(2):  # 2 second timeout
-                    # Read response length (varint)
-                    length_bytes = b""
-                    while True:
-                        b = await stream.read(1)
-                        if not b:
-                            logger.warning(f"Peer {peer_id} disconnected during ping")
-                            return False
-                        length_bytes += b
-                        if b[0] & 0x80 == 0:
-                            break
-
-                    msg_len = varint.decode_bytes(length_bytes)
-                    if (
-                        msg_len <= 0 or msg_len > 1024 * 1024
-                    ):  # Sanity check on message size
-                        logger.warning(
-                            f"Invalid message length from {peer_id}: {msg_len}"
-                        )
-                        return False
-
-                    logger.debug(
-                        f"Receiving response from {peer_id}, size: {msg_len} bytes"
-                    )
-
-                    # Read full message
-                    response_bytes = b""
-                    remaining = msg_len
-                    while remaining > 0:
-                        chunk = await stream.read(remaining)
-                        if not chunk:
-                            logger.warning(f"Failed to read response from {peer_id}")
-                            return False
-                        response_bytes += chunk
-                        remaining -= len(chunk)
-
-                    # Parse protobuf response
-                    response = Message()
-                    try:
-                        response.ParseFromString(response_bytes)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to parse protobuf response from {peer_id}: {e}"
-                        )
-                        return False
-
-                    if response.type == Message.PING:
-                        # Update the last seen timestamp for this peer
-                        logger.debug(f"Successfully pinged peer {peer_id}")
-                        result = True
-                        return result
-
-                    else:
-                        logger.warning(
-                            f"Unexpected response type from {peer_id}: {response.type}"
-                        )
-                        return False
-
-                # If we get here, the ping timed out
-                logger.warning(f"Ping to peer {peer_id} timed out")
-                return False
-
-            finally:
-                await stream.close()
-
-        except Exception as e:
-            logger.error(f"Error pinging peer {peer_id}: {str(e)}")
+                return True
             return False
-
-        return False
+        except Exception as e:
+            logger.debug(f"Failed to ping peer {peer_id} via libp2p ping: {e}")
+            return False
 
     def refresh_peer_last_seen(self, peer_id: ID) -> bool:
         """
@@ -443,11 +367,19 @@ class RoutingTable:
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
 
-    async def add_peer(self, peer_obj: PeerInfo | ID) -> bool:
+    async def add_peer(
+        self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
+    ) -> bool:
         """
         Add a peer to the routing table.
 
+        Per spec: "Nodes add another node to their routing table if and only if
+        that node operates in server mode." We check if the peer supports the
+        KAD protocol via identify before adding, unless skip_server_mode_check
+        is True (e.g., when adding from an incoming KAD stream).
+
         :param peer_obj: Either PeerInfo object or peer ID to add
+        :param skip_server_mode_check: If True, skip the server-mode protocol check
 
         Returns
         -------
@@ -490,6 +422,26 @@ class RoutingTable:
             # Don't add ourselves
             if peer_id == self.local_id:
                 return False
+
+            # Per spec: only add peers that operate in server mode.
+            # A peer is in server mode if it supports the KAD protocol
+            # (learned via identify protocol). Only check if identify has
+            # populated protocol info for this peer.
+            if not skip_server_mode_check:
+                try:
+                    from .common import PROTOCOL_ID
+                    peer_protocols = self.host.get_peerstore().get_protocols(peer_id)
+                    if peer_protocols is not None and len(peer_protocols) > 0:
+                        # Identify has run — check if peer supports KAD
+                        if str(PROTOCOL_ID) not in peer_protocols:
+                            logger.debug(
+                                "Peer %s does not support KAD protocol, "
+                                "not adding to routing table (client mode)",
+                                peer_id,
+                            )
+                            return False
+                except Exception:
+                    pass
 
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
