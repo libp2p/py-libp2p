@@ -48,9 +48,7 @@ def peer_id_to_key(peer_id: ID) -> bytes:
     :param peer_id: The peer ID to convert
     :return: 32-byte (256-bit) key for routing table operations
     """
-    digest = hashlib.sha256(peer_id.to_bytes()).digest()
-    mh_bytes = multihash.encode(digest, "sha2-256")
-    return multihash.decode(mh_bytes).digest
+    return hashlib.sha256(peer_id.to_bytes()).digest()
 
 
 def key_to_int(key: bytes) -> int:
@@ -145,7 +143,9 @@ class KBucket:
                 oldest_peer_id,
                 peer_id,
             )
-            self.peers.popitem(last=False)  # Remove oldest peer
+            # Remove the specific peer by ID (not popitem) to handle concurrent mutations
+            if oldest_peer_id in self.peers:
+                del self.peers[oldest_peer_id]
             self.peers[peer_id] = (peer_info, current_time)
             return True
 
@@ -212,8 +212,8 @@ class KBucket:
                         try:
                             # Try to ping the peer
                             logger.debug("Pinging stale peer %s", peer_id)
-                            responce = await self._ping_peer(peer_id)
-                            if responce:
+                            response = await self._ping_peer(peer_id)
+                            if response:
                                 # Update the last seen time
                                 self.refresh_peer_last_seen(peer_id)
                                 logger.debug(f"Refreshed peer {peer_id}")

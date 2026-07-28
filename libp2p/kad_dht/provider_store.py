@@ -131,13 +131,19 @@ class ProviderStore:
 
     async def _republish_provider_records(self) -> None:
         """Republish all provider records for content this node is providing."""
+        # Snapshot the sets/dicts to avoid mutation during iteration
+        providing_keys_snapshot = list(self.providing_keys)
+        providers_snapshot = {
+            key: dict(providers) for key, providers in self.providers.items()
+        }
+
         # First, republish keys we're actively providing
-        for key in self.providing_keys:
+        for key in providing_keys_snapshot:
             logger.debug(f"Republishing provider record for key {key.hex()}")
             await self.provide(key)
 
         # Also check for any records that should be republished
-        for key, providers in self.providers.items():
+        for key, providers in providers_snapshot.items():
             for peer_id_str, record in providers.items():
                 # Only republish records for our own peer
                 if self.local_peer_id and str(self.local_peer_id) == peer_id_str:

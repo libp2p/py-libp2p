@@ -303,20 +303,23 @@ class KadDHT(Service):
         """Run the main DHT service loop."""
         # Main service loop
         while self.manager.is_running:
-            # Periodically refresh the routing table
-            await self.refresh_routing_table()
+            try:
+                # Periodically refresh the routing table
+                await self.refresh_routing_table()
 
-            # Check if it's time to republish provider records
-            current_time = time.time()
-            await self.provider_store._republish_provider_records()
-            self._last_provider_republish = current_time
+                # Check if it's time to republish provider records
+                current_time = time.time()
+                await self.provider_store._republish_provider_records()
+                self._last_provider_republish = current_time
 
-            # Clean up expired values and provider records
-            expired_values = self.value_store.cleanup_expired()
-            if expired_values > 0:
-                logger.debug(f"Cleaned up {expired_values} expired values")
+                # Clean up expired values and provider records
+                expired_values = self.value_store.cleanup_expired()
+                if expired_values > 0:
+                    logger.debug(f"Cleaned up {expired_values} expired values")
 
-            self.provider_store.cleanup_expired()
+                self.provider_store.cleanup_expired()
+            except Exception as e:
+                logger.error(f"Error in DHT maintenance loop: {e}")
 
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
@@ -495,6 +498,14 @@ class KadDHT(Service):
 
                 # Handle FIND_NODE message
                 if message.type == Message.MessageType.FIND_NODE:
+                    # Consume the source signed_peer_record if sent (validate first)
+                    if not maybe_consume_signed_record(message, self.host, peer_id):
+                        logger.error(
+                            "Received an invalid-signed-record, dropping the stream"
+                        )
+                        await stream.close()
+                        return
+
                     # Get target key directly from protobuf
                     target_key = message.key
 
@@ -503,14 +514,6 @@ class KadDHT(Service):
                         target_key, 20
                     )
                     logger.debug(f"Found {len(closest_peers)} peers close to target")
-
-                    # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
 
                     # Metrics Event
                     event.find_node = True
@@ -571,7 +574,7 @@ class KadDHT(Service):
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.debug(
-                        f"Sent FIND_NODE response with{len(response.closerPeers)} peers"
+                        f"Sent FIND_NODE response with {len(response.closerPeers)} peers"
                     )
 
                 # Handle PING message
@@ -1041,6 +1044,10 @@ class KadDHT(Service):
 
         """
         logger.debug(f"Getting value for key: {key}")
+
+        # Validate quorum parameter
+        if quorum < 0:
+            quorum = 0
 
         # Convert string key to bytes for lookup
         key_bytes = key.encode("utf-8")

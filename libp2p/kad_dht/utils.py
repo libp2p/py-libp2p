@@ -195,9 +195,7 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
 
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
-        digest = hashlib.sha256(peer_id.to_bytes()).digest()
-        mh_bytes = multihash.encode(digest, "sha2-256")
-        peer_hash = multihash.decode(mh_bytes).digest
+        peer_hash = hashlib.sha256(peer_id.to_bytes()).digest()
         return xor_distance(target_hash, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
