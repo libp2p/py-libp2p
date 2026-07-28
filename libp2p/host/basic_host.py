@@ -1073,7 +1073,8 @@ class BasicHost(IHost):
         event_started = getattr(swarm_conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
             try:
-                await event_started.wait()
+                with trio.fail_after(5.0):
+                    await event_started.wait()
             except Exception:
                 return
 
@@ -1162,7 +1163,8 @@ class BasicHost(IHost):
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
             try:
-                await event_started.wait()
+                with trio.fail_after(5.0):
+                    await event_started.wait()
             except Exception:
                 return
         self._schedule_identify(peer_id, reason="notifee-connected")

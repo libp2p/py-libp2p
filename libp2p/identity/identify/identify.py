@@ -76,7 +76,7 @@ def _mk_identify_protobuf(
         protocol_version=PROTOCOL_VERSION,
         agent_version=AGENT_VERSION,
         public_key=public_key.serialize(),
-        listen_addrs=map(_multiaddr_to_bytes, laddrs),
+        listen_addrs=[_multiaddr_to_bytes(addr) for addr in laddrs],
         observed_addr=observed_addr,
         protocols=protocols,
         signedPeerRecord=envelope_bytes,
@@ -109,6 +109,9 @@ def parse_identify_response(response: bytes) -> Identify:
     try:
         identify_response = Identify()
         identify_response.ParseFromString(response)
+        # Validate that the message has at least a public_key
+        if not identify_response.HasField("public_key"):
+            raise ValueError("Identify response missing public_key field")
         return identify_response
     except Exception as e:
         logger.error(f"Failed to parse identify response: {e}")
@@ -162,8 +165,14 @@ def identify_handler_for(
                 await stream.write(response)
             await stream.close()
             logger.debug("successfully handled request for %s from %s", ID, peer_id)
-        except (StreamClosed, StreamReset, MuxedStreamError):
+        except (StreamClosed, StreamReset):
             logger.debug("Fail to respond to %s request: stream closed or reset", ID)
+        except MuxedStreamError:
+            logger.debug("Fail to respond to %s request: muxed stream error", ID)
+            try:
+                await stream.reset()
+            except Exception:
+                pass
         except Exception as e:
             logger.error(
                 "Error sending identify response to %s: %s (type: %s)\n%s",
@@ -172,9 +181,8 @@ def identify_handler_for(
                 type(e),
                 traceback.format_exc(),
             )
-        finally:
             try:
-                await stream.close()
+                await stream.reset()
             except Exception:
                 pass
 
