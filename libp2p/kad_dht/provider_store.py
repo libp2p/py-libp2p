@@ -458,11 +458,10 @@ class ProviderStore:
                         # Consume the provider's signed-peer-record if sent, peer-id
                         # already sent with the provider-proto
                         if not maybe_consume_signed_record(provider_proto, self.host):
-                            logger.error(
-                                "Received an invalid-signed-record, "
-                                "ignoring the response"
+                            logger.warning(
+                                "Received an invalid-signed-record, skipping provider"
                             )
-                            return []
+                            continue
 
                         # Create peer ID from bytes
                         provider_id = ID(provider_proto.id)

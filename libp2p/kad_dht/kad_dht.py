@@ -714,42 +714,41 @@ class KadDHT(Service):
                         for addr in provider_info.addrs:
                             provider_proto.addrs.append(addr.to_bytes())
 
-                    # Also include closest peers if we don't have providers
-                    if not providers:
-                        closest_peers = self.routing_table.find_local_closest_peers(
-                            key, 20
+                    # Also include closest peers (always, per IPFS spec)
+                    closest_peers = self.routing_table.find_local_closest_peers(
+                        key, 20
+                    )
+                    logger.debug(
+                        f"Including {len(closest_peers)} closest peers"
+                        " in GET_PROVIDERS response"
+                    )
+
+                    for peer in closest_peers:
+                        # Skip if peer is the requester
+                        if peer == peer_id:
+                            continue
+
+                        peer_proto = response.closerPeers.add()
+                        peer_proto.id = peer.to_bytes()
+                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add the signed-records of closest_peers if cached
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer)
                         )
-                        logger.debug(
-                            f"No providers found, including {len(closest_peers)}"
-                            "closest peers"
-                        )
 
-                        for peer in closest_peers:
-                            # Skip if peer is the requester
-                            if peer == peer_id:
-                                continue
-
-                            peer_proto = response.closerPeers.add()
-                            peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
-
-                            # Add the signed-records of closest_peers if cached
-                            closer_peer_envelope = (
-                                self.host.get_peerstore().get_peer_record(peer)
+                        if closer_peer_envelope is not None:
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
                             )
 
-                            if closer_peer_envelope is not None:
-                                peer_proto.signedRecord = (
-                                    closer_peer_envelope.marshal_envelope()
-                                )
-
-                            # Add addresses if available
-                            try:
-                                addrs = self.host.get_peerstore().addrs(peer)
-                                for addr in addrs:
-                                    peer_proto.addrs.append(addr.to_bytes())
-                            except Exception:
-                                pass
+                        # Add addresses if available
+                        try:
+                            addrs = self.host.get_peerstore().addrs(peer)
+                            for addr in addrs:
+                                peer_proto.addrs.append(addr.to_bytes())
+                        except Exception:
+                            pass
 
                     # Serialize and send response
                     response_bytes = response.SerializeToString()

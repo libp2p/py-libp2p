@@ -104,12 +104,8 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     bytes: The resulting key.
 
     """
-    # Hash the data first, then encode as multihash
-    digest = hashlib.sha256(binary_data).digest()
-    mh_bytes = multihash.encode(digest, "sha2-256")
-    # Decode to get the digest part
-    mh = multihash.decode(mh_bytes)
-    return mh.digest
+    # Hash the data with SHA-256 to produce a 32-byte key
+    return hashlib.sha256(binary_data).digest()
 
 
 def xor_distance(key1: bytes, key2: bytes) -> int:
