@@ -241,8 +241,11 @@ class KadDHT(Service):
                 enable_auto_refresh=True,
             )
 
-        # Set protocol handlers
-        host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        # Set protocol handlers — only in server mode per spec:
+        # "Server mode nodes accept incoming streams using the KAD protocol.
+        #  Client mode nodes do not offer the KAD protocol for incoming streams."
+        if self.mode == DHTMode.SERVER:
+            host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     @property
     def strict_validation(self) -> bool:
@@ -430,6 +433,10 @@ class KadDHT(Service):
         """
         Switch the DHT mode.
 
+        Per spec: "Server mode nodes accept incoming streams using the KAD
+        protocol. Client mode nodes do not offer the KAD protocol for
+        incoming streams."
+
         :param new_mode: The new mode - must be DHTMode enum
         :return: The new mode as DHTMode enum
         """
@@ -437,9 +444,18 @@ class KadDHT(Service):
         if not isinstance(new_mode, DHTMode):
             raise TypeError(f"new_mode must be DHTMode enum, got {type(new_mode)}")
 
-        if new_mode == DHTMode.CLIENT:
-            self.routing_table.cleanup_routing_table()
+        old_mode = self.mode
         self.mode = new_mode
+
+        # Register/unregister KAD stream handler based on mode
+        if new_mode == DHTMode.SERVER and old_mode == DHTMode.CLIENT:
+            self.host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+            logger.debug("Registered KAD stream handler (switched to server mode)")
+        elif new_mode == DHTMode.CLIENT and old_mode == DHTMode.SERVER:
+            self.host.remove_stream_handler(PROTOCOL_ID)
+            logger.debug("Removed KAD stream handler (switched to client mode)")
+            self.routing_table.cleanup_routing_table()
+
         logger.info(f"Switched to {new_mode.value} mode")
         return self.mode
 
@@ -509,6 +525,14 @@ class KadDHT(Service):
 
                     # Get target key directly from protobuf
                     target_key = message.key
+
+                    # Per spec: "key must be set to the binary PeerId"
+                    if not target_key:
+                        logger.warning(
+                            "FIND_NODE received with empty key, ignoring"
+                        )
+                        await stream.close()
+                        return
 
                     # Find closest peers to the target key
                     closest_peers = self.routing_table.find_local_closest_peers(

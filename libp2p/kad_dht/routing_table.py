@@ -634,6 +634,10 @@ class RoutingTable:
         """
         Check if a bucket should be split according to Kademlia rules.
 
+        Per spec: "must try to maintain k peers with shared key prefix of
+        length L, for every L in [0..255]". We split any full bucket up
+        to the maximum of 256 buckets.
+
         :param bucket: The bucket to check
         :return: True if the bucket should be split
         """
@@ -642,30 +646,7 @@ class RoutingTable:
             logger.debug("Maximum number of buckets reached, cannot split")
             return False
 
-        # Check if the bucket contains our local ID
-        local_key = peer_id_to_key(self.local_id)
-        local_key_int = key_to_int(local_key)
-        contains_local_id = bucket.min_range <= local_key_int < bucket.max_range
-
-        logger.debug(
-            f"Bucket range: {bucket.min_range} - {bucket.max_range}, "
-            f"local_key_int: {local_key_int}, contains_local: {contains_local_id}"
-        )
-
-        # Strict Kademlia only splits if it contains the local ID.
-        # However, to improve discovery and routing table size for nodes
-        # that don't receive many incoming connections, we relax this rule
-        # and allow splitting far buckets until we reach a reasonable depth.
-        if contains_local_id:
-            return True
-
-        # Allow splitting any bucket if we have fewer than MAXIMUM_BUCKETS / 2 buckets.
-        # This allows the routing table to grow and store more peers even if they
-        # are not close to our local ID.
-        if len(self.buckets) < (MAXIMUM_BUCKETS // 2):
-            return True
-
-        return False
+        return True
 
     def _split_bucket(self, bucket: KBucket) -> bool:
         """
