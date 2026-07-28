@@ -211,12 +211,17 @@ async def read_length_prefixed_protobuf(
                 f"Message length {msg_length} exceeds maximum allowed {max_length}"
             )
 
-        # Read the protobuf message
-        data = await stream.read(msg_length)
-        if len(data) != msg_length:
-            raise Exception(
-                f"Incomplete message: expected {msg_length}, got {len(data)}"
-            )
+        # Read the protobuf message, handling partial reads
+        data = b""
+        remaining = msg_length
+        while remaining > 0:
+            chunk = await stream.read(remaining)
+            if not chunk:
+                raise Exception(
+                    f"Incomplete message: expected {msg_length}, got {len(data)}"
+                )
+            data += chunk
+            remaining -= len(chunk)
 
         return data
     else:

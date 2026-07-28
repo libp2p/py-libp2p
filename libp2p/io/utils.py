@@ -44,13 +44,39 @@ async def read_exactly(
 
     """
     buffer = bytearray()
-    buffer.extend(await reader.read(n))
+    initial = await reader.read(n)
+    if not initial:
+        # Stream is closed; no point retrying
+        context_info = ""
+        try:
+            if hasattr(reader, "conn_state"):
+                conn_state_method = getattr(reader, "conn_state")
+                if callable(conn_state_method):
+                    state = conn_state_method()
+                    if isinstance(state, dict):
+                        transport = state.get("transport", "unknown")
+                        duration = state.get("connection_duration", 0)
+                        context_info = (
+                            f" (transport: {transport}, duration: {duration:.2f}s)"
+                        )
+        except Exception:
+            pass
+        raise IncompleteReadError(
+            f"Connection closed during read operation: expected {n} bytes but "
+            f"received 0 bytes{context_info}",
+            expected_bytes=n,
+            received_bytes=0,
+        )
+    buffer.extend(initial)
 
     for _ in range(retry_count):
         if len(buffer) < n:
             remaining = n - len(buffer)
-            buffer.extend(await reader.read(remaining))
-
+            chunk = await reader.read(remaining)
+            if not chunk:
+                # Stream closed mid-read; stop retrying
+                break
+            buffer.extend(chunk)
         else:
             return bytes(buffer)
 
