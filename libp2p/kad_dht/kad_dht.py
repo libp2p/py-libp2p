@@ -478,6 +478,7 @@ class KadDHT(Service):
         try:
             # Read varint-prefixed length for the message
             length_prefix = b""
+            max_varint_bytes = 10  # varint max is 10 bytes for uint64
             while True:
                 byte = await stream.read(1)
                 if not byte:
@@ -487,7 +488,20 @@ class KadDHT(Service):
                 length_prefix += byte
                 if byte[0] & 0x80 == 0:
                     break
+                if len(length_prefix) >= max_varint_bytes:
+                    logger.warning("Varint length exceeds maximum bytes")
+                    await stream.close()
+                    return
             msg_length = varint.decode_bytes(length_prefix)
+
+            # Sanity check message size to prevent OOM
+            max_message_size = 4 * 1024 * 1024  # 4 MB
+            if msg_length > max_message_size:
+                logger.warning(
+                    f"DHT message too large: {msg_length} bytes (max {max_message_size})"
+                )
+                await stream.close()
+                return
 
             # Read the message bytes
             msg_bytes = b""

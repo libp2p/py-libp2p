@@ -100,12 +100,21 @@ import time
 class _NegativePeerCache:
     """Short-lived cache of peers whose all addresses recently failed."""
 
-    def __init__(self, ttl: float = 300.0) -> None:  # 5 minutes default
+    def __init__(self, ttl: float = 300.0, max_size: int = 10000) -> None:
         self._cache: dict[str, float] = {}  # peer_id -> expiry timestamp
         self._ttl = ttl
+        self._max_size = max_size
 
     def mark_failed(self, peer_id: str) -> None:
+        if len(self._cache) >= self._max_size:
+            self._evict_expired()
         self._cache[peer_id] = time.monotonic() + self._ttl
+
+    def _evict_expired(self) -> None:
+        now = time.monotonic()
+        expired = [k for k, v in self._cache.items() if now >= v]
+        for k in expired:
+            del self._cache[k]
 
     def is_blocked(self, peer_id: str) -> bool:
         expiry = self._cache.get(peer_id)
@@ -121,6 +130,7 @@ class _NegativePeerCache:
         self._cache.pop(peer_id, None)
 
 _UNPARSEABLE_ADDRS: set[bytes] = set()
+_MAX_UNPARSEABLE_ADDRS = 10000
 
 def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
     if raw in _UNPARSEABLE_ADDRS:
@@ -128,7 +138,8 @@ def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
     try:
         return Multiaddr(raw)
     except Exception:
-        _UNPARSEABLE_ADDRS.add(raw)
+        if len(_UNPARSEABLE_ADDRS) < _MAX_UNPARSEABLE_ADDRS:
+            _UNPARSEABLE_ADDRS.add(raw)
         logger.debug("Skipping permanently unparseable multiaddr (cached): %r", raw[:64])
         return None
 

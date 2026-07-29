@@ -57,7 +57,7 @@ class TransportUpgrader:
         try:
             if is_initiator:
                 if peer_id is None:
-                    raise ValueError("peer_id must be provided for outbout connection")
+                    raise ValueError("peer_id must be provided for outbound connection")
                 secure_conn = await self.security_multistream.secure_outbound(
                     raw_conn, peer_id
                 )

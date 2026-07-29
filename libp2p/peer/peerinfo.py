@@ -33,6 +33,9 @@ class PeerInfo:
             and self.addrs == other.addrs
         )
 
+    def __hash__(self) -> int:
+        return hash(self.peer_id)
+
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
