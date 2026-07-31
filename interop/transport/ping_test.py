@@ -269,7 +269,16 @@ class PingTest:
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
         """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+        try:
+            value = addr.value_for_protocol("ip4")
+        except multiaddr.exceptions.ProtocolLookupError:
+            value = None
+        if value is not None:
+            return value
+        try:
+            return addr.value_for_protocol("ip6")
+        except multiaddr.exceptions.ProtocolLookupError:
+            return None
 
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
