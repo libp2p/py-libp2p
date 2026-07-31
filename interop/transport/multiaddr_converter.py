@@ -1,6 +1,8 @@
 import sys
+from typing import List, Optional, Tuple
+
 import multiaddr
-from typing import Tuple, List, Optional
+
 
 def get_ip_value(addr: multiaddr.Multiaddr) -> Optional[str]:
     """Extract IP value from multiaddr (IPv4 or IPv6)."""
@@ -25,7 +27,9 @@ def extract_p2p(addr: multiaddr.Multiaddr) -> Tuple[multiaddr.Multiaddr, Optiona
             addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
     return addr, p2p_value
 
-def filter_by_transport(addresses: List[multiaddr.Multiaddr], transport: str) -> List[multiaddr.Multiaddr]:
+def filter_by_transport(
+    addresses: List[multiaddr.Multiaddr], transport: str
+) -> List[multiaddr.Multiaddr]:
     """Filter addresses to match current transport type."""
     filtered = []
     for addr in addresses:
@@ -44,7 +48,9 @@ def filter_by_transport(addresses: List[multiaddr.Multiaddr], transport: str) ->
             filtered.append(addr)
     return filtered if filtered else addresses
 
-def replace_loopback_ip(addresses: List[multiaddr.Multiaddr], ip: str) -> List[multiaddr.Multiaddr]:
+def replace_loopback_ip(
+    addresses: List[multiaddr.Multiaddr], ip: str
+) -> List[multiaddr.Multiaddr]:
     """Replace loopback IPs with the given IP."""
     results = []
     for addr in addresses:

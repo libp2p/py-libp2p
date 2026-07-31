@@ -47,7 +47,10 @@ class Key(ABC):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Key):
             return NotImplemented
-        return self.get_type() == other.get_type() and self.to_bytes() == other.to_bytes()
+        return (
+            self.get_type() == other.get_type()
+            and self.to_bytes() == other.to_bytes()
+        )
 
 
 class PublicKey(Key):

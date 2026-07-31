@@ -5,6 +5,7 @@ from collections.abc import (
 import ipaddress
 import logging
 import random
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 from libp2p.metrics.swarm import SwarmEvent
@@ -95,8 +96,6 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
     return stream_handler
 
 
-import time
-
 class _NegativePeerCache:
     """Short-lived cache of peers whose all addresses recently failed."""
 
@@ -140,7 +139,10 @@ def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
     except Exception:
         if len(_UNPARSEABLE_ADDRS) < _MAX_UNPARSEABLE_ADDRS:
             _UNPARSEABLE_ADDRS.add(raw)
-        logger.debug("Skipping permanently unparseable multiaddr (cached): %r", raw[:64])
+        logger.debug(
+            "Skipping permanently unparseable multiaddr (cached): %r",
+            raw[:64],
+        )
         return None
 
 
@@ -635,8 +637,14 @@ class Swarm(Service, INetworkService):
             await self.metric_send_channel.send(event)
 
         if self._negative_peer_cache.is_blocked(str(peer_id)):
-            logger.debug("Peer %s recently failed all addresses (negative cache)", peer_id)
-            raise SwarmException(f"Peer {peer_id} recently failed all addresses (negative cache)")
+            logger.debug(
+                "Peer %s recently failed all addresses (negative cache)",
+                peer_id,
+            )
+            raise SwarmException(
+                f"Peer {peer_id} recently failed all addresses "
+                "(negative cache)"
+            )
 
         # Check if we already have connections
         existing_connections = self.get_connections(peer_id)
@@ -662,30 +670,31 @@ class Swarm(Service, INetworkService):
         self._ongoing_dials[peer_id] = dial_event
         try:
             logger.debug("attempting to dial peer %s", peer_id)
-    
+
             try:
                 # Get peer info from peer store
                 addrs = self.peerstore.addrs(peer_id)
             except PeerStoreError as error:
                 raise SwarmException(f"No known addresses to peer {peer_id}") from error
-    
+
             if not addrs:
                 raise SwarmException(f"No known addresses to peer {peer_id}")
-    
+
             # Filter addresses through connection gate (InterceptAddrDial)
             gate = self.connection_gate
             allowed_addrs = []
             for addr in addrs:
                 if await gate.is_allowed(addr):
                     allowed_addrs.append(addr)
-    
+
             if not allowed_addrs:
                 raise SwarmException(
                     f"All addresses for peer {peer_id} blocked by connection gate"
                 )
-    
+
             # Filter out loopback addresses if public addresses are available
-            # This prevents the node from dialing itself when DHT peers advertise localhost
+            # This prevents the node from dialing itself when DHT peers
+            # advertise localhost
             public_addrs = [
                 a
                 for a in allowed_addrs
@@ -693,20 +702,23 @@ class Swarm(Service, INetworkService):
             ]
             if public_addrs:
                 allowed_addrs = public_addrs
-    
+
             from libp2p.utils.address_validation import is_ipv6_available
             if not is_ipv6_available():
-                allowed_addrs = [a for a in allowed_addrs if not str(a).startswith("/ip6/")]
-    
+                allowed_addrs = [
+                    a for a in allowed_addrs
+                    if not str(a).startswith("/ip6/")
+                ]
+
             connections = []
             exceptions: list[SwarmException] = []
-    
+
             # Try allowed addresses using Happy Eyeballs algorithm
             with trio.CancelScope() as cancel_scope:
                 async with trio.open_nursery() as nursery:
                     for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
                         failed_event = trio.Event()
-    
+
                         async def dial_task(
                             addr: Any = multiaddr, ev: Any = failed_event
                         ) -> None:
@@ -722,29 +734,30 @@ class Swarm(Service, INetworkService):
                             except SwarmException as e:
                                 exceptions.append(e)
                                 logger.debug(
-                                    "encountered exception when trying to connect to %s",
+                                    "encountered exception when trying to "
+                                    "connect to %s",
                                     addr,
                                     exc_info=e,
                                 )
                                 ev.set()
-    
+
                         nursery.start_soon(dial_task)
-    
+
                         # Start next dial immediately if this one fails, or after 250ms
                         with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
                             await failed_event.wait()
-    
+
             if not connections:
                 # Tried all addresses, raising exception.
-    
+
                 # Emit metric-event for dial_attempt failure
                 event = SwarmEvent()
                 event.peer_id = peer_id.pretty()
                 event.dial_attempt_error = True
-    
+
                 if self.metric_send_channel is not None:
                     await self.metric_send_channel.send(event)
-    
+
                 self._negative_peer_cache.mark_failed(str(peer_id))
                 raise SwarmDialAllFailedError(
                     f"unable to connect to {peer_id}, no addresses established a "
@@ -752,7 +765,7 @@ class Swarm(Service, INetworkService):
                     peer_id=peer_id,
                     num_addrs_tried=len(exceptions),
                 ) from MultiError(exceptions)
-    
+
             self._negative_peer_cache.evict(str(peer_id))
             return connections
         finally:
@@ -775,14 +788,18 @@ class Swarm(Service, INetworkService):
                 return await self._dial_addr_single_attempt(addr, peer_id)
             except Exception as e:
                 last_exception = e
-                
+
                 # Check for deterministic errors that should not be retried
                 error_msg = str(e)
                 if getattr(e, "__cause__", None):
                     error_msg += f" {e.__cause__}"
-                    
+
                 if "Peer ID mismatch" in error_msg:
-                    logger.debug(f"Skipping retries for peer {peer_id} at {addr} due to identity mismatch")
+                    logger.debug(
+                        "Skipping retries for peer %s at %s due to "
+                        "identity mismatch",
+                        peer_id, addr,
+                    )
                     try:
                         self.peerstore.clear_addrs(peer_id)
                     except Exception:
@@ -1975,7 +1992,8 @@ class Swarm(Service, INetworkService):
             if muxed_conn.is_closed:
                 raise SwarmException("Connection closed while starting")
             logger.debug(
-                f"Swarm::add_conn | event_started received for peer {muxed_conn.peer_id}"
+                "Swarm::add_conn | event_started received for peer "
+                f"{muxed_conn.peer_id}"
             )
             # Verify connection is fully established before proceeding.
             # For QUIC connections, wait for the connected event.
@@ -2001,12 +2019,14 @@ class Swarm(Service, INetworkService):
             if peer_id not in self.connections:
                 self.connections[peer_id] = []
 
-            # Check for duplicate connections by comparing the underlying muxed connection
+            # Check for duplicate connections by comparing the
+            # underlying muxed connection
             for existing_conn in self.connections[peer_id]:
                 if existing_conn.muxed_conn == muxed_conn:
                     logger.debug(f"Connection already exists for peer {peer_id}")
                     await swarm_conn.close()
-                    # existing_conn is a SwarmConn since it's stored in the connections list
+                    # existing_conn is a SwarmConn since it's stored
+                    # in the connections list
                     return existing_conn  # type: ignore[return-value]
 
             self.connections[peer_id].append(swarm_conn)

@@ -9,6 +9,7 @@ Environment variables are accepted in uppercase or lowercase where listed in get
 """
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 import ipaddress
 import json
@@ -18,7 +19,7 @@ import ssl
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+import traceback
 from typing import Any
 
 from cryptography import x509
@@ -26,13 +27,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 import multiaddr
-import redis
 import trio
 
-from .tls_config import get_wss_server_context
-from .container_utils import get_container_ip
+from .multiaddr_converter import (
+    extract_p2p,
+    filter_by_transport,
+    get_ip_value,
+    replace_loopback_ip,
+)
 from .redis_coordinator import RedisCoordinator
-from .multiaddr_converter import filter_by_transport, extract_p2p, get_ip_value, replace_loopback_ip
 
 # ExceptionGroup is built-in in Python 3.11+, import for older versions
 try:
@@ -66,9 +69,13 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
-from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 _orig_mk_identify_protobuf = _identify_mod._mk_identify_protobuf
+
+
+def get_protocol_names(addr: multiaddr.Multiaddr) -> list[str]:
+    """Return list of protocol names in a multiaddr."""
+    return [p.name for p in addr.protocols()]
 
 
 def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
@@ -252,7 +259,10 @@ class PingTest:
             self.redis_listener_key = f"{self.test_key}_listener_multiaddr"
 
         self.host: Any = None
-        self.redis_coordinator = RedisCoordinator(self.redis_host, self.redis_port, min(self.test_timeout_seconds, 120))
+        self.redis_coordinator = RedisCoordinator(
+            self.redis_host, self.redis_port,
+            min(self.test_timeout_seconds, 120),
+        )
         self.ping_received = False
 
     # Note: setup_redis() removed - _connect_redis_with_retry() is used instead

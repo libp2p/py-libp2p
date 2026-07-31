@@ -16,10 +16,8 @@ import time
 import pytest
 
 from libp2p.network.decay import (
-    DEFAULT_RESOLUTION,
     Decayer,
     DecayingTag,
-    DecayingValue,
     bump_overwrite,
     bump_sum_bounded,
     bump_sum_unbounded,
@@ -30,7 +28,6 @@ from libp2p.network.decay import (
 )
 from libp2p.network.tag_store import TagStore
 from libp2p.peer.id import ID
-
 
 PEER_A = ID.from_base58("QmcgpsyWgH8Y8ajJz1Cu72KnS5uo2Aa2LpzU7kinSupNKC")
 PEER_B = ID.from_base58("QmTzQ1kKpJwVGgzJuEdq7wAA5EQUWbVcPKJ6M7eBz3vqv7")
@@ -86,7 +83,8 @@ class TestDecayFunctions:
         assert erase is True
 
     def test_decay_expire_when_inactive_is_noop(self):
-        """decay_expire_when_inactive fn itself never erases (Decayer checks last_bump)."""
+        # decay_expire_when_inactive fn itself never erases
+        # (Decayer checks last_bump).
         fn = decay_expire_when_inactive(60.0)
         val, erase = fn(100)
         assert val == 100
@@ -256,8 +254,12 @@ class TestDecayer:
 
     def test_multiple_tags_independent(self, decayer, store):
         """Multiple registered tags for the same peer are independent."""
-        tag_a = decayer.register_decaying_tag("a", 10.0, decay_none(), bump_sum_unbounded())
-        tag_b = decayer.register_decaying_tag("b", 10.0, decay_none(), bump_sum_unbounded())
+        tag_a = decayer.register_decaying_tag(
+            "a", 10.0, decay_none(), bump_sum_unbounded()
+        )
+        tag_b = decayer.register_decaying_tag(
+            "b", 10.0, decay_none(), bump_sum_unbounded()
+        )
         tag_a.bump(PEER_A, 10)
         tag_b.bump(PEER_A, 20)
         assert store.get_tag(PEER_A, "a") == 10

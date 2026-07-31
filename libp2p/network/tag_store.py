@@ -444,7 +444,10 @@ class TagStore:
                 if not self._tags[peer_id].conns:
                     self._tags.pop(peer_id, None)
                     self._protected.pop(peer_id, None)
-                    logger.debug(f"Removed last connection for {peer_id}: tag entry deleted")
+                    logger.debug(
+                        "Removed last connection for %s: "
+                        "tag entry deleted", peer_id
+                    )
 
     def clear_peer(self, peer_id: "ID") -> None:
         """

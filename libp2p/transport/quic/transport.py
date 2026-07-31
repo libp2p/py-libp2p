@@ -13,7 +13,6 @@ from aioquic.quic.configuration import (
 from aioquic.quic.connection import (
     QuicConnection as NativeQUICConnection,
 )
-from aioquic.quic.logger import QuicLogger
 import multiaddr
 import trio
 
@@ -278,7 +277,8 @@ class QUICTransport(ITransport):
             import copy
             config = copy.copy(config)
             config.is_client = True
-            # Remove quic_logger to prevent "QuicLoggerTrace does not belong to QuicLogger" crash
+            # Remove quic_logger to prevent
+            # "QuicLoggerTrace does not belong to QuicLogger" crash
 
             # Ensure client certificate is properly set for mutual authentication
             if not config.certificate or not config.private_key:

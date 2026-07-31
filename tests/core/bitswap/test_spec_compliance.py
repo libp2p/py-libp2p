@@ -8,12 +8,10 @@ Each test targets a specific spec requirement or a bug fix from the
 spec compliance audit.
 """
 
-import hashlib
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
-from libp2p.bitswap.block_store import MemoryBlockStore
 from libp2p.bitswap.cid import compute_cid_v1, get_cid_prefix, parse_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.config import (
@@ -33,7 +31,6 @@ from libp2p.bitswap.wantlist import (
     BlockPresenceType,
     WantType,
 )
-
 
 # ── BUG-9: v1.0.0 blocks field vs payload field ──────────────────────────────
 
@@ -86,7 +83,7 @@ class TestSendDontHaveRespected:
     """
 
     def test_wantlist_entry_send_dont_have_field(self):
-        """sendDontHave field is correctly set in protobuf."""
+        """SendDontHave field is correctly set in protobuf."""
         cid = compute_cid_v1(b"test")
         entry = create_wantlist_entry(cid, send_dont_have=True)
         assert entry.sendDontHave is True
@@ -95,19 +92,19 @@ class TestSendDontHaveRespected:
         assert entry2.sendDontHave is False
 
     def test_wantlist_entry_send_dont_have_default(self):
-        """sendDontHave defaults to False per spec."""
+        """SendDontHave defaults to False per spec."""
         cid = compute_cid_v1(b"test")
         entry = create_wantlist_entry(cid)
         assert entry.sendDontHave is False
 
     def test_wanttype_block_defaults_to_zero(self):
-        """wantType defaults to Block (0) per spec."""
+        """WantType defaults to Block (0) per spec."""
         cid = compute_cid_v1(b"test")
         entry = create_wantlist_entry(cid)
         assert entry.wantType == 0
 
     def test_wanttype_have_is_one(self):
-        """wantType Have = 1 per spec."""
+        """WantType Have = 1 per spec."""
         cid = compute_cid_v1(b"test")
         entry = create_wantlist_entry(cid, want_type=WantType.Have)
         assert entry.wantType == 1
@@ -213,13 +210,13 @@ class TestPendingBytes:
     """
 
     def test_pending_bytes_field_in_proto(self):
-        """pendingBytes field exists in protobuf message."""
+        """PendingBytes field exists in protobuf message."""
         msg = Message()
         msg.pendingBytes = 12345
         assert msg.pendingBytes == 12345
 
     def test_pending_bytes_default_zero(self):
-        """pendingBytes defaults to 0."""
+        """PendingBytes defaults to 0."""
         msg = Message()
         assert msg.pendingBytes == 0
 
@@ -386,7 +383,9 @@ class TestBlockSizeLimits:
         cid = compute_cid_v1(b"too-big")
         oversized_data = b"x" * (MAX_BLOCK_SIZE + 1)
         with pytest.raises(Exception):
-            client._wantlist[cid] = {"priority": 1, "want_type": 0, "send_dont_have": False}
+            client._wantlist[cid] = {
+                "priority": 1, "want_type": 0, "send_dont_have": False
+            }
             # add_block validates size
             import trio
 

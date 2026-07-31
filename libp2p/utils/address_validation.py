@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import ipaddress
-import socket
 import functools
+import ipaddress
 import logging
+import socket
 
 from multiaddr import Multiaddr
+from multiaddr.utils import get_network_addrs, get_thin_waist_addresses
 
 logger = logging.getLogger(__name__)
-from multiaddr.utils import get_network_addrs, get_thin_waist_addresses
 
 
 def _safe_get_network_addrs(ip_version: int) -> list[str]:

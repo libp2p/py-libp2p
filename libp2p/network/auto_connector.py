@@ -115,7 +115,9 @@ class AutoConnector:
         min_connections = self.swarm.connection_config.min_connections
 
         logger.info(
-            f"AUTO_CONNECTOR_STATE: num_connections={num_connections}, low_watermark={low_watermark}, min_connections={min_connections}"
+            "AUTO_CONNECTOR_STATE: num_connections=%s, "
+            "low_watermark=%s, min_connections=%s",
+            num_connections, low_watermark, min_connections,
         )
 
         # Only connect if below low watermark
@@ -130,7 +132,9 @@ class AutoConnector:
             return
 
         logger.info(
-            f"the connection ({num_connections}) is less the low limit ({low_watermark}) so connection manager is initiating {needed} number of new connections"
+            "the connection (%s) is less the low limit (%s) "
+            "so connection manager is initiating %s number of new connections",
+            num_connections, low_watermark, needed,
         )
 
         # Get candidate peers from peerstore
@@ -144,7 +148,7 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        # We need to limit concurrency to avoid OS "Too many open files" errors 
+        # We need to limit concurrency to avoid OS "Too many open files" errors
         # (Kubo default is 160 concurrent outbound dials)
         dial_limiter = trio.CapacityLimiter(160)
 

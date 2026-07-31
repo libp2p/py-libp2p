@@ -4,8 +4,9 @@ Tests for connection tagging and direction functionality.
 Tests for TagStore, Direction enum, and integration with connection pruning.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from libp2p.network.tag_store import (
     CommonTags,
@@ -364,7 +365,8 @@ class TestTagStoreNotifee:
 
     @pytest.mark.trio
     async def test_disconnected_removes_entry_when_last(self, store, peer_id):
-        """TagStoreNotifee.disconnected() deletes the entry when last connection leaves."""
+        # TagStoreNotifee.disconnected() deletes the entry when
+        # last connection leaves.
         notifee = TagStoreNotifee(store)
         conn = self._make_conn(peer_id)
         network = MagicMock()

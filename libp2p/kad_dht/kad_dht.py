@@ -498,7 +498,8 @@ class KadDHT(Service):
             max_message_size = 4 * 1024 * 1024  # 4 MB
             if msg_length > max_message_size:
                 logger.warning(
-                    f"DHT message too large: {msg_length} bytes (max {max_message_size})"
+                    "DHT message too large: %s bytes (max %s)",
+                    msg_length, max_message_size,
                 )
                 await stream.close()
                 return
@@ -613,7 +614,8 @@ class KadDHT(Service):
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.debug(
-                        f"Sent FIND_NODE response with {len(response.closerPeers)} peers"
+                        "Sent FIND_NODE response with %s peers",
+                        len(response.closerPeers),
                     )
 
                 # Handle PING message
@@ -873,7 +875,10 @@ class KadDHT(Service):
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug("Sent GET_VALUE response with record and closer peers")
+                        logger.debug(
+                            "Sent GET_VALUE response with record "
+                            "and closer peers"
+                        )
                     else:
                         logger.debug(f"No value found for key {key.hex()}")
 

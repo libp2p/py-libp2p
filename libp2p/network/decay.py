@@ -12,18 +12,18 @@ requiring manual cleanup — the value naturally falls to zero and is erased.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
+import math
 import time
 from typing import TYPE_CHECKING
 
 import trio
 
 if TYPE_CHECKING:
-    from libp2p.peer.id import ID
     from libp2p.network.tag_store import TagStore
+    from libp2p.peer.id import ID
 
 logger = logging.getLogger("libp2p.network.decay")
 
@@ -70,6 +70,7 @@ def decay_fixed(minuend: int) -> DecayFn:
     ----------
     minuend : int
         Amount to subtract each tick.
+
     """
 
     def fn(value: int) -> tuple[int, bool]:
@@ -88,6 +89,7 @@ def decay_linear(coef: float) -> DecayFn:
     coef : float
         Decay coefficient (e.g. 0.5 halves the value each tick).
         Must be in (0, 1] — values >= 1 never decay.
+
     """
 
     def fn(value: int) -> tuple[int, bool]:
@@ -108,6 +110,7 @@ def decay_expire_when_inactive(after_seconds: float) -> DecayFn:
     ----------
     after_seconds : float
         Inactivity threshold in seconds.
+
     """
 
     def fn(value: int) -> tuple[int, bool]:
@@ -140,6 +143,7 @@ def bump_sum_bounded(min_val: int, max_val: int) -> BumpFn:
         Minimum allowed value.
     max_val : int
         Maximum allowed value.
+
     """
     return lambda old, delta: max(min_val, min(max_val, old + delta))
 
@@ -197,6 +201,7 @@ class DecayingTag:
             The peer to bump.
         delta : int
             The bump delta — interpreted by bump_fn (e.g. add, overwrite).
+
         """
         self._decayer.bump(peer_id, self, delta)
 
@@ -208,6 +213,7 @@ class DecayingTag:
         ----------
         peer_id : ID
             The peer to remove the tag from.
+
         """
         self._decayer.remove(peer_id, self)
 
@@ -242,6 +248,7 @@ class Decayer:
         resolution : float
             Clock tick interval in seconds.  Individual tag intervals are
             rounded up to the nearest multiple of this value.
+
         """
         self._tag_store = tag_store
         self._resolution = resolution
@@ -279,11 +286,14 @@ class Decayer:
         -------
         DecayingTag
             Handle for bumping and removing this tag.
+
         """
         if interval < self._resolution:
             effective_interval = self._resolution
         else:
-            effective_interval = math.ceil(interval / self._resolution) * self._resolution
+            effective_interval = (
+                math.ceil(interval / self._resolution) * self._resolution
+            )
         tag = DecayingTag(name, effective_interval, decay_fn, bump_fn, self)
         self._tags[name] = tag
         return tag
@@ -302,6 +312,7 @@ class Decayer:
             Tag whose bump_fn will be applied.
         delta : int
             Bump delta, passed to bump_fn.
+
         """
         key = (peer_id, tag.name)
         dv = self._values.get(key)
@@ -332,6 +343,7 @@ class Decayer:
             Target peer.
         tag : DecayingTag
             Tag to remove.
+
         """
         key = (peer_id, tag.name)
         if self._values.pop(key, None) is not None:
@@ -347,6 +359,7 @@ class Decayer:
         ----------
         nursery : trio.Nursery
             The nursery to start the decay loop in.
+
         """
         nursery.start_soon(self._decay_loop)
 

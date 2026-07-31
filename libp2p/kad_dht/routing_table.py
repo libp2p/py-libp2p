@@ -9,9 +9,7 @@ import hashlib
 import logging
 import time
 
-import multihash
 import trio
-import varint
 
 from libp2p.abc import (
     IHost,
@@ -30,11 +28,7 @@ from .common import (
     BUCKET_SIZE,
     MAXIMUM_BUCKETS,
     PEER_REFRESH_INTERVAL,
-    PROTOCOL_ID,
     STALE_PEER_THRESHOLD,
-)
-from .pb.kademlia_pb2 import (
-    Message,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,7 +137,8 @@ class KBucket:
                 oldest_peer_id,
                 peer_id,
             )
-            # Remove the specific peer by ID (not popitem) to handle concurrent mutations
+            # Remove the specific peer by ID (not popitem) to handle
+            # concurrent mutations
             if oldest_peer_id in self.peers:
                 del self.peers[oldest_peer_id]
             self.peers[peer_id] = (peer_info, current_time)

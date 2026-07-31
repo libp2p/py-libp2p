@@ -340,7 +340,10 @@ class ConnectionPruner:
         now = time.time()
         for peer_id in tag_store.get_all_peers():
             info = tag_store.get_tag_info(peer_id)
-            if info and info.temp and not info.conns and (now - info.first_seen) > grace:
+            if (
+                info and info.temp and not info.conns
+                and (now - info.first_seen) > grace
+            ):
                 tag_store.clear_peer(peer_id)
                 logger.debug("Reaped stale temp entry for peer %s", peer_id)
 

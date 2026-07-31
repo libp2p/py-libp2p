@@ -11,7 +11,7 @@ Covers:
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -19,7 +19,6 @@ from libp2p.abc import CMInfo
 from libp2p.network.config import ConnectionConfig
 from libp2p.network.connection_pruner import ConnectionPruner
 from libp2p.network.tag_store import TagStore
-
 
 # ── CMInfo dataclass tests ─────────────────────────────────────────────────────
 
@@ -124,7 +123,8 @@ class TestPrunerLastTrimTime:
 
     @pytest.mark.trio
     async def test_last_trim_time_not_set_below_watermark(self):
-        """_last_trim_time stays None when connection count is at or below high_watermark."""
+        # _last_trim_time stays None when connection count is
+        # at or below high_watermark.
         pruner = self._make_pruner()
 
         # Fewer connections than high_watermark=200 — no pruning needed
@@ -151,7 +151,8 @@ class TestSwarmGetConnMgrInfo:
         connected: int = 15,
         last_trim: float | None = None,
     ):
-        """Build a minimal Swarm stub with just the attributes get_conn_mgr_info needs."""
+        # Build a minimal Swarm stub with just the attributes
+        # get_conn_mgr_info needs.
         swarm = MagicMock()
         # Use valid ConnectionConfig values: min_connections default is 50
         swarm.connection_config = ConnectionConfig(

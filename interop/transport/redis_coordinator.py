@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-import trio
+
 import redis.asyncio as redis
+import trio
 
 logger = logging.getLogger("libp2p.interop.redis")
 
@@ -23,7 +24,9 @@ class RedisCoordinator:
         last_err = None
         while trio.current_time() < deadline:
             try:
-                client = redis.Redis(host=self.host, port=self.port, decode_responses=True)
+                client = redis.Redis(
+                    host=self.host, port=self.port, decode_responses=True
+                )
                 await client.ping()
                 return client
             except redis.RedisError as e:

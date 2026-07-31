@@ -11,8 +11,8 @@ from __future__ import annotations
 from enum import Enum
 import ipaddress
 import logging
-import weakref
 from typing import TYPE_CHECKING, cast
+import weakref
 
 from multiaddr import Multiaddr
 from multiaddr.protocols import (
@@ -150,8 +150,11 @@ class ObservedAddrManager:
     def __init__(self) -> None:
         # local_tw_str -> external_tw_str -> observer group key -> count
         self._external_addrs: dict[str, dict[str, dict[str, int]]] = {}
-        # id(conn) -> (local_tw_str, external_tw_str, observer_group_key, weakref to conn)
-        self._conn_observations: dict[int, tuple[str, str, str, weakref.ReferenceType[INetConn]]] = {}
+        # id(conn) -> (local_tw_str, external_tw_str,
+        # observer_group_key, weakref to conn)
+        self._conn_observations: dict[
+            int, tuple[str, str, str, weakref.ReferenceType[INetConn]]
+        ] = {}
         # local_tw_str -> set of "rest" suffixes seen on listen addresses
         self._local_addr_rests: dict[str, set[str]] = {}
         # Cache: full_addr_str → Multiaddr object (avoids repeated construction)

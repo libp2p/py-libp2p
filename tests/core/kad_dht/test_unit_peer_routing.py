@@ -661,7 +661,6 @@ class TestPeerRouting:
         group2 = [create_valid_peer_id(f"vol_g2_{i}") for i in range(ALPHA)]
         group3 = [create_valid_peer_id(f"vol_g3_{i}") for i in range(ALPHA)]
         queried_peers: list[ID] = []
-        round_sizes: list[int] = []
 
         async def mock_query(peer, _target_key, new_peers):
             queried_peers.append(peer)
@@ -690,9 +689,6 @@ class TestPeerRouting:
                 side_effect=mock_query,
             ):
                 # Track round sizes by counting queries per nursery cycle
-                nursery_start_idx = [0]
-
-                original_open = trio.open_nursery
 
                 await peer_routing.find_closest_peers_network(target_key)
 

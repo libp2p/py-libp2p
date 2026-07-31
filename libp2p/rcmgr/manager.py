@@ -4,8 +4,6 @@ import logging
 import threading
 from typing import Any, cast
 
-logger = logging.getLogger(__name__)
-
 from .allowlist import Allowlist, AllowlistConfig
 from .cidr_limits import CIDRLimiter
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
@@ -26,6 +24,8 @@ from .rate_limiter import (
     RateLimiter,
     create_per_peer_rate_limiter,
 )
+
+logger = logging.getLogger(__name__)
 
 """
 Resource Manager implementation.
@@ -272,8 +272,13 @@ class ResourceManager:
                     pid = None
                 if pid is not None:
                     if not self.connection_rate_limiter.try_allow(peer_id=pid):
-                        self._record_blocked_resource("connection", direction, scope="rate")
-                        logger.debug("acquire_connection failed: rate limit exceeded for peer %s", pid)
+                        self._record_blocked_resource(
+                            "connection", direction, scope="rate"
+                        )
+                        logger.debug(
+                            "acquire_connection failed: rate limit exceeded "
+                            "for peer %s", pid
+                        )
                         return False
             except Exception:
                 # Fail-open on limiter errors
@@ -283,8 +288,13 @@ class ResourceManager:
         if self.cidr_limiter is not None:
             try:
                 if not self.cidr_limiter.allow(endpoint_ip):
-                    self._record_blocked_resource("connection", direction, scope="cidr")
-                    logger.debug("acquire_connection failed: CIDR limit exceeded for %s", endpoint_ip)
+                    self._record_blocked_resource(
+                        "connection", direction, scope="cidr"
+                    )
+                    logger.debug(
+                        "acquire_connection failed: CIDR limit exceeded for %s",
+                        endpoint_ip,
+                    )
                     return False
             except Exception:
                 pass
@@ -320,12 +330,21 @@ class ResourceManager:
                         ):
                             # Retry after degradation
                             if self._current_connections >= self.limits.max_connections:
-                                self._record_blocked_resource("connection", direction)
-                                logger.debug("acquire_connection failed: max connections reached (degradation)")
+                                self._record_blocked_resource(
+                                    "connection", direction
+                                )
+                                logger.debug(
+                                    "acquire_connection failed: max connections "
+                                    "reached (degradation)"
+                                )
                                 return False
                         else:
-                            self._record_blocked_resource("connection", direction)
-                            logger.debug("acquire_connection failed: max connections reached")
+                            self._record_blocked_resource(
+                                "connection", direction
+                            )
+                            logger.debug(
+                                "acquire_connection failed: max connections reached"
+                            )
                             return False
                     else:
                         self._record_blocked_resource("connection", direction)
@@ -341,7 +360,10 @@ class ResourceManager:
                             self._record_blocked_resource(
                                 "connection", direction, scope="cidr"
                             )
-                            logger.debug("acquire_connection failed: CIDR limit acquire failed for %s", endpoint_ip)
+                            logger.debug(
+                                "acquire_connection failed: CIDR limit acquire "
+                                "failed for %s", endpoint_ip
+                            )
                             return False
                     except Exception:
                         # Fail-open if limiter errors
@@ -763,7 +785,9 @@ class ResourceManager:
         scope object for tracking/cleanup.
         """
         peer_id_str = str(peer_id) if peer_id is not None else ""
-        acquired = self.acquire_connection(peer_id_str, endpoint_ip=endpoint_ip, direction=direction)
+        acquired = self.acquire_connection(
+            peer_id_str, endpoint_ip=endpoint_ip, direction=direction
+        )
         if acquired:
             # Extend scope to remember endpoint for release
             scope = ConnectionScope(peer_id_str, self)
@@ -775,7 +799,9 @@ class ResourceManager:
                 if scope.closed:
                     return
                 ep = getattr(scope, "_endpoint_ip", None)
-                self.release_connection(peer_id_str, endpoint_ip=ep, direction=direction)
+                self.release_connection(
+                    peer_id_str, endpoint_ip=ep, direction=direction
+                )
                 scope.closed = True
 
             scope.close = _close_with_endpoint  # type: ignore[assignment]
