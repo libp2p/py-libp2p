@@ -1,0 +1,163 @@
+From 55ee6d0fbff5509efcaf322ca66a2dcea1ec07a6 Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sun, 19 Jul 2026 15:43:59 +0530
+Subject: [PATCH 01/13] fix(quic): stream EOF fixes, idle timeout, and
+ is_client dialing
+
+---
+ .../multiselect_communicator.py               |  1 +
+ libp2p/transport/quic/config.py               |  4 +-
+ libp2p/transport/quic/stream.py               | 51 ++++++++++++-------
+ libp2p/transport/quic/transport.py            |  2 +
+ 4 files changed, 39 insertions(+), 19 deletions(-)
+
+diff --git a/libp2p/protocol_muxer/multiselect_communicator.py b/libp2p/protocol_muxer/multiselect_communicator.py
+index dff5b339..e5624aa0 100644
+--- a/libp2p/protocol_muxer/multiselect_communicator.py
++++ b/libp2p/protocol_muxer/multiselect_communicator.py
+@@ -56,3 +56,4 @@ class MultiselectCommunicator(IMultiselectCommunicator):
+                 "fail to read from multiselect communicator"
+             ) from error
+         return data.decode()
++
+diff --git a/libp2p/transport/quic/config.py b/libp2p/transport/quic/config.py
+index d572ca69..db3376d7 100644
+--- a/libp2p/transport/quic/config.py
++++ b/libp2p/transport/quic/config.py
+@@ -62,7 +62,9 @@ class QUICTransportConfig(ConnectionConfig):
+     """Configuration for QUIC transport."""
+ 
+     # Connection settings
+-    idle_timeout: float = 30.0  # Seconds before an idle connection is closed.
++    idle_timeout: float = 600.0  # Seconds before an idle connection is closed.
++                                  # Matches go-libp2p default (10 minutes).
++
+     max_datagram_size: int = (
+         1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
+     )
+diff --git a/libp2p/transport/quic/stream.py b/libp2p/transport/quic/stream.py
+index a68980ad..6b874e8b 100644
+--- a/libp2p/transport/quic/stream.py
++++ b/libp2p/transport/quic/stream.py
+@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, cast
+ 
+ import trio
+ 
++from libp2p.io.exceptions import IOException
++
+ from .exceptions import (
+     QUICStreamBackpressureError,
+     QUICStreamClosedError,
+@@ -40,6 +42,19 @@ else:
+ logger = logging.getLogger(__name__)
+ 
+ 
++class _QUICStreamEOF(IOException, EOFError):
++    """
++    Raised by QUICStream.read() when the stream has reached EOF (FIN received)
++    and the receive buffer is empty.
++
++    Inherits IOException so that callers like MultiselectCommunicator.read()
++    (which catches IOException) and read_exactly() (raises IncompleteReadError on
++    incomplete reads) both handle it correctly.  Also inherits EOFError to be
++    semantically compatible with libp2p.network.stream.exceptions.StreamEOF.
++    """
++
++
++
+ class StreamState(Enum):
+     """Stream lifecycle states following libp2p patterns."""
+ 
+@@ -226,18 +241,22 @@ class QUICStream(IMuxedStream):
+         if n is None:
+             n = -1
+ 
++        # Check if there is data in the buffer FIRST before raising closed/reset errors
++        async with self._receive_buffer_lock:
++            if self._receive_buffer:
++                data = self._extract_data_from_buffer(n)
++                self._timeline.record_first_data()
++                return data
++
+         async with self._state_lock:
+             if self._state in (StreamState.CLOSED, StreamState.RESET):
+                 raise QUICStreamClosedError(f"Stream {self.stream_id} is closed")
+ 
+             if self._read_closed:
+-                # Return any remaining buffered data, then EOF
+-                async with self._receive_buffer_lock:
+-                    if self._receive_buffer:
+-                        data = self._extract_data_from_buffer(n)
+-                        self._timeline.record_first_data()
+-                        return data
+-                return b""
++                # Buffer is empty and stream is half-closed for reading — signal EOF
++                # Raise StreamEOF (extends IOException) so callers like read_exactly()
++                # fail immediately instead of looping on empty reads.
++                raise _QUICStreamEOF()
+ 
+         # Wait for data with timeout
+         timeout = self.READ_TIMEOUT
+@@ -256,9 +275,9 @@ class QUICStream(IMuxedStream):
+                                 f"Stream {self.stream_id} was reset"
+                             )
+ 
+-                        # Check if stream was closed while waiting
++                        # Buffer is empty and stream closed while waiting — EOF
+                         if self._read_closed:
+-                            return b""
++                            raise _QUICStreamEOF()
+ 
+                     # Wait for more data
+                     await self._receive_event.wait()
+@@ -314,7 +333,9 @@ class QUICStream(IMuxedStream):
+ 
+         except ValueError as e:
+             if "unknown peer-initiated stream" in str(e):
+-                raise QUICStreamClosedError(f"Stream {self.stream_id} was already closed in QUIC layer") from e
++                raise QUICStreamClosedError(
++                    f"Stream {self.stream_id} was already closed in QUIC layer"
++                ) from e
+             logger.error(f"Error writing to stream {self.stream_id}: {e}")
+             await self._handle_stream_error(e)
+             raise
+@@ -541,11 +562,6 @@ class QUICStream(IMuxedStream):
+     async def handle_data_received(self, data: bytes, end_stream: bool) -> None:
+         """
+         Handle data received from the QUIC connection.
+-
+-        Args:
+-            data: Received data
+-            end_stream: Whether this is the last data (FIN received)
+-
+         """
+         if self._state == StreamState.RESET:
+             return
+@@ -708,9 +724,8 @@ class QUICStream(IMuxedStream):
+         if self._memory_reserved > 0:
+             self._release_memory(self._memory_reserved)
+ 
+-        # Clear receive buffer
+-        async with self._receive_buffer_lock:
+-            self._receive_buffer.clear()
++        # Do not clear receive buffer here. Allow application to drain it
++        # before surfacing EOF/reset.
+ 
+         # Release resource scope if present
+         if self._resource_scope and hasattr(self._resource_scope, "done"):
+diff --git a/libp2p/transport/quic/transport.py b/libp2p/transport/quic/transport.py
+index 08c2d10d..343f0166 100644
+--- a/libp2p/transport/quic/transport.py
++++ b/libp2p/transport/quic/transport.py
+@@ -292,6 +292,8 @@ class QUICTransport(ITransport):
+                 client_tls_config = self._security_manager.create_client_config()
+                 self._apply_tls_configuration(config, client_tls_config)
+ 
++            config.is_client = True
++
+             # Debug log to verify certificate is present
+             logger.info(
+                 f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
+-- 
+2.50.1 (Apple Git-155)
+

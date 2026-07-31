@@ -1,0 +1,57 @@
+From c39e83d62fd9cfdf90064d2f2f3f7c97d259c65a Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sat, 25 Jul 2026 10:56:29 +0530
+Subject: [PATCH 05/13] fix(typing): resolve mypy type check errors
+
+---
+ libp2p/bitswap/client.py  | 10 +++++-----
+ libp2p/kad_dht/kad_dht.py |  5 +++--
+ 2 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/libp2p/bitswap/client.py b/libp2p/bitswap/client.py
+index 3155958b..e9e1cf58 100644
+--- a/libp2p/bitswap/client.py
++++ b/libp2p/bitswap/client.py
+@@ -266,8 +266,8 @@ class BitswapClient:
+                     else:
+                         # Block may have arrived late (e.g. after payment round-trip).
+                         # Check if the pending event was set after the timeout fired.
+-                        event = batch_events.get(cid_obj)
+-                        if event and event.is_set():
++                        batch_event = batch_events.get(cid_obj)
++                        if batch_event and batch_event.is_set():
+                             data = await self.block_store.get_block(cid_obj)
+                             if data is not None:
+                                 results[cid_obj.buffer] = data
+@@ -284,9 +284,9 @@ class BitswapClient:
+             finally:
+                 # Cleanup
+                 for cid_obj in batch:
+-                    event = batch_events.get(cid_obj)
+-                    if event and cid_obj in self._pending_requests:
+-                        self._pending_requests[cid_obj].discard(event)
++                    batch_event = batch_events.get(cid_obj)
++                    if batch_event and cid_obj in self._pending_requests:
++                        self._pending_requests[cid_obj].discard(batch_event)
+                         if not self._pending_requests[cid_obj]:
+                             del self._pending_requests[cid_obj]
+                     if cid_obj in self._wantlist:
+diff --git a/libp2p/kad_dht/kad_dht.py b/libp2p/kad_dht/kad_dht.py
+index ead15eb1..60acdd07 100644
+--- a/libp2p/kad_dht/kad_dht.py
++++ b/libp2p/kad_dht/kad_dht.py
+@@ -889,8 +889,9 @@ class KadDHT(Service):
+     async def refresh_routing_table(self) -> None:
+         """Refresh the routing table."""
+         logger.debug("Refreshing routing table")
+-        if getattr(self, "rt_refresh_manager", None) is not None:
+-            await self.rt_refresh_manager._do_refresh(force=True)
++        rt_mgr = getattr(self, "rt_refresh_manager", None)
++        if rt_mgr is not None:
++            await rt_mgr._do_refresh(force=True)
+         else:
+             await self.peer_routing.refresh_routing_table()
+ 
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,52 @@
+From a831fa6f3d7e2cfe11c3a18b1a329cf8918e8f93 Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sat, 25 Jul 2026 10:57:29 +0530
+Subject: [PATCH 06/13] fix(typing): resolve pyrefly typing errors
+
+---
+ libp2p/bitswap/client.py | 4 ++--
+ libp2p/network/swarm.py  | 6 ++----
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/libp2p/bitswap/client.py b/libp2p/bitswap/client.py
+index e9e1cf58..bab38c65 100644
+--- a/libp2p/bitswap/client.py
++++ b/libp2p/bitswap/client.py
+@@ -294,8 +294,8 @@ class BitswapClient:
+                     if cid_obj in self._dont_have_responses:
+                         del self._dont_have_responses[cid_obj]
+                     # Clean up expected_blocks for all peers
+-                    for peer_id in list(self._expected_blocks.keys()):
+-                        self._expected_blocks[peer_id].discard(cid_obj)
++                    for pid in list(self._expected_blocks.keys()):
++                        self._expected_blocks[pid].discard(cid_obj)
+ 
+         return results
+ 
+diff --git a/libp2p/network/swarm.py b/libp2p/network/swarm.py
+index ecbe3730..6c9e9f79 100644
+--- a/libp2p/network/swarm.py
++++ b/libp2p/network/swarm.py
+@@ -591,9 +591,7 @@ class Swarm(Service, INetworkService):
+                 for multiaddr in allowed_addrs[:_MAX_PARALLEL_DIALS]:
+                     failed_event = trio.Event()
+ 
+-                    async def dial_task(
+-                        addr: Multiaddr = multiaddr, ev: trio.Event = failed_event
+-                    ) -> None:
++                    async def dial_task(addr: Multiaddr, ev: trio.Event) -> None:
+                         try:
+                             connection = await self._dial_with_retry(addr, peer_id)
+                             connections.append(connection)
+@@ -612,7 +610,7 @@ class Swarm(Service, INetworkService):
+                             )
+                             ev.set()
+ 
+-                    nursery.start_soon(dial_task)
++                    nursery.start_soon(dial_task, multiaddr, failed_event)
+ 
+                     # Start next dial immediately if this one fails, or after 250ms
+                     with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
+-- 
+2.50.1 (Apple Git-155)
+

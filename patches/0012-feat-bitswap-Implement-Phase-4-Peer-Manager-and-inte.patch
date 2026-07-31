@@ -1,0 +1,306 @@
+From 4ce3318a3132d958bbd44b9314e0f7b9d752e23e Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sat, 25 Jul 2026 13:46:16 +0530
+Subject: [PATCH 12/13] feat(bitswap): Implement Phase 4 - Peer Manager and
+ intelligent routing
+
+---
+ libp2p/bitswap/client.py                  | 32 +++++++++--
+ libp2p/bitswap/peer_manager.py            | 66 +++++++++++++++++++++++
+ libp2p/bitswap/session.py                 | 36 ++++++++-----
+ tests/core/bitswap/test_dag_pb.py         |  4 +-
+ tests/core/bitswap/test_payment.py        |  2 +-
+ tests/core/bitswap/test_provider_query.py |  4 ++
+ 6 files changed, 126 insertions(+), 18 deletions(-)
+ create mode 100644 libp2p/bitswap/peer_manager.py
+
+diff --git a/libp2p/bitswap/client.py b/libp2p/bitswap/client.py
+index f7456aa7..e30c61f3 100644
+--- a/libp2p/bitswap/client.py
++++ b/libp2p/bitswap/client.py
+@@ -43,6 +43,7 @@ from .errors import (
+ )
+ from .messages import create_message, create_wantlist_entry
+ from .pb.bitswap_pb2 import Message
++from .peer_manager import BitswapPeerManager
+ from .presence import BlockPresenceManager
+ from .provider_query import ProviderQueryManager
+ from .session import BitswapSession
+@@ -100,6 +101,7 @@ class BitswapClient:
+         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
+ 
+         self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
++        self.peer_manager = BitswapPeerManager()
+ 
+         self._nursery: trio.Nursery | None = None
+         self._started = False
+@@ -620,7 +622,7 @@ class BitswapClient:
+             await self._process_blocks_v100(list(msg.blocks), peer_id)
+ 
+         if msg.payload:
+-            await self._process_blocks_v110(msg.payload)
++            await self._process_blocks_v110(msg.payload, peer_id)
+ 
+         if msg.blockPresences:
+             await self._process_block_presences(msg.blockPresences, peer_id)
+@@ -946,6 +948,17 @@ class BitswapClient:
+                 await self.block_store.put_block(matched_cid, block_data)
+                 logger.info("  ✓ Stored successfully")
+ 
++                # Record delivery for peer scoring
++                self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
++
++                # Tag high-performing peers (Connection Manager Integration)
++                stats = self.peer_manager._get_stats(peer_id)
++                if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
++                    try:
++                        self.host.get_network().tag_peer(peer_id, "bitswap", 5)
++                    except AttributeError:
++                        pass
++
+                 # Remove from expected blocks for all peers
+                 self.presence_manager.remove_have_from_all(matched_cid)
+                 pid_str = (
+@@ -983,9 +996,11 @@ class BitswapClient:
+             logger.info("  ✓ All blocks received from this peer!")
+         logger.info("=" * 70)
+ 
+-    async def _process_blocks_v110(self, blocks: Sequence[Any]) -> None:
++    async def _process_blocks_v110(
++        self, blocks: Sequence[Any], peer_id: PeerID
++    ) -> None:
+         """Process received blocks (v1.1.0+ format with prefix)."""
+-        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+)")
++        logger.debug(f"Processing {len(blocks)} blocks (v1.1.0+) from peer {peer_id}")
+         for block in blocks:
+             prefix = block.prefix
+             data = block.data
+@@ -1001,6 +1016,17 @@ class BitswapClient:
+                 f"(v1.1.0+)"
+             )
+ 
++            # Record delivery for peer scoring
++            self.peer_manager.record_delivery(peer_id, cid, len(data))
++
++            # Tag high-performing peers (Connection Manager Integration)
++            stats = self.peer_manager._get_stats(peer_id)
++            if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
++                try:
++                    self.host.get_network().tag_peer(peer_id, "bitswap", 5)
++                except AttributeError:
++                    pass
++
+             # Remove from expected blocks for all peers
+             self.presence_manager.remove_have_from_all(cid)
+ 
+diff --git a/libp2p/bitswap/peer_manager.py b/libp2p/bitswap/peer_manager.py
+new file mode 100644
+index 00000000..889caba3
+--- /dev/null
++++ b/libp2p/bitswap/peer_manager.py
+@@ -0,0 +1,66 @@
++import time
++from typing import Dict, List, Set
++
++from libp2p.bitswap.cid import CIDObject
++from libp2p.peer.id import ID as PeerID
++
++
++class PeerStats:
++    def __init__(self) -> None:
++        self.requests_sent = 0
++        self.blocks_delivered = 0
++        self.bytes_delivered = 0
++        self.timeouts = 0
++        # Default latency of 1 second for untried peers
++        self.ema_latency = 1.0
++        self._pending_requests: Dict[CIDObject, float] = {}
++
++
++class BitswapPeerManager:
++    """
++    Tracks performance of Bitswap peers to optimize routing.
++    """
++
++    def __init__(self) -> None:
++        self.peers: Dict[PeerID, PeerStats] = {}
++
++    def _get_stats(self, peer_id: PeerID) -> PeerStats:
++        if peer_id not in self.peers:
++            self.peers[peer_id] = PeerStats()
++        return self.peers[peer_id]
++
++    def record_request(self, peer_id: PeerID, cid: CIDObject) -> None:
++        stats = self._get_stats(peer_id)
++        stats.requests_sent += 1
++        stats._pending_requests[cid] = time.time()
++
++    def record_delivery(self, peer_id: PeerID, cid: CIDObject, data_size: int) -> None:
++        stats = self._get_stats(peer_id)
++        stats.blocks_delivered += 1
++        stats.bytes_delivered += data_size
++
++        if cid in stats._pending_requests:
++            latency = time.time() - stats._pending_requests.pop(cid)
++            # Update EMA latency (alpha = 0.125)
++            stats.ema_latency = (0.125 * latency) + (0.875 * stats.ema_latency)
++
++    def record_timeout(self, peer_id: PeerID, cid: CIDObject) -> None:
++        stats = self._get_stats(peer_id)
++        stats.timeouts += 1
++        if cid in stats._pending_requests:
++            del stats._pending_requests[cid]
++
++    def get_best_peers(self, candidates: Set[PeerID], count: int) -> List[PeerID]:
++        """Rank peers based on latency and success rate."""
++        def score(peer_id: PeerID) -> float:
++            stats = self._get_stats(peer_id)
++            success_rate = (
++                (stats.blocks_delivered / stats.requests_sent)
++                if stats.requests_sent > 0
++                else 0.5
++            )
++            # Higher score is better: high success rate, low latency
++            return success_rate / max(stats.ema_latency, 0.001)
++
++        sorted_peers = sorted(candidates, key=score, reverse=True)
++        return sorted_peers[:count]
+diff --git a/libp2p/bitswap/session.py b/libp2p/bitswap/session.py
+index 64bbbb20..9793d7a0 100644
+--- a/libp2p/bitswap/session.py
++++ b/libp2p/bitswap/session.py
+@@ -227,29 +227,35 @@ class BitswapSession:
+                         )
+                         untried = have_peers - requested_from[cid]
+ 
+-                        target = None
++                        targets = []
+                         if peer_id and peer_id not in requested_from[cid]:
+-                            target = peer_id
++                            targets = [peer_id]
+                         elif untried:
+-                            target = random.choice(list(untried))
++                            targets = self.client.peer_manager.get_best_peers(
++                                untried, 1
++                            )
+                         elif not untried and getattr(
+                             self.client, "provider_query_manager", None
+                         ):
+                             try:
+-                                target = await (
++                                p_target = await (
+                                     self.client.provider_query_manager
+                                 ).find_providers_single(cid)
++                                if p_target:
++                                    targets = [p_target]
+                             except Exception as e:
+                                 logger.warning(f"PQM error for {cid}: {e}")
+ 
+-                        if target:
+-                            if target not in to_peer:
+-                                to_peer[target] = []
+-                            to_peer[target].append(cid)
+-                            requested_from[cid].add(target)
+-                            await self.client.want_block(
+-                                cid, want_type=0, send_dont_have=True
+-                            )
++                        if targets:
++                            for target in targets:
++                                if target not in to_peer:
++                                    to_peer[target] = []
++                                to_peer[target].append(cid)
++                                requested_from[cid].add(target)
++                                self.client.peer_manager.record_request(target, cid)
++                                await self.client.want_block(
++                                    cid, want_type=0, send_dont_have=True
++                                )
+                         else:
+                             to_broadcast.append(cid)
+                             await self.client.want_block(
+@@ -277,6 +283,12 @@ class BitswapSession:
+                                 await batch_events[cid].wait()
+                     except trio.TooSlowError:
+                         retry_interval = min(retry_interval * 1.5, 10.0)
++
++                        # Record timeouts for peers that we requested from
++                        for cid in still_pending:
++                            for req_peer in requested_from[cid]:
++                                self.client.peer_manager.record_timeout(req_peer, cid)
++
+                         msg = (
+                             f"Session {self.id}: Batch sub-timeout: "
+                             f"{len(still_pending)} blocks still pending, retrying..."
+diff --git a/tests/core/bitswap/test_dag_pb.py b/tests/core/bitswap/test_dag_pb.py
+index 26beb54f..27d8168f 100644
+--- a/tests/core/bitswap/test_dag_pb.py
++++ b/tests/core/bitswap/test_dag_pb.py
+@@ -21,7 +21,7 @@ class TestLink:
+ 
+     def test_link_creation(self):
+         """Test creating a Link."""
+-        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
++        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
+         link = Link(cid=cid, name="file.txt", size=1024)
+ 
+         assert link.cid == cid
+@@ -30,7 +30,7 @@ class TestLink:
+ 
+     def test_link_optional_fields(self):
+         """Test Link with optional fields."""
+-        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
++        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
+         link = Link(cid=cid)
+ 
+         assert link.cid == cid
+diff --git a/tests/core/bitswap/test_payment.py b/tests/core/bitswap/test_payment.py
+index 3c38198d..276aea5f 100644
+--- a/tests/core/bitswap/test_payment.py
++++ b/tests/core/bitswap/test_payment.py
+@@ -87,7 +87,7 @@ async def test_gated_decision_engine_auth():
+     from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
+ 
+     auth = MagicMock()
+-    auth.cid = compute_cid_v1(b"dummy", codec=CODEC_RAW).encode()
++    auth.cid = compute_cid_v1(b"dummy", codec=CODEC_RAW)
+     auth.value = 50
+     auth.from_address = "0x..."
+     auth.nonce = b"nonce1"
+diff --git a/tests/core/bitswap/test_provider_query.py b/tests/core/bitswap/test_provider_query.py
+index 4e34a174..68124fbc 100644
+--- a/tests/core/bitswap/test_provider_query.py
++++ b/tests/core/bitswap/test_provider_query.py
+@@ -360,6 +360,7 @@ class TestBitswapClientProviderQueryIntegration:
+         async def _fake_send(peer, cids):
+             captured["peer_id"] = peer
+             await client.add_block(cid, block_data)
++
+         async def _fake_broadcast(cids):
+             captured["peer_id"] = None
+             await client.add_block(cid, block_data)
+@@ -392,6 +393,7 @@ class TestBitswapClientProviderQueryIntegration:
+         async def _fake_send(peer, cids):
+             captured["peer_id"] = peer
+             await client.add_block(cid, block_data)
++
+         async def _fake_broadcast(cids):
+             captured["peer_id"] = None
+             await client.add_block(cid, block_data)
+@@ -419,6 +421,7 @@ class TestBitswapClientProviderQueryIntegration:
+         async def _fake_send(peer, cids):
+             captured["peer_id"] = peer
+             await client.add_block(cid, block_data)
++
+         async def _fake_broadcast(cids):
+             captured["peer_id"] = None
+             await client.add_block(cid, block_data)
+@@ -453,6 +456,7 @@ class TestBitswapClientProviderQueryIntegration:
+         async def _fake_send(peer, cids):
+             captured["peer_id"] = peer
+             await client.add_block(cid, block_data)
++
+         async def _fake_broadcast(cids):
+             captured["peer_id"] = None
+             await client.add_block(cid, block_data)
+-- 
+2.50.1 (Apple Git-155)
+

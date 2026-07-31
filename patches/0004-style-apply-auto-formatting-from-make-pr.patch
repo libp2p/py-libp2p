@@ -1,0 +1,192 @@
+From 5d24f628b6f0014b21df4878a53effb89fd0e05d Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sat, 25 Jul 2026 10:55:36 +0530
+Subject: [PATCH 04/13] style: apply auto-formatting from make pr
+
+---
+ libp2p/bitswap/client.py                      | 29 +++++++++++++------
+ libp2p/host/basic_host.py                     |  9 ++++--
+ libp2p/network/swarm.py                       |  3 +-
+ .../multiselect_communicator.py               |  1 -
+ libp2p/transport/quic/config.py               |  2 +-
+ libp2p/transport/quic/stream.py               |  1 -
+ tests/core/bitswap/test_client.py             |  3 +-
+ 7 files changed, 30 insertions(+), 18 deletions(-)
+
+diff --git a/libp2p/bitswap/client.py b/libp2p/bitswap/client.py
+index 37588387..3155958b 100644
+--- a/libp2p/bitswap/client.py
++++ b/libp2p/bitswap/client.py
+@@ -171,7 +171,9 @@ class BitswapClient:
+         cid_obj = parse_cid(cid)
+ 
+         if not verify_cid(cid_obj, data):
+-            raise ValueError(f"Block data does not match CID hash: {format_cid_for_display(cid_obj)}")
++            raise ValueError(
++                f"Block data does not match CID hash: {format_cid_for_display(cid_obj)}"
++            )
+ 
+         await self.block_store.put_block(cid_obj, data)
+         logger.debug(
+@@ -255,7 +257,7 @@ class BitswapClient:
+                 except trio.TooSlowError:
+                     msg = f"Batch timeout: {len(batch)} blocks, got partial results"
+                     logger.warning(msg)
+-    
++
+                 # Collect results
+                 for cid_obj in batch:
+                     data = await self.block_store.get_block(cid_obj)
+@@ -548,9 +550,12 @@ class BitswapClient:
+                 protocol = stream.get_protocol()
+                 if protocol:
+                     self._peer_protocols[peer_id] = str(protocol)
+-                
++
+                 peer_proto_str = str(protocol) if protocol else ""
+-                supports_1_2_0 = peer_proto_str in (BITSWAP_PROTOCOL_V120, "ipfs/bitswap/1.3.0")
++                supports_1_2_0 = peer_proto_str in (
++                    BITSWAP_PROTOCOL_V120,
++                    "ipfs/bitswap/1.3.0",
++                )
+ 
+                 # Create wantlist entries with full v1.2.0 information if supported
+                 entries = []
+@@ -564,8 +569,12 @@ class BitswapClient:
+                         },
+                     )
+                     want_type = want_info.get("want_type", 0) if supports_1_2_0 else 0
+-                    send_dont_have = want_info.get("send_dont_have", False) if supports_1_2_0 else False
+-                    
++                    send_dont_have = (
++                        want_info.get("send_dont_have", False)
++                        if supports_1_2_0
++                        else False
++                    )
++
+                     entry = create_wantlist_entry(
+                         cid,
+                         want_info["priority"],
+@@ -603,7 +612,7 @@ class BitswapClient:
+         import random
+ 
+         peers = list(self.host.get_network().connections.keys())
+-        
++
+         # Limit broadcast to a maximum number of peers to provide backpressure
+         # and prevent overwhelming the network or triggering GO_AWAY.
+         MAX_BROADCAST_PEERS = 20
+@@ -1177,7 +1186,8 @@ class BitswapClient:
+ 
+                 # Notify pending requests
+                 if matched_cid in self._pending_requests:
+-                    logger.info(f"  ✓ Notifying {len(self._pending_requests[matched_cid])} pending requests")
++                    pending_count = len(self._pending_requests[matched_cid])
++                    logger.info(f"  ✓ Notifying {pending_count} pending requests")
+                     for event in self._pending_requests[matched_cid]:
+                         event.set()
+             else:
+@@ -1225,8 +1235,9 @@ class BitswapClient:
+ 
+             # Notify pending requests
+             if cid in self._pending_requests:
++                pending_count = len(self._pending_requests[cid])
+                 logger.debug(
+-                    f"Notifying {len(self._pending_requests[cid])} pending requests for "
++                    f"Notifying {pending_count} pending requests for "
+                     f"{format_cid_for_display(cid, max_len=16)}..."
+                 )
+                 for event in self._pending_requests[cid]:
+diff --git a/libp2p/host/basic_host.py b/libp2p/host/basic_host.py
+index 6186ed97..18d29814 100644
+--- a/libp2p/host/basic_host.py
++++ b/libp2p/host/basic_host.py
+@@ -496,13 +496,16 @@ class BasicHost(IHost):
+                                             and type(muxed).__name__ == "QUICConnection"
+                                         ):
+                                             try:
+-                                                # Send a transport-level PING frame to keep the connection alive
++                                                # Send a transport-level PING frame
++                                                # to keep the connection alive
+                                                 muxed._quic.send_ping(0)
+-                                                # Use start_soon for transmit to not block the loop
++                                                # Use start_soon for transmit to
++                                                # not block the loop
+                                                 nursery.start_soon(muxed._transmit)
+                                             except Exception as e:
+                                                 logger.debug(
+-                                                    f"QUIC ping failed for {peer_id}: {e}"
++                                                    f"QUIC ping failed for {peer_id}: "
++                                                    f"{e}"
+                                                 )
+                             except Exception as e:
+                                 logger.debug(f"Error in keepalive loop: {e}")
+diff --git a/libp2p/network/swarm.py b/libp2p/network/swarm.py
+index b27c8197..ecbe3730 100644
+--- a/libp2p/network/swarm.py
++++ b/libp2p/network/swarm.py
+@@ -575,7 +575,8 @@ class Swarm(Service, INetworkService):
+         # Filter out loopback addresses if public addresses are available
+         # This prevents the node from dialing itself when DHT peers advertise localhost
+         public_addrs = [
+-            a for a in allowed_addrs
++            a
++            for a in allowed_addrs
+             if "/ip4/127." not in str(a) and "/ip6/::1" not in str(a)
+         ]
+         if public_addrs:
+diff --git a/libp2p/protocol_muxer/multiselect_communicator.py b/libp2p/protocol_muxer/multiselect_communicator.py
+index e5624aa0..dff5b339 100644
+--- a/libp2p/protocol_muxer/multiselect_communicator.py
++++ b/libp2p/protocol_muxer/multiselect_communicator.py
+@@ -56,4 +56,3 @@ class MultiselectCommunicator(IMultiselectCommunicator):
+                 "fail to read from multiselect communicator"
+             ) from error
+         return data.decode()
+-
+diff --git a/libp2p/transport/quic/config.py b/libp2p/transport/quic/config.py
+index db3376d7..8a0d0579 100644
+--- a/libp2p/transport/quic/config.py
++++ b/libp2p/transport/quic/config.py
+@@ -63,7 +63,7 @@ class QUICTransportConfig(ConnectionConfig):
+ 
+     # Connection settings
+     idle_timeout: float = 600.0  # Seconds before an idle connection is closed.
+-                                  # Matches go-libp2p default (10 minutes).
++    # Matches go-libp2p default (10 minutes).
+ 
+     max_datagram_size: int = (
+         1200  # Maximum size of UDP datagrams to avoid IP fragmentation.
+diff --git a/libp2p/transport/quic/stream.py b/libp2p/transport/quic/stream.py
+index 6b874e8b..6fff28a1 100644
+--- a/libp2p/transport/quic/stream.py
++++ b/libp2p/transport/quic/stream.py
+@@ -54,7 +54,6 @@ class _QUICStreamEOF(IOException, EOFError):
+     """
+ 
+ 
+-
+ class StreamState(Enum):
+     """Stream lifecycle states following libp2p patterns."""
+ 
+diff --git a/tests/core/bitswap/test_client.py b/tests/core/bitswap/test_client.py
+index dfd45eeb..5e7faf59 100644
+--- a/tests/core/bitswap/test_client.py
++++ b/tests/core/bitswap/test_client.py
+@@ -356,7 +356,7 @@ class TestBitswapClientBugFixes:
+ 
+     @pytest.mark.trio
+     async def test_concurrent_get_block_same_cid(self, autojump_clock):
+-        """Test concurrent requests for the exact same CID don't race/orphan (Bugs 1 & 2)."""
++        """Test concurrent requests for the exact same CID don't race/orphan."""
+         mock_host = MagicMock()
+         client = BitswapClient(mock_host)
+         cid = compute_cid_v1(b"concurrent_data")
+@@ -436,4 +436,3 @@ class TestBitswapClientBugFixes:
+         await client._broadcast_wantlist([cid])
+ 
+         assert client._send_wantlist_to_peer.call_count == 20
+-
+-- 
+2.50.1 (Apple Git-155)
+

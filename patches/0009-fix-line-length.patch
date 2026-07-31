@@ -1,0 +1,29 @@
+From 51d00de0b6022b4a4141a3c020950a8b4cf58a5f Mon Sep 17 00:00:00 2001
+From: sumanjeet0012 <sumanjeet0012@gmail.com>
+Date: Sat, 25 Jul 2026 11:07:33 +0530
+Subject: [PATCH 09/13] fix: line length
+
+---
+ tests/core/bitswap/test_integration.py | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tests/core/bitswap/test_integration.py b/tests/core/bitswap/test_integration.py
+index bec099f1..337bf782 100644
+--- a/tests/core/bitswap/test_integration.py
++++ b/tests/core/bitswap/test_integration.py
+@@ -478,7 +478,11 @@ class TestBitswapIntegration:
+                         # The ACTUAL test: Did we receive a DontHave
+                         # response?
+                         cid_obj = parse_cid(nonexistent_cid)
+-                        dont_have_peers = client_bitswap.presence_manager.get_dont_have_peers(cid_obj)
++                        dont_have_peers = (
++                            client_bitswap.presence_manager.get_dont_have_peers(
++                                cid_obj
++                            )
++                        )
+                         logger.debug(
+                             "DontHave responses peers: %s",
+                             dont_have_peers,
+-- 
+2.50.1 (Apple Git-155)
+

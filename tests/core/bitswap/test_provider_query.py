@@ -357,16 +357,17 @@ class TestBitswapClientProviderQueryIntegration:
         # Patch _request_block so we can inspect the peer_id it receives
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
+            return True
 
-        async def _fake_broadcast(cids: list[CIDObject]):
+        async def _fake_broadcast(cids: list[CIDObject]) -> None:
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
-        client._send_wantlist_to_peer = _fake_send
-        client._broadcast_wantlist = _fake_broadcast
+        client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
+        client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
 
         result = await client.new_session().get_block(cid)
 
@@ -390,16 +391,17 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
+            return True
 
-        async def _fake_broadcast(cids: list[CIDObject]):
+        async def _fake_broadcast(cids: list[CIDObject]) -> None:
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
-        client._send_wantlist_to_peer = _fake_send
-        client._broadcast_wantlist = _fake_broadcast
+        client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
+        client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
 
         result = await client.new_session().get_block(cid)
 
@@ -418,16 +420,17 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
+            return True
 
-        async def _fake_broadcast(cids: list[CIDObject]):
+        async def _fake_broadcast(cids: list[CIDObject]) -> None:
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
-        client._send_wantlist_to_peer = _fake_send
-        client._broadcast_wantlist = _fake_broadcast
+        client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
+        client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
 
         await client.new_session().get_block(cid, peer_id=PEER_A)
 
@@ -453,16 +456,17 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]) -> bool:
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
+            return True
 
-        async def _fake_broadcast(cids: list[CIDObject]):
+        async def _fake_broadcast(cids: list[CIDObject]) -> None:
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
-        client._send_wantlist_to_peer = _fake_send
-        client._broadcast_wantlist = _fake_broadcast
+        client._send_wantlist_to_peer = _fake_send  # type: ignore[assignment]
+        client._broadcast_wantlist = _fake_broadcast  # type: ignore[assignment]
 
         result = await client.new_session().get_block(cid)
 
