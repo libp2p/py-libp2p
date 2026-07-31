@@ -26,10 +26,10 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
 )
-from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.peer.id import (
     ID,
 )
+from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
     varint,
 )
@@ -114,7 +114,7 @@ async def push_identify_to_peer(
     host: IHost,
     peer_id: ID,
     observed_multiaddr: Multiaddr | None = None,
-    limit: trio.Semaphore | None = None,
+    limit: trio.CapacityLimiter | None = None,
     use_varint_format: bool = True,
 ) -> bool:
     """

@@ -115,7 +115,8 @@ async def update_peerstore_from_identify(
     if identify_msg.listen_addrs:
         try:
             MAX_LISTEN_ADDRS = 1000
-            raw_addrs = identify_msg.listen_addrs
+            all_raw_addrs = identify_msg.listen_addrs
+            raw_addrs: list[bytes] = list(all_raw_addrs)
             if len(raw_addrs) > MAX_LISTEN_ADDRS:
                 logger.warning(
                     "Peer %s sent %d listen addresses; truncating to %d",

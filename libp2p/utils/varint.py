@@ -216,18 +216,18 @@ async def read_length_prefixed_protobuf(
             )
 
         # Read the protobuf message, handling partial reads
-        data = bytearray()
+        result = bytearray()
         remaining = msg_length
         while remaining > 0:
             chunk = await stream.read(remaining)
             if not chunk:
                 raise Exception(
-                    f"Incomplete message: expected {msg_length}, got {len(data)}"
+                    f"Incomplete message: expected {msg_length}, got {len(result)}"
                 )
-            data.extend(chunk)
+            result.extend(chunk)
             remaining -= len(chunk)
 
-        return bytes(data)
+        return bytes(result)
     else:
         # Read raw protobuf message from the stream
         # For raw format, read all available data in one go
