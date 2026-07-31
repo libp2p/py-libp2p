@@ -50,6 +50,7 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
     from libp2p.utils.address_validation import (
         find_free_port,
         get_available_interfaces,
+        get_optimal_binding_address,
     )
 
     if port <= 0:
@@ -86,8 +87,9 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
                 print(f"{addr}")
 
             print(
-                f"\nRun this from the same folder in another console:\n\n"
-                f"ping-demo -d {host.get_addrs()[0]} -psk {psk} -t {transport}\n"
+                "\nRun this from the same folder in another console:\n\n"
+                f"ping-demo -d {get_optimal_binding_address(port)}"
+                f" -psk {psk} -t {transport}\n"
             )
             print("Waiting for incoming connection...")
 
