@@ -1,7 +1,7 @@
+from collections.abc import AsyncIterator
 import logging
 import secrets
 import time
-from collections.abc import AsyncIterator
 
 import trio
 
@@ -99,7 +99,9 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     return True
 
 
-async def _ping(stream: INetStream, cancel_scope: trio.CancelScope | None = None) -> int:
+async def _ping(
+    stream: INetStream, cancel_scope: trio.CancelScope | None = None
+) -> int:
     """
     Perform a single ping and return the RTT in **milliseconds**.
 
@@ -140,7 +142,8 @@ async def _ping(stream: INetStream, cancel_scope: trio.CancelScope | None = None
 
 
 class PingService:
-    """PingService executes pings and returns RTT in milliseconds (ms).
+    """
+    PingService executes pings and returns RTT in milliseconds (ms).
 
     Matches go-libp2p convention: Result.RTT.Milliseconds().
     """
@@ -200,7 +203,12 @@ class PingService:
                 self._inbound_streams.get(peer_id, set()).discard(stream)
 
 
-    async def ping_iter(self, peer_id: PeerID, ping_amt: int = 1, cancel_scope: trio.CancelScope | None = None) -> AsyncIterator[int]:
+    async def ping_iter(
+        self,
+        peer_id: PeerID,
+        ping_amt: int = 1,
+        cancel_scope: trio.CancelScope | None = None,
+    ) -> AsyncIterator[int]:
         if ping_amt < 1:
             raise ValueError(f"ping_amt must be >= 1, got {ping_amt!r}")
 
@@ -230,7 +238,9 @@ class PingService:
                 self._outbound_streams.pop(peer_id, None)
             raise
         finally:
-            if event is not None and getattr(stream, 'metric_send_channel', None) is not None:
+            if event is not None and getattr(
+                stream, 'metric_send_channel', None
+            ) is not None:
                 with trio.move_on_after(1):
                     await stream.metric_send_channel.send(event)
 

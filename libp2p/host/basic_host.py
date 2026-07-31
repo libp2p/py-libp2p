@@ -1131,7 +1131,9 @@ class BasicHost(IHost):
         try:
             with trio.fail_after(10.0):
                 try:
-                    data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+                    data = await read_length_prefixed_protobuf(
+                        stream, use_varint_format=True
+                    )
                 except Exception:
                     # Remote may use legacy raw protobuf format
                     data = await stream.read()
@@ -1140,7 +1142,8 @@ class BasicHost(IHost):
             await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
             # Only mark as identified if still connected (avoid stale entries)
             if self._network.get_connections(peer_id):
-                self._identified_peers[peer_id] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                self._identified_peers[peer_id] = ts
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
                 try:

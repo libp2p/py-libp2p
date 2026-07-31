@@ -99,7 +99,8 @@ class BitswapClient:
         ] = {}  # peer -> wantlist
         self.sim = SessionInterestManager()
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
-        self._peer_pending_bytes: dict[PeerID, int] = {}  # peer -> pending bytes (v1.2.0)
+        self._peer_pending_bytes: dict[PeerID, int] = {}
+        # peer -> pending bytes (v1.2.0)
 
         self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
         self.peer_manager = BitswapPeerManager()
@@ -518,7 +519,6 @@ class BitswapClient:
             peer_id_str = str(peer_id)
             logger.info(f"Reading responses from {peer_id_str} on stream")
             message_count = 0
-            last_activity = trio.current_time()
             # If no activity for 30s, consider the stream dead
             STREAM_IDLE_TIMEOUT = 30.0
 
@@ -553,7 +553,6 @@ class BitswapClient:
                     logger.warning(f"Stream from {peer_id_str} closed by remote")
                     break
 
-                last_activity = trio.current_time()
                 message_count += 1
                 logger.info(f"Received message #{message_count} from {peer_id_str}")
 
@@ -861,7 +860,9 @@ class BitswapClient:
                     )
                 except RuntimeError as e:
                     if "Nursery is closed" in str(e):
-                        logger.debug("Skipping wantlist response; node is shutting down.")
+                        logger.debug(
+                            "Skipping wantlist response; node is shutting down."
+                        )
                     else:
                         raise
             else:
@@ -1231,7 +1232,8 @@ class BitswapClient:
             return msg
 
         except (StreamEOF, StreamError) as e:
-            # Stream closed or reset by remote peer - this is normal when transfer completes or connection drops
+            # Stream closed or reset by remote peer - normal when transfer
+            # completes or connection drops
             logger.debug(f"Stream closed or error by remote peer: {e}")
             return None
         except Exception as e:

@@ -1,5 +1,4 @@
 import logging
-import random
 import time
 from typing import TYPE_CHECKING
 
@@ -12,8 +11,8 @@ from .config import DEFAULT_TIMEOUT
 from .errors import TimeoutError as BitswapTimeoutError
 
 if TYPE_CHECKING:
-    from .client import BitswapClient
     from .cid import CIDInput
+    from .client import BitswapClient
 
 logger = logging.getLogger("libp2p.bitswap.session")
 
@@ -127,7 +126,6 @@ class BitswapSession:
                 # Phase 1: Discover peers via WANT-HAVE
                 # Get peers that we know have this block
                 known_have_peers = self.client.presence_manager.get_expected_peers(cid)
-                untried_have_peers = known_have_peers - requested_from
 
                 # Add any newly discovered HAVE peers
                 have_peers.update(known_have_peers)
@@ -143,7 +141,11 @@ class BitswapSession:
                 if untried_block_peers and result is None:
                     # Phase 2: Send WANT-BLOCK to available peers (parallel racing)
                     targets = list(untried_block_peers)[:MAX_PARALLEL_RACE]
-                    if peer_id and peer_id not in block_requested_from and peer_id in have_peers:
+                    if (
+                        peer_id
+                        and peer_id not in block_requested_from
+                        and peer_id in have_peers
+                    ):
                         # Prioritize the specific peer if it has the block
                         if peer_id not in targets:
                             targets.insert(0, peer_id)
@@ -162,7 +164,9 @@ class BitswapSession:
                 elif not have_peers:
                     # No peers known to have the block yet — broadcast WANT-HAVE
                     now = time.time()
-                    should_rebroadcast = (now - last_rebroadcast) >= REBROADCAST_INTERVAL
+                    should_rebroadcast = (
+                        (now - last_rebroadcast) >= REBROADCAST_INTERVAL
+                    )
                     untried_have = (
                         set()
                         if peer_id in requested_from

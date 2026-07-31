@@ -169,7 +169,9 @@ def read_varint_prefixed_bytes_sync(
         if byte_data[0] & 0x80 == 0:
             break
     else:
-        raise ValueError("Varint decoding error: integer exceeds maximum size of 64 bits")
+        raise ValueError(
+            "Varint decoding error: integer exceeds maximum size of 64 bits"
+        )
 
     # Decode the length
     length = decode_uvarint(length_bytes)
@@ -202,7 +204,9 @@ async def read_length_prefixed_protobuf(
             if b[0] & 0x80 == 0:
                 break
         else:
-            raise Exception("Varint decoding error: integer exceeds maximum size of 64 bits")
+            raise Exception(
+                "Varint decoding error: integer exceeds maximum size of 64 bits"
+            )
 
         msg_length = decode_varint_from_bytes(length_bytes)
 

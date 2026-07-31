@@ -135,7 +135,11 @@ class PaymentExtension(IBitswapExtension):
                     _has_receipt = bool(response.payment_receipts)
                     _has_rejection = bool(response.payment_rejections)
                     _has_blocks = bool(response.payload) or bool(response.blocks)
-                    _nb = len(response.payload) + len(response.blocks) if _has_blocks else 0
+                    _nb = (
+                        len(response.payload) + len(response.blocks)
+                        if _has_blocks
+                        else 0
+                    )
                     logger.warning("=" * 70)
                     logger.warning(
                         "[STEP 8] SERVER SENDING RESPONSE after PaymentAuthorization:"
