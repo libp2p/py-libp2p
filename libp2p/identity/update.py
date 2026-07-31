@@ -40,7 +40,7 @@ def _is_public_addr(a: Multiaddr) -> bool:
         return False
     if "/ip4/192.168." in s:
         return False
-    if "/ip4/169.254." in s:   # link-local (RFC 3927)
+    if "/ip4/169.254." in s:  # link-local (RFC 3927)
         return False
     # 172.16.0.0/12
     if "/ip4/172." in s:
@@ -120,7 +120,9 @@ async def update_peerstore_from_identify(
             if len(raw_addrs) > MAX_LISTEN_ADDRS:
                 logger.warning(
                     "Peer %s sent %d listen addresses; truncating to %d",
-                    peer_id, len(raw_addrs), MAX_LISTEN_ADDRS,
+                    peer_id,
+                    len(raw_addrs),
+                    MAX_LISTEN_ADDRS,
                 )
                 raw_addrs = raw_addrs[:MAX_LISTEN_ADDRS]
 

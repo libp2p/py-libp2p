@@ -1,6 +1,5 @@
-import pytest
-from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.identity.identify.identify import parse_identify_response
+from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.utils import varint
 
 

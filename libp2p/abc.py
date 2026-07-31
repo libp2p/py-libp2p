@@ -1725,6 +1725,7 @@ class CMInfo:
     last_trim : float | None
         Unix timestamp of the most recent prune cycle, or None if
         the connection count has never exceeded the high watermark.
+
     """
 
     low_watermark: int

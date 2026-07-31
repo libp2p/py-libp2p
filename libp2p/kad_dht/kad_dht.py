@@ -499,7 +499,8 @@ class KadDHT(Service):
             if msg_length > max_message_size:
                 logger.warning(
                     "DHT message too large: %s bytes (max %s)",
-                    msg_length, max_message_size,
+                    msg_length,
+                    max_message_size,
                 )
                 await stream.close()
                 return
@@ -543,9 +544,7 @@ class KadDHT(Service):
 
                     # Per spec: "key must be set to the binary PeerId"
                     if not target_key:
-                        logger.warning(
-                            "FIND_NODE received with empty key, ignoring"
-                        )
+                        logger.warning("FIND_NODE received with empty key, ignoring")
                         await stream.close()
                         return
 
@@ -639,6 +638,7 @@ class KadDHT(Service):
                     # Per spec: verify key is a valid CID
                     try:
                         from cid import make_cid
+
                         make_cid(key)
                     except Exception:
                         logger.warning(
@@ -773,9 +773,7 @@ class KadDHT(Service):
                             provider_proto.addrs.append(addr.to_bytes())
 
                     # Also include closest peers (always, per IPFS spec)
-                    closest_peers = self.routing_table.find_local_closest_peers(
-                        key, 20
-                    )
+                    closest_peers = self.routing_table.find_local_closest_peers(key, 20)
                     logger.debug(
                         f"Including {len(closest_peers)} closest peers"
                         " in GET_PROVIDERS response"
@@ -876,8 +874,7 @@ class KadDHT(Service):
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                         logger.debug(
-                            "Sent GET_VALUE response with record "
-                            "and closer peers"
+                            "Sent GET_VALUE response with record and closer peers"
                         )
                     else:
                         logger.debug(f"No value found for key {key.hex()}")
@@ -994,9 +991,7 @@ class KadDHT(Service):
 
                 # Handle PUT_VALUE without record field
                 elif message.type == Message.MessageType.PUT_VALUE:
-                    logger.warning(
-                        f"Received PUT_VALUE without record from {peer_id}"
-                    )
+                    logger.warning(f"Received PUT_VALUE without record from {peer_id}")
                     response = Message()
                     response.type = Message.MessageType.PUT_VALUE
                     envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -1273,8 +1268,7 @@ class KadDHT(Service):
             # Entry correction: also update peers that returned no record
             # but are among the k closest to the key (per spec requirement)
             missing_peers = [
-                p for p in peers_with_no_record
-                if p in closest_peers[:BUCKET_SIZE]
+                p for p in peers_with_no_record if p in closest_peers[:BUCKET_SIZE]
             ]
             if missing_peers:
                 logger.debug(
@@ -1292,9 +1286,7 @@ class KadDHT(Service):
                                 f"Propagated record to peer {peer} (had no record)"
                             )
                     except Exception as e:
-                        logger.debug(
-                            f"Failed to propagate to peer {peer}: {e}"
-                        )
+                        logger.debug(f"Failed to propagate to peer {peer}: {e}")
 
                 async with trio.open_nursery() as nursery:
                     for p in missing_peers:

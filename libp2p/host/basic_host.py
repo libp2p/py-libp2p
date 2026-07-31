@@ -345,7 +345,7 @@ class BasicHost(IHost):
         return self.peerstore
 
     @property
-    def conn_manager(self) -> "TagStore":  # noqa: F821
+    def conn_manager(self) -> TagStore:  # noqa: F821
         """
         Return the connection manager (TagStore) from the underlying network.
 
@@ -363,7 +363,6 @@ class BasicHost(IHost):
         from libp2p.network.tag_store import TagStore  # noqa: F401 (type reference)
 
         return self._network.tag_store  # type: ignore[attr-defined]
-
 
     def _detect_negotiate_timeout_from_transport(self) -> float | None:
         """
@@ -1036,8 +1035,6 @@ class BasicHost(IHost):
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
 
-
-
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
@@ -1099,7 +1096,8 @@ class BasicHost(IHost):
             return False
         except Exception:
             logger.debug(
-                "Unexpected error checking cached protocols for %s", peer_id,
+                "Unexpected error checking cached protocols for %s",
+                peer_id,
                 exc_info=True,
             )
             return False
@@ -1248,6 +1246,7 @@ class BasicHost(IHost):
         from libp2p.identity.identify_push.identify_push import (
             push_identify_to_peers,
         )
+
         try:
             await push_identify_to_peers(self)
         except Exception:

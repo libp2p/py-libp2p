@@ -341,7 +341,9 @@ class ConnectionPruner:
         for peer_id in tag_store.get_all_peers():
             info = tag_store.get_tag_info(peer_id)
             if (
-                info and info.temp and not info.conns
+                info
+                and info.temp
+                and not info.conns
                 and (now - info.first_seen) > grace
             ):
                 tag_store.clear_peer(peer_id)

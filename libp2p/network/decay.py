@@ -160,7 +160,7 @@ class DecayingValue:
     """
 
     tag_name: str
-    peer_id: "ID"
+    peer_id: ID
     value: int = 0
     added_at: float = field(default_factory=time.time)
     last_bump: float = field(default_factory=time.time)
@@ -183,7 +183,7 @@ class DecayingTag:
         interval: float,
         decay_fn: DecayFn,
         bump_fn: BumpFn,
-        decayer: "Decayer",
+        decayer: Decayer,
     ) -> None:
         self.name = name
         self.interval = interval
@@ -191,7 +191,7 @@ class DecayingTag:
         self._bump_fn = bump_fn
         self._decayer = decayer
 
-    def bump(self, peer_id: "ID", delta: int) -> None:
+    def bump(self, peer_id: ID, delta: int) -> None:
         """
         Apply bump_fn to this peer's value for this tag.
 
@@ -205,7 +205,7 @@ class DecayingTag:
         """
         self._decayer.bump(peer_id, self, delta)
 
-    def remove(self, peer_id: "ID") -> None:
+    def remove(self, peer_id: ID) -> None:
         """
         Remove this decaying tag from a peer entirely.
 
@@ -235,7 +235,7 @@ class Decayer:
 
     def __init__(
         self,
-        tag_store: "TagStore",
+        tag_store: TagStore,
         resolution: float = DEFAULT_RESOLUTION,
     ) -> None:
         """
@@ -254,7 +254,7 @@ class Decayer:
         self._resolution = resolution
         self._tags: dict[str, DecayingTag] = {}
         # (peer_id, tag_name) → DecayingValue
-        self._values: dict[tuple["ID", str], DecayingValue] = {}
+        self._values: dict[tuple[ID, str], DecayingValue] = {}
         self._started = False
         self._cancel_scope: trio.CancelScope | None = None
 
@@ -298,7 +298,7 @@ class Decayer:
         self._tags[name] = tag
         return tag
 
-    def bump(self, peer_id: "ID", tag: "DecayingTag", delta: int) -> None:
+    def bump(self, peer_id: ID, tag: DecayingTag, delta: int) -> None:
         """
         Apply bump_fn synchronously and reflect in TagStore immediately.
 
@@ -328,10 +328,13 @@ class Decayer:
         self._tag_store.upsert_tag(peer_id, tag.name, lambda _: captured)
         logger.debug(
             "Bumped decaying tag %r for peer %s: %d → %d",
-            tag.name, peer_id, old_value, new_value,
+            tag.name,
+            peer_id,
+            old_value,
+            new_value,
         )
 
-    def remove(self, peer_id: "ID", tag: "DecayingTag") -> None:
+    def remove(self, peer_id: ID, tag: DecayingTag) -> None:
         """
         Remove a decaying tag from a peer.
 
@@ -383,7 +386,7 @@ class Decayer:
         Erased entries are removed from both the Decayer's internal state and
         the TagStore so the next connection prune cycle sees up-to-date values.
         """
-        to_erase: list[tuple["ID", str]] = []
+        to_erase: list[tuple[ID, str]] = []
 
         for (peer_id, tag_name), dv in list(self._values.items()):
             tag = self._tags.get(tag_name)

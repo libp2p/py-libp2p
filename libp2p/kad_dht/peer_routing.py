@@ -13,10 +13,8 @@ import varint
 
 from libp2p.abc import (
     IHost,
-    INetStream,
     IPeerRouting,
 )
-from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -472,6 +470,4 @@ class PeerRouting(IPeerRouting):
                                 f"Failed to add peer {peer_id} during refresh: {e}"
                             )
                 except Exception as e:
-                    logger.debug(
-                        f"Failed to lookup random key for bucket refresh: {e}"
-                    )
+                    logger.debug(f"Failed to lookup random key for bucket refresh: {e}")

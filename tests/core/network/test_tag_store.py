@@ -63,7 +63,7 @@ class TestTagInfo:
         assert info.tags == {}
         assert info.conns == {}
         assert info.first_seen > 0
-        assert info.temp is False   # explicitly created TagInfo is not temp
+        assert info.temp is False  # explicitly created TagInfo is not temp
 
     def test_tag_info_copy_independence(self):
         """TagInfo.copy() returns an object whose mutations don't affect original."""
@@ -266,6 +266,7 @@ class TestTagStore:
     def test_temp_flips_on_first_connection(self, store, peer_id):
         """record_connection flips temp=False and updates first_seen."""
         import time
+
         store.tag_peer(peer_id, "dht", 10)
         before = time.time()
         store.record_connection(peer_id, 101)
@@ -406,7 +407,7 @@ class TestTagStoreNotifee:
 
         info = store.get_tag_info(peer_id)
         assert info.temp is False
-        assert info.tags["dht"] == 15   # tag survived the connect
+        assert info.tags["dht"] == 15  # tag survived the connect
 
 
 class TestUpsertHelpers:

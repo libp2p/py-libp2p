@@ -80,7 +80,7 @@ class TagInfo:
     first_seen: float = field(default_factory=time.time)
     value: int = 0
     tags: dict[str, int] = field(default_factory=dict)
-    conns: dict[int, float] = field(default_factory=dict)   # keyed by id(conn)
+    conns: dict[int, float] = field(default_factory=dict)  # keyed by id(conn)
     temp: bool = False  # True until first real Connected event fires
 
     def get_total_value(self) -> int:
@@ -95,7 +95,7 @@ class TagInfo:
         """
         return sum(self.tags.values())
 
-    def copy(self) -> "TagInfo":
+    def copy(self) -> TagInfo:
         """
         Return a defensive copy.
 
@@ -151,7 +151,7 @@ class TagStore:
         self._protected: dict[ID, set[str]] = {}
         self._lock = threading.RLock()
 
-    def _entry_for(self, peer_id: "ID") -> TagInfo:
+    def _entry_for(self, peer_id: ID) -> TagInfo:
         """
         Get-or-create a TagInfo for the given peer.
 
@@ -175,7 +175,7 @@ class TagStore:
             self._tags[peer_id] = TagInfo(temp=True)
         return self._tags[peer_id]
 
-    def tag_peer(self, peer_id: "ID", tag: str, value: int) -> None:
+    def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
         """
         Tag a peer with a string, associating a weight with the tag.
 
@@ -199,7 +199,7 @@ class TagStore:
             tag_info.value += value - old_value
             logger.debug(f"Tagged peer {peer_id} with {tag}={value}")
 
-    def untag_peer(self, peer_id: "ID", tag: str) -> None:
+    def untag_peer(self, peer_id: ID, tag: str) -> None:
         """
         Remove the tagged value from the peer.
 
@@ -221,7 +221,7 @@ class TagStore:
 
     def upsert_tag(
         self,
-        peer_id: "ID",
+        peer_id: ID,
         tag: str,
         upsert_fn: Callable[[int], int],
     ) -> None:
@@ -251,7 +251,7 @@ class TagStore:
             tag_info.value += new_value - current_value
             logger.debug(f"Upserted tag {tag} for peer {peer_id}: {new_value}")
 
-    def get_tag_info(self, peer_id: "ID") -> TagInfo | None:
+    def get_tag_info(self, peer_id: ID) -> TagInfo | None:
         """
         Get the metadata associated with a peer.
 
@@ -274,7 +274,7 @@ class TagStore:
             info = self._tags.get(peer_id)
             return info.copy() if info is not None else None
 
-    def get_tag_value(self, peer_id: "ID") -> int:
+    def get_tag_value(self, peer_id: ID) -> int:
         """
         Get the total tag value for a peer.
 
@@ -294,7 +294,7 @@ class TagStore:
                 return self._tags[peer_id].value
             return 0
 
-    def get_tag(self, peer_id: "ID", tag: str) -> int:
+    def get_tag(self, peer_id: ID, tag: str) -> int:
         """
         Get a specific tag value for a peer.
 
@@ -316,7 +316,7 @@ class TagStore:
                 return self._tags[peer_id].tags.get(tag, 0)
             return 0
 
-    def protect(self, peer_id: "ID", tag: str) -> None:
+    def protect(self, peer_id: ID, tag: str) -> None:
         """
         Protect a peer from having its connection(s) pruned.
 
@@ -339,7 +339,7 @@ class TagStore:
             self._protected[peer_id].add(tag)
             logger.debug(f"Protected peer {peer_id} with tag {tag}")
 
-    def unprotect(self, peer_id: "ID", tag: str) -> bool:
+    def unprotect(self, peer_id: ID, tag: str) -> bool:
         """
         Remove a protection that may have been placed on a peer.
 
@@ -370,7 +370,7 @@ class TagStore:
                 return True
             return False
 
-    def is_protected(self, peer_id: "ID", tag: str = "") -> bool:
+    def is_protected(self, peer_id: ID, tag: str = "") -> bool:
         """
         Check if a peer is protected.
 
@@ -395,7 +395,7 @@ class TagStore:
                 return len(self._protected[peer_id]) > 0
             return tag in self._protected[peer_id]
 
-    def record_connection(self, peer_id: "ID", conn_id: int) -> None:
+    def record_connection(self, peer_id: ID, conn_id: int) -> None:
         """
         Record a new connection for a peer.
 
@@ -420,7 +420,7 @@ class TagStore:
                 tag_info.first_seen = time.time()
             tag_info.conns[conn_id] = time.time()
 
-    def remove_connection(self, peer_id: "ID", conn_id: int) -> None:
+    def remove_connection(self, peer_id: ID, conn_id: int) -> None:
         """
         Remove a connection record for a peer.
 
@@ -445,11 +445,10 @@ class TagStore:
                     self._tags.pop(peer_id, None)
                     self._protected.pop(peer_id, None)
                     logger.debug(
-                        "Removed last connection for %s: "
-                        "tag entry deleted", peer_id
+                        "Removed last connection for %s: tag entry deleted", peer_id
                     )
 
-    def clear_peer(self, peer_id: "ID") -> None:
+    def clear_peer(self, peer_id: ID) -> None:
         """
         Clear all tag data for a peer.
 
@@ -464,7 +463,7 @@ class TagStore:
             self._protected.pop(peer_id, None)
             logger.debug(f"Cleared all tag data for peer {peer_id}")
 
-    def get_all_peers(self) -> list["ID"]:
+    def get_all_peers(self) -> list[ID]:
         """
         Get all peers with tags.
 
@@ -477,7 +476,7 @@ class TagStore:
         with self._lock:
             return list(self._tags.keys())
 
-    def get_protected_peers(self) -> list["ID"]:
+    def get_protected_peers(self) -> list[ID]:
         """
         Get all protected peers.
 
@@ -505,26 +504,26 @@ class TagStoreNotifee(INotifee):
         """Initialise with a reference to the TagStore to update."""
         self._store = tag_store
 
-    async def connected(self, network: "INetwork", conn: INetConn) -> None:
+    async def connected(self, network: INetwork, conn: INetConn) -> None:
         """Record connection in TagStore using id(conn) as the key."""
         peer_id = conn.muxed_conn.peer_id
         self._store.record_connection(peer_id, id(conn))
 
-    async def disconnected(self, network: "INetwork", conn: INetConn) -> None:
+    async def disconnected(self, network: INetwork, conn: INetConn) -> None:
         """Remove connection from TagStore; deletes entry when last conn closes."""
         peer_id = conn.muxed_conn.peer_id
         self._store.remove_connection(peer_id, id(conn))
 
-    async def opened_stream(self, network: "INetwork", stream: INetStream) -> None:
+    async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
         """No-op — TagStore does not track streams."""
 
-    async def closed_stream(self, network: "INetwork", stream: INetStream) -> None:
+    async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
         """No-op — TagStore does not track streams."""
 
-    async def listen(self, network: "INetwork", multiaddr: Multiaddr) -> None:
+    async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
         """No-op."""
 
-    async def listen_close(self, network: "INetwork", multiaddr: Multiaddr) -> None:
+    async def listen_close(self, network: INetwork, multiaddr: Multiaddr) -> None:
         """No-op."""
 
 

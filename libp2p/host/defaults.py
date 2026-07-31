@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 def get_default_protocols(host: IHost) -> "OrderedDict[TProtocol, StreamHandlerFn]":
     from libp2p.host.ping import PingService
+
     ping_service = PingService(host)
     return OrderedDict(
         (

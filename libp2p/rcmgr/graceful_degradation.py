@@ -52,7 +52,7 @@ class GracefulDegradation:
         self.degradation_level = 0
         self.original_limits: ResourceLimits | None = None
         self._last_max_log_time: float = 0.0
-        self._escalation_cooldown: float = 10.0   # seconds between escalations
+        self._escalation_cooldown: float = 10.0  # seconds between escalations
         self._last_escalation_time: float = 0.0
         self._store_original_limits()
 
@@ -282,6 +282,7 @@ class GracefulDegradation:
     async def run_periodic_recovery(self, interval: float = 30.0) -> None:
         """Background task: attempt recovery every `interval` seconds."""
         import trio
+
         while True:
             await trio.sleep(interval)
             if self.degradation_level > 0:

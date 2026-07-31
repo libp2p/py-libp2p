@@ -90,7 +90,6 @@ def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
     return msg
 
 
-
 @contextmanager
 def _nim_identify_interop():
     """Temporarily strip fields from identify messages for nim-libp2p interop."""
@@ -260,7 +259,8 @@ class PingTest:
 
         self.host: Any = None
         self.redis_coordinator = RedisCoordinator(
-            self.redis_host, self.redis_port,
+            self.redis_host,
+            self.redis_port,
             min(self.test_timeout_seconds, 120),
         )
         self.ping_received = False
@@ -460,9 +460,6 @@ class PingTest:
                 return None
         return None
 
-
-
-
     def _encapsulate_with_p2p(
         self, addr: multiaddr.Multiaddr, p2p_value: str | None
     ) -> multiaddr.Multiaddr:
@@ -574,9 +571,7 @@ class PingTest:
                         ws_addrs.append(addr)
                     else:
                         # Extract p2p component before adding /ws
-                        addr_without_p2p, p2p_value = extract_p2p(
-                            addr
-                        )
+                        addr_without_p2p, p2p_value = extract_p2p(addr)
                         # Add /ws protocol
                         ws_addr = addr_without_p2p.encapsulate(
                             multiaddr.Multiaddr("/ws")
@@ -606,9 +601,7 @@ class PingTest:
                     elif "ws" in protocols:
                         # Convert /ws to /wss (upgrade to secure)
                         # Extract p2p component before conversion
-                        addr_without_p2p, p2p_value = extract_p2p(
-                            addr
-                        )
+                        addr_without_p2p, p2p_value = extract_p2p(addr)
                         # Remove /ws protocol
                         addr_without_ws = addr_without_p2p.decapsulate(
                             multiaddr.Multiaddr("/ws")
@@ -623,9 +616,7 @@ class PingTest:
                     else:
                         # Plain TCP address - add /wss protocol
                         # Extract p2p component before adding /wss
-                        addr_without_p2p, p2p_value = extract_p2p(
-                            addr
-                        )
+                        addr_without_p2p, p2p_value = extract_p2p(addr)
                         # Add /wss protocol
                         wss_addr = addr_without_p2p.encapsulate(
                             multiaddr.Multiaddr("/wss")
@@ -756,8 +747,6 @@ class PingTest:
         except Exception as e:
             print(f"error occurred: {e}", file=sys.stderr)
             raise
-
-
 
     def _get_publishable_address(self, addresses: list[multiaddr.Multiaddr]) -> str:
         """
@@ -924,7 +913,6 @@ class PingTest:
                 )
                 return
             raise
-
 
     def _debug_connection_state(self, network: Any, peer_id: Any) -> None:
         """Debug connection state (only if debug logging enabled)."""
@@ -1379,7 +1367,6 @@ class PingTest:
 
         finally:
             await self.redis_coordinator.close()
-
 
 
 def parse_args() -> argparse.Namespace:

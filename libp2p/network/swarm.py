@@ -128,8 +128,10 @@ class _NegativePeerCache:
         """Remove from cache when a peer successfully connects."""
         self._cache.pop(peer_id, None)
 
+
 _UNPARSEABLE_ADDRS: set[bytes] = set()
 _MAX_UNPARSEABLE_ADDRS = 10000
+
 
 def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
     if raw in _UNPARSEABLE_ADDRS:
@@ -642,8 +644,7 @@ class Swarm(Service, INetworkService):
                 peer_id,
             )
             raise SwarmException(
-                f"Peer {peer_id} recently failed all addresses "
-                "(negative cache)"
+                f"Peer {peer_id} recently failed all addresses (negative cache)"
             )
 
         # Check if we already have connections
@@ -704,10 +705,10 @@ class Swarm(Service, INetworkService):
                 allowed_addrs = public_addrs
 
             from libp2p.utils.address_validation import is_ipv6_available
+
             if not is_ipv6_available():
                 allowed_addrs = [
-                    a for a in allowed_addrs
-                    if not str(a).startswith("/ip6/")
+                    a for a in allowed_addrs if not str(a).startswith("/ip6/")
                 ]
 
             connections = []
@@ -796,9 +797,9 @@ class Swarm(Service, INetworkService):
 
                 if "Peer ID mismatch" in error_msg:
                     logger.debug(
-                        "Skipping retries for peer %s at %s due to "
-                        "identity mismatch",
-                        peer_id, addr,
+                        "Skipping retries for peer %s at %s due to identity mismatch",
+                        peer_id,
+                        addr,
                     )
                     try:
                         self.peerstore.clear_addrs(peer_id)

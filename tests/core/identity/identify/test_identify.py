@@ -1,6 +1,5 @@
 import logging
 
-from libp2p.network.stream.exceptions import StreamEOF
 import pytest
 from multiaddr import (
     Multiaddr,
@@ -15,6 +14,7 @@ from libp2p.identity.identify.identify import (
     _multiaddr_to_bytes,
     parse_identify_response,
 )
+from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.envelope import Envelope, consume_envelope, unmarshal_envelope
 from libp2p.peer.peer_record import unmarshal_record
 from tests.utils.factories import (

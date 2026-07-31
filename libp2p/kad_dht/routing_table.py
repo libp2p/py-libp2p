@@ -425,6 +425,7 @@ class RoutingTable:
             if not skip_server_mode_check:
                 try:
                     from .common import PROTOCOL_ID
+
                     peer_protocols = self.host.get_peerstore().get_protocols(peer_id)
                     if peer_protocols is not None and len(peer_protocols) > 0:
                         # Identify has run — check if peer supports KAD

@@ -7,7 +7,6 @@ import logging
 
 import base58
 import multibase
-import multihash
 
 from libp2p.abc import IHost
 from libp2p.encoding_config import get_default_encoding

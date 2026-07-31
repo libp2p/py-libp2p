@@ -1,9 +1,11 @@
-"""Portable container IP discovery.
+"""
+Portable container IP discovery.
 
 hostname -I is GNU/Linux-only (not macOS, BSD, Alpine). This module
 uses the UDP connect trick as the primary method, with hostname -I
 as a Linux-specific fallback only.
 """
+
 from __future__ import annotations
 
 import socket

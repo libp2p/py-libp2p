@@ -165,8 +165,8 @@ class BitswapSession:
                     # No peers known to have the block yet — broadcast WANT-HAVE
                     now = time.time()
                     should_rebroadcast = (
-                        (now - last_rebroadcast) >= REBROADCAST_INTERVAL
-                    )
+                        now - last_rebroadcast
+                    ) >= REBROADCAST_INTERVAL
                     untried_have = (
                         set()
                         if peer_id in requested_from
@@ -288,9 +288,7 @@ class BitswapSession:
             start_time = time.time()
             retry_interval = 1.0
             last_rebroadcast = 0.0
-            requested_from: dict[CIDObject, set[PeerID]] = {
-                cid: set() for cid in batch
-            }
+            requested_from: dict[CIDObject, set[PeerID]] = {cid: set() for cid in batch}
             block_requested_from: dict[CIDObject, set[PeerID]] = {
                 cid: set() for cid in batch
             }
@@ -350,8 +348,8 @@ class BitswapSession:
                             # No HAVE peers yet — broadcast WANT-HAVE
                             now = time.time()
                             should_rebroadcast = (
-                                (now - last_rebroadcast) >= REBROADCAST_INTERVAL
-                            )
+                                now - last_rebroadcast
+                            ) >= REBROADCAST_INTERVAL
                             if should_rebroadcast or (
                                 peer_id and peer_id not in requested_from[cid]
                             ):

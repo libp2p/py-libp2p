@@ -147,9 +147,7 @@ async def test_handle_ping_survives_short_reads():
 
     ping_payload = secrets.token_bytes(PING_LENGTH)
     fake_stream = AsyncMock()
-    fake_stream.read = AsyncMock(
-        side_effect=[ping_payload[:5], ping_payload[5:]]
-    )
+    fake_stream.read = AsyncMock(side_effect=[ping_payload[:5], ping_payload[5:]])
     fake_stream.write = AsyncMock(return_value=None)
 
     should_continue = await _handle_ping(fake_stream, PeerID(b"\x00" * 32))

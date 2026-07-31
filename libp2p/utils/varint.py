@@ -160,7 +160,7 @@ def read_varint_prefixed_bytes_sync(
     """
     # Read the varint length prefix
     length_bytes = b""
-    for _ in range(10): # max 10 bytes for 64-bit int
+    for _ in range(10):  # max 10 bytes for 64-bit int
         byte_data = stream.read(1)
         if not byte_data:
             raise EOFError("Stream ended while reading varint length prefix")

@@ -85,9 +85,7 @@ def _mk_identify_protobuf(
     if not laddrs:
         # plain transport addrs, matching go-libp2p
         laddrs = list(host.get_transport_addrs())
-    protocols = tuple(
-        str(p) for p in host.get_mux().get_protocols() if p is not None
-    )
+    protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
 
     # Create a signed peer-record for the remote peer
     envelope_bytes, _ = env_to_send_in_RPC(host)
@@ -139,7 +137,9 @@ def parse_identify_response(response: bytes) -> Identify:
     except Exception as e:
         logger.error(
             "Failed to parse identify response: %s (length=%d, hex=%s)",
-            e, len(response), response.hex(),
+            e,
+            len(response),
+            response.hex(),
         )
         raise
 
@@ -168,10 +168,7 @@ def identify_handler_for(
         # Under heavy parallel test load, listeners may not yet appear in
         # get_addrs() when the identify stream opens immediately after connect.
         deadline = trio.current_time() + 0.5
-        while (
-            not host.get_addrs()
-            and trio.current_time() < deadline
-        ):
+        while not host.get_addrs() and trio.current_time() < deadline:
             await trio.sleep(0.01)
 
         protobuf = _mk_identify_protobuf(host, observed_multiaddr)

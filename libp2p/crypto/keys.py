@@ -48,8 +48,7 @@ class Key(ABC):
         if not isinstance(other, Key):
             return NotImplemented
         return (
-            self.get_type() == other.get_type()
-            and self.to_bytes() == other.to_bytes()
+            self.get_type() == other.get_type() and self.to_bytes() == other.to_bytes()
         )
 
 

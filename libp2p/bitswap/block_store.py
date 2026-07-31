@@ -187,9 +187,11 @@ class FilesystemBlockStore(BlockStore):
     async def delete_block(self, cid: CIDInput) -> None:
         """Delete a block file from disk."""
         path = self._cid_to_path(cid)
+
         def _delete() -> None:
             if path.exists():
                 path.unlink()
+
         await trio.to_thread.run_sync(_delete)
 
     def get_all_cids(self) -> list[bytes]:

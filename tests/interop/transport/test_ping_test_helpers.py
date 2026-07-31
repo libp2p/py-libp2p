@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 import sys
 
@@ -16,10 +15,10 @@ _PING_TEST_PATH = _REPO_ROOT / "interop" / "transport" / "ping_test.py"
 
 
 def _load_ping_test_module():
-    import sys
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
     import interop.transport.ping_test as ping_test_mod
+
     return ping_test_mod
 
 

@@ -78,7 +78,7 @@ class TestDecayFunctions:
     def test_decay_linear_erases_at_zero(self):
         """decay_linear erases when int(value * coef) == 0."""
         fn = decay_linear(0.5)
-        val, erase = fn(1)   # int(1 * 0.5) == 0
+        val, erase = fn(1)  # int(1 * 0.5) == 0
         assert val == 0
         assert erase is True
 
@@ -248,8 +248,8 @@ class TestDecayer:
             "score", 10.0, decay_linear(0.5), bump_sum_unbounded()
         )
         tag.bump(PEER_A, 100)
-        await decayer._tick()   # 100 → 50
-        tag.bump(PEER_A, 20)   # 50 + 20 = 70
+        await decayer._tick()  # 100 → 50
+        tag.bump(PEER_A, 20)  # 50 + 20 = 70
         assert store.get_tag(PEER_A, "score") == 70
 
     def test_multiple_tags_independent(self, decayer, store):

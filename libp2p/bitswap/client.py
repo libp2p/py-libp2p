@@ -277,9 +277,7 @@ class BitswapClient:
                         result = True
                         break
                     # Check if we got DontHave from all queried peers
-                    dont_have_peers = self.presence_manager.get_dont_have_peers(
-                        cid_obj
-                    )
+                    dont_have_peers = self.presence_manager.get_dont_have_peers(cid_obj)
                     if peer_id and peer_id in dont_have_peers:
                         result = False
                         break
@@ -438,9 +436,7 @@ class BitswapClient:
             stream = None
             try:
                 # Use the negotiated protocol for this peer, fall back to v1.0.0
-                peer_protocol = self._peer_protocols.get(
-                    peer_id, BITSWAP_PROTOCOL_V100
-                )
+                peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
                 stream = await self.host.new_stream(
                     peer_id,
                     [TProtocol(peer_protocol)],

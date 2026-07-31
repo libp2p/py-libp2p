@@ -1,5 +1,4 @@
 import time
-from typing import Dict, List, Set
 
 from libp2p.bitswap.cid import CIDObject
 from libp2p.peer.id import ID as PeerID
@@ -13,7 +12,7 @@ class PeerStats:
         self.timeouts = 0
         # Default latency of 1 second for untried peers
         self.ema_latency = 1.0
-        self._pending_requests: Dict[CIDObject, float] = {}
+        self._pending_requests: dict[CIDObject, float] = {}
 
 
 class BitswapPeerManager:
@@ -22,7 +21,7 @@ class BitswapPeerManager:
     """
 
     def __init__(self) -> None:
-        self.peers: Dict[PeerID, PeerStats] = {}
+        self.peers: dict[PeerID, PeerStats] = {}
 
     def _get_stats(self, peer_id: PeerID) -> PeerStats:
         if peer_id not in self.peers:
@@ -50,8 +49,9 @@ class BitswapPeerManager:
         if cid in stats._pending_requests:
             del stats._pending_requests[cid]
 
-    def get_best_peers(self, candidates: Set[PeerID], count: int) -> List[PeerID]:
+    def get_best_peers(self, candidates: set[PeerID], count: int) -> list[PeerID]:
         """Rank peers based on latency and success rate."""
+
         def score(peer_id: PeerID) -> float:
             stats = self._get_stats(peer_id)
             success_rate = (

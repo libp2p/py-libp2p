@@ -58,8 +58,8 @@ class AutoConnector:
         self._shutdown_event = trio.Event()
         self._last_connect_attempt: dict[ID, float] = {}
         self._failure_counts: dict[ID, int] = {}
-        self._base_cooldown = 300.0   # base retry interval (seconds)
-        self._max_cooldown = 3600.0   # cap at 1 hour for persistent failures
+        self._base_cooldown = 300.0  # base retry interval (seconds)
+        self._max_cooldown = 3600.0  # cap at 1 hour for persistent failures
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -117,7 +117,9 @@ class AutoConnector:
         logger.info(
             "AUTO_CONNECTOR_STATE: num_connections=%s, "
             "low_watermark=%s, min_connections=%s",
-            num_connections, low_watermark, min_connections,
+            num_connections,
+            low_watermark,
+            min_connections,
         )
 
         # Only connect if below low watermark
@@ -134,7 +136,9 @@ class AutoConnector:
         logger.info(
             "the connection (%s) is less the low limit (%s) "
             "so connection manager is initiating %s number of new connections",
-            num_connections, low_watermark, needed,
+            num_connections,
+            low_watermark,
+            needed,
         )
 
         # Get candidate peers from peerstore

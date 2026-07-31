@@ -165,6 +165,7 @@ class TestSwarmGetConnMgrInfo:
 
         # Import and patch the real method directly for testing
         from libp2p.network.swarm import Swarm
+
         swarm.get_conn_mgr_info = lambda: Swarm.get_conn_mgr_info(swarm)
         return swarm
 

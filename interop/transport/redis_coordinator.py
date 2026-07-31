@@ -7,6 +7,7 @@ import trio
 
 logger = logging.getLogger("libp2p.interop.redis")
 
+
 class RedisCoordinator:
     def __init__(self, host: str, port: int, timeout: float) -> None:
         self.host = host

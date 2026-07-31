@@ -1,11 +1,12 @@
 import pytest
-from libp2p.peer.id import ID
+from multiaddr import Multiaddr
+
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.identity.identify.pb.identify_pb2 import Identify
 from libp2p.identity.update import (
     update_peerstore_from_identify as _update_peerstore_from_identify,
 )
-from multiaddr import Multiaddr
+from libp2p.peer.id import ID
 from libp2p.peer.peerstore import PeerStore
 
 
@@ -23,7 +24,6 @@ async def test_pubkey_update_preserves_protocols():
     await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
 
     assert "/foo/1.0.0" in peerstore.get_protocols(peer_id)
-
 
 
 @pytest.mark.trio
@@ -50,6 +50,7 @@ async def test_private_addr_always_filtered():
 
     # Should raise because no addresses are found
     from libp2p.peer.peerstore import PeerStoreError
+
     with pytest.raises(PeerStoreError):
         peerstore.addrs(peer_id)
 
@@ -68,6 +69,7 @@ async def test_pubkey_spoofing_rejected():
     await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
 
     from libp2p.peer.peerstore import PeerStoreError
+
     with pytest.raises(PeerStoreError):
         peerstore.pubkey(peer_id)
 

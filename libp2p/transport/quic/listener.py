@@ -5,7 +5,6 @@ QUIC Listener
 import logging
 import socket
 import struct
-import sys
 import time
 from typing import TYPE_CHECKING
 

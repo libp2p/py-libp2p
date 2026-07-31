@@ -21,7 +21,6 @@ This matches the multicodec specification but changes binary format
 for dag-jose, dag-json, and experimental codecs.
 """
 
-import hashlib
 from typing import TypeAlias
 
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid

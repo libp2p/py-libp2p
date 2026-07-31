@@ -277,7 +277,8 @@ class ResourceManager:
                         )
                         logger.debug(
                             "acquire_connection failed: rate limit exceeded "
-                            "for peer %s", pid
+                            "for peer %s",
+                            pid,
                         )
                         return False
             except Exception:
@@ -288,9 +289,7 @@ class ResourceManager:
         if self.cidr_limiter is not None:
             try:
                 if not self.cidr_limiter.allow(endpoint_ip):
-                    self._record_blocked_resource(
-                        "connection", direction, scope="cidr"
-                    )
+                    self._record_blocked_resource("connection", direction, scope="cidr")
                     logger.debug(
                         "acquire_connection failed: CIDR limit exceeded for %s",
                         endpoint_ip,
@@ -330,18 +329,14 @@ class ResourceManager:
                         ):
                             # Retry after degradation
                             if self._current_connections >= self.limits.max_connections:
-                                self._record_blocked_resource(
-                                    "connection", direction
-                                )
+                                self._record_blocked_resource("connection", direction)
                                 logger.debug(
                                     "acquire_connection failed: max connections "
                                     "reached (degradation)"
                                 )
                                 return False
                         else:
-                            self._record_blocked_resource(
-                                "connection", direction
-                            )
+                            self._record_blocked_resource("connection", direction)
                             logger.debug(
                                 "acquire_connection failed: max connections reached"
                             )
@@ -362,7 +357,8 @@ class ResourceManager:
                             )
                             logger.debug(
                                 "acquire_connection failed: CIDR limit acquire "
-                                "failed for %s", endpoint_ip
+                                "failed for %s",
+                                endpoint_ip,
                             )
                             return False
                     except Exception:

@@ -149,18 +149,14 @@ class TestCancelMessageWantType:
     def test_cancel_retains_want_type_block(self):
         """Cancel for Block request retains wantType=0."""
         cid = compute_cid_v1(b"cancel-block")
-        entry = create_wantlist_entry(
-            cid, cancel=True, want_type=WantType.Block
-        )
+        entry = create_wantlist_entry(cid, cancel=True, want_type=WantType.Block)
         assert entry.wantType == 0
         assert entry.cancel is True
 
     def test_cancel_retains_want_type_have(self):
         """Cancel for Have request retains wantType=1."""
         cid = compute_cid_v1(b"cancel-have")
-        entry = create_wantlist_entry(
-            cid, cancel=True, want_type=WantType.Have
-        )
+        entry = create_wantlist_entry(cid, cancel=True, want_type=WantType.Have)
         assert entry.wantType == 1
         assert entry.cancel is True
 
@@ -384,7 +380,9 @@ class TestBlockSizeLimits:
         oversized_data = b"x" * (MAX_BLOCK_SIZE + 1)
         with pytest.raises(Exception):
             client._wantlist[cid] = {
-                "priority": 1, "want_type": 0, "send_dont_have": False
+                "priority": 1,
+                "want_type": 0,
+                "send_dont_have": False,
             }
             # add_block validates size
             import trio
@@ -505,9 +503,7 @@ class TestWantTypeSemantics:
     def test_want_have_roundtrip(self):
         """WantType.Have survives protobuf round-trip."""
         cid = compute_cid_v1(b"have-roundtrip")
-        entry = create_wantlist_entry(
-            cid, want_type=WantType.Have, send_dont_have=True
-        )
+        entry = create_wantlist_entry(cid, want_type=WantType.Have, send_dont_have=True)
         msg = create_message(wantlist_entries=[entry])
         serialized = msg.SerializeToString()
 
@@ -533,9 +529,7 @@ class TestWantTypeSemantics:
     def test_cancel_with_want_type_roundtrip(self):
         """Cancel entry with wantType survives round-trip."""
         cid = compute_cid_v1(b"cancel-roundtrip")
-        entry = create_wantlist_entry(
-            cid, cancel=True, want_type=WantType.Have
-        )
+        entry = create_wantlist_entry(cid, cancel=True, want_type=WantType.Have)
         msg = create_message(wantlist_entries=[entry])
         serialized = msg.SerializeToString()
 

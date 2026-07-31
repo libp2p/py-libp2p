@@ -10,8 +10,8 @@ from libp2p import (
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
     PING_LENGTH,
-    PingService,
     RESP_TIMEOUT,
+    PingService,
 )
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -27,9 +27,6 @@ logging.getLogger("libp2p").setLevel(logging.WARNING)
 
 
 PSK = "dffb7e3135399a8b1612b2aaca1c36a3a8ac2cd0cca51ceeb2ced87d308cac6d"
-
-
-
 
 
 async def send_ping(stream: INetStream) -> None:
@@ -57,8 +54,6 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
 
     if port <= 0:
         port = find_free_port()
-
-
 
     if transport == "tcp":
         listen_addrs = get_available_interfaces(port)

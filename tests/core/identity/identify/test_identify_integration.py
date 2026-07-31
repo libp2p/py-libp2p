@@ -1,6 +1,5 @@
 import logging
 
-from libp2p.network.stream.exceptions import StreamEOF
 import pytest
 import trio
 
@@ -13,6 +12,7 @@ from libp2p.identity.identify.identify import (
     identify_handler_for,
     parse_identify_response,
 )
+from libp2p.network.stream.exceptions import StreamEOF
 from tests.utils.factories import host_pair_factory
 from tests.utils.identify_test_helpers import (
     read_and_parse_identify,

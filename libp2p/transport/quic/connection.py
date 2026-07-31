@@ -368,7 +368,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 if not self._socket:
                     logger.debug("Creating new socket for outbound connection")
                     family = (
-                        socket.AF_INET6 if ":" in self._remote_addr[0]
+                        socket.AF_INET6
+                        if ":" in self._remote_addr[0]
                         else socket.AF_INET
                     )
                     self._socket = trio.socket.socket(

@@ -69,9 +69,7 @@ async def _handle_ping(stream: INetStream, peer_id: PeerID) -> bool:
     except IncompleteReadError as error:
         if error.is_clean_close:
             # Peer closed the stream cleanly between pings; same as StreamEOF.
-            logger.debug(
-                "Other side closed while waiting for ping from %s", peer_id
-            )
+            logger.debug("Other side closed while waiting for ping from %s", peer_id)
             return False
         logger.debug(
             "Truncated ping from %s: expected %d bytes, got %d: %s",
@@ -202,7 +200,6 @@ class PingService:
             async with self._lock:
                 self._inbound_streams.get(peer_id, set()).discard(stream)
 
-
     async def ping_iter(
         self,
         peer_id: PeerID,
@@ -238,9 +235,10 @@ class PingService:
                 self._outbound_streams.pop(peer_id, None)
             raise
         finally:
-            if event is not None and getattr(
-                stream, 'metric_send_channel', None
-            ) is not None:
+            if (
+                event is not None
+                and getattr(stream, "metric_send_channel", None) is not None
+            ):
                 with trio.move_on_after(1):
                     await stream.metric_send_channel.send(event)
 

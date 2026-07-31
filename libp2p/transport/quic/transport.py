@@ -275,6 +275,7 @@ class QUICTransport(ITransport):
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
             import copy
+
             config = copy.copy(config)
             config.is_client = True
             # Remove quic_logger to prevent
