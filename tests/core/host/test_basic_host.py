@@ -616,7 +616,7 @@ def _prepare_identify_host(
         "libp2p.host.basic_host.read_length_prefixed_protobuf", fake_read
     )
     monkeypatch.setattr(
-        "libp2p.host.basic_host._update_peerstore_from_identify", fake_update
+        "libp2p.host.basic_host.update_peerstore_from_identify", fake_update
     )
 
     return host, peer_id, swarm_conn

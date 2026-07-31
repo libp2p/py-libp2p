@@ -2,8 +2,8 @@ import pytest
 from libp2p.peer.id import ID
 from libp2p.crypto.rsa import create_new_key_pair
 from libp2p.identity.identify.pb.identify_pb2 import Identify
-from libp2p.identity.identify_push.identify_push import (
-    _update_peerstore_from_identify,
+from libp2p.identity.update import (
+    update_peerstore_from_identify as _update_peerstore_from_identify,
 )
 from multiaddr import Multiaddr
 from libp2p.peer.peerstore import PeerStore

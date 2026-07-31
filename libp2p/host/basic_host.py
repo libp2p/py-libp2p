@@ -66,7 +66,9 @@ from libp2p.identity.identify.pb.identify_pb2 import (
 )
 from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
-    _update_peerstore_from_identify,
+)
+from libp2p.identity.update import (
+    update_peerstore_from_identify,
 )
 from libp2p.peer.id import (
     ID,
@@ -137,6 +139,7 @@ class _IdentifyNotifee(INotifee):
 
     def __init__(self, host: BasicHost):
         self._host_ref = weakref.ref(host)
+        self._push_identify_scheduled: bool = False
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         host = self._host_ref()
@@ -157,7 +160,25 @@ class _IdentifyNotifee(INotifee):
         return None
 
     async def listen(self, network: INetwork, multiaddr: multiaddr.Multiaddr) -> None:
-        return None
+        host = self._host_ref()
+        if host is None:
+            return
+        # Debounce: when multiple addresses are bound in rapid succession,
+        # only push identify once after the current batch completes.
+        if self._push_identify_scheduled:
+            return
+        self._push_identify_scheduled = True
+
+        async def _deferred_push():
+            # Yield control so all listen() calls in the current batch complete
+            await trio.sleep(0)
+            self._push_identify_scheduled = False
+            try:
+                await host._push_identify_to_all_peers()
+            except Exception:
+                pass  # Best-effort; don't crash the notifee chain
+
+        trio.lowlevel.spawn_system_task(_deferred_push)
 
     async def listen_close(
         self, network: INetwork, multiaddr: multiaddr.Multiaddr
@@ -1089,7 +1110,7 @@ class BasicHost(IHost):
                 data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
+            await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
             self._identified_peers[peer_id] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
@@ -1182,6 +1203,23 @@ class BasicHost(IHost):
         if connections:
             return connections[0]
         return None
+
+    async def _push_identify_to_all_peers(self) -> None:
+        """
+        Push identify updates to all connected peers.
+
+        Called when the host's addresses or protocols change, per the
+        identify/push spec: ``When a peer's basic information changes, for
+        example, because they've obtained a new public listen address, they
+        can use identify/push to inform others about the new information.``
+        """
+        from libp2p.identity.identify_push.identify_push import (
+            push_identify_to_peers,
+        )
+        try:
+            await push_identify_to_peers(self)
+        except Exception:
+            pass  # Best-effort push; don't crash the host
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         """

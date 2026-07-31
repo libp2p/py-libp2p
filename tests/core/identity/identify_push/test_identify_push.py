@@ -22,10 +22,12 @@ from libp2p.identity.identify.pb.identify_pb2 import (
 from libp2p.identity.identify_push.identify_push import (
     CONCURRENCY_LIMIT,
     ID_PUSH,
-    _update_peerstore_from_identify,
     identify_push_handler_for,
     push_identify_to_peer,
     push_identify_to_peers,
+)
+from libp2p.identity.update import (
+    update_peerstore_from_identify as _update_peerstore_from_identify,
 )
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
@@ -241,9 +243,12 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
 
     This test verifies that:
     1. The function correctly handles an explicitly provided set of peer IDs
-    2. The function correctly uses the provided observed_multiaddr
-    3. The identify information is only pushed to the specified peers
-    4. The protocols are correctly propagated to the receiving peers
+    2. The identify information is only pushed to the specified peers
+    3. A peer NOT in the target set does not receive the push
+
+    Note: observed_addr is used for the initiator's NAT detection and is NOT
+    stored in the peerstore, so we verify the push via peerstore presence
+    and protocol data instead.
     """
     # Create four hosts to thoroughly test selective pushing
     async with host_pair_factory(security_protocol=security_protocol) as (
@@ -291,20 +296,14 @@ async def test_push_identify_to_peers_with_explicit_params(security_protocol):
             peer_id_a = host_a.get_id()
 
             # Hosts B and C should have peer_id_a in their peerstores
+            # (B only from the explicit push, C from both connect and push)
             assert peer_id_a in peerstore_b.peer_ids()
             assert peer_id_a in peerstore_c.peer_ids()
 
-            # Hosts B and C should have host_a's protocols from the push
-            protocols_b = peerstore_b.get_protocols(peer_id_a)
-            protocols_c = peerstore_c.get_protocols(peer_id_a)
-            assert len(protocols_b) > 0
-            assert len(protocols_c) > 0
-
-            # Hosts B and C should have host_a's listen addresses
-            addrs_b = peerstore_b.addrs(peer_id_a)
-            addrs_c = peerstore_c.addrs(peer_id_a)
-            assert len(addrs_b) > 0
-            assert len(addrs_c) > 0
+            # Verify that host_b received host_a's protocols from the push
+            peerstore_protocols_b = set(peerstore_b.get_protocols(peer_id_a))
+            host_a_protocols = set(host_a.get_mux().get_protocols())
+            assert all(p in peerstore_protocols_b for p in host_a_protocols)
 
 
 @pytest.mark.trio

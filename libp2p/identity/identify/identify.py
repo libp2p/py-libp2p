@@ -18,8 +18,8 @@ from libp2p.network.stream.exceptions import (
     StreamClosed,
     StreamReset,
 )
-from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.stream_muxer.exceptions import MuxedStreamError
 from libp2p.utils import (
     decode_varint_with_size,
     get_agent_version,
@@ -37,8 +37,22 @@ PROTOCOL_VERSION = "ipfs/0.1.0"
 AGENT_VERSION = get_agent_version()
 
 
+def _strip_p2p_suffix(maddr: Multiaddr) -> Multiaddr:
+    """
+    Strip /p2p/{peer_id} suffix from a multiaddr if present.
+
+    The Identify spec requires listenAddrs to be plain multiaddresses
+    without a /p2p suffix.
+    """
+    try:
+        p2p_value = maddr.value_for_protocol("p2p")
+    except Exception:
+        return maddr
+    return maddr.decapsulate(Multiaddr(f"/p2p/{p2p_value}"))
+
+
 def _multiaddr_to_bytes(maddr: Multiaddr) -> bytes:
-    return maddr.to_bytes()
+    return _strip_p2p_suffix(maddr).to_bytes()
 
 
 def _remote_address_to_multiaddr(
@@ -49,6 +63,10 @@ def _remote_address_to_multiaddr(
         return None
 
     host, port = remote_address
+
+    # Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+    if host.startswith("::ffff:"):
+        host = host[7:]
 
     # Check if the address is IPv6 (contains ':')
     if ":" in host:
@@ -65,8 +83,11 @@ def _mk_identify_protobuf(
     public_key = host.get_public_key()
     laddrs = host.get_addrs()
     if not laddrs:
-        laddrs = list(host.get_transport_addrs())   # plain transport addrs, matching go-libp2p
-    protocols = tuple(str(p) for p in host.get_mux().get_protocols() if p is not None)
+        # plain transport addrs, matching go-libp2p
+        laddrs = list(host.get_transport_addrs())
+    protocols = tuple(
+        str(p) for p in host.get_mux().get_protocols() if p is not None
+    )
 
     # Create a signed peer-record for the remote peer
     envelope_bytes, _ = env_to_send_in_RPC(host)
@@ -86,24 +107,24 @@ def _mk_identify_protobuf(
 def parse_identify_response(response: bytes) -> Identify:
     """
     Parse identify response that could be either:
+    - New format: length-prefixed protobuf (varint + protobuf bytes)
     - Old format: raw protobuf
-    - New format: length-prefixed protobuf
 
     This function provides backward and forward compatibility.
     """
+    if not response:
+        raise ValueError("Empty identify response")
+
     # Try new format first: length-prefixed protobuf
-    if len(response) >= 1:
-        length, varint_size = decode_varint_with_size(response)
-        if varint_size > 0 and length > 0 and varint_size + length == len(response):
-            protobuf_data = response[varint_size : varint_size + length]
-            try:
-                identify_response = Identify()
-                identify_response.ParseFromString(protobuf_data)
-                # Use public_key as the sanity check: every compliant peer must have one
-                if identify_response.HasField("public_key"):
-                    return identify_response
-            except Exception:
-                pass  # Fall through to old format
+    length, varint_size = decode_varint_with_size(response)
+    if varint_size > 0 and length > 0 and varint_size + length == len(response):
+        protobuf_data = response[varint_size : varint_size + length]
+        try:
+            identify_response = Identify()
+            identify_response.ParseFromString(protobuf_data)
+            return identify_response
+        except Exception:
+            pass  # Fall through to old format
 
     # Fall back to old format: raw protobuf
     try:
@@ -114,9 +135,10 @@ def parse_identify_response(response: bytes) -> Identify:
             raise ValueError("Identify response missing public_key field")
         return identify_response
     except Exception as e:
-        logger.error(f"Failed to parse identify response: {e}")
-        logger.error(f"Response length: {len(response)}")
-        logger.error(f"Response hex: {response.hex()}")
+        logger.error(
+            "Failed to parse identify response: %s (length=%d, hex=%s)",
+            e, len(response), response.hex(),
+        )
         raise
 
 
@@ -163,7 +185,6 @@ def identify_handler_for(
             else:
                 # Send raw protobuf message (old format for backward compatibility)
                 await stream.write(response)
-            await stream.close()
             logger.debug("successfully handled request for %s from %s", ID, peer_id)
         except (StreamClosed, StreamReset):
             logger.debug("Fail to respond to %s request: stream closed or reset", ID)
