@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, cast
+
+logger = logging.getLogger(__name__)
 
 from .allowlist import Allowlist, AllowlistConfig
 from .cidr_limits import CIDRLimiter
@@ -254,6 +257,7 @@ class ResourceManager:
         """Acquire a connection resource"""
         # Check circuit breaker
         if self.circuit_breaker and self.circuit_breaker.is_open():
+            logger.debug("acquire_connection failed: circuit breaker open")
             return False
 
         # Check connection rate limiter (per-peer)
@@ -266,9 +270,11 @@ class ResourceManager:
                     pid = ID.from_string(peer_id) if peer_id else None
                 except Exception:
                     pid = None
-                if not self.connection_rate_limiter.try_allow(peer_id=pid):
-                    self._record_blocked_resource("connection", direction, scope="rate")
-                    return False
+                if pid is not None:
+                    if not self.connection_rate_limiter.try_allow(peer_id=pid):
+                        self._record_blocked_resource("connection", direction, scope="rate")
+                        logger.debug("acquire_connection failed: rate limit exceeded for peer %s", pid)
+                        return False
             except Exception:
                 # Fail-open on limiter errors
                 pass
@@ -278,6 +284,7 @@ class ResourceManager:
             try:
                 if not self.cidr_limiter.allow(endpoint_ip):
                     self._record_blocked_resource("connection", direction, scope="cidr")
+                    logger.debug("acquire_connection failed: CIDR limit exceeded for %s", endpoint_ip)
                     return False
             except Exception:
                 pass
@@ -314,9 +321,11 @@ class ResourceManager:
                             # Retry after degradation
                             if self._current_connections >= self.limits.max_connections:
                                 self._record_blocked_resource("connection", direction)
+                                logger.debug("acquire_connection failed: max connections reached (degradation)")
                                 return False
                         else:
                             self._record_blocked_resource("connection", direction)
+                            logger.debug("acquire_connection failed: max connections reached")
                             return False
                     else:
                         self._record_blocked_resource("connection", direction)
@@ -332,6 +341,7 @@ class ResourceManager:
                             self._record_blocked_resource(
                                 "connection", direction, scope="cidr"
                             )
+                            logger.debug("acquire_connection failed: CIDR limit acquire failed for %s", endpoint_ip)
                             return False
                     except Exception:
                         # Fail-open if limiter errors
@@ -353,6 +363,7 @@ class ResourceManager:
             else:
                 return _acquire()
         except CircuitBreakerError:
+            logger.debug("acquire_connection failed: CircuitBreakerError")
             return False
 
     def release_connection(

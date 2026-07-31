@@ -109,18 +109,22 @@ async def _ping(stream: INetStream, cancel_scope: trio.CancelScope | None = None
     """
     ping_bytes = secrets.token_bytes(PING_LENGTH)
 
+    start = time.monotonic()
+
     with cancel_scope or trio.CancelScope():
         with trio.fail_after(RESP_TIMEOUT):
             await stream.write(ping_bytes)
-            # Measure RTT from when the bytes were written (per spec: "from when
-            # it wrote the bytes to when it received them").
-            start = time.monotonic()
             # See the matching note in _handle_ping: stream.read(n) may return
             # fewer than n bytes even on a healthy connection, so a naive
             # single read() here can misreport a short-but-correct pong as a
             # payload mismatch. read_exactly() blocks until PING_LENGTH bytes
             # are collected (or the connection genuinely closes/resets).
-            pong_bytes = await read_exactly(stream, PING_LENGTH)
+            try:
+                pong_bytes = await read_exactly(stream, PING_LENGTH)
+            except IncompleteReadError as error:
+                if error.is_clean_close:
+                    raise StreamEOF() from error
+                raise
 
     rtt = int((time.monotonic() - start) * 1000)  # in milliseconds
 
@@ -202,7 +206,7 @@ class PingService:
 
         async with self._lock:
             stream = self._outbound_streams.get(peer_id)
-            if stream is None or stream.is_closed:
+            if stream is None or stream.is_closed():
                 stream = await self._host.new_stream(peer_id, [ID])
                 self._outbound_streams[peer_id] = stream
 
@@ -214,17 +218,16 @@ class PingService:
                 rtt = await _ping(stream, cancel_scope=cancel_scope)
                 rtts.append(rtt)
                 yield rtt
+            # Spec: "The dialing peer SHOULD close the write operation of the
+            # stream after sending the last payload."
+            await stream.close_write()
+            async with self._lock:
+                self._outbound_streams.pop(peer_id, None)
             event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
         except Exception as error:
             event = PingEvent(peer_id=peer_id, rtts=None, failure_error=error)
-            # Clean up the stream on error so the next ping creates a fresh one
             async with self._lock:
                 self._outbound_streams.pop(peer_id, None)
-            if not stream.is_closed:
-                try:
-                    await stream.reset()
-                except Exception:
-                    pass
             raise
         finally:
             if event is not None and getattr(stream, 'metric_send_channel', None) is not None:
@@ -236,27 +239,6 @@ class PingService:
         Legacy support for callers expecting a list of RTTs.
         """
         rtts = []
-        stream = None
-        try:
-            async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
-                rtts.append(rtt)
-            # Per spec: "The dialing peer SHOULD close the write operation of
-            # the stream after sending the last payload."
-            async with self._lock:
-                stream = self._outbound_streams.pop(peer_id, None)
-            if stream is not None:
-                try:
-                    await stream.close()
-                except Exception:
-                    pass
-        except Exception:
-            # On error, reset the stream to signal abnormal termination
-            async with self._lock:
-                stream = self._outbound_streams.pop(peer_id, None)
-            if stream is not None:
-                try:
-                    await stream.reset()
-                except Exception:
-                    pass
-            raise
+        async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
+            rtts.append(rtt)
         return rtts

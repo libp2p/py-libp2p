@@ -284,20 +284,20 @@ class TestBitswapClientMixedCIDInputs:
 
     @pytest.mark.trio
     async def test_have_block_with_canonical_text_input(self):
-        """Test have_block accepts canonical text and uses normalized CID bytes."""
+        """Test have_block accepts canonical text and returns True for local blocks."""
         mock_host = MagicMock()
         client = BitswapClient(mock_host)
         cid = compute_cid_v1(b"mixed-client-have")
 
-        # Avoid network behavior and validate normalized bytes are propagated.
+        # Put block locally — have_block should return True immediately
         client._broadcast_wantlist = AsyncMock()  # type: ignore[method-assign]
         await client.block_store.put_block(cid, b"mixed-client-have")
 
         has_block = await client.have_block(cid_to_text(cid))
 
         assert has_block is True
-        assert parse_cid(cid) not in client._wantlist
-        client._broadcast_wantlist.assert_awaited_once_with([parse_cid(cid)])  # type: ignore[attr-defined]
+        # Block was local, so no network broadcast needed
+        client._broadcast_wantlist.assert_not_awaited()
 
 
 class TestBitswapClientMultipleBlocks:

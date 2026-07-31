@@ -99,7 +99,7 @@ class BitswapClient:
         ] = {}  # peer -> wantlist
         self.sim = SessionInterestManager()
         self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
-        self._response_streams: dict[PeerID, INetStream] = {}  # peer -> cached outbound stream
+        self._peer_pending_bytes: dict[PeerID, int] = {}  # peer -> pending bytes (v1.2.0)
 
         self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
         self.peer_manager = BitswapPeerManager()
@@ -154,8 +154,8 @@ class BitswapClient:
         # Clear wantlists and pending requests
         self._wantlist.clear()
         self._peer_wantlists.clear()
+        # _pending_requests removed (handled by sessions)
         self._peer_protocols.clear()
-        self._response_streams.clear()
         self.presence_manager = BlockPresenceManager(
             ttl_seconds=self.presence_manager.ttl
         )
@@ -239,8 +239,8 @@ class BitswapClient:
         """
         Check if a peer has a block (v1.2.0 feature).
 
-        Sends a WANT_HAVE request and waits for a Have or DontHave
-        BlockPresence response per the Bitswap 1.2.0 spec.
+        Sends a WANT_HAVE and waits for a Have/DontHave response.
+        Also returns True if the block is already in the local store.
 
         Args:
             cid: The CID of the block to check
@@ -252,6 +252,10 @@ class BitswapClient:
         """
         cid_obj = parse_cid(cid)
 
+        # Fast path: block is already local
+        if await self.block_store.has_block(cid_obj):
+            return True
+
         # Add to wantlist with Have type
         await self.want_block(cid_obj, want_type=1, send_dont_have=True)
 
@@ -261,24 +265,24 @@ class BitswapClient:
         else:
             await self._broadcast_wantlist([cid_obj])
 
-        # Wait for Have/DontHave BlockPresence response
+        # Wait for Have/DontHave response via presence manager
         result = False
         try:
             with trio.fail_after(5.0):
                 while True:
-                    # Check if any peer responded with Have
-                    have_peers = self.presence_manager.get_expected_peers(cid_obj)
-                    if have_peers:
+                    # Check if presence manager recorded a Have from any peer
+                    expected_peers = self.presence_manager.get_expected_peers(cid_obj)
+                    if expected_peers:
                         result = True
                         break
-                    # Check if all queried peers responded with DontHave
+                    # Check if we got DontHave from all queried peers
                     dont_have_peers = self.presence_manager.get_dont_have_peers(
                         cid_obj
                     )
                     if peer_id and peer_id in dont_have_peers:
                         result = False
                         break
-                    # Also check if block appeared in store (implicit Have)
+                    # Also check local store in case block arrived meanwhile
                     if await self.block_store.has_block(cid_obj):
                         result = True
                         break
@@ -301,15 +305,13 @@ class BitswapClient:
         cid_obj = parse_cid(cid)
 
         if cid_obj in self._wantlist:
-            want_info = self._wantlist[cid_obj]
-            want_type = want_info.get("want_type", 0)
             del self._wantlist[cid_obj]
             logger.debug(
                 f"Removed {format_cid_for_display(cid_obj, max_len=16)} from wantlist"
             )
 
-            # Send cancel message to all peers (retain original wantType)
-            await self._broadcast_cancel(cid_obj, want_type=want_type)
+            # Send cancel message to all peers
+            await self._broadcast_cancel(cid_obj)
 
     async def _send_wantlist_to_peer(
         self, peer_id: PeerID, cids: list[CIDObject]
@@ -425,25 +427,32 @@ class BitswapClient:
             else:
                 await self._send_wantlist_to_peer(peer_id, cids)
 
-    async def _broadcast_cancel(self, cid: CIDObject, want_type: int = 0) -> None:
-        """Broadcast a cancel message to all peers."""
-        entry = create_wantlist_entry(cid, cancel=True, want_type=want_type)
+    async def _broadcast_cancel(self, cid: CIDObject) -> None:
+        """Broadcast a cancel message to all peers using their negotiated protocol."""
+        entry = create_wantlist_entry(cid, cancel=True)
         msg = create_message(wantlist_entries=[entry])
 
-        peers = list(self.host.get_network().connections.keys())
+        peers = self.host.get_network().connections.keys()
         for peer_id in peers:
+            stream = None
             try:
-                # Use the negotiated protocol for this peer
-                peer_proto = self._peer_protocols.get(
+                # Use the negotiated protocol for this peer, fall back to v1.0.0
+                peer_protocol = self._peer_protocols.get(
                     peer_id, BITSWAP_PROTOCOL_V100
                 )
                 stream = await self.host.new_stream(
                     peer_id,
-                    [TProtocol(peer_proto)],
+                    [TProtocol(peer_protocol)],
                 )
                 await self._write_message(stream, msg)
             except Exception as e:
                 logger.debug(f"Failed to send cancel to peer {peer_id}: {e}")
+            finally:
+                if stream is not None:
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
 
     async def _notify_peers_about_block(self, cid: CIDObject, data: bytes) -> None:
         """Notify peers who wanted this block."""
@@ -457,6 +466,7 @@ class BitswapClient:
 
         # Send block or presence to interested peers
         for peer_id, want_info in peers_to_notify:
+            stream = None
             try:
                 # Get peer's protocol version
                 peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
@@ -488,6 +498,12 @@ class BitswapClient:
                 )
             except Exception as e:
                 logger.error(f"Failed to send block to peer {peer_id}: {e}")
+            finally:
+                if stream is not None:
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
 
     async def _read_responses_from_stream(
         self, stream: INetStream, peer_id: PeerID
@@ -498,11 +514,13 @@ class BitswapClient:
         This keeps the stream open so the provider can send blocks back.
         Stops reading once all expected blocks are received or after a timeout.
         """
-        STREAM_READ_TIMEOUT = 30.0  # Close stream if no data for 30s
         try:
             peer_id_str = str(peer_id)
             logger.info(f"Reading responses from {peer_id_str} on stream")
             message_count = 0
+            last_activity = trio.current_time()
+            # If no activity for 30s, consider the stream dead
+            STREAM_IDLE_TIMEOUT = 30.0
 
             while True:
                 # Check if we've received all expected blocks from this peer
@@ -519,26 +537,25 @@ class BitswapClient:
                         f"Still expecting {remaining} blocks from {peer_id_str}"
                     )
 
-                # Read message with timeout to avoid blocking forever
+                # Read message from provider with idle timeout
                 logger.debug(f"Waiting for message from {peer_id_str}...")
-                msg = None
                 try:
-                    with trio.move_on_after(STREAM_READ_TIMEOUT) as scope:
+                    with trio.fail_after(STREAM_IDLE_TIMEOUT):
                         msg = await self._read_message(stream)
-                except trio.Cancelled:
-                    pass
-                if msg is None:
-                    if scope and scope.cancelled_caught:
-                        logger.warning(
-                            f"Stream from {peer_id_str} timed out after "
-                            f"{STREAM_READ_TIMEOUT}s with {remaining} blocks pending"
-                        )
-                    else:
-                        logger.warning(f"Stream from {peer_id_str} closed by remote")
+                except trio.TooSlowError:
+                    logger.warning(
+                        f"Stream from {peer_id_str} idle for "
+                        f"{STREAM_IDLE_TIMEOUT}s, closing"
+                    )
                     break
 
+                if msg is None:
+                    logger.warning(f"Stream from {peer_id_str} closed by remote")
+                    break
+
+                last_activity = trio.current_time()
                 message_count += 1
-                logger.debug(f"Received message #{message_count} from {peer_id_str}")
+                logger.info(f"Received message #{message_count} from {peer_id_str}")
 
                 # Process the response (blocks, presences, etc.)
                 await self._process_message(msg, peer_id, stream)
@@ -546,21 +563,34 @@ class BitswapClient:
         except Exception as e:
             peer_id_str = str(peer_id)
             logger.error(f"Stream from {peer_id_str} ended with error: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
         finally:
             # Clean up expected blocks for this peer
             expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
             remaining = len(expected_cids)
             if remaining > 0:
                 peer_id_str = str(peer_id)
-                logger.warning(
-                    f"Stream closed with {remaining} missing blocks from {peer_id_str}"
-                )
-                for cid in expected_cids:
+                logger.error("")
+                logger.error("=" * 70)
+                logger.error("⚠️  STREAM CLOSED WITH MISSING BLOCKS")
+                logger.error("=" * 70)
+                logger.error(f"Peer: {peer_id_str}")
+                logger.error(f"Missing {remaining} blocks:")
+                for i, cid in enumerate(expected_cids):
+                    logger.error(f"  {i + 1}. {format_cid_for_display(cid)}")
+                    self.presence_manager.remove_have(peer_id, cid)
+                logger.error("=" * 70)
+                logger.error("")
+            else:
+                for cid in list(expected_cids):
                     self.presence_manager.remove_have(peer_id, cid)
             try:
                 await stream.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Stream might already be closed
+                logger.debug(f"Error closing stream: {e}")
 
     async def _handle_stream(self, stream: INetStream) -> None:
         """Handle incoming Bitswap stream."""
@@ -573,9 +603,19 @@ class BitswapClient:
         if protocol:
             self._peer_protocols[peer_id] = str(protocol)
 
+        # If no activity for 60s, consider the stream dead
+        STREAM_IDLE_TIMEOUT = 60.0
+
         try:
             # Read the first message from this stream
-            msg = await self._read_message(stream)
+            try:
+                with trio.fail_after(STREAM_IDLE_TIMEOUT):
+                    msg = await self._read_message(stream)
+            except trio.TooSlowError:
+                logger.warning(
+                    f"Stream from {peer_id} idle for {STREAM_IDLE_TIMEOUT}s, closing"
+                )
+                return
             if msg is None:
                 return
 
@@ -587,7 +627,15 @@ class BitswapClient:
             # Continue reading further messages on the same stream
             # (Kubo sends WANT_BLOCK as a follow-up after receiving HAVE)
             while True:
-                msg = await self._read_message(stream)
+                try:
+                    with trio.fail_after(STREAM_IDLE_TIMEOUT):
+                        msg = await self._read_message(stream)
+                except trio.TooSlowError:
+                    logger.warning(
+                        f"Stream from {peer_id} idle for {STREAM_IDLE_TIMEOUT}s, "
+                        f"closing"
+                    )
+                    break
                 if msg is None:
                     break
                 await self._process_message(msg, peer_id, stream)
@@ -660,6 +708,10 @@ class BitswapClient:
         if msg.blockPresences:
             await self._process_block_presences(msg.blockPresences, peer_id)
 
+        # Track pending bytes from peer (v1.2.0 flow control hint)
+        if msg.pendingBytes > 0:
+            self._peer_pending_bytes[peer_id] = msg.pendingBytes
+
     async def _process_wantlist(
         self, wantlist: Message.Wantlist, peer_id: PeerID, stream: INetStream
     ) -> None:
@@ -684,14 +736,14 @@ class BitswapClient:
         logger.warning("=" * 70)
 
         # ── Standard 1.0.0–1.2.0 wantlist handling ────────────────────────
-        # Sort entries by priority (higher priority served first) per spec
-        sorted_entries = sorted(wantlist.entries, key=lambda e: e.priority, reverse=True)
+        # Process entries sorted by priority (higher priority first per spec)
+        sorted_entries = sorted(
+            wantlist.entries, key=lambda e: e.priority, reverse=True
+        )
 
-        # Process entries
         blocks_to_send_v100 = []  # For v1.0.0
         blocks_to_send_v110 = []  # For v1.1.0+
         presences_to_send = []  # For v1.2.0
-        pending_bytes = 0  # v1.2.0: bytes queued to send
 
         for entry in sorted_entries:
             try:
@@ -733,13 +785,42 @@ class BitswapClient:
                 # Handle based on want type (v1.2.0)
                 if entry.wantType == 1:  # Have request (WANT_HAVE)
                     if has_block:
-                        # Spec: "it SHOULD respond with a Have"
-                        presences_to_send.append((entry_cid, True))
+                        # Send the block directly — do NOT send a separate HAVE
+                        # presence. Sending HAVE causes Go's bitswap session to
+                        # open a NEW outbound WANT_BLOCK stream to Python. That
+                        # stream fails due to Python TLS limitations, so Go never
+                        # receives the block. Sending the block directly (implicit
+                        # HAVE) is the correct interop approach.
+                        data = await self.block_store.get_block(entry_cid)
+                        if data:
+                            logger.debug(
+                                f"\n[WANT_HAVE] Sending block directly "
+                                f"({len(data)} bytes) for "
+                                f"{format_cid_for_display(entry_cid, max_len=16)}"
+                            )
+                            logger.warning(
+                                f"[WANT_HAVE] Sending block directly "
+                                f"({len(data)} bytes) for "
+                                f"{format_cid_for_display(entry_cid, max_len=16)} "
+                                f"(skipping HAVE presence to avoid Go re-request)"
+                            )
+                            if peer_protocol == BITSWAP_PROTOCOL_V100:
+                                blocks_to_send_v100.append(data)
+                            else:
+                                prefix = get_cid_prefix(entry_cid)
+                                blocks_to_send_v110.append((prefix, data))
                     else:
-                        # Spec: "if C has requested for DontHave responses
-                        # then S SHOULD respond with DontHave"
-                        if entry.sendDontHave:
-                            presences_to_send.append((entry_cid, False))
+                        # Don't have the block — send DontHave so requester
+                        # knows to look elsewhere.
+                        logger.debug(
+                            f"\n[WANT_HAVE] DontHave for "
+                            f"{format_cid_for_display(entry_cid, max_len=16)}"
+                        )
+                        logger.warning(
+                            f"[WANT_HAVE] Sending DontHave for "
+                            f"{format_cid_for_display(entry_cid, max_len=16)}"
+                        )
+                        presences_to_send.append((entry_cid, False))
                 else:  # Block request (WANT_BLOCK)
                     if has_block:
                         data = await self.block_store.get_block(entry_cid)
@@ -759,21 +840,14 @@ class BitswapClient:
                                 prefix = get_cid_prefix(entry_cid)
                                 blocks_to_send_v110.append((prefix, data))
                     else:
-                        # Spec: "if C has requested for DontHave responses
-                        # then S SHOULD respond with DontHave"
+                        # Only send DontHave if the requester asked for it
+                        # (sendDontHave=true). Per spec, if sendDontHave is false,
+                        # the server MAY simply not respond.
                         if entry.sendDontHave:
                             presences_to_send.append((entry_cid, False))
 
         # Send responses in batches to stay under MAX_MESSAGE_SIZE
         # and Noise protocol limit (65535 bytes)
-
-        # Compute pendingBytes (v1.2.0): total bytes queued to send
-        pending_bytes = 0
-        for data in blocks_to_send_v100:
-            pending_bytes += len(data)
-        for prefix, data in blocks_to_send_v110:
-            pending_bytes += len(prefix) + len(data)
-
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
             if self._nursery is not None:
                 try:
@@ -784,7 +858,6 @@ class BitswapClient:
                         blocks_to_send_v100,
                         blocks_to_send_v110,
                         presences_to_send,
-                        pending_bytes,
                     )
                 except RuntimeError as e:
                     if "Nursery is closed" in str(e):
@@ -801,7 +874,6 @@ class BitswapClient:
                     blocks_to_send_v100,
                     blocks_to_send_v110,
                     presences_to_send,
-                    pending_bytes,
                 )
 
     async def _send_wantlist_responses_bg(
@@ -811,31 +883,18 @@ class BitswapClient:
         blocks_to_send_v100: list[bytes],
         blocks_to_send_v110: list[tuple[bytes, bytes]],
         presences_to_send: list[tuple[CIDObject, bool]],
-        pending_bytes: int = 0,
     ) -> None:
-        """Background task to send responses, reusing cached outbound streams."""
-        # Try to reuse a cached stream; open a new one only if needed.
-        outbound_stream = self._response_streams.get(peer_id)
-
-        # Validate cached stream is still usable
-        if outbound_stream is not None:
-            try:
-                if hasattr(outbound_stream, "is_closed") and outbound_stream.is_closed:
-                    outbound_stream = None
-                    self._response_streams.pop(peer_id, None)
-            except Exception:
-                outbound_stream = None
-                self._response_streams.pop(peer_id, None)
-
-        if outbound_stream is None:
-            try:
-                outbound_stream = await self.host.new_stream(
-                    peer_id, [TProtocol(peer_protocol)]
-                )
-                self._response_streams[peer_id] = outbound_stream
-            except Exception as e:
-                logger.error(f"Failed to open outbound stream to send response: {e}")
-                return
+        """Background task to send responses over a new outbound stream."""
+        # We MUST open a new stream to the client to send the blocks.
+        # Writing to the inbound stream that the client opened for their WANTLIST
+        # is often ignored by the client (Kubo), as it expects dial back.
+        try:
+            outbound_stream = await self.host.new_stream(
+                peer_id, [TProtocol(peer_protocol)]
+            )
+        except Exception as e:
+            logger.error(f"Failed to open outbound stream to send response: {e}")
+            return
 
         try:
             await self._send_wantlist_responses_inline(
@@ -844,12 +903,14 @@ class BitswapClient:
                 blocks_to_send_v100,
                 blocks_to_send_v110,
                 presences_to_send,
-                pending_bytes,
             )
         except Exception as e:
             logger.debug(f"Failed to send wantlist responses to {peer_id}: {e}")
-            # Discard broken stream so next response opens a fresh one
-            self._response_streams.pop(peer_id, None)
+        finally:
+            try:
+                await outbound_stream.close()
+            except Exception as e:
+                logger.debug(f"Error closing outbound stream to {peer_id}: {e}")
 
     async def _send_wantlist_responses_inline(
         self,
@@ -858,7 +919,6 @@ class BitswapClient:
         blocks_to_send_v100: list[bytes],
         blocks_to_send_v110: list[tuple[bytes, bytes]],
         presences_to_send: list[tuple[CIDObject, bool]],
-        pending_bytes: int = 0,
     ) -> None:
         """Helper to send blocks on a specific stream."""
         # Send blocks in batches
@@ -872,10 +932,7 @@ class BitswapClient:
             )
         # Send presences (usually small, can send all at once)
         if presences_to_send:
-            presence_msg = create_message(
-                block_presences=presences_to_send,
-                pending_bytes=pending_bytes,
-            )
+            presence_msg = create_message(block_presences=presences_to_send)
             await self._write_message(stream, presence_msg)
 
     async def _send_blocks_in_batches_v100(
@@ -952,31 +1009,50 @@ class BitswapClient:
         block data against the CIDs we're expecting.
         """
         peer_id_str = str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
-        logger.debug(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
+        logger.info("=" * 70)
+        logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
 
         # Get the CIDs we're expecting from this peer
         expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
+        logger.info(f"Expected {len(expected_cids)} blocks from this peer")
+        logger.info("Expected CIDs:")
+        for i, cid in enumerate(expected_cids):
+            logger.info(f"  {i + 1}. {format_cid_for_display(cid)}")
+        logger.info("=" * 70)
 
         for idx, block_data in enumerate(blocks):
+            block_hash = hashlib.sha256(block_data).hexdigest()
+            logger.info("")
+            logger.info(f"Block {idx + 1}/{len(blocks)}:")
+            logger.info(f"  Size: {len(block_data)} bytes")
+            logger.info(f"  SHA-256: {block_hash}")
+            logger.info(f"  First 64 bytes: {block_data[:64].hex()}")
+
             # Find which expected CID matches this block data
             matched_cid = None
-            for cid in expected_cids:
+            logger.info(f"  Checking against {len(expected_cids)} expected CIDs...")
+            for i, cid in enumerate(expected_cids):
+                logger.info(
+                    f"    Attempt {i + 1}: Checking CID {format_cid_for_display(cid)}"
+                )
                 if verify_cid(cid, block_data):
                     matched_cid = cid
+                    logger.info(
+                        f"  ✓ MATCHED CID: {format_cid_for_display(matched_cid)}"
+                    )
                     break
+                else:
+                    logger.info("    -> No match")
 
             if matched_cid:
                 # Store the block with the correct CID
                 await self.block_store.put_block(matched_cid, block_data)
-                logger.debug(
-                    f"Received and stored block "
-                    f"{format_cid_for_display(matched_cid, max_len=16)} (v1.0.0)"
-                )
+                logger.info("  ✓ Stored successfully")
 
                 # Record delivery for peer scoring
                 self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
 
-                # Tag high-performing peers
+                # Tag high-performing peers (Connection Manager Integration)
                 stats = self.peer_manager._get_stats(peer_id)
                 if stats.blocks_delivered >= 1 and stats.ema_latency < 1.0:
                     try:
@@ -986,19 +1062,40 @@ class BitswapClient:
 
                 # Remove from expected blocks for all peers
                 self.presence_manager.remove_have_from_all(matched_cid)
+                pid_str = (
+                    str(peer_id)[:16] if hasattr(peer_id, "__str__") else "unknown"
+                )
+                logger.info(f"  ✓ Removed from expected blocks for peer {pid_str}")
 
                 # Notify sessions
                 sessions = self.sim.split_wanted_blocks(matched_cid)
                 if sessions:
+                    logger.info(f"  ✓ Notifying {len(sessions)} sessions")
                     for session in sessions:
                         await session.receive_block(matched_cid, block_data, peer_id)
 
                     if self._started and hasattr(self, "_nursery") and self._nursery:
                         self._nursery.start_soon(self.cancel_want, matched_cid)
             else:
-                logger.debug(
-                    f"Block {idx + 1}/{len(blocks)} doesn't match any expected CID"
-                )
+                logger.error("  ✗ NO MATCH FOUND!")
+                logger.error("  Block doesn't match any expected CID")
+                logger.error(f"  Expected CIDs ({len(expected_cids)}):")
+                for i, cid in enumerate(list(expected_cids)[:5]):
+                    logger.error(f"    {i + 1}. {format_cid_for_display(cid)}")
+                if len(expected_cids) > 5:
+                    logger.error(f"    ... and {len(expected_cids) - 5} more")
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("Block processing complete. Remaining expected blocks:")
+        remaining = self.presence_manager.get_expected_for_peer(peer_id)
+        if remaining:
+            logger.warning(f"  Still waiting for {len(remaining)} blocks:")
+            for i, cid in enumerate(remaining):
+                logger.warning(f"    {i + 1}. {format_cid_for_display(cid)}")
+        else:
+            logger.info("  ✓ All blocks received from this peer!")
+        logger.info("=" * 70)
 
     async def _process_blocks_v110(
         self, blocks: Sequence[Any], peer_id: PeerID
@@ -1042,7 +1139,7 @@ class BitswapClient:
                     f"{format_cid_for_display(cid, max_len=16)}..."
                 )
                 for session in sessions:
-                    await session.receive_block(cid, data, None)
+                    await session.receive_block(cid, data, peer_id)
 
                 if self._started and self._nursery:
                     self._nursery.start_soon(self.cancel_want, cid)
@@ -1058,35 +1155,33 @@ class BitswapClient:
         """
         Process received block presences (v1.2.0).
 
-        Tracks both Have and DontHave messages for optimization and logging.
-        DontHave messages help us know which peers don't have blocks, but we
-        don't fail the request - we continue waiting for other peers or timeout.
-        This matches IPFS Bitswap behavior.
+        Tracks Have, DontHave, and PaymentRequired messages.
+        PaymentRequired (type=2) means the peer HAS the block but requires
+        payment — do NOT mark as DontHave.
         """
         for presence in presences:
             cid = parse_cid(presence.cid)
-            has_block = presence.type == Message.Have
 
-            logger.debug(
-                f"Received presence from {peer_id} for "
-                f"{format_cid_for_display(cid, max_len=16)}: "
-                f"{'Have' if has_block else 'DontHave'}"
-            )
-
-            if has_block:
-                # We are sending directly to this peer, so we expect it from them
+            if presence.type == Message.Have:
+                logger.debug(
+                    f"Received Have from {peer_id} for "
+                    f"{format_cid_for_display(cid, max_len=16)}"
+                )
                 self.presence_manager.add_have(peer_id, cid)
-            else:
-                # DontHave - peer confirms they don't have this block
-                # Track DontHave responses for metrics/optimization
+            elif presence.type == 2:  # PaymentRequired (v1.3.0)
+                # Peer has the block but wants payment — treat as "has block"
+                logger.debug(
+                    f"Received PaymentRequired from {peer_id} for "
+                    f"{format_cid_for_display(cid, max_len=16)}"
+                )
+                self.presence_manager.add_have(peer_id, cid)
+            else:  # DontHave (type=1 or unknown)
+                logger.debug(
+                    f"Received DontHave from {peer_id} for "
+                    f"{format_cid_for_display(cid, max_len=16)}"
+                )
                 self.presence_manager.add_dont_have(peer_id, cid)
                 self.presence_manager.remove_have(peer_id, cid)
-
-                logger.info(
-                    f"  ℹ️  Peer {peer_id} doesn't have block "
-                    f"{format_cid_for_display(cid, max_len=16)} "
-                    f"(DontHave response) - will try other peers or timeout"
-                )
 
     async def _read_message(self, stream: INetStream) -> Message | None:
         """Read a length-prefixed message from the stream."""

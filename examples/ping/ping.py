@@ -10,8 +10,8 @@ from libp2p import (
 from libp2p.host.ping import (
     ID as PING_PROTOCOL_ID,
     PING_LENGTH,
+    PingService,
     RESP_TIMEOUT,
-    handle_ping,
 )
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -75,7 +75,8 @@ async def run(port: int, destination: str, psk: int, transport: str) -> None:
         nursery.start_soon(host.get_peerstore().start_cleanup_task, 60)
 
         if not destination:
-            host.set_stream_handler(PING_PROTOCOL_ID, handle_ping)
+            ping_service = PingService(host)
+            host.set_stream_handler(PING_PROTOCOL_ID, ping_service.handle_ping)
 
             # Get all available addresses with peer ID
             all_addrs = host.get_addrs()

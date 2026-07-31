@@ -82,8 +82,7 @@ def create_block_message_v100(blocks: list[bytes]) -> Message:
 
     """
     msg = Message()
-    for data in blocks:
-        msg.blocks.append(data)
+    msg.blocks.extend(blocks)
     return msg
 
 
@@ -150,7 +149,16 @@ def create_message(
     Returns:
         A Bitswap message
 
+    Raises:
+        ValueError: If both blocks_v100 and blocks_v110 are provided
+
     """
+    if blocks_v100 and blocks_v110:
+        raise ValueError(
+            "Cannot provide both blocks_v100 and blocks_v110: "
+            "v1.0.0 uses 'blocks' field, v1.1.0+ uses 'payload' field"
+        )
+
     msg = Message()
 
     if wantlist_entries:

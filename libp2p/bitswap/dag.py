@@ -460,7 +460,18 @@ class MerkleDag:
                 )
 
         # Build balanced DAG tree
-        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
+        internal_nodes: list[tuple[bytes, bytes]] = []
+
+        def store_internal_node(cid: bytes, data: bytes) -> None:
+            internal_nodes.append((cid, data))
+
+        root_cid, root_data, _tsize = balanced_layout(
+            leaf_triples, put_block_callback=store_internal_node
+        )
+
+        # Store all internal nodes
+        for cid, data in internal_nodes:
+            await self._put_block(cid, data)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:
@@ -547,7 +558,18 @@ class MerkleDag:
             return leaf_triples[0][0]
 
         # Multiple chunks — build balanced DAG tree
-        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
+        internal_nodes: list[tuple[bytes, bytes]] = []
+
+        def store_internal_node(cid: bytes, data: bytes) -> None:
+            internal_nodes.append((cid, data))
+
+        root_cid, root_data, _tsize = balanced_layout(
+            leaf_triples, put_block_callback=store_internal_node
+        )
+
+        # Store all internal nodes
+        for cid, data in internal_nodes:
+            await self._put_block(cid, data)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:

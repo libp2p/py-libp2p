@@ -13,15 +13,25 @@ from .errors import TimeoutError as BitswapTimeoutError
 
 if TYPE_CHECKING:
     from .client import BitswapClient
-    from .types import CIDInput
+    from .cid import CIDInput
 
 logger = logging.getLogger("libp2p.bitswap.session")
+
+# How often to rebroadcast WANT_HAVE for undiscovered blocks (seconds)
+REBROADCAST_INTERVAL = 5.0
+# How many peers to race in parallel for a single block
+MAX_PARALLEL_RACE = 3
 
 
 class BitswapSession:
     """
     A Session scopes the retrieval of a set of related blocks (like a file).
     It isolates the network state and routes requests efficiently.
+
+    Implements:
+      - WANT-HAVE → WANT-BLOCK phasing (cheap presence check first)
+      - Parallel peer racing (request from multiple peers simultaneously)
+      - Periodic wantlist rebroadcasting (prevent want starvation)
     """
 
     def __init__(self, client: "BitswapClient", session_id: int):
@@ -51,7 +61,7 @@ class BitswapSession:
             try:
                 providers = (
                     await self.client.provider_query_manager.find_providers_single(
-                        cid, timeout=min(60.0, timeout * 0.8)
+                        cid, timeout=min(5.0, timeout / 2)
                     )
                 )
                 if providers:
@@ -74,8 +84,18 @@ class BitswapSession:
     async def _request_block(
         self, cid: CIDObject, peer_id: PeerID | None, timeout: float
     ) -> bytes:
+        """
+        Request a single block with WANT-HAVE → WANT-BLOCK phasing.
+
+        Strategy:
+          1. Broadcast WANT-HAVE to discover which peers have the block.
+          2. Once HAVE responses arrive, send WANT-BLOCK to up to
+             MAX_PARALLEL_RACE peers simultaneously (parallel racing).
+          3. Take the first block response and cancel the rest.
+          4. Periodically rebroadcast WANT-HAVE if no peers found yet.
+        """
         logger.info(
-            f"Session {self.id}: 📤 Requesting block: {format_cid_for_display(cid)}"
+            f"Session {self.id}: Requesting block: {format_cid_for_display(cid)}"
         )
 
         event = trio.Event()
@@ -88,11 +108,15 @@ class BitswapSession:
 
         start_time = time.time()
         retry_interval = 1.0
+        last_rebroadcast = 0.0
         requested_from: set[PeerID] = set()
+        # Track peers we've sent WANT_BLOCK to (for parallel racing)
+        block_requested_from: set[PeerID] = set()
+        # Track peers that responded with HAVE
+        have_peers: set[PeerID] = set()
 
         result: bytes | None = None
         error: Exception | None = None
-        MAX_RETRIES_PER_PEER = 3
 
         try:
             while time.time() - start_time < timeout:
@@ -100,27 +124,65 @@ class BitswapSession:
                 if remaining_total <= 0:
                     break
 
-                have_peers = self.client.presence_manager.get_expected_peers(cid)
-                untried_peers = have_peers - requested_from
+                # Phase 1: Discover peers via WANT-HAVE
+                # Get peers that we know have this block
+                known_have_peers = self.client.presence_manager.get_expected_peers(cid)
+                untried_have_peers = known_have_peers - requested_from
 
-                target_peer = None
-                if peer_id and peer_id not in requested_from:
-                    target_peer = peer_id
-                elif untried_peers:
-                    target_peer = random.choice(list(untried_peers))
+                # Add any newly discovered HAVE peers
+                have_peers.update(known_have_peers)
 
-                if target_peer:
-                    await self.client.want_block(cid, want_type=0, send_dont_have=True)
-                    logger.debug(
-                        f"Session {self.id}: Sending WANT-BLOCK to {target_peer}"
+                # Check if any HAVE peers haven't been sent WANT_BLOCK yet
+                untried_block_peers = have_peers - block_requested_from
+
+                # If we have a known peer_id (from DHT), treat it as having the block
+                if peer_id and peer_id not in block_requested_from:
+                    have_peers.add(peer_id)
+                    untried_block_peers.add(peer_id)
+
+                if untried_block_peers and result is None:
+                    # Phase 2: Send WANT-BLOCK to available peers (parallel racing)
+                    targets = list(untried_block_peers)[:MAX_PARALLEL_RACE]
+                    if peer_id and peer_id not in block_requested_from and peer_id in have_peers:
+                        # Prioritize the specific peer if it has the block
+                        if peer_id not in targets:
+                            targets.insert(0, peer_id)
+                            targets = targets[:MAX_PARALLEL_RACE]
+
+                    for target in targets:
+                        await self.client.want_block(
+                            cid, want_type=0, send_dont_have=True
+                        )
+                        logger.debug(
+                            f"Session {self.id}: Sending WANT-BLOCK to {target}"
+                        )
+                        await self.client._send_wantlist_to_peer(target, [cid])
+                        block_requested_from.add(target)
+
+                elif not have_peers:
+                    # No peers known to have the block yet — broadcast WANT-HAVE
+                    now = time.time()
+                    should_rebroadcast = (now - last_rebroadcast) >= REBROADCAST_INTERVAL
+                    untried_have = (
+                        set()
+                        if peer_id in requested_from
+                        else ({peer_id} if peer_id else set())
                     )
-                    await self.client._send_wantlist_to_peer(target_peer, [cid])
-                    requested_from.add(target_peer)
-                else:
-                    await self.client.want_block(cid, want_type=1, send_dont_have=True)
-                    logger.debug(f"Session {self.id}: Broadcasting WANT-HAVE")
-                    await self.client._broadcast_wantlist([cid])
 
+                    if should_rebroadcast or untried_have:
+                        await self.client.want_block(
+                            cid, want_type=1, send_dont_have=True
+                        )
+                        logger.debug(
+                            f"Session {self.id}: Broadcasting WANT-HAVE "
+                            f"(rebroadcast={should_rebroadcast})"
+                        )
+                        await self.client._broadcast_wantlist([cid])
+                        last_rebroadcast = now
+                        if peer_id:
+                            requested_from.add(peer_id)
+
+                # Wait for response
                 current_timeout = min(retry_interval, remaining_total)
                 try:
                     with trio.fail_after(current_timeout):
@@ -135,7 +197,10 @@ class BitswapSession:
                             )
                             break
                         else:
+                            # Block not in store despite event — create new event
+                            # and re-register it so receive_block can set it
                             event = trio.Event()
+                            self._pending_requests.setdefault(cid, set()).add(event)
                 except trio.TooSlowError:
                     retry_interval = min(retry_interval * 1.5, 10.0)
                     logger.debug(
@@ -143,16 +208,11 @@ class BitswapSession:
                         f"retry {retry_interval:.1f}s"
                     )
 
-                    # Track retry count per peer to avoid infinite retries
-                    if target_peer:
-                        if not hasattr(self, '_peer_retry_counts'):
-                            self._peer_retry_counts: dict = {}
-                        key = (target_peer, cid)
-                        count = self._peer_retry_counts.get(key, 0) + 1
-                        self._peer_retry_counts[key] = count
-                        if count >= MAX_RETRIES_PER_PEER:
-                            requested_from.add(target_peer)
-                            self._peer_retry_counts.pop(key, None)
+                    # Allow retrying peers after timeout
+                    if peer_id and peer_id in block_requested_from:
+                        block_requested_from.discard(peer_id)
+                    if peer_id and peer_id in requested_from:
+                        requested_from.discard(peer_id)
 
         except Exception as e:
             logger.error(f"Session {self.id}: Error during block request: {e}")
@@ -186,7 +246,15 @@ class BitswapSession:
         timeout: float = DEFAULT_TIMEOUT,
         batch_size: int = 32,
     ) -> dict[bytes, bytes]:
-        """Fetch multiple blocks in batches using a single wantlist per batch."""
+        """
+        Fetch multiple blocks in batches with WANT-HAVE phasing and parallel racing.
+
+        Strategy per batch:
+          1. Broadcast WANT-HAVE for all pending CIDs to discover providers.
+          2. After HAVE responses, send WANT-BLOCK to discovered peers.
+          3. Race multiple peers per CID.
+          4. Periodically rebroadcast WANT-HAVE for undiscovered CIDs.
+        """
         results: dict[bytes, bytes] = {}
         cid_objs = [parse_cid(c) for c in cids]
 
@@ -215,7 +283,14 @@ class BitswapSession:
 
             start_time = time.time()
             retry_interval = 1.0
-            requested_from: dict[CIDObject, set[PeerID]] = {cid: set() for cid in batch}
+            last_rebroadcast = 0.0
+            requested_from: dict[CIDObject, set[PeerID]] = {
+                cid: set() for cid in batch
+            }
+            block_requested_from: dict[CIDObject, set[PeerID]] = {
+                cid: set() for cid in batch
+            }
+            have_peers: dict[CIDObject, set[PeerID]] = {cid: set() for cid in batch}
 
             try:
                 while time.time() - start_time < timeout:
@@ -229,49 +304,59 @@ class BitswapSession:
                     if not still_pending:
                         break
 
-                    to_broadcast = []
+                    to_broadcast: list[CIDObject] = []
                     to_peer: dict[PeerID, list[CIDObject]] = {}
 
                     for cid in still_pending:
-                        have_peers = self.client.presence_manager.get_expected_peers(
+                        # Discover HAVE peers from presence manager
+                        known_have = self.client.presence_manager.get_expected_peers(
                             cid
                         )
-                        untried = have_peers - requested_from[cid]
+                        have_peers[cid].update(known_have)
 
-                        targets = []
-                        if peer_id and peer_id not in requested_from[cid]:
-                            targets = [peer_id]
-                        elif untried:
-                            targets = self.client.peer_manager.get_best_peers(
-                                untried, 1
-                            )
-                        elif not untried and getattr(
-                            self.client, "provider_query_manager", None
-                        ):
-                            try:
-                                p_target = await (
-                                    self.client.provider_query_manager
-                                ).find_providers_single(cid)
-                                if p_target:
-                                    targets = [p_target]
-                            except Exception as e:
-                                logger.warning(f"PQM error for {cid}: {e}")
+                        untried_block = have_peers[cid] - block_requested_from[cid]
 
-                        if targets:
+                        # If we have a known peer_id, treat it as having the block
+                        if peer_id and peer_id not in block_requested_from[cid]:
+                            have_peers[cid].add(peer_id)
+                            untried_block.add(peer_id)
+
+                        if untried_block:
+                            # Send WANT-BLOCK to discovered peers (parallel racing)
+                            targets = list(untried_block)[:MAX_PARALLEL_RACE]
+                            if (
+                                peer_id
+                                and peer_id not in block_requested_from[cid]
+                                and peer_id in have_peers[cid]
+                            ):
+                                if peer_id not in targets:
+                                    targets.insert(0, peer_id)
+                                    targets = targets[:MAX_PARALLEL_RACE]
+
                             for target in targets:
                                 if target not in to_peer:
                                     to_peer[target] = []
                                 to_peer[target].append(cid)
-                                requested_from[cid].add(target)
+                                block_requested_from[cid].add(target)
                                 self.client.peer_manager.record_request(target, cid)
                                 await self.client.want_block(
                                     cid, want_type=0, send_dont_have=True
                                 )
-                        else:
-                            to_broadcast.append(cid)
-                            await self.client.want_block(
-                                cid, want_type=1, send_dont_have=True
+                        elif not have_peers[cid]:
+                            # No HAVE peers yet — broadcast WANT-HAVE
+                            now = time.time()
+                            should_rebroadcast = (
+                                (now - last_rebroadcast) >= REBROADCAST_INTERVAL
                             )
+                            if should_rebroadcast or (
+                                peer_id and peer_id not in requested_from[cid]
+                            ):
+                                to_broadcast.append(cid)
+                                await self.client.want_block(
+                                    cid, want_type=1, send_dont_have=True
+                                )
+                                if peer_id:
+                                    requested_from[cid].add(peer_id)
 
                     for p, b_cids in to_peer.items():
                         logger.debug(
@@ -286,6 +371,7 @@ class BitswapSession:
                             f"for {len(to_broadcast)} CIDs"
                         )
                         await self.client._broadcast_wantlist(to_broadcast)
+                        last_rebroadcast = time.time()
 
                     current_timeout = min(retry_interval, remaining_total)
                     try:
@@ -295,16 +381,18 @@ class BitswapSession:
                     except trio.TooSlowError:
                         retry_interval = min(retry_interval * 1.5, 10.0)
 
-                        # Record timeouts for peers that we requested from
+                        # Record timeouts and allow retrying
                         for cid in still_pending:
-                            for req_peer in requested_from[cid]:
+                            for req_peer in block_requested_from[cid]:
                                 self.client.peer_manager.record_timeout(req_peer, cid)
+                            # Allow retrying after timeout
+                            block_requested_from[cid].clear()
+                            requested_from[cid].clear()
 
-                        msg = (
+                        logger.debug(
                             f"Session {self.id}: Batch sub-timeout: "
                             f"{len(still_pending)} blocks still pending, retrying..."
                         )
-                        logger.debug(msg)
 
                 for cid_obj in batch:
                     data = await self.client.block_store.get_block(cid_obj)
