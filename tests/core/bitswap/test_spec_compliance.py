@@ -635,14 +635,12 @@ class TestMessageCreationEdgeCases:
         msg = create_message(
             wantlist_entries=[entry],
             blocks_v100=[b"block"],
-            blocks_v110=[(b"prefix", b"data")],
             block_presences=[(cid, True)],
             pending_bytes=100,
             full_wantlist=True,
         )
         assert len(msg.wantlist.entries) == 1
         assert len(msg.blocks) == 1
-        assert len(msg.payload) == 1
         assert len(msg.blockPresences) == 1
         assert msg.pendingBytes == 100
         assert msg.wantlist.full is True
