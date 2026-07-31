@@ -558,9 +558,6 @@ class TestClientStateManagement:
         mock_host.set_stream_handler = MagicMock()
         client = BitswapClient(mock_host)
 
-        from libp2p.peer.id import ID as PeerID
-
-        peer = PeerID(b"test-peer")
         # _response_streams was removed; verify stop works without error
         await client.start()
         await client.stop()

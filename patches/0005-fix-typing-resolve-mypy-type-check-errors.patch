@@ -51,7 +51,6 @@ index ead15eb1..60acdd07 100644
 +            await rt_mgr._do_refresh(force=True)
          else:
              await self.peer_routing.refresh_routing_table()
- 
--- 
-2.50.1 (Apple Git-155)
 
+--
+2.50.1 (Apple Git-155)

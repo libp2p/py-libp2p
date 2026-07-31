@@ -13,22 +13,22 @@ index e30c61f3..30e47c47 100644
 --- a/libp2p/bitswap/client.py
 +++ b/libp2p/bitswap/client.py
 @@ -105,6 +105,7 @@ class BitswapClient:
- 
+
          self._nursery: trio.Nursery | None = None
          self._started = False
 +        self._cancel_scope: trio.CancelScope | None = None
- 
+
      def register_extension(self, protocol: str, extension: "IBitswapExtension") -> None:
          """Register an extension for a specific protocol."""
 @@ -126,15 +127,17 @@ class BitswapClient:
              )
- 
+
          self._started = True
 +        self._cancel_scope = trio.CancelScope()
          if self._nursery is not None:
              self._nursery.start_soon(self._presence_cleanup_loop)
          logger.info(f"Bitswap client started (protocol: {self.protocol_version})")
- 
+
      async def _presence_cleanup_loop(self) -> None:
          """Periodic background task to clean up expired presence state."""
 -        while self._started:
@@ -38,18 +38,17 @@ index e30c61f3..30e47c47 100644
 +            while self._started:
 +                await trio.sleep(10)
 +                self.presence_manager.cleanup_expired()
- 
+
      async def stop(self) -> None:
          """Stop the Bitswap client."""
 @@ -142,6 +145,8 @@ class BitswapClient:
              return
- 
+
          self._started = False
 +        if self._cancel_scope is not None:
 +            self._cancel_scope.cancel()
          # Unregister stream handlers for all supported Bitswap protocols
          for protocol in self.supported_protocols:
              self.host.remove_stream_handler(TProtocol(protocol))
--- 
+--
 2.50.1 (Apple Git-155)
-

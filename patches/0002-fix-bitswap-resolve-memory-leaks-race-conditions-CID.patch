@@ -22,9 +22,9 @@ index c39defa0..37588387 100644
          self._dont_have_responses: dict[CIDObject, set[PeerID]] = {}
          self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
 @@ -170,6 +170,9 @@ class BitswapClient:
- 
+
          cid_obj = parse_cid(cid)
- 
+
 +        if not verify_cid(cid_obj, data):
 +            raise ValueError(f"Block data does not match CID hash: {format_cid_for_display(cid_obj)}")
 +
@@ -33,7 +33,7 @@ index c39defa0..37588387 100644
              f"Added block {format_cid_for_display(cid_obj, max_len=16)} to store"
 @@ -222,9 +225,13 @@ class BitswapClient:
              batch = remaining[batch_start : batch_start + batch_size]
- 
+
              # Register pending events for all CIDs in batch
 +            batch_events = {}
              for cid_obj in batch:
@@ -44,10 +44,10 @@ index c39defa0..37588387 100644
 +                self._pending_requests[cid_obj].add(event)
 +                batch_events[cid_obj] = event
                  await self.want_block(cid_obj, send_dont_have=True)
- 
+
              # Send all CIDs in a single wantlist to the peer
 @@ -240,43 +247,53 @@ class BitswapClient:
- 
+
              # Wait for all blocks in this batch
              try:
 -                with trio.fail_after(timeout):
@@ -83,7 +83,7 @@ index c39defa0..37588387 100644
 +                except trio.TooSlowError:
 +                    msg = f"Batch timeout: {len(batch)} blocks, got partial results"
 +                    logger.warning(msg)
-+    
++
 +                # Collect results
 +                for cid_obj in batch:
 +                    data = await self.block_store.get_block(cid_obj)
@@ -130,19 +130,19 @@ index c39defa0..37588387 100644
 +                    # Clean up expected_blocks for all peers
 +                    for peer_id in list(self._expected_blocks.keys()):
 +                        self._expected_blocks[peer_id].discard(cid_obj)
- 
+
          return results
- 
+
 @@ -433,15 +450,19 @@ class BitswapClient:
          await self.want_block(cid, send_dont_have=True)
- 
+
          # Create pending request event
 +        event = trio.Event()
          if cid not in self._pending_requests:
 -            self._pending_requests[cid] = trio.Event()
 +            self._pending_requests[cid] = set()
 +        self._pending_requests[cid].add(event)
- 
+
          # Send wantlist to peers
          if peer_id:
              success = await self._send_wantlist_to_peer(peer_id, [cid])
@@ -161,7 +161,7 @@ index c39defa0..37588387 100644
              with trio.fail_after(timeout):
 -                await self._pending_requests[cid].wait()
 +                await event.wait()
- 
+
              # Get the block from store
              data = await self.block_store.get_block(cid)
 @@ -474,9 +495,13 @@ class BitswapClient:
@@ -176,12 +176,12 @@ index c39defa0..37588387 100644
                  del self._dont_have_responses[cid]
 +            for pid in list(self._expected_blocks.keys()):
 +                self._expected_blocks[pid].discard(cid)
- 
+
          if error:
              raise error
 @@ -506,29 +531,6 @@ class BitswapClient:
          )
- 
+
          try:
 -            # Create wantlist entries with full v1.2.0 information
 -            entries = []
@@ -212,7 +212,7 @@ index c39defa0..37588387 100644
 @@ -541,31 +543,73 @@ class BitswapClient:
                  protocols,
              )
- 
+
 -            # Store negotiated protocol
 -            protocol = stream.get_protocol()
 -            if protocol:
@@ -222,7 +222,7 @@ index c39defa0..37588387 100644
 +                protocol = stream.get_protocol()
 +                if protocol:
 +                    self._peer_protocols[peer_id] = str(protocol)
-+                
++
 +                peer_proto_str = str(protocol) if protocol else ""
 +                supports_1_2_0 = peer_proto_str in (BITSWAP_PROTOCOL_V120, "ipfs/bitswap/1.3.0")
 +
@@ -239,7 +239,7 @@ index c39defa0..37588387 100644
 +                    )
 +                    want_type = want_info.get("want_type", 0) if supports_1_2_0 else 0
 +                    send_dont_have = want_info.get("send_dont_have", False) if supports_1_2_0 else False
-+                    
++
 +                    entry = create_wantlist_entry(
 +                        cid,
 +                        want_info["priority"],
@@ -248,12 +248,12 @@ index c39defa0..37588387 100644
 +                        send_dont_have=send_dont_have,
 +                    )
 +                    entries.append(entry)
- 
+
 -            await self._write_message(stream, msg)
 -            logger.debug(f"Sent wantlist to peer {peer_id}")
 +                # Create message
 +                msg = create_message(wantlist_entries=entries, full_wantlist=False)
- 
+
 -            # Keep stream open and read responses
 -            # This allows the provider to send blocks back on the same stream
 -            if self._nursery:
@@ -278,11 +278,11 @@ index c39defa0..37588387 100644
 +            except Exception as inner_e:
 +                await stream.close()
 +                raise inner_e
- 
+
          except Exception as e:
              logger.error(f"Failed to send wantlist to peer {peer_id}: {e}")
              return False
- 
+
      async def _broadcast_wantlist(self, cids: list[CIDObject]) -> None:
 -        """Broadcast wantlist to all connected peers."""
 -        peers = self.host.get_network().connections.keys()
@@ -290,7 +290,7 @@ index c39defa0..37588387 100644
 +        import random
 +
 +        peers = list(self.host.get_network().connections.keys())
-+        
++
 +        # Limit broadcast to a maximum number of peers to provide backpressure
 +        # and prevent overwhelming the network or triggering GO_AWAY.
 +        MAX_BROADCAST_PEERS = 20
@@ -301,7 +301,7 @@ index c39defa0..37588387 100644
              if self._nursery:
                  self._nursery.start_soon(self._send_wantlist_to_peer, peer_id, cids)
 @@ -1133,8 +1177,9 @@ class BitswapClient:
- 
+
                  # Notify pending requests
                  if matched_cid in self._pending_requests:
 -                    logger.info("  ✓ Notifying pending request")
@@ -326,6 +326,5 @@ index c39defa0..37588387 100644
              else:
                  logger.debug(
                      f"No pending request for "
--- 
+--
 2.50.1 (Apple Git-155)
-

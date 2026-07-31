@@ -28,25 +28,25 @@ index f7456aa7..e30c61f3 100644
  from .session import BitswapSession
 @@ -100,6 +101,7 @@ class BitswapClient:
          self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
- 
+
          self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
 +        self.peer_manager = BitswapPeerManager()
- 
+
          self._nursery: trio.Nursery | None = None
          self._started = False
 @@ -620,7 +622,7 @@ class BitswapClient:
              await self._process_blocks_v100(list(msg.blocks), peer_id)
- 
+
          if msg.payload:
 -            await self._process_blocks_v110(msg.payload)
 +            await self._process_blocks_v110(msg.payload, peer_id)
- 
+
          if msg.blockPresences:
              await self._process_block_presences(msg.blockPresences, peer_id)
 @@ -946,6 +948,17 @@ class BitswapClient:
                  await self.block_store.put_block(matched_cid, block_data)
                  logger.info("  ✓ Stored successfully")
- 
+
 +                # Record delivery for peer scoring
 +                self.peer_manager.record_delivery(peer_id, matched_cid, len(block_data))
 +
@@ -64,7 +64,7 @@ index f7456aa7..e30c61f3 100644
 @@ -983,9 +996,11 @@ class BitswapClient:
              logger.info("  ✓ All blocks received from this peer!")
          logger.info("=" * 70)
- 
+
 -    async def _process_blocks_v110(self, blocks: Sequence[Any]) -> None:
 +    async def _process_blocks_v110(
 +        self, blocks: Sequence[Any], peer_id: PeerID
@@ -78,7 +78,7 @@ index f7456aa7..e30c61f3 100644
 @@ -1001,6 +1016,17 @@ class BitswapClient:
                  f"(v1.1.0+)"
              )
- 
+
 +            # Record delivery for peer scoring
 +            self.peer_manager.record_delivery(peer_id, cid, len(data))
 +
@@ -92,7 +92,7 @@ index f7456aa7..e30c61f3 100644
 +
              # Remove from expected blocks for all peers
              self.presence_manager.remove_have_from_all(cid)
- 
+
 diff --git a/libp2p/bitswap/peer_manager.py b/libp2p/bitswap/peer_manager.py
 new file mode 100644
 index 00000000..889caba3
@@ -172,7 +172,7 @@ index 64bbbb20..9793d7a0 100644
 @@ -227,29 +227,35 @@ class BitswapSession:
                          )
                          untried = have_peers - requested_from[cid]
- 
+
 -                        target = None
 +                        targets = []
                          if peer_id and peer_id not in requested_from[cid]:
@@ -195,7 +195,7 @@ index 64bbbb20..9793d7a0 100644
 +                                    targets = [p_target]
                              except Exception as e:
                                  logger.warning(f"PQM error for {cid}: {e}")
- 
+
 -                        if target:
 -                            if target not in to_peer:
 -                                to_peer[target] = []
@@ -235,22 +235,22 @@ index 26beb54f..27d8168f 100644
 --- a/tests/core/bitswap/test_dag_pb.py
 +++ b/tests/core/bitswap/test_dag_pb.py
 @@ -21,7 +21,7 @@ class TestLink:
- 
+
      def test_link_creation(self):
          """Test creating a Link."""
 -        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
 +        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
          link = Link(cid=cid, name="file.txt", size=1024)
- 
+
          assert link.cid == cid
 @@ -30,7 +30,7 @@ class TestLink:
- 
+
      def test_link_optional_fields(self):
          """Test Link with optional fields."""
 -        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
 +        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
          link = Link(cid=cid)
- 
+
          assert link.cid == cid
 diff --git a/tests/core/bitswap/test_payment.py b/tests/core/bitswap/test_payment.py
 index 3c38198d..276aea5f 100644
@@ -258,7 +258,7 @@ index 3c38198d..276aea5f 100644
 +++ b/tests/core/bitswap/test_payment.py
 @@ -87,7 +87,7 @@ async def test_gated_decision_engine_auth():
      from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
- 
+
      auth = MagicMock()
 -    auth.cid = compute_cid_v1(b"dummy", codec=CODEC_RAW).encode()
 +    auth.cid = compute_cid_v1(b"dummy", codec=CODEC_RAW)
@@ -301,6 +301,5 @@ index 4e34a174..68124fbc 100644
          async def _fake_broadcast(cids):
              captured["peer_id"] = None
              await client.add_block(cid, block_data)
--- 
+--
 2.50.1 (Apple Git-155)
-

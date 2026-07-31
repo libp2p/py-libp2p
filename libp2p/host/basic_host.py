@@ -349,7 +349,7 @@ class BasicHost(IHost):
         return self.peerstore
 
     @property
-    def conn_manager(self) -> "TagStore":
+    def conn_manager(self) -> TagStore:
         """
         Return the connection manager (TagStore) from the underlying network.
 

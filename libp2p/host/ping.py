@@ -253,7 +253,8 @@ class PingService:
 
 
 async def handle_ping(stream: INetStream) -> None:
-    """Standalone ping stream handler (no shared state).
+    """
+    Standalone ping stream handler (no shared state).
 
     Suitable for use as a ``StreamHandlerFn`` without creating a
     :class:`PingService` instance — e.g. in simple examples and tests.

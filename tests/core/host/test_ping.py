@@ -127,6 +127,7 @@ async def test_ping_survives_short_reads():
     import libp2p.host.ping as ping_mod
 
     original_token_bytes = ping_mod.secrets.token_bytes
+
     def fake_token_bytes(n: int | None = None) -> bytes:
         return pong
 

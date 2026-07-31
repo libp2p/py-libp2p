@@ -23,7 +23,7 @@ index bab38c65..1505e0e5 100644
  from .pb.bitswap_pb2 import Message
 +from .presence import BlockPresenceManager
  from .provider_query import ProviderQueryManager
- 
+
  logger = logging.getLogger(__name__)
 @@ -67,18 +68,17 @@ class BitswapClient:
          block_store: BlockStore | None = None,
@@ -35,7 +35,7 @@ index bab38c65..1505e0e5 100644
          """
 -        Initialize Bitswap client.
 +        Initialize a Bitswap client.
- 
+
          Args:
              host: The libp2p host
 -            block_store: Block storage backend (defaults to in-memory)
@@ -48,7 +48,7 @@ index bab38c65..1505e0e5 100644
 +            protocol_version: The Bitswap protocol version string to prefer
 +            provider_query_manager: Optional manager to handle DHT provider queries
 +            presence_ttl: Time-to-live for block presence tracking (default 60s)
- 
+
          """
          self.host = host
 @@ -98,12 +98,10 @@ class BitswapClient:
@@ -66,15 +66,15 @@ index bab38c65..1505e0e5 100644
 +
          self._nursery: trio.Nursery | None = None
          self._started = False
- 
+
 @@ -127,8 +125,16 @@ class BitswapClient:
              )
- 
+
          self._started = True
 +        if self._nursery is not None:
 +            self._nursery.start_soon(self._presence_cleanup_loop)
          logger.info(f"Bitswap client started (protocol: {self.protocol_version})")
- 
+
 +    async def _presence_cleanup_loop(self) -> None:
 +        """Periodic background task to clean up expired presence state."""
 +        while self._started:
@@ -95,7 +95,7 @@ index bab38c65..1505e0e5 100644
 +            ttl_seconds=self.presence_manager.ttl
 +        )
          logger.info("Bitswap client stopped")
- 
+
      def set_nursery(self, nursery: trio.Nursery) -> None:
 @@ -291,11 +298,10 @@ class BitswapClient:
                              del self._pending_requests[cid_obj]
@@ -109,9 +109,9 @@ index bab38c65..1505e0e5 100644
 -                        self._expected_blocks[pid].discard(cid_obj)
 +                    for pid in self.presence_manager.get_expected_peers(cid_obj):
 +                        self.presence_manager.remove_have(pid, cid_obj)
- 
+
          return results
- 
+
 @@ -500,10 +506,10 @@ class BitswapClient:
                  self._pending_requests[cid].discard(event)
                  if not self._pending_requests[cid]:
@@ -124,12 +124,12 @@ index bab38c65..1505e0e5 100644
 +            # Clean up expected_blocks for all peers
 +            for pid in self.presence_manager.get_expected_peers(cid):
 +                self.presence_manager.remove_have(pid, cid)
- 
+
          if error:
              raise error
 @@ -1137,7 +1143,7 @@ class BitswapClient:
          logger.info(f"Processing {len(blocks)} blocks (v1.0.0) from peer {peer_id_str}")
- 
+
          # Get the CIDs we're expecting from this peer
 -        expected_cids = self._expected_blocks.get(peer_id, set()).copy()
 +        expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
@@ -138,7 +138,7 @@ index bab38c65..1505e0e5 100644
          for i, cid in enumerate(expected_cids):
 @@ -1174,15 +1180,13 @@ class BitswapClient:
                  logger.info("  ✓ Stored successfully")
- 
+
                  # Remove from expected blocks for all peers
 -                for pid in self._expected_blocks:
 -                    if matched_cid in self._expected_blocks[pid]:
@@ -156,7 +156,7 @@ index bab38c65..1505e0e5 100644
 +                logger.info(
 +                    f"  ✓ Removed from expected blocks for peer {pid_str}"
 +                )
- 
+
                  # Notify pending requests
                  if matched_cid in self._pending_requests:
 @@ -1190,6 +1194,9 @@ class BitswapClient:
@@ -180,12 +180,12 @@ index bab38c65..1505e0e5 100644
              for i, cid in enumerate(remaining):
 @@ -1230,8 +1237,7 @@ class BitswapClient:
              )
- 
+
              # Remove from expected blocks for all peers
 -            for peer_id in self._expected_blocks:
 -                self._expected_blocks[peer_id].discard(cid)
 +            self.presence_manager.remove_have_from_all(cid)
- 
+
              # Notify pending requests
              if cid in self._pending_requests:
 @@ -1242,6 +1248,9 @@ class BitswapClient:
@@ -200,7 +200,7 @@ index bab38c65..1505e0e5 100644
                      f"No pending request for "
 @@ -1270,17 +1279,12 @@ class BitswapClient:
              )
- 
+
              if has_block:
 -                # Peer has the block - we can expect it to arrive soon
 -                # Track which peer has it
@@ -216,12 +216,12 @@ index bab38c65..1505e0e5 100644
 -                    self._dont_have_responses[cid] = set()
 -                self._dont_have_responses[cid].add(peer_id)
 +                self.presence_manager.add_dont_have(cid, peer_id)
- 
+
                  logger.info(
                      f"  ℹ️  Peer {peer_id} doesn't have block "
 @@ -1393,17 +1397,13 @@ class BitswapClient:
              presence_type = presence.type
- 
+
              if presence_type == 0:  # Have
 -                if peer_id not in self._expected_blocks:
 -                    self._expected_blocks[peer_id] = set()
@@ -328,17 +328,17 @@ index 5e7faf59..10d78fc0 100644
 --- a/tests/core/bitswap/test_client.py
 +++ b/tests/core/bitswap/test_client.py
 @@ -409,16 +409,17 @@ class TestBitswapClientBugFixes:
- 
+
          # Simulate expected block setup and dont_have
          peer_id = PeerID(b"peer1")
 -        client._expected_blocks[peer_id] = {cid_obj}
 -        client._dont_have_responses[cid_obj] = {peer_id}
 +        client.presence_manager.add_have(peer_id, cid_obj)
 +        client.presence_manager.add_dont_have(peer_id, cid_obj)
- 
+
          with pytest.raises(BitswapTimeoutError):
              await client.get_block(cid, timeout=0.1)
- 
+
          assert cid_obj not in client._pending_requests
          assert cid_obj not in client._wantlist
 -        assert cid_obj not in client._dont_have_responses
@@ -346,7 +346,7 @@ index 5e7faf59..10d78fc0 100644
 +        assert peer_id not in client.presence_manager.get_dont_have_peers(cid_obj)
 +        expected_cids = client.presence_manager.get_expected_cids_for_peer(peer_id)
 +        assert cid_obj not in expected_cids
- 
+
      @pytest.mark.trio
      async def test_broadcast_limit(self):
 diff --git a/tests/core/bitswap/test_presence.py b/tests/core/bitswap/test_presence.py
@@ -408,6 +408,5 @@ index 00000000..b6bc1ed9
 +        assert cid1 not in manager.get_expected_cids_for_peer(peer1)
 +        assert cid2 in manager.get_expected_cids_for_peer(peer1)
 +        assert peer1 not in manager.get_dont_have_peers(cid1)
--- 
+--
 2.50.1 (Apple Git-155)
-

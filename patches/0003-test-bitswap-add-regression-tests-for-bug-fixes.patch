@@ -13,10 +13,10 @@ index b5995450..dfd45eeb 100644
 +++ b/tests/core/bitswap/test_client.py
 @@ -3,6 +3,7 @@
  from unittest.mock import AsyncMock, MagicMock
- 
+
  import pytest
 +import trio
- 
+
  from libp2p.bitswap.block_store import MemoryBlockStore
  from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 @@ -348,3 +349,91 @@ class TestBitswapClientMultipleBlocks:
@@ -111,6 +111,5 @@ index b5995450..dfd45eeb 100644
 +
 +        assert client._send_wantlist_to_peer.call_count == 20
 +
--- 
+--
 2.50.1 (Apple Git-155)
-

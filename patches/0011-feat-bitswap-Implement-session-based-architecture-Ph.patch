@@ -34,12 +34,12 @@ index c4e452d9..06cd7528 100644
 +++ b/libp2p/bitswap/block_service.py
 @@ -21,6 +21,7 @@ if TYPE_CHECKING:
      from libp2p.peer.id import ID as PeerID
- 
+
      from .client import BitswapClient
 +from .session import BitswapSession
- 
+
  logger = logging.getLogger(__name__)
- 
+
 @@ -57,6 +58,7 @@ class BlockService:
      async def get_block(
          self,
@@ -49,13 +49,13 @@ index c4e452d9..06cd7528 100644
          timeout: float = 30.0,
      ) -> bytes | None:
 @@ -66,6 +68,7 @@ class BlockService:
- 
+
          Args:
              cid: The CID of the block to retrieve
 +            session: The BitswapSession to use for fetching
              peer_id: Optional specific peer to fetch from (passed to bitswap)
              timeout: Network timeout in seconds
- 
+
 @@ -90,7 +93,7 @@ class BlockService:
              f"{format_cid_for_display(cid_obj, max_len=12)}"
          )
@@ -75,7 +75,7 @@ index c4e452d9..06cd7528 100644
          batch_size: int = 32,
 @@ -145,10 +149,11 @@ class BlockService:
          are auto-cached locally.
- 
+
          Args:
 -            cids: List of CIDs to fetch
 +            cids: Sequence of CIDs to fetch
@@ -85,18 +85,18 @@ index c4e452d9..06cd7528 100644
 -            batch_size: Wantlist batch size passed to bitswap
 +            timeout: Network timeout per batch
 +            batch_size: How many CIDs to request at onceh size passed to bitswap
- 
+
          Returns:
              Dict mapping cid_bytes -> block_data for all found blocks
 @@ -178,7 +183,7 @@ class BlockService:
          )
- 
+
          # Network pass for missing blocks
 -        network_results = await self.bitswap.get_blocks_batch(
 +        network_results = await session.get_blocks_batch(
              missing_cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
          )
- 
+
 diff --git a/libp2p/bitswap/client.py b/libp2p/bitswap/client.py
 index 911e13e1..f7456aa7 100644
 --- a/libp2p/bitswap/client.py
@@ -121,9 +121,9 @@ index 911e13e1..f7456aa7 100644
  from .provider_query import ProviderQueryManager
 +from .session import BitswapSession
 +from .sim import SessionInterestManager
- 
+
  logger = logging.getLogger(__name__)
- 
+
 @@ -97,7 +96,7 @@ class BitswapClient:
          self._peer_wantlists: dict[
              PeerID, dict[CIDObject, dict[str, Any]]
@@ -131,7 +131,7 @@ index 911e13e1..f7456aa7 100644
 -        self._pending_requests: dict[CIDObject, set[trio.Event]] = {}  # CID -> event
 +        self.sim = SessionInterestManager()
          self._peer_protocols: dict[PeerID, str] = {}  # peer -> negotiated protocol
- 
+
          self.presence_manager = BlockPresenceManager(ttl_seconds=presence_ttl)
 @@ -147,7 +146,7 @@ class BitswapClient:
          # Clear wantlists and pending requests
@@ -145,7 +145,7 @@ index 911e13e1..f7456aa7 100644
 @@ -158,6 +157,11 @@ class BitswapClient:
          """Set the nursery for background tasks."""
          self._nursery = nursery
- 
+
 +    def new_session(self) -> BitswapSession:
 +        """Create a new Bitswap session for fetching blocks."""
 +        session_id = id(self) ^ id(trio.current_time())
@@ -157,14 +157,14 @@ index 911e13e1..f7456aa7 100644
 @@ -187,181 +191,13 @@ class BitswapClient:
              f"Added block {format_cid_for_display(cid_obj, max_len=16)} to store"
          )
- 
+
 +        # Notify sessions
 +        for session in self.sim.split_wanted_blocks(cid_obj):
 +            await session.receive_block(cid_obj, data)
 +
          # Notify peers who wanted this block
          await self._notify_peers_about_block(cid_obj, data)
- 
+
 -    async def get_blocks_batch(
 -        self,
 -        cids: list[CIDInput],
@@ -343,7 +343,7 @@ index 911e13e1..f7456aa7 100644
 @@ -448,74 +284,6 @@ class BitswapClient:
              # Send cancel message to all peers
              await self._broadcast_cancel(cid_obj)
- 
+
 -    async def _request_block(
 -        self, cid: CIDObject, peer_id: PeerID | None, timeout: float
 -    ) -> bytes:
@@ -418,7 +418,7 @@ index 911e13e1..f7456aa7 100644
 @@ -1185,12 +953,12 @@ class BitswapClient:
                  )
                  logger.info(f"  ✓ Removed from expected blocks for peer {pid_str}")
- 
+
 -                # Notify pending requests
 -                if matched_cid in self._pending_requests:
 -                    pending_count = len(self._pending_requests[matched_cid])
@@ -431,13 +431,13 @@ index 911e13e1..f7456aa7 100644
 +                    logger.info(f"  ✓ Notifying {len(sessions)} sessions")
 +                    for session in sessions:
 +                        await session.receive_block(matched_cid, block_data, peer_id)
- 
+
                      if self._started and self._nursery:
                          self._nursery.start_soon(self.cancel_want, matched_cid)
 @@ -1236,15 +1004,15 @@ class BitswapClient:
              # Remove from expected blocks for all peers
              self.presence_manager.remove_have_from_all(cid)
- 
+
 -            # Notify pending requests
 -            if cid in self._pending_requests:
 -                pending_count = len(self._pending_requests[cid])
@@ -453,7 +453,7 @@ index 911e13e1..f7456aa7 100644
 -                    event.set()
 +                for session in sessions:
 +                    await session.receive_block(cid, data, None)
- 
+
                  if self._started and self._nursery:
                      self._nursery.start_soon(self.cancel_want, cid)
 @@ -1281,7 +1049,7 @@ class BitswapClient:
@@ -462,7 +462,7 @@ index 911e13e1..f7456aa7 100644
                  # Track DontHave responses for metrics/optimization
 -                self.presence_manager.add_dont_have(cid, peer_id)
 +                self.presence_manager.add_dont_have(peer_id, cid)
- 
+
                  logger.info(
                      f"  ℹ️  Peer {peer_id} doesn't have block "
 diff --git a/libp2p/bitswap/client.py.bak b/libp2p/bitswap/client.py.bak
@@ -1968,9 +1968,9 @@ index 7641ad9d..5ae11dfb 100644
  )
  from .errors import BlockNotFoundError
 +from .session import BitswapSession
- 
+
  logger = logging.getLogger(__name__)
- 
+
 @@ -174,22 +175,26 @@ class MerkleDag:
      async def _get_block(
          self,
@@ -1992,7 +1992,7 @@ index 7641ad9d..5ae11dfb 100644
              return data
 -        return await self.bitswap.get_block(cid, peer_id, timeout)
 +        return await session.get_block(cid, peer_id, timeout)
- 
+
      async def _get_blocks_batch(
          self,
          cids: list[CIDInput],
@@ -2011,15 +2011,15 @@ index 7641ad9d..5ae11dfb 100644
 +        return await session.get_blocks_batch(
              cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
          )
- 
+
 @@ -604,11 +609,12 @@ class MerkleDag:
              ... )
- 
+
          """
 +        session = self.bitswap.new_session()
          root_cid_bytes = cid_to_bytes(root_cid)
          logger.info(f"Fetching file: {format_cid_for_display(root_cid_bytes)}")
- 
+
          # Step 1: Fetch the root block
 -        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
 +        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
@@ -2036,7 +2036,7 @@ index 7641ad9d..5ae11dfb 100644
                  if not verify_cid(actual_file_cid, actual_file_data):
                      f_cid_str = format_cid_for_display(actual_file_cid)
 @@ -681,7 +687,7 @@ class MerkleDag:
- 
+
              # Batch-fetch this level's blocks
              level_blocks = await self._get_blocks_batch(
 -                list(cid_list), peer_id=peer_id, timeout=timeout, batch_size=32
@@ -2052,21 +2052,21 @@ index 7641ad9d..5ae11dfb 100644
 +                missing_cids, session, peer_id=peer_id, timeout=timeout, batch_size=32
              )
              block_map.update(fetched_blocks)
- 
+
 @@ -881,9 +887,10 @@ class MerkleDag:
              >>> print(f"Chunks: {info['chunks']}")
- 
+
          """
 +        session = self.bitswap.new_session()
          # Get root block
          root_cid_bytes = cid_to_bytes(root_cid)
 -        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
 +        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
- 
+
          # Check if it's a DAG-PB file node
          if is_file_node(root_data):
 @@ -928,12 +935,13 @@ class MerkleDag:
- 
+
      async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None) -> Any:
          """Fetches a CID and decodes the block back into a structured node."""
 +        session = self.bitswap.new_session()
@@ -2082,11 +2082,11 @@ index 7641ad9d..5ae11dfb 100644
              try:
 @@ -943,7 +951,7 @@ class MerkleDag:
                  pass
- 
+
              if data is None:
 -                data = await self.bitswap.get_block(cid_bytes, peer_id)
 +                data = await session.get_block(cid_bytes, peer_id)
- 
+
          if data is None:
              raise BlockNotFoundError(cid_bytes)
 diff --git a/libp2p/bitswap/session.py b/libp2p/bitswap/session.py
@@ -2485,39 +2485,39 @@ index f4754dd7..9a767ac7 100644
      mock_bitswap.add_block = AsyncMock(side_effect=fake_add_block)
      mock_bitswap.get_blocks_batch = AsyncMock(side_effect=fake_get_blocks_batch)
 +    mock_bitswap.new_session = MagicMock(return_value=mock_bitswap)
- 
+
      service = BlockService(store, mock_bitswap)
      return service, store, mock_bitswap
 @@ -69,7 +70,7 @@ async def test_local_hit_no_network():
      # Pre-populate local store
      await store.put_block(cid, data)
- 
+
 -    result = await service.get_block(cid)
 +    result = await service.get_block(cid, mock_bitswap)
      assert result == data
      ok("get_block returns local data")
- 
+
 @@ -82,7 +83,7 @@ async def test_local_miss_goes_to_network():
      cid, data = make_block(b"only on the network")
      service, store, mock_bitswap = make_service(network_blocks={bytes(cid): data})
- 
+
 -    result = await service.get_block(cid)
 +    result = await service.get_block(cid, mock_bitswap)
      assert result == data
      ok("get_block returns network data")
- 
+
 @@ -96,7 +97,7 @@ async def test_auto_cache_after_network_fetch():
      service, store, mock_bitswap = make_service(network_blocks={bytes(cid): data})
- 
+
      # First call: local miss → network fetch → auto-cache
 -    result1 = await service.get_block(cid)
 +    result1 = await service.get_block(cid, mock_bitswap)
      assert result1 == data
- 
+
      # Verify it's now in the local store
 @@ -105,7 +106,7 @@ async def test_auto_cache_after_network_fetch():
      ok("block is in local store after first network fetch")
- 
+
      # Second call: must be a local hit, no second network call
 -    result2 = await service.get_block(cid)
 +    result2 = await service.get_block(cid, mock_bitswap)
@@ -2526,70 +2526,70 @@ index f4754dd7..9a767ac7 100644
      ok("second get_block is a local hit (network called only once total)")
 @@ -138,7 +139,7 @@ async def test_get_blocks_batch_local_hits_skip_network():
          await store.put_block(cid, data)
- 
+
      cids: list[bytes] = [cid for cid, _ in blocks]
 -    results = await service.get_blocks_batch(cids)
 +    results = await service.get_blocks_batch(cids, mock_bitswap)
- 
+
      assert len(results) == 5
      ok("all 5 blocks returned from local store")
 @@ -159,7 +160,7 @@ async def test_get_blocks_batch_partial_local():
          await store.put_block(cid, data)
- 
+
      all_cids: list[bytes] = [cid for cid, _ in local_blocks + net_blocks]
 -    results = await service.get_blocks_batch(all_cids)
 +    results = await service.get_blocks_batch(all_cids, mock_bitswap)
- 
+
      assert len(results) == 5
      ok("all 5 blocks returned (3 local + 2 network)")
 @@ -178,7 +179,7 @@ async def test_missing_block_returns_none():
      cid, _ = make_block(b"this block does not exist")
      service, store, mock_bitswap = make_service(network_blocks={})  # empty network
- 
+
 -    result = await service.get_block(cid)
 +    result = await service.get_block(cid, mock_bitswap)
      assert result is None
      ok("get_block returns None for unknown block")
- 
+
 diff --git a/tests/core/bitswap/test_client.py b/tests/core/bitswap/test_client.py
 index 10d78fc0..b32f4bfe 100644
 --- a/tests/core/bitswap/test_client.py
 +++ b/tests/core/bitswap/test_client.py
 @@ -50,7 +50,6 @@ class TestBitswapClientInit:
- 
+
          assert len(client._wantlist) == 0
          assert len(client._peer_wantlists) == 0
 -        assert len(client._pending_requests) == 0
          assert client._started is False
- 
- 
+
+
 @@ -188,7 +187,7 @@ class TestBitswapClientBlockOperations:
          await client.block_store.put_block(cid, data)
- 
+
          # Get block
 -        retrieved = await client.get_block(cid)
 +        retrieved = await client.new_session().get_block(cid)
          assert retrieved == data
- 
+
      @pytest.mark.trio
 @@ -221,7 +220,7 @@ class TestBitswapClientBlockOperations:
- 
+
          # Should timeout when block doesn't exist
          with pytest.raises(BitswapTimeoutError):
 -            await client.get_block(cid, timeout=0.1)
 +            await client.new_session().get_block(cid, timeout=0.1)
- 
- 
+
+
  class TestBitswapClientPeerManagement:
 @@ -266,8 +265,8 @@ class TestBitswapClientMixedCIDInputs:
          cid = compute_cid_v1(data)
- 
+
          await client.add_block(cid_to_text(cid), data)
 -        assert await client.get_block(cid.hex()) == data
 -        assert await client.get_block(parse_cid(cid)) == data
 +        assert await client.new_session().get_block(cid.hex()) == data
 +        assert await client.new_session().get_block(parse_cid(cid)) == data
- 
+
      @pytest.mark.trio
      async def test_want_and_cancel_with_mixed_inputs(self):
 @@ -324,7 +323,7 @@ class TestBitswapClientMultipleBlocks:
@@ -2599,16 +2599,16 @@ index 10d78fc0..b32f4bfe 100644
 -            retrieved = await client.get_block(cid)
 +            retrieved = await client.new_session().get_block(cid)
              assert retrieved == data
- 
+
      @pytest.mark.trio
 @@ -367,17 +366,12 @@ class TestBitswapClientBugFixes:
          results = []
- 
+
          async def fetch_block():
 -            data = await client.get_block(cid, timeout=2.0)
 +            data = await client.new_session().get_block(cid, timeout=2.0)
              results.append(data)
- 
+
          async def mock_network_delivery():
              await trio.sleep(0.5)
 -            # Store the block locally
@@ -2618,16 +2618,16 @@ index 10d78fc0..b32f4bfe 100644
 -                for event in client._pending_requests[cid_obj]:
 -                    event.set()
 +            await client.add_block(cid_obj, b"concurrent_data")
- 
+
          async with trio.open_nursery() as nursery:
              nursery.start_soon(mock_network_delivery)
 @@ -413,9 +407,8 @@ class TestBitswapClientBugFixes:
          client.presence_manager.add_dont_have(peer_id, cid_obj)
- 
+
          with pytest.raises(BitswapTimeoutError):
 -            await client.get_block(cid, timeout=0.1)
 +            await client.new_session().get_block(cid, timeout=0.1)
- 
+
 -        assert cid_obj not in client._pending_requests
          assert cid_obj not in client._wantlist
          assert peer_id not in client.presence_manager.get_dont_have_peers(cid_obj)
@@ -2642,7 +2642,7 @@ index 0385000e..cdcfa535 100644
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
- 
+
          dag = MerkleDag(mock_client)
 @@ -36,6 +37,7 @@ class TestMerkleDagInit:
      def test_init_with_custom_store(self):
@@ -2651,7 +2651,7 @@ index 0385000e..cdcfa535 100644
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          custom_store = MemoryBlockStore()
- 
+
 @@ -54,6 +56,7 @@ class TestAddBytes:
          """Test adding small data (single block)."""
          # Setup
@@ -2659,7 +2659,7 @@ index 0385000e..cdcfa535 100644
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.add_block = AsyncMock()
- 
+
 @@ -83,6 +86,7 @@ class TestAddBytes:
          """Test adding large data (multiple chunks)."""
          # Setup
@@ -2667,7 +2667,7 @@ index 0385000e..cdcfa535 100644
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.add_block = AsyncMock()
- 
+
 @@ -115,6 +119,7 @@ class TestAddBytes:
      async def test_add_bytes_with_progress(self):
          """Test adding bytes with progress callback."""
@@ -2675,7 +2675,7 @@ index 0385000e..cdcfa535 100644
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.add_block = AsyncMock()
- 
+
 @@ -153,6 +158,7 @@ class TestAddFile:
          try:
              # Setup
@@ -2683,7 +2683,7 @@ index 0385000e..cdcfa535 100644
 +            mock_client.new_session = MagicMock(return_value=mock_client)
              mock_client.block_store = MemoryBlockStore()
              mock_client.add_block = AsyncMock()
- 
+
 @@ -189,6 +195,7 @@ class TestAddFile:
          try:
              # Setup
@@ -2691,70 +2691,70 @@ index 0385000e..cdcfa535 100644
 +            mock_client.new_session = MagicMock(return_value=mock_client)
              mock_client.block_store = MemoryBlockStore()
              mock_client.add_block = AsyncMock()
- 
+
 @@ -219,6 +226,7 @@ class TestAddFile:
      async def test_add_file_not_found(self):
          """Test adding non-existent file."""
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
- 
+
          dag = MerkleDag(mock_client)
 @@ -238,6 +246,7 @@ class TestAddFile:
- 
+
          try:
              mock_client = MagicMock(spec=BitswapClient)
 +            mock_client.new_session = MagicMock(return_value=mock_client)
              mock_client.block_store = MemoryBlockStore()
              mock_client.add_block = AsyncMock()
- 
+
 @@ -275,6 +284,7 @@ class TestFetchFile:
- 
+
          # Setup
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.get_block = AsyncMock(return_value=data)
- 
+
 @@ -328,6 +338,7 @@ class TestFetchFile:
              raise ValueError(f"Unknown CID: {cid.hex()}")
- 
+
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
- 
+
 @@ -394,6 +405,7 @@ class TestFetchFile:
                  return leaf2
- 
+
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
- 
+
 @@ -452,6 +464,7 @@ class TestGetFileInfo:
              cid_input = cid.hex()
- 
+
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.get_block = AsyncMock(return_value=data)
- 
+
 @@ -476,6 +489,7 @@ class TestGetFileInfo:
          root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
- 
+
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = MemoryBlockStore()
          mock_client.get_block = AsyncMock(return_value=root_data)
- 
+
 @@ -504,6 +518,7 @@ class TestEndToEnd:
              # Setup with real store
              store = MemoryBlockStore()
              mock_client = MagicMock(spec=BitswapClient)
 +            mock_client.new_session = MagicMock(return_value=mock_client)
              mock_client.block_store = store
- 
+
              # Capture blocks during add
 @@ -570,6 +585,7 @@ class TestEndToEnd:
          # Setup
@@ -2762,7 +2762,7 @@ index 0385000e..cdcfa535 100644
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = store
- 
+
          added_blocks = {}
 @@ -633,6 +649,7 @@ class TestEndToEnd:
              # Setup
@@ -2770,68 +2770,68 @@ index 0385000e..cdcfa535 100644
              mock_client = MagicMock(spec=BitswapClient)
 +            mock_client.new_session = MagicMock(return_value=mock_client)
              mock_client.block_store = store
- 
+
              added_blocks = {}
 @@ -717,6 +734,7 @@ class TestGenericDag:
- 
+
          store = MemoryBlockStore()
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = store
- 
+
          async def add_block_impl(cid, data):
 @@ -744,6 +762,7 @@ class TestGenericDag:
- 
+
          store = MemoryBlockStore()
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = store
- 
+
          async def add_block_impl(cid, data):
 @@ -771,6 +790,7 @@ class TestGenericDag:
- 
+
          store = MemoryBlockStore()
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = store
- 
+
          async def add_block_impl(cid, data):
 @@ -794,6 +814,7 @@ class TestGenericDag:
- 
+
          store = MemoryBlockStore()
          mock_client = MagicMock(spec=BitswapClient)
 +        mock_client.new_session = MagicMock(return_value=mock_client)
          mock_client.block_store = store
- 
+
          bad_data = b'{"name":"Alice"}'  # This is JSON, not CBOR
 diff --git a/tests/core/bitswap/test_dag_pb.py b/tests/core/bitswap/test_dag_pb.py
 index 2a4b9025..26beb54f 100644
 --- a/tests/core/bitswap/test_dag_pb.py
 +++ b/tests/core/bitswap/test_dag_pb.py
 @@ -21,7 +21,7 @@ class TestLink:
- 
+
      def test_link_creation(self):
          """Test creating a Link."""
 -        cid = b"\x01\x23\x45\x67" * 8
 +        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
          link = Link(cid=cid, name="file.txt", size=1024)
- 
+
          assert link.cid == cid
 @@ -30,7 +30,7 @@ class TestLink:
- 
+
      def test_link_optional_fields(self):
          """Test Link with optional fields."""
 -        cid = b"\x01\x23\x45\x67" * 8
 +        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW).encode()
          link = Link(cid=cid)
- 
+
          assert link.cid == cid
 diff --git a/tests/core/bitswap/test_integration.py b/tests/core/bitswap/test_integration.py
 index d016ed08..72fc3977 100644
 --- a/tests/core/bitswap/test_integration.py
 +++ b/tests/core/bitswap/test_integration.py
 @@ -156,7 +156,7 @@ class TestBitswapIntegration:
- 
+
                      # Client: Request all blocks
                      for data, cid in blocks.items():
 -                        retrieved = await client_bitswap.get_block(
@@ -2842,7 +2842,7 @@ index d016ed08..72fc3977 100644
 @@ -210,19 +210,21 @@ class TestBitswapIntegration:
                      cid_hex = block_cid.hex()
                      cid_path = f"/ipfs/{cid_canonical}"
- 
+
 -                    retrieved_from_canonical = await client_bitswap.get_block(
 -                        cid_canonical, peer_id=provider_host.get_id(), timeout=2.0
 +                    retrieved_from_canonical = (
@@ -2851,14 +2851,14 @@ index d016ed08..72fc3977 100644
 +                        )
                      )
                      assert retrieved_from_canonical == block_data
- 
+
                      await client_store.delete_block(block_cid)
 -                    retrieved_from_hex = await client_bitswap.get_block(
 +                    retrieved_from_hex = await client_bitswap.new_session().get_block(
                          cid_hex, peer_id=provider_host.get_id(), timeout=2.0
                      )
                      assert retrieved_from_hex == block_data
- 
+
                      await client_store.delete_block(block_cid)
 -                    retrieved_from_path = await client_bitswap.get_block(
 +                    retrieved_from_path = await client_bitswap.new_session().get_block(
@@ -2867,14 +2867,14 @@ index d016ed08..72fc3977 100644
                      assert retrieved_from_path == block_data
 @@ -350,13 +352,13 @@ class TestBitswapIntegration:
                      await trio.sleep(0.2)
- 
+
                      # Node1 requests block B from Node2
 -                    retrieved_b = await node1_bitswap.get_block(
 +                    retrieved_b = await node1_bitswap.new_session().get_block(
                          cid_b, peer_id=node2_host.get_id(), timeout=2.0
                      )
                      assert retrieved_b == block_b
- 
+
                      # Node2 requests block A from Node1
 -                    retrieved_a = await node2_bitswap.get_block(
 +                    retrieved_a = await node2_bitswap.new_session().get_block(
@@ -2883,21 +2883,21 @@ index d016ed08..72fc3977 100644
                      assert retrieved_a == block_a
 @@ -433,12 +435,12 @@ class TestBitswapIntegration:
                      )
- 
+
                      # Client requests existing blocks - these should succeed
 -                    retrieved_a = await client_bitswap.get_block(
 +                    retrieved_a = await client_bitswap.new_session().get_block(
                          cid_a, peer_id=provider_host.get_id(), timeout=2.0
                      )
                      assert retrieved_a == block_a
- 
+
 -                    retrieved_b = await client_bitswap.get_block(
 +                    retrieved_b = await client_bitswap.new_session().get_block(
                          cid_b, peer_id=provider_host.get_id(), timeout=2.0
                      )
                      assert retrieved_b == block_b
 @@ -460,7 +462,7 @@ class TestBitswapIntegration:
- 
+
                          async def request_nonexistent():
                              try:
 -                                await client_bitswap.get_block(
@@ -2912,7 +2912,7 @@ index 8e944e56..3c38198d 100644
 @@ -84,8 +84,10 @@ async def test_gated_decision_engine_auth():
          blockstore=blockstore, ledger=ledger, pricing=pricing, tx_verifier=None
      )
- 
+
 +    from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
 +
      auth = MagicMock()
@@ -2927,14 +2927,14 @@ index de388afa..c0ae9b3c 100644
 +++ b/tests/core/bitswap/test_protocol_versions.py
 @@ -279,13 +279,13 @@ class TestBitswapProtocolVersions:
                  await trio.sleep(0.2)
- 
+
                  # Node1 requests block B from Node2
 -                retrieved_b = await node1_bitswap.get_block(
 +                retrieved_b = await node1_bitswap.new_session().get_block(
                      cid_b, peer_id=node2_host.get_id(), timeout=2.0
                  )
                  assert retrieved_b == block_b
- 
+
                  # Node2 requests block A from Node1
 -                retrieved_a = await node2_bitswap.get_block(
 +                retrieved_a = await node2_bitswap.new_session().get_block(
@@ -2943,15 +2943,15 @@ index de388afa..c0ae9b3c 100644
                  assert retrieved_a == block_a
 @@ -395,7 +395,7 @@ class TestProtocolNegotiation:
                  await trio.sleep(0.2)
- 
+
                  # Client requests block
 -                retrieved = await client_bitswap.get_block(
 +                retrieved = await client_bitswap.new_session().get_block(
                      cid, peer_id=provider_host.get_id(), timeout=2.0
                  )
- 
+
 @@ -463,7 +463,7 @@ class TestProtocolFeatures:
- 
+
                  # Request all blocks
                  for data, cid in test_blocks:
 -                    retrieved = await client_bitswap.get_block(
@@ -2961,7 +2961,7 @@ index de388afa..c0ae9b3c 100644
                      assert retrieved == data
 @@ -520,7 +520,7 @@ class TestProtocolFeatures:
                  await trio.sleep(0.2)
- 
+
                  # Request existing block - should succeed
 -                retrieved = await client_bitswap.get_block(
 +                retrieved = await client_bitswap.new_session().get_block(
@@ -2975,7 +2975,7 @@ index 8617cc6e..4e34a174 100644
 @@ -357,13 +357,17 @@ class TestBitswapClientProviderQueryIntegration:
          # Patch _request_block so we can inspect the peer_id it receives
          captured: dict[str, object] = {}
- 
+
 -        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
 -            captured["peer_id"] = peer_id
 -            return block_data
@@ -2985,20 +2985,20 @@ index 8617cc6e..4e34a174 100644
 +        async def _fake_broadcast(cids):
 +            captured["peer_id"] = None
 +            await client.add_block(cid, block_data)
- 
+
 -        client._request_block = _fake_request  # type: ignore[method-assign]
 +        client._send_wantlist_to_peer = _fake_send
 +        client._broadcast_wantlist = _fake_broadcast
- 
+
 -        result = await client.get_block(cid)
 +        result = await client.new_session().get_block(cid)
- 
+
          assert result == block_data
          assert captured["peer_id"] == discovered_peer
 @@ -385,13 +389,17 @@ class TestBitswapClientProviderQueryIntegration:
- 
+
          captured: dict[str, object] = {}
- 
+
 -        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
 -            captured["peer_id"] = peer_id
 -            return block_data
@@ -3008,20 +3008,20 @@ index 8617cc6e..4e34a174 100644
 +        async def _fake_broadcast(cids):
 +            captured["peer_id"] = None
 +            await client.add_block(cid, block_data)
- 
+
 -        client._request_block = _fake_request  # type: ignore[method-assign]
 +        client._send_wantlist_to_peer = _fake_send
 +        client._broadcast_wantlist = _fake_broadcast
- 
+
 -        result = await client.get_block(cid)
 +        result = await client.new_session().get_block(cid)
- 
+
          assert result == block_data
          assert captured["peer_id"] is None  # broadcast
 @@ -408,13 +416,17 @@ class TestBitswapClientProviderQueryIntegration:
- 
+
          captured: dict[str, object] = {}
- 
+
 -        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
 -            captured["peer_id"] = peer_id
 -            return block_data
@@ -3031,20 +3031,20 @@ index 8617cc6e..4e34a174 100644
 +        async def _fake_broadcast(cids):
 +            captured["peer_id"] = None
 +            await client.add_block(cid, block_data)
- 
+
 -        client._request_block = _fake_request  # type: ignore[method-assign]
 +        client._send_wantlist_to_peer = _fake_send
 +        client._broadcast_wantlist = _fake_broadcast
- 
+
 -        await client.get_block(cid, peer_id=PEER_A)
 +        await client.new_session().get_block(cid, peer_id=PEER_A)
- 
+
          # DHT must NOT have been called
          dht.provider_store.get_providers.assert_not_called()
 @@ -438,13 +450,17 @@ class TestBitswapClientProviderQueryIntegration:
- 
+
          captured: dict[str, object] = {}
- 
+
 -        async def _fake_request(cid_obj, peer_id, timeout):  # noqa: ANN001
 -            captured["peer_id"] = peer_id
 -            return block_data
@@ -3054,16 +3054,15 @@ index 8617cc6e..4e34a174 100644
 +        async def _fake_broadcast(cids):
 +            captured["peer_id"] = None
 +            await client.add_block(cid, block_data)
- 
+
 -        client._request_block = _fake_request  # type: ignore[method-assign]
 +        client._send_wantlist_to_peer = _fake_send
 +        client._broadcast_wantlist = _fake_broadcast
- 
+
 -        result = await client.get_block(cid)
 +        result = await client.new_session().get_block(cid)
- 
+
          assert result == block_data
          assert captured["peer_id"] is None  # graceful broadcast fallback
--- 
+--
 2.50.1 (Apple Git-155)
-
