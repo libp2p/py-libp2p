@@ -110,6 +110,8 @@ if TYPE_CHECKING:
         OrderedDict,
     )
 
+    from libp2p.network.tag_store import TagStore
+
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
@@ -169,14 +171,16 @@ class _IdentifyNotifee(INotifee):
             return
         self._push_identify_scheduled = True
 
-        async def _deferred_push():
+        async def _deferred_push() -> None:
             # Yield control so all listen() calls in the current batch complete
             await trio.sleep(0)
             self._push_identify_scheduled = False
-            try:
-                await host._push_identify_to_all_peers()
-            except Exception:
-                pass  # Best-effort; don't crash the notifee chain
+            h = self._host_ref()
+            if h is not None:
+                try:
+                    await h._push_identify_to_all_peers()
+                except Exception:
+                    pass  # Best-effort; don't crash the notifee chain
 
         trio.lowlevel.spawn_system_task(_deferred_push)
 
@@ -345,7 +349,7 @@ class BasicHost(IHost):
         return self.peerstore
 
     @property
-    def conn_manager(self) -> TagStore:  # noqa: F821
+    def conn_manager(self) -> "TagStore":
         """
         Return the connection manager (TagStore) from the underlying network.
 

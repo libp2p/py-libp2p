@@ -372,11 +372,14 @@ class TestBlockSizeLimits:
 
     def test_add_block_validates_size(self):
         """add_block rejects blocks exceeding MAX_BLOCK_SIZE."""
+        from libp2p.bitswap.cid import parse_cid
+
         mock_host = MagicMock()
         client = BitswapClient(mock_host)
         from libp2p.bitswap.config import MAX_BLOCK_SIZE
 
-        cid = compute_cid_v1(b"too-big")
+        cid_bytes = compute_cid_v1(b"too-big")
+        cid = parse_cid(cid_bytes)
         oversized_data = b"x" * (MAX_BLOCK_SIZE + 1)
         with pytest.raises(Exception):
             client._wantlist[cid] = {
@@ -387,7 +390,10 @@ class TestBlockSizeLimits:
             # add_block validates size
             import trio
 
-            trio.run(client.add_block(cid, oversized_data))
+            async def _add_block():
+                await client.add_block(cid, oversized_data)
+
+            trio.run(_add_block)
 
 
 # ── full wantlist flag ───────────────────────────────────────────────────────
@@ -555,12 +561,11 @@ class TestClientStateManagement:
         from libp2p.peer.id import ID as PeerID
 
         peer = PeerID(b"test-peer")
-        client._response_streams[peer] = MagicMock()
-
+        # _response_streams was removed; verify stop works without error
         await client.start()
         await client.stop()
-
-        assert len(client._response_streams) == 0
+        # Verify client is stopped
+        assert not client._started
 
     @pytest.mark.trio
     async def test_wantlist_tracks_want_type(self):

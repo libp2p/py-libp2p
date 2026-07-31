@@ -106,8 +106,8 @@ class TestPrunerLastTrimTime:
         connections = [mock_conn] * 210  # 210 > high_watermark=200
         # Override with MagicMock so return_value works correctly
         pruner.swarm.get_connections = MagicMock(return_value=connections)
-        pruner.swarm.peerstore.addrs.return_value = []
-        pruner.swarm.connection_gate.is_in_allow_list.return_value = False
+        pruner.swarm.peerstore.addrs.return_value = []  # type: ignore[attr-defined]
+        pruner.swarm.connection_gate.is_in_allow_list.return_value = False  # type: ignore[attr-defined]
 
         # Patch tag store — use the real TagStore, no mock needed (no peers tagged)
         # just ensure is_protected returns False

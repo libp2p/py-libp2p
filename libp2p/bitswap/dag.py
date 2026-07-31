@@ -988,6 +988,8 @@ class MerkleDag:
         # Try to decode as DAG-PB to find child links
         try:
             block_data = await self.block_store.get_block(cid_bytes)
+            if block_data is None:
+                raise BlockNotFoundError(cid_bytes)
             links, _ = decode_dag_pb(block_data)
             # Recursively delete children
             for link in links:

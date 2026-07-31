@@ -773,6 +773,8 @@ class Swarm(Service, INetworkService):
             dial_event.set()
             self._ongoing_dials.pop(peer_id, None)
 
+        return []
+
     async def _dial_with_retry(self, addr: Multiaddr, peer_id: ID) -> INetConn:
         """
         Enhanced: Dial with retry logic and exponential backoff.

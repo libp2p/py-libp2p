@@ -127,7 +127,10 @@ async def test_ping_survives_short_reads():
     import libp2p.host.ping as ping_mod
 
     original_token_bytes = ping_mod.secrets.token_bytes
-    ping_mod.secrets.token_bytes = lambda n: pong
+    def fake_token_bytes(n: int | None = None) -> bytes:
+        return pong
+
+    ping_mod.secrets.token_bytes = fake_token_bytes
     try:
         rtt = await _ping(fake_stream)
     finally:
@@ -188,10 +191,10 @@ async def test_ping_service_cancellation_propagates_cleanly():
             return self._stream
 
     send_ch, _recv_ch = trio.open_memory_channel(10)
-    svc = PingService(FakeHost(HangingStream(send_ch)))
+        svc = PingService(FakeHost(HangingStream(send_ch)))  # type: ignore[arg-type]
 
     with trio.move_on_after(0.05) as scope:
-        await svc.ping(object())
+        await svc.ping(object())  # type: ignore[arg-type]
 
     assert scope.cancelled_caught
 

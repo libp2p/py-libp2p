@@ -427,6 +427,9 @@ class TestBitswapClientBugFixes:
         client._send_wantlist_to_peer = AsyncMock(return_value=True)
 
         cid = compute_cid_v1(b"broadcast_data")
-        await client._broadcast_wantlist([cid])
+        from libp2p.bitswap.cid import parse_cid
+
+        cid_obj = parse_cid(cid)
+        await client._broadcast_wantlist([cid_obj])
 
         assert client._send_wantlist_to_peer.call_count == 20

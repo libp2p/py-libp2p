@@ -95,7 +95,7 @@ class TestTagInfo:
         """Test TagInfo.to_dict method."""
         info = TagInfo()
         info.tags = {"tag1": 10}
-        info.conns = {"conn1": 12345.0}
+        info.conns = {id("conn1"): 12345.0}  # type: ignore[assignment]
 
         result = info.to_dict()
         assert "first_seen" in result
@@ -347,7 +347,7 @@ class TestTagStoreNotifee:
         conn = MagicMock()
         conn.muxed_conn.peer_id = peer_id
         if conn_id_override is not None:
-            conn.__hash__ = lambda self: conn_id_override
+            conn.__hash__ = lambda self: conn_id_override  # type: ignore[assignment]
         return conn
 
     @pytest.mark.trio

@@ -136,6 +136,8 @@ class BitswapClient:
 
     async def _presence_cleanup_loop(self) -> None:
         """Periodic background task to clean up expired presence state."""
+        if self._cancel_scope is None:
+            return
         with self._cancel_scope:
             while self._started:
                 await trio.sleep(10)

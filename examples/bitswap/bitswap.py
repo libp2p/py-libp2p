@@ -145,10 +145,10 @@ async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
         logger.info("=" * 70)
         logger.info("BLOCKS CREATED:")
         logger.info("=" * 70)
-        all_cids = await bitswap.block_store.get_all_cids()
+        all_cids = bitswap.block_store.get_all_cids()
         logger.info(f"Total blocks stored: {len(all_cids)}")
         for i, cid in enumerate(all_cids, 1):
-            block_data = await bitswap.block_store.get_block(cid)
+            block_data = bitswap.block_store.get_block(cid)
             block_size = len(block_data) if block_data else 0
             logger.info(
                 f"  {i}. {format_cid_for_display(cid)} ({format_size(block_size)})"
@@ -279,7 +279,7 @@ async def run_client(
                 logger.info("=" * 70)
                 logger.info("FETCH STATISTICS:")
                 logger.info("=" * 70)
-                all_blocks = await bitswap.block_store.get_all_cids()
+                all_blocks = bitswap.block_store.get_all_cids()
                 logger.info(f"Total blocks fetched: {len(all_blocks)}")
                 for i, cid in enumerate(all_blocks, 1):
                     block_data = await bitswap.block_store.get_block(cid)
@@ -298,7 +298,7 @@ async def run_client(
                 logger.error(f"Error: {fetch_error}")
 
                 # Show blocks we did get
-                all_blocks = await bitswap.block_store.get_all_cids()
+                all_blocks = bitswap.block_store.get_all_cids()
                 if all_blocks:
                     logger.error(f"Blocks successfully fetched: {len(all_blocks)}")
                     for i, cid in enumerate(all_blocks, 1):

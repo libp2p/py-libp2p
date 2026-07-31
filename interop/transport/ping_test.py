@@ -267,6 +267,10 @@ class PingTest:
 
     # Note: setup_redis() removed - _connect_redis_with_retry() is used instead
 
+    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
+        """Extract IP value from multiaddr (IPv4 or IPv6)."""
+        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
         valid_transports = ["tcp", "ws", "wss", "quic-v1", "webrtc-direct"]

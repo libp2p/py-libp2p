@@ -1,6 +1,6 @@
 import time
 
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.bitswap.cid import compute_cid_v1, parse_cid
 from libp2p.bitswap.presence import BlockPresenceManager
 from libp2p.peer.id import ID as PeerID
 
@@ -9,7 +9,7 @@ class TestBlockPresenceManager:
     def test_add_and_remove(self):
         manager = BlockPresenceManager(ttl_seconds=60.0)
         peer1 = PeerID(b"peer1")
-        cid1 = compute_cid_v1(b"data1")
+        cid1 = parse_cid(compute_cid_v1(b"data1"))
 
         manager.add_have(peer1, cid1)
         assert cid1 in manager.get_expected_cids_for_peer(peer1)
@@ -27,8 +27,8 @@ class TestBlockPresenceManager:
     def test_cleanup_expired(self, monkeypatch):
         manager = BlockPresenceManager(ttl_seconds=1.0)
         peer1 = PeerID(b"peer1")
-        cid1 = compute_cid_v1(b"data1")
-        cid2 = compute_cid_v1(b"data2")
+        cid1 = parse_cid(compute_cid_v1(b"data1"))
+        cid2 = parse_cid(compute_cid_v1(b"data2"))
 
         # Mock time to T=0
         monkeypatch.setattr(time, "time", lambda: 0.0)

@@ -164,7 +164,7 @@ class RTRefreshManager:
             # without this outer guard.
             logger.info("Running concurrent random walks to discover new peers")
             current_rt_size = self.routing_table.size()
-            discovered_peers: list = []
+            discovered_peers: list[PeerInfo] = []
             with trio.move_on_after(REFRESH_TOTAL_TIMEOUT) as _refresh_scope:
                 discovered_peers = await self.random_walk.run_concurrent_random_walks(
                     count=RANDOM_WALK_CONCURRENCY,

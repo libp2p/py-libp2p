@@ -19,7 +19,7 @@ import pytest
 import trio
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import cid_to_bytes, compute_cid_v0, parse_cid
+from libp2p.bitswap.cid import CIDObject, cid_to_bytes, compute_cid_v0, parse_cid
 from libp2p.bitswap.client import BitswapClient
 from libp2p.bitswap.provider_query import (
     ProviderCache,
@@ -357,11 +357,11 @@ class TestBitswapClientProviderQueryIntegration:
         # Patch _request_block so we can inspect the peer_id it receives
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer, cids):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
 
-        async def _fake_broadcast(cids):
+        async def _fake_broadcast(cids: list[CIDObject]):
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
@@ -390,11 +390,11 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer, cids):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
 
-        async def _fake_broadcast(cids):
+        async def _fake_broadcast(cids: list[CIDObject]):
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
@@ -418,11 +418,11 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer, cids):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
 
-        async def _fake_broadcast(cids):
+        async def _fake_broadcast(cids: list[CIDObject]):
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 
@@ -453,11 +453,11 @@ class TestBitswapClientProviderQueryIntegration:
 
         captured: dict[str, object] = {}
 
-        async def _fake_send(peer, cids):
+        async def _fake_send(peer: PeerID, cids: list[CIDObject]):
             captured["peer_id"] = peer
             await client.add_block(cid, block_data)
 
-        async def _fake_broadcast(cids):
+        async def _fake_broadcast(cids: list[CIDObject]):
             captured["peer_id"] = None
             await client.add_block(cid, block_data)
 

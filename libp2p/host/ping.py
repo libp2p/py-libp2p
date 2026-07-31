@@ -24,6 +24,7 @@ from libp2p.network.stream.exceptions import (
     StreamReset,
 )
 from libp2p.peer.id import ID as PeerID
+from libp2p.rcmgr import ResourceManager
 
 ID = TProtocol("/ipfs/ping/1.0.0")
 SERVICE_NAME = "libp2p.ping"
@@ -146,7 +147,7 @@ class PingService:
     Matches go-libp2p convention: Result.RTT.Milliseconds().
     """
 
-    def __init__(self, host: IHost, rcmgr=None):
+    def __init__(self, host: IHost, rcmgr: ResourceManager | None = None):
         self._host = host
         self._rcmgr = rcmgr
         self._outbound_streams: dict[PeerID, INetStream] = {}
@@ -211,7 +212,7 @@ class PingService:
 
         async with self._lock:
             stream = self._outbound_streams.get(peer_id)
-            if stream is None or stream.is_closed():
+            if stream is None or (hasattr(stream, "is_closed") and stream.is_closed()):  # type: ignore[attr-defined]
                 stream = await self._host.new_stream(peer_id, [ID])
                 self._outbound_streams[peer_id] = stream
 
@@ -225,7 +226,8 @@ class PingService:
                 yield rtt
             # Spec: "The dialing peer SHOULD close the write operation of the
             # stream after sending the last payload."
-            await stream.close_write()
+            if hasattr(stream, "close_write"):
+                await stream.close_write()  # type: ignore[attr-defined]
             async with self._lock:
                 self._outbound_streams.pop(peer_id, None)
             event = PingEvent(peer_id=peer_id, rtts=rtts, failure_error=None)
@@ -235,12 +237,10 @@ class PingService:
                 self._outbound_streams.pop(peer_id, None)
             raise
         finally:
-            if (
-                event is not None
-                and getattr(stream, "metric_send_channel", None) is not None
-            ):
+            ch = getattr(stream, "metric_send_channel", None)
+            if event is not None and ch is not None:
                 with trio.move_on_after(1):
-                    await stream.metric_send_channel.send(event)
+                    await ch.send(event)
 
     async def ping(self, peer_id: PeerID, ping_amt: int = 1) -> list[int]:
         """
@@ -250,3 +250,30 @@ class PingService:
         async for rtt in self.ping_iter(peer_id, ping_amt=ping_amt):
             rtts.append(rtt)
         return rtts
+
+
+async def handle_ping(stream: INetStream) -> None:
+    """Standalone ping stream handler (no shared state).
+
+    Suitable for use as a ``StreamHandlerFn`` without creating a
+    :class:`PingService` instance — e.g. in simple examples and tests.
+    """
+    peer_id = stream.muxed_conn.peer_id
+    try:
+        while True:
+            should_continue = await _handle_ping(stream, peer_id)
+            if not should_continue:
+                await stream.close()
+                return
+    except StreamEOF:
+        try:
+            await stream.close()
+        except Exception:
+            pass
+    except StreamReset:
+        pass
+    except Exception:
+        try:
+            await stream.reset()
+        except Exception:
+            pass

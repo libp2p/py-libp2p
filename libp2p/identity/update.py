@@ -71,9 +71,10 @@ def _is_public_addr(a: Multiaddr) -> bool:
     # IPv4 multicast 224.0.0.0/4
     try:
         ip_val = a.value_for_protocol(4)
-        first_octet = int(ip_val.split(".")[0])
-        if 224 <= first_octet <= 239:
-            return False
+        if ip_val is not None:
+            first_octet = int(ip_val.split(".")[0])
+            if 224 <= first_octet <= 239:
+                return False
     except Exception:
         pass
     return True
