@@ -42,6 +42,15 @@ logger = logging.getLogger(__name__)
 # Protocol ID for identify/push
 ID_PUSH = TProtocol("/ipfs/id/push/1.0.0")
 CONCURRENCY_LIMIT = 10
+_default_push_capacity: trio.CapacityLimiter | None = None
+
+
+def _get_push_capacity() -> trio.CapacityLimiter:
+    """Return a shared CapacityLimiter for identify-push concurrency control."""
+    global _default_push_capacity
+    if _default_push_capacity is None:
+        _default_push_capacity = trio.CapacityLimiter(CONCURRENCY_LIMIT)
+    return _default_push_capacity
 
 
 def identify_push_handler_for(
@@ -126,7 +135,7 @@ async def push_identify_to_peer(
 
     """
     if limit is None:
-        limit = trio.Semaphore(CONCURRENCY_LIMIT)
+        limit = _get_push_capacity()
     async with limit:
         stream = None
         try:
@@ -184,8 +193,8 @@ async def push_identify_to_peers(
         # Get all connected peers
         peer_ids = set(host.get_connected_peers())
 
-    # Create a single shared semaphore for concurrency control
-    limit = trio.Semaphore(CONCURRENCY_LIMIT)
+    # Use a single shared limiter for concurrency control
+    limit = _get_push_capacity()
 
     # Push to each peer in parallel using a trio.Nursery
     # limiting concurrent connections to CONCURRENCY_LIMIT

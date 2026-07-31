@@ -54,10 +54,28 @@ def _is_public_addr(a: Multiaddr) -> bool:
     # IPv6 loopback and link-local
     if "/ip6/::1" in s:
         return False
+    # IPv6 unspecified address (::) — match exactly, not substring
     if "/ip6/::" in s:
-        return False
+        try:
+            ip_val = a.value_for_protocol(6)
+            if ip_val == "::":
+                return False
+        except Exception:
+            pass
     if "/ip6/fe80" in s.lower():  # fe80::/10 link-local
         return False
+    # IPv6 Unique Local Addresses (fc00::/7)
+    s_lower = s.lower()
+    if "/ip6/fc" in s_lower or "/ip6/fd" in s_lower:
+        return False
+    # IPv4 multicast 224.0.0.0/4
+    try:
+        ip_val = a.value_for_protocol(4)
+        first_octet = int(ip_val.split(".")[0])
+        if 224 <= first_octet <= 239:
+            return False
+    except Exception:
+        pass
     return True
 
 
@@ -114,6 +132,12 @@ async def update_peerstore_from_identify(
             # Always filter private/loopback/link-local addresses
             addrs = [a for a in addrs if _is_public_addr(a)]
 
+            # Replace old addresses (peer is authoritative source for its own addrs)
+            try:
+                peerstore.clear_addrs(peer_id)
+            except Exception:
+                pass  # Peer might not exist yet; that's fine
+
             for addr in addrs:
                 peerstore.add_addr(peer_id, addr, 7200)  # 2 hours TTL
         except Exception as e:
@@ -122,6 +146,11 @@ async def update_peerstore_from_identify(
     # Update protocols if present
     if identify_msg.protocols:
         try:
+            # Replace old protocols (peer is authoritative source for its own protocols)
+            try:
+                peerstore.clear_protocol_data(peer_id)
+            except Exception:
+                pass  # Peer might not exist yet; that's fine
             peerstore.add_protocols(peer_id, identify_msg.protocols)
         except Exception as e:
             logger.error("Error updating protocols for peer %s: %s", peer_id, e)

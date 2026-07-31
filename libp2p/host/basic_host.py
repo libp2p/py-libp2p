@@ -76,7 +76,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.peer.peerstore import PeerStoreError, create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -314,6 +314,7 @@ class BasicHost(IHost):
         # Automatic identify coordination
         self._identify_inflight: set[ID] = set()
         self._identified_peers: dict[ID, str] = {}
+        self._identify_tasks: set[trio.CancelScope] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
 
         # Metrics
@@ -1041,6 +1042,9 @@ class BasicHost(IHost):
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        for cs in self._identify_tasks:
+            cs.cancel()
+        self._identify_tasks.clear()
         await self._network.close()
 
     def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
@@ -1048,16 +1052,29 @@ class BasicHost(IHost):
         Ensure identify is running for `peer_id`. If a task is already running or
         cached protocols exist, this is a no-op.
         """
-        if (
-            peer_id == self.get_id()
-            or self._has_cached_protocols(peer_id)
-            or peer_id in self._identify_inflight
-        ):
+        if peer_id == self.get_id():
+            return
+        if peer_id in self._identify_inflight:
+            return
+        # Add to inflight before checks to prevent duplicate tasks
+        self._identify_inflight.add(peer_id)
+        if self._has_cached_protocols(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
         if not self._should_identify_peer(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
-        self._identify_inflight.add(peer_id)
-        trio.lowlevel.spawn_system_task(self._identify_task_entry, peer_id, reason)
+        cs = trio.CancelScope()
+        self._identify_tasks.add(cs)
+
+        async def _tracked_identify() -> None:
+            with cs:
+                try:
+                    await self._identify_task_entry(peer_id, reason)
+                finally:
+                    self._identify_tasks.discard(cs)
+
+        trio.lowlevel.spawn_system_task(_tracked_identify)
 
     async def _identify_task_entry(self, peer_id: ID, reason: str) -> None:
         try:
@@ -1078,7 +1095,13 @@ class BasicHost(IHost):
                 return False
             supported = self.peerstore.supports_protocols(peer_id, cacheable)
             return bool(supported)
+        except PeerStoreError:
+            return False
         except Exception:
+            logger.debug(
+                "Unexpected error checking cached protocols for %s", peer_id,
+                exc_info=True,
+            )
             return False
 
     async def _identify_peer(self, peer_id: ID, *, reason: str) -> None:
@@ -1107,11 +1130,17 @@ class BasicHost(IHost):
 
         try:
             with trio.fail_after(10.0):
-                data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+                try:
+                    data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+                except Exception:
+                    # Remote may use legacy raw protobuf format
+                    data = await stream.read()
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
             await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-            self._identified_peers[peer_id] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            # Only mark as identified if still connected (avoid stale entries)
+            if self._network.get_connections(peer_id):
+                self._identified_peers[peer_id] = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
                 try:

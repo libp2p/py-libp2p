@@ -750,7 +750,7 @@ def test_on_notifee_disconnected_calls_remove_conn():
     conn.muxed_conn.peer_id = peer_id
 
     # Preload identified_peers so we can also verify the cleanup happens.
-    host._identified_peers.add(peer_id)
+    host._identified_peers[peer_id] = "test"
 
     host._on_notifee_disconnected(conn)
 

@@ -65,7 +65,7 @@ def _remote_address_to_multiaddr(
     host, port = remote_address
 
     # Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
-    if host.startswith("::ffff:"):
+    if host.lower().startswith("::ffff:"):
         host = host[7:]
 
     # Check if the address is IPv6 (contains ':')
@@ -122,6 +122,8 @@ def parse_identify_response(response: bytes) -> Identify:
         try:
             identify_response = Identify()
             identify_response.ParseFromString(protobuf_data)
+            if not identify_response.HasField("public_key"):
+                raise ValueError("Identify response missing public_key field")
             return identify_response
         except Exception:
             pass  # Fall through to old format
@@ -204,6 +206,11 @@ def identify_handler_for(
             )
             try:
                 await stream.reset()
+            except Exception:
+                pass
+        finally:
+            try:
+                await stream.close()
             except Exception:
                 pass
 
