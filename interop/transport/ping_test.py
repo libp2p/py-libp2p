@@ -9,7 +9,6 @@ Environment variables are accepted in uppercase or lowercase where listed in get
 """
 
 import argparse
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 import ipaddress
 import json
@@ -19,7 +18,6 @@ import ssl
 import sys
 import tempfile
 import time
-import traceback
 from typing import Any
 
 from cryptography import x509
@@ -27,15 +25,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 import multiaddr
+import redis
 import trio
-
-from .multiaddr_converter import (
-    extract_p2p,
-    filter_by_transport,
-    get_ip_value,
-    replace_loopback_ip,
-)
-from .redis_coordinator import RedisCoordinator
 
 # ExceptionGroup is built-in in Python 3.11+, import for older versions
 try:
@@ -69,13 +60,9 @@ from libp2p.security.tls.transport import (
     TLSTransport,
 )
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 _orig_mk_identify_protobuf = _identify_mod._mk_identify_protobuf
-
-
-def get_protocol_names(addr: multiaddr.Multiaddr) -> list[str]:
-    """Return list of protocol names in a multiaddr."""
-    return [p.name for p in addr.protocols()]
 
 
 def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
@@ -90,16 +77,7 @@ def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
     return msg
 
 
-@contextmanager
-def _nim_identify_interop():
-    """Temporarily strip fields from identify messages for nim-libp2p interop."""
-    original = _identify_mod._mk_identify_protobuf
-    _identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
-    try:
-        yield
-    finally:
-        _identify_mod._mk_identify_protobuf = original
-
+_identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
 
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
@@ -258,27 +236,10 @@ class PingTest:
             self.redis_listener_key = f"{self.test_key}_listener_multiaddr"
 
         self.host: Any = None
-        self.redis_coordinator = RedisCoordinator(
-            self.redis_host,
-            self.redis_port,
-            min(self.test_timeout_seconds, 120),
-        )
+        self.redis_client: redis.Redis[str] | None = None
         self.ping_received = False
 
     # Note: setup_redis() removed - _connect_redis_with_retry() is used instead
-
-    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
-        """Extract IP value from multiaddr (IPv4 or IPv6)."""
-        try:
-            value = addr.value_for_protocol("ip4")
-        except Exception:
-            value = None
-        if value is not None:
-            return value
-        try:
-            return addr.value_for_protocol("ip6")
-        except Exception:
-            return None
 
     def validate_configuration(self) -> None:
         """Validate configuration parameters."""
@@ -468,10 +429,38 @@ class PingTest:
                     f"[WARNING] Failed to create TLS server config: {e}",
                     file=sys.stderr,
                 )
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 return None
         return None
+
+    def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
+        """Extract IP value from multiaddr (IPv4 or IPv6)."""
+        return extract_ip_from_multiaddr(addr)
+
+    def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
+        """Get protocol names from multiaddr."""
+        return [p.name for p in addr.protocols()]
+
+    def _extract_and_preserve_p2p(
+        self, addr: multiaddr.Multiaddr
+    ) -> tuple[multiaddr.Multiaddr, str | None]:
+        """
+        Extract p2p component from address and return address without p2p.
+
+        Returns:
+            tuple: (address_without_p2p, p2p_value) where p2p_value is None
+                if not present
+
+        """
+        protocols = self._get_protocol_names(addr)
+        p2p_value = None
+        if "p2p" in protocols:
+            p2p_value = addr.value_for_protocol("p2p")
+            if p2p_value:
+                addr = addr.decapsulate(multiaddr.Multiaddr(f"/p2p/{p2p_value}"))
+        return addr, p2p_value
 
     def _encapsulate_with_p2p(
         self, addr: multiaddr.Multiaddr, p2p_value: str | None
@@ -534,13 +523,13 @@ class PingTest:
             quic_addrs = []
             for addr in base_addrs:
                 try:
-                    ip_value = get_ip_value(addr)
+                    ip_value = self._get_ip_value(addr)
                     tcp_port = addr.value_for_protocol("tcp") or port
                     if ip_value:
                         # Build QUIC address (UDP-based)
                         quic_addr = self._build_quic_addr(ip_value, tcp_port)
                         # Preserve /p2p component if present in original address
-                        _, p2p_value = extract_p2p(addr)
+                        _, p2p_value = self._extract_and_preserve_p2p(addr)
                         quic_addr = self._encapsulate_with_p2p(quic_addr, p2p_value)
                         quic_addrs.append(quic_addr)
                 except Exception as e:
@@ -556,11 +545,11 @@ class PingTest:
             webrtc_addrs = []
             for addr in base_addrs:
                 try:
-                    ip_value = get_ip_value(addr)
+                    ip_value = self._get_ip_value(addr)
                     tcp_port = addr.value_for_protocol("tcp") or port
                     if ip_value:
                         wrtc_addr = self._build_webrtc_direct_addr(ip_value, tcp_port)
-                        _, p2p_value = extract_p2p(addr)
+                        _, p2p_value = self._extract_and_preserve_p2p(addr)
                         wrtc_addr = self._encapsulate_with_p2p(wrtc_addr, p2p_value)
                         webrtc_addrs.append(wrtc_addr)
                 except Exception as e:
@@ -578,13 +567,15 @@ class PingTest:
             ws_addrs = []
             for addr in base_addrs:
                 try:
-                    protocols = get_protocol_names(addr)
+                    protocols = self._get_protocol_names(addr)
                     if "ws" in protocols or "wss" in protocols:
                         # Already a WebSocket address, use as-is
                         ws_addrs.append(addr)
                     else:
                         # Extract p2p component before adding /ws
-                        addr_without_p2p, p2p_value = extract_p2p(addr)
+                        addr_without_p2p, p2p_value = self._extract_and_preserve_p2p(
+                            addr
+                        )
                         # Add /ws protocol
                         ws_addr = addr_without_p2p.encapsulate(
                             multiaddr.Multiaddr("/ws")
@@ -607,14 +598,16 @@ class PingTest:
             wss_addrs = []
             for addr in base_addrs:
                 try:
-                    protocols = get_protocol_names(addr)
+                    protocols = self._get_protocol_names(addr)
                     if "wss" in protocols:
                         # Already a WSS address, use as-is
                         wss_addrs.append(addr)
                     elif "ws" in protocols:
                         # Convert /ws to /wss (upgrade to secure)
                         # Extract p2p component before conversion
-                        addr_without_p2p, p2p_value = extract_p2p(addr)
+                        addr_without_p2p, p2p_value = self._extract_and_preserve_p2p(
+                            addr
+                        )
                         # Remove /ws protocol
                         addr_without_ws = addr_without_p2p.decapsulate(
                             multiaddr.Multiaddr("/ws")
@@ -629,7 +622,9 @@ class PingTest:
                     else:
                         # Plain TCP address - add /wss protocol
                         # Extract p2p component before adding /wss
-                        addr_without_p2p, p2p_value = extract_p2p(addr)
+                        addr_without_p2p, p2p_value = self._extract_and_preserve_p2p(
+                            addr
+                        )
                         # Add /wss protocol
                         wss_addr = addr_without_p2p.encapsulate(
                             multiaddr.Multiaddr("/wss")
@@ -716,6 +711,7 @@ class PingTest:
                 self.ping_received = True
         except Exception as e:
             # DEBUG: Print the full exception traceback
+            import traceback
 
             error_msg = (
                 str(e) if e else "Unknown error (exception object is None or empty)"
@@ -761,6 +757,76 @@ class PingTest:
             print(f"error occurred: {e}", file=sys.stderr)
             raise
 
+    def _filter_addresses_by_transport(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
+        """Filter addresses to match current transport type."""
+        filtered = []
+        for addr in addresses:
+            protocols = self._get_protocol_names(addr)
+            if self.transport == "ws" and ("ws" in protocols or "wss" in protocols):
+                filtered.append(addr)
+            elif self.transport == "wss" and "wss" in protocols:
+                filtered.append(addr)
+            elif self.transport == "quic-v1" and "quic-v1" in protocols:
+                filtered.append(addr)
+            elif self.transport == "webrtc-direct" and "webrtc-direct" in protocols:
+                filtered.append(addr)
+            elif self.transport == "tcp" and not any(
+                p in protocols for p in ["ws", "wss", "quic-v1", "webrtc-direct"]
+            ):
+                filtered.append(addr)
+        return filtered if filtered else addresses
+
+    def _replace_loopback_ip(self, addr: multiaddr.Multiaddr) -> str:
+        """
+        Replace loopback IP (127.0.0.1, 0.0.0.0) with container's actual IP.
+
+        This is necessary for Docker networking where loopback addresses
+        are not accessible from other containers. The container's actual
+        IP allows cross-container communication.
+
+        Args:
+            addr: Multiaddr address with loopback IP
+
+        Returns:
+            String representation of address with container IP
+
+        """
+        ip_value = self._get_ip_value(addr)
+        if ip_value not in ["127.0.0.1", "0.0.0.0", "::1", "::"]:
+            return str(addr)
+
+        actual_ip = self.get_container_ip()
+        try:
+            protocols = self._get_protocol_names(addr)
+            is_ipv6 = "ip6" in protocols
+            addr_parts = [f"/ip6/{actual_ip}" if is_ipv6 else f"/ip4/{actual_ip}"]
+
+            found_ip = False
+            for p in addr.protocols():
+                if p.name in ["ip4", "ip6"]:
+                    found_ip = True
+                    continue
+                if found_ip:
+                    if p.value:
+                        addr_parts.append(f"/{p.name}/{p.value}")
+                    else:
+                        addr_parts.append(f"/{p.name}")
+
+            return str(multiaddr.Multiaddr("".join(addr_parts)))
+        except Exception as e:
+            print(
+                f"Warning: Failed to replace IP using multiaddr API: {e}, "
+                f"using string replacement",
+                file=sys.stderr,
+            )
+            addr_str = str(addr)
+            for old_ip in ["/ip4/0.0.0.0/", "/ip4/127.0.0.1/"]:
+                if old_ip in addr_str:
+                    return addr_str.replace(old_ip, f"/ip4/{actual_ip}/")
+            return addr_str
+
     def _get_publishable_address(self, addresses: list[multiaddr.Multiaddr]) -> str:
         """
         Get the best address to publish to Redis for dialer coordination.
@@ -779,7 +845,7 @@ class PingTest:
             String representation of the best publishable address
 
         """
-        filtered = filter_by_transport(addresses)
+        filtered = self._filter_addresses_by_transport(addresses)
         if not filtered:
             print(
                 f"Warning: No addresses matched transport {self.transport}, "
@@ -790,16 +856,17 @@ class PingTest:
 
         # Prefer non-loopback addresses
         for addr in filtered:
-            ip_value = get_ip_value(addr)
+            ip_value = self._get_ip_value(addr)
             if ip_value and ip_value not in ["127.0.0.1", "0.0.0.0", "::1", "::"]:
                 return str(addr)
 
         # Fallback: replace loopback IP
-        return replace_loopback_ip(filtered[0])
+        return self._replace_loopback_ip(filtered[0])
 
     async def run_listener(self) -> None:
         """Run the listener role."""
         self.validate_configuration()
+        await self._connect_redis_with_retry()
 
         # Create security and muxer options based on configuration
         sec_opt, key_pair = self.create_security_options()
@@ -821,17 +888,16 @@ class PingTest:
                 file=sys.stderr,
             )
 
-        with _nim_identify_interop():
-            self.host = new_host(
-                key_pair=key_pair,
-                sec_opt=sec_opt,
-                muxer_opt=muxer_opt,
-                listen_addrs=listen_addrs,
-                enable_quic=(self.transport == "quic-v1"),
-                enable_webrtc=(self.transport == "webrtc-direct"),
-                tls_client_config=tls_client_config,
-                tls_server_config=tls_server_config,
-            )
+        self.host = new_host(
+            key_pair=key_pair,
+            sec_opt=sec_opt,
+            muxer_opt=muxer_opt,
+            listen_addrs=listen_addrs,
+            enable_quic=(self.transport == "quic-v1"),
+            enable_webrtc=(self.transport == "webrtc-direct"),
+            tls_client_config=tls_client_config,
+            tls_server_config=tls_server_config,
+        )
         self.host.set_stream_handler(PING_PROTOCOL_ID, self.handle_ping)
         self.log_protocols()
 
@@ -854,7 +920,11 @@ class PingTest:
                 redis_key = self.redis_listener_key
 
                 # Clean up any existing key to ensure it's a list type
-                # deleted via coordinator if needed (omitted for brevity)
+                try:
+                    assert self.redis_client is not None
+                    self.redis_client.delete(redis_key)
+                except Exception:
+                    pass  # Ignore if key doesn't exist
 
                 # Dialers may race multistream after WS upgrade; brief settle helps.
                 if self.test_plans and self.transport in ("ws", "wss"):
@@ -862,7 +932,8 @@ class PingTest:
 
                 # Publish listener address using RPUSH (list operation)
                 # Dialer will use BLPOP to block and read this value
-                await self.redis_coordinator.publish(redis_key, actual_addr)
+                assert self.redis_client is not None
+                self.redis_client.rpush(redis_key, actual_addr)
                 print(
                     "Listener ready, waiting for dialer to connect...", file=sys.stderr
                 )
@@ -926,6 +997,47 @@ class PingTest:
                 )
                 return
             raise
+
+    async def _connect_redis_with_retry(
+        self, max_retries: int = 10, retry_delay: float = 1.0
+    ) -> None:
+        """
+        Connect to Redis with retry mechanism.
+
+        This method handles Redis connection failures that can occur when:
+        - Redis container is still starting up
+        - Network delays in Docker environments
+        - Temporary DNS resolution issues
+
+        Args:
+            max_retries: Maximum number of connection attempts (default: 10)
+            retry_delay: Delay between retries in seconds (default: 1.0)
+
+        Raises:
+            RuntimeError: If connection fails after all retries
+
+        """
+        print("Connecting to Redis...", file=sys.stderr)
+        for attempt in range(max_retries):
+            try:
+                self.redis_client = redis.Redis(
+                    host=self.redis_host, port=self.redis_port, decode_responses=True
+                )
+                self.redis_client.ping()
+                print(
+                    f"Successfully connected to Redis on attempt {attempt + 1}",
+                    file=sys.stderr,
+                )
+                return
+            except Exception as e:
+                print(
+                    f"Redis connection attempt {attempt + 1} failed: {e}",
+                    file=sys.stderr,
+                )
+                if attempt < max_retries - 1:
+                    print(f"Retrying in {retry_delay} seconds...", file=sys.stderr)
+                    await trio.sleep(retry_delay)
+        raise RuntimeError(f"Failed to connect to Redis after {max_retries} attempts")
 
     def _debug_connection_state(self, network: Any, peer_id: Any) -> None:
         """Debug connection state (only if debug logging enabled)."""
@@ -1004,6 +1116,7 @@ class PingTest:
 
         try:
             self.validate_configuration()
+            await self._connect_redis_with_retry()
 
             print("Waiting for listener address from Redis...", file=sys.stderr)
 
@@ -1033,6 +1146,7 @@ class PingTest:
                     )
             except Exception as e:
                 print(f"BLPOP on TEST_KEY key failed: {e}", file=sys.stderr)
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 raise
@@ -1120,8 +1234,7 @@ class PingTest:
             if dialer_listen_addrs:
                 host_kwargs["listen_addrs"] = dialer_listen_addrs
 
-            with _nim_identify_interop():
-                self.host = new_host(**host_kwargs)
+            self.host = new_host(**host_kwargs)
 
             async with self.host.run(listen_addrs=dialer_listen_addrs or []):
                 handshake_start = time.time()
@@ -1197,6 +1310,7 @@ class PingTest:
                                         file=sys.stderr,
                                     )
                                 # Print full traceback for each exception
+                                import traceback
 
                                 print(
                                     f"[DEBUG]     Traceback for exception {i}:",
@@ -1206,6 +1320,7 @@ class PingTest:
                                     type(exc), exc, exc.__traceback__, file=sys.stderr
                                 )
                     # Print full traceback for debugging
+                    import traceback
 
                     print(
                         "[DEBUG] Full traceback:",
@@ -1318,6 +1433,7 @@ class PingTest:
 
             if non_connection_errors:
                 print(f"Dialer error: {eg}", file=sys.stderr)
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 sys.exit(1)
@@ -1336,6 +1452,7 @@ class PingTest:
                 )
             else:
                 print(f"Dialer error: {e}", file=sys.stderr)
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 sys.exit(1)
@@ -1344,6 +1461,7 @@ class PingTest:
         """Main run method."""
         try:
             print("Setting up Redis connection...", file=sys.stderr)
+            await self._connect_redis_with_retry()
 
             if self.is_dialer:
                 await self.run_dialer()
@@ -1365,6 +1483,7 @@ class PingTest:
 
             if not all_conn_closed:
                 print(f"Error: {eg}", file=sys.stderr)
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 sys.exit(1)
@@ -1374,12 +1493,38 @@ class PingTest:
             # Check if it's a connection closed error (expected during shutdown)
             if not self._is_connection_closed_error(e):
                 print(f"Error: {e}", file=sys.stderr)
+                import traceback
 
                 traceback.print_exc(file=sys.stderr)
                 sys.exit(1)
 
         finally:
-            await self.redis_coordinator.close()
+            if self.redis_client:
+                self.redis_client.close()
+
+    def get_container_ip(self) -> str:
+        """Get the container's actual IP address for Docker networking."""
+        import socket
+        import subprocess
+
+        try:
+            # Try hostname -I first (works in most Docker containers)
+            try:
+                result = subprocess.run(
+                    ["hostname", "-I"], capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip().split()[0]
+            except Exception:
+                pass
+
+            # Fallback: Connect to a remote address to determine local IP
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            # Fallback to a reasonable default
+            return "172.17.0.1"
 
 
 def parse_args() -> argparse.Namespace:

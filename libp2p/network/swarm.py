@@ -43,7 +43,6 @@ from libp2p.network.auto_connector import AutoConnector
 from libp2p.network.config import ConnectionConfig, RetryConfig
 from libp2p.network.connection_gate import ConnectionGate
 from libp2p.network.connection_pruner import ConnectionPruner
-from libp2p.network.decay import Decayer
 from libp2p.network.tag_store import TagInfo, TagStore, TagStoreNotifee
 from libp2p.peer.id import (
     ID,
@@ -129,25 +128,6 @@ class _NegativePeerCache:
         self._cache.pop(peer_id, None)
 
 
-_UNPARSEABLE_ADDRS: set[bytes] = set()
-_MAX_UNPARSEABLE_ADDRS = 10000
-
-
-def _safe_parse_multiaddr(raw: bytes) -> Multiaddr | None:
-    if raw in _UNPARSEABLE_ADDRS:
-        return None
-    try:
-        return Multiaddr(raw)
-    except Exception:
-        if len(_UNPARSEABLE_ADDRS) < _MAX_UNPARSEABLE_ADDRS:
-            _UNPARSEABLE_ADDRS.add(raw)
-        logger.debug(
-            "Skipping permanently unparseable multiaddr (cached): %r",
-            raw[:64],
-        )
-        return None
-
-
 class Swarm(Service, INetworkService):
     self_id: ID
     peerstore: IPeerStore
@@ -174,7 +154,6 @@ class Swarm(Service, INetworkService):
     connection_gate: ConnectionGate
     dns_resolver: DNSResolver
     connection_pruner: ConnectionPruner
-    decayer: Decayer
     auto_connector: AutoConnector
     tag_store: TagStore
 
@@ -293,9 +272,6 @@ class Swarm(Service, INetworkService):
         self.tag_store = TagStore()
         self.register_notifee(TagStoreNotifee(self.tag_store))
 
-        # Initialize decayer for go-libp2p-style decaying tags (Phase 2)
-        self.decayer = Decayer(self.tag_store)
-
     def set_resource_manager(
         self,
         resource_manager: ResourceManager | None,
@@ -331,8 +307,6 @@ class Swarm(Service, INetworkService):
                 await self.auto_connector.start()
                 # Start auto-connector background task
                 await self.auto_connector.run_background_task(nursery)
-                # Start decayer background task (Phase 2 — decaying tags)
-                await self.decayer.run_background_task(nursery)
                 # Start graceful degradation recovery task
                 if (
                     self._resource_manager is not None
@@ -352,7 +326,6 @@ class Swarm(Service, INetworkService):
                 try:
                     await self.connection_pruner.stop()
                     await self.auto_connector.stop()
-                    await self.decayer.stop()
                 except Exception as e:
                     logger.warning(
                         f"Error stopping connection management components: {e}"
@@ -2001,8 +1974,6 @@ class Swarm(Service, INetworkService):
             # Verify connection is fully established before proceeding.
             # For QUIC connections, wait for the connected event.
             # For other muxers (like Yamux/Mplex), check the is_established property.
-            # For some muxers (e.g. QUIC), wait for the connected event.
-            # For others (like Yamux/Mplex), check the is_established property.
             if hasattr(muxed_conn, "_connected_event") and hasattr(
                 muxed_conn, "is_established"
             ):

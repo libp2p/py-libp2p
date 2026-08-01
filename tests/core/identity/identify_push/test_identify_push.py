@@ -10,6 +10,9 @@ import trio
 from libp2p import (
     new_host,
 )
+from libp2p.crypto.rsa import (
+    create_new_key_pair as create_new_rsa_key_pair,
+)
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
@@ -29,10 +32,14 @@ from libp2p.identity.identify_push.identify_push import (
 from libp2p.identity.update import (
     update_peerstore_from_identify as _update_peerstore_from_identify,
 )
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.peer.peerinfo import (
     info_from_p2p_addr,
 )
 from libp2p.peer.peerstore import (
+    PeerStore,
     PeerStoreError,
 )
 from tests.utils.factories import (
@@ -762,3 +769,80 @@ async def test_identify_push_rejects_mismatched_peer_id(security_protocol):
             assert peer_id_c_in_peerstore_after == peer_id_c_in_peerstore_before, (
                 "Peer ID should not be added to peerstore when validation fails"
             )
+
+
+# ── Unit tests for update_peerstore_from_identify ──────────────────────────────
+
+
+@pytest.mark.trio
+async def test_pubkey_update_preserves_protocols():
+    """Sending pubkey update should not clear protocols."""
+    peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
+    peerstore = PeerStore()
+    peerstore.add_protocols(peer_id, ["/foo/1.0.0"])
+
+    key_pair = create_new_rsa_key_pair()
+    identify_msg = Identify()
+    identify_msg.public_key = key_pair.public_key.serialize()
+
+    await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+
+    assert "/foo/1.0.0" in peerstore.get_protocols(peer_id)
+
+
+@pytest.mark.trio
+async def test_private_addr_always_filtered():
+    """Private addrs should be filtered even if no public addrs exist."""
+    peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
+    peerstore = PeerStore()
+
+    identify_msg = Identify()
+    addrs = [
+        multiaddr.Multiaddr("/ip4/127.0.0.1/tcp/1234"),
+        multiaddr.Multiaddr("/ip4/10.0.0.1/tcp/1234"),
+        multiaddr.Multiaddr("/ip4/192.168.1.1/tcp/1234"),
+        multiaddr.Multiaddr("/ip4/169.254.1.1/tcp/1234"),
+        multiaddr.Multiaddr("/ip4/172.16.0.1/tcp/1234"),
+        multiaddr.Multiaddr("/ip6/::1/tcp/1234"),
+        multiaddr.Multiaddr("/ip6/fe80::1/tcp/1234"),
+    ]
+    for a in addrs:
+        identify_msg.listen_addrs.append(a.to_bytes())
+
+    await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+
+    with pytest.raises(PeerStoreError):
+        peerstore.addrs(peer_id)
+
+
+@pytest.mark.trio
+async def test_pubkey_spoofing_rejected():
+    """Pubkey spoofing should be rejected."""
+    peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
+    peerstore = PeerStore()
+
+    key_pair = create_new_rsa_key_pair()
+    identify_msg = Identify()
+    identify_msg.public_key = key_pair.public_key.serialize()
+
+    await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+
+    with pytest.raises(PeerStoreError):
+        peerstore.pubkey(peer_id)
+
+
+@pytest.mark.trio
+async def test_listen_addrs_truncated_at_1000():
+    """listen_addrs should be truncated to 1000."""
+    peer_id = ID.from_base58("QmQvGbd2FwM5WJMW226R7z8Z4KxXmBvjPXYz3yQ5f8XyA9")
+    peerstore = PeerStore()
+
+    identify_msg = Identify()
+    for i in range(1500):
+        ma = multiaddr.Multiaddr(f"/ip4/8.8.8.8/tcp/{1000 + i}")
+        identify_msg.listen_addrs.append(ma.to_bytes())
+
+    await _update_peerstore_from_identify(peerstore, peer_id, identify_msg)
+
+    stored_addrs = peerstore.addrs(peer_id)
+    assert len(stored_addrs) == 1000
