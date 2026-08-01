@@ -71,14 +71,6 @@ def extract_ip_from_multiaddr(maddr: Multiaddr) -> str | None:
     except Exception:
         pass
 
-    for proto in ["dns", "dns4", "dns6", "dnsaddr"]:
-        try:
-            val = maddr.value_for_protocol(proto)
-            if val:
-                return val
-        except Exception:
-            pass
-
     return None
 
 

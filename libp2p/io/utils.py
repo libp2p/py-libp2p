@@ -43,6 +43,9 @@ async def read_exactly(
         Relies on exceptions to break out on erroneous conditions, like EOF.
 
     """
+    if n == 0:
+        return b""
+
     buffer = bytearray()
     initial = await reader.read(n)
     if not initial:
