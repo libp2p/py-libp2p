@@ -101,7 +101,7 @@ class TestTagInfo:
         assert "first_seen" in result
         assert result["value"] == 0
         assert result["tags"] == {"tag1": 10}
-        assert result["conns"] == {"conn1": 12345.0}
+        assert result["conns"] == {id("conn1"): 12345.0}
 
 
 class TestTagStore:
