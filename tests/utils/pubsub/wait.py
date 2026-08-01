@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 import inspect
 import logging
 from typing import TYPE_CHECKING
 
 import trio
+
+from tests.utils.pubsub.dummy_account_node import CRYPTO_TOPIC
 
 if TYPE_CHECKING:
     from tests.utils.pubsub.dummy_account_node import DummyAccountNode
@@ -52,6 +55,61 @@ async def wait_for(
             raise err
 
         await trio.sleep(poll_interval)
+
+
+async def _wait_for_adjacency_edge_ready(
+    nodes: tuple[DummyAccountNode, ...],
+    src: int,
+    tgt: int,
+    topic: str,
+    timeout: float,
+) -> None:
+    src_node = nodes[src]
+    tgt_node = nodes[tgt]
+    src_id = src_node.host.get_id()
+    tgt_id = tgt_node.host.get_id()
+
+    await src_node.pubsub.wait_for_peer(tgt_id, timeout=timeout)
+    await tgt_node.pubsub.wait_for_peer(src_id, timeout=timeout)
+    await src_node.pubsub.wait_for_subscription(tgt_id, topic, timeout=timeout)
+    await tgt_node.pubsub.wait_for_subscription(src_id, topic, timeout=timeout)
+
+
+async def wait_for_adjacency_ready(
+    nodes: tuple[DummyAccountNode, ...],
+    adjacency_map: dict[int, list[int]],
+    *,
+    topic: str = CRYPTO_TOPIC,
+    timeout: float = 10.0,
+) -> None:
+    """
+    Wait until pubsub peers and topic subscriptions are ready on every edge.
+
+    For each directed edge in *adjacency_map*, blocks until both endpoints
+    have pubsub streams and see each other's subscription on *topic*.
+    Uses event-based ``wait_for_peer`` / ``wait_for_subscription`` instead of
+    fixed sleeps.
+    """
+    try:
+        with trio.fail_after(timeout):
+            async with trio.open_nursery() as nursery:
+                for src, targets in adjacency_map.items():
+                    for tgt in targets:
+                        nursery.start_soon(
+                            partial(
+                                _wait_for_adjacency_edge_ready,
+                                nodes,
+                                src,
+                                tgt,
+                                topic,
+                                timeout,
+                            )
+                        )
+    except trio.TooSlowError as exc:
+        raise TimeoutError(
+            f"Adjacency readiness timed out after {timeout:.2f}s "
+            f"for topic {topic!r} with map {adjacency_map}"
+        ) from exc
 
 
 async def wait_for_convergence(

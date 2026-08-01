@@ -229,14 +229,8 @@ def create_websocket_host(
         listen_addrs=listen_addrs,
         tls_server_config=server_context,
         tls_client_config=client_context,
+        transports=[transport],
     )
-
-    # Replace the default transport with our configured one
-    from libp2p.network.swarm import Swarm
-
-    swarm = host.get_network()
-    if isinstance(swarm, Swarm):
-        swarm.transport = transport
 
     return host
 

@@ -171,10 +171,10 @@ class TestBitswapProtocolVersions:
                 await provider_bitswap.start()
                 await client_bitswap.start()
 
-                # Create large file (300KB to ensure chunking)
+                # Create large file (>256KB to ensure chunking)
                 large_data = (
                     b"LARGE FILE TEST [" + protocol_version.encode() + b"] "
-                ) * 5000
+                ) * 10000
                 with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                     tmp_file.write(large_data)
                     tmp_file_path = tmp_file.name

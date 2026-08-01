@@ -186,12 +186,11 @@ class BasicHost(IHost):
         network: INetworkService,
         enable_mDNS: bool = False,
         enable_upnp: bool = False,
-        enable_autotls: bool = False,
         bootstrap: list[str] | None = None,
         default_protocols: OrderedDict[TProtocol, StreamHandlerFn] | None = None,
         negotiate_timeout: int = DEFAULT_NEGOTIATE_TIMEOUT,
         resource_manager: ResourceManager | None = None,
-        psk: str | None = None,
+        metric_recv_channel: trio.MemoryReceiveChannel[Any] | None = None,
         *,
         bootstrap_allow_ipv6: bool = False,
         bootstrap_dns_timeout: float = 10.0,
@@ -266,7 +265,6 @@ class BasicHost(IHost):
                 dns_resolution_timeout=bootstrap_dns_timeout,
                 dns_max_retries=bootstrap_dns_max_retries,
             )
-        self.psk = psk
 
         # Address announcement configuration (from #1268)
         self._announce_addrs = (
@@ -296,6 +294,9 @@ class BasicHost(IHost):
         self._identified_peers: set[ID] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
 
+        # Metrics
+        self.metric_recv_channel = metric_recv_channel
+
     def get_id(self) -> ID:
         """
         :return: peer_id of host
@@ -324,32 +325,36 @@ class BasicHost(IHost):
         """
         Detect negotiate timeout from transport configuration.
 
-        Checks if the network uses a QUIC transport and returns its
-        NEGOTIATE_TIMEOUT config value for coordination.
+        Iterates all registered transports in the swarm's
+        :attr:`~libp2p.network.swarm.Swarm.transport_manager` and returns the
+        ``NEGOTIATE_TIMEOUT`` value from the first transport that exposes it
+        (currently QUIC).
 
-        :return: Negotiate timeout from transport config, or None if not available
+        :return: Negotiate timeout in seconds from transport config, or None.
         """
         try:
-            # Check if network has a transport attribute (Swarm pattern)
-            # Type ignore: transport exists on Swarm but not in INetworkService
-            if hasattr(self._network, "transport"):
-                transport = getattr(self._network, "transport", None)  # type: ignore
-                # Check if it's a QUIC transport
-                if (
-                    transport is not None
-                    and hasattr(transport, "_config")
-                    and hasattr(transport._config, "NEGOTIATE_TIMEOUT")
-                ):
-                    timeout = getattr(transport._config, "NEGOTIATE_TIMEOUT", None)  # type: ignore
-                    if timeout is not None:
-                        logger.debug(
-                            f"Detected negotiate timeout {timeout}s "
-                            "from QUIC transport config"
-                        )
-                        return float(timeout)
+            # Prefer the new multi-transport API (transport_manager).
+            if hasattr(self._network, "transport_manager"):
+                tm = getattr(self._network, "transport_manager", None)
+                if tm is not None:
+                    for transport in tm.get_transports():
+                        if hasattr(transport, "_config") and hasattr(
+                            transport._config, "NEGOTIATE_TIMEOUT"
+                        ):
+                            timeout = getattr(
+                                transport._config, "NEGOTIATE_TIMEOUT", None
+                            )
+                            if timeout is not None:
+                                logger.debug(
+                                    "Detected negotiate timeout %ss from %s config",
+                                    timeout,
+                                    type(transport).__name__,
+                                )
+                                return float(timeout)
+
         except Exception as e:
-            # Silently fail - this is optional coordination
-            logger.debug(f"Could not detect negotiate timeout from transport: {e}")
+            # Silently fail — this is optional coordination.
+            logger.debug("Could not detect negotiate timeout from transport: %s", e)
 
         return None
 
@@ -566,6 +571,12 @@ class BasicHost(IHost):
                 "Will negotiate protocol."
             )
         return None
+
+    def get_metrics_recv_channel(self) -> trio.MemoryReceiveChannel[Any] | None:
+        """
+        Returns the recving end of the channel, used for metric events
+        """
+        return self.metric_recv_channel
 
     async def initiate_autotls_procedure(self, public_ip: str | None = None) -> None:
         """

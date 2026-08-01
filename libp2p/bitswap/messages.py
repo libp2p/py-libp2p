@@ -4,16 +4,20 @@ Supports v1.0.0, v1.1.0, and v1.2.0 message formats.
 """
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING, Union
 
 from .cid import CIDInput, cid_to_bytes
 from .pb.bitswap_pb2 import Message
+
+if TYPE_CHECKING:
+    from .wantlist import WantType
 
 
 def create_wantlist_entry(
     block_cid: CIDInput,
     priority: int = 1,
     cancel: bool = False,
-    want_type: int = 0,  # 0 = Block, 1 = Have (v1.2.0)
+    want_type: Union[int, "WantType"] = 0,  # 0 = Block, 1 = Have (v1.2.0)
     send_dont_have: bool = False,  # v1.2.0
 ) -> Message.Wantlist.Entry:
     """
@@ -36,8 +40,12 @@ def create_wantlist_entry(
     entry.block = cid_to_bytes(block_cid)
     entry.priority = priority
     entry.cancel = cancel
-    # Type checkers don't like int assignment to enum, but protobuf accepts it
-    entry.wantType = want_type  # type: ignore[assignment]  # v1.2.0 field
+    # Handle both int and WantType enum
+    if isinstance(want_type, int):
+        entry.wantType = want_type  # type: ignore[assignment]
+    else:
+        # Extract .value from WantType enum
+        entry.wantType = want_type.value  # type: ignore[assignment]
     entry.sendDontHave = send_dont_have  # v1.2.0 field
     return entry
 

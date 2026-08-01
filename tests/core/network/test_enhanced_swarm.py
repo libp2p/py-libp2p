@@ -92,7 +92,7 @@ async def test_enhanced_swarm_constructor():
     transport = Mock()
 
     # Test with default config
-    swarm = Swarm(peer_id, peerstore, upgrader, transport)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport])
     assert swarm.retry_config.max_retries == 3
     assert swarm.connection_config.max_connections_per_peer == 3
     assert isinstance(swarm.connections, dict)
@@ -101,7 +101,7 @@ async def test_enhanced_swarm_constructor():
     custom_retry = RetryConfig(max_retries=5, initial_delay=0.5)
     custom_conn = ConnectionConfig(max_connections_per_peer=5)
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport, custom_retry, custom_conn)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport], custom_retry, custom_conn)
     assert swarm.retry_config.max_retries == 5
     assert swarm.retry_config.initial_delay == 0.5
     assert swarm.connection_config.max_connections_per_peer == 5
@@ -119,7 +119,7 @@ async def test_swarm_backoff_calculation():
         initial_delay=0.1, max_delay=1.0, backoff_multiplier=2.0, jitter_factor=0.1
     )
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport, retry_config)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport], retry_config)
 
     # Test backoff calculation
     delay1 = swarm._calculate_backoff_delay(0)
@@ -154,7 +154,7 @@ async def test_swarm_retry_logic():
         max_delay=0.1,
     )
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport, retry_config)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport], retry_config)
 
     # Mock the single attempt method to fail twice then succeed
     attempt_count = [0]
@@ -186,7 +186,7 @@ async def test_swarm_load_balancing_strategies():
     upgrader = Mock()
     transport = Mock()
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport])
 
     # Create mock connections with different stream counts
     conn1 = MockConnection(peer_id)
@@ -235,7 +235,7 @@ async def test_swarm_multiple_connections_api():
     upgrader = Mock()
     transport = Mock()
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport])
 
     # Test empty connections
     assert swarm.get_connections() == []
@@ -311,7 +311,7 @@ async def test_swarm_backward_compatibility():
     upgrader = Mock()
     transport = Mock()
 
-    swarm = Swarm(peer_id, peerstore, upgrader, transport)
+    swarm = Swarm(peer_id, peerstore, upgrader, [transport])
 
     # Add connections
     conn1 = MockConnection(peer_id)

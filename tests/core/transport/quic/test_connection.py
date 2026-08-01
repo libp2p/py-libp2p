@@ -246,32 +246,33 @@ class TestQUICConnection:
 
     @pytest.mark.trio
     async def test_connection_start_client(self, quic_connection):
-        """Test client connection start."""
-        with patch.object(
-            quic_connection, "_initiate_connection", new_callable=AsyncMock
-        ) as mock_initiate:
-            await quic_connection.start()
+        """Test that start() is a pure Swarm lifecycle signal (sets event_started)."""
+        await quic_connection.start()
 
-            assert quic_connection._started
-            mock_initiate.assert_called_once()
+        assert quic_connection._started
+        assert quic_connection.event_started.is_set()
+        # _initiate_connection is no longer called from start(); it lives in connect()
 
     @pytest.mark.trio
     async def test_connection_start_server(self, server_connection):
-        """Test server connection start."""
+        """Test that start() on a server connection is a pure Swarm lifecycle signal."""
         await server_connection.start()
 
         assert server_connection._started
-        assert server_connection._established
-        assert server_connection._connected_event.is_set()
+        assert server_connection.event_started.is_set()
+        # _established and _connected_event are now set inside connect(), not start()
 
     @pytest.mark.trio
     async def test_connection_start_already_started(self, quic_connection):
-        """Test starting already started connection."""
+        """Test that calling start() twice is idempotent (guarded by event_started)."""
+        # Simulate that Swarm already called start() once
+        quic_connection.event_started.set()
         quic_connection._started = True
 
-        # Should not raise error, just log warning
+        # Should not raise error or set event_started a second time
         await quic_connection.start()
         assert quic_connection._started
+        assert quic_connection.event_started.is_set()
 
     @pytest.mark.trio
     async def test_connection_start_closed(self, quic_connection):
@@ -287,25 +288,39 @@ class TestQUICConnection:
     async def test_connection_connect_with_nursery(
         self, quic_connection: QUICConnection
     ):
-        """Test connection establishment with nursery."""
-        quic_connection._started = True
-        quic_connection._established = True
+        """
+        Test connection establishment with nursery.
+
+        connect() now directly handles raw transport setup (no longer delegates
+        to start()). For a client connection, it calls _initiate_connection()
+        and then waits for the handshake before verifying peer identity.
+        event_started is NOT set by connect() — that's exclusively Swarm's job.
+        """
+        # Pre-set the connected event so connect() doesn't hang on the handshake
         quic_connection._connected_event.set()
 
         with patch.object(
-            quic_connection, "_start_background_tasks", new_callable=AsyncMock
-        ) as mock_start_tasks:
+            quic_connection, "_initiate_connection", new_callable=AsyncMock
+        ) as mock_initiate:
             with patch.object(
-                quic_connection,
-                "_verify_peer_identity_with_security",
-                new_callable=AsyncMock,
-            ) as mock_verify:
-                async with trio.open_nursery() as nursery:
-                    await quic_connection.connect(nursery)
+                quic_connection, "_start_background_tasks", new_callable=AsyncMock
+            ) as mock_start_tasks:
+                with patch.object(
+                    quic_connection,
+                    "_verify_peer_identity_with_security",
+                    new_callable=AsyncMock,
+                ) as mock_verify:
+                    async with trio.open_nursery() as nursery:
+                        await quic_connection.connect(nursery)
 
-                    assert quic_connection._nursery == nursery
-                    mock_start_tasks.assert_called_once()
-                    mock_verify.assert_called_once()
+                        assert quic_connection._nursery == nursery
+                        assert quic_connection._established
+                        # connect() must have called raw setup directly
+                        mock_initiate.assert_called_once()
+                        mock_start_tasks.assert_called_once()
+                        mock_verify.assert_called_once()
+                        # event_started must NOT be set by connect()
+                        assert not quic_connection.event_started.is_set()
 
     @pytest.mark.trio
     @pytest.mark.slow
@@ -313,17 +328,20 @@ class TestQUICConnection:
         self, quic_connection: QUICConnection
     ) -> None:
         """Test connection establishment timeout."""
-        quic_connection._started = True
         # Don't set connected event to simulate timeout
 
         with patch.object(
-            quic_connection, "_start_background_tasks", new_callable=AsyncMock
+            quic_connection, "_initiate_connection", new_callable=AsyncMock
         ):
-            async with trio.open_nursery() as nursery:
-                with pytest.raises(
-                    QUICConnectionTimeoutError, match="Connection handshake timed out"
-                ):
-                    await quic_connection.connect(nursery)
+            with patch.object(
+                quic_connection, "_start_background_tasks", new_callable=AsyncMock
+            ):
+                async with trio.open_nursery() as nursery:
+                    with pytest.raises(
+                        QUICConnectionTimeoutError,
+                        match="Connection handshake timed out",
+                    ):
+                        await quic_connection.connect(nursery)
 
     # Resource management tests
 
@@ -568,6 +586,37 @@ async def test_invalid_certificate_verification():
         QUICPeerVerificationError, match="Certificate verification failed"
     ):
         manager.verify_peer_identity(corrupted_cert, peer_id1)
+
+
+@pytest.mark.trio
+async def test_verify_peer_identity_raises_when_inbound_has_no_certificate() -> None:
+    """Inbound server-side connections without a peer certificate must fail closed."""
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    manager = QUICTLSConfigManager(
+        libp2p_private_key=key_pair.private_key, peer_id=peer_id
+    )
+
+    mock_quic_conn = Mock()
+    mock_quic_conn.configuration = Mock()
+    mock_quic_conn.configuration.is_client = False
+    mock_quic_conn._handshake_complete = True
+    mock_quic_conn.tls = Mock()
+    mock_quic_conn.tls._peer_certificate = None
+
+    connection = QUICConnection(
+        quic_connection=mock_quic_conn,
+        remote_addr=("127.0.0.1", 4001),
+        remote_peer_id=None,
+        local_peer_id=peer_id,
+        is_initiator=False,
+        maddr=Multiaddr("/ip4/127.0.0.1/udp/4001/quic-v1"),
+        transport=Mock(),
+        security_manager=manager,
+    )
+
+    with pytest.raises(QUICPeerVerificationError, match="no peer certificate"):
+        await connection._verify_peer_identity_with_security()
 
 
 @pytest.mark.trio

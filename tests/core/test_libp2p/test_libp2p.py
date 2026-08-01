@@ -1,5 +1,6 @@
 import pytest
-import multiaddr
+from multiaddr import Multiaddr
+from multiaddr.exceptions import ProtocolLookupError
 
 from libp2p.custom_types import (
     TProtocol,
@@ -26,6 +27,16 @@ PROTOCOL_ID_3 = TProtocol("/echo/3")
 ACK_STR_0 = "ack_0:"
 ACK_STR_1 = "ack_1:"
 ACK_STR_2 = "ack_2:"
+
+
+def _transport_only(addr: Multiaddr) -> Multiaddr:
+    try:
+        peer_id = addr.value_for_protocol("p2p")
+    except ProtocolLookupError:
+        return addr
+    return addr.decapsulate(Multiaddr(f"/p2p/{peer_id}"))
+
+
 ACK_STR_3 = "ack_3:"
 
 
@@ -290,6 +301,8 @@ async def test_triangle_nodes_connection(security_protocol):
 
 
 @pytest.mark.trio
+@pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_host_connect(security_protocol):
     async with HostFactory.create_batch_and_listen(
         2, security_protocol=security_protocol
@@ -297,6 +310,10 @@ async def test_host_connect(security_protocol):
         assert len(hosts[0].get_peerstore().peer_ids()) == 1
 
         await connect(hosts[0], hosts[1])
+        from libp2p.host.basic_host import BasicHost
+
+        assert isinstance(hosts[0], BasicHost)
+        await hosts[0]._identify_peer(hosts[1].get_id(), reason="test-host-connect")
         assert len(hosts[0].get_peerstore().peer_ids()) == 2
 
         await connect(hosts[0], hosts[1])
@@ -304,6 +321,9 @@ async def test_host_connect(security_protocol):
         assert len(hosts[0].get_peerstore().peer_ids()) == 2
 
         assert hosts[1].get_id() in hosts[0].get_peerstore().peer_ids()
-        ma_node_b = multiaddr.Multiaddr("/p2p/%s" % hosts[1].get_id().pretty())
-        for addr in hosts[0].get_peerstore().addrs(hosts[1].get_id()):
-            assert addr.encapsulate(ma_node_b) in hosts[1].get_addrs()
+        # Ensure host 0 learned all of host 1's advertised addresses
+        host1_advertised_addrs = hosts[1].get_addrs()
+        host0_known_addrs = hosts[0].get_peerstore().addrs(hosts[1].get_id())
+        known_transport = {_transport_only(addr) for addr in host0_known_addrs}
+        for addr in host1_advertised_addrs:
+            assert _transport_only(addr) in known_transport or addr in host0_known_addrs

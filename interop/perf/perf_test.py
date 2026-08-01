@@ -13,12 +13,15 @@ Follows docs/write-a-perf-test-app.md:
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+from pathlib import Path
 import ssl
 import sys
 import tempfile
 import time
 from typing import Any
 
+# Interop perf: default logging is quiet. DEBUG=true enables targeted interop
+# loggers (fast). LIBP2P_DEBUG enables full py-libp2p logging at import (slow).
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -36,6 +39,7 @@ from libp2p import create_mplex_muxer_option, create_yamux_muxer_option, new_hos
 from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.custom_types import TProtocol
+from libp2p.network.config import ConnectionConfig
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.perf import PROTOCOL_NAME, PerfService
 from libp2p.security.insecure.transport import PLAINTEXT_PROTOCOL_ID, InsecureTransport
@@ -47,17 +51,65 @@ from libp2p.security.tls.transport import (
     PROTOCOL_ID as TLS_PROTOCOL_ID,
     TLSTransport,
 )
+from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.utils.address_validation import get_available_interfaces
+from libp2p.utils.multiaddr_utils import extract_ip_from_multiaddr
 
 MAX_TEST_TIMEOUT = 300
 logger = logging.getLogger("libp2p.perf_test")
 
 
-def configure_logging() -> None:
-    """Configure logging based on DEBUG environment variable."""
-    debug_value = os.getenv("DEBUG") or "false"
-    debug_enabled = debug_value.upper() in ["DEBUG", "1", "TRUE", "YES"]
+def _env_int(name: str, default: int, minimum: int | None = None) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    return value
 
+
+def _env_float(name: str, default: float, minimum: float | None = None) -> float:
+    raw = os.getenv(name)
+    if not raw:
+        value = default
+    else:
+        try:
+            value = float(raw)
+        except ValueError:
+            value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    return value
+
+
+class _UnbufferedStream:
+    """Flush after every write so debug logs appear immediately in Docker."""
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def write(self, data: str | bytes) -> int:
+        n = self._stream.write(data)
+        self._stream.flush()
+        return n
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+def _libp2p_debug_enabled() -> bool:
+    return bool(os.getenv("LIBP2P_DEBUG", "").strip())
+
+
+def _quiet_multiaddr_loggers() -> None:
     for logger_name in [
         "multiaddr",
         "multiaddr.transforms",
@@ -66,10 +118,46 @@ def configure_logging() -> None:
     ]:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+
+def configure_logging() -> None:
+    """Configure perf logging: LIBP2P_DEBUG (full), DEBUG (targeted), or default."""
+    _quiet_multiaddr_loggers()
+
+    if _libp2p_debug_enabled():
+        print(
+            "Full libp2p logging via LIBP2P_DEBUG "
+            f"({os.getenv('LIBP2P_DEBUG')!r}; configured at import, not capped)",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+        return
+
+    debug_value = os.getenv("DEBUG") or "false"
+    debug_enabled = debug_value.upper() in ["DEBUG", "1", "TRUE", "YES"]
+
     if debug_enabled:
-        for name in ["", "libp2p.perf_test", "libp2p", "libp2p.perf"]:
+        stream = _UnbufferedStream(sys.stderr)
+        logging.basicConfig(
+            level=logging.DEBUG,
+            stream=stream,
+            format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            force=True,
+        )
+        for name in [
+            "libp2p.perf_test",
+            "libp2p.perf",
+            "libp2p.security.tls",
+            "libp2p.stream_muxer.mplex",
+            "libp2p.stream_muxer.yamux",
+        ]:
             logging.getLogger(name).setLevel(logging.DEBUG)
-        print("Debug logging enabled", file=sys.stderr)
+        # Keep core libp2p at INFO to avoid multi-GB logs on yamux perf runs.
+        logging.getLogger("libp2p").setLevel(logging.INFO)
+        logging.getLogger("libp2p.network").setLevel(logging.WARNING)
+        logging.getLogger("libp2p.transport").setLevel(logging.WARNING)
+        print("Targeted perf debug logging enabled (DEBUG=true)", file=sys.stderr)
+        sys.stderr.flush()
     else:
         logging.getLogger().setLevel(logging.INFO)
         logging.getLogger("libp2p.perf_test").setLevel(logging.INFO)
@@ -91,14 +179,76 @@ def _percentile(sorted_values: list[float], p: float) -> float:
     return sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
 
 
-def _is_connection_closed_error(exc: BaseException) -> bool:
-    """True if this is the expected 'Connection closed' from swarm/mplex on shutdown."""
+# Phrases when mplex/TLS read loops exit after peer disconnect (tcp+tls+mplex).
+_SHUTDOWN_ERROR_PHRASES = (
+    "connection closed",
+    "connection is closed",
+    "cannot read: tls connection is closed",
+    "tls connection is closed",
+    "broken pipe",
+    "connection reset",
+    "stream reset",
+    "stream eof",
+    "end of file",
+    "eof",
+    "closed resource",
+    "broken resource",
+)
+
+# Extra settle time so dialer can exit before listener during interop teardown.
+_LISTENER_POST_PERF_GRACE_TLS_MPLEX_SECS = 3.0
+_LISTENER_POST_PERF_GRACE_SECS = 0.5
+_DIALER_DISCONNECT_GRACE_TLS_MPLEX_SECS = 2.0
+_DIALER_DISCONNECT_GRACE_SECS = 0.5
+# Require several consecutive empty get_live_peers() polls before listener
+# teardown (avoids false disconnect during slow muxer/transport stacks).
+_LISTENER_EMPTY_PEER_POLLS_REQUIRED = 3
+_LISTENER_PEER_POLL_INTERVAL_SECS = 0.5
+# ws+mplex can report no live peers for seconds while the perf stream is active.
+_LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS = 30.0
+# Perf runs are 1:1; do not auto-dial extra peers or retry loopback from Identify.
+_PERF_LOOPBACK_DENY_LIST = ("127.0.0.0/8", "::1/128")
+
+
+def _is_connection_closed_error(exc: BaseException | None) -> bool:
+    """True if this is an expected connection-closed error during muxer/TLS shutdown."""
+    if exc is None:
+        return False
+
     msg = str(exc).lower()
-    if "connection closed" in msg:
+    if any(phrase in msg for phrase in _SHUTDOWN_ERROR_PHRASES):
         return True
+
     if isinstance(exc, ExceptionGroup):
+        if not exc.exceptions:
+            return False
         return all(_is_connection_closed_error(e) for e in exc.exceptions)
+
+    if exc.__cause__ is not None and _is_connection_closed_error(exc.__cause__):
+        return True
+    if (
+        exc.__context__ is not None
+        and exc.__context__ is not exc.__cause__
+        and _is_connection_closed_error(exc.__context__)
+    ):
+        return True
+
     return False
+
+
+def _log_perf_phase(role: str, phase: str, **details: Any) -> None:
+    extra = " ".join(f"{k}={v}" for k, v in details.items())
+    msg = f"[PERF_PHASE] {role} {phase}" + (f" {extra}" if extra else "")
+    print(msg, file=sys.stderr)
+    logger.info(msg)
+
+
+def _log_ignored_shutdown_error(role: str, exc: BaseException) -> None:
+    print(
+        f"{role} completed (connection closed during cleanup)",
+        file=sys.stderr,
+    )
+    logger.info("Ignored shutdown error: %s", exc)
 
 
 def _compute_stats(samples: list[float], is_latency: bool = False) -> dict[str, Any]:
@@ -163,9 +313,14 @@ class PerfTest:
         self.is_dialer = is_dialer_val == "true"
 
         self.ip = os.getenv("LISTENER_IP") or "0.0.0.0"
+        self.local_addr_file = os.getenv("PERF_LOCAL_ADDR_FILE")
         self.redis_addr = os.getenv("REDIS_ADDR")
-        if not self.redis_addr:
-            raise ValueError("REDIS_ADDR environment variable is required")
+        if not self.local_addr_file and not self.redis_addr:
+            raise ValueError(
+                "REDIS_ADDR is required unless PERF_LOCAL_ADDR_FILE is set"
+            )
+        if self.local_addr_file and not self.redis_addr:
+            self.redis_addr = "local:0"
         if ":" in self.redis_addr:
             self.redis_host, port = self.redis_addr.split(":", 1)
             self.redis_port = int(port)
@@ -185,10 +340,30 @@ class PerfTest:
 
         timeout_val = os.getenv("TEST_TIMEOUT_SECS") or "180"
         self.test_timeout_seconds = min(int(timeout_val), MAX_TEST_TIMEOUT)
+        # 64 KiB blocks align with yamux half-window batching; stay under Noise limits.
+        self.write_block_size = _env_int("PERF_WRITE_BLOCK_SIZE", 65536, minimum=1024)
+        self.dial_timeout_seconds = _env_float("DIAL_TIMEOUT_SECS", 30.0, minimum=1.0)
+        self.upgrade_timeout_seconds = _env_float(
+            "UPGRADE_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.stream_negotiate_timeout_seconds = _env_float(
+            "STREAM_NEGOTIATE_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.negotiate_timeout_seconds = _env_int(
+            "NEGOTIATE_TIMEOUT_SECS", 30, minimum=1
+        )
+        self.quic_connection_timeout_seconds = _env_float(
+            "QUIC_CONNECTION_TIMEOUT_SECS", 30.0, minimum=1.0
+        )
+        self.quic_idle_timeout_seconds = _env_float(
+            "QUIC_IDLE_TIMEOUT_SECS", 60.0, minimum=1.0
+        )
 
         self.host: Any = None
         self.redis_client: redis.Redis[str] | None = None
         self.perf_service: PerfService | None = None
+        self._benchmarks_complete = False
+        self._listener_served_peer = False
 
     def validate_configuration(self) -> None:
         valid_transports = ["tcp", "ws", "wss", "quic-v1"]
@@ -210,6 +385,148 @@ class PerfTest:
                 raise ValueError(
                     f"Unsupported muxer: {self.muxer}. Supported: {valid_muxers}"
                 )
+
+    def _is_tls_mplex(self) -> bool:
+        return self.security == "tls" and self.muxer == "mplex"
+
+    def _listener_shutdown_grace_secs(self) -> float:
+        if self._is_tls_mplex():
+            return _LISTENER_POST_PERF_GRACE_TLS_MPLEX_SECS
+        return _LISTENER_POST_PERF_GRACE_SECS
+
+    def _dialer_disconnect_grace_secs(self) -> float:
+        if self._is_tls_mplex():
+            return _DIALER_DISCONNECT_GRACE_TLS_MPLEX_SECS
+        return _DIALER_DISCONNECT_GRACE_SECS
+
+    def _listener_teardown_idle_secs(self) -> float:
+        """Seconds without live peers before listener treats dialer as gone."""
+        if self.transport in ("ws", "wss") and self.muxer == "mplex":
+            return _LISTENER_WS_MPLEX_TEARDOWN_IDLE_SECS
+        return _LISTENER_EMPTY_PEER_POLLS_REQUIRED * _LISTENER_PEER_POLL_INTERVAL_SECS
+
+    def _should_ignore_shutdown_error(self, exc: BaseException) -> bool:
+        """Swallow connection-closed errors only during post-benchmark cleanup."""
+        if not _is_connection_closed_error(exc):
+            _log_perf_phase(
+                self._role_label(),
+                "shutdown_error_not_ignored",
+                reason="not_connection_closed",
+                exc=type(exc).__name__,
+            )
+            return False
+        if self.is_dialer:
+            ignore = self._benchmarks_complete
+        else:
+            ignore = self._listener_served_peer
+        _log_perf_phase(
+            self._role_label(),
+            "shutdown_ignore" if ignore else "shutdown_error_not_ignored",
+            benchmarks_complete=self._benchmarks_complete,
+            listener_served_peer=self._listener_served_peer,
+            exc=type(exc).__name__,
+        )
+        return ignore
+
+    def _role_label(self) -> str:
+        return "dialer" if self.is_dialer else "listener"
+
+    def _close_redis(self) -> None:
+        if self.redis_client:
+            try:
+                self.redis_client.close()
+            except Exception:
+                pass
+
+    async def _stop_perf_service(self) -> None:
+        if self.perf_service is None:
+            return
+        try:
+            await self.perf_service.stop()
+        except Exception as e:
+            logger.debug("PerfService.stop: %s", e)
+
+    def _connection_config(self) -> ConnectionConfig:
+        return ConnectionConfig(
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=(
+                self.stream_negotiate_timeout_seconds
+            ),
+            inbound_stream_protocol_negotiation_timeout=(
+                self.stream_negotiate_timeout_seconds
+            ),
+            # Single peer benchmark: no connmgr background dials.
+            min_connections=0,
+            low_watermark=0,
+            max_connections_per_peer=2,
+            deny_list=list(_PERF_LOOPBACK_DENY_LIST),
+        )
+
+    def _without_loopback_listen_addrs(
+        self, addresses: list[multiaddr.Multiaddr]
+    ) -> list[multiaddr.Multiaddr]:
+        """Drop loopback binds so Identify does not advertise 127.0.0.1/::1."""
+        filtered: list[multiaddr.Multiaddr] = []
+        for addr in addresses:
+            ip_value = self._get_ip_value(addr)
+            if ip_value in ("127.0.0.1", "::1"):
+                continue
+            filtered.append(addr)
+        return filtered
+
+    def _fallback_listen_addr(self) -> multiaddr.Multiaddr:
+        if self.transport == "ws":
+            return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0/ws")
+        if self.transport == "wss":
+            return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0/wss")
+        if self.transport == "quic-v1":
+            return self._build_quic_addr("0.0.0.0", 0)
+        return multiaddr.Multiaddr("/ip4/0.0.0.0/tcp/0")
+
+    def _perf_listen_addresses(self, port: int = 0) -> list[multiaddr.Multiaddr]:
+        addrs = self._without_loopback_listen_addrs(self.create_listen_addresses(port))
+        return addrs if addrs else [self._fallback_listen_addr()]
+
+    def _dialer_ws_listen_addrs(self) -> list[multiaddr.Multiaddr]:
+        """WS dialer binds for transport registration (no loopback Identify)."""
+        return self._perf_listen_addresses(0)
+
+    def _install_listener_perf_lifecycle_handler(self) -> None:
+        """Mark peer connected on first inbound perf stream (ws+mplex polls lie)."""
+        assert self.perf_service is not None
+        original = self.perf_service._handle_message
+
+        async def marking_handler(stream: Any) -> None:
+            if not self._listener_served_peer:
+                self._listener_served_peer = True
+                _log_perf_phase("listener", "perf_stream_connected")
+            await original(stream)
+
+        self.host.set_stream_handler(self.perf_service._protocol, marking_handler)
+
+    def _listener_peer_present(self) -> bool:
+        """True when dialer opened perf or swarm lists a live peer (connect detect)."""
+        if self._listener_served_peer:
+            return True
+        return bool(self.host.get_live_peers())
+
+    def _quic_transport_config(self) -> QUICTransportConfig:
+        return QUICTransportConfig(
+            connection_timeout=self.quic_connection_timeout_seconds,
+            idle_timeout=self.quic_idle_timeout_seconds,
+            dial_timeout=self.dial_timeout_seconds,
+            inbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_upgrade_timeout=self.upgrade_timeout_seconds,
+            outbound_stream_protocol_negotiation_timeout=(
+                self.stream_negotiate_timeout_seconds
+            ),
+            inbound_stream_protocol_negotiation_timeout=(
+                self.stream_negotiate_timeout_seconds
+            ),
+            NEGOTIATE_TIMEOUT=self.stream_negotiate_timeout_seconds,
+        )
 
     def create_security_options(self) -> tuple[dict[TProtocol, Any], Any]:
         standalone = ["quic-v1"]
@@ -304,7 +621,16 @@ class PerfTest:
         return None
 
     def _get_ip_value(self, addr: multiaddr.Multiaddr) -> str | None:
-        return addr.value_for_protocol("ip4") or addr.value_for_protocol("ip6")
+        """Extract IP value from multiaddr (IPv4 or IPv6)."""
+        return extract_ip_from_multiaddr(addr)
+
+    def _safe_value_for_protocol(
+        self, addr: multiaddr.Multiaddr, protocol: str
+    ) -> str | None:
+        try:
+            return addr.value_for_protocol(protocol)
+        except Exception:
+            return None
 
     def _get_protocol_names(self, addr: multiaddr.Multiaddr) -> list[str]:
         return [p.name for p in addr.protocols()]
@@ -338,13 +664,19 @@ class PerfTest:
         if self.transport == "quic-v1":
             out = []
             for addr in base_addrs:
-                ip_value = self._get_ip_value(addr)
-                tcp_port = addr.value_for_protocol("tcp") or port
-                if ip_value:
-                    qa = self._build_quic_addr(ip_value, tcp_port)
+                try:
+                    ip_value = self._get_ip_value(addr)
+                    tcp_port = self._safe_value_for_protocol(addr, "tcp")
+                    if not ip_value:
+                        continue
+                    qa = self._build_quic_addr(
+                        ip_value, int(tcp_port) if tcp_port else port
+                    )
                     _, p2p = self._extract_and_preserve_p2p(addr)
                     qa = self._encapsulate_with_p2p(qa, p2p)
                     out.append(qa)
+                except Exception:
+                    continue
             return out if out else [self._build_quic_addr("0.0.0.0", port)]
         if self.transport == "ws":
             out = []
@@ -422,8 +754,7 @@ class PerfTest:
         if ip_value not in ["127.0.0.1", "0.0.0.0", "::1", "::"]:
             return str(addr)
         actual = self.get_container_ip()
-        names = self._get_protocol_names(addr)
-        is_ipv6 = "ip6" in names
+        is_ipv6 = ":" in actual
         parts = [f"/ip6/{actual}" if is_ipv6 else f"/ip4/{actual}"]
         found = False
         for proto, value in addr.items():
@@ -447,6 +778,12 @@ class PerfTest:
     async def _connect_redis_with_retry(
         self, max_retries: int = 10, retry_delay: float = 1.0
     ) -> None:
+        if self.local_addr_file:
+            print(
+                f"Local coordination via {self.local_addr_file}",
+                file=sys.stderr,
+            )
+            return
         print("Connecting to Redis...", file=sys.stderr)
         for attempt in range(max_retries):
             try:
@@ -470,7 +807,7 @@ class PerfTest:
 
         sec_opt, key_pair = self.create_security_options()
         muxer_opt = self.create_muxer_options()
-        listen_addrs = self.create_listen_addresses(0)
+        listen_addrs = self._perf_listen_addresses(0)
         tls_client = self.create_tls_client_config()
         tls_server = self.create_tls_server_config()
 
@@ -479,30 +816,115 @@ class PerfTest:
             sec_opt=sec_opt,
             muxer_opt=muxer_opt,
             listen_addrs=listen_addrs,
+            negotiate_timeout=self.negotiate_timeout_seconds,
             enable_quic=(self.transport == "quic-v1"),
+            quic_transport_opt=self._quic_transport_config()
+            if self.transport == "quic-v1"
+            else None,
             tls_client_config=tls_client,
             tls_server_config=tls_server,
+            connection_config=self._connection_config(),
         )
-        self.perf_service = PerfService(self.host)
+        self.perf_service = PerfService(
+            self.host, {"write_block_size": self.write_block_size}
+        )
         await self.perf_service.start()
+        self._install_listener_perf_lifecycle_handler()
         print(f"Perf service started (protocol {PROTOCOL_NAME})", file=sys.stderr)
 
-        async with self.host.run(listen_addrs=listen_addrs):
-            all_addrs = self.host.get_addrs()
-            if not all_addrs:
-                raise RuntimeError("No listen addresses available")
-            actual_addr = self._get_publishable_address(all_addrs)
-            print(f"Publishing address: {actual_addr}", file=sys.stderr)
-            redis_key = f"{self.test_key}_listener_multiaddr"
-            assert self.redis_client is not None
-            self.redis_client.set(redis_key, actual_addr)
-            print("Listener ready, waiting for dialer...", file=sys.stderr)
-            await trio.sleep_forever()
+        listener_ready = False
+        try:
+            async with self.host.run(listen_addrs=listen_addrs):
+                all_addrs = self.host.get_addrs()
+                if not all_addrs:
+                    raise RuntimeError("No listen addresses available")
+                actual_addr = self._get_publishable_address(all_addrs)
+                print(f"Publishing address: {actual_addr}", file=sys.stderr)
+                if self.local_addr_file:
+                    Path(self.local_addr_file).write_text(actual_addr, encoding="utf-8")
+                else:
+                    redis_key = f"{self.test_key}_listener_multiaddr"
+                    assert self.redis_client is not None
+                    self.redis_client.set(redis_key, actual_addr)
+                print("Listener ready, waiting for dialer...", file=sys.stderr)
+                _log_perf_phase(
+                    "listener",
+                    "ready",
+                    test_timeout_seconds=self.test_timeout_seconds,
+                    muxer=self.muxer,
+                    security=self.security,
+                    transport=self.transport,
+                )
+                listener_ready = True
+
+                connect_deadline = time.monotonic() + self.test_timeout_seconds
+                saw_peer = False
+                empty_peer_polls = 0
+                last_peer_seen_at = time.monotonic()
+                teardown_idle_secs = self._listener_teardown_idle_secs()
+                while True:
+                    if not saw_peer:
+                        if self._listener_peer_present():
+                            saw_peer = True
+                            empty_peer_polls = 0
+                            last_peer_seen_at = time.monotonic()
+                        elif time.monotonic() >= connect_deadline:
+                            raise RuntimeError(
+                                f"Timeout: dialer never connected within "
+                                f"{self.test_timeout_seconds}s"
+                            )
+                    elif self.host.get_live_peers():
+                        empty_peer_polls = 0
+                        last_peer_seen_at = time.monotonic()
+                    else:
+                        empty_peer_polls += 1
+                        peer_idle_secs = time.monotonic() - last_peer_seen_at
+                        if (
+                            empty_peer_polls >= _LISTENER_EMPTY_PEER_POLLS_REQUIRED
+                            and peer_idle_secs >= teardown_idle_secs
+                        ):
+                            print(
+                                "Listener: peer disconnected, shutting down",
+                                file=sys.stderr,
+                            )
+                            _log_perf_phase(
+                                "listener",
+                                "teardown_start",
+                                peer_idle_secs=f"{peer_idle_secs:.1f}",
+                            )
+                            await trio.sleep(self._listener_shutdown_grace_secs())
+                            break
+
+                    await trio.sleep(_LISTENER_PEER_POLL_INTERVAL_SECS)
+
+                await self._stop_perf_service()
+                self._close_redis()
+        except ExceptionGroup as eg:
+            if listener_ready and self._should_ignore_shutdown_error(eg):
+                _log_ignored_shutdown_error("Listener", eg)
+                return
+            raise
+        except BaseException as e:
+            if listener_ready and self._should_ignore_shutdown_error(e):
+                _log_ignored_shutdown_error("Listener", e)
+                return
+            raise
 
     async def _wait_for_listener_addr(self) -> str:
-        redis_key = f"{self.test_key}_listener_multiaddr"
         timeout = min(self.test_timeout_seconds, MAX_TEST_TIMEOUT)
         deadline = time.monotonic() + timeout
+        if self.local_addr_file:
+            addr_path = Path(self.local_addr_file)
+            while time.monotonic() < deadline:
+                if addr_path.is_file():
+                    text = addr_path.read_text(encoding="utf-8").strip()
+                    if text:
+                        return text
+                await trio.sleep(0.1)
+            raise RuntimeError(
+                f"Timeout waiting for listener address in {addr_path} after {timeout}s"
+            )
+        redis_key = f"{self.test_key}_listener_multiaddr"
         assert self.redis_client is not None
         while time.monotonic() < deadline:
             addr = self.redis_client.get(redis_key)
@@ -541,7 +963,7 @@ class PerfTest:
         # Dialer needs listen_addrs for ws/wss so transport is registered;
         # for quic/tcp pass [] (host.run still starts swarm/nursery)
         dialer_listen_addrs = (
-            self.create_listen_addresses(0) if self.transport in ["ws", "wss"] else None
+            self._dialer_ws_listen_addrs() if self.transport in ["ws", "wss"] else None
         )
         tls_client = self.create_tls_client_config()
         tls_server = None
@@ -550,14 +972,21 @@ class PerfTest:
             "key_pair": key_pair,
             "sec_opt": sec_opt,
             "muxer_opt": muxer_opt,
+            "negotiate_timeout": self.negotiate_timeout_seconds,
             "enable_quic": (self.transport == "quic-v1"),
+            "quic_transport_opt": self._quic_transport_config()
+            if self.transport == "quic-v1"
+            else None,
             "tls_client_config": tls_client,
             "tls_server_config": tls_server,
+            "connection_config": self._connection_config(),
         }
         if dialer_listen_addrs:
             kw["listen_addrs"] = dialer_listen_addrs
         self.host = new_host(**kw)
-        self.perf_service = PerfService(self.host)
+        self.perf_service = PerfService(
+            self.host, {"write_block_size": self.write_block_size}
+        )
         await self.perf_service.start()
 
         # Must run host inside host.run() so swarm/nursery are active
@@ -572,8 +1001,19 @@ class PerfTest:
                 listener_peer_id = info.peer_id
                 await self.host.connect(info)
                 print("Connected to listener", file=sys.stderr)
+                _log_perf_phase(
+                    "dialer",
+                    "connected",
+                    test_timeout_seconds=self.test_timeout_seconds,
+                    muxer=self.muxer,
+                    security=self.security,
+                    transport=self.transport,
+                )
 
                 upload_samples: list[float] = []
+                _log_perf_phase(
+                    "dialer", "upload_start", iterations=self.upload_iterations
+                )
                 for i in range(self.upload_iterations):
                     elapsed = await self._one_measurement(self.upload_bytes, 0)
                     gbps = (
@@ -588,6 +1028,9 @@ class PerfTest:
                     )
 
                 download_samples: list[float] = []
+                _log_perf_phase(
+                    "dialer", "download_start", iterations=self.download_iterations
+                )
                 for i in range(self.download_iterations):
                     elapsed = await self._one_measurement(0, self.download_bytes)
                     gbps = (
@@ -606,6 +1049,9 @@ class PerfTest:
                     elapsed = await self._one_measurement(1, 1)
                     latency_samples.append(elapsed * 1000.0)
                 print("Latency iterations done", file=sys.stderr)
+                _log_perf_phase(
+                    "dialer", "latency_done", iterations=self.latency_iterations
+                )
 
                 u = _compute_stats(upload_samples, is_latency=False)
                 d = _compute_stats(download_samples, is_latency=False)
@@ -643,47 +1089,84 @@ class PerfTest:
                 print(f"  samples: {lat['samples']}")
                 print("  unit: ms")
 
+                self._benchmarks_complete = True
+                _log_perf_phase("dialer", "benchmarks_complete")
+
                 # Graceful close: disconnect listener so it sees a clean
                 # close, then stop services
+                _log_perf_phase("dialer", "teardown_start")
                 try:
                     await self.host.disconnect(listener_peer_id)
-                    await trio.sleep(0.5)
                 except Exception as e:
                     logger.debug("Disconnect: %s", e)
-                try:
-                    await self.perf_service.stop()
-                except Exception as e:
-                    logger.debug("PerfService.stop: %s", e)
-                if self.redis_client:
-                    try:
-                        self.redis_client.close()
-                    except Exception:
-                        pass
+                await trio.sleep(self._dialer_disconnect_grace_secs())
+                await self._stop_perf_service()
+                self._close_redis()
+        except ExceptionGroup as eg:
+            if self._should_ignore_shutdown_error(eg):
+                _log_ignored_shutdown_error("Dialer", eg)
+                return
+            raise
         except BaseException as e:
-            # Swarm/mplex may raise "Connection closed" on disconnect;
-            # treat as success
-            if not _is_connection_closed_error(e):
-                raise
+            if self._should_ignore_shutdown_error(e):
+                _log_ignored_shutdown_error("Dialer", e)
+                return
+            raise
 
     async def run(self) -> None:
         try:
-            await self._connect_redis_with_retry()
             if self.is_dialer:
                 await self.run_dialer()
             else:
                 await self.run_listener()
-        except Exception as e:
+        except ExceptionGroup as eg:
+            if self._should_ignore_shutdown_error(eg):
+                _log_ignored_shutdown_error("Perf", eg)
+                return
+            print(f"Error: {eg}", file=sys.stderr)
+            import traceback
+
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+        except BaseException as e:
+            if self._should_ignore_shutdown_error(e):
+                _log_ignored_shutdown_error("Perf", e)
+                return
             print(f"Error: {e}", file=sys.stderr)
             import traceback
 
             traceback.print_exc(file=sys.stderr)
-            if self.redis_client:
-                self.redis_client.close()
             sys.exit(1)
+        finally:
+            self._close_redis()
 
 
 async def main() -> None:
+    print(
+        "[PERF_IMAGE_MARKER] perf-test entrypoint starting",
+        file=sys.stderr,
+    )
+    sys.stderr.flush()
+
     configure_logging()
+
+    if _libp2p_debug_enabled():
+        msg = (
+            "[PERF_IMAGE_MARKER] full libp2p logging via LIBP2P_DEBUG "
+            f"({os.getenv('LIBP2P_DEBUG')!r})"
+        )
+        logger.info(msg)
+        print(msg, file=sys.stderr)
+        sys.stderr.flush()
+    elif os.getenv("DEBUG", "").upper() in ("1", "TRUE", "YES", "DEBUG"):
+        msg = (
+            "[PERF_IMAGE_MARKER] targeted logging (TLS/mplex/yamux at DEBUG; "
+            "set LIBP2P_DEBUG for full libp2p trace)"
+        )
+        logger.info(msg)
+        print(msg, file=sys.stderr)
+        sys.stderr.flush()
+
     test = PerfTest()
     await test.run()
 

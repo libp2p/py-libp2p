@@ -8,6 +8,7 @@ from libp2p.custom_types import TProtocol
 BITSWAP_PROTOCOL_V100 = TProtocol("/ipfs/bitswap/1.0.0")
 BITSWAP_PROTOCOL_V110 = TProtocol("/ipfs/bitswap/1.1.0")
 BITSWAP_PROTOCOL_V120 = TProtocol("/ipfs/bitswap/1.2.0")
+BITSWAP_PROTOCOL_V130 = TProtocol("/ipfs/bitswap/1.3.0")
 
 # All supported protocols (ordered from newest to oldest for negotiation)
 BITSWAP_PROTOCOLS = [
@@ -22,12 +23,13 @@ DEFAULT_PRIORITY = 1
 # Maximum message size (4MiB as per spec)
 MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
-# Maximum block size (63 KB - matches DEFAULT_CHUNK_SIZE in chunker.py)
+# Maximum block size (63 KB - after DAG-PB/UnixFS encoding)
 # py-libp2p stream limit is ~64 KB, so we use 63 KB to be safe
-MAX_BLOCK_SIZE = 63 * 1024
+# Note: Raw chunk data should be smaller to account for DAG-PB overhead (~14 bytes)
+MAX_BLOCK_SIZE = 512 * 1024
 
 # Default timeout for operations (in seconds)
-DEFAULT_TIMEOUT = 30
+DEFAULT_TIMEOUT = 90
 
 # Maximum number of concurrent block requests
 MAX_CONCURRENT_REQUESTS = 100

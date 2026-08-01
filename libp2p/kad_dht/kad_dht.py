@@ -110,6 +110,17 @@ def is_valid_timestamp(ts: float) -> bool:
     return True
 
 
+class KadDhtEvent:
+    peer_id: str
+
+    inbound: bool = False
+    find_node: bool = False
+    get_value: bool = False
+    put_value: bool = False
+    get_providers: bool = False
+    add_provider: bool = False
+
+
 class KadDHT(Service):
     """
     Kademlia DHT implementation for libp2p.
@@ -479,6 +490,10 @@ class KadDHT(Service):
                     f"Received DHT message from {peer_id}, type: {message.type}"
                 )
 
+                event = KadDhtEvent()
+                event.peer_id = peer_id.pretty()
+                event.inbound = True
+
                 # Handle FIND_NODE message
                 if message.type == Message.MessageType.FIND_NODE:
                     # Get target key directly from protobuf
@@ -498,14 +513,27 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
+                    # Metrics Event
+                    event.find_node = True
+
                     # Build response message with protobuf
                     response = Message()
                     response.type = Message.MessageType.FIND_NODE
 
+                    target = ID(target_key)
+                    try:
+                        target_known = bool(self.host.get_peerstore().addrs(target))
+                    except Exception:
+                        target_known = False
+                    if target_known:
+                        closest_peers = [target] + [
+                            p for p in closest_peers if p != target
+                        ]
+
                     # Add closest peers to response
                     for peer in closest_peers:
                         # Skip if the peer is the requester
-                        if peer == peer_id:
+                        if peer == peer_id and peer != target:
                             continue
 
                         # Add peer to closerPeers field
@@ -558,6 +586,9 @@ class KadDHT(Service):
                         )
                         await stream.close()
                         return
+
+                    # Metrics Event
+                    event.add_provider = True
 
                     # Extract provider information
                     for provider_proto in message.providerPeers:
@@ -626,6 +657,9 @@ class KadDHT(Service):
                         )
                         await stream.close()
                         return
+
+                    # Metrics event
+                    event.get_providers = True
 
                     # Find providers for the key
                     providers = self.provider_store.get_providers(key)
@@ -721,6 +755,9 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
+                    # Metrics Event
+                    event.get_value = True
+
                     value_record = self.value_store.get(key)
                     if value_record:
                         logger.debug(f"Found value for key {key.hex()}")
@@ -813,6 +850,8 @@ class KadDHT(Service):
                         await stream.close()
                         return
 
+                    event.put_value = True
+
                     try:
                         if not (key and value):
                             raise ValueError(
@@ -853,6 +892,10 @@ class KadDHT(Service):
 
             except Exception as proto_err:
                 logger.warning(f"Failed to parse protobuf message: {proto_err}")
+
+            # Send KAD-DHT event to Metrics
+            if stream.metric_send_channel is not None:
+                await stream.metric_send_channel.send(event)
 
             await stream.close()
         except Exception as e:
@@ -1064,7 +1107,7 @@ class KadDHT(Service):
             values = [rec.value for _p, rec in valid_records]
             best_idx = self.validator.select(key, values)
             logger.debug(
-                f"Selected best value at index {best_idx}using validator.select()"
+                f"Selected best value at index {best_idx} using validator.select()"
             )
 
             best_peer, best_rec = valid_records[best_idx]
@@ -1080,7 +1123,7 @@ class KadDHT(Service):
 
             if outdated_peers:
                 logger.debug(
-                    f"Propagating best value to {len(outdated_peers)}"
+                    f"Propagating best value to {len(outdated_peers)} "
                     "peers with outdated values"
                 )
 
