@@ -1,7 +1,6 @@
 import logging
 
 from multiaddr import Multiaddr
-from multiaddr.protocols import P_IP4, P_IP6, P_TCP
 from multiaddr.resolvers import DNSResolver
 import trio
 
@@ -319,25 +318,16 @@ class BootstrapDiscovery:
 
     def _is_supported_addr(self, addr: Multiaddr) -> bool:
         """
-        Check if address is IPv4+TCP or (when allow_ipv6) IPv6+TCP.
-
-        Filters out UDP, QUIC, WebSocket, and other unsupported protocols.
-        Uses protocol codes for type-safe comparison.
-        When allow_ipv6 is True, IPv6+TCP is accepted (for when handshake supports it).
+        Check if address contains a supported transport protocol.
+        Accepts TCP, QUIC, QUIC-v1, WebSockets (ws, wss) unconditionally.
         """
         try:
-            protocols = list(addr.protocols())
+            proto_names = {p.name for p in addr.protocols()}
 
-            # Must have TCP protocol (by code)
-            has_tcp = any(p.code == P_TCP for p in protocols)
-            if not has_tcp:
-                return False
+            supported_transports = {"tcp", "quic", "quic-v1", "ws", "wss"}
 
-            # IPv4+TCP always supported
-            if any(p.code == P_IP4 for p in protocols):
-                return True
-            # IPv6+TCP supported only when allow_ipv6 is True (handshake allows)
-            if self.allow_ipv6 and any(p.code == P_IP6 for p in protocols):
+            # If the address has any of the supported transports, accept it
+            if proto_names.intersection(supported_transports):
                 return True
 
             return False

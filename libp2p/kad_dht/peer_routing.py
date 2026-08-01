@@ -291,6 +291,11 @@ class PeerRouting(IPeerRouting):
         Query a peer for their closest peers
         to the target key using varint length prefix
         """
+        local_id = self.host.get_id()
+        if peer == local_id:
+            logger.debug("Skipping FIND_NODE query to ourselves")
+            return []
+
         stream = None
         results = []
         try:
@@ -382,6 +387,8 @@ class PeerRouting(IPeerRouting):
                         return []
 
                     new_peer_id = ID(peer_data.id)
+                    if new_peer_id == local_id:
+                        continue
                     if new_peer_id not in results:
                         results.append(new_peer_id)
                     if peer_data.addrs:

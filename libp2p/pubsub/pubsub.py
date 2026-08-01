@@ -301,6 +301,16 @@ class ValidationCache:
 MAX_CONCURRENT_VALIDATORS = 10
 
 
+class GossipsubEvent:
+    peer_id: str
+
+    publish: bool = False
+    subopts: bool = False
+    control: bool = False
+
+    message_size: int | None = None
+
+
 class Pubsub(Service, IPubsub):
     host: IHost
 
@@ -499,8 +509,13 @@ class Pubsub(Service, IPubsub):
                     )
                     continue
 
+                event = GossipsubEvent()
+                event.peer_id = peer_id.pretty()
+                event.message_size = len(incoming)
+
                 if rpc_incoming.publish:
                     # deal with RPC.publish
+                    event.publish = True
                     for msg in rpc_incoming.publish:
                         if not self._is_subscribed_to_msg(msg):
                             continue
@@ -517,6 +532,7 @@ class Pubsub(Service, IPubsub):
                     # peers because a given node only needs its peers
                     # to know that it is subscribed to the topic (doesn't
                     # need everyone to know)
+                    event.subopts = True
                     for message in rpc_incoming.subscriptions:
                         logger.debug(
                             "received `subscriptions` message %s from peer %s",
@@ -529,6 +545,7 @@ class Pubsub(Service, IPubsub):
                 #   This is necessary because `control` is an optional field in pb2.
                 #   Ref: https://developers.google.com/protocol-buffers/docs/reference/python-generated#singular-fields-proto2  # noqa: E501
                 if rpc_incoming.HasField("control"):
+                    event.control = True
                     # Pass rpc to router so router could perform custom logic
                     logger.debug(
                         "received `control` message %s from peer %s",
@@ -536,6 +553,10 @@ class Pubsub(Service, IPubsub):
                         peer_id,
                     )
                     await self.router.handle_rpc(rpc_incoming, peer_id)
+
+                if stream.metric_send_channel is not None:
+                    await stream.metric_send_channel.send(event)
+
         except StreamEOF:
             logger.debug(
                 f"Stream closed for peer {peer_id}, exiting read loop cleanly."
@@ -810,7 +831,37 @@ class Pubsub(Service, IPubsub):
                     error,
                 )
 
+        await self._send_recent_messages_to_new_peer(peer_id)
+
         logger.debug("added new peer %s", peer_id)
+
+    async def _send_recent_messages_to_new_peer(self, peer_id: ID) -> None:
+        """
+        Replay recent messages to a peer whose subscriptions we already hold.
+
+        ``handle_subscription`` normally does this, but it runs off the inbound
+        stream and can fire before ``_handle_new_peer`` has registered the
+        outbound stream in ``peers``. Its catch-up is a no-op in that ordering,
+        so the messages are lost unless the replay also runs here.
+
+        :param peer_id: the peer that just became writable
+        """
+        if not hasattr(self.router, "send_recent_messages"):
+            return
+
+        subscribed_topics = [
+            topic for topic, peers in self.peer_topics.items() if peer_id in peers
+        ]
+        for topic in subscribed_topics:
+            try:
+                await self.router.send_recent_messages(peer_id, topic)  # type: ignore[attr-defined]
+            except Exception as error:
+                logger.debug(
+                    "failed to send recent messages for topic %s to peer %s: %s",
+                    topic,
+                    peer_id,
+                    error,
+                )
 
     async def _handle_new_peer_safe(self, peer_id: ID) -> None:
         """

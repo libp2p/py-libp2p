@@ -108,6 +108,21 @@ def _yamux_batch_threshold_divisor() -> int:
     return max(div, 1)
 
 
+_DEFAULT_DATA_FRAME_READ_TIMEOUT = 60.0
+
+
+def _yamux_data_read_timeout() -> float:
+    """Seconds to wait for an announced DATA frame body before tearing down"""
+    raw = _py_yamux_env(
+        "DATA_READ_TIMEOUT", str(_DEFAULT_DATA_FRAME_READ_TIMEOUT)
+    ).strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        return _DEFAULT_DATA_FRAME_READ_TIMEOUT
+    return val if val > 0 else _DEFAULT_DATA_FRAME_READ_TIMEOUT
+
+
 def _perf_yamux_log(msg: str) -> None:
     if _perf_yamux_debug_enabled():
         logger.debug("[YAMUX_PERF] %s", msg)
@@ -1006,6 +1021,11 @@ class Yamux(IMuxedConn):
             if self._nursery is not None:
                 self._nursery.cancel_scope.cancel()
 
+    async def _read_data_body(self, length: int) -> bytes:
+        """Read a DATA frame's length-byte body, bounded by timeout"""
+        with trio.fail_after(_yamux_data_read_timeout()):
+            return await read_exactly(self.secured_conn, length)
+
     async def handle_incoming(self) -> None:
         logger.debug(f"Yamux handle_incoming() started for peer {self.peer_id}")
         while not self.event_shutting_down.is_set():
@@ -1088,12 +1108,23 @@ class Yamux(IMuxedConn):
                     f"stream={stream_id} length={length} "
                     f"is_initiator={self.is_initiator_value}"
                 )
+                # Flow control guard against oversized DATA frames.
+                if typ == TYPE_DATA and length > MAX_WINDOW_SIZE:
+                    logger.warning(
+                        f"Yamux: peer {self.peer_id} announced oversized DATA "
+                        f"frame length={length} (> MAX_WINDOW_SIZE="
+                        f"{MAX_WINDOW_SIZE}) on stream {stream_id} "
+                        f"closing connection"
+                    )
+                    self.event_shutting_down.set()
+                    await self._cleanup_on_error()
+                    break
                 if (typ == TYPE_DATA or typ == TYPE_WINDOW_UPDATE) and flags & FLAG_SYN:
                     syn_payload: bytes = b""
                     syn_payload_err: IncompleteReadError | None = None
                     if typ == TYPE_DATA and length > 0:
                         try:
-                            syn_payload = await read_exactly(self.secured_conn, length)
+                            syn_payload = await self._read_data_body(length)
                         except IncompleteReadError as e:
                             syn_payload_err = e
                             logger.error(
@@ -1207,7 +1238,7 @@ class Yamux(IMuxedConn):
                     ack_payload_err: IncompleteReadError | None = None
                     if typ == TYPE_DATA and length > 0:
                         try:
-                            ack_payload = await read_exactly(self.secured_conn, length)
+                            ack_payload = await self._read_data_body(length)
                         except IncompleteReadError as e:
                             ack_payload_err = e
                             logger.error(
@@ -1312,7 +1343,7 @@ class Yamux(IMuxedConn):
                         )
                         try:
                             data = (
-                                await read_exactly(self.secured_conn, length)
+                                await self._read_data_body(length)
                                 if length > 0
                                 else b""
                             )
@@ -1378,6 +1409,8 @@ class Yamux(IMuxedConn):
                                     # Wake up reader
                                     self.stream_events[stream_id].set()
 
+                    except trio.TooSlowError:
+                        raise
                     except Exception as e:
                         logger.error(f"Error reading data for stream {stream_id}: {e}")
                         # Mark stream as closed on read error
@@ -1425,6 +1458,14 @@ class Yamux(IMuxedConn):
                                 stream.reset_received = True
                                 # Wake up reader
                                 self.stream_events[stream_id].set()
+            except trio.TooSlowError:
+                logger.warning(
+                    f"Yamux: timed out reading DATA frame body for peer "
+                    f"{self.peer_id}; closing connection"
+                )
+                self.event_shutting_down.set()
+                await self._cleanup_on_error()
+                break
             except Exception as e:
                 # Special handling for expected IncompleteReadError on stream close
                 # This occurs when the connection closes while reading
