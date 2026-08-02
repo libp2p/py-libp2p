@@ -408,9 +408,14 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     record_a = envelope_a.record()
     record_b = envelope_b.record()
 
+    # Generate a valid CID from the content for the provide/find_providers API
+    from libp2p.bitswap.cid import compute_cid_v1_obj
+    content_cid = compute_cid_v1_obj(content)
+    content_cid_str = str(content_cid)
+
     # Advertise the first node as a provider
     with trio.fail_after(TEST_TIMEOUT):
-        success = await dht_a.provide(content_id)
+        success = await dht_a.provide(content_cid_str)
         assert success, "Failed to advertise as provider"
 
     # These are the records that were sent between the peers during
@@ -443,7 +448,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
     with trio.fail_after(TEST_TIMEOUT):
 
         async def find_and_verify_providers() -> list[PeerInfo]:
-            providers = await dht_b.find_providers(content_id)
+            providers = await dht_b.find_providers(content_cid_str)
             # Verify that we found the first node as a provider
             assert providers, "No providers found"
             assert any(p.peer_id == dht_a.local_peer_id for p in providers), (

@@ -58,8 +58,8 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param validity: Absolute Unix timestamp when the value expires.
-         Defaults to `time.time() + DEFAULT_TTL` if set to 0.0.
+        :param validity: validity in seconds before the value expires.
+         Defaults to `DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
@@ -82,7 +82,23 @@ class ValueStore:
         self.store[key] = (record, validity)
         logger.debug(f"Stored value for key {key.hex()}")
 
-    async def _store_at_peer(self, peer_id: ID, key: bytes, value: bytes) -> bool:
+    def put_record(self, key: bytes, record: Record) -> None:
+        """
+        Store a signed Record directly in the DHT without re-signing.
+
+        Used when storing records retrieved from the network to preserve
+        the original author's signature.
+
+        :param key: The key to store the record under
+        :param record: The signed Record to store
+        """
+        validity = time.time() + DEFAULT_TTL
+        logger.debug("Storing record directly for key %s", key.hex())
+        self.store[key] = (record, validity)
+
+    async def _store_at_peer(
+        self, peer_id: ID, key: bytes, value: bytes, record: Record | None = None
+    ) -> bool:
         """
         Store a value at a specific peer.
 
@@ -94,6 +110,9 @@ class ValueStore:
             The key to store
         value : bytes
             The value to store
+        record : Record | None
+            The original signed Record to send. If None, a new record will be
+            created signed by the local peer (normal put path).
 
         Returns
         -------
@@ -127,17 +146,20 @@ class ValueStore:
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
-            # Build the outbound record from the locally-stored signed record when
-            # available (normal put() path), otherwise sign the record now so the
-            # outbound message always carries signature and author fields.
-            local_entry = self.store.get(key)
-            if local_entry is not None:
-                signed_record, _ = local_entry
-                message.record.CopyFrom(signed_record)
+            # Build the outbound record from the provided record when available
+            # (entry correction path). Otherwise, create a new signed record with
+            # the local peer's key (normal put path).
+            if record is not None:
+                message.record.CopyFrom(record)
             else:
-                private_key = self.host.get_private_key()
-                signed_record = make_signed_put_record(key, value, private_key)
-                message.record.CopyFrom(signed_record)
+                local_entry = self.store.get(key)
+                if local_entry is not None:
+                    signed_record, _ = local_entry
+                    message.record.CopyFrom(signed_record)
+                else:
+                    private_key = self.host.get_private_key()
+                    signed_record = make_signed_put_record(key, value, private_key)
+                    message.record.CopyFrom(signed_record)
             message.key = key
             # Note: timeReceived will be set by the receiving peer when storing
             message.record.ClearField("timeReceived")

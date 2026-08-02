@@ -388,6 +388,10 @@ class PeerRouting(IPeerRouting):
                         )
                         continue
 
+                    if not peer_data.id:
+                        logger.debug("Skipping peer with empty ID in FIND_NODE")
+                        continue
+
                     new_peer_id = ID(peer_data.id)
                     if new_peer_id == local_id:
                         continue

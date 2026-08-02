@@ -299,6 +299,9 @@ class KadDHT(Service):
             else:
                 logger.info("Random Walk is disabled - RT Refresh Manager not started")
 
+            # Start periodic stale peer refresh for routing table buckets
+            self.routing_table.start_periodic_refresh(nursery)
+
             # Start the main DHT service loop
             nursery.start_soon(self._run_main_loop)
 
@@ -476,425 +479,303 @@ class KadDHT(Service):
         provider_peer_envelope: Envelope | None = None
 
         try:
-            # Read varint-prefixed length for the message
-            length_prefix = b""
-            max_varint_bytes = 10  # varint max is 10 bytes for uint64
             while True:
-                byte = await stream.read(1)
-                if not byte:
-                    logger.warning("Stream closed while reading varint length")
-                    await stream.close()
-                    return
-                length_prefix += byte
-                if byte[0] & 0x80 == 0:
+                # Read varint-prefixed length for the message
+                length_prefix = b""
+                max_varint_bytes = 10  # varint max is 10 bytes for uint64
+                eof = False
+                while True:
+                    byte = await stream.read(1)
+                    if not byte:
+                        logger.debug("Stream closed (EOF), exiting message loop")
+                        eof = True
+                        break
+                    length_prefix += byte
+                    if byte[0] & 0x80 == 0:
+                        break
+                    if len(length_prefix) >= max_varint_bytes:
+                        logger.warning("Varint length exceeds maximum bytes")
+                        eof = True
+                        break
+                if eof:
                     break
-                if len(length_prefix) >= max_varint_bytes:
-                    logger.warning("Varint length exceeds maximum bytes")
-                    await stream.close()
-                    return
-            msg_length = varint.decode_bytes(length_prefix)
 
-            # Sanity check message size to prevent OOM
-            max_message_size = 4 * 1024 * 1024  # 4 MB
-            if msg_length > max_message_size:
-                logger.warning(
-                    "DHT message too large: %s bytes (max %s)",
-                    msg_length,
-                    max_message_size,
-                )
-                await stream.close()
-                return
+                msg_length = varint.decode_bytes(length_prefix)
 
-            # Read the message bytes
-            msg_bytes = b""
-            remaining = msg_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.warning("Failed to read full message from stream")
-                    await stream.close()
-                    return
-                msg_bytes += chunk
-                remaining -= len(chunk)
-
-            try:
-                # Parse as protobuf
-                message = Message()
-                message.ParseFromString(msg_bytes)
-                logger.debug(
-                    f"Received DHT message from {peer_id}, type: {message.type}"
-                )
-
-                event = KadDhtEvent()
-                event.peer_id = peer_id.pretty()
-                event.inbound = True
-
-                # Handle FIND_NODE message
-                if message.type == Message.MessageType.FIND_NODE:
-                    # Consume the source signed_peer_record if sent (validate first)
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
-
-                    # Get target key directly from protobuf
-                    target_key = message.key
-
-                    # Per spec: "key must be set to the binary PeerId"
-                    if not target_key:
-                        logger.warning("FIND_NODE received with empty key, ignoring")
-                        await stream.close()
-                        return
-
-                    # Find closest peers to the target key
-                    closest_peers = self.routing_table.find_local_closest_peers(
-                        target_key, 20
+                # Sanity check message size to prevent OOM
+                max_message_size = 4 * 1024 * 1024  # 4 MB
+                if msg_length > max_message_size:
+                    logger.warning(
+                        "DHT message too large: %s bytes (max %s)",
+                        msg_length,
+                        max_message_size,
                     )
-                    logger.debug(f"Found {len(closest_peers)} peers close to target")
+                    break
 
-                    # Metrics Event
-                    event.find_node = True
+                # Read the message bytes
+                msg_bytes = b""
+                remaining = msg_length
+                read_failed = False
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        logger.debug("Failed to read full message from stream, exiting")
+                        read_failed = True
+                        break
+                    msg_bytes += chunk
+                    remaining -= len(chunk)
+                if read_failed:
+                    break
 
-                    # Build response message with protobuf
-                    response = Message()
-                    response.type = Message.MessageType.FIND_NODE
-
-                    target = ID(target_key)
-                    try:
-                        target_known = bool(self.host.get_peerstore().addrs(target))
-                    except Exception:
-                        target_known = False
-                    if not target_known and target == self.host.get_id():
-                        target_known = True
-                    if target_known:
-                        closest_peers = [target] + [
-                            p for p in closest_peers if p != target
-                        ]
-
-                    # Add closest peers to response
-                    for peer in closest_peers:
-                        # Skip if the peer is the requester
-                        if peer == peer_id:
-                            continue
-
-                        # Add peer to closerPeers field
-                        peer_proto = response.closerPeers.add()
-                        peer_proto.id = peer.to_bytes()
-                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
-
-                        # Add addresses if available
-                        try:
-                            addrs = self.host.get_peerstore().addrs(peer)
-                            if addrs:
-                                for addr in addrs:
-                                    peer_proto.addrs.append(addr.to_bytes())
-                        except Exception:
-                            pass
-
-                        # Add the signed-peer-record for each peer in the peer-proto
-                        # if cached in the peerstore
-                        closer_peer_envelope = (
-                            self.host.get_peerstore().get_peer_record(peer)
-                        )
-
-                        if closer_peer_envelope is not None:
-                            peer_proto.signedRecord = (
-                                closer_peer_envelope.marshal_envelope()
-                            )
-
-                    # Create sender_signed_peer_record
-                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                    response.senderRecord = envelope_bytes
-
-                    # Serialize and send response
-                    response_bytes = response.SerializeToString()
-                    await stream.write(varint.encode(len(response_bytes)))
-                    await stream.write(response_bytes)
+                try:
+                    # Parse as protobuf
+                    message = Message()
+                    message.ParseFromString(msg_bytes)
                     logger.debug(
-                        "Sent FIND_NODE response with %s peers",
-                        len(response.closerPeers),
+                        f"Received DHT message from {peer_id}, type: {message.type}"
                     )
 
-                # Handle PING message
-                elif message.type == Message.MessageType.PING:
-                    logger.debug(f"Received PING from {peer_id}")
+                    event = KadDhtEvent()
+                    event.peer_id = peer_id.pretty()
+                    event.inbound = True
 
-                    # Send PING response
-                    response = Message()
-                    response.type = Message.MessageType.PING
-                    response_bytes = response.SerializeToString()
-                    await stream.write(varint.encode(len(response_bytes)))
-                    await stream.write(response_bytes)
-                    logger.debug(f"Sent PING response to {peer_id}")
-
-                # Handle ADD_PROVIDER message
-                elif message.type == Message.MessageType.ADD_PROVIDER:
-                    # Process ADD_PROVIDER
-                    key = message.key
-                    logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
-
-                    # Per spec: verify key is a valid CID
-                    try:
-                        from cid import make_cid
-
-                        make_cid(key)
-                    except Exception:
-                        logger.warning(
-                            f"ADD_PROVIDER key is not a valid CID: {key.hex()}, "
-                            "ignoring"
-                        )
-                        response = Message()
-                        response.type = Message.MessageType.ADD_PROVIDER
-                        response_bytes = response.SerializeToString()
-                        await stream.write(varint.encode(len(response_bytes)))
-                        await stream.write(response_bytes)
-                        await stream.close()
-                        return
-
-                    # Consume the source signed-peer-record if sent
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
-
-                    # Metrics Event
-                    event.add_provider = True
-
-                    # Extract provider information
-                    for provider_proto in message.providerPeers:
-                        try:
-                            # Validate that the provider is the sender
-                            provider_id = ID(provider_proto.id)
-                            if provider_id != peer_id:
-                                logger.warning(
-                                    f"Provider ID {provider_id} doesn't"
-                                    f"match sender {peer_id}, ignoring"
-                                )
-                                continue
-
-                            # Convert addresses to Multiaddr
-                            addrs = []
-                            for addr_bytes in provider_proto.addrs:
-                                try:
-                                    addrs.append(Multiaddr(addr_bytes))
-                                except Exception as e:
-                                    logger.warning(f"Failed to parse address: {e}")
-
-                            # Add to provider store
-                            provider_info = PeerInfo(provider_id, addrs)
-                            self.provider_store.add_provider(key, provider_info)
-                            logger.debug(
-                                f"Added provider {provider_id} for key {key.hex()}"
+                    # Handle FIND_NODE message
+                    if message.type == Message.MessageType.FIND_NODE:
+                        # Consume the source signed_peer_record if sent (validate first)
+                        if not maybe_consume_signed_record(message, self.host, peer_id):
+                            logger.error(
+                                "Received an invalid-signed-record, dropping the stream"
                             )
+                            break
 
-                            # Process the signed-records of provider if sent
-                            if not maybe_consume_signed_record(
-                                provider_proto, self.host
-                            ):
-                                logger.error(
-                                    "Received an invalid-signed-record,"
-                                    "dropping the stream"
-                                )
-                                await stream.close()
-                                return
-                        except Exception as e:
-                            logger.warning(f"Failed to process provider info: {e}")
+                        # Get target key directly from protobuf
+                        target_key = message.key
 
-                    # Send acknowledgement
-                    response = Message()
-                    response.type = Message.MessageType.ADD_PROVIDER
-                    response.key = key
+                        # Per spec: "key must be set to the binary PeerId"
+                        if not target_key:
+                            logger.warning("FIND_NODE with empty key, ignoring")
+                            break
 
-                    # Add sender's signed-peer-record
-                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                    response.senderRecord = envelope_bytes
-
-                    response_bytes = response.SerializeToString()
-                    await stream.write(varint.encode(len(response_bytes)))
-                    await stream.write(response_bytes)
-                    logger.debug("Sent ADD_PROVIDER acknowledgement")
-
-                # Handle GET_PROVIDERS message
-                elif message.type == Message.MessageType.GET_PROVIDERS:
-                    # Process GET_PROVIDERS
-                    key = message.key
-                    logger.debug(f"Received GET_PROVIDERS request for key {key.hex()}")
-
-                    # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
-
-                    # Metrics event
-                    event.get_providers = True
-
-                    # Find providers for the key
-                    providers = self.provider_store.get_providers(key)
-                    logger.debug(
-                        f"Found {len(providers)} providers for key {key.hex()}"
-                    )
-
-                    # Create response
-                    response = Message()
-                    response.type = Message.MessageType.GET_PROVIDERS
-                    response.key = key
-
-                    # Create sender_signed_peer_record for the response
-                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                    response.senderRecord = envelope_bytes
-
-                    # Add provider information to response
-                    for provider_info in providers:
-                        provider_proto = response.providerPeers.add()
-                        provider_proto.id = provider_info.peer_id.to_bytes()
-                        provider_proto.connection = Message.ConnectionType.CAN_CONNECT
-
-                        # Add provider signed-records if cached
-                        provider_peer_envelope = (
-                            self.host.get_peerstore().get_peer_record(
-                                provider_info.peer_id
-                            )
-                        )
-
-                        if provider_peer_envelope is not None:
-                            provider_proto.signedRecord = (
-                                provider_peer_envelope.marshal_envelope()
-                            )
-
-                        # Add addresses if available
-                        for addr in provider_info.addrs:
-                            provider_proto.addrs.append(addr.to_bytes())
-
-                    # Also include closest peers (always, per IPFS spec)
-                    closest_peers = self.routing_table.find_local_closest_peers(key, 20)
-                    logger.debug(
-                        f"Including {len(closest_peers)} closest peers"
-                        " in GET_PROVIDERS response"
-                    )
-
-                    for peer in closest_peers:
-                        # Skip if peer is the requester
-                        if peer == peer_id:
-                            continue
-
-                        peer_proto = response.closerPeers.add()
-                        peer_proto.id = peer.to_bytes()
-                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
-
-                        # Add the signed-records of closest_peers if cached
-                        closer_peer_envelope = (
-                            self.host.get_peerstore().get_peer_record(peer)
-                        )
-
-                        if closer_peer_envelope is not None:
-                            peer_proto.signedRecord = (
-                                closer_peer_envelope.marshal_envelope()
-                            )
-
-                        # Add addresses if available
-                        try:
-                            addrs = self.host.get_peerstore().addrs(peer)
-                            for addr in addrs:
-                                peer_proto.addrs.append(addr.to_bytes())
-                        except Exception:
-                            pass
-
-                    # Serialize and send response
-                    response_bytes = response.SerializeToString()
-                    await stream.write(varint.encode(len(response_bytes)))
-                    await stream.write(response_bytes)
-                    logger.debug("Sent GET_PROVIDERS response")
-
-                # Handle GET_VALUE message
-                elif message.type == Message.MessageType.GET_VALUE:
-                    # Process GET_VALUE
-                    key = message.key
-                    logger.debug(f"Received GET_VALUE request for key {key.hex()}")
-
-                    # Consume the sender_signed_peer_record
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
-
-                    # Metrics Event
-                    event.get_value = True
-
-                    value_record = self.value_store.get(key)
-                    if value_record:
-                        logger.debug(f"Found value for key {key.hex()}")
-
-                        # Create response using protobuf
-                        response = Message()
-                        response.type = Message.MessageType.GET_VALUE
-
-                        # Create record
-                        response.key = key
-                        response.record.CopyFrom(value_record)
-
-                        # Create sender_signed_peer_record
-                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                        response.senderRecord = envelope_bytes
-
-                        # Per spec: also include closerPeers even when value is found
+                        # Find closest peers to the target key
                         closest_peers = self.routing_table.find_local_closest_peers(
-                            key, 20
+                            target_key, 20
                         )
+                        logger.debug(f"Found {len(closest_peers)} close peers")
+
+                        # Metrics Event
+                        event.find_node = True
+
+                        # Build response message with protobuf
+                        response = Message()
+                        response.type = Message.MessageType.FIND_NODE
+
+                        target = ID(target_key)
+
+                        # Per spec: FIND_PEER has a special exception where the
+                        # target peer MUST be included in the response (if present
+                        # in peerstore), even if it is self, the requester, or not
+                        # a DHT server. go-libp2p always prepends the target, but
+                        # then filters by addresses (len(pi.Addrs) > 0). We
+                        # achieve the same result by only prepending if the target
+                        # is known (has addresses) or is self.
+                        try:
+                            target_known = bool(
+                                self.host.get_peerstore().addrs(target)
+                            )
+                        except Exception:
+                            target_known = False
+                        if not target_known and target == self.host.get_id():
+                            target_known = True
+                        if target_known:
+                            closest_peers = [target] + [
+                                p for p in closest_peers if p != target
+                            ]
+
+                        # Add closest peers to response
                         for peer in closest_peers:
+                            # Skip if the peer is the requester
                             if peer == peer_id:
                                 continue
+
+                            # Add peer to closerPeers field
                             peer_proto = response.closerPeers.add()
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                            # Add addresses if available
+                            try:
+                                addrs = self.host.get_peerstore().addrs(peer)
+                                if addrs:
+                                    for addr in addrs:
+                                        peer_proto.addrs.append(addr.to_bytes())
+                            except Exception:
+                                pass
+
+                            # Add the signed-peer-record for each peer in the peer-proto
+                            # if cached in the peerstore
                             closer_peer_envelope = (
                                 self.host.get_peerstore().get_peer_record(peer)
                             )
+
                             if closer_peer_envelope is not None:
                                 peer_proto.signedRecord = (
                                     closer_peer_envelope.marshal_envelope()
                                 )
-                            try:
-                                addrs = self.host.get_peerstore().addrs(peer)
-                                for addr in addrs:
-                                    peer_proto.addrs.append(addr.to_bytes())
-                            except Exception:
-                                pass
+
+                        # Create sender_signed_peer_record
+                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                        response.senderRecord = envelope_bytes
 
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                         logger.debug(
-                            "Sent GET_VALUE response with record and closer peers"
+                            "Sent FIND_NODE response with %s peers",
+                            len(response.closerPeers),
                         )
-                    else:
-                        logger.debug(f"No value found for key {key.hex()}")
 
-                        # Create response with closest peers when no value is found
+                    # Handle PING message
+                    elif message.type == Message.MessageType.PING:
+                        logger.debug(f"Received PING from {peer_id}")
+
+                        # Send PING response
                         response = Message()
-                        response.type = Message.MessageType.GET_VALUE
+                        response.type = Message.MessageType.PING
+                        response_bytes = response.SerializeToString()
+                        await stream.write(varint.encode(len(response_bytes)))
+                        await stream.write(response_bytes)
+                        logger.debug(f"Sent PING response to {peer_id}")
+
+                    # Handle ADD_PROVIDER message
+                    elif message.type == Message.MessageType.ADD_PROVIDER:
+                        # Process ADD_PROVIDER
+                        key = message.key
+                        logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
+
+                        # Per spec: check key length (len > 80 or == 0)
+                        if len(key) > 80 or len(key) == 0:
+                            logger.warning(
+                                f"ADD_PROVIDER key length invalid: {len(key)}, ignoring"
+                            )
+                            break
+
+                        # Consume the source signed_peer_record if sent
+                        if not maybe_consume_signed_record(message, self.host, peer_id):
+                            logger.error(
+                                "Received an invalid-signed-record, dropping the stream"
+                            )
+                            break
+
+                        # Metrics Event
+                        event.add_provider = True
+
+                        # Extract provider information
+                        for provider_proto in message.providerPeers:
+                            try:
+                                # Validate that the provider is the sender
+                                provider_id = ID(provider_proto.id)
+                                if provider_id != peer_id:
+                                    logger.warning(
+                                        f"Provider ID {provider_id} doesn't"
+                                        f"match sender {peer_id}, ignoring"
+                                    )
+                                    continue
+
+                                # Convert addresses to Multiaddr
+                                addrs = []
+                                for addr_bytes in provider_proto.addrs:
+                                    try:
+                                        addrs.append(Multiaddr(addr_bytes))
+                                    except Exception as e:
+                                        logger.warning(f"Failed to parse address: {e}")
+
+                                # Add to provider store
+                                provider_info = PeerInfo(provider_id, addrs)
+                                self.provider_store.add_provider(key, provider_info)
+                                logger.debug(
+                                    f"Added provider {provider_id} for key {key.hex()}"
+                                )
+
+                                # Process the signed-records of provider if sent
+                                if not maybe_consume_signed_record(
+                                    provider_proto, self.host
+                                ):
+                                    logger.error(
+                                        "Received an invalid-signed-record,"
+                                        "dropping the stream"
+                                    )
+                                    break
+                            except Exception as e:
+                                logger.warning(f"Failed to process provider info: {e}")
+
+                        # Per spec, ADD_PROVIDER is fire-and-forget:
+                        # the receiver does NOT send a response.
+                        # go-libp2p returns nil, nil; handleNewMessage skips writing.
+                        logger.debug("ADD_PROVIDER processed (no response)")
+
+                    # Handle GET_PROVIDERS message
+                    elif message.type == Message.MessageType.GET_PROVIDERS:
+                        # Process GET_PROVIDERS
+                        key = message.key
+                        logger.debug(f"GET_PROVIDERS request key {key.hex()}")
+
+                        # Consume the source signed_peer_record if sent
+                        if not maybe_consume_signed_record(message, self.host, peer_id):
+                            logger.error(
+                                "Received an invalid-signed-record, dropping the stream"
+                            )
+                            break
+
+                        # Metrics event
+                        event.get_providers = True
+
+                        # Find providers for the key
+                        providers = self.provider_store.get_providers(key)
+                        logger.debug(
+                            f"Found {len(providers)} providers for key {key.hex()}"
+                        )
+
+                        # Create response
+                        response = Message()
+                        response.type = Message.MessageType.GET_PROVIDERS
                         response.key = key
 
                         # Create sender_signed_peer_record for the response
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
-                        # Add closest peers to key
+                        # Add provider information to response
+                        for provider_info in providers:
+                            provider_proto = response.providerPeers.add()
+                            provider_proto.id = provider_info.peer_id.to_bytes()
+                            provider_proto.connection = (
+                            Message.ConnectionType.CAN_CONNECT
+                        )
+
+                            # Add provider signed-records if cached
+                            provider_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(
+                                    provider_info.peer_id
+                                )
+                            )
+
+                            if provider_peer_envelope is not None:
+                                provider_proto.signedRecord = (
+                                    provider_peer_envelope.marshal_envelope()
+                                )
+
+                            # Add addresses if available
+                            for addr in provider_info.addrs:
+                                provider_proto.addrs.append(addr.to_bytes())
+
+                        # Also include closest peers (always, per IPFS spec)
                         closest_peers = self.routing_table.find_local_closest_peers(
                             key, 20
                         )
                         logger.debug(
-                            "No value found,"
-                            f"including {len(closest_peers)} closest peers"
+                            f"Including {len(closest_peers)} closest peers"
+                            " in GET_PROVIDERS response"
                         )
 
                         for peer in closest_peers:
@@ -906,7 +787,7 @@ class KadDHT(Service):
                             peer_proto.id = peer.to_bytes()
                             peer_proto.connection = Message.ConnectionType.CAN_CONNECT
 
-                            # Add signed-records of closer-peers if cached
+                            # Add the signed-records of closest_peers if cached
                             closer_peer_envelope = (
                                 self.host.get_peerstore().get_peer_record(peer)
                             )
@@ -928,88 +809,228 @@ class KadDHT(Service):
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug("Sent GET_VALUE response with closest peers")
+                        logger.debug("Sent GET_PROVIDERS response")
 
-                # Handle PUT_VALUE message
-                elif message.type == Message.MessageType.PUT_VALUE and message.HasField(
-                    "record"
-                ):
-                    # Process PUT_VALUE
-                    key = message.record.key
-                    value = message.record.value
-                    success = False
+                    # Handle GET_VALUE message
+                    elif message.type == Message.MessageType.GET_VALUE:
+                        # Process GET_VALUE
+                        key = message.key
+                        logger.debug(f"Received GET_VALUE request for key {key.hex()}")
 
-                    # Consume the source signed_peer_record if sent
-                    if not maybe_consume_signed_record(message, self.host, peer_id):
-                        logger.error(
-                            "Received an invalid-signed-record, dropping the stream"
-                        )
-                        await stream.close()
-                        return
+                        # Consume the sender_signed_peer_record
+                        if not maybe_consume_signed_record(message, self.host, peer_id):
+                            logger.error(
+                                "Received an invalid-signed-record, dropping the stream"
+                            )
+                            break
 
-                    event.put_value = True
+                        # Metrics Event
+                        event.get_value = True
 
-                    try:
-                        if not (key and value):
-                            raise ValueError(
-                                "Missing key or value in PUT_VALUE message"
+                        value_record = self.value_store.get(key)
+                        if value_record:
+                            logger.debug(f"Found value for key {key.hex()}")
+
+                            # Create response using protobuf
+                            response = Message()
+                            response.type = Message.MessageType.GET_VALUE
+
+                            # Create record
+                            response.key = key
+                            response.record.CopyFrom(value_record)
+
+                            # Create sender_signed_peer_record
+                            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                            response.senderRecord = envelope_bytes
+
+                            # Include closerPeers per spec even when value is found
+                            closest_peers = self.routing_table.find_local_closest_peers(
+                                key, 20
+                            )
+                            for peer in closest_peers:
+                                if peer == peer_id:
+                                    continue
+                                peer_proto = response.closerPeers.add()
+                                peer_proto.id = peer.to_bytes()
+                                peer_proto.connection = (
+                                    Message.ConnectionType.CAN_CONNECT
+                                )
+                                closer_peer_envelope = (
+                                    self.host.get_peerstore().get_peer_record(peer)
+                                )
+                                if closer_peer_envelope is not None:
+                                    peer_proto.signedRecord = (
+                                        closer_peer_envelope.marshal_envelope()
+                                    )
+                                try:
+                                    addrs = self.host.get_peerstore().addrs(peer)
+                                    for addr in addrs:
+                                        peer_proto.addrs.append(addr.to_bytes())
+                                except Exception:
+                                    pass
+
+                            # Serialize and send response
+                            response_bytes = response.SerializeToString()
+                            await stream.write(varint.encode(len(response_bytes)))
+                            await stream.write(response_bytes)
+                            logger.debug(
+                                "Sent GET_VALUE response with record and closer peers"
+                            )
+                        else:
+                            logger.debug(f"No value found for key {key.hex()}")
+
+                            # Create response with closest peers when no value is found
+                            response = Message()
+                            response.type = Message.MessageType.GET_VALUE
+                            response.key = key
+
+                            # Create sender_signed_peer_record for the response
+                            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                            response.senderRecord = envelope_bytes
+
+                            # Add closest peers to key
+                            closest_peers = self.routing_table.find_local_closest_peers(
+                                key, 20
+                            )
+                            logger.debug(
+                                "No value found,"
+                                f"including {len(closest_peers)} closest peers"
                             )
 
-                        # Always validate the key-value pair before storing
-                        # Reject keys without registered namespace validators
-                        key_str = key.decode("utf-8")
-                        if self.validator is None:
-                            raise ValueError("Validator is required for DHT operations")
-                        self.validator.validate(key_str, value)
+                            for peer in closest_peers:
+                                # Skip if peer is the requester
+                                if peer == peer_id:
+                                    continue
 
-                        self.value_store.put(key, value)
-                        logger.debug(f"Stored value {value.hex()} for key {key.hex()}")
-                        success = True
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to store value {value.hex()} for key "
-                            f"{key.hex()}: {e}"
-                        )
-                    finally:
-                        # Send acknowledgement — echo the request per spec
+                                peer_proto = response.closerPeers.add()
+                                peer_proto.id = peer.to_bytes()
+                                peer_proto.connection = (
+                                    Message.ConnectionType.CAN_CONNECT
+                                )
+
+                                # Add signed-records of closer-peers if cached
+                                closer_peer_envelope = (
+                                    self.host.get_peerstore().get_peer_record(peer)
+                                )
+
+                                if closer_peer_envelope is not None:
+                                    peer_proto.signedRecord = (
+                                        closer_peer_envelope.marshal_envelope()
+                                    )
+
+                                # Add addresses if available
+                                try:
+                                    addrs = self.host.get_peerstore().addrs(peer)
+                                    for addr in addrs:
+                                        peer_proto.addrs.append(addr.to_bytes())
+                                except Exception:
+                                    pass
+
+                            # Serialize and send response
+                            response_bytes = response.SerializeToString()
+                            await stream.write(varint.encode(len(response_bytes)))
+                            await stream.write(response_bytes)
+                            logger.debug("Sent GET_VALUE response with closest peers")
+
+                    # Handle PUT_VALUE message
+                    elif (
+                        message.type == Message.MessageType.PUT_VALUE
+                        and message.HasField("record")
+                    ):
+                        # Process PUT_VALUE
+                        key = message.record.key
+                        value = message.record.value
+                        success = False
+
+                        # Consume the source signed_peer_record if sent
+                        if not maybe_consume_signed_record(message, self.host, peer_id):
+                            logger.error(
+                                "Received an invalid-signed-record, dropping the stream"
+                            )
+                            break
+
+                        # Validate record key matches the message key
+                        if message.record.key != key:
+                            logger.warning(
+                                "PUT_VALUE record key does not match message key"
+                            )
+                            break
+
+                        event.put_value = True
+
+                        try:
+                            if not (key and value):
+                                raise ValueError(
+                                    "Missing key or value in PUT_VALUE message"
+                                )
+
+                            # Validate the key-value pair before storing
+                            key_str = key.decode("utf-8")
+                            if self.validator is None:
+                                raise ValueError("Validator required for DHT ops")
+                            self.validator.validate(key_str, value)
+
+                            # Verify signature if present (py-libp2p record format)
+                            if message.record.signature and message.record.author:
+                                from libp2p.records.utils import verify_record
+                                if not verify_record(
+                                    message.record.signature,
+                                    message.record.author,
+                                    key,
+                                    value,
+                                ):
+                                    raise ValueError("Record sig verification failed")
+
+                            # Store record as-is, preserving original author/signature
+                            self.value_store.put_record(key, message.record)
+                            logger.debug(f"Stored value for key {key.hex()}")
+                            success = True
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to store value {value.hex()} for key "
+                                f"{key.hex()}: {e}"
+                            )
+                        finally:
+                            # Send acknowledgement — echo the request per spec
+                            response = Message()
+                            response.type = Message.MessageType.PUT_VALUE
+                            if success:
+                                response.key = key
+                                # Echo the record back per spec requirement
+                                response.record.CopyFrom(message.record)
+
+                            # Create sender_signed_peer_record for the response
+                            envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                            response.senderRecord = envelope_bytes
+
+                            # Serialize and send response
+                            response_bytes = response.SerializeToString()
+                            await stream.write(varint.encode(len(response_bytes)))
+                            await stream.write(response_bytes)
+                            logger.debug("Sent PUT_VALUE acknowledgement")
+
+                    # Handle PUT_VALUE without record field
+                    elif message.type == Message.MessageType.PUT_VALUE:
+                        logger.warning(f"PUT_VALUE w/o record from {peer_id}")
                         response = Message()
                         response.type = Message.MessageType.PUT_VALUE
-                        if success:
-                            response.key = key
-                            # Echo the record back per spec requirement
-                            response.record.CopyFrom(message.record)
-
-                        # Create sender_signed_peer_record for the response
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
-
-                        # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug("Sent PUT_VALUE acknowledgement")
 
-                # Handle PUT_VALUE without record field
-                elif message.type == Message.MessageType.PUT_VALUE:
-                    logger.warning(f"Received PUT_VALUE without record from {peer_id}")
-                    response = Message()
-                    response.type = Message.MessageType.PUT_VALUE
-                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                    response.senderRecord = envelope_bytes
-                    response_bytes = response.SerializeToString()
-                    await stream.write(varint.encode(len(response_bytes)))
-                    await stream.write(response_bytes)
+                except Exception as proto_err:
+                    logger.warning(f"Failed to parse protobuf message: {proto_err}")
+                    break
 
-            except Exception as proto_err:
-                logger.warning(f"Failed to parse protobuf message: {proto_err}")
+                # Send KAD-DHT event to Metrics
+                if stream.metric_send_channel is not None:
+                    await stream.metric_send_channel.send(event)
 
-            # Send KAD-DHT event to Metrics
-            if stream.metric_send_channel is not None:
-                await stream.metric_send_channel.send(event)
-
-            await stream.close()
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
+        finally:
             await stream.close()
 
     async def refresh_routing_table(self) -> None:
@@ -1052,7 +1073,7 @@ class KadDHT(Service):
         # - No validator is registered for the key's namespace
         # Following Go libp2p behavior where only namespaced keys are allowed
         if self.validator is None:
-            raise ValueError("Validator is required for DHT operations")
+            raise ValueError("Validator required for DHT operations")
         self.validator.validate(key, value)
 
         key_bytes = key.encode("utf-8")
@@ -1070,10 +1091,10 @@ class KadDHT(Service):
             decoded_value = value.hex()
         logger.debug(f"Stored value locally for key {key} with value {decoded_value}")
 
-        # 2. Get closest peers, excluding self
+        # 2. Get closest peers via network lookup (not just local routing table)
         closest_peers = [
             peer
-            for peer in self.routing_table.find_local_closest_peers(key_bytes)
+            for peer in await self.peer_routing.find_closest_peers_network(key_bytes)
             if peer != self.local_peer_id
         ]
         logger.debug(f"Found {len(closest_peers)} peers to store value at")
@@ -1280,7 +1301,7 @@ class KadDHT(Service):
                     try:
                         with trio.move_on_after(QUERY_TIMEOUT):
                             await self.value_store._store_at_peer(
-                                peer, key_bytes, best_value
+                                peer, key_bytes, best_value, record=best_rec
                             )
                             logger.debug(
                                 f"Propagated record to peer {peer} (had no record)"
@@ -1292,8 +1313,8 @@ class KadDHT(Service):
                     for p in missing_peers:
                         nursery.start_soon(propagate_to_missing, p)
 
-            # Store the best value locally
-            self.value_store.put(key_bytes, best_value)
+            # Store the best record locally (preserve original signature)
+            self.value_store.put_record(key_bytes, best_rec)
             logger.info("Successfully retrieved value from network")
             return best_value
 
@@ -1327,17 +1348,37 @@ class KadDHT(Service):
     async def provide(self, key: str) -> bool:
         """
         Reference to provider_store.provide for convenience.
+
+        Accepts either a CID string or a multihash hex string.
         """
-        from libp2p.bitswap.cid import cid_to_bytes, parse_cid
-        key_bytes = cid_to_bytes(parse_cid(key))
+        from libp2p.bitswap.cid import parse_cid
+
+        try:
+            cid_obj = parse_cid(key)
+            key_bytes = cid_obj.multihash
+        except (ValueError, TypeError):
+            try:
+                key_bytes = bytes.fromhex(key)
+            except ValueError:
+                key_bytes = key.encode("utf-8")
         return await self.provider_store.provide(key_bytes)
 
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
+
+        Accepts either a CID string or a multihash hex string.
         """
-        from libp2p.bitswap.cid import cid_to_bytes, parse_cid
-        key_bytes = cid_to_bytes(parse_cid(key))
+        from libp2p.bitswap.cid import parse_cid
+
+        try:
+            cid_obj = parse_cid(key)
+            key_bytes = cid_obj.multihash
+        except (ValueError, TypeError):
+            try:
+                key_bytes = bytes.fromhex(key)
+            except ValueError:
+                key_bytes = key.encode("utf-8")
         return await self.provider_store.find_providers(key_bytes, count)
 
     def get_routing_table_size(self) -> int:

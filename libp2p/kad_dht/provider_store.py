@@ -128,30 +128,26 @@ class ProviderStore:
         self.peer_routing = peer_routing
         self.providing_keys: set[bytes] = set()
         self.local_peer_id = host.get_id()
+        # Track when each key was last republished
+        self._last_republish: dict[bytes, float] = {}
 
     async def _republish_provider_records(self) -> None:
-        """Republish all provider records for content this node is providing."""
-        # Snapshot the sets/dicts to avoid mutation during iteration
+        """
+        Republish provider records that are due.
+
+        Per spec: provider records should be republished every 22h.
+        """
+        current_time = time.time()
+        # Snapshot to avoid mutation during iteration
         providing_keys_snapshot = list(self.providing_keys)
-        providers_snapshot = {
-            key: dict(providers) for key, providers in self.providers.items()
-        }
 
-        # First, republish keys we're actively providing
+        # Only republish keys that are due (last republish > 22h ago or never)
         for key in providing_keys_snapshot:
-            logger.debug(f"Republishing provider record for key {key.hex()}")
-            await self.provide(key)
-
-        # Also check for any records that should be republished
-        for key, providers in providers_snapshot.items():
-            for peer_id_str, record in providers.items():
-                # Only republish records for our own peer
-                if self.local_peer_id and str(self.local_peer_id) == peer_id_str:
-                    if record.should_republish():
-                        logger.debug(
-                            f"Republishing old provider record for key {key.hex()}"
-                        )
-                        await self.provide(key)
+            last_republished = self._last_republish.get(key, 0)
+            if (current_time - last_republished) >= PROVIDER_RECORD_REPUBLISH_INTERVAL:
+                logger.debug(f"Republishing provider record for key {key.hex()}")
+                await self.provide(key)
+                self._last_republish[key] = current_time
 
     async def provide(self, key: bytes) -> bool:
         """
@@ -469,6 +465,10 @@ class ProviderStore:
         None
 
         """
+        if not provider or not provider.peer_id:
+            logger.debug("Skipping add_provider with invalid PeerInfo")
+            return
+
         # Initialize providers for this key if needed
         if key not in self.providers:
             self.providers[key] = {}

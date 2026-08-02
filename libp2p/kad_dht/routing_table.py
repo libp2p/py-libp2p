@@ -79,6 +79,7 @@ class KBucket:
         self.max_range = max_range
         # Store PeerInfo objects along with last-seen timestamp
         self.peers: OrderedDict[ID, tuple[PeerInfo, float]] = OrderedDict()
+        self._lock: trio.Lock = trio.Lock()
 
     def peer_ids(self) -> list[ID]:
         """Get all peer IDs in the bucket."""
@@ -99,49 +100,65 @@ class KBucket:
         Add a peer to the bucket. Returns True if the peer was added or updated,
         False if the bucket is full.
         """
-        current_time = time.time()
-        peer_id = peer_info.peer_id
+        async with self._lock:
+            current_time = time.time()
+            peer_id = peer_info.peer_id
 
-        # If peer is already in the bucket, move it to the end (most recently seen)
-        if peer_id in self.peers:
-            self.refresh_peer_last_seen(peer_id)
-            return True
+            # If peer is already in the bucket, move it to the end (most recently seen)
+            if peer_id in self.peers:
+                self.refresh_peer_last_seen(peer_id)
+                return True
 
-        # If bucket has space, add the peer
-        if len(self.peers) < self.bucket_size:
-            self.peers[peer_id] = (peer_info, current_time)
-            return True
+            # If bucket has space, add the peer
+            if len(self.peers) < self.bucket_size:
+                self.peers[peer_id] = (peer_info, current_time)
+                return True
 
-        # If bucket is full, we need to replace the least-recently seen peer
-        # Get the least-recently seen peer
-        oldest_peer_id = self.get_oldest_peer()
-        if oldest_peer_id is None:
-            logger.warning("No oldest peer found when bucket is full")
-            return False
+            # If bucket is full, we need to replace the least-recently seen peer
+            # Get the least-recently seen peer
+            oldest_peer_id = self.get_oldest_peer()
+            if oldest_peer_id is None:
+                logger.warning("No oldest peer found when bucket is full")
+                return False
 
-        # Check if the old peer is responsive to ping request
-        # Try to ping the oldest peer, not the new peer
-        response = await self._ping_peer(oldest_peer_id)
-        if response:
-            # If the old peer is still alive, we will not add the new peer
-            logger.debug(
-                "Old peer %s is still alive, cannot add new peer %s",
-                oldest_peer_id,
-                peer_id,
-            )
-            return False
-        else:
-            # If the old peer is unresponsive, we can replace it with the new peer
-            logger.debug(
-                "Old peer %s is unresponsive, replacing with new peer %s",
-                oldest_peer_id,
-                peer_id,
-            )
-            # Remove the specific peer by ID (not popitem) to handle
-            # concurrent mutations
-            if oldest_peer_id in self.peers:
-                del self.peers[oldest_peer_id]
-            self.peers[peer_id] = (peer_info, current_time)
+            # Check if the old peer is responsive to ping request
+            # Try to ping the oldest peer, not the new peer
+            response = await self._ping_peer(oldest_peer_id)
+            if response:
+                # If the old peer is still alive, we will not add the new peer
+                logger.debug(
+                    "Old peer %s is still alive, cannot add new peer %s",
+                    oldest_peer_id,
+                    peer_id,
+                )
+                return False
+            else:
+                # If the old peer is unresponsive, we can replace it with the new peer
+                logger.debug(
+                    "Old peer %s is unresponsive, replacing with new peer %s",
+                    oldest_peer_id,
+                    peer_id,
+                )
+                # Re-check bucket state after the await — another coroutine may have
+                # modified the bucket while we were pinging.
+                if peer_id in self.peers:
+                    # Another coroutine added this peer (or the old peer) during ping
+                    self.refresh_peer_last_seen(peer_id)
+                    return True
+
+                if oldest_peer_id in self.peers:
+                    del self.peers[oldest_peer_id]
+
+                # Re-check capacity: another coroutine may have added a peer
+                # during the ping, potentially filling the bucket to capacity.
+                if len(self.peers) >= self.bucket_size:
+                    logger.debug(
+                        "Bucket full after ping, cannot add new peer %s",
+                        peer_id,
+                    )
+                    return False
+
+                self.peers[peer_id] = (peer_info, current_time)
             return True
 
     def remove_peer(self, peer_id: ID) -> bool:
@@ -361,6 +378,7 @@ class RoutingTable:
         self.local_id = local_id
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
+        self._rt_refresh_nursery = None
 
     async def add_peer(
         self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
@@ -643,13 +661,13 @@ class RoutingTable:
             return False
 
         return True
-
     def _split_bucket(self, bucket: KBucket) -> bool:
         """
         Split a bucket into two buckets.
 
         :param bucket: The bucket to split
         :return: True if the bucket was successfully split
+
         """
         try:
             # Find the bucket index
@@ -677,8 +695,19 @@ class RoutingTable:
                 f"peers: {upper_bucket.size()}"
             )
 
+            # Start periodic refresh for the new buckets
+            if self._rt_refresh_nursery is not None:
+                self._rt_refresh_nursery.start_soon(lower_bucket._periodic_peer_refresh)
+                self._rt_refresh_nursery.start_soon(upper_bucket._periodic_peer_refresh)
+
             return True
 
         except Exception as e:
             logger.error(f"Error splitting bucket: {e}")
             return False
+
+    def start_periodic_refresh(self, nursery: trio.Nursery) -> None:
+        """Start periodic stale peer refresh for all buckets."""
+        self._rt_refresh_nursery = nursery
+        for bucket in self.buckets:
+            nursery.start_soon(bucket._periodic_peer_refresh)
