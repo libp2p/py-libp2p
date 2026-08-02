@@ -245,9 +245,12 @@ class PeerRouting(IPeerRouting):
             # Admit at most ALPHA peers per round to preserve classic Kademlia
             # iterative refinement: after each small batch we re-sort with any
             # newly discovered peers before admitting the next batch.
-            peers_to_query = [p for p in closest_peers if p not in queried_peers][
-                :ALPHA
-            ]
+            # Exclude self - we can't query ourselves (Kubo does the same)
+            local_id = self.host.get_id()
+            peers_to_query = [
+                p for p in closest_peers
+                if p not in queried_peers and p != local_id
+            ][:ALPHA]
             if not peers_to_query:
                 logger.debug("No more unqueried peers available, ending lookup")
                 break

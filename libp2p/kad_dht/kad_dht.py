@@ -1328,14 +1328,16 @@ class KadDHT(Service):
         """
         Reference to provider_store.provide for convenience.
         """
-        key_bytes = key.encode("utf-8")
+        from libp2p.bitswap.cid import cid_to_bytes, parse_cid
+        key_bytes = cid_to_bytes(parse_cid(key))
         return await self.provider_store.provide(key_bytes)
 
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
         Reference to provider_store.find_providers for convenience.
         """
-        key_bytes = key.encode("utf-8")
+        from libp2p.bitswap.cid import cid_to_bytes, parse_cid
+        key_bytes = cid_to_bytes(parse_cid(key))
         return await self.provider_store.find_providers(key_bytes, count)
 
     def get_routing_table_size(self) -> int:

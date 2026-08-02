@@ -222,19 +222,22 @@ class ProviderStore:
         """
         Send ADD_PROVIDER message to a specific peer.
 
+        Per the IPFS DHT spec, ADD_PROVIDER is fire-and-forget:
+        the receiver stores the provider record but does NOT send a response.
+        We send the message and close the stream.
+
         :param peer_id: The peer to send the message to
         :param key: The content key being provided
 
         Returns
         -------
         bool
-            True if the message was successfully sent and acknowledged
+            True if the message was successfully sent
 
         """
         stream = None
 
         try:
-            result = False
             # Open a stream to the peer
             stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
 
@@ -265,50 +268,15 @@ class ProviderStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
-            # Read response length prefix
-            length_bytes = b""
-            while True:
-                logger.debug("Reading response length prefix in add provider")
-                b = await stream.read(1)
-                if not b:
-                    return False
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-
-            response_length = varint.decode_bytes(length_bytes)
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    return False
-                response_bytes += chunk
-                remaining -= len(chunk)
-
-            # Parse response
-            response = Message()
-            response.ParseFromString(response_bytes)
-
-            if response.type == Message.MessageType.ADD_PROVIDER:
-                # Consume the sender's signed-peer-record if sent
-                if not maybe_consume_signed_record(response, self.host, peer_id):
-                    logger.error(
-                        "Received an invalid-signed-record, ignoring the response"
-                    )
-                    result = False
-                else:
-                    result = True
+            return True
 
         except Exception as e:
             logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            return False
 
         finally:
             if stream is not None:
                 await stream.close()
-
-        return result
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
