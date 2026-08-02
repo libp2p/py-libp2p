@@ -65,12 +65,15 @@ class Metrics:
         while True:
             event = await metric_recv_channel.receive()
 
-            match event:
-                case PingEvent():
-                    self.ping.record(event)
-                case GossipsubEvent():
-                    self.gossipsub.record(event)
-                case KadDhtEvent():
-                    self.kad_dht.record(event)
-                case SwarmEvent():
-                    self.swarm.record(event)
+            try:
+                match event:
+                    case PingEvent():
+                        self.ping.record(event)
+                    case GossipsubEvent():
+                        self.gossipsub.record(event)
+                    case KadDhtEvent():
+                        self.kad_dht.record(event)
+                    case SwarmEvent():
+                        self.swarm.record(event)
+            except Exception:
+                logger.debug("Failed to record metric event: %r", event, exc_info=True)

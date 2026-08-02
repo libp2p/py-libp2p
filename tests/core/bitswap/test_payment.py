@@ -84,8 +84,10 @@ async def test_gated_decision_engine_auth():
         blockstore=blockstore, ledger=ledger, pricing=pricing, tx_verifier=None
     )
 
+    from libp2p.bitswap.cid import CODEC_RAW, compute_cid_v1
+
     auth = MagicMock()
-    auth.cid = b"cid1"
+    auth.cid = compute_cid_v1(b"dummy", codec=CODEC_RAW)
     auth.value = 50
     auth.from_address = "0x..."
     auth.nonce = b"nonce1"
