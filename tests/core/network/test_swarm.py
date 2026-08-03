@@ -232,6 +232,8 @@ async def test_swarm_multiaddr(security_protocol):
 
         def clear():
             swarms[0].peerstore.clear_addrs(swarms[1].get_peer_id())
+            if hasattr(swarms[0], "_negative_peer_cache"):
+                swarms[0]._negative_peer_cache.evict(str(swarms[1].get_peer_id()))
 
         clear()
         # No addresses
@@ -258,6 +260,7 @@ async def test_swarm_multiaddr(security_protocol):
         with pytest.raises(SwarmException):
             await swarms[0].dial_peer(swarms[1].get_peer_id())
 
+        clear()
         # Test one address
         addrs = tuple(
             addr

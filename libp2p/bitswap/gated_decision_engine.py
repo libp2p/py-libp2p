@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 from libp2p.bitswap.block_store import BlockStore
-from libp2p.bitswap.cid import parse_cid
+from libp2p.bitswap.cid import get_cid_prefix, parse_cid
 from libp2p.bitswap.pb.bitswap_1_3_0_pb2 import Message as Message_1_3
 from libp2p.bitswap.pb.bitswap_pb2 import Message as Message_1_2
 
@@ -153,10 +153,6 @@ class PaymentGatedDecisionEngine:
         )
 
         # Check blockstore
-        logger.info(
-            "All CIDs in blockstore: "
-            + ", ".join([c.hex() for c in self.blockstore.get_all_cids()])
-        )
         block_data = await self.blockstore.get_block(cid_obj)
 
         if block_data is None:
@@ -352,34 +348,12 @@ class PaymentGatedDecisionEngine:
         """
         Get the size to use for pricing calculation.
 
-        NEW PAYMENT MODEL: For root CIDs, use total DAG size.
+        For root CIDs (registered via register_dag), use total DAG size.
         For child CIDs, pricing is N/A (they inherit root payment).
-
-        Args:
-            cid_str: The CID (hex string)
-            block_size: The actual block size
-
-        Returns:
-            Size in bytes to use for pricing
-
         """
-        # Check if this is a registered DAG root
         dag_info = self._dag_info.get(cid_str)
         if dag_info:
-            # This is a root CID - use total DAG size for pricing
-            total_size = dag_info["total_size"]
-            logger.info(
-                f"💡 CID {cid_str[:20]}... is DAG root: "
-                f"block_size={block_size}B, total_size={total_size}B"
-            )
-            return total_size
-
-        # Not a registered root CID - use block size (backward compatibility)
-        # This handles: old files, single-block files, or child blocks
-        logger.debug(
-            f"CID {cid_str[:20]}... not a registered DAG root, "
-            f"using block_size={block_size}B for pricing"
-        )
+            return dag_info["total_size"]
         return block_size
 
     def _make_payment_required_1_3(
@@ -434,7 +408,7 @@ class PaymentGatedDecisionEngine:
         receipt.expires = int(time.time()) + 86400 * 7  # 7 days
 
         block_entry = msg.payload.add()
-        block_entry.prefix = cid_bytes[:4]
+        block_entry.prefix = get_cid_prefix(cid_bytes)
         block_entry.data = block_data
 
         return msg
@@ -476,36 +450,9 @@ class PaymentGatedDecisionEngine:
         MsgClass = Message_1_3 if protocol == BITSWAP_PROTOCOL_V130 else Message_1_2
         msg = MsgClass()
         block = msg.payload.add()
-        block.prefix = cid_bytes[:4]
+        block.prefix = get_cid_prefix(cid_bytes)
         block.data = block_data
         return msg
-
-    def _get_pricing_size_fallback(self, cid_str: str, block_size: int) -> int:
-        """
-        Get the size to use for pricing calculations.
-
-        If this CID is part of a registered DAG, return the total DAG size.
-        Otherwise, return the individual block size.
-
-        Args:
-            cid_str: The CID being priced
-            block_size: The individual block size
-
-        Returns:
-            Size in bytes to use for pricing
-
-        """
-        # Check if this is a registered root CID
-        if cid_str in self._dag_info:
-            total_size = self._dag_info[cid_str]["total_size"]
-            logger.debug(
-                f"Using DAG total size for pricing: {cid_str[:20]}... "
-                f"total={total_size}B (not block={block_size}B)"
-            )
-            return total_size
-
-        # Not a registered DAG, use individual block size
-        return block_size
 
 
 # ── CID helpers ───────────────────────────────────────────────────────────────
@@ -522,5 +469,5 @@ def _cid_to_bytes(cid: str | bytes) -> bytes:
         try:
             return bytes.fromhex(cid)
         except ValueError:
-            return cid.encode()
+            raise ValueError(f"Invalid CID: cannot decode as hex: {cid!r}")
     return cid

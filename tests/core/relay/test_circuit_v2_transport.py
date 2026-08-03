@@ -889,9 +889,10 @@ async def test_circuit_v2_transport_relay_selection_fallback_no_reservation():
         # Should still select relays even without reservations
         selected1 = await client_transport._select_relay(target_info)
         assert selected1 is not None, "Should select a relay even without reservations"
-        assert selected1 in [relay_id1, relay_id2], (
-            "Should select from available relays"
-        )
+        assert selected1 in [
+            relay_id1,
+            relay_id2,
+        ], "Should select from available relays"
 
         logger.info("Fallback to non-reserved relays test passed")
 

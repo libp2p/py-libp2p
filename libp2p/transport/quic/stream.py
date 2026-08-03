@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import trio
 
+from libp2p.io.exceptions import IOException
+from libp2p.stream_muxer.exceptions import MuxedStreamEOF
+
 from .exceptions import (
     QUICStreamBackpressureError,
     QUICStreamClosedError,
@@ -38,6 +41,18 @@ else:
     TProtocol = cast(type, object)
 
 logger = logging.getLogger(__name__)
+
+
+class _QUICStreamEOF(MuxedStreamEOF, IOException, EOFError):
+    """
+    Raised by QUICStream.read() when the stream has reached EOF (FIN received)
+    and the receive buffer is empty.
+
+    Inherits IOException so that callers like MultiselectCommunicator.read()
+    (which catches IOException) and read_exactly() (raises IncompleteReadError on
+    incomplete reads) both handle it correctly.  Also inherits EOFError to be
+    semantically compatible with libp2p.network.stream.exceptions.StreamEOF.
+    """
 
 
 class StreamState(Enum):
@@ -226,18 +241,22 @@ class QUICStream(IMuxedStream):
         if n is None:
             n = -1
 
+        # Check if there is data in the buffer FIRST before raising closed/reset errors
+        async with self._receive_buffer_lock:
+            if self._receive_buffer:
+                data = self._extract_data_from_buffer(n)
+                self._timeline.record_first_data()
+                return data
+
         async with self._state_lock:
             if self._state in (StreamState.CLOSED, StreamState.RESET):
                 raise QUICStreamClosedError(f"Stream {self.stream_id} is closed")
 
             if self._read_closed:
-                # Return any remaining buffered data, then EOF
-                async with self._receive_buffer_lock:
-                    if self._receive_buffer:
-                        data = self._extract_data_from_buffer(n)
-                        self._timeline.record_first_data()
-                        return data
-                return b""
+                # Buffer is empty and stream is half-closed for reading — signal EOF
+                # Raise StreamEOF (extends IOException) so callers like read_exactly()
+                # fail immediately instead of looping on empty reads.
+                raise _QUICStreamEOF()
 
         # Wait for data with timeout
         timeout = self.READ_TIMEOUT
@@ -256,9 +275,9 @@ class QUICStream(IMuxedStream):
                                 f"Stream {self.stream_id} was reset"
                             )
 
-                        # Check if stream was closed while waiting
+                        # Buffer is empty and stream closed while waiting — EOF
                         if self._read_closed:
-                            return b""
+                            raise _QUICStreamEOF()
 
                     # Wait for more data
                     await self._receive_event.wait()
@@ -312,6 +331,14 @@ class QUICStream(IMuxedStream):
             self._timeline.record_first_data()
             logger.debug(f"Wrote {len(data)} bytes to stream {self.stream_id}")
 
+        except ValueError as e:
+            if "unknown peer-initiated stream" in str(e):
+                raise QUICStreamClosedError(
+                    f"Stream {self.stream_id} was already closed in QUIC layer"
+                ) from e
+            logger.error(f"Error writing to stream {self.stream_id}: {e}")
+            await self._handle_stream_error(e)
+            raise
         except Exception as e:
             logger.error(f"Error writing to stream {self.stream_id}: {e}")
             # Convert QUIC-specific errors using isinstance checks
@@ -530,11 +557,6 @@ class QUICStream(IMuxedStream):
     async def handle_data_received(self, data: bytes, end_stream: bool) -> None:
         """
         Handle data received from the QUIC connection.
-
-        Args:
-            data: Received data
-            end_stream: Whether this is the last data (FIN received)
-
         """
         if self._state == StreamState.RESET:
             return
@@ -697,16 +719,20 @@ class QUICStream(IMuxedStream):
         if self._memory_reserved > 0:
             self._release_memory(self._memory_reserved)
 
-        # Clear receive buffer
-        async with self._receive_buffer_lock:
-            self._receive_buffer.clear()
+        # Do not clear receive buffer here. Allow application to drain it
+        # before surfacing EOF/reset.
 
         # Release resource scope if present
-        if self._resource_scope and hasattr(self._resource_scope, "done"):
+        if self._resource_scope:
             try:
-                self._resource_scope.done()
+                if hasattr(self._resource_scope, "close"):
+                    self._resource_scope.close()
+                elif hasattr(self._resource_scope, "release"):
+                    self._resource_scope.release()
+                elif hasattr(self._resource_scope, "done"):
+                    self._resource_scope.done()
             except Exception as e:
-                logger.warning(f"Error releasing resource scope: {e}")
+                logger.warning(f"Error releasing stream resource scope: {e}")
             self._resource_scope = None
 
         # Remove from connection's stream registry
