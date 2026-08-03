@@ -215,10 +215,7 @@ class BootstrapDiscovery:
         for resolved_addr in resolved_addrs:
             try:
                 decapsulated = resolved_addr.decapsulate(p2p_suffix)
-                if (
-                    decapsulated is not None
-                    and len(decapsulated.protocols()) > 0
-                ):
+                if decapsulated is not None and len(decapsulated.protocols()) > 0:
                     decapsulated_addrs.append(decapsulated)
                 else:
                     decapsulated_addrs.append(resolved_addr)
@@ -263,9 +260,7 @@ class BootstrapDiscovery:
             return
 
         # Add supported addresses to peerstore.
-        self.peerstore.add_addrs(
-            peer_info.peer_id, supported_addrs, PERMANENT_ADDR_TTL
-        )
+        self.peerstore.add_addrs(peer_info.peer_id, supported_addrs, PERMANENT_ADDR_TTL)
 
         # Deduplicate: only emit discovery event for new peers.
         peer_id_str = str(peer_info.peer_id)
@@ -275,7 +270,9 @@ class BootstrapDiscovery:
             logger.info("Peer discovered: %s", peer_info.peer_id)
             await self._connect_to_peer(peer_info.peer_id)
         else:
-            logger.debug("Additional addresses for existing peer: %s", peer_info.peer_id)
+            logger.debug(
+                "Additional addresses for existing peer: %s", peer_info.peer_id
+            )
             if peer_info.peer_id not in self.swarm.connections:
                 await self._connect_to_peer(peer_info.peer_id)
 
@@ -327,8 +324,7 @@ class BootstrapDiscovery:
         except SwarmDialAllFailedError as e:
             failed_connection_time = trio.current_time() - connection_start_time
             logger.warning(
-                "Failed to connect to %s after trying all %d addresses "
-                "(took %.2fs)",
+                "Failed to connect to %s after trying all %d addresses (took %.2fs)",
                 peer_id,
                 len(available_addrs),
                 failed_connection_time,
@@ -393,8 +389,7 @@ class BootstrapDiscovery:
         # Remove from bootstrap_addrs so it's not re-processed on reconnect.
         p2p_component = f"/p2p/{peer_id_str}"
         self.bootstrap_addrs = [
-            a for a in self.bootstrap_addrs
-            if not a.endswith(p2p_component)
+            a for a in self.bootstrap_addrs if not a.endswith(p2p_component)
         ]
 
     @staticmethod
