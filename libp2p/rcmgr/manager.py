@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any, cast
 
@@ -23,6 +24,8 @@ from .rate_limiter import (
     RateLimiter,
     create_per_peer_rate_limiter,
 )
+
+logger = logging.getLogger(__name__)
 
 """
 Resource Manager implementation.
@@ -249,10 +252,12 @@ class ResourceManager:
         self,
         peer_id: str = "",
         endpoint_ip: str | None = None,
+        direction: str = "inbound",
     ) -> bool:
         """Acquire a connection resource"""
         # Check circuit breaker
         if self.circuit_breaker and self.circuit_breaker.is_open():
+            logger.debug("acquire_connection failed: circuit breaker open")
             return False
 
         # Check connection rate limiter (per-peer)
@@ -265,9 +270,17 @@ class ResourceManager:
                     pid = ID.from_string(peer_id) if peer_id else None
                 except Exception:
                     pid = None
-                if not self.connection_rate_limiter.try_allow(peer_id=pid):
-                    self._record_blocked_resource("connection", "inbound", scope="rate")
-                    return False
+                if pid is not None:
+                    if not self.connection_rate_limiter.try_allow(peer_id=pid):
+                        self._record_blocked_resource(
+                            "connection", direction, scope="rate"
+                        )
+                        logger.debug(
+                            "acquire_connection failed: rate limit exceeded "
+                            "for peer %s",
+                            pid,
+                        )
+                        return False
             except Exception:
                 # Fail-open on limiter errors
                 pass
@@ -276,7 +289,11 @@ class ResourceManager:
         if self.cidr_limiter is not None:
             try:
                 if not self.cidr_limiter.allow(endpoint_ip):
-                    self._record_blocked_resource("connection", "inbound", scope="cidr")
+                    self._record_blocked_resource("connection", direction, scope="cidr")
+                    logger.debug(
+                        "acquire_connection failed: CIDR limit exceeded for %s",
+                        endpoint_ip,
+                    )
                     return False
             except Exception:
                 pass
@@ -312,13 +329,20 @@ class ResourceManager:
                         ):
                             # Retry after degradation
                             if self._current_connections >= self.limits.max_connections:
-                                self._record_blocked_resource("connection", "inbound")
+                                self._record_blocked_resource("connection", direction)
+                                logger.debug(
+                                    "acquire_connection failed: max connections "
+                                    "reached (degradation)"
+                                )
                                 return False
                         else:
-                            self._record_blocked_resource("connection", "inbound")
+                            self._record_blocked_resource("connection", direction)
+                            logger.debug(
+                                "acquire_connection failed: max connections reached"
+                            )
                             return False
                     else:
-                        self._record_blocked_resource("connection", "inbound")
+                        self._record_blocked_resource("connection", direction)
                         return False
 
                 self._current_connections += 1
@@ -329,7 +353,12 @@ class ResourceManager:
                             # Rollback and deny
                             self._current_connections -= 1
                             self._record_blocked_resource(
-                                "connection", "inbound", scope="cidr"
+                                "connection", direction, scope="cidr"
+                            )
+                            logger.debug(
+                                "acquire_connection failed: CIDR limit acquire "
+                                "failed for %s",
+                                endpoint_ip,
                             )
                             return False
                     except Exception:
@@ -339,7 +368,7 @@ class ResourceManager:
                 # Record metrics if enabled. For allowlisted peers we still
                 # record allowed connections so metrics reflect activity.
                 if self.metrics:
-                    self.metrics.allow_conn("inbound", use_fd=True)
+                    self.metrics.allow_conn(direction, use_fd=True)
 
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
@@ -352,12 +381,14 @@ class ResourceManager:
             else:
                 return _acquire()
         except CircuitBreakerError:
+            logger.debug("acquire_connection failed: CircuitBreakerError")
             return False
 
     def release_connection(
         self,
         peer_id: str = "",
         endpoint_ip: str | None = None,
+        direction: str = "inbound",
     ) -> None:
         """Release a connection resource"""
         with self._lock:
@@ -365,7 +396,7 @@ class ResourceManager:
                 self._current_connections -= 1
 
                 if self.metrics:
-                    self.metrics.remove_conn("inbound", use_fd=True)
+                    self.metrics.remove_conn(direction, use_fd=True)
 
                 # Release CIDR slot if in use
                 if self.cidr_limiter is not None:
@@ -373,6 +404,10 @@ class ResourceManager:
                         self.cidr_limiter.release(endpoint_ip)
                     except Exception:
                         pass
+
+                # Attempt to recover degraded limits when resources free up
+                if self.graceful_degradation:
+                    self.graceful_degradation.recover()
 
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
@@ -460,6 +495,10 @@ class ResourceManager:
             # Update Prometheus metrics
             self._update_prometheus_metrics()
 
+            # Recover gracefully degraded limits if resources are freed
+            if self.graceful_degradation:
+                self.graceful_degradation.recover()
+
     # ---------------------------
     # Stream resources (global)
     # ---------------------------
@@ -526,6 +565,10 @@ class ResourceManager:
 
                 # Update Prometheus metrics
                 self._update_prometheus_metrics()
+
+                # Recover gracefully degraded limits if resources are freed
+                if self.graceful_degradation:
+                    self.graceful_degradation.recover()
 
     # ---------------------------
     # Hierarchical scoped stream limits
@@ -731,13 +774,16 @@ class ResourceManager:
         self,
         peer_id: Any | None = None,
         endpoint_ip: str | None = None,
+        direction: str = "inbound",
     ) -> ConnectionScope | None:
         """
         Open a connection resource for the given peer and return a
         scope object for tracking/cleanup.
         """
         peer_id_str = str(peer_id) if peer_id is not None else ""
-        acquired = self.acquire_connection(peer_id_str, endpoint_ip=endpoint_ip)
+        acquired = self.acquire_connection(
+            peer_id_str, endpoint_ip=endpoint_ip, direction=direction
+        )
         if acquired:
             # Extend scope to remember endpoint for release
             scope = ConnectionScope(peer_id_str, self)
@@ -746,8 +792,12 @@ class ResourceManager:
             # Preserve endpoint on scope for release, then override close()
 
             def _close_with_endpoint() -> None:
+                if scope.closed:
+                    return
                 ep = getattr(scope, "_endpoint_ip", None)
-                self.release_connection(peer_id_str, endpoint_ip=ep)
+                self.release_connection(
+                    peer_id_str, endpoint_ip=ep, direction=direction
+                )
                 scope.closed = True
 
             scope.close = _close_with_endpoint  # type: ignore[assignment]

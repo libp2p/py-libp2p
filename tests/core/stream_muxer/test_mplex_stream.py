@@ -88,7 +88,7 @@ async def test_mplex_stream_read_after_remote_closed(mplex_stream_pair):
     await wait_all_tasks_blocked()
     await stream_0.close()
     assert stream_0.event_local_closed.is_set()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
     await wait_all_tasks_blocked()
     assert stream_1.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
@@ -123,7 +123,8 @@ async def test_mplex_stream_read_after_remote_closed_and_reset(mplex_stream_pair
     await stream_0.close()
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
 
@@ -167,7 +168,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close one side.
     await stream_0.close()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     assert stream_0.event_local_closed.is_set()
     assert not stream_1.event_local_closed.is_set()
@@ -197,7 +199,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 async def test_mplex_stream_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.reset()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
 
 logger = logging.getLogger("libp2p.network.auto_connector")
+logger.setLevel(logging.INFO)
 
 
 class AutoConnector:
@@ -56,7 +57,9 @@ class AutoConnector:
         self._started = False
         self._shutdown_event = trio.Event()
         self._last_connect_attempt: dict[ID, float] = {}
-        self._connect_cooldown = 60.0  # Don't retry a peer for 60 seconds
+        self._failure_counts: dict[ID, int] = {}
+        self._base_cooldown = 300.0  # base retry interval (seconds)
+        self._max_cooldown = 3600.0  # cap at 1 hour for persistent failures
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -111,9 +114,12 @@ class AutoConnector:
         low_watermark = self.swarm.connection_config.low_watermark
         min_connections = self.swarm.connection_config.min_connections
 
-        logger.debug(
-            f"AutoConnector: {num_connections} connections, "
-            f"low_watermark={low_watermark}, min_connections={min_connections}"
+        logger.info(
+            "AUTO_CONNECTOR_STATE: num_connections=%s, "
+            "low_watermark=%s, min_connections=%s",
+            num_connections,
+            low_watermark,
+            min_connections,
         )
 
         # Only connect if below low watermark
@@ -128,8 +134,11 @@ class AutoConnector:
             return
 
         logger.info(
-            f"Connection count ({num_connections}) below low watermark "
-            f"({low_watermark}), trying to connect to {needed} more peers"
+            "the connection (%s) is less the low limit (%s) "
+            "so connection manager is initiating %s number of new connections",
+            num_connections,
+            low_watermark,
+            needed,
         )
 
         # Get candidate peers from peerstore
@@ -143,35 +152,61 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        connected = 0
-        for peer_id in candidates:
-            if connected >= needed:
-                break
+        # We need to limit concurrency to avoid OS "Too many open files" errors
+        # (Kubo default is 160 concurrent outbound dials)
+        dial_limiter = trio.CapacityLimiter(160)
 
-            if self._should_skip_peer(peer_id):
-                continue
+        async def _dial_candidate(peer_id: ID) -> None:
+            async with dial_limiter:
+                connected = False
+                try:
+                    logger.debug(f"Auto-connecting to peer {peer_id}")
+                    with trio.move_on_after(
+                        self.swarm.connection_config.dial_timeout
+                    ) as cancel_scope:
+                        await self.swarm.dial_peer(peer_id)
+                        connected = True  # only set if dial completes before timeout
+                    if cancel_scope.cancelled_caught:
+                        # Dial timed out — treat as failure, apply backoff
+                        logger.debug(f"Dial to {peer_id} timed out")
+                        self._failure_counts[peer_id] = (
+                            self._failure_counts.get(peer_id, 0) + 1
+                        )
+                        self._last_connect_attempt[peer_id] = time.time()
+                    elif connected:
+                        logger.info(f"Auto-connected to peer {peer_id}")
+                        # Success — clear cooldown so peer is immediately
+                        # re-dialable if it disconnects later
+                        self._last_connect_attempt.pop(peer_id, None)
+                        self._failure_counts.pop(peer_id, None)
+                except Exception as e:
+                    logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
+                    self._failure_counts[peer_id] = (
+                        self._failure_counts.get(peer_id, 0) + 1
+                    )
+                    self._last_connect_attempt[peer_id] = time.time()
 
-            try:
-                # Mark that we're attempting to connect
-                self._last_connect_attempt[peer_id] = time.time()
+        try:
+            async with trio.open_nursery() as dial_nursery:
+                dialed = 0
+                # We overdial (needed * 2) because in a P2P network, most dials will
+                # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
+                dial_target = needed * 2
 
-                # Get addresses for the peer
-                addrs = self.swarm.peerstore.addrs(peer_id)
-                if not addrs:
-                    logger.debug(f"No addresses for peer {peer_id}")
-                    continue
+                for peer_id in candidates:
+                    if dialed >= dial_target:
+                        break
 
-                # Try to connect
-                logger.debug(f"Auto-connecting to peer {peer_id}")
-                await self.swarm.dial_peer(peer_id)
-                connected += 1
-                logger.info(f"Auto-connected to peer {peer_id}")
+                    if self._should_skip_peer(peer_id):
+                        continue
 
-            except Exception as e:
-                logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
+                    dial_nursery.start_soon(_dial_candidate, peer_id)
+                    dialed += 1
+        except Exception as e:
+            logger.error(f"Error in auto_connect dial nursery: {e}")
 
-        if connected > 0:
-            logger.info(f"Auto-connected to {connected} new peers")
+        if dialed > 0:
+            logger.info(f"Auto-connected to {dialed} new peers")
 
     async def _get_candidate_peers(self) -> list[ID]:
         """
@@ -213,11 +248,34 @@ class AutoConnector:
 
         return candidates
 
+    def _get_cooldown(self, peer_id: ID) -> float:
+        """
+        Calculate exponential backoff cooldown for a peer.
+
+        Returns base_cooldown * 2^(failures-1), capped at max_cooldown.
+        First failure: 300s, second: 600s, third: 1200s … cap: 3600s.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to calculate cooldown for
+
+        Returns
+        -------
+        float
+            Cooldown duration in seconds
+
+        """
+        n = self._failure_counts.get(peer_id, 0)
+        if n <= 0:
+            return self._base_cooldown
+        return min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+
     def _should_skip_peer(self, peer_id: ID) -> bool:
         """
         Check if we should skip connecting to a peer.
 
-        Skips peers that we recently tried to connect to (cooldown).
+        Skips peers that we recently tried to connect to (exponential backoff).
 
         Parameters
         ----------
@@ -232,7 +290,7 @@ class AutoConnector:
         """
         last_attempt = self._last_connect_attempt.get(peer_id)
         if last_attempt is not None:
-            if time.time() - last_attempt < self._connect_cooldown:
+            if time.time() - last_attempt < self._get_cooldown(peer_id):
                 return True
 
         return False
@@ -250,6 +308,7 @@ class AutoConnector:
 
         """
         self._last_connect_attempt.pop(peer_id, None)
+        self._failure_counts.pop(peer_id, None)
 
     def record_failed_connection(self, peer_id: ID) -> None:
         """
@@ -263,6 +322,7 @@ class AutoConnector:
             The peer we failed to connect to
 
         """
+        self._failure_counts[peer_id] = self._failure_counts.get(peer_id, 0) + 1
         self._last_connect_attempt[peer_id] = time.time()
 
     def clear_cooldown(self, peer_id: ID) -> None:
@@ -276,7 +336,9 @@ class AutoConnector:
 
         """
         self._last_connect_attempt.pop(peer_id, None)
+        self._failure_counts.pop(peer_id, None)
 
     def clear_all_cooldowns(self) -> None:
-        """Clear all peer cooldowns."""
+        """Clear all peer cooldowns and failure counts."""
         self._last_connect_attempt.clear()
+        self._failure_counts.clear()
