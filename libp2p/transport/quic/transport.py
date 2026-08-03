@@ -13,7 +13,6 @@ from aioquic.quic.configuration import (
 from aioquic.quic.connection import (
     QuicConnection as NativeQUICConnection,
 )
-from aioquic.quic.logger import QuicLogger
 import multiaddr
 import trio
 
@@ -275,8 +274,12 @@ class QUICTransport(ITransport):
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
+            import copy
+
+            config = copy.copy(config)
             config.is_client = True
-            config.quic_logger = QuicLogger()
+            # Remove quic_logger to prevent
+            # "QuicLoggerTrace does not belong to QuicLogger" crash
 
             # Ensure client certificate is properly set for mutual authentication
             if not config.certificate or not config.private_key:
@@ -285,6 +288,8 @@ class QUICTransport(ITransport):
                 )
                 client_tls_config = self._security_manager.create_client_config()
                 self._apply_tls_configuration(config, client_tls_config)
+
+            config.is_client = True
 
             # Debug log to verify certificate is present
             logger.info(

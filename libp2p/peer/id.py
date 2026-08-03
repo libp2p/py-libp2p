@@ -180,7 +180,7 @@ class ID:
             return NotImplemented
 
     def __hash__(self) -> int:
-        return hash(self._bytes)
+        return hash(self.to_base58())
 
     @classmethod
     def from_base58(cls, b58_encoded_peer_id_str: str) -> "ID":

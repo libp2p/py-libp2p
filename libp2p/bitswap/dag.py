@@ -54,6 +54,7 @@ from .dag_pb import (
     is_file_node,
 )
 from .errors import BlockNotFoundError
+from .session import BitswapSession
 
 logger = logging.getLogger(__name__)
 
@@ -174,22 +175,26 @@ class MerkleDag:
     async def _get_block(
         self,
         cid: CIDInput,
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
     ) -> bytes:
         """Fetch a block. Routes through BlockService when available."""
         if self._service is not None:
-            data = await self._service.get_block(cid, peer_id=peer_id, timeout=timeout)
+            data = await self._service.get_block(
+                cid, session, peer_id=peer_id, timeout=timeout
+            )
             if data is None:
                 raise BlockNotFoundError(
                     f"Block not found: {format_cid_for_display(cid_to_bytes(cid))}"
                 )
             return data
-        return await self.bitswap.get_block(cid, peer_id, timeout)
+        return await session.get_block(cid, peer_id, timeout)
 
     async def _get_blocks_batch(
         self,
         cids: list[CIDInput],
+        session: BitswapSession,
         peer_id: PeerID | None = None,
         timeout: float = 30.0,
         batch_size: int = 32,
@@ -197,9 +202,9 @@ class MerkleDag:
         """Batch-fetch blocks. Routes through BlockService when available."""
         if self._service is not None:
             return await self._service.get_blocks_batch(
-                cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
+                cids, session, peer_id=peer_id, timeout=timeout, batch_size=batch_size
             )
-        return await self.bitswap.get_blocks_batch(
+        return await session.get_blocks_batch(
             cids, peer_id=peer_id, timeout=timeout, batch_size=batch_size
         )
 
@@ -455,7 +460,18 @@ class MerkleDag:
                 )
 
         # Build balanced DAG tree
-        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
+        internal_nodes: list[tuple[bytes, bytes]] = []
+
+        def store_internal_node(cid: bytes, data: bytes) -> None:
+            internal_nodes.append((cid, data))
+
+        root_cid, root_data, _tsize = balanced_layout(
+            leaf_triples, put_block_callback=store_internal_node
+        )
+
+        # Store all internal nodes
+        for cid, data in internal_nodes:
+            await self._put_block(cid, data)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:
@@ -542,7 +558,18 @@ class MerkleDag:
             return leaf_triples[0][0]
 
         # Multiple chunks — build balanced DAG tree
-        root_cid, root_data, _tsize = balanced_layout(leaf_triples)
+        internal_nodes: list[tuple[bytes, bytes]] = []
+
+        def store_internal_node(cid: bytes, data: bytes) -> None:
+            internal_nodes.append((cid, data))
+
+        root_cid, root_data, _tsize = balanced_layout(
+            leaf_triples, put_block_callback=store_internal_node
+        )
+
+        # Store all internal nodes
+        for cid, data in internal_nodes:
+            await self._put_block(cid, data)
         await self._put_block(root_cid, root_data)
 
         if progress_callback:
@@ -604,11 +631,12 @@ class MerkleDag:
             ... )
 
         """
+        session = self.bitswap.new_session()
         root_cid_bytes = cid_to_bytes(root_cid)
         logger.info(f"Fetching file: {format_cid_for_display(root_cid_bytes)}")
 
         # Step 1: Fetch the root block
-        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
         if not verify_cid(root_cid_bytes, root_data):
             root_cid_str = format_cid_for_display(root_cid_bytes)
             raise ValueError(f"Root block CID verification failed: {root_cid_str}")
@@ -629,7 +657,7 @@ class MerkleDag:
                 actual_file_cid = first_link.cid
                 logger.info(f"Filename from directory: {filename!r}")
                 actual_file_data = await self._get_block(
-                    actual_file_cid, peer_id, timeout
+                    actual_file_cid, session, peer_id, timeout
                 )
                 if not verify_cid(actual_file_cid, actual_file_data):
                     f_cid_str = format_cid_for_display(actual_file_cid)
@@ -644,7 +672,7 @@ class MerkleDag:
         # Step 4: Parse the file node
         top_links, top_unixfs = decode_dag_pb(actual_file_data)
         filesize = top_unixfs.filesize if top_unixfs else 0
-        total_size = filesize or sum(lnk.size for lnk in top_links)
+        total_size = filesize if filesize else sum(lnk.size for lnk in top_links)
         msg = f"File node: {len(top_links)} top-level links, total size={total_size}"
         logger.info(f"{msg} bytes")
 
@@ -681,7 +709,7 @@ class MerkleDag:
 
             # Batch-fetch this level's blocks
             level_blocks = await self._get_blocks_batch(
-                list(cid_list), peer_id=peer_id, timeout=timeout, batch_size=32
+                list(cid_list), session, peer_id=peer_id, timeout=timeout, batch_size=32
             )
             logger.info(f"[DAG] Depth {depth}: ✓ received {len(level_blocks)} blocks")
             all_blocks_map.update(level_blocks)
@@ -791,7 +819,7 @@ class MerkleDag:
         if missing_cids:
             logger.info(f"[DAG] Fetching {len(missing_cids)} missing leaves")
             fetched_blocks = await self._get_blocks_batch(
-                missing_cids, peer_id=peer_id, timeout=timeout, batch_size=32
+                missing_cids, session, peer_id=peer_id, timeout=timeout, batch_size=32
             )
             block_map.update(fetched_blocks)
 
@@ -881,9 +909,10 @@ class MerkleDag:
             >>> print(f"Chunks: {info['chunks']}")
 
         """
+        session = self.bitswap.new_session()
         # Get root block
         root_cid_bytes = cid_to_bytes(root_cid)
-        root_data = await self._get_block(root_cid_bytes, peer_id, timeout)
+        root_data = await self._get_block(root_cid_bytes, session, peer_id, timeout)
 
         # Check if it's a DAG-PB file node
         if is_file_node(root_data):
@@ -928,12 +957,13 @@ class MerkleDag:
 
     async def get_node(self, cid: CIDInput, peer_id: PeerID | None = None) -> Any:
         """Fetches a CID and decodes the block back into a structured node."""
+        session = self.bitswap.new_session()
         cid_bytes = cid_to_bytes(cid)
         # Try to get the block
         data = None
         if self._service is not None:
             data = await self._service.get_block(
-                cid_bytes, peer_id=peer_id, timeout=30.0
+                cid_bytes, session, peer_id=peer_id, timeout=30.0
             )
         else:
             try:
@@ -943,7 +973,7 @@ class MerkleDag:
                 pass
 
             if data is None:
-                data = await self.bitswap.get_block(cid_bytes, peer_id)
+                data = await session.get_block(cid_bytes, peer_id)
 
         if data is None:
             raise BlockNotFoundError(cid_bytes)
@@ -952,8 +982,24 @@ class MerkleDag:
         return decode_node(data, codec)
 
     async def remove_node(self, cid: CIDInput) -> None:
-        """Deletes a node from the local blockstore only."""
+        """Deletes a node and all its children from the local blockstore."""
         cid_bytes = cid_to_bytes(cid)
+
+        # Try to decode as DAG-PB to find child links
+        try:
+            block_data = await self.block_store.get_block(cid_bytes)
+            if block_data is None:
+                raise BlockNotFoundError(cid_bytes)
+            links, _ = decode_dag_pb(block_data)
+            # Recursively delete children
+            for link in links:
+                try:
+                    await self.remove_node(link.cid)
+                except Exception:
+                    pass  # Best-effort child deletion
+        except Exception:
+            pass  # Not a DAG node or not found — just delete root
+
         await self.block_store.delete_block(cid_bytes)
 
 

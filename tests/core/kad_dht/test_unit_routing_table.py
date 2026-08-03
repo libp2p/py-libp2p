@@ -209,19 +209,30 @@ class TestKBucket:
 
     @pytest.mark.trio
     async def test_ping_peer_scenarios(self, mock_host, sample_peer_info):
-        """Test different ping scenarios."""
+        """Test different ping scenarios using libp2p ping protocol."""
         bucket = KBucket(mock_host)
         bucket.peers[sample_peer_info.peer_id] = (sample_peer_info, time.time())
 
-        # Test ping peer not in bucket
+        # Test ping peer not in bucket — returns False on failure
         other_peer_id = create_valid_peer_id("other")
-        with pytest.raises(ValueError, match="Peer .* not in bucket"):
-            await bucket._ping_peer(other_peer_id)
-
-        # Test ping failure due to stream error
-        mock_host.new_stream.side_effect = Exception("Stream failed")
-        result = await bucket._ping_peer(sample_peer_info.peer_id)
+        result = await bucket._ping_peer(other_peer_id)
         assert result is False
+
+        # Test ping failure — PingService.ping raises exception
+        with patch(
+            "libp2p.host.ping.PingService.ping",
+            new_callable=lambda: AsyncMock(side_effect=Exception("Connection refused")),
+        ):
+            result = await bucket._ping_peer(sample_peer_info.peer_id)
+            assert result is False
+
+        # Test successful ping
+        with patch(
+            "libp2p.host.ping.PingService.ping",
+            new_callable=lambda: AsyncMock(return_value=[42]),
+        ):
+            result = await bucket._ping_peer(sample_peer_info.peer_id)
+            assert result is True
 
 
 class TestRoutingTable:

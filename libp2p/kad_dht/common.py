@@ -7,7 +7,7 @@ from libp2p.custom_types import (
 )
 
 # Constants for the Kademlia algorithm
-ALPHA = 3  # Concurrency parameter
+ALPHA = 10  # Concurrency parameter (per libp2p Kademlia spec)
 PROTOCOL_ID = TProtocol("/ipfs/kad/1.0.0")
 PROTOCOL_PREFIX = TProtocol("/ipfs")
 QUERY_TIMEOUT = 10
