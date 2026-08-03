@@ -5,7 +5,6 @@ Uses zeroconf for mDNS broadcast/listen. Async operations use trio.
 """
 
 import logging
-from typing import Any
 
 import trio
 from zeroconf import (
@@ -147,8 +146,10 @@ def create_mdns_discovery(
     listen_addrs: list[str] | None = None,
     private_network_fingerprint: str | None = None,
     ttl: int = 120,
+    retry_attempts: int = 3,
+    retry_base_delay: float = 1.0,
+    cleanup_interval: int = 60,
     host: IHost | None = None,
-    **kwargs: Any,
 ) -> MDNSDiscovery:
     """
     Factory function to create MDNSDiscovery with common options.
@@ -157,10 +158,12 @@ def create_mdns_discovery(
         swarm: The network service
         port: Port to advertise
         listen_addrs: List of multiaddrs to advertise
-        private_network_fingerprint: If set, uses _p2p-<fp>._udp.local
+        private_network_fingerprint: If set, uses private network service name
         ttl: TTL for discovered peer addresses (seconds)
+        retry_attempts: Number of retry attempts for service info lookup
+        retry_base_delay: Base delay between retries in seconds
+        cleanup_interval: Interval between stale entry cleanup runs
         host: The host instance for getting transport addresses
-        **kwargs: Additional options passed to MDNSDiscovery
 
     Returns:
         Configured MDNSDiscovery instance
@@ -168,7 +171,6 @@ def create_mdns_discovery(
     """
     service_type = SERVICE_TYPE
     if private_network_fingerprint:
-        # Private network: _p2p-<fingerprint>._udp.local
         service_type = f"_p2p-{private_network_fingerprint}._udp.local."
 
     return MDNSDiscovery(
@@ -177,6 +179,8 @@ def create_mdns_discovery(
         listen_addrs=listen_addrs,
         service_type=service_type,
         ttl=ttl,
+        retry_attempts=retry_attempts,
+        retry_base_delay=retry_base_delay,
+        cleanup_interval=cleanup_interval,
         host=host,
-        **kwargs,
     )
