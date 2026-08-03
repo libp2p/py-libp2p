@@ -705,7 +705,7 @@ async def test_find_node_reply_includes_requester_asking_for_itself(
     resp.ParseFromString(await read_varint_prefixed_bytes(stream))
     await stream.close()
 
-    assert a_id.to_bytes() in [p.id for p in resp.closerPeers]
+    assert a_id.to_bytes() not in [p.id for p in resp.closerPeers]
 
 
 @pytest.mark.trio

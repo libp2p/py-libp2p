@@ -5,7 +5,6 @@ QUIC Listener
 import logging
 import socket
 import struct
-import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -42,11 +41,7 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+# Library should not call basicConfig
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -1444,7 +1439,7 @@ class QUICListener(IListener):
                 await self._remove_connection(connection_connection_id)
                 logger.debug(f"Removed connection {connection_connection_id.hex()}")
             else:
-                logger.warning("Connection object not found in tracking")
+                logger.debug("Connection object not found in tracking")
 
         except Exception as e:
             logger.error(f"Error removing connection by object: {e}")
