@@ -115,6 +115,21 @@ class PeerRouting(IPeerRouting):
                     except Exception:
                         pass
 
+            # Re-check the peerstore after the network lookup. During the
+            # iterative lookup, the target peer's signed record may have
+            # been discovered and added to the peerstore (via
+            # maybe_consume_signed_record) even if it wasn't in the top
+            # 'count' closest peers. go-libp2p does the same.
+            try:
+                addrs = self.host.get_peerstore().addrs(peer_id)
+                if addrs:
+                    logger.debug(
+                        f"Found peer {peer_id} in peerstore after network lookup"
+                    )
+                    return PeerInfo(peer_id, addrs)
+            except Exception:
+                pass
+
         except Exception as e:
             logger.error(f"Error searching for peer {peer_id}: {e}")
 
@@ -338,8 +353,10 @@ class PeerRouting(IPeerRouting):
                 await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
 
-                # Read varint-prefixed response length
+                # Read varint-prefixed response length with max byte limit
+
                 length_bytes = b""
+                max_varint_bytes = 10
                 while True:
                     b = await stream.read(1)
                     if not b:
@@ -350,6 +367,11 @@ class PeerRouting(IPeerRouting):
                     length_bytes += b
                     if b[0] & 0x80 == 0:
                         break
+                    if len(length_bytes) >= max_varint_bytes:
+                        logger.warning(
+                            "Varint length exceeds maximum bytes, ignoring response"
+                        )
+                        return []
                 response_length = varint.decode_bytes(length_bytes)
 
                 # Read response data

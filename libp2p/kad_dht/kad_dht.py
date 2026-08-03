@@ -651,8 +651,8 @@ class KadDHT(Service):
                         key = message.key
                         logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
-                        # Per spec: check key length (empty key is invalid)
-                        if len(key) == 0:
+                        # Per spec: check key length (len > 80 or == 0)
+                        if len(key) > 80 or len(key) == 0:
                             logger.warning(
                                 f"ADD_PROVIDER key length invalid: {len(key)}, ignoring"
                             )

@@ -379,8 +379,10 @@ class ProviderStore:
                 await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
 
-                # Read response length prefix
+                # Read response length prefix with max byte limit
+
                 length_bytes = b""
+                max_varint_bytes = 10
                 while True:
                     b = await stream.read(1)
                     if not b:
@@ -388,6 +390,11 @@ class ProviderStore:
                     length_bytes += b
                     if b[0] & 0x80 == 0:
                         break
+                    if len(length_bytes) >= max_varint_bytes:
+                        logger.warning(
+                            "Varint length exceeds maximum bytes, ignoring response"
+                        )
+                        return []
 
                 response_length = varint.decode_bytes(length_bytes)
                 # Read response data

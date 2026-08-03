@@ -169,9 +169,10 @@ class ValueStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug("Sent PUT_VALUE protobuf message with varint length")
-            # Read varint-prefixed response length
+            # Read varint-prefixed response length with max byte limit
 
             length_bytes = b""
+            max_varint_bytes = 10
             while True:
                 logger.debug("Reading varint length prefix for response...")
                 b = await stream.read(1)
@@ -181,6 +182,11 @@ class ValueStore:
                 length_bytes += b
                 if b[0] & 0x80 == 0:
                     break
+                if len(length_bytes) >= max_varint_bytes:
+                    logger.warning(
+                        "Varint length exceeds maximum bytes, ignoring response"
+                    )
+                    return False
             logger.debug(f"Received varint length bytes: {length_bytes.hex()}")
             response_length = varint.decode_bytes(length_bytes)
             logger.debug("Response length: %d bytes", response_length)
@@ -312,8 +318,9 @@ class ValueStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
 
-            # Read response length
+            # Read varint-prefixed response length with max byte limit
             length_bytes = b""
+            max_varint_bytes = 10  # varint max is 10 bytes for uint64
             while True:
                 b = await stream.read(1)
                 if not b:
@@ -322,6 +329,12 @@ class ValueStore:
                 length_bytes += b
                 if b[0] & 0x80 == 0:
                     break
+                if len(length_bytes) >= max_varint_bytes:
+                    logger.warning(
+                        "Varint length exceeds maximum bytes "
+                        f"({max_varint_bytes}), ignoring response"
+                    )
+                    return None
             response_length = varint.decode_bytes(length_bytes)
             # Read response data
             response_bytes = b""
