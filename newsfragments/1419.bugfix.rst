@@ -1,0 +1,2 @@
+mDNS peer discovery now uses spec-compliant ``dnsaddr`` TXT records, supports IPv4 and IPv6, filters unsuitable addresses (circuit relay, browser transports), and resolves the ``remove_service`` ``KeyError`` crash.
+
