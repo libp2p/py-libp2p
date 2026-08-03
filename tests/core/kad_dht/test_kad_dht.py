@@ -410,6 +410,7 @@ async def test_provide_and_find_providers(dht_pair: tuple[KadDHT, KadDHT]):
 
     # Generate a valid CID from the content for the provide/find_providers API
     from libp2p.bitswap.cid import compute_cid_v1_obj
+
     content_cid = compute_cid_v1_obj(content)
     content_cid_str = str(content_cid)
 

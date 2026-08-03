@@ -376,7 +376,7 @@ class RoutingTable:
         self.local_id = local_id
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
-        self._rt_refresh_nursery = None
+        self._rt_refresh_nursery: trio.Nursery | None = None
 
     async def add_peer(
         self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
