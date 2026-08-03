@@ -8,6 +8,8 @@ from zeroconf import (
     Zeroconf,
 )
 
+import multiaddr.exceptions
+
 from libp2p.abc import IPeerStore, Multiaddr
 from libp2p.discovery.events.peerDiscovery import peerDiscovery
 from libp2p.peer.id import ID
@@ -76,7 +78,8 @@ class PeerListener(ServiceListener):
                 return None
             pid = ID.from_string(pid_bytes.decode())
             return PeerInfo(peer_id=pid, addrs=addrs)
-        except Exception:
+        except (ValueError, socket.error, multiaddr.exceptions.EncodeError) as e:
+            logger.warning(f"Failed to extract peer info from mDNS service info: {e}")
             return None
 
     def stop(self) -> None:
