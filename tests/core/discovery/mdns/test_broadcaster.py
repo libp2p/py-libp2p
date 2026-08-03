@@ -61,8 +61,9 @@ class TestPeerBroadcaster:
         assert service_info.type == service_type
         assert service_info.name == service_name
         assert service_info.port == port
-        assert b"id" in service_info.properties
-        assert service_info.properties[b"id"] == peer_id.encode()
+        assert b"dnsaddr" in service_info.properties
+        dnsaddr = service_info.properties[b"dnsaddr"].decode()
+        assert f"/p2p/{peer_id}" in dnsaddr
 
         # Clean up
         zeroconf.close()

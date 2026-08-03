@@ -52,7 +52,7 @@ class TestMDNSDiscovery:
             assert "host1._p2p._udp.local." in host2_listener.discovered_services
 
             # Verify that host1's peer info was added to host2's peerstore
-            discovered_peer_id = host2_listener.discovered_services[
+            discovered_peer_id, _ = host2_listener.discovered_services[
                 "host1._p2p._udp.local."
             ]
             assert str(discovered_peer_id) == host1_peer_id
