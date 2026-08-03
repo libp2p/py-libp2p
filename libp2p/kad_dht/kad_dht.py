@@ -375,6 +375,9 @@ class KadDHT(Service):
                 await self.provider_store._republish_provider_records()
                 self._last_provider_republish = current_time
 
+                # Republish locally-stored value records
+                await self.value_store._republish_records(self.peer_routing)
+
                 # Clean up expired values and provider records
                 expired_values = self.value_store.cleanup_expired()
                 if expired_values > 0:
@@ -1176,6 +1179,18 @@ class KadDHT(Service):
                                 self.value_store.put_record(key, cleaned_record)
                                 logger.debug(f"Stored value for key {key.hex()}")
                                 success = True
+
+                            # Per spec: Sliding window PUT_VALUE propagation
+                            # When a value is stored, propagate it to the k
+                            # closest peers (entry correction)
+                            if success:
+                                try:
+                                    await self._propagate_to_closest_peers(
+                                        key, value, cleaned_record
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Failed to propagate value: {e}")
+
                         except Exception as e:
                             logger.warning(
                                 f"Failed to store value {value.hex()} for key "
@@ -1576,6 +1591,44 @@ class KadDHT(Service):
         # 5. Not found
         logger.warning(f"Value not found for key {key}")
         return None
+
+    async def _propagate_to_closest_peers(
+        self, key: bytes, value: bytes, record: Record
+    ) -> None:
+        """
+        Propagate a value to the k closest peers (sliding window PUT_VALUE).
+
+        Per spec: when a value is stored, it should be propagated to ensure
+        availability. This implements entry correction for PUT_VALUE.
+
+        :param key: The key being stored
+        :param value: The value being stored
+        :param record: The signed record to propagate
+        """
+        # Find k closest peers to the key
+        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+
+        # Propagate to k closest peers in batches of ALPHA
+        for i in range(0, len(closest_peers), ALPHA):
+            batch = closest_peers[i : i + ALPHA]
+            if not batch:
+                break
+
+            async def store_at_peer(peer_id: ID) -> None:
+                if peer_id == self.local_peer_id:
+                    return
+                try:
+                    with trio.move_on_after(QUERY_TIMEOUT):
+                        await self.value_store._store_at_peer(
+                            peer_id, key, value, record=record
+                        )
+                        logger.debug(f"Propagated value to peer {peer_id}")
+                except Exception as e:
+                    logger.debug(f"Failed to propagate to peer {peer_id}: {e}")
+
+            async with trio.open_nursery() as nursery:
+                for peer_id in batch:
+                    nursery.start_soon(store_at_peer, peer_id)
 
     # Add these methods in the Utility methods section
 

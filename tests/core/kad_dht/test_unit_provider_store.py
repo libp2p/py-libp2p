@@ -620,12 +620,15 @@ class TestProviderStore:
         closest_peers = [ID.from_base58("QmPeer1")]
         mock_peer_routing.find_closest_peers_network.return_value = closest_peers
 
-        # Mock provider response
+        # Mock provider response (async method returns tuple of providers, closer_peers)
         remote_peer_id = ID.from_base58("QmRemote123")
         remote_providers = [PeerInfo(remote_peer_id, [])]
 
         with patch.object(
-            store, "_get_providers_from_peer", return_value=remote_providers
+            store,
+            "_get_providers_from_peer_with_closers",
+            new_callable=AsyncMock,
+            return_value=(remote_providers, []),
         ):
             key = b"test_key"
             result = await store.find_providers(key)

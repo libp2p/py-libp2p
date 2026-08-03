@@ -6,6 +6,7 @@ Provides a way to store and retrieve key-value pairs with optional expiration.
 
 import logging
 import time
+from typing import Any
 
 import varint
 
@@ -54,6 +55,10 @@ class ValueStore:
         # Store references to the host and local peer ID for making requests
         self.host = host
         self.local_peer_id = local_peer_id
+        # Track keys that were locally put (for republishing)
+        self.local_keys: set[bytes] = set()
+        # Track when each key was last republished
+        self._last_republish: dict[bytes, float] = {}
 
     def _evict_if_full(self) -> None:
         """Evict the oldest entry if the store exceeds max size."""
@@ -110,6 +115,8 @@ class ValueStore:
         self._evict_if_full()
 
         self.store[key] = (record, validity)
+        # Track as locally put for republishing
+        self.local_keys.add(key)
         logger.debug(f"Stored value for key {key.hex()}")
 
     def put_record(self, key: bytes, record: Record) -> None:
@@ -127,6 +134,59 @@ class ValueStore:
         # Evict oldest entry if store is full
         self._evict_if_full()
         self.store[key] = (record, validity)
+
+    async def _republish_records(self, peer_routing: Any = None) -> None:
+        """
+        Republish locally-stored records to the k closest peers.
+
+        Per spec: records should be periodically republished to ensure
+        they remain available in the network.
+
+        :param peer_routing: PeerRouting instance for finding closest peers
+        """
+        from .common import BUCKET_SIZE
+
+        current_time = time.time()
+        # Republish interval: 22 hours (same as provider records)
+        REPUBLISH_INTERVAL = 22 * 60 * 60
+
+        # Snapshot to avoid mutation during iteration
+        local_keys_snapshot = list(self.local_keys)
+
+        for key in local_keys_snapshot:
+            # Skip if not in store (may have been evicted)
+            if key not in self.store:
+                self.local_keys.discard(key)
+                continue
+
+            # Check if republish is due
+            last_republished = self._last_republish.get(key, 0)
+            if (current_time - last_republished) < REPUBLISH_INTERVAL:
+                continue
+
+            record, _ = self.store[key]
+            logger.debug(f"Republishing record for key {key.hex()}")
+
+            # Find k closest peers and store the record at each
+            if peer_routing is None:
+                continue
+
+            try:
+                closest_peers = await peer_routing.find_closest_peers_network(key)
+                # Store at up to k closest peers
+                for peer_id in closest_peers[:BUCKET_SIZE]:
+                    if peer_id == self.local_peer_id:
+                        continue
+                    try:
+                        await self._store_at_peer(
+                            peer_id, key, record.value, record=record
+                        )
+                    except Exception as e:
+                        logger.debug(f"Failed to republish to {peer_id}: {e}")
+
+                self._last_republish[key] = current_time
+            except Exception as e:
+                logger.debug(f"Failed to republish record for key {key.hex()}: {e}")
 
     async def _store_at_peer(
         self, peer_id: ID, key: bytes, value: bytes, record: Record | None = None

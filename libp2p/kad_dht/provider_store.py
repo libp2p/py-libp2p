@@ -277,7 +277,17 @@ class ProviderStore:
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
-        Find content providers for a given key.
+        Find content providers for a given key using iterative lookup.
+
+        Per spec: "Getting the providers for a given key is done in the same
+        way as getting a value for a given key except that instead of using
+        the GET_VALUE RPC message the GET_PROVIDERS RPC message is used."
+
+        The algorithm:
+        1. Start with ALPHA closest peers to the key
+        2. Query them for providers
+        3. Process closer peers from responses and add to candidate set
+        4. Continue until we have enough providers or no more progress
 
         :param key: The content key to look for
         :param count: Maximum number of providers to return
@@ -299,38 +309,51 @@ class ProviderStore:
                 f"Found {len(local_providers)} providers locally for {key.hex()}"
             )
             return local_providers[:count]
-        logger.debug("local providers are %s", local_providers)
 
-        # Find the closest peers to the key
-        closest_peers = await self.peer_routing.find_closest_peers_network(key)
+        # Get initial closest peers
+        closest_peers = list(await self.peer_routing.find_closest_peers_network(key))
         logger.debug(
             f"Searching {len(closest_peers)} peers for providers of {key.hex()}"
         )
 
-        # Query these peers for providers in batches of ALPHA, in parallel, with timeout
-        all_providers = []
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
+        # Iterative provider lookup
+        all_providers: list[PeerInfo] = []
+        queried_peers: set[ID] = set()
+        candidate_peers = list(closest_peers)
+
+        while candidate_peers and len(all_providers) < count:
+            # Take ALPHA peers from candidates
+            batch = candidate_peers[:ALPHA]
+            candidate_peers = candidate_peers[ALPHA:]
+
+            # Query batch in parallel
             batch_results: list[list[PeerInfo]] = [[] for _ in batch]
+            batch_closer: list[list[ID]] = [[] for _ in batch]
 
             async def get_one(
                 idx: int,
                 peer_id: ID,
                 batch_results: list[list[PeerInfo]] = batch_results,
+                batch_closer: list[list[ID]] = batch_closer,
             ) -> None:
-                if peer_id == self.local_peer_id:
+                if peer_id == self.local_peer_id or peer_id in queried_peers:
                     return
+                queried_peers.add(peer_id)
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
-                        providers = await self._get_providers_from_peer(peer_id, key)
+                        (
+                            providers,
+                            closer_peers,
+                        ) = await self._get_providers_from_peer_with_closers(
+                            peer_id, key
+                        )
                         if providers:
                             for provider in providers:
                                 self.add_provider(key, provider)
                             batch_results[idx] = providers
-                        else:
-                            logger.debug(f"No providers found at peer {peer_id}")
+                        if closer_peers:
+                            batch_closer[idx] = closer_peers
                 except trio.Cancelled:
-                    # Re-raise Cancelled to allow proper cancellation propagation
                     logger.debug(f"Query for providers from {peer_id} cancelled")
                     raise
                 except Exception as e:
@@ -338,13 +361,38 @@ class ProviderStore:
 
             async with trio.open_nursery() as nursery:
                 for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(get_one, idx, peer_id, batch_results)
+                    nursery.start_soon(get_one, idx, peer_id)
 
+            # Collect results
             for providers in batch_results:
                 all_providers.extend(providers)
-                if len(all_providers) >= count:
-                    return all_providers[:count]
 
+            # Add closer peers to candidates for next iteration
+            for closer in batch_closer:
+                for peer in closer:
+                    if (
+                        peer not in queried_peers
+                        and peer not in candidate_peers
+                        and peer != self.local_peer_id
+                    ):
+                        candidate_peers.append(peer)
+
+            # Sort candidates by distance to key for next iteration
+            if candidate_peers:
+                from .utils import sort_peer_ids_by_distance
+
+                candidate_peers = sort_peer_ids_by_distance(key, candidate_peers)
+
+            # Check if we have enough providers
+            if len(all_providers) >= count:
+                break
+
+            # If no new providers found in this batch, stop
+            if not any(batch_results):
+                logger.debug("No providers found in batch, stopping search")
+                break
+
+        logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
         return all_providers[:count]
 
     async def _get_providers_from_peer(self, peer_id: ID, key: bytes) -> list[PeerInfo]:
@@ -460,6 +508,132 @@ class ProviderStore:
             return []
 
         return providers
+
+    async def _get_providers_from_peer_with_closers(
+        self, peer_id: ID, key: bytes
+    ) -> tuple[list[PeerInfo], list[ID]]:
+        """
+        Get content providers and closer peers from a specific peer.
+
+        Per spec, GET_PROVIDERS responses include closerPeers which should
+        be used for iterative lookup (same as value retrieval).
+
+        :param peer_id: The peer to query
+        :param key: The content key to look for
+
+        Returns
+        -------
+        Tuple[List[PeerInfo], List[ID]]
+            Tuple of (providers, closer_peers)
+
+        """
+        providers: list[PeerInfo] = []
+        closer_peers: list[ID] = []
+        try:
+            # Open a stream to the peer
+            stream = await self.host.new_stream(peer_id, [TProtocol(PROTOCOL_ID)])
+
+            try:
+                # Create the GET_PROVIDERS message
+                message = Message()
+                message.type = Message.MessageType.GET_PROVIDERS
+                message.key = key
+
+                # Create sender's signed-peer-record
+                envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                message.senderRecord = envelope_bytes
+
+                # Serialize and send the message
+                proto_bytes = message.SerializeToString()
+                await stream.write(varint.encode(len(proto_bytes)))
+                await stream.write(proto_bytes)
+
+                # Read response length prefix with max byte limit
+                length_bytes = b""
+                max_varint_bytes = 10
+                while True:
+                    b = await stream.read(1)
+                    if not b:
+                        return [], []
+                    length_bytes += b
+                    if b[0] & 0x80 == 0:
+                        break
+                    if len(length_bytes) >= max_varint_bytes:
+                        logger.warning(
+                            "Varint length exceeds maximum bytes, ignoring response"
+                        )
+                        return [], []
+
+                response_length = varint.decode_bytes(length_bytes)
+                # Read response data
+                response_bytes = b""
+                remaining = response_length
+                while remaining > 0:
+                    chunk = await stream.read(remaining)
+                    if not chunk:
+                        return [], []
+                    response_bytes += chunk
+                    remaining -= len(chunk)
+
+                # Parse response
+                response = Message()
+                response.ParseFromString(response_bytes)
+
+                # Check response type
+                if response.type != Message.MessageType.GET_PROVIDERS:
+                    return [], []
+
+                # Consume the sender's signed-peer-record if sent
+                if not maybe_consume_signed_record(response, self.host, peer_id):
+                    logger.error(
+                        "Received an invalid-signed-record, ignoring the response"
+                    )
+                    return [], []
+
+                # Extract provider information
+                for provider_proto in response.providerPeers:
+                    try:
+                        # Consume the provider's signed-peer-record
+                        if not maybe_consume_signed_record(provider_proto, self.host):
+                            logger.warning(
+                                "Received an invalid-signed-record, skipping provider"
+                            )
+                            continue
+
+                        # Create peer ID from bytes
+                        provider_id = ID(provider_proto.id)
+
+                        # Convert addresses to Multiaddr
+                        addrs = []
+                        for addr_bytes in provider_proto.addrs:
+                            try:
+                                addrs.append(Multiaddr(addr_bytes))
+                            except Exception:
+                                pass
+
+                        # Create PeerInfo and add to result
+                        providers.append(PeerInfo(provider_id, addrs))
+
+                    except Exception as e:
+                        logger.warning(f"Failed to parse provider info: {e}")
+
+                # Extract closer peers for iterative lookup
+                for peer_proto in response.closerPeers:
+                    try:
+                        closer_id = ID(peer_proto.id)
+                        if closer_id != self.local_peer_id:
+                            closer_peers.append(closer_id)
+                    except Exception:
+                        pass
+
+            finally:
+                await stream.close()
+
+        except Exception as e:
+            logger.warning(f"Error getting providers from {peer_id}: {e}")
+            return [], []
+
+        return providers, closer_peers
 
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """

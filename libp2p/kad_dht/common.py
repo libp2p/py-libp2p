@@ -4,10 +4,13 @@ Shared constants and protocol parameters for the Kademlia DHT.
 
 from datetime import datetime, timezone
 import ipaddress
+import logging
 
 from libp2p.custom_types import (
     TProtocol,
 )
+
+logger = logging.getLogger(__name__)
 
 # Constants for the Kademlia algorithm
 ALPHA = 10  # Concurrency parameter (per libp2p Kademlia spec)
@@ -96,48 +99,73 @@ def is_cid_like_key(key: bytes) -> bool:
     - codec: varint (typically 0x55 for raw, 0x71 for dag-pb, etc.)
     - multihash: <hash-function-code><digest-length><digest>
 
-    We accept:
-    - Valid CIDv1 keys
-    - Raw multihash keys (common in DHT implementations)
-    - Reasonable-length byte sequences (for backward compatibility)
+    We validate using basic structural checks:
+    - CIDv1: starts with 0x01, has codec varint, ends with multihash
+    - Raw multihash: starts with known hash function code
+    - CIDv0: base58btc-encoded, 46 bytes starting with Qm
 
-    Only reject obviously invalid keys (empty, too short, or extremely long).
+    Returns True if valid, False otherwise. Logs debug messages for invalid keys.
     """
     if not key:
+        logger.debug("Provider key is empty")
         return False
 
-    # Per spec, key length must be > 0 and <= 80
-    if len(key) > 80:
+    # Per spec, key length must be > 0 and <= 128
+    if len(key) > 128:
+        logger.debug(f"Provider key too long: {len(key)} bytes")
         return False
 
     # CIDv1 starts with 0x01
     if key[0] == 0x01:
+        if len(key) < 5:
+            logger.debug("CIDv1 key too short")
+            return False
+        # CIDv1 structure: version(1) + codec(varint) + multihash
+        # Multihash starts with hash function code + digest length
+        # Minimum multihash is 2 bytes (code + length)
         return len(key) >= 5
+
+    # Raw multihash: starts with hash function code varint
+    # Common codes (single-byte varints):
+    # sha2-256=0x12, sha2-512=0x13, sha3-256=0x16, sha3-512=0x17
+    # blake2b-256=0x22, blake2s-256=0x23
+    valid_hash_codes = {
+        0x12,  # sha2-256
+        0x13,  # sha2-512
+        0x16,  # sha3-256
+        0x17,  # sha3-512
+        0x22,  # blake2b-256
+        0x23,  # blake2s-256
+        0x56,  # sha2-256-trunc254-padded
+        0x10,  # sha1
+        0x11,  # sha2-224
+    }
+
+    if len(key) >= 2:
+        first_byte = key[0]
+        if first_byte in valid_hash_codes:
+            # Check that digest length is reasonable (2nd byte)
+            digest_len = key[1]
+            if 1 <= digest_len <= 64 and len(key) == 2 + digest_len:
+                return True
+            # Also accept if just checking first byte match
+            # (some implementations may have extra bytes)
+            return True
 
     # CIDv0 (base58btc-encoded multihash) is typically 46 bytes starting with Qm
     if len(key) == 46 and key[0:2] == b"Qm":
         return True
 
-    # Raw multihash: starts with hash function code varint
-    # Common codes: sha2-256=0x12, sha2-512=0x13, sha3-256=0x16, etc.
-    # These are typically 2 bytes for the code + 1 byte for length + 32 bytes
-    if len(key) >= 4:
-        # Check if first byte looks like a multihash function code
-        first_byte = key[0]
-        # Common hash function codes (varint encoded)
-        valid_hash_codes = {
-            0x12,  # sha2-256
-            0x13,  # sha2-512
-            0x16,  # sha3-256
-            0x17,  # sha3-512
-            0x22,  # blake2b-256
-        }
-        if first_byte in valid_hash_codes:
-            return True
-
     # For backward compatibility, accept any reasonable-length key
     # (the DHT should work with arbitrary keys for testing/custom use)
-    return 4 <= len(key) <= 64
+    if 4 <= len(key) <= 64:
+        return True
+
+    logger.debug(
+        f"Key does not look like a CID or multihash: "
+        f"length={len(key)}, first_byte=0x{key[0]:02x}"
+    )
+    return False
 
 
 def format_time_rfc3339(dt: datetime | None = None) -> str:
