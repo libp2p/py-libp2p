@@ -1,5 +1,6 @@
 import logging
 import socket
+from typing import TYPE_CHECKING
 
 from zeroconf import (
     EventLoopBlocked,
@@ -7,12 +8,18 @@ from zeroconf import (
     Zeroconf,
 )
 
+if TYPE_CHECKING:
+    from libp2p.abc import IHost
+
 logger = logging.getLogger(__name__)
+
+MDNS_DOMAIN = "local"
 
 
 class PeerBroadcaster:
     """
     Broadcasts this peer's presence on the local network using mDNS/zeroconf.
+
     Registers a service with the peer's multiaddresses in the TXT record
     as per libp2p spec (dnsaddr format).
     """
@@ -25,31 +32,65 @@ class PeerBroadcaster:
         peer_id: str,
         port: int,
         listen_addrs: list[str] | None = None,
+        host: "IHost | None" = None,
     ):
         self.zeroconf = zeroconf
         self.service_type = service_type
         self.peer_id = peer_id
         self.port = port
         self.service_name = service_name
+        self.host = host
+        self.listen_addrs = listen_addrs
 
-        # Get local IP addresses (both IPv4 and IPv6)
+        # Derive peer_name from service_name
+        # (e.g., "abc123._p2p._udp.local." -> "abc123")
+        # Spec: "host-name is derived from the peer's name and p2p.local"
+        self.peer_name = service_name.split(".")[0]
+
+        # Build service_info with placeholder addresses
+        # Actual addresses are resolved during register() when host is ready
+        self._build_service_info()
+
+    def _build_service_info(self, resolved_addrs: list[str] | None = None) -> None:
+        """Build ServiceInfo with resolved addresses."""
         local_ips = self._get_local_ips()
-        hostname = socket.gethostname()
+
+        # Use resolved_addrs if provided, otherwise use stored listen_addrs
+        addrs_to_use = (
+            resolved_addrs if resolved_addrs is not None else self.listen_addrs
+        )
 
         # Build dnsaddr TXT records per spec
-        properties = self._build_txt_properties(listen_addrs, local_ips, port, peer_id)
+        properties = self._build_txt_properties(
+            addrs_to_use, local_ips, self.port, self.peer_id
+        )
 
         self.service_info = ServiceInfo(
             type_=self.service_type,
             name=self.service_name,
             port=self.port,
             properties=properties,
-            server=f"{hostname}.local.",
+            # Spec: host-name is derived from peer's name and p2p.local
+            server=f"{self.peer_name}.{MDNS_DOMAIN}",
             addresses=[self._ip_to_bytes(ip) for ip in local_ips],
         )
 
+    def _resolve_host_addrs(self) -> list[str]:
+        """Resolve multiaddr strings from host's transport addresses."""
+        if self.host is None:
+            return self.listen_addrs or []
+
+        addrs = []
+        for addr in self.host.get_transport_addrs():
+            addr_str = str(addr)
+            # Strip /p2p/QmId suffix if present
+            if "/p2p/" in addr_str:
+                addr_str = addr_str.rsplit("/p2p/", 1)[0]
+            addrs.append(addr_str)
+        return addrs
+
     def _get_local_ips(self) -> list[str]:
-        """Get all local IP addresses (IPv4 and IPv6)"""
+        """Get all local IP addresses (both IPv4 and IPv6)"""
         ips = []
 
         # Get IPv4
@@ -106,8 +147,6 @@ class PeerBroadcaster:
                 return False
 
         # Not suitable: non-.local DNS names (require unicast DNS)
-        # Suitable: /ip4, /ip6 (direct LAN addresses)
-        # Suitable: /dns*.local, /dnsaddr/*.local (mDNS-resolvable)
         if addr_str.startswith(("/dns4/", "/dns6/", "/dns/", "/dnsaddr/")):
             if ".local" not in addr_str.lower():
                 return False
@@ -131,20 +170,24 @@ class PeerBroadcaster:
         # If listen_addrs provided, use those (filtered)
         # otherwise construct from local IPs
         if listen_addrs:
-            # Filter out unsuitable addresses (circuit relay, browser transports, etc.)
+            # Filter out unsuitable addresses
             multiaddrs = [a for a in listen_addrs if self.is_suitable_for_mdns(a)]
         else:
             multiaddrs = []
             for ip in local_ips:
                 if ":" in ip:
-                    # IPv6
                     multiaddrs.append(f"/ip6/{ip}/tcp/{port}/p2p/{peer_id}")
                 else:
-                    # IPv4
                     multiaddrs.append(f"/ip4/{ip}/tcp/{port}/p2p/{peer_id}")
 
+        # Ensure each address has /p2p/{peer_id} suffix per spec
+        p2p_suffix = f"/p2p/{peer_id}"
+        multiaddrs = [
+            addr if addr.endswith(p2p_suffix) else f"{addr}{p2p_suffix}"
+            for addr in multiaddrs
+        ]
+
         # Add each multiaddr as a dnsaddr TXT record
-        # Multiple dnsaddr attributes are allowed per spec
         for i, addr in enumerate(multiaddrs):
             if i == 0:
                 properties[b"dnsaddr"] = addr.encode()
@@ -156,11 +199,18 @@ class PeerBroadcaster:
     def register(self) -> None:
         """Register the peer's mDNS service on the network."""
         try:
+            # Resolve addresses from host at registration time (host is ready)
+            resolved_addrs = self._resolve_host_addrs()
+            if resolved_addrs:
+                self._build_service_info(resolved_addrs)
+
             self.zeroconf.register_service(self.service_info)
             logger.debug(f"mDNS service registered: {self.service_name}")
         except EventLoopBlocked as e:
             logger.warning(
-                "EventLoopBlocked while registering mDNS '%s': %s", self.service_name, e
+                "EventLoopBlocked while registering mDNS '%s': %s",
+                self.service_name,
+                e,
             )
         except Exception as e:
             logger.error(

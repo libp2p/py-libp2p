@@ -281,7 +281,7 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         self.mDNS = None
         if enable_mDNS:
-            self.mDNS = create_mdns_discovery(network)
+            self.mDNS = create_mdns_discovery(network, host=self)
 
         # Initialize bootstrap discovery container. Keep attribute defined so
         # we can avoid hasattr checks elsewhere.

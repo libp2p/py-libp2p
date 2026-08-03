@@ -13,6 +13,7 @@ from zeroconf import (
 )
 
 from libp2p.abc import (
+    IHost,
     INetworkService,
 )
 
@@ -59,6 +60,7 @@ class MDNSDiscovery:
         retry_attempts: int = 3,
         retry_base_delay: float = 1.0,
         cleanup_interval: int = 60,
+        host: IHost | None = None,
     ):
         self.peer_id = str(swarm.get_peer_id())
         self.port = port
@@ -81,6 +83,7 @@ class MDNSDiscovery:
             peer_id=self.peer_id,
             port=self.port,
             listen_addrs=self.listen_addrs,
+            host=host,
         )
         self.listener = PeerListener(
             zeroconf=self.zeroconf,
@@ -144,6 +147,7 @@ def create_mdns_discovery(
     listen_addrs: list[str] | None = None,
     private_network_fingerprint: str | None = None,
     ttl: int = 120,
+    host: IHost | None = None,
     **kwargs: Any,
 ) -> MDNSDiscovery:
     """
@@ -155,6 +159,7 @@ def create_mdns_discovery(
         listen_addrs: List of multiaddrs to advertise
         private_network_fingerprint: If set, uses _p2p-<fp>._udp.local
         ttl: TTL for discovered peer addresses (seconds)
+        host: The host instance for getting transport addresses
         **kwargs: Additional options passed to MDNSDiscovery
 
     Returns:
@@ -172,5 +177,6 @@ def create_mdns_discovery(
         listen_addrs=listen_addrs,
         service_type=service_type,
         ttl=ttl,
+        host=host,
         **kwargs,
     )
