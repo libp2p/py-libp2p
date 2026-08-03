@@ -58,8 +58,8 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param validity: validity in seconds before the value expires.
-         Defaults to `DEFAULT_TTL` if set to 0.0.
+        :param validity: Absolute Unix timestamp when the value expires.
+         Defaults to `time.time() + DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
@@ -198,7 +198,8 @@ class ValueStore:
         finally:
             if stream:
                 await stream.close()
-            return result
+
+        return False
 
     def get(self, key: bytes) -> Record | None:
         """
@@ -260,9 +261,14 @@ class ValueStore:
         """
         stream = None
         try:
-            # Don't try to get from ourselves
+            # If querying ourselves, return the local value directly
             if peer_id == self.local_peer_id:
-                return None
+                local_record = self.get(key)
+                if local_record is None:
+                    return None
+                if return_record:
+                    return local_record
+                return local_record.value
 
             logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 

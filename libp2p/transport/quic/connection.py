@@ -353,7 +353,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         if self._closed:
-            raise QUICConnectionError("Cannot start a closed connection")
+            logger.debug("Cannot start a closed connection (shutdown race), silencing.")
+            self.event_started.set()
+            return
 
         self._started = True
         logger.debug(f"QUIC connection ready for Swarm: {self._remote_peer_id}")
@@ -365,11 +367,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             with QUICErrorContext("connection_initiation", "connection"):
                 if not self._socket:
                     logger.debug("Creating new socket for outbound connection")
+                    family = (
+                        socket.AF_INET6
+                        if ":" in self._remote_addr[0]
+                        else socket.AF_INET
+                    )
                     self._socket = trio.socket.socket(
-                        family=socket.AF_INET, type=socket.SOCK_DGRAM
+                        family=family, type=socket.SOCK_DGRAM
                     )
 
-                await self._socket.bind(("0.0.0.0", 0))
+                bind_addr = "::" if family == socket.AF_INET6 else "0.0.0.0"
+                await self._socket.bind((bind_addr, 0))
 
                 self._quic.connect(self._remote_addr, now=time.time())
 
@@ -426,7 +434,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 if cancel_scope.cancelled_caught:
                     raise QUICConnectionTimeoutError(
-                        "Connection handshake timed out after"
+                        "Connection handshake timed out after "
                         f"{self.CONNECTION_HANDSHAKE_TIMEOUT}s"
                     )
 
@@ -625,7 +633,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
             elif self._remote_peer_id != verified_peer_id:
                 raise QUICPeerVerificationError(
                     f"Peer ID mismatch: expected {self._remote_peer_id}, "
-                    "got {verified_peer_id}"
+                    f"got {verified_peer_id}"
                 )
 
             self._peer_verified = True
@@ -1385,10 +1393,32 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._closed = True
         self._closed_event.set()
 
+        # Release resource scope if present (mirrors close())
+        try:
+            scope = getattr(self, "_resource_scope", None)
+            if scope is not None:
+                if hasattr(scope, "close"):
+                    scope.close()
+                elif hasattr(scope, "release"):
+                    scope.release()
+                elif hasattr(scope, "done"):
+                    scope.done()
+                self._resource_scope = None
+        except Exception as e:
+            logger.debug(f"Error releasing resource scope: {e}")
+
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
 
         await self._notify_parent_of_termination()
+
+        # Notify swarm/on_close listeners so peer bookkeeping is cleaned up too —
+        # close() does this but this termination path bypassed it entirely.
+        if self.on_close:
+            try:
+                await self.on_close()
+            except Exception as e:
+                logger.debug(f"Error in on_close during termination: {e}")
 
     async def _handle_stream_data(self, event: events.StreamDataReceived) -> None:
         """Handle stream data events - create streams and add to accept queue."""
@@ -1621,11 +1651,16 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Release resource scope if present
             try:
                 scope = getattr(self, "_resource_scope", None)
-                if scope is not None and hasattr(scope, "done"):
-                    scope.done()
+                if scope is not None:
+                    if hasattr(scope, "close"):
+                        scope.close()
+                    elif hasattr(scope, "release"):
+                        scope.release()
+                    elif hasattr(scope, "done"):
+                        scope.done()
                     self._resource_scope = None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error releasing resource scope: {e}")
 
         except Exception as e:
             logger.error(f"Error during connection close: {e}")

@@ -7,7 +7,6 @@ import logging
 
 import base58
 import multibase
-import multihash
 
 from libp2p.abc import IHost
 from libp2p.encoding_config import get_default_encoding
@@ -104,12 +103,8 @@ def create_key_from_binary(binary_data: bytes) -> bytes:
     bytes: The resulting key.
 
     """
-    # Hash the data first, then encode as multihash
-    digest = hashlib.sha256(binary_data).digest()
-    mh_bytes = multihash.encode(digest, "sha2-256")
-    # Decode to get the digest part
-    mh = multihash.decode(mh_bytes)
-    return mh.digest
+    # Hash the data with SHA-256 to produce a 32-byte key
+    return hashlib.sha256(binary_data).digest()
 
 
 def xor_distance(key1: bytes, key2: bytes) -> int:
@@ -190,13 +185,13 @@ def sort_peer_ids_by_distance(target_key: bytes, peer_ids: list[ID]) -> list[ID]
         List[ID]: Sorted list of peer IDs from closest to furthest
 
     """
+    # Hash the target key to map it into the DHT keyspace
+    target_hash = hashlib.sha256(target_key).digest()
 
     def get_distance(peer_id: ID) -> int:
         # Hash the peer ID bytes to get a key for distance calculation
-        digest = hashlib.sha256(peer_id.to_bytes()).digest()
-        mh_bytes = multihash.encode(digest, "sha2-256")
-        peer_hash = multihash.decode(mh_bytes).digest
-        return xor_distance(target_key, peer_hash)
+        peer_hash = hashlib.sha256(peer_id.to_bytes()).digest()
+        return xor_distance(target_hash, peer_hash)
 
     return sorted(peer_ids, key=get_distance)
 

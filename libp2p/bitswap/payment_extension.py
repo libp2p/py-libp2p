@@ -135,6 +135,11 @@ class PaymentExtension(IBitswapExtension):
                     _has_receipt = bool(response.payment_receipts)
                     _has_rejection = bool(response.payment_rejections)
                     _has_blocks = bool(response.payload) or bool(response.blocks)
+                    _nb = (
+                        len(response.payload) + len(response.blocks)
+                        if _has_blocks
+                        else 0
+                    )
                     logger.warning("=" * 70)
                     logger.warning(
                         "[STEP 8] SERVER SENDING RESPONSE after PaymentAuthorization:"
@@ -145,13 +150,12 @@ class PaymentExtension(IBitswapExtension):
                     )
                     if _has_rejection:
                         for _rj in response.payment_rejections:
-                            logger.warning(f"   ❌ REJECTION reason={_rj.reason}")
+                            logger.warning(f"   REJECTION reason={_rj.reason}")
                     if _has_blocks:
-                        _nb = len(response.payload) + len(response.blocks)
-                    logger.warning(
-                        f"   ✅ SENDING {_nb} block(s) to client "  # type: ignore
-                        f"— FILE TRANSFER STARTING"
-                    )
+                        logger.warning(
+                            f"   SENDING {_nb} block(s) to client "
+                            f"-- FILE TRANSFER STARTING"
+                        )
                     logger.warning("=" * 70)
                     await self.client._write_message_bytes(
                         stream, response.SerializeToString()

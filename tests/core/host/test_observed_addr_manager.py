@@ -600,7 +600,7 @@ def test_old_observation_replaced():
 
     # Internal state: _conn_observations should all point to B.
     for c in conns:
-        _, ext, _ = mgr._conn_observations[id(c)]
+        _, ext, _, _ = mgr._conn_observations[id(c)]
         assert ext == "/ip4/5.6.7.8/tcp/4001"
 
     # Internal state: old external entry should be cleaned up.

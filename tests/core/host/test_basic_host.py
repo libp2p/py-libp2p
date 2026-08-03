@@ -616,7 +616,7 @@ def _prepare_identify_host(
         "libp2p.host.basic_host.read_length_prefixed_protobuf", fake_read
     )
     monkeypatch.setattr(
-        "libp2p.host.basic_host._update_peerstore_from_identify", fake_update
+        "libp2p.host.basic_host.update_peerstore_from_identify", fake_update
     )
 
     return host, peer_id, swarm_conn
@@ -750,7 +750,7 @@ def test_on_notifee_disconnected_calls_remove_conn():
     conn.muxed_conn.peer_id = peer_id
 
     # Preload identified_peers so we can also verify the cleanup happens.
-    host._identified_peers.add(peer_id)
+    host._identified_peers[peer_id] = "test"
 
     host._on_notifee_disconnected(conn)
 
