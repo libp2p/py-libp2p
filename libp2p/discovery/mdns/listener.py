@@ -178,10 +178,11 @@ class PeerListener(ServiceListener):
         addrs: list[Multiaddr] = []
 
         # Parse dnsaddr TXT records (spec-compliant)
-        for key, value in info.properties.items():
+        for key, value in info.properties.items():  # type: ignore[union-attr]
             if key.startswith(b"dnsaddr") and value is not None:
+                addr_bytes: bytes = value
                 try:
-                    addr_str = value.decode()
+                    addr_str = addr_bytes.decode()
                     # Extract peer ID from /p2p/QmId
                     if "/p2p/" in addr_str:
                         candidate_id = addr_str.split("/p2p/")[-1]

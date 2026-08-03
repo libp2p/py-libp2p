@@ -46,6 +46,7 @@ class PeerBroadcaster:
         # (e.g., "abc123._p2p._udp.local." -> "abc123")
         # Spec: "host-name is derived from the peer's name and p2p.local"
         self.peer_name = service_name.split(".")[0]
+        self.service_info: ServiceInfo | None = None
 
         # Build service_info with placeholder addresses
         # Actual addresses are resolved during register() when host is ready
@@ -204,6 +205,9 @@ class PeerBroadcaster:
             if resolved_addrs:
                 self._build_service_info(resolved_addrs)
 
+            if self.service_info is None:
+                logger.error("Cannot register: service_info not initialized")
+                return
             self.zeroconf.register_service(self.service_info)
             logger.debug(f"mDNS service registered: {self.service_name}")
         except EventLoopBlocked as e:
@@ -222,6 +226,9 @@ class PeerBroadcaster:
     def unregister(self) -> None:
         """Unregister the peer's mDNS service from the network."""
         try:
+            if self.service_info is None:
+                logger.warning("Cannot unregister: service_info not initialized")
+                return
             self.zeroconf.unregister_service(self.service_info)
             logger.debug(f"mDNS service unregistered: {self.service_name}")
         except EventLoopBlocked as e:

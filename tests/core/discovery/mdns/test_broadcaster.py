@@ -41,7 +41,8 @@ class TestPeerBroadcaster:
         # Verify server field uses peer_name, not system hostname
         # Note: zeroconf strips trailing dot from FQDN
         assert broadcaster.service_info is not None
-        assert broadcaster.service_info.server.startswith("test-peer.local")
+        server = broadcaster.service_info.server
+        assert server is not None and server.startswith("test-peer.local")
 
         # Clean up
         zeroconf.close()
@@ -154,6 +155,7 @@ class TestPeerBroadcaster:
         )
 
         # Only the suitable address should be in the TXT record
+        assert broadcaster.service_info is not None
         assert b"dnsaddr" in broadcaster.service_info.properties
         dnsaddr_val = broadcaster.service_info.properties[b"dnsaddr"]
         assert dnsaddr_val is not None

@@ -96,7 +96,7 @@ class MDNSDiscovery:
         )
 
         self._cleanup_cancel_scope: trio.CancelScope | None = None
-        self._cleanup_task: trio.lowlevel.Task | None = None
+        self._cleanup_task = None
 
     def start(self) -> None:
         """Register this peer and start listening for others."""
