@@ -18,7 +18,7 @@ from libp2p.utils.dns_utils import (
 logger = logging.getLogger(__name__)
 resolver = DNSResolver()
 
-DEFAULT_CONNECTION_TIMEOUT = 10
+DEFAULT_CONNECTION_TIMEOUT = 10.0
 
 
 class BootstrapDiscovery:
@@ -54,11 +54,11 @@ class BootstrapDiscovery:
         self.peerstore = swarm.peerstore
         self.bootstrap_addrs = bootstrap_addrs or []
         self.discovered_peers: set[str] = set()
-        self.connection_timeout: int = DEFAULT_CONNECTION_TIMEOUT
+        self.connection_timeout: float = DEFAULT_CONNECTION_TIMEOUT
         self.allow_ipv6 = allow_ipv6
-        self.dns_resolution_timeout = dns_resolution_timeout
-        self.dns_max_retries = dns_max_retries
-        self.dns_metrics = dns_metrics
+        self.dns_resolution_timeout: float = dns_resolution_timeout
+        self.dns_max_retries: int = dns_max_retries
+        self.dns_metrics: DNSResolutionMetrics | None = dns_metrics
 
     async def start(self) -> None:
         """Process bootstrap addresses and emit peer discovery events in parallel."""
@@ -138,8 +138,27 @@ class BootstrapDiscovery:
                 if peer_id_str is None:
                     logger.warning("Missing peer ID in DNS address: %s", addr_str)
                     return
-                peer_id = ID.from_base58(peer_id_str)
-                peer_info = PeerInfo(peer_id, list(resolved_addrs))
+                peer_id = ID.from_string(peer_id_str)
+                # Decapsulate /p2p/ from resolved addresses to match the
+                # non-DNS path (info_from_p2p_addr) which strips /p2p/.
+                # This ensures PeerInfo.addrs contains transport addresses
+                # without the /p2p/ component, matching go-libp2p's
+                # AddrInfoFromP2pAddr behavior.
+                decapsulated_addrs: list[Multiaddr] = []
+                p2p_suffix = Multiaddr(f"/p2p/{peer_id_str}")
+                for resolved_addr in resolved_addrs:
+                    try:
+                        decapsulated = resolved_addr.decapsulate(p2p_suffix)
+                        if (
+                            decapsulated is not None
+                            and len(decapsulated.protocols()) > 0
+                        ):
+                            decapsulated_addrs.append(decapsulated)
+                        else:
+                            decapsulated_addrs.append(resolved_addr)
+                    except ValueError:
+                        decapsulated_addrs.append(resolved_addr)
+                peer_info = PeerInfo(peer_id, decapsulated_addrs)
                 await self.add_addr(peer_info)
             else:
                 peer_info = info_from_p2p_addr(multiaddr)
@@ -246,7 +265,7 @@ class BootstrapDiscovery:
         connection_start_time = trio.current_time()
 
         try:
-            with trio.move_on_after(self.connection_timeout):
+            with trio.fail_after(self.connection_timeout):
                 # Log connection attempt
                 logger.debug(
                     f"Attempting connection to {peer_id} using "
@@ -318,16 +337,25 @@ class BootstrapDiscovery:
 
     def _is_supported_addr(self, addr: Multiaddr) -> bool:
         """
-        Check if address contains a supported transport protocol.
+        Check if address contains a supported transport protocol and IP version.
+
         Accepts TCP, QUIC, QUIC-v1, WebSockets (ws, wss) unconditionally.
+        IPv4 addresses are always accepted. IPv6 addresses are accepted
+        only when allow_ipv6 is True.
         """
         try:
             proto_names = {p.name for p in addr.protocols()}
 
             supported_transports = {"tcp", "quic", "quic-v1", "ws", "wss"}
 
-            # If the address has any of the supported transports, accept it
+            # If the address has any of the supported transports, check IP version
             if proto_names.intersection(supported_transports):
+                # Filter IPv6 addresses when allow_ipv6 is False
+                if "ip6" in proto_names and not self.allow_ipv6:
+                    logger.debug(
+                        f"Filtering out IPv6 address (allow_ipv6=False): {addr}"
+                    )
+                    return False
                 return True
 
             return False
