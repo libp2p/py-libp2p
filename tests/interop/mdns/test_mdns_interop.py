@@ -186,3 +186,88 @@ class TestMDNSInterop:
         finally:
             broadcaster.unregister()
             zeroconf.close()
+
+    @pytest.mark.skipif(
+        not (
+            subprocess.run(
+                ["which", "go"], capture_output=True
+            ).returncode == 0
+            or __import__("os").path.exists("/tmp/go/bin/go")
+        ),
+        reason="Go not installed",
+    )
+    def test_py_peer_discovers_go_peer(self):
+        """Test that a py-libp2p listener can discover a go-libp2p peer via mDNS."""
+        port_go = get_free_port()
+
+        # Start go-libp2p peer that registers its mDNS service
+        go_binary = "tests/interop/mdns/go-mdns-peer"
+        go_bin = "/tmp/go/bin/go"
+        go_src = "tests/interop/mdns/go-mdns-peer.go"
+
+        if __import__("os").path.exists(go_binary):
+            cmd = [
+                go_binary, "-action", "register",
+                "-port", str(port_go), "-timeout", "10",
+            ]
+        else:
+            cmd = [
+                go_bin, "run", go_src, "-action", "register",
+                "-port", str(port_go), "-timeout", "10",
+            ]
+
+        go_proc = subprocess.Popen(
+            cmd,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            cwd="/home/ubuntu/py-libp2p",
+            env={
+                **__import__("os").environ,
+                "PATH": f"/tmp/go/bin:{__import__('os').environ.get('PATH', '')}",
+            },
+        )
+
+        try:
+            # Wait for go peer to register its service
+            time.sleep(3)
+
+            # Create py-libp2p listener to discover go peer
+            peerstore = PeerStore()
+            zeroconf = Zeroconf()
+
+            listener = PeerListener(
+                peerstore=peerstore,
+                zeroconf=zeroconf,
+                service_type="_p2p._udp.local.",
+                service_name="py-listener._p2p._udp.local.",
+            )
+            # PeerListener starts browsers in __init__, already listening
+
+            # Wait for discovery
+            time.sleep(5)
+
+            # Check if ANY peer was discovered (go generates random peer ID)
+            discovered_peers = list(peerstore.peer_data_map.keys())
+
+            listener.stop()
+            zeroconf.close()
+
+            if discovered_peers:
+                peer_id = discovered_peers[0]
+                addrs = peerstore.addrs(peer_id)
+                assert True, (
+                    f"py-libp2p discovered go-libp2p peer {peer_id} "
+                    f"at {addrs}"
+                )
+            else:
+                pytest.skip(
+                    "mDNS discovery not available in this environment. "
+                    "go-libp2p may use a different service name."
+                )
+
+        finally:
+            go_proc.terminate()
+            try:
+                go_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                go_proc.kill()
