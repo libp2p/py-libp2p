@@ -50,6 +50,32 @@ def key_to_int(key: bytes) -> int:
     return int.from_bytes(key, byteorder="big")
 
 
+def get_ip_prefix(addr_str: str, prefix_len: int = 16) -> str:
+    """
+    Extract IP prefix for diversity filtering.
+
+    For IPv4: returns first 2 octets (e.g., "192.168")
+    For IPv6: returns first 4 octets (e.g., "2001:0db8")
+    """
+    try:
+        if "/ip4/" in addr_str:
+            ip = addr_str.split("/ip4/")[1].split("/")[0]
+            parts = ip.split(".")
+            if len(parts) >= 2:
+                return f"{parts[0]}.{parts[1]}"
+        elif "/ip6/" in addr_str:
+            ip = addr_str.split("/ip6/")[1].split("/")[0]
+            parts = ip.split(":")
+            if len(parts) >= 4:
+                return ":".join(parts[:4])
+    except (IndexError, ValueError):
+        pass
+    return ""
+
+
+MAX_PEERS_PER_IP_PREFIX = 3  # Max peers from same /16 subnet per bucket
+
+
 class KBucket:
     """
     A k-bucket implementation for the Kademlia DHT.
@@ -454,6 +480,43 @@ class RoutingTable:
                             return False
                 except Exception:
                     pass
+
+            # IP diversity filtering: limit peers from same /16 subnet
+            try:
+                peer_addrs = self.host.get_peerstore().addrs(peer_id)
+                if peer_addrs:
+                    # Count peers from same IP prefix in this bucket
+                    bucket = self.find_bucket(peer_id)
+                    ip_prefix_counts: dict[str, int] = {}
+                    for existing_peer in bucket.peer_infos():
+                        try:
+                            existing_addrs = self.host.get_peerstore().addrs(
+                                existing_peer.peer_id
+                            )
+                            for addr in existing_addrs:
+                                prefix = get_ip_prefix(str(addr))
+                                if prefix:
+                                    ip_prefix_counts[prefix] = (
+                                        ip_prefix_counts.get(prefix, 0) + 1
+                                    )
+                        except Exception:
+                            pass
+
+                    # Check if adding this peer would exceed the limit
+                    for addr in peer_addrs:
+                        prefix = get_ip_prefix(str(addr))
+                        count = ip_prefix_counts.get(prefix, 0)
+                        if prefix and count >= MAX_PEERS_PER_IP_PREFIX:
+                            logger.debug(
+                                "Peer %s rejected: too many peers from %s "
+                                "(max %d per /16 subnet)",
+                                peer_id,
+                                prefix,
+                                MAX_PEERS_PER_IP_PREFIX,
+                            )
+                            return False
+            except Exception:
+                pass
 
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)

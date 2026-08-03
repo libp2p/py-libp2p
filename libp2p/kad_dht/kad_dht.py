@@ -45,9 +45,16 @@ from libp2p.tools.anyio_service import (
 from .common import (
     ALPHA,
     BUCKET_SIZE,
+    MAX_PROVIDERS_PER_MSG,
+    MAX_RECORD_AGE,
+    MAX_RECORD_SIZE,
     PROTOCOL_ID,
     PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
+    format_time_rfc3339,
+    is_cid_like_key,
+    is_reserved_or_private_addr,
+    parse_time_received,
 )
 from .pb.kademlia_pb2 import (
     Message,
@@ -68,7 +75,8 @@ from .value_store import (
 
 logger = logging.getLogger(__name__)
 # Default parameters
-ROUTING_TABLE_REFRESH_INTERVAL = 60  # 1 min in seconds for testing
+# 10 minutes in seconds (per spec: "default: 10 minutes")
+ROUTING_TABLE_REFRESH_INTERVAL = 600
 
 
 class DHTMode(Enum):
@@ -102,6 +110,50 @@ def is_valid_timestamp(ts: float) -> bool:
     if current_time - ts > MAX_TIMESTAMP_AGE:
         return False
     return True
+
+
+def clean_record(record: Record) -> Record:
+    """
+    Strip TimeReceived from incoming record to prevent timestamp forgery.
+
+    Per go-libp2p, the receiver sets its own TimeReceived timestamp.
+    This prevents malicious peers from forging the receive timestamp.
+    """
+    cleaned = Record()
+    cleaned.key = record.key
+    cleaned.value = record.value
+    cleaned.author = record.author
+    cleaned.signature = record.signature
+    # Do NOT copy timeReceived - let the receiver set it
+    return cleaned
+
+
+def get_connection_type(host: IHost, peer_id: ID) -> Message.ConnectionType:
+    """
+    Get the actual connection type for a peer based on connection state.
+
+    Per spec, we should report actual connection capability:
+    - CONNECTED: Currently connected
+    - CAN_CONNECT: Has known addresses and was recently connected
+    - CANNOT_CONNECT: Has addresses but connection attempts failed
+    - NOT_CONNECTED: No known addresses
+    """
+    try:
+        # Check if currently connected
+        connected_peers = host.get_connected_peers()
+        if peer_id in connected_peers:
+            return Message.ConnectionType.CONNECTED
+
+        # Check if has addresses (can potentially connect)
+        addrs = host.get_peerstore().addrs(peer_id)
+        if addrs:
+            # Has addresses but not connected - report CAN_CONNECT
+            # (we can't easily detect failed connection attempts)
+            return Message.ConnectionType.CAN_CONNECT
+
+        return Message.ConnectionType.NOT_CONNECTED
+    except Exception:
+        return Message.ConnectionType.NOT_CONNECTED
 
 
 class KadDhtEvent:
@@ -226,6 +278,11 @@ class KadDHT(Service):
 
         # Initialize provider store with host and peer_routing references
         self.provider_store = ProviderStore(host=host, peer_routing=self.peer_routing)
+
+        # Rate limiter for ADD_PROVIDER: maps peer_id -> (timestamp, count)
+        self._provider_rate_limits: dict[str, tuple[float, int]] = {}
+        self._provider_rate_window = 10.0  # seconds
+        self._provider_rate_max = 10  # max ADD_PROVIDER messages per window
 
         # Last time we republished provider records
         self._last_provider_republish = time.time()
@@ -598,7 +655,7 @@ class KadDHT(Service):
                             # Add peer to closerPeers field
                             peer_proto = response.closerPeers.add()
                             peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+                            peer_proto.connection = get_connection_type(self.host, peer)
 
                             # Add addresses if available
                             try:
@@ -651,12 +708,20 @@ class KadDHT(Service):
                         key = message.key
                         logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
-                        # Per spec: check key length (len > 80 or == 0)
-                        if len(key) > 80 or len(key) == 0:
+                        # Per spec: check key length (per go-libp2p, max ~128 bytes)
+                        if len(key) > 128 or len(key) == 0:
                             logger.warning(
                                 f"ADD_PROVIDER key length invalid: {len(key)}, ignoring"
                             )
                             break
+
+                        # Per spec: "The target node verifies key is a valid CID"
+                        # Log a warning if key doesn't look like a CID,
+                        # but don't reject (backward compatibility)
+                        if not is_cid_like_key(key):
+                            logger.debug(
+                                "ADD_PROVIDER key does not look like a CID"
+                            )
 
                         # Consume the source signed_peer_record if sent
                         if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -665,17 +730,29 @@ class KadDHT(Service):
                             )
                             break
 
+                        # Rate limit check
+                        if not self._check_provider_rate_limit(peer_id):
+                            break
+
                         # Metrics Event
                         event.add_provider = True
 
-                        # Extract provider information
+                        # Cap the number of providers per message
+                        provider_count = 0
                         for provider_proto in message.providerPeers:
+                            if provider_count >= MAX_PROVIDERS_PER_MSG:
+                                logger.warning(
+                                    f"Too many providers in ADD_PROVIDER "
+                                    f"message (>{MAX_PROVIDERS_PER_MSG}), "
+                                    "ignoring rest"
+                                )
+                                break
                             try:
                                 # Validate that the provider is the sender
                                 provider_id = ID(provider_proto.id)
                                 if provider_id != peer_id:
                                     logger.warning(
-                                        f"Provider ID {provider_id} doesn't"
+                                        f"Provider ID {provider_id} doesn't "
                                         f"match sender {peer_id}, ignoring"
                                     )
                                     continue
@@ -688,9 +765,39 @@ class KadDHT(Service):
                                     except Exception as e:
                                         logger.warning(f"Failed to parse address: {e}")
 
+                                # Validate provider has at least one address
+                                if not addrs:
+                                    logger.warning(
+                                        f"Provider {provider_id} "
+                                        "has no addresses, skipping"
+                                    )
+                                    continue
+
+                                # Validate addresses are public and not reserved
+                                valid_addrs = []
+                                for addr in addrs:
+                                    addr_str = str(addr)
+                                    if is_reserved_or_private_addr(addr_str):
+                                        logger.debug(
+                                            "Skipping reserved address "
+                                            f"{addr_str} for provider "
+                                            f"{provider_id}"
+                                        )
+                                        continue
+                                    valid_addrs.append(addr)
+
+                                # Require at least one valid public address
+                                if not valid_addrs:
+                                    logger.warning(
+                                        f"Provider {provider_id} "
+                                        "has no public addresses, skipping"
+                                    )
+                                    continue
+
                                 # Add to provider store
-                                provider_info = PeerInfo(provider_id, addrs)
+                                provider_info = PeerInfo(provider_id, valid_addrs)
                                 self.provider_store.add_provider(key, provider_info)
+                                provider_count += 1
                                 logger.debug(
                                     f"Added provider {provider_id} for key {key.hex()}"
                                 )
@@ -725,6 +832,27 @@ class KadDHT(Service):
                             )
                             break
 
+                        # Validate key is not empty
+                        if not key:
+                            logger.warning("GET_PROVIDERS with empty key, ignoring")
+                            break
+
+                        # Validate key length (per go-libp2p, max ~128 bytes)
+                        if len(key) > 128:
+                            logger.warning(
+                                f"GET_PROVIDERS key too long "
+                                f"({len(key)} bytes), ignoring"
+                            )
+                            break
+
+                        # Per spec: key is set to a CID
+                        # Log a warning if key doesn't look like a CID,
+                        # but don't reject (backward compatibility)
+                        if not is_cid_like_key(key):
+                            logger.debug(
+                                "GET_PROVIDERS key does not look like a CID"
+                            )
+
                         # Metrics event
                         event.get_providers = True
 
@@ -747,8 +875,8 @@ class KadDHT(Service):
                         for provider_info in providers:
                             provider_proto = response.providerPeers.add()
                             provider_proto.id = provider_info.peer_id.to_bytes()
-                            provider_proto.connection = (
-                                Message.ConnectionType.CAN_CONNECT
+                            provider_proto.connection = get_connection_type(
+                                self.host, provider_info.peer_id
                             )
 
                             # Add provider signed-records if cached
@@ -783,7 +911,7 @@ class KadDHT(Service):
 
                             peer_proto = response.closerPeers.add()
                             peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+                            peer_proto.connection = get_connection_type(self.host, peer)
 
                             # Add the signed-records of closest_peers if cached
                             closer_peer_envelope = (
@@ -822,10 +950,32 @@ class KadDHT(Service):
                             )
                             break
 
+                        # Validate key is not empty
+                        if not key:
+                            logger.warning("GET_VALUE with empty key, ignoring")
+                            break
+
                         # Metrics Event
                         event.get_value = True
 
                         value_record = self.value_store.get(key)
+                        if value_record:
+                            # Check record age - delete and don't serve
+                            # expired records
+                            time_received = parse_time_received(
+                                value_record.timeReceived
+                            )
+                            if time_received is not None:
+                                if time.time() - time_received > MAX_RECORD_AGE:
+                                    logger.debug(
+                                        f"Record for key {key.hex()} "
+                                        "expired, deleting and not serving"
+                                    )
+                                    self.value_store.remove(key)
+                                    value_record = None
+                            # If timeReceived is unparseable, serve the
+                            # record anyway (backwards compatibility)
+
                         if value_record:
                             logger.debug(f"Found value for key {key.hex()}")
 
@@ -850,8 +1000,8 @@ class KadDHT(Service):
                                     continue
                                 peer_proto = response.closerPeers.add()
                                 peer_proto.id = peer.to_bytes()
-                                peer_proto.connection = (
-                                    Message.ConnectionType.CAN_CONNECT
+                                peer_proto.connection = get_connection_type(
+                                    self.host, peer
                                 )
                                 closer_peer_envelope = (
                                     self.host.get_peerstore().get_peer_record(peer)
@@ -902,8 +1052,8 @@ class KadDHT(Service):
 
                                 peer_proto = response.closerPeers.add()
                                 peer_proto.id = peer.to_bytes()
-                                peer_proto.connection = (
-                                    Message.ConnectionType.CAN_CONNECT
+                                peer_proto.connection = get_connection_type(
+                                    self.host, peer
                                 )
 
                                 # Add signed-records of closer-peers if cached
@@ -954,6 +1104,11 @@ class KadDHT(Service):
                             )
                             break
 
+                        # Validate key is not empty
+                        if not key:
+                            logger.warning("PUT_VALUE with empty key, ignoring")
+                            break
+
                         event.put_value = True
 
                         try:
@@ -962,6 +1117,15 @@ class KadDHT(Service):
                                     "Missing key or value in PUT_VALUE message"
                                 )
 
+                            # Validate record size
+                            record_bytes = message.record.SerializeToString()
+                            if len(record_bytes) > MAX_RECORD_SIZE:
+                                raise ValueError("Record too large")
+
+                            # Clean the record to prevent timestamp forgery
+                            cleaned_record = clean_record(message.record)
+                            cleaned_record.timeReceived = format_time_rfc3339()
+
                             # Validate the key-value pair before storing
                             key_str = key.decode("utf-8")
                             if self.validator is None:
@@ -969,36 +1133,69 @@ class KadDHT(Service):
                             self.validator.validate(key_str, value)
 
                             # Verify signature if present (py-libp2p record format)
-                            if message.record.signature and message.record.author:
+                            if cleaned_record.signature and cleaned_record.author:
                                 from libp2p.records.utils import verify_record
 
                                 if not verify_record(
-                                    message.record.signature,
-                                    message.record.author,
+                                    cleaned_record.signature,
+                                    cleaned_record.author,
                                     key,
                                     value,
                                 ):
                                     raise ValueError("Record sig verification failed")
 
-                            # Store record as-is, preserving original author/signature
-                            self.value_store.put_record(key, message.record)
-                            logger.debug(f"Stored value for key {key.hex()}")
-                            success = True
+                            # Compare against existing record using Validator.Select
+                            existing_record = self.value_store.get(key)
+                            if existing_record is not None:
+                                try:
+                                    best_idx = self.validator.select(
+                                        key_str, [existing_record.value, value]
+                                    )
+                                    # best_idx=0 means existing is better, reject new
+                                    if best_idx == 0:
+                                        logger.debug(
+                                            f"Rejecting PUT_VALUE for {key.hex()}: "
+                                            "existing record is better"
+                                        )
+                                        # Still send acknowledgement per spec
+                                        success = False
+                                    else:
+                                        # New record is better, store it
+                                        self.value_store.put_record(key, cleaned_record)
+                                        logger.debug(
+                                            f"Stored value for key {key.hex()} "
+                                            "(new record preferred)"
+                                        )
+                                        success = True
+                                except Exception:
+                                    # If select fails, store the new record
+                                    self.value_store.put_record(key, cleaned_record)
+                                    logger.debug(
+                                        f"Stored value for key {key.hex()} "
+                                        "(select failed, storing anyway)"
+                                    )
+                                    success = True
+                            else:
+                                # No existing record, store the new one
+                                self.value_store.put_record(key, cleaned_record)
+                                logger.debug(f"Stored value for key {key.hex()}")
+                                success = True
                         except Exception as e:
                             logger.warning(
                                 f"Failed to store value {value.hex()} for key "
                                 f"{key.hex()}: {e}"
                             )
-                        finally:
-                            # Send acknowledgement — echo the request per spec
+
+                        # Per spec: only echo the request if validation
+                        # succeeds
+                        if success:
                             response = Message()
                             response.type = Message.MessageType.PUT_VALUE
-                            if success:
-                                response.key = key
-                                # Echo the record back per spec requirement
-                                response.record.CopyFrom(message.record)
+                            response.key = key
+                            # Echo the cleaned record back per spec
+                            response.record.CopyFrom(cleaned_record)
 
-                            # Create sender_signed_peer_record for the response
+                            # Create sender_signed_peer_record
                             envelope_bytes, _ = env_to_send_in_RPC(self.host)
                             response.senderRecord = envelope_bytes
 
@@ -1029,8 +1226,40 @@ class KadDHT(Service):
 
         except Exception as e:
             logger.error(f"Error handling DHT stream: {e}")
-        finally:
+            # Per spec: "On any error, the stream is reset."
+            try:
+                await stream.reset()
+            except Exception:
+                await stream.close()
+        else:
+            # Clean shutdown - close gracefully
             await stream.close()
+
+    def _check_provider_rate_limit(self, peer_id: ID) -> bool:
+        """
+        Check if a peer is within the ADD_PROVIDER rate limit.
+
+        Returns True if the request should be allowed, False if rate limited.
+        """
+        now = time.time()
+        peer_key = str(peer_id)
+
+        if peer_key in self._provider_rate_limits:
+            last_time, count = self._provider_rate_limits[peer_key]
+            if now - last_time < self._provider_rate_window:
+                if count >= self._provider_rate_max:
+                    logger.debug(
+                        f"Rate limiting ADD_PROVIDER from peer {peer_id} "
+                        f"({count} in {now - last_time:.1f}s)"
+                    )
+                    return False
+                self._provider_rate_limits[peer_key] = (last_time, count + 1)
+            else:
+                self._provider_rate_limits[peer_key] = (now, 1)
+        else:
+            self._provider_rate_limits[peer_key] = (now, 1)
+
+        return True
 
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""

@@ -25,6 +25,8 @@ from libp2p.peer.peerstore import env_to_send_in_RPC
 
 from .common import (
     ALPHA,
+    BETA,
+    BUCKET_SIZE,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
@@ -229,6 +231,7 @@ class PeerRouting(IPeerRouting):
 
         queried_peers: set[ID] = set()
         rounds = 0
+        start_time = trio.current_time()
 
         # Return early if we have no peers to start with
         if not closest_peers:
@@ -255,6 +258,14 @@ class PeerRouting(IPeerRouting):
                 sem.release()
 
         while rounds < MAX_PEER_LOOKUP_ROUNDS:
+            # Check total timeout (30 seconds max per spec recommendation)
+            elapsed = trio.current_time() - start_time
+            if elapsed > 30:
+                logger.debug(
+                    f"Lookup timed out after {elapsed:.1f}s, completed {rounds} rounds"
+                )
+                break
+
             rounds += 1
             logger.debug(f"Lookup round {rounds}/{MAX_PEER_LOOKUP_ROUNDS}")
 
@@ -297,6 +308,25 @@ class PeerRouting(IPeerRouting):
                 logger.debug("No improvement in closest peers, ending lookup")
                 break
 
+            # Beta resiliency: ensure at least BETA of the closest peers
+            # have been queried before terminating
+            queried_in_closest = sum(
+                1 for p in closest_peers[:BUCKET_SIZE] if p in queried_peers
+            )
+            if queried_in_closest < BETA and len(closest_peers) >= BETA:
+                # Not enough closest peers queried, continue if we have candidates
+                unqueried_closest = [
+                    p
+                    for p in closest_peers[:BUCKET_SIZE]
+                    if p not in queried_peers and p != local_id
+                ]
+                if unqueried_closest:
+                    logger.debug(
+                        f"Only {queried_in_closest}/{BETA} closest peers queried, "
+                        "continuing lookup"
+                    )
+                    continue
+
         logger.info(
             f"Network lookup completed after {rounds} rounds "
             f"({query_count} queries), found {len(closest_peers)} peers"
@@ -334,6 +364,8 @@ class PeerRouting(IPeerRouting):
                     logger.debug(f"Stream opened to {peer}")
                 except Exception as e:
                     logger.warning(f"Failed to open stream to {peer}: {e}")
+                    # Per spec: remove peer from routing table if connection fails
+                    self.routing_table.remove_peer(peer)
                     return []
 
                 # Create and send FIND_NODE request using protobuf
@@ -401,8 +433,10 @@ class PeerRouting(IPeerRouting):
                     # Consume the sender_signed_peer_record
                     if not maybe_consume_signed_record(response_msg, self.host, peer):
                         logger.error(
-                            "Received an invalid-signed-record,ignoring the response"
+                            "Received an invalid-signed-record, ignoring the response"
                         )
+                        # Remove peer for sending invalid signed record
+                        self.routing_table.remove_peer(peer)
                         return []
 
                     for peer_data in response_msg.closerPeers:

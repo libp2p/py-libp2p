@@ -24,7 +24,10 @@ from libp2p.records.record import make_signed_put_record
 
 from .common import (
     DEFAULT_TTL,
+    MAX_VALUE_STORE_SIZE,
     PROTOCOL_ID,
+    format_time_rfc3339,
+    parse_time_received,
 )
 from .pb.kademlia_pb2 import Message, Record
 
@@ -52,6 +55,30 @@ class ValueStore:
         self.host = host
         self.local_peer_id = local_peer_id
 
+    def _evict_if_full(self) -> None:
+        """Evict the oldest entry if the store exceeds max size."""
+        if len(self.store) >= MAX_VALUE_STORE_SIZE:
+            # Find the entry with the oldest timeReceived
+            oldest_key = None
+            oldest_time = float("inf")
+            for key, (record, _) in self.store.items():
+                time_received = parse_time_received(record.timeReceived)
+                if time_received is not None:
+                    if time_received < oldest_time:
+                        oldest_time = time_received
+                        oldest_key = key
+                else:
+                    # If timeReceived is invalid, treat as oldest
+                    oldest_key = key
+                    break
+            if oldest_key is not None:
+                logger.debug(
+                    "Evicting oldest entry for key %s (store at capacity %d)",
+                    oldest_key.hex(),
+                    MAX_VALUE_STORE_SIZE,
+                )
+                del self.store[oldest_key]
+
     def put(self, key: bytes, value: bytes, validity: float = 0.0) -> None:
         """
         Store a value in the DHT.
@@ -76,8 +103,11 @@ class ValueStore:
         private_key = self.host.get_private_key()
         record = make_signed_put_record(key, value, private_key)
 
-        # Set timeReceived when storing locally
-        record.timeReceived = str(time.time())
+        # Set timeReceived when storing locally (RFC3339 per spec)
+        record.timeReceived = format_time_rfc3339()
+
+        # Evict oldest entry if store is full
+        self._evict_if_full()
 
         self.store[key] = (record, validity)
         logger.debug(f"Stored value for key {key.hex()}")
@@ -94,6 +124,8 @@ class ValueStore:
         """
         validity = time.time() + DEFAULT_TTL
         logger.debug("Storing record directly for key %s", key.hex())
+        # Evict oldest entry if store is full
+        self._evict_if_full()
         self.store[key] = (record, validity)
 
     async def _store_at_peer(
@@ -375,8 +407,8 @@ class ValueStore:
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )
 
-                    # Update timeReceived to current time (when we received it locally)
-                    response.record.timeReceived = str(time.time())
+                    # Update timeReceived to current time (RFC3339 per spec)
+                    response.record.timeReceived = format_time_rfc3339()
 
                     return response.record if return_record else response.record.value
 
