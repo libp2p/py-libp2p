@@ -17,7 +17,6 @@ from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.quic.connection import QUICConnection
 from libp2p.transport.quic.exceptions import (
     QUICConnectionClosedError,
-    QUICConnectionError,
     QUICConnectionTimeoutError,
     QUICPeerVerificationError,
     QUICStreamLimitError,
@@ -276,13 +275,11 @@ class TestQUICConnection:
 
     @pytest.mark.trio
     async def test_connection_start_closed(self, quic_connection):
-        """Test starting closed connection."""
+        """Test starting closed connection silences shutdown race."""
         quic_connection._closed = True
 
-        with pytest.raises(
-            QUICConnectionError, match="Cannot start a closed connection"
-        ):
-            await quic_connection.start()
+        await quic_connection.start()
+        assert quic_connection.event_started.is_set()
 
     @pytest.mark.trio
     async def test_connection_connect_with_nursery(

@@ -66,17 +66,22 @@ class TestGetValueQuorumEarlyStop:
     @pytest.mark.trio
     async def test_get_value_stops_after_quorum(self):
         """
-        With 8 closest peers and quorum=2, get_value should not
-        query all 8.
+        With more peers than ALPHA and quorum=2, get_value should not
+        query all peers — quorum early-stop should limit queries.
         """
+        from libp2p.kad_dht.common import ALPHA
+
         dht = _make_dht()
-        peers = [_make_peer_id(f"peer{i}") for i in range(8)]
+        # Use enough peers that ALPHA limit + quorum interact
+        total_peers = ALPHA + 5
+        peers = [_make_peer_id(f"peer{i}") for i in range(total_peers)]
         query_count: list[int] = [0]
 
         async def mock_get(peer, key_bytes, return_record=False):
             query_count[0] += 1
             idx = peers.index(peer)
-            if idx < 3:
+            if idx < 2:
+                # First 2 peers return quickly with valid records
                 await trio.sleep(0.01)
                 rec = Record()
                 rec.key = key_bytes
@@ -84,7 +89,8 @@ class TestGetValueQuorumEarlyStop:
                 rec.timeReceived = str(int(time.time()))
                 return rec
             else:
-                await trio.sleep(1.0)
+                # All other peers are slow
+                await trio.sleep(10.0)
                 return None
 
         with (
@@ -100,8 +106,10 @@ class TestGetValueQuorumEarlyStop:
             result = await dht.get_value("test-key", quorum=2)
 
         assert result == b"test-value"
-        assert query_count[0] <= 5, (
-            f"Expected at most ~4-5 queries with quorum=2, ALPHA=3, "
+        # Quorum=2 means after ALPHA peers are dispatched and 2 return valid,
+        # no more should be dispatched. Bound is ALPHA + small margin.
+        assert query_count[0] <= ALPHA + 2, (
+            f"Expected at most ALPHA+2 queries with quorum=2, ALPHA={ALPHA}, "
             f"but got {query_count[0]}."
         )
 

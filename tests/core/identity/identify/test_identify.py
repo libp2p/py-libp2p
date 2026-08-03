@@ -14,6 +14,7 @@ from libp2p.identity.identify.identify import (
     _multiaddr_to_bytes,
     parse_identify_response,
 )
+from libp2p.network.stream.exceptions import StreamEOF
 from libp2p.peer.envelope import Envelope, consume_envelope, unmarshal_envelope
 from libp2p.peer.peer_record import unmarshal_record
 from tests.utils.factories import (
@@ -50,7 +51,16 @@ async def test_identify_protocol(security_protocol):
                 await trio.sleep(0.01)
         stream = await host_b.new_stream(host_a.get_id(), (ID,))
 
-        response = await stream.read(8192)
+        response = bytearray()
+        try:
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        except StreamEOF:
+            pass
+        response = bytes(response)
         await stream.close()
 
         identify_response = parse_identify_response(response)

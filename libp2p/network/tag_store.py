@@ -10,7 +10,6 @@ Reference: https://pkg.go.dev/github.com/libp2p/go-libp2p/core/connmgr
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
@@ -18,7 +17,12 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from multiaddr import Multiaddr
+
+from libp2p.abc import INetConn, INetStream, INotifee
+
 if TYPE_CHECKING:
+    from libp2p.abc import INetwork
     from libp2p.peer.id import ID
 
 logger = logging.getLogger("libp2p.network.tag_store")
@@ -55,20 +59,29 @@ class TagInfo:
     Attributes
     ----------
     first_seen : float
-        Unix timestamp when this peer was first seen.
+        Unix timestamp when this peer was first seen (or tag-creation time if
+        temp=True and no real connection has arrived yet).
     value : int
         Total aggregated tag value for this peer.
     tags : dict[str, int]
         Individual tag names mapped to their values.
-    conns : dict[str, float]
-        Connection identifiers mapped to their creation time.
+    conns : dict[int, float]
+        Connection identifiers (id(conn)) mapped to their open timestamp.
+        Keyed by Python object identity to match go-libp2p's map[network.Conn]time.Time.
+    temp : bool
+        True while no real Connected event has arrived for this peer.
+        Entries created by early tagging (before dial) start temp=True;
+        the flag flips to False on the first record_connection() call.
+        Temp entries with no connections are reaped by ConnectionPruner after
+        grace_period.
 
     """
 
     first_seen: float = field(default_factory=time.time)
     value: int = 0
     tags: dict[str, int] = field(default_factory=dict)
-    conns: dict[str, float] = field(default_factory=dict)
+    conns: dict[int, float] = field(default_factory=dict)  # keyed by id(conn)
+    temp: bool = False  # True until first real Connected event fires
 
     def get_total_value(self) -> int:
         """
@@ -81,6 +94,27 @@ class TagInfo:
 
         """
         return sum(self.tags.values())
+
+    def copy(self) -> TagInfo:
+        """
+        Return a defensive copy.
+
+        Caller mutations on the returned object do not affect the store's
+        internal state — matches go-libp2p's GetTagInfo copy semantics.
+
+        Returns
+        -------
+        TagInfo
+            A shallow copy with independent tags and conns dicts.
+
+        """
+        return TagInfo(
+            first_seen=self.first_seen,
+            value=self.value,
+            tags=dict(self.tags),
+            conns=dict(self.conns),
+            temp=self.temp,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -97,6 +131,7 @@ class TagInfo:
             "value": self.value,
             "tags": self.tags.copy(),
             "conns": self.conns.copy(),
+            "temp": self.temp,
         }
 
 
@@ -112,15 +147,40 @@ class TagStore:
 
     def __init__(self) -> None:
         """Initialize the tag store."""
-        self._tags: dict[ID, TagInfo] = defaultdict(TagInfo)
-        self._protected: dict[ID, set[str]] = defaultdict(set)
+        self._tags: dict[ID, TagInfo] = {}
+        self._protected: dict[ID, set[str]] = {}
         self._lock = threading.RLock()
+
+    def _entry_for(self, peer_id: ID) -> TagInfo:
+        """
+        Get-or-create a TagInfo for the given peer.
+
+        New entries are always born with temp=True so that early tags (applied
+        before a real connection exists) are distinguished from confirmed peers.
+        The temp flag is cleared by record_connection() when the first real
+        Connected event arrives.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to look up or create an entry for.
+
+        Returns
+        -------
+        TagInfo
+            The existing or newly-created entry.
+
+        """
+        if peer_id not in self._tags:
+            self._tags[peer_id] = TagInfo(temp=True)
+        return self._tags[peer_id]
 
     def tag_peer(self, peer_id: ID, tag: str, value: int) -> None:
         """
         Tag a peer with a string, associating a weight with the tag.
 
         If the tag already exists, it will be overwritten with the new value.
+        If no entry exists for the peer yet, a temp entry is created.
 
         Parameters
         ----------
@@ -133,7 +193,7 @@ class TagStore:
 
         """
         with self._lock:
-            tag_info = self._tags[peer_id]
+            tag_info = self._entry_for(peer_id)
             old_value = tag_info.tags.get(tag, 0)
             tag_info.tags[tag] = value
             tag_info.value += value - old_value
@@ -170,7 +230,8 @@ class TagStore:
 
         The upsert function is called with the current value of the tag
         (or zero if it doesn't exist). The return value becomes the new
-        value of the tag.
+        value of the tag. If no entry exists for the peer yet, a temp entry
+        is created.
 
         Parameters
         ----------
@@ -183,7 +244,7 @@ class TagStore:
 
         """
         with self._lock:
-            tag_info = self._tags[peer_id]
+            tag_info = self._entry_for(peer_id)
             current_value = tag_info.tags.get(tag, 0)
             new_value = upsert_fn(current_value)
             tag_info.tags[tag] = new_value
@@ -194,6 +255,10 @@ class TagStore:
         """
         Get the metadata associated with a peer.
 
+        Returns a **defensive copy** — mutations on the returned object do not
+        affect the store's internal state. This matches go-libp2p's GetTagInfo
+        copy semantics.
+
         Parameters
         ----------
         peer_id : ID
@@ -202,13 +267,12 @@ class TagStore:
         Returns
         -------
         TagInfo | None
-            The tag info for the peer, or None if no tags recorded.
+            A copy of the tag info for the peer, or None if no tags recorded.
 
         """
         with self._lock:
-            if peer_id in self._tags:
-                return self._tags[peer_id]
-            return None
+            info = self._tags.get(peer_id)
+            return info.copy() if info is not None else None
 
     def get_tag_value(self, peer_id: ID) -> int:
         """
@@ -270,6 +334,8 @@ class TagStore:
 
         """
         with self._lock:
+            if peer_id not in self._protected:
+                self._protected[peer_id] = set()
             self._protected[peer_id].add(tag)
             logger.debug(f"Protected peer {peer_id} with tag {tag}")
 
@@ -329,39 +395,58 @@ class TagStore:
                 return len(self._protected[peer_id]) > 0
             return tag in self._protected[peer_id]
 
-    def record_connection(self, peer_id: ID, conn_id: str) -> None:
+    def record_connection(self, peer_id: ID, conn_id: int) -> None:
         """
         Record a new connection for a peer.
+
+        Called by TagStoreNotifee.connected() when a real swarm connection is
+        established. Flips temp=False on the first call for a peer, and updates
+        first_seen to the actual connection time.
 
         Parameters
         ----------
         peer_id : ID
             The peer that connected.
-        conn_id : str
-            Identifier for the connection (e.g., remote multiaddr).
+        conn_id : int
+            id(conn) — Python object identity of the INetConn, mirrors
+            go-libp2p's map[network.Conn]time.Time keying.
 
         """
         with self._lock:
-            tag_info = self._tags[peer_id]
-            if tag_info.first_seen == 0:
+            tag_info = self._entry_for(peer_id)
+            if tag_info.temp:
+                # First real connection — flip temp and record actual connect time.
+                tag_info.temp = False
                 tag_info.first_seen = time.time()
             tag_info.conns[conn_id] = time.time()
 
-    def remove_connection(self, peer_id: ID, conn_id: str) -> None:
+    def remove_connection(self, peer_id: ID, conn_id: int) -> None:
         """
         Remove a connection record for a peer.
+
+        When the last connection for a peer is removed, the entire tag entry
+        (including protection state) is deleted — matching go-libp2p's
+        ConnManager which deletes the peer record on last-disconnect.
+        This prevents unbounded memory growth as peers churn.
 
         Parameters
         ----------
         peer_id : ID
             The peer that disconnected.
-        conn_id : str
-            Identifier for the connection.
+        conn_id : int
+            id(conn) — Python object identity of the INetConn.
 
         """
         with self._lock:
             if peer_id in self._tags:
                 self._tags[peer_id].conns.pop(conn_id, None)
+                # Delete the entire entry when the last connection closes.
+                if not self._tags[peer_id].conns:
+                    self._tags.pop(peer_id, None)
+                    self._protected.pop(peer_id, None)
+                    logger.debug(
+                        "Removed last connection for %s: tag entry deleted", peer_id
+                    )
 
     def clear_peer(self, peer_id: ID) -> None:
         """
@@ -403,6 +488,43 @@ class TagStore:
         """
         with self._lock:
             return list(self._protected.keys())
+
+
+class TagStoreNotifee(INotifee):
+    """
+    Bridges real swarm connection events into TagStore's lifecycle.
+
+    Registered by Swarm._init_connection_management() so that TagStore
+    automatically tracks connection open/close without any manual calls.
+    This is the py-libp2p equivalent of go-libp2p's cmNotifee that drives
+    BasicConnMgr's peerInfo map via Connected/Disconnected callbacks.
+    """
+
+    def __init__(self, tag_store: TagStore) -> None:
+        """Initialise with a reference to the TagStore to update."""
+        self._store = tag_store
+
+    async def connected(self, network: INetwork, conn: INetConn) -> None:
+        """Record connection in TagStore using id(conn) as the key."""
+        peer_id = conn.muxed_conn.peer_id
+        self._store.record_connection(peer_id, id(conn))
+
+    async def disconnected(self, network: INetwork, conn: INetConn) -> None:
+        """Remove connection from TagStore; deletes entry when last conn closes."""
+        peer_id = conn.muxed_conn.peer_id
+        self._store.remove_connection(peer_id, id(conn))
+
+    async def opened_stream(self, network: INetwork, stream: INetStream) -> None:
+        """No-op — TagStore does not track streams."""
+
+    async def closed_stream(self, network: INetwork, stream: INetStream) -> None:
+        """No-op — TagStore does not track streams."""
+
+    async def listen(self, network: INetwork, multiaddr: Multiaddr) -> None:
+        """No-op."""
+
+    async def listen_close(self, network: INetwork, multiaddr: Multiaddr) -> None:
+        """No-op."""
 
 
 # Upsert helper functions (similar to go-libp2p's BumpFn presets)
