@@ -10,14 +10,14 @@ class PingMetrics:
     def __init__(self) -> None:
         rtt = Histogram(
             "ping",
-            "round-trip time sending a 'ping' and receiving a 'pong'",
-            buckets=[400, 500, 600, 700, 800],
+            "Round-trip time for ping/pong in milliseconds",
+            buckets=[1, 5, 10, 25, 50, 100, 200, 500, 1000],  # ms, like go-libp2p
         )
 
         failures = Counter(
             "ping_failure",
             "Failure while sending a ping or receiving a ping",
-            labelnames=["reason", "peer_id"],
+            labelnames=["reason"],
         )
 
         self.rtt = rtt
@@ -26,11 +26,10 @@ class PingMetrics:
     def record(self, event: PingEvent) -> None:
         match event:
             case PingEvent(peer_id=_, rtts=list() as rtts, failure_error=None):
-                print(rtts)
-                for rtt_us in rtts:
-                    self.rtt.observe(rtt_us)
+                for rtt_ms in rtts:
+                    self.rtt.observe(rtt_ms)
 
-            case PingEvent(peer_id=_, rtts=None, failure_error=err):
+            case PingEvent(peer_id=_, rtts=None, failure_error=err) if err is not None:
                 self.failures.labels(reason=type(err).__name__).inc()
 
             case _:
