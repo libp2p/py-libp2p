@@ -579,9 +579,7 @@ class KadDHT(Service):
                         # achieve the same result by only prepending if the target
                         # is known (has addresses) or is self.
                         try:
-                            target_known = bool(
-                                self.host.get_peerstore().addrs(target)
-                            )
+                            target_known = bool(self.host.get_peerstore().addrs(target))
                         except Exception:
                             target_known = False
                         if not target_known and target == self.host.get_id():
@@ -703,9 +701,9 @@ class KadDHT(Service):
                                 ):
                                     logger.error(
                                         "Received an invalid-signed-record,"
-                                        "dropping the stream"
+                                        "skipping provider"
                                     )
-                                    break
+                                    continue
                             except Exception as e:
                                 logger.warning(f"Failed to process provider info: {e}")
 
@@ -750,8 +748,8 @@ class KadDHT(Service):
                             provider_proto = response.providerPeers.add()
                             provider_proto.id = provider_info.peer_id.to_bytes()
                             provider_proto.connection = (
-                            Message.ConnectionType.CAN_CONNECT
-                        )
+                                Message.ConnectionType.CAN_CONNECT
+                            )
 
                             # Add provider signed-records if cached
                             provider_peer_envelope = (
@@ -950,7 +948,7 @@ class KadDHT(Service):
                             break
 
                         # Validate record key matches the message key
-                        if message.record.key != key:
+                        if message.key != key:
                             logger.warning(
                                 "PUT_VALUE record key does not match message key"
                             )
@@ -973,6 +971,7 @@ class KadDHT(Service):
                             # Verify signature if present (py-libp2p record format)
                             if message.record.signature and message.record.author:
                                 from libp2p.records.utils import verify_record
+
                                 if not verify_record(
                                     message.record.signature,
                                     message.record.author,

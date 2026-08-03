@@ -234,8 +234,6 @@ class KBucket:
                                 logger.debug(f"Failed to ping peer {peer_id}")
                                 self.remove_peer(peer_id)
                                 logger.info(f"Removed unresponsive peer {peer_id}")
-
-                            logger.debug(f"Successfully refreshed peer {peer_id}")
                         except Exception as e:
                             # If ping fails, remove the peer
                             logger.debug(
@@ -661,6 +659,7 @@ class RoutingTable:
             return False
 
         return True
+
     def _split_bucket(self, bucket: KBucket) -> bool:
         """
         Split a bucket into two buckets.
