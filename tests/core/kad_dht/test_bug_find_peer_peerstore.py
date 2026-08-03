@@ -59,14 +59,14 @@ async def test_find_peer_rechecks_peerstore_after_lookup():
     # Mock find_closest_peers_network to simulate:
     # 1. Target peer discovered during lookup (added to peerstore)
     # 2. But NOT in the top 20 closest_peers result
-    async def mock_find_closest(*args, **kwargs):
+    async def mock_find_closest(target_key: bytes, count: int = 20) -> list[ID]:
         nonlocal peerstore_has_target
         # Simulate the target peer being discovered during the lookup
         peerstore_has_target = True
         # Return a different peer, NOT the target
         return [ID(b"\xee" + b"\x00" * 31)]
 
-    peer_routing.find_closest_peers_network = mock_find_closest
+    peer_routing.find_closest_peers_network = mock_find_closest  # type: ignore[assignment]
 
     result = await peer_routing.find_peer(target_id)
 
