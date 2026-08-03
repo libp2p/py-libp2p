@@ -719,9 +719,7 @@ class KadDHT(Service):
                         # Log a warning if key doesn't look like a CID,
                         # but don't reject (backward compatibility)
                         if not is_cid_like_key(key):
-                            logger.debug(
-                                "ADD_PROVIDER key does not look like a CID"
-                            )
+                            logger.debug("ADD_PROVIDER key does not look like a CID")
 
                         # Consume the source signed_peer_record if sent
                         if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -849,9 +847,7 @@ class KadDHT(Service):
                         # Log a warning if key doesn't look like a CID,
                         # but don't reject (backward compatibility)
                         if not is_cid_like_key(key):
-                            logger.debug(
-                                "GET_PROVIDERS key does not look like a CID"
-                            )
+                            logger.debug("GET_PROVIDERS key does not look like a CID")
 
                         # Metrics event
                         event.get_providers = True
@@ -1398,21 +1394,26 @@ class KadDHT(Service):
 
         # Collect valid records from peers: mapping peer -> Record
         valid_records: list[tuple[ID, Record]] = []
+        # Per spec: Pb = peers that returned the best value
+        # Po = peers that returned an outdated/worse value
+        peers_best: set[ID] = set()  # Pb
+        peers_outdated: set[ID] = set()  # Po
         # Track peers that returned no valid record (for entry correction)
         peers_with_no_record: set[ID] = set()
+        # Track best value for comparison (use list as mutable container)
+        best_value_container: list[bytes | None] = [None]
 
         # 3. Query peers using a semaphore-based sliding window (up to ALPHA
         #    concurrent queries). A new query starts as soon as any finishes.
         #
         #    When quorum is reached:
-        #    - No new peer queries will be scheduled (early-stop via sem + quorum check)
-        #    - In-flight queries continue to completion for robustness and observability
-        #    - This prevents resource waste while allowing partial results to propagate
+        #    - Cancel all outstanding queries (per spec)
+        #    - This ensures we return quickly once we have enough answers
         total_responses_list: list[int] = [0]
         sem = trio.Semaphore(ALPHA)
         quorum_reached = trio.Event()
 
-        async def query_one(peer: ID) -> None:
+        async def query_one(peer: ID, cancel_scope: trio.CancelScope) -> None:
             try:
                 with trio.move_on_after(QUERY_TIMEOUT):
                     rec = await self.value_store._get_from_peer(
@@ -1426,6 +1427,34 @@ class KadDHT(Service):
                             if not isinstance(rec, Record):
                                 raise TypeError("Expected Record type")
                             self.validator.validate(key, rec.value)
+
+                            # Per spec: track Pb and Po sets
+                            best_val = best_value_container[0]
+                            if best_val is None:
+                                # First valid record becomes the best
+                                best_value_container[0] = rec.value
+                                peers_best.add(peer)
+                            elif rec.value == best_val:
+                                # Same as current best -> Pb
+                                peers_best.add(peer)
+                                # Remove from Po if it was there
+                                peers_outdated.discard(peer)
+                            else:
+                                # Different value -> compare with best
+                                values = [best_val, rec.value]
+                                best_idx = self.validator.select(key, values)
+                                if best_idx == 1:
+                                    # New value is better!
+                                    # Old best peers become outdated
+                                    peers_outdated.update(peers_best)
+                                    peers_best.clear()
+                                    best_value_container[0] = rec.value
+                                    peers_best.add(peer)
+                                else:
+                                    # Current best wins, new peer is outdated
+                                    peers_outdated.add(peer)
+                                    peers_best.discard(peer)
+
                             valid_records.append((peer, rec))
                             logger.debug(f"Found valid record at peer {peer}")
                             if quorum and len(valid_records) >= quorum:
@@ -1434,6 +1463,8 @@ class KadDHT(Service):
                                     f"({len(valid_records)} valid records)"
                                 )
                                 quorum_reached.set()
+                                # Per spec: cancel outstanding requests
+                                cancel_scope.cancel()
                         except Exception as e:
                             peers_with_no_record.add(peer)
                             logger.debug(
@@ -1449,12 +1480,13 @@ class KadDHT(Service):
                 sem.release()
 
         async with trio.open_nursery() as nursery:
+            cancel_scope = nursery.cancel_scope
             for peer in closest_peers:
                 await sem.acquire()
                 if quorum_reached.is_set():
                     sem.release()
                     break
-                nursery.start_soon(query_one, peer)
+                nursery.start_soon(query_one, peer, cancel_scope)
 
         logger.debug(
             f"get_value query complete: {total_responses_list[0]} responses, "
@@ -1486,18 +1518,13 @@ class KadDHT(Service):
             best_peer, best_rec = valid_records[best_idx]
             best_value = best_rec.value
 
-            # Propagate the best record to peers that have different values
-            # This ensures network consistency, following Go libp2p's approach
-            outdated_peers: list[ID] = []
-            for peer, rec in valid_records:
-                # Propagate if the peer has a different value than the best
-                if rec.value != best_value:
-                    outdated_peers.append(peer)
-
-            if outdated_peers:
+            # Per spec: Entry correction - propagate best value to Po peers
+            # (peers that returned outdated values)
+            # Also propagate to peers in closest_peers[:k] that had no record
+            if peers_outdated:
                 logger.debug(
-                    f"Propagating best value to {len(outdated_peers)} "
-                    "peers with outdated values"
+                    f"Entry correction: propagating best value to "
+                    f"{len(peers_outdated)} peers with outdated values (Po)"
                 )
 
                 async def propagate(peer: ID) -> None:
@@ -1511,7 +1538,7 @@ class KadDHT(Service):
                         logger.debug(f"Failed to propagate to peer {peer}: {e}")
 
                 async with trio.open_nursery() as nursery:
-                    for p in outdated_peers:
+                    for p in peers_outdated:
                         nursery.start_soon(propagate, p)
 
             # Entry correction: also update peers that returned no record
