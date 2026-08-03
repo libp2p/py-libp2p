@@ -279,13 +279,13 @@ class TestBitswapProtocolVersions:
                 await trio.sleep(0.2)
 
                 # Node1 requests block B from Node2
-                retrieved_b = await node1_bitswap.get_block(
+                retrieved_b = await node1_bitswap.new_session().get_block(
                     cid_b, peer_id=node2_host.get_id(), timeout=2.0
                 )
                 assert retrieved_b == block_b
 
                 # Node2 requests block A from Node1
-                retrieved_a = await node2_bitswap.get_block(
+                retrieved_a = await node2_bitswap.new_session().get_block(
                     cid_a, peer_id=node1_host.get_id(), timeout=2.0
                 )
                 assert retrieved_a == block_a
@@ -395,7 +395,7 @@ class TestProtocolNegotiation:
                 await trio.sleep(0.2)
 
                 # Client requests block
-                retrieved = await client_bitswap.get_block(
+                retrieved = await client_bitswap.new_session().get_block(
                     cid, peer_id=provider_host.get_id(), timeout=2.0
                 )
 
@@ -463,7 +463,7 @@ class TestProtocolFeatures:
 
                 # Request all blocks
                 for data, cid in test_blocks:
-                    retrieved = await client_bitswap.get_block(
+                    retrieved = await client_bitswap.new_session().get_block(
                         cid, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved == data
@@ -520,7 +520,7 @@ class TestProtocolFeatures:
                 await trio.sleep(0.2)
 
                 # Request existing block - should succeed
-                retrieved = await client_bitswap.get_block(
+                retrieved = await client_bitswap.new_session().get_block(
                     existing_cid, peer_id=provider_host.get_id(), timeout=2.0
                 )
                 assert retrieved == existing_data

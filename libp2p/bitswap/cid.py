@@ -21,7 +21,6 @@ This matches the multicodec specification but changes binary format
 for dag-jose, dag-json, and experimental codecs.
 """
 
-import hashlib
 from typing import TypeAlias
 
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
@@ -168,9 +167,7 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
     try:
         return Prefix.from_bytes(prefix).sum(data).buffer
     except ValueError:
-        # Preserve previous permissive behavior for malformed prefixes.
-        digest = hashlib.sha256(data).digest()
-        return prefix + digest
+        raise
 
 
 def verify_cid(cid: CIDInput, data: bytes) -> bool:

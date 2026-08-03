@@ -26,6 +26,7 @@ class TestMerkleDagInit:
     def test_init_with_bitswap(self):
         """Test initializing with Bitswap client."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
 
         dag = MerkleDag(mock_client)
@@ -36,6 +37,7 @@ class TestMerkleDagInit:
     def test_init_with_custom_store(self):
         """Test initializing with custom block store."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         custom_store = MemoryBlockStore()
 
@@ -54,6 +56,7 @@ class TestAddBytes:
         """Test adding small data (single block)."""
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -83,6 +86,7 @@ class TestAddBytes:
         """Test adding large data (multiple chunks)."""
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -115,6 +119,7 @@ class TestAddBytes:
     async def test_add_bytes_with_progress(self):
         """Test adding bytes with progress callback."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.add_block = AsyncMock()
 
@@ -153,6 +158,7 @@ class TestAddFile:
         try:
             # Setup
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -189,6 +195,7 @@ class TestAddFile:
         try:
             # Setup
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -219,6 +226,7 @@ class TestAddFile:
     async def test_add_file_not_found(self):
         """Test adding non-existent file."""
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
 
         dag = MerkleDag(mock_client)
@@ -238,6 +246,7 @@ class TestAddFile:
 
         try:
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = MemoryBlockStore()
             mock_client.add_block = AsyncMock()
 
@@ -275,6 +284,7 @@ class TestFetchFile:
 
         # Setup
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=data)
 
@@ -328,6 +338,7 @@ class TestFetchFile:
             raise ValueError(f"Unknown CID: {cid.hex()}")
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
 
@@ -394,6 +405,7 @@ class TestFetchFile:
                 return leaf2
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(side_effect=get_block_side_effect)
 
@@ -452,6 +464,7 @@ class TestGetFileInfo:
             cid_input = cid.hex()
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=data)
 
@@ -476,6 +489,7 @@ class TestGetFileInfo:
         root_cid = compute_cid_v1(root_data, codec=CODEC_DAG_PB)
 
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = MemoryBlockStore()
         mock_client.get_block = AsyncMock(return_value=root_data)
 
@@ -504,6 +518,7 @@ class TestEndToEnd:
             # Setup with real store
             store = MemoryBlockStore()
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = store
 
             # Capture blocks during add
@@ -570,6 +585,7 @@ class TestEndToEnd:
         # Setup
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         added_blocks = {}
@@ -633,6 +649,7 @@ class TestEndToEnd:
             # Setup
             store = MemoryBlockStore()
             mock_client = MagicMock(spec=BitswapClient)
+            mock_client.new_session = MagicMock(return_value=mock_client)
             mock_client.block_store = store
 
             added_blocks = {}
@@ -717,6 +734,7 @@ class TestGenericDag:
 
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         async def add_block_impl(cid, data):
@@ -744,6 +762,7 @@ class TestGenericDag:
 
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         async def add_block_impl(cid, data):
@@ -771,6 +790,7 @@ class TestGenericDag:
 
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         async def add_block_impl(cid, data):
@@ -794,6 +814,7 @@ class TestGenericDag:
 
         store = MemoryBlockStore()
         mock_client = MagicMock(spec=BitswapClient)
+        mock_client.new_session = MagicMock(return_value=mock_client)
         mock_client.block_store = store
 
         bad_data = b'{"name":"Alice"}'  # This is JSON, not CBOR
