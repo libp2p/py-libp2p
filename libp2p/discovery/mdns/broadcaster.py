@@ -81,6 +81,39 @@ class PeerBroadcaster:
             # Try IPv6
             return socket.inet_pton(socket.AF_INET6, ip)
 
+    @staticmethod
+    def is_suitable_for_mdns(addr_str: str) -> bool:
+        """
+        Check if a multiaddr string is suitable for mDNS advertisement.
+
+        Filters out circuit relay, browser transports, and non-.local DNS names
+        per go-libp2p's isSuitableForMDNS.
+        """
+        # Not suitable: circuit relay
+        if "/p2p-circuit" in addr_str:
+            return False
+
+        # Not suitable: browser transports (browsers don't use mDNS)
+        browser_protocols = [
+            "/quic-v1/webtransport",
+            "/webrtc",
+            "/webrtc-direct",
+            "/ws",
+            "/wss",
+        ]
+        for proto in browser_protocols:
+            if proto in addr_str:
+                return False
+
+        # Not suitable: non-.local DNS names (require unicast DNS)
+        # Suitable: /ip4, /ip6 (direct LAN addresses)
+        # Suitable: /dns*.local, /dnsaddr/*.local (mDNS-resolvable)
+        if addr_str.startswith(("/dns4/", "/dns6/", "/dns/", "/dnsaddr/")):
+            if ".local" not in addr_str.lower():
+                return False
+
+        return True
+
     def _build_txt_properties(
         self,
         listen_addrs: list[str] | None,
@@ -95,9 +128,11 @@ class PeerBroadcaster:
         """
         properties: dict[bytes, bytes] = {}
 
-        # If listen_addrs provided, use those; otherwise construct from local IPs
+        # If listen_addrs provided, use those (filtered)
+        # otherwise construct from local IPs
         if listen_addrs:
-            multiaddrs = listen_addrs
+            # Filter out unsuitable addresses (circuit relay, browser transports, etc.)
+            multiaddrs = [a for a in listen_addrs if self.is_suitable_for_mdns(a)]
         else:
             multiaddrs = []
             for ip in local_ips:

@@ -141,87 +141,95 @@ class PeerListener(ServiceListener):
         self.meta_query_services[name] = name
 
     def _extract_peer_info(self, info: ServiceInfo) -> PeerInfo | None:
-        """Extract peer info from ServiceInfo, parsing dnsaddr TXT records per spec."""
-        try:
-            # Parse addresses from A/AAAA records
-            addrs = []
-            for addr in info.addresses:
-                if len(addr) == 4:
-                    # IPv4
-                    ip = socket.inet_ntoa(addr)
-                    addrs.append(Multiaddr(f"/ip4/{ip}/tcp/{info.port}"))
-                elif len(addr) == 16:
-                    # IPv6
-                    ip = socket.inet_ntop(socket.AF_INET6, addr)
-                    addrs.append(Multiaddr(f"/ip6/{ip}/tcp/{info.port}"))
+        """
+        Extract peer info from ServiceInfo, parsing dnsaddr TXT records per spec.
 
-            # Parse peer ID from TXT records (spec: dnsaddr format)
-            peer_id = self._parse_peer_id_from_txt(info.properties)
-            if not peer_id:
-                logger.debug(f"No valid peer ID in TXT records for {info.name}")
+        Per the libp2p mDNS spec, TXT records are the authoritative source of
+        multiaddresses. A/AAAA records are ignored (go-libp2p behavior).
+        """
+        try:
+            # Parse peer ID AND addresses from TXT dnsaddr records
+            peer_id_str, addrs = self._parse_from_txt_records(info)
+            if not peer_id_str or not addrs:
+                logger.debug(f"No valid peer info in TXT records for {info.name}")
                 return None
 
             # Validate peer ID format
-            if not self._validate_peer_id(peer_id):
-                logger.warning(f"Invalid peer ID format: {peer_id}")
+            if not self._validate_peer_id(peer_id_str):
+                logger.warning(f"Invalid peer ID format: {peer_id_str}")
                 return None
 
-            pid = ID.from_string(peer_id)
+            pid = ID.from_string(peer_id_str)
             return PeerInfo(peer_id=pid, addrs=addrs)
         except Exception as e:
             logger.debug(f"Failed to extract peer info from {info.name}: {e}")
             return None
 
-    def _parse_peer_id_from_txt(
-        self, properties: dict[bytes, bytes | None]
-    ) -> str | None:
+    def _parse_from_txt_records(
+        self, info: ServiceInfo
+    ) -> tuple[str | None, list[Multiaddr]]:
         """
-        Parse peer ID from TXT record properties.
+        Parse peer ID and addresses from TXT dnsaddr records.
 
-        Spec: TXT records contain dnsaddr=/.../p2p/QmId format.
+        Spec: TXT record contains multiaddresses as dnsaddr=/.../p2p/QmId.
         We also support legacy 'id' property for backward compatibility.
         """
-        # First try spec-compliant dnsaddr format
-        for key, value in properties.items():
+        peer_id = None
+        addrs: list[Multiaddr] = []
+
+        # Parse dnsaddr TXT records (spec-compliant)
+        for key, value in info.properties.items():
             if key.startswith(b"dnsaddr") and value is not None:
                 try:
                     addr_str = value.decode()
                     # Extract peer ID from /p2p/QmId
                     if "/p2p/" in addr_str:
-                        peer_id = addr_str.split("/p2p/")[-1]
-                        return peer_id
+                        candidate_id = addr_str.split("/p2p/")[-1]
+                        if peer_id is None:
+                            peer_id = candidate_id
+                    # Parse the multiaddr (without /p2p/id suffix)
+                    if "/p2p/" in addr_str:
+                        ma_part = addr_str.split("/p2p/")[0]
+                    else:
+                        ma_part = addr_str
+                    if ma_part:
+                        addrs.append(Multiaddr(ma_part))
                 except Exception:
                     continue
 
-        # Fallback: legacy 'id' property
-        pid_bytes = properties.get(b"id")
-        if pid_bytes is not None:
-            try:
-                return pid_bytes.decode()
-            except Exception:
-                pass
+        # Fallback: legacy 'id' property (older implementations)
+        if peer_id is None:
+            pid_bytes = info.properties.get(b"id")
+            if pid_bytes is not None:
+                try:
+                    peer_id = pid_bytes.decode()
+                except Exception:
+                    pass
 
-        return None
+        # If we have a peer_id from TXT but no addrs, try A/AAAA as fallback
+        if peer_id and not addrs:
+            for addr_bytes in info.addresses:
+                try:
+                    if len(addr_bytes) == 4:
+                        ip = socket.inet_ntoa(addr_bytes)
+                        addrs.append(Multiaddr(f"/ip4/{ip}/tcp/{info.port}"))
+                    elif len(addr_bytes) == 16:
+                        ip = socket.inet_ntop(socket.AF_INET6, addr_bytes)
+                        addrs.append(Multiaddr(f"/ip6/{ip}/tcp/{info.port}"))
+                except Exception:
+                    continue
+
+        return peer_id, addrs
 
     def _validate_peer_id(self, peer_id: str) -> bool:
         """
-        Validate peer ID format.
+        Validate peer ID format using ID.from_string().
 
-        Peer ID should be a valid multihash (typically base58-encoded).
-        Basic validation: starts with 'Qm' and reasonable length.
+        Supports all key types (Qm, 12D3KooW, 4qB, etc.).
         """
         if not peer_id or not isinstance(peer_id, str):
             return False
 
-        # Basic format check: libp2p peer IDs typically start with Qm
-        # and are base58 encoded multihashes (46+ chars for SHA2-256)
-        if not peer_id.startswith("Qm"):
-            return False
-
-        if len(peer_id) < 46 or len(peer_id) > 100:
-            return False
-
-        # Try to decode to verify it's valid base58
         try:
             ID.from_string(peer_id)
             return True

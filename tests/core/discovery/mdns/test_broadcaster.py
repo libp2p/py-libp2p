@@ -90,3 +90,74 @@ class TestPeerBroadcaster:
 
         # Clean up
         zeroconf.close()
+
+    def test_is_suitable_for_mdns(self):
+        """Test address filtering for mDNS suitability."""
+        # Suitable: direct IP addresses
+        assert PeerBroadcaster.is_suitable_for_mdns("/ip4/192.168.1.1/tcp/4001")
+        assert PeerBroadcaster.is_suitable_for_mdns("/ip6/fe80::1/tcp/4001")
+        assert PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/192.168.1.1/udp/4001/quic-v1"
+        )
+
+        # Suitable: .local DNS names
+        assert PeerBroadcaster.is_suitable_for_mdns("/dns/myhost.local/tcp/4001")
+        assert PeerBroadcaster.is_suitable_for_mdns("/dns4/MyHost.LOCAL/tcp/4001")
+
+        # Not suitable: circuit relay
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/198.51.100.1/tcp/4001/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN/p2p-circuit/p2p/12D3KooWGzBXWNvHpLALvz3jhwdCF6kfv9MfhMn9CuS2MBD2GpSy"
+        )
+
+        # Not suitable: browser transports
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/192.168.1.1/udp/4001/quic-v1/webtransport"
+        )
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/192.168.1.1/udp/4001/webrtc"
+        )
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/192.168.1.1/tcp/4001/ws"
+        )
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/ip4/192.168.1.1/tcp/443/wss"
+        )
+
+        # Not suitable: non-.local DNS
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/dns4/example.com/tcp/4001"
+        )
+        assert not PeerBroadcaster.is_suitable_for_mdns(
+            "/dns6/example.com/tcp/4001"
+        )
+
+    def test_broadcaster_filters_unsuitable_addrs(self):
+        """Test that broadcaster filters out unsuitable listen addresses."""
+        zeroconf = Zeroconf()
+        peer_id_obj = ID.from_base58("QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN")
+        peer_id = str(peer_id_obj)
+
+        # Include a mix of suitable and unsuitable addresses
+        listen_addrs = [
+            "/ip4/192.168.1.1/tcp/4001",
+            "/ip4/192.168.1.1/udp/4001/quic-v1/webtransport",  # unsuitable
+            "/ip4/192.168.1.1/tcp/4001/ws",  # unsuitable
+        ]
+
+        broadcaster = PeerBroadcaster(
+            zeroconf=zeroconf,
+            service_type="_p2p._udp.local.",
+            service_name="test-peer._p2p._udp.local.",
+            peer_id=peer_id,
+            port=4001,
+            listen_addrs=listen_addrs,
+        )
+
+        # Only the suitable address should be in the TXT record
+        assert b"dnsaddr" in broadcaster.service_info.properties
+        dnsaddr = broadcaster.service_info.properties[b"dnsaddr"].decode()
+        assert "/ip4/192.168.1.1/tcp/4001" in dnsaddr
+        assert "/ws" not in dnsaddr
+        assert "/webtransport" not in dnsaddr
+
+        zeroconf.close()
