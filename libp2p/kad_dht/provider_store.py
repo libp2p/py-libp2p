@@ -4,7 +4,9 @@ Provider record storage for Kademlia DHT.
 This module implements the storage for content provider records in the Kademlia DHT.
 """
 
+import json
 import logging
+from pathlib import Path
 import time
 from typing import (
     Any,
@@ -115,12 +117,15 @@ class ProviderStore:
     Maps content keys to provider records, with support for expiration.
     """
 
-    def __init__(self, host: IHost, peer_routing: Any = None) -> None:
+    def __init__(
+        self, host: IHost, peer_routing: Any = None, persist_path: str | None = None
+    ) -> None:
         """
         Initialize a new provider store.
 
         :param host: The libp2p host instance (optional)
         :param peer_routing: The peer routing instance (optional)
+        :param persist_path: Optional file path for JSON persistence
         """
         # Maps content keys to a dict of provider records (peer_id -> record)
         self.providers: dict[bytes, dict[str, ProviderRecord]] = {}
@@ -130,6 +135,64 @@ class ProviderStore:
         self.local_peer_id = host.get_id()
         # Track when each key was last republished
         self._last_republish: dict[bytes, float] = {}
+        self._persist_path = persist_path
+        # Load from disk if persistence is enabled
+        if persist_path:
+            self._load()
+
+    def _save(self) -> None:
+        """Save provider records to disk as JSON."""
+        if not self._persist_path:
+            return
+        data: dict[str, Any] = {}
+        for key, providers_dict in self.providers.items():
+            key_hex = key.hex()
+            data[key_hex] = {}
+            for peer_id_str, record in providers_dict.items():
+                addrs = [str(a) for a in record.addresses]
+                data[key_hex][peer_id_str] = {
+                    "peer_id": record.peer_id.to_base58(),
+                    "addresses": addrs,
+                    "timestamp": record.timestamp,
+                }
+        # Also save providing_keys
+        data["_providing_keys"] = [k.hex() for k in self.providing_keys]
+        try:
+            assert self._persist_path is not None
+            persist_path = Path(self._persist_path)
+            persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with persist_path.open("w") as f:
+                json.dump(data, f)
+            logger.debug(
+                f"Saved {len(self.providers)} provider records to {self._persist_path}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save provider records: {e}")
+
+    def _load(self) -> None:
+        """Load provider records from disk."""
+        if not self._persist_path or not Path(self._persist_path).exists():
+            return
+        try:
+            with open(self._persist_path) as f:
+                data = json.load(f)
+            loaded = 0
+            for key_hex, providers_dict in data.items():
+                if key_hex == "_providing_keys":
+                    self.providing_keys = {bytes.fromhex(k) for k in providers_dict}
+                    continue
+                key = bytes.fromhex(key_hex)
+                self.providers[key] = {}
+                for peer_id_str, record_data in providers_dict.items():
+                    peer_id = ID.from_base58(record_data["peer_id"])
+                    addrs = [Multiaddr(a) for a in record_data["addresses"]]
+                    provider_info = PeerInfo(peer_id, addrs)
+                    record = ProviderRecord(provider_info, record_data["timestamp"])
+                    self.providers[key][peer_id_str] = record
+                    loaded += 1
+            logger.debug(f"Loaded {loaded} provider records from {self._persist_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load provider records: {e}")
 
     async def _republish_provider_records(self) -> None:
         """
@@ -661,6 +724,7 @@ class ProviderStore:
             provider_info=provider, timestamp=time.time()
         )
         logger.debug(f"Added provider {provider.peer_id} for key {key.hex()}")
+        self._save()
 
     def get_providers(self, key: bytes) -> list[PeerInfo]:
         """
@@ -736,6 +800,9 @@ class ProviderStore:
         for key in expired_keys:
             del self.providers[key]
             logger.debug(f"Removed key with no providers: {key.hex()}")
+
+        if expired_keys or any(True for _ in expired_providers):
+            self._save()
 
     def get_provided_keys(self, peer_id: ID) -> list[bytes]:
         """

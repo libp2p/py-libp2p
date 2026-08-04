@@ -15,6 +15,7 @@ import time
 from multiaddr import (
     Multiaddr,
 )
+import multihash
 import trio
 import varint
 
@@ -198,6 +199,7 @@ class KadDHT(Service):
         enable_providers: bool = True,
         enable_values: bool = True,
         strict_validation: bool = False,
+        persist_dir: str | None = None,
     ):
         """
         Initialize a new Kademlia DHT node.
@@ -274,10 +276,18 @@ class KadDHT(Service):
         self.peer_routing = PeerRouting(host, self.routing_table)
 
         # Initialize value store
-        self.value_store = ValueStore(host=host, local_peer_id=self.local_peer_id)
+        self.value_store = ValueStore(
+            host=host,
+            local_peer_id=self.local_peer_id,
+            persist_path=f"{persist_dir}/values.json" if persist_dir else None,
+        )
 
         # Initialize provider store with host and peer_routing references
-        self.provider_store = ProviderStore(host=host, peer_routing=self.peer_routing)
+        self.provider_store = ProviderStore(
+            host=host,
+            peer_routing=self.peer_routing,
+            persist_path=f"{persist_dir}/providers.json" if persist_dir else None,
+        )
 
         # Rate limiter for ADD_PROVIDER: maps peer_id -> (timestamp, count)
         self._provider_rate_limits: dict[str, tuple[float, int]] = {}
@@ -618,6 +628,17 @@ class KadDHT(Service):
                         # Per spec: "key must be set to the binary PeerId"
                         if not target_key:
                             logger.warning("FIND_NODE with empty key, ignoring")
+                            should_reset = True
+                            break
+
+                        # Validate key is a valid multihash (PeerId format)
+                        try:
+                            multihash.decode(target_key)
+                        except Exception:
+                            logger.warning(
+                                f"FIND_NODE key is not a valid PeerId "
+                                f"({len(target_key)} bytes), ignoring"
+                            )
                             should_reset = True
                             break
 
@@ -970,6 +991,14 @@ class KadDHT(Service):
                         # Validate key is not empty
                         if not key:
                             logger.warning("GET_VALUE with empty key, ignoring")
+                            should_reset = True
+                            break
+
+                        # Validate key size (max 128 bytes per go-libp2p)
+                        if len(key) > 128:
+                            logger.warning(
+                                f"GET_VALUE key too long ({len(key)} bytes), ignoring"
+                            )
                             should_reset = True
                             break
 

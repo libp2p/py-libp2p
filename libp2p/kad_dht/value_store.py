@@ -4,7 +4,9 @@ Value store implementation for Kademlia DHT.
 Provides a way to store and retrieve key-value pairs with optional expiration.
 """
 
+import json
 import logging
+from pathlib import Path
 import time
 from typing import Any
 
@@ -42,12 +44,13 @@ class ValueStore:
     Values are stored with a timestamp and optional expiration time.
     """
 
-    def __init__(self, host: IHost, local_peer_id: ID):
+    def __init__(self, host: IHost, local_peer_id: ID, persist_path: str | None = None):
         """
         Initialize an empty value store.
 
         :param host: The libp2p host instance.
         :param local_peer_id: The local peer ID to ignore in peer requests.
+        :param persist_path: Optional file path for JSON persistence
 
         """
         # Store format: {key: (value, validity)}
@@ -59,6 +62,69 @@ class ValueStore:
         self.local_keys: set[bytes] = set()
         # Track when each key was last republished
         self._last_republish: dict[bytes, float] = {}
+        self._persist_path = persist_path
+        # Load from disk if persistence is enabled
+        if persist_path:
+            self._load()
+
+    def _save(self) -> None:
+        """Save value records to disk as JSON."""
+        if not self._persist_path:
+            return
+        data: dict[str, Any] = {}
+        for key, (record, validity) in self.store.items():
+            key_hex = key.hex()
+            data[key_hex] = {
+                "key": record.key.hex(),
+                "value": record.value.hex(),
+                "timeReceived": record.timeReceived,
+                "validity": validity,
+                "author": record.author.hex() if record.author else None,
+                "signature": record.signature.hex() if record.signature else None,
+            }
+        # Also save local_keys
+        data["_local_keys"] = [k.hex() for k in self.local_keys]
+        try:
+            assert self._persist_path is not None
+            persist_path = Path(self._persist_path)
+            persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with persist_path.open("w") as f:
+                json.dump(data, f)
+            logger.debug(
+                f"Saved {len(self.store)} value records to {self._persist_path}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save value records: {e}")
+
+    def _load(self) -> None:
+        """Load value records from disk."""
+        if not self._persist_path or not Path(self._persist_path).exists():
+            return
+        try:
+            with open(self._persist_path) as f:
+                data = json.load(f)
+            loaded = 0
+            for key_hex, record_data in data.items():
+                if key_hex == "_local_keys":
+                    self.local_keys = {bytes.fromhex(k) for k in record_data}
+                    continue
+                key = bytes.fromhex(key_hex)
+                record = Record()
+                record.key = bytes.fromhex(record_data["key"])
+                record.value = bytes.fromhex(record_data["value"])
+                record.timeReceived = record_data["timeReceived"]
+                if record_data.get("author"):
+                    record.author = bytes.fromhex(record_data["author"])
+                if record_data.get("signature"):
+                    record.signature = bytes.fromhex(record_data["signature"])
+                validity = record_data["validity"]
+                # Skip expired records
+                if validity > time.time():
+                    self.store[key] = (record, validity)
+                    loaded += 1
+            logger.debug(f"Loaded {loaded} value records from {self._persist_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load value records: {e}")
 
     def _evict_if_full(self) -> None:
         """Evict the oldest entry if the store exceeds max size."""
@@ -118,6 +184,7 @@ class ValueStore:
         # Track as locally put for republishing
         self.local_keys.add(key)
         logger.debug(f"Stored value for key {key.hex()}")
+        self._save()
 
     def put_record(self, key: bytes, record: Record) -> None:
         """
@@ -134,6 +201,7 @@ class ValueStore:
         # Evict oldest entry if store is full
         self._evict_if_full()
         self.store[key] = (record, validity)
+        self._save()
 
     async def _republish_records(self, peer_routing: Any = None) -> None:
         """
@@ -554,6 +622,7 @@ class ValueStore:
         if key in self.store:
             del self.store[key]
             logger.debug(f"Removed value for key {key.hex()[:8]}...")
+            self._save()
             return True
         return False
 
