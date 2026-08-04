@@ -158,27 +158,25 @@ async def dht_pair(security_protocol):
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
-            # Allow time for bootstrap to complete and connections to establish
-            await trio.sleep(0.1)
-
-            # Force a connection between nodes to ensure routing table is populated
-            # This eliminates the race condition by ensuring both nodes
-            # know about each other
+            # Best-effort nudge to speed up mutual discovery.
             try:
                 await dht_a.find_peer(dht_b.host.get_id())
                 await dht_b.find_peer(dht_a.host.get_id())
             except Exception as e:
                 logger.warning(f"Initial peer discovery failed: {e}")
-                # Continue anyway, the retry mechanism will handle it
+                # Continue anyway, the poll below handles it.
 
-            # Verify both nodes know about each other in their routing tables
-            # This ensures the test won't have race conditions
-            assert dht_a.routing_table.peer_in_table(dht_b.host.get_id()), (
-                "Node A should know about Node B"
-            )
-            assert dht_b.routing_table.peer_in_table(dht_a.host.get_id()), (
-                "Node B should know about Node A"
-            )
+            # Wait until both nodes know about each other in their routing tables.
+            # The background refresh manager populates these via mutual FIND_NODE
+            # streams, which is time-driven; a fixed sleep raced under CI load. Poll
+            # with a ceiling that still fails loud (TooSlowError) if a peer never
+            # lands, rather than a fixed wait that can assert before discovery.
+            with trio.fail_after(10):
+                while not (
+                    dht_a.routing_table.peer_in_table(dht_b.host.get_id())
+                    and dht_b.routing_table.peer_in_table(dht_a.host.get_id())
+                ):
+                    await trio.sleep(0.05)
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
