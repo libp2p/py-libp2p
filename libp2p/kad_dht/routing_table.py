@@ -16,7 +16,6 @@ import time
 from multiaddr.exceptions import (
     ProtocolLookupError,
 )
-import multihash
 import trio
 
 from libp2p.abc import (
@@ -75,6 +74,12 @@ def _subnet_key(peer_info: PeerInfo) -> str | None:
 
     A relayed address carries the *relay's* IP, not the peer's, so it is skipped
     to avoid grouping distinct peers behind a shared relay.
+
+    Divergence from go-libp2p (go-libp2p-kbucket/peerdiversity): go checks *every*
+    address of the peer and rejects if any group is saturated. We group by the
+    *first* globally-routable address only — simpler, and it avoids false
+    rejections of legitimately multi-homed peers. A stricter all-addresses check
+    is a reasonable follow-up once address ordering is well-defined.
     """
     for addr in peer_info.addrs:
         # Relayed addrs expose the relay's IP, not the peer's — never group them.
@@ -196,22 +201,19 @@ class KBucket:
                 peer_id,
             )
             return False
-        else:
-            # If the old peer is unresponsive, we can replace it with the new peer
-            logger.debug(
-                "Old peer %s is unresponsive, replacing with new peer %s",
-                oldest_peer_id,
-                peer_id,
-            )
-            # Remove the specific peer by ID (not popitem) to handle
-            # concurrent mutations
-            if oldest_peer_id in self.peers:
-                del self.peers[oldest_peer_id]
-            self.peers[peer_id] = (peer_info, current_time)
-            return True
 
-        # If we got here, the oldest peer responded but we couldn't add the new peer
-        return False
+        # If the old peer is unresponsive, we can replace it with the new peer
+        logger.debug(
+            "Old peer %s is unresponsive, replacing with new peer %s",
+            oldest_peer_id,
+            peer_id,
+        )
+        # Remove the specific peer by ID (not popitem) to handle
+        # concurrent mutations
+        if oldest_peer_id in self.peers:
+            del self.peers[oldest_peer_id]
+        self.peers[peer_id] = (peer_info, current_time)
+        return True
 
     def _peers_in_subnet(self, subnet: str) -> int:
         """

@@ -24,6 +24,13 @@ MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
 # Only globally-routable addresses are grouped; loopback / private / CGNAT /
 # link-local / DNS-named / relayed peers are exempt. Set MAX_PEERS_PER_SUBNET to
 # 0 (or negative) to disable the check entirely.
+#
+# Divergence from go-libp2p (go-libp2p-kbucket/peerdiversity): go groups IPv4 by
+# /16 (legacy Class A by /8) and IPv6 by ASN; we use a fixed /24 (IPv4) and /48
+# (IPv6). /24 matches realistic attacker economics — a rented cloud block is
+# typically a /24, not a /16 — and avoids bundling an ASN dataset. go also
+# enforces a table-wide cap (maxForTable=3) in addition to the per-group cap;
+# that table-wide cap is tracked as a follow-up and not implemented here.
 MAX_PEERS_PER_SUBNET = 2
 SUBNET_PREFIX_LEN_V4 = 24
 SUBNET_PREFIX_LEN_V6 = 48

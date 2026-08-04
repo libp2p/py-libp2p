@@ -530,6 +530,35 @@ class TestKBucketSubnetDiversity:
         )
         assert bucket.size() == 2
 
+    @pytest.mark.trio
+    async def test_subnet_rejection_on_non_full_bucket_does_not_split(self, mock_host):
+        """
+        Regression (#1383): a subnet rejection leaves the bucket non-full, which
+        must NOT be reported as splittable. Before the fix, _should_split_bucket
+        fell through to ``return True`` for any bucket under MAXIMUM_BUCKETS,
+        so a diversity rejection on a non-full bucket could trigger a spurious
+        split.
+        """
+        routing_table = RoutingTable(create_valid_peer_id("local"), mock_host)
+        bucket = routing_table.buckets[0]
+
+        # Two peers from 8.8.8.0/24 are admitted; the third is subnet-rejected.
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.1/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.2/tcp/1")) is True
+        assert await bucket.add_peer(_peer_with_addrs("/ip4/8.8.8.3/tcp/1")) is False
+
+        # Bucket holds 2 peers, far below bucket_size — never splittable.
+        assert bucket.size() < bucket.bucket_size
+        assert routing_table._should_split_bucket(bucket) is False
+
+        # Sanity: a genuinely full bucket is still splittable (guard is specific,
+        # not a blanket "never split").
+        small = KBucket(mock_host, bucket_size=2)
+        assert await small.add_peer(_peer_with_addrs("/ip4/1.1.1.1/tcp/1")) is True
+        assert await small.add_peer(_peer_with_addrs("/ip4/9.9.9.9/tcp/1")) is True
+        assert small.size() == small.bucket_size
+        assert routing_table._should_split_bucket(small) is True
+
     def test_subnet_key_helper(self):
         """_subnet_key groups globals and exempts everything non-routable."""
         assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.7/tcp/1")) == "8.8.8.0/24"
