@@ -35,6 +35,7 @@ from libp2p.peer.peerstore import env_to_send_in_RPC
 
 from .common import (
     ALPHA,
+    BUCKET_SIZE,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
@@ -281,9 +282,9 @@ class ProviderStore:
         """
         Send ADD_PROVIDER message to a specific peer.
 
-        Per the IPFS DHT spec, ADD_PROVIDER is fire-and-forget:
-        the receiver stores the provider record but does NOT send a response.
-        We send the message and close the stream.
+        Per the libp2p DHT spec, the receiver echoes the request to confirm
+        success. We send the message and close the stream (the echo response
+        is not read by the sender).
 
         :param peer_id: The peer to send the message to
         :param key: The content key being provided
@@ -718,6 +719,17 @@ class ProviderStore:
         if key not in self.providers:
             self.providers[key] = {}
 
+        # Per spec: limit providers per key to k (BUCKET_SIZE)
+        if (
+            len(self.providers[key]) >= BUCKET_SIZE
+            and str(provider.peer_id) not in self.providers[key]
+        ):
+            logger.debug(
+                f"Provider limit ({BUCKET_SIZE}) reached for key {key.hex()}, "
+                f"ignoring new provider {provider.peer_id}"
+            )
+            return
+
         # Add or update the provider record
         peer_id_str = str(provider.peer_id)  # Use string representation as dict key
         self.providers[key][peer_id_str] = ProviderRecord(
@@ -752,13 +764,10 @@ class ProviderStore:
                 expired_peers.append(peer_id_str)
                 continue
 
-            # Use addresses only if they haven't expired
-            addresses = []
-            if current_time - record.timestamp <= PROVIDER_ADDRESS_TTL:
-                addresses = record.addresses
-
             # Create PeerInfo and add to results
-            result.append(PeerInfo(record.peer_id, addresses))
+            # Per spec: return addresses for valid records (address TTL is
+            # for refresh timing, not for making addresses empty)
+            result.append(PeerInfo(record.peer_id, record.addresses))
 
         # Clean up expired records
         for peer_id in expired_peers:

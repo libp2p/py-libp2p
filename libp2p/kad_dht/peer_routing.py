@@ -6,7 +6,6 @@ to efficiently locate peers in a distributed network.
 """
 
 import logging
-import os
 
 import trio
 import varint
@@ -523,8 +522,12 @@ class PeerRouting(IPeerRouting):
         # and look it up to discover new peers
         for bucket in self.routing_table.buckets:
             if bucket.size() > 0:
-                # Generate a random peer ID that would fall in this bucket's range
-                random_key = os.urandom(32)
+                # Generate a random peer ID that falls in this bucket's range
+                # The bucket's range is [min_range, max_range)
+                import random
+
+                random_int = random.randint(bucket.min_range, bucket.max_range - 1)
+                random_key = random_int.to_bytes(32, byteorder="big")
                 try:
                     random_peers = await self.find_closest_peers_network(random_key)
                     for peer_id in random_peers:

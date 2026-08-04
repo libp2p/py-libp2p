@@ -631,10 +631,20 @@ class KadDHT(Service):
                             should_reset = True
                             break
 
-                        # Validate key is a valid multihash (PeerId format)
+                        # Validate key is a valid PeerId
+                        # Accept raw multihash (common) or any reasonable-length
+                        # key for backward compatibility with CID-encoded PeerIds
+                        valid_peer_id = False
                         try:
                             multihash.decode(target_key)
+                            valid_peer_id = True
                         except Exception:
+                            # Accept any reasonable-length key for
+                            # backward compatibility
+                            if 2 <= len(target_key) <= 50:
+                                valid_peer_id = True
+
+                        if not valid_peer_id:
                             logger.warning(
                                 f"FIND_NODE key is not a valid PeerId "
                                 f"({len(target_key)} bytes), ignoring"
@@ -1020,6 +1030,23 @@ class KadDHT(Service):
                                     )
                                     self.value_store.remove(key)
                                     value_record = None
+
+                            # Validate signature before serving
+                            if value_record and value_record.signature:
+                                from libp2p.records.utils import verify_record
+
+                                if not verify_record(
+                                    value_record.signature,
+                                    value_record.author,
+                                    key,
+                                    value_record.value,
+                                ):
+                                    logger.debug(
+                                        f"Record for key {key.hex()} "
+                                        "has invalid signature, removing"
+                                    )
+                                    self.value_store.remove(key)
+                                    value_record = None
                             # If timeReceived is unparseable, serve the
                             # record anyway (backwards compatibility)
 
@@ -1218,13 +1245,13 @@ class KadDHT(Service):
                                         )
                                         success = True
                                 except Exception:
-                                    # If select fails, store the new record
-                                    self.value_store.put_record(key, cleaned_record)
-                                    logger.debug(
-                                        f"Stored value for key {key.hex()} "
-                                        "(select failed, storing anyway)"
+                                    # Per spec: if validation fails, do NOT store
+                                    # the record and close the stream
+                                    logger.warning(
+                                        f"validator.select() failed for key "
+                                        f"{key.hex()}, rejecting PUT_VALUE"
                                     )
-                                    success = True
+                                    success = False
                             else:
                                 # No existing record, store the new one
                                 self.value_store.put_record(key, cleaned_record)
@@ -1486,7 +1513,8 @@ class KadDHT(Service):
         # Track queried peers to avoid duplicates
         queried_peers: set[ID] = set()
         # Candidate peers for iterative lookup (closer peers from responses)
-        candidate_peers: list[ID] = list(closest_peers)
+        # Use list wrapper for mutable reference in closure
+        candidate_peers_wrapper: list[list[ID]] = [list(closest_peers)]
 
         async def query_one(peer: ID, cancel_scope: trio.CancelScope) -> None:
             closer_peers: list[ID] = []
@@ -1559,22 +1587,29 @@ class KadDHT(Service):
             finally:
                 # Add closer peers from response to candidates for iterative lookup
                 if closer_peers:
+                    from .utils import sort_peer_ids_by_distance
+
+                    candidates = candidate_peers_wrapper[0]
                     for cp in closer_peers:
                         if (
                             cp not in queried_peers
-                            and cp not in candidate_peers
+                            and cp not in candidates
                             and cp != self.local_peer_id
                         ):
-                            candidate_peers.append(cp)
+                            candidates.append(cp)
+                    # Re-sort candidates by distance to key (per spec)
+                    candidate_peers_wrapper[0] = sort_peer_ids_by_distance(
+                        key_bytes, candidates
+                    )
                 sem.release()
 
         async with trio.open_nursery() as nursery:
             cancel_scope = nursery.cancel_scope
             # Iterative lookup: query peers, add closer peers, continue
-            while candidate_peers and not quorum_reached.is_set():
+            while candidate_peers_wrapper[0] and not quorum_reached.is_set():
                 # Take next unqueried peer from candidates
-                while candidate_peers:
-                    peer = candidate_peers.pop(0)
+                while candidate_peers_wrapper[0]:
+                    peer = candidate_peers_wrapper[0].pop(0)
                     if peer not in queried_peers:
                         queried_peers.add(peer)
                         break

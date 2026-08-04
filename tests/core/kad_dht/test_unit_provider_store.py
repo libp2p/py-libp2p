@@ -311,10 +311,11 @@ class TestProviderStore:
 
         providers = store.get_providers(key)
 
-        # Should return provider but with empty addresses
+        # Per spec: return addresses for valid records (address TTL is for
+        # refresh timing, not for making addresses empty)
         assert len(providers) == 1
         assert providers[0].peer_id == peer_id
-        assert providers[0].addrs == []
+        assert providers[0].addrs == addresses
 
     def test_get_providers_cleanup_empty_key(self):
         """Test that keys with no valid providers are removed."""
