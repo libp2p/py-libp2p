@@ -347,6 +347,8 @@ class Pubsub(Service, IPubsub):
 
     _msg_id_constructor: Callable[[rpc_pb2.Message], bytes]
     _pending_announce_retries: set[tuple[ID, str, bool]]
+    # topics whose message-cache window we already replayed, per peer
+    _replayed_recent_topics: dict[ID, set[str]]
 
     def __init__(
         self,
@@ -449,6 +451,7 @@ class Pubsub(Service, IPubsub):
         self._peer_added_events: dict[ID, trio.Event] = {}
         self._subscription_events: dict[tuple[ID, str], trio.Event] = {}
         self._pending_announce_retries = set()
+        self._replayed_recent_topics = {}
 
         self.event_handle_peer_queue_started = trio.Event()
         self.event_handle_dead_peer_queue_started = trio.Event()
@@ -621,9 +624,7 @@ class Pubsub(Service, IPubsub):
                 pass
             del self.peers[peer_id]
         # Also remove from any subscription maps:
-        for _topic, peerset in self.peer_topics.items():
-            if peer_id in peerset:
-                peerset.discard(peer_id)
+        self._forget_all_subscriptions(peer_id)
 
     def remove_from_blacklist(self, peer_id: ID) -> None:
         """
@@ -820,16 +821,14 @@ class Pubsub(Service, IPubsub):
 
         # Flush any messages that were queued while this peer's protocol
         # identification was still in progress (identify-aware publishing).
-        if hasattr(self.router, "flush_pending_messages"):
-            try:
-                # Type narrowing: router has flush_pending_messages method
-                await self.router.flush_pending_messages(peer_id)  # type: ignore[attr-defined]
-            except Exception as error:
-                logger.debug(
-                    "failed to flush pending messages for peer %s: %s",
-                    peer_id,
-                    error,
-                )
+        try:
+            await self.router.flush_pending_messages(peer_id)
+        except Exception as error:
+            logger.debug(
+                "failed to flush pending messages for peer %s: %s",
+                peer_id,
+                error,
+            )
 
         await self._send_recent_messages_to_new_peer(peer_id)
 
@@ -839,29 +838,50 @@ class Pubsub(Service, IPubsub):
         """
         Replay recent messages to a peer whose subscriptions we already hold.
 
-        ``handle_subscription`` normally does this, but it runs off the inbound
-        stream and can fire before ``_handle_new_peer`` has registered the
-        outbound stream in ``peers``. Its catch-up is a no-op in that ordering,
-        so the messages are lost unless the replay also runs here.
+        The peer's subscriptions can land before ``_handle_new_peer`` registers
+        the outbound stream, and ``handle_subscription``'s catch-up is a no-op
+        in that ordering, so the replay has to run again once we can write.
 
         :param peer_id: the peer that just became writable
         """
-        if not hasattr(self.router, "send_recent_messages"):
-            return
-
         subscribed_topics = [
             topic for topic, peers in self.peer_topics.items() if peer_id in peers
         ]
         for topic in subscribed_topics:
-            try:
-                await self.router.send_recent_messages(peer_id, topic)  # type: ignore[attr-defined]
-            except Exception as error:
-                logger.debug(
-                    "failed to send recent messages for topic %s to peer %s: %s",
-                    topic,
-                    peer_id,
-                    error,
-                )
+            await self._replay_recent_messages(peer_id, topic)
+
+    async def _replay_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Replay the router's recent messages for a topic, once per subscription.
+
+        The gate keeps a peer that reconnects or re-announces from being handed
+        the whole message-cache window again. It is dropped when the peer
+        unsubscribes, disconnects, is blacklisted, or when the replay fails.
+
+        :param peer_id: the peer to replay messages to
+        :param topic: the topic to replay messages for
+        """
+        if peer_id not in self.peers:
+            # Not writable yet, so the replay would be a no-op. Once the
+            # outbound stream is registered, `_handle_new_peer` replays.
+            return
+
+        replayed = self._replayed_recent_topics.setdefault(peer_id, set())
+        if topic in replayed:
+            return
+        replayed.add(topic)
+
+        try:
+            await self.router.send_recent_messages(peer_id, topic)
+        except Exception as error:
+            # Un-spend the gate so a later announcement can retry.
+            replayed.discard(topic)
+            logger.debug(
+                "failed to send recent messages for topic %s to peer %s: %s",
+                topic,
+                peer_id,
+                error,
+            )
 
     async def _handle_new_peer_safe(self, peer_id: ID) -> None:
         """
@@ -875,23 +895,34 @@ class Pubsub(Service, IPubsub):
             logger.info(f"Protocol negotiation failed for peer {peer_id}: {error}")
 
     def _handle_dead_peer(self, peer_id: ID) -> None:
+        # Runs before the `peers` check: subscriptions arrive on the peer's
+        # inbound stream, so a half-registered peer has state to clean up here.
+        self._clear_pending_announce_retries_for_peer(peer_id)
+        self._forget_all_subscriptions(peer_id)
+
         if peer_id not in self.peers:
             return
         del self.peers[peer_id]
-
-        self._clear_pending_announce_retries_for_peer(peer_id)
 
         # Close the outbound queue so the sending task exits
         if peer_id in self.peer_queues:
             self.peer_queues.pop(peer_id).close()
 
-        for topic in self.peer_topics:
-            if peer_id in self.peer_topics[topic]:
-                self.peer_topics[topic].discard(peer_id)
-
         self.router.remove_peer(peer_id)
 
         logger.debug("removed dead peer %s", peer_id)
+
+    def _forget_all_subscriptions(self, peer_id: ID) -> None:
+        for peers in self.peer_topics.values():
+            peers.discard(peer_id)
+        self._replayed_recent_topics.pop(peer_id, None)
+
+    def _forget_subscription(self, peer_id: ID, topic: str) -> None:
+        if topic in self.peer_topics:
+            self.peer_topics[topic].discard(peer_id)
+        replayed = self._replayed_recent_topics.get(peer_id)
+        if replayed is not None:
+            replayed.discard(topic)
 
     def _clear_pending_announce_retries_for_peer(self, peer_id: ID) -> None:
         # This is O(n) over pending retry keys. Keep this representation because
@@ -990,32 +1021,27 @@ class Pubsub(Service, IPubsub):
                 if key in self._subscription_events:
                     self._subscription_events.pop(key).set()
 
-                # Flush any messages that were queued while waiting for this
-                # peer's subscription (identify-aware publishing).
-                # This handles messages that were queued explicitly for this peer.
-                if hasattr(self.router, "flush_pending_messages"):
-                    # Must use run_task since flush_pending_messages is async
-                    # but handle_subscription is sync
-                    if self.manager.is_running:
-                        self.manager.run_task(
-                            self.router.flush_pending_messages,  # type: ignore[attr-defined]
-                            origin_id,
-                        )
+                # Both hooks are async while `handle_subscription` is sync, so
+                # they have to be spawned.
+                if self.manager.is_running:
+                    # Flush any messages that were queued while waiting for this
+                    # peer's subscription (identify-aware publishing).
+                    self.manager.run_task(
+                        self.router.flush_pending_messages,
+                        origin_id,
+                    )
 
-                # Also send recent messages from mcache for this topic.
-                # This handles the case where messages were published before this
-                # peer was even in pubsub.peers (race during connection setup).
-                if hasattr(self.router, "send_recent_messages"):
-                    if self.manager.is_running:
-                        self.manager.run_task(
-                            self.router.send_recent_messages,  # type: ignore[attr-defined]
-                            origin_id,
-                            sub_message.topicid,
-                        )
+                    # Also send recent messages from mcache for this topic.
+                    # This handles the case where messages were published before
+                    # this peer was even in pubsub.peers (race during connection
+                    # setup).
+                    self.manager.run_task(
+                        self._replay_recent_messages,
+                        origin_id,
+                        sub_message.topicid,
+                    )
         else:
-            if sub_message.topicid in self.peer_topics:
-                if origin_id in self.peer_topics[sub_message.topicid]:
-                    self.peer_topics[sub_message.topicid].discard(origin_id)
+            self._forget_subscription(origin_id, sub_message.topicid)
 
     def notify_subscriptions(self, publish_message: rpc_pb2.Message) -> None:
         """
