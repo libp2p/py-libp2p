@@ -654,7 +654,7 @@ class KadDHT(Service):
 
                         # Find closest peers to the target key
                         closest_peers = self.routing_table.find_local_closest_peers(
-                            target_key, 20
+                            target_key, BUCKET_SIZE
                         )
                         logger.debug(f"Found {len(closest_peers)} close peers")
 
@@ -944,7 +944,7 @@ class KadDHT(Service):
 
                         # Also include closest peers (always, per IPFS spec)
                         closest_peers = self.routing_table.find_local_closest_peers(
-                            key, 20
+                            key, BUCKET_SIZE
                         )
                         logger.debug(
                             f"Including {len(closest_peers)} closest peers"
@@ -1067,7 +1067,7 @@ class KadDHT(Service):
 
                             # Include closerPeers per spec even when value is found
                             closest_peers = self.routing_table.find_local_closest_peers(
-                                key, 20
+                                key, BUCKET_SIZE
                             )
                             for peer in closest_peers:
                                 if peer == peer_id:
@@ -1112,7 +1112,7 @@ class KadDHT(Service):
 
                             # Add closest peers to key
                             closest_peers = self.routing_table.find_local_closest_peers(
-                                key, 20
+                                key, BUCKET_SIZE
                             )
                             logger.debug(
                                 "No value found,"
@@ -1274,6 +1274,7 @@ class KadDHT(Service):
                                 f"Failed to store value {value.hex()} for key "
                                 f"{key.hex()}: {e}"
                             )
+                            should_reset = True
 
                         # Per spec: only echo the request if validation
                         # succeeds
@@ -1293,6 +1294,10 @@ class KadDHT(Service):
                             await stream.write(varint.encode(len(response_bytes)))
                             await stream.write(response_bytes)
                             logger.debug("Sent PUT_VALUE acknowledgement")
+                        else:
+                            # Per spec: if validation fails, reset the stream
+                            should_reset = True
+                            break
 
                     # Handle PUT_VALUE without record field
                     # Per spec: if verification fails, close the stream without

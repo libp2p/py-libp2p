@@ -289,9 +289,23 @@ class PeerRouting(IPeerRouting):
                     query_count += 1
                     nursery.start_soon(_guarded_query, peer)
 
-            # If we got no new peers, we're done
+            # If we got no new peers, check if there are still unqueried
+            # closest peers before terminating
             if not new_peers:
-                logger.debug("No new peers discovered in this round, ending lookup")
+                unqueried_in_topk = [
+                    p
+                    for p in closest_peers[:BUCKET_SIZE]
+                    if p not in queried_peers and p != local_id
+                ]
+                if unqueried_in_topk:
+                    logger.debug(
+                        f"No new peers discovered but {len(unqueried_in_topk)} "
+                        "unqueried closest peers remain, continuing"
+                    )
+                    # Continue with remaining unqueried closest peers
+                    peers_to_query = unqueried_in_topk[:ALPHA]
+                    continue
+                logger.debug("No new peers discovered and all closest queried")
                 break
 
             # Update our list of closest peers

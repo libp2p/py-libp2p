@@ -564,6 +564,14 @@ class ValueStore:
                                 closer_id = ID(peer_proto.id)
                                 if closer_id != self.local_peer_id:
                                     closer.append(closer_id)
+                                    # Per spec: store addresses in peerbook
+                                    if peer_proto.addrs:
+                                        from multiaddr import Multiaddr
+
+                                        addrs = [Multiaddr(a) for a in peer_proto.addrs]
+                                        self.host.get_peerstore().add_addrs(
+                                            closer_id, addrs, 600
+                                        )
                             except Exception:
                                 pass
                         return result, closer
@@ -582,6 +590,14 @@ class ValueStore:
                                 closer_id = ID(peer_proto.id)
                                 if closer_id != self.local_peer_id:
                                     closer.append(closer_id)
+                                    # Per spec: store addresses in peerbook
+                                    if peer_proto.addrs:
+                                        from multiaddr import Multiaddr
+
+                                        addrs = [Multiaddr(a) for a in peer_proto.addrs]
+                                        self.host.get_peerstore().add_addrs(
+                                            closer_id, addrs, 600
+                                        )
                             except Exception:
                                 pass
                         return None, closer

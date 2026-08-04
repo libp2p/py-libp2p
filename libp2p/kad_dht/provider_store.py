@@ -451,9 +451,8 @@ class ProviderStore:
             if len(all_providers) >= count:
                 break
 
-            # If no new providers found in this batch, stop
-            if not any(batch_results):
-                logger.debug("No providers found in batch, stopping search")
+            # If no candidates left, stop
+            if not candidate_peers:
                 break
 
         logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
