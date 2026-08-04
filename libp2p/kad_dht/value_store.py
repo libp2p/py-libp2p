@@ -358,8 +358,12 @@ class ValueStore:
         return record
 
     async def _get_from_peer(
-        self, peer_id: ID, key: bytes, return_record: bool = False
-    ) -> bytes | Record | None:
+        self,
+        peer_id: ID,
+        key: bytes,
+        return_record: bool = False,
+        return_closer_peers: bool = False,
+    ) -> bytes | Record | None | tuple[bytes | Record | None, list[ID]]:
         """
         Retrieve a value from a specific peer.
 
@@ -372,11 +376,14 @@ class ValueStore:
         return_record : bool
             If True, return the full Record (for quorum),
             else return just the value
+        return_closer_peers : bool
+            If True, return a tuple of (result, closer_peers)
 
         Returns
         -------
-        Optional[bytes] | Optional[Record]
+        Optional[bytes] | Optional[Record] | Tuple
             The value if found (or full Record if return_record=True), None otherwise
+            If return_closer_peers, returns (result, closer_peers_list)
 
         """
         stream = None
@@ -385,10 +392,13 @@ class ValueStore:
             if peer_id == self.local_peer_id:
                 local_record = self.get(key)
                 if local_record is None:
+                    if return_closer_peers:
+                        return None, []
                     return None
-                if return_record:
-                    return local_record
-                return local_record.value
+                result = local_record if return_record else local_record.value
+                if return_closer_peers:
+                    return result, []
+                return result
 
             logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 
@@ -417,6 +427,8 @@ class ValueStore:
                 b = await stream.read(1)
                 if not b:
                     logger.warning("Connection closed while reading length")
+                    if return_closer_peers:
+                        return None, []
                     return None
                 length_bytes += b
                 if b[0] & 0x80 == 0:
@@ -426,6 +438,8 @@ class ValueStore:
                         "Varint length exceeds maximum bytes "
                         f"({max_varint_bytes}), ignoring response"
                     )
+                    if return_closer_peers:
+                        return None, []
                     return None
             response_length = varint.decode_bytes(length_bytes)
             # Read response data
@@ -437,6 +451,8 @@ class ValueStore:
                     logger.debug(
                         f"Connection closed by peer {peer_id} while reading data"
                     )
+                    if return_closer_peers:
+                        return None, []
                     return None
                 response_bytes += chunk
                 remaining -= len(chunk)
@@ -461,6 +477,8 @@ class ValueStore:
                         logger.error(
                             "Received an invalid-signed-record, ignoring the response"
                         )
+                        if return_closer_peers:
+                            return None, []
                         return None
 
                     logger.debug(
@@ -470,7 +488,18 @@ class ValueStore:
                     # Update timeReceived to current time (RFC3339 per spec)
                     response.record.timeReceived = format_time_rfc3339()
 
-                    return response.record if return_record else response.record.value
+                    result = response.record if return_record else response.record.value
+                    if return_closer_peers:
+                        closer = []
+                        for peer_proto in response.closerPeers:
+                            try:
+                                closer_id = ID(peer_proto.id)
+                                if closer_id != self.local_peer_id:
+                                    closer.append(closer_id)
+                            except Exception:
+                                pass
+                        return result, closer
+                    return result
 
                 # Handle case where value is not found but peer infos are returned
                 else:
@@ -478,15 +507,29 @@ class ValueStore:
                         f"Value not found for key {key.hex()} from peer {peer_id},"
                         f" received {len(response.closerPeers)} closer peers"
                     )
+                    if return_closer_peers:
+                        closer = []
+                        for peer_proto in response.closerPeers:
+                            try:
+                                closer_id = ID(peer_proto.id)
+                                if closer_id != self.local_peer_id:
+                                    closer.append(closer_id)
+                            except Exception:
+                                pass
+                        return None, closer
                     return None
 
             except Exception as proto_err:
                 logger.warning(f"Failed to parse as protobuf: {proto_err}")
 
+            if return_closer_peers:
+                return None, []
             return None
 
         except Exception as e:
             logger.warning(f"Failed to get value from peer {peer_id}: {e}")
+            if return_closer_peers:
+                return None, []
             return None
 
         finally:

@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Constants for provider records (based on IPFS standards)
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
-PROVIDER_ADDRESS_TTL = 30 * 60  # 30 minutes in seconds
+PROVIDER_ADDRESS_TTL = 24 * 60 * 60  # 24 hours in seconds (per spec Section 7.3.3)
 
 
 class ProviderRecord:

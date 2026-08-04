@@ -538,6 +538,9 @@ class KadDHT(Service):
         closer_peer_envelope: Envelope | None = None
         provider_peer_envelope: Envelope | None = None
 
+        # Per spec: "On any error, the stream is reset."
+        should_reset = False
+
         try:
             while True:
                 # Read varint-prefixed length for the message
@@ -606,6 +609,7 @@ class KadDHT(Service):
                             logger.error(
                                 "Received an invalid-signed-record, dropping the stream"
                             )
+                            should_reset = True
                             break
 
                         # Get target key directly from protobuf
@@ -614,6 +618,7 @@ class KadDHT(Service):
                         # Per spec: "key must be set to the binary PeerId"
                         if not target_key:
                             logger.warning("FIND_NODE with empty key, ignoring")
+                            should_reset = True
                             break
 
                         # Find closest peers to the target key
@@ -711,11 +716,12 @@ class KadDHT(Service):
                         key = message.key
                         logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
 
-                        # Per spec: check key length (per go-libp2p, max ~128 bytes)
-                        if len(key) > 128 or len(key) == 0:
+                        # Per spec: check key length (80 bytes max)
+                        if len(key) > 80 or len(key) == 0:
                             logger.warning(
                                 f"ADD_PROVIDER key length invalid: {len(key)}, ignoring"
                             )
+                            should_reset = True
                             break
 
                         # Per spec: "The target node verifies key is a valid CID"
@@ -729,10 +735,12 @@ class KadDHT(Service):
                             logger.error(
                                 "Received an invalid-signed-record, dropping the stream"
                             )
+                            should_reset = True
                             break
 
                         # Rate limit check
                         if not self._check_provider_rate_limit(peer_id):
+                            should_reset = True
                             break
 
                         # Metrics Event
@@ -815,10 +823,16 @@ class KadDHT(Service):
                             except Exception as e:
                                 logger.warning(f"Failed to process provider info: {e}")
 
-                        # Per spec, ADD_PROVIDER is fire-and-forget:
-                        # the receiver does NOT send a response.
-                        # go-libp2p returns nil, nil; handleNewMessage skips writing.
-                        logger.debug("ADD_PROVIDER processed (no response)")
+                        # Per spec: ADD_PROVIDER echoes the request to confirm success.
+                        # If verification fails, the server MUST close the stream
+                        # without sending a response.
+                        response = Message()
+                        response.type = Message.MessageType.ADD_PROVIDER
+                        response.key = key
+                        response_bytes = response.SerializeToString()
+                        await stream.write(varint.encode(len(response_bytes)))
+                        await stream.write(response_bytes)
+                        logger.debug("ADD_PROVIDER processed, sent echo response")
 
                     # Handle GET_PROVIDERS message
                     elif message.type == Message.MessageType.GET_PROVIDERS:
@@ -831,11 +845,13 @@ class KadDHT(Service):
                             logger.error(
                                 "Received an invalid-signed-record, dropping the stream"
                             )
+                            should_reset = True
                             break
 
                         # Validate key is not empty
                         if not key:
                             logger.warning("GET_PROVIDERS with empty key, ignoring")
+                            should_reset = True
                             break
 
                         # Validate key length (per go-libp2p, max ~128 bytes)
@@ -844,6 +860,7 @@ class KadDHT(Service):
                                 f"GET_PROVIDERS key too long "
                                 f"({len(key)} bytes), ignoring"
                             )
+                            should_reset = True
                             break
 
                         # Per spec: key is set to a CID
@@ -947,11 +964,13 @@ class KadDHT(Service):
                             logger.error(
                                 "Received an invalid-signed-record, dropping the stream"
                             )
+                            should_reset = True
                             break
 
                         # Validate key is not empty
                         if not key:
                             logger.warning("GET_VALUE with empty key, ignoring")
+                            should_reset = True
                             break
 
                         # Metrics Event
@@ -1094,6 +1113,7 @@ class KadDHT(Service):
                             logger.error(
                                 "Received an invalid-signed-record, dropping the stream"
                             )
+                            should_reset = True
                             break
 
                         # Validate record key matches the message key
@@ -1101,11 +1121,13 @@ class KadDHT(Service):
                             logger.warning(
                                 "PUT_VALUE record key does not match message key"
                             )
+                            should_reset = True
                             break
 
                         # Validate key is not empty
                         if not key:
                             logger.warning("PUT_VALUE with empty key, ignoring")
+                            should_reset = True
                             break
 
                         event.put_value = True
@@ -1217,18 +1239,16 @@ class KadDHT(Service):
                             logger.debug("Sent PUT_VALUE acknowledgement")
 
                     # Handle PUT_VALUE without record field
+                    # Per spec: if verification fails, close the stream without
+                    # sending a response.
                     elif message.type == Message.MessageType.PUT_VALUE:
                         logger.warning(f"PUT_VALUE w/o record from {peer_id}")
-                        response = Message()
-                        response.type = Message.MessageType.PUT_VALUE
-                        envelope_bytes, _ = env_to_send_in_RPC(self.host)
-                        response.senderRecord = envelope_bytes
-                        response_bytes = response.SerializeToString()
-                        await stream.write(varint.encode(len(response_bytes)))
-                        await stream.write(response_bytes)
+                        should_reset = True
+                        break
 
                 except Exception as proto_err:
                     logger.warning(f"Failed to parse protobuf message: {proto_err}")
+                    should_reset = True
                     break
 
                 # Send KAD-DHT event to Metrics
@@ -1243,8 +1263,15 @@ class KadDHT(Service):
             except Exception:
                 await stream.close()
         else:
-            # Clean shutdown - close gracefully
-            await stream.close()
+            # Per spec: On any error in the handler, the stream is reset.
+            # Only close gracefully if the handler completed without errors.
+            if should_reset:
+                try:
+                    await stream.reset()
+                except Exception:
+                    await stream.close()
+            else:
+                await stream.close()
 
     def _check_provider_rate_limit(self, peer_id: ID) -> bool:
         """
@@ -1427,13 +1454,22 @@ class KadDHT(Service):
         total_responses_list: list[int] = [0]
         sem = trio.Semaphore(ALPHA)
         quorum_reached = trio.Event()
+        # Track queried peers to avoid duplicates
+        queried_peers: set[ID] = set()
+        # Candidate peers for iterative lookup (closer peers from responses)
+        candidate_peers: list[ID] = list(closest_peers)
 
         async def query_one(peer: ID, cancel_scope: trio.CancelScope) -> None:
+            closer_peers: list[ID] = []
             try:
                 with trio.move_on_after(QUERY_TIMEOUT):
-                    rec = await self.value_store._get_from_peer(
-                        peer, key_bytes, return_record=True
+                    result = await self.value_store._get_from_peer(
+                        peer, key_bytes, return_record=True, return_closer_peers=True
                     )
+                    if result is None or not isinstance(result, tuple):
+                        peers_with_no_record.add(peer)
+                        return
+                    rec, closer_peers = result
                     if rec is not None:
                         total_responses_list[0] += 1
                         try:
@@ -1492,11 +1528,30 @@ class KadDHT(Service):
                 peers_with_no_record.add(peer)
                 logger.debug(f"Error querying peer {peer}: {e}")
             finally:
+                # Add closer peers from response to candidates for iterative lookup
+                if closer_peers:
+                    for cp in closer_peers:
+                        if (
+                            cp not in queried_peers
+                            and cp not in candidate_peers
+                            and cp != self.local_peer_id
+                        ):
+                            candidate_peers.append(cp)
                 sem.release()
 
         async with trio.open_nursery() as nursery:
             cancel_scope = nursery.cancel_scope
-            for peer in closest_peers:
+            # Iterative lookup: query peers, add closer peers, continue
+            while candidate_peers and not quorum_reached.is_set():
+                # Take next unqueried peer from candidates
+                while candidate_peers:
+                    peer = candidate_peers.pop(0)
+                    if peer not in queried_peers:
+                        queried_peers.add(peer)
+                        break
+                else:
+                    break
+
                 await sem.acquire()
                 if quorum_reached.is_set():
                     sem.release()
