@@ -2,7 +2,11 @@
 Tests for the Grid Routing Table implementation.
 """
 
+import inspect
+from unittest.mock import Mock
+
 import pytest
+from multiaddr import Multiaddr
 
 from libp2p.kad_dht.grid_routing_table import (
     GRID_BUCKET_COUNT,
@@ -10,7 +14,23 @@ from libp2p.kad_dht.grid_routing_table import (
     GridRoutingTable,
     NodeId,
 )
+from libp2p.kad_dht.kad_dht import DHTMode, KadDHT
 from libp2p.peer.id import ID
+from libp2p.peer.peerinfo import PeerInfo
+
+
+@pytest.fixture
+def mock_host():
+    """Create a mock host with a peerstore for routing-table tests."""
+    host = Mock()
+    peerstore = Mock()
+    peerstore.addrs.return_value = [Multiaddr("/ip4/127.0.0.1/tcp/8000")]
+    peerstore.get_protocols.return_value = []
+    host.get_peerstore.return_value = peerstore
+    host.get_id.return_value = ID.from_base58(
+        "QmaCpDMGvV2BGHeYERUEnRQAwe5CcqarqmtA7xNXT92p2"
+    )
+    return host
 
 
 class TestNodeId:
@@ -129,14 +149,36 @@ class TestGridBucket:
 class TestGridRoutingTable:
     """Tests for GridRoutingTable class."""
 
-    def test_routing_table_creation(self):
+    def test_routing_table_creation(self, mock_host):
         """Test creating a grid routing table."""
         local_id = ID.from_base58("QmaCpDMGvV2BGHeYERUEnRQAwe5CcqarqmtA7xNXT92p2")
-        rt = GridRoutingTable(local_id)
+        rt = GridRoutingTable(local_id, mock_host)
 
         assert rt.local_id == local_id
+        assert rt.host == mock_host
         assert len(rt.buckets) == GRID_BUCKET_COUNT
         assert rt.size() == 0
+
+    def test_kad_dht_can_select_grid_routing_table(self, mock_host):
+        """Test selecting the grid routing table through KadDHT."""
+        dht = KadDHT(mock_host, DHTMode.SERVER, routing_table_type="grid")
+
+        assert isinstance(dht.routing_table, GridRoutingTable)
+
+    def test_add_peer_matches_routing_table_async_api(self, mock_host):
+        """Test GridRoutingTable implements the async add_peer API."""
+        local_id = ID.from_base58("QmaCpDMGvV2BGHeYERUEnRQAwe5CcqarqmtA7xNXT92p2")
+        peer_id = ID.from_base58("QmZLaXk3bbiHgVK3zp5A8n2DEuvMZFRv1GAjTrSvZuLnFr")
+        peer_info = PeerInfo(peer_id, [Multiaddr("/ip4/127.0.0.1/tcp/8001")])
+
+        rt = GridRoutingTable(local_id, mock_host)
+        pending_add = rt.add_peer(peer_info)
+
+        assert inspect.iscoroutine(pending_add)
+        pending_add.close()
+        assert rt.update(peer_id, peer_info=peer_info)
+        assert rt.peer_in_table(peer_id)
+        assert rt.get_peer_info(peer_id) == peer_info
 
     def test_add_peer_updates_routing_table(self):
         """Test adding a peer to the routing table."""

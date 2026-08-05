@@ -15,17 +15,22 @@ Key features:
 from dataclasses import dataclass
 import hashlib
 import logging
+import time
 from typing import Any
 
-import multihash
+import trio
 
+from libp2p.abc import IHost
+from libp2p.kad_dht.common import BUCKET_SIZE, PEER_REFRESH_INTERVAL
+from libp2p.kad_dht.routing_table import key_to_int, peer_id_to_key
+from libp2p.kad_dht.utils import shared_prefix_len, xor_distance
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
 
 logger = logging.getLogger(__name__)
 
 GRID_BUCKET_COUNT = 256
-DEFAULT_MAX_BUCKET_SIZE = 20
+DEFAULT_MAX_BUCKET_SIZE = BUCKET_SIZE
 
 
 @dataclass
@@ -34,19 +39,18 @@ class BucketPeerInfo:
 
     peer_id: ID
     peer_info: PeerInfo | None = None
+    last_seen: float = 0
     is_replaceable: bool = False
     is_connected: bool = False
 
 
 class NodeId:
-    """DHT Node ID with SHA256-based hashing and XOR distance calculation."""
+    """DHT node key wrapper using the shared Kademlia key helpers."""
 
     def __init__(self, peer_id: ID):
         """Initialize Node ID from a peer ID."""
         self.peer_id: ID | None = peer_id
-        digest = hashlib.sha256(peer_id.to_bytes()).digest()
-        mh_bytes = multihash.encode(digest, "sha2-256")
-        self.data = multihash.decode(mh_bytes).digest
+        self.data = peer_id_to_key(peer_id)
 
     @classmethod
     def from_hash(cls, hash_data: bytes) -> "NodeId":
@@ -58,32 +62,12 @@ class NodeId:
 
     def distance(self, other: "NodeId") -> bytes:
         """Calculate XOR distance to another NodeId."""
-        distance = bytes(a ^ b for a, b in zip(self.data, other.data))
-        return distance
+        distance = xor_distance(self.data, other.data)
+        return distance.to_bytes(len(self.data), byteorder="big")
 
     def common_prefix_len(self, other: "NodeId") -> int:
-        r"""
-        Calculate the number of common prefix bits between two node IDs.
-
-        Returns the number of leading bits that are the same.
-
-        Example:
-            0x00 and 0xFF have 0 common prefix bits.
-            0xFF and 0xFE have 7 common prefix bits.
-
-        """
-        distance = self.distance(other)
-
-        for i, byte in enumerate(distance):
-            if byte != 0:
-                leading_zeros = 0
-                bit = 0x80
-                while (byte & bit) == 0:
-                    leading_zeros += 1
-                    bit >>= 1
-                return i * 8 + leading_zeros
-
-        return 256
+        """Calculate the number of common prefix bits between two node IDs."""
+        return shared_prefix_len(self.data, other.data)
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, NodeId):
@@ -130,9 +114,14 @@ class GridBucket:
         :param is_connected: True if peer is currently connected
         :return: True if peer was added, False if bucket is full
         """
+        current_time = time.time()
         for i, peer_info_obj in enumerate(self.peers):
             if peer_info_obj.peer_id == peer_id:
+                if peer_info is not None:
+                    peer_info_obj.peer_info = peer_info
+                peer_info_obj.is_replaceable = is_replaceable
                 peer_info_obj.is_connected = is_connected
+                peer_info_obj.last_seen = current_time
                 self.peers.append(self.peers.pop(i))
                 return True
 
@@ -141,6 +130,7 @@ class GridBucket:
                 BucketPeerInfo(
                     peer_id=peer_id,
                     peer_info=peer_info,
+                    last_seen=current_time,
                     is_replaceable=is_replaceable,
                     is_connected=is_connected,
                 )
@@ -211,6 +201,21 @@ class GridBucket:
         """Get all BucketPeerInfo objects in the bucket."""
         return list(self.peers)
 
+    def get_stale_peers(self, stale_threshold_seconds: int = 3600) -> list[ID]:
+        """Get peers whose last-seen timestamp is older than the threshold."""
+        current_time = time.time()
+        return [
+            peer.peer_id
+            for peer in self.peers
+            if current_time - peer.last_seen > stale_threshold_seconds
+        ]
+
+    def get_oldest_peer(self) -> ID | None:
+        """Get the least recently seen peer."""
+        if not self.peers:
+            return None
+        return self.peers[0].peer_id
+
     def truncate(self, limit: int) -> None:
         """Truncate the bucket to a maximum size."""
         while len(self.peers) > limit:
@@ -225,7 +230,12 @@ class GridRoutingTable:
     Bucket index = 255 - CPL(local_id, peer_id)
     """
 
-    def __init__(self, local_id: ID, max_bucket_size: int = DEFAULT_MAX_BUCKET_SIZE):
+    def __init__(
+        self,
+        local_id: ID,
+        host: IHost | None = None,
+        max_bucket_size: int = DEFAULT_MAX_BUCKET_SIZE,
+    ):
         """
         Initialize the grid routing table.
 
@@ -233,6 +243,7 @@ class GridRoutingTable:
         :param max_bucket_size: Maximum peers per bucket (default 20)
         """
         self.local_id = local_id
+        self.host = host
         self.local_node_id = NodeId(local_id)
         self.max_bucket_size = max_bucket_size
 
@@ -263,23 +274,32 @@ class GridRoutingTable:
         bucket_index = 255 - cpl
         return bucket_index
 
-    def update(
+    async def add_peer(
         self,
-        peer_id: ID,
-        peer_info: PeerInfo | None = None,
+        peer_obj: PeerInfo | ID,
+        *,
+        skip_server_mode_check: bool = False,
         is_permanent: bool = True,
         is_connected: bool = False,
     ) -> bool:
         """
         Update or add a peer to the routing table.
 
-        :param peer_id: ID of the peer to add/update
-        :param peer_info: Optional PeerInfo object
+        :param peer_obj: Either PeerInfo object or peer ID to add
+        :param skip_server_mode_check: If True, skip the KAD protocol check
         :param is_permanent: True for permanent peers, False for temporary
         :param is_connected: True if peer is currently connected
         :return: True if added/updated, False if bucket full and no replacement
         """
+        peer_info = await self._coerce_peer_info(peer_obj)
+        if peer_info is None:
+            return False
+
+        peer_id = peer_info.peer_id
         if peer_id == self.local_id:
+            return False
+
+        if not skip_server_mode_check and not self._peer_supports_kad(peer_id):
             return False
 
         node_id = NodeId(peer_id)
@@ -311,10 +331,56 @@ class GridRoutingTable:
             )
             return True
 
+        oldest_peer_id = bucket.get_oldest_peer()
+        if oldest_peer_id is not None and not await self._ping_peer(oldest_peer_id):
+            bucket.remove_peer(oldest_peer_id)
+            return bucket.add_peer(
+                peer_id,
+                peer_info=peer_info,
+                is_replaceable=not is_permanent,
+                is_connected=is_connected,
+            )
+
         logger.debug(f"Bucket {bucket_index} full and no replaceable peers")
         return False
 
-    def remove(self, peer_id: ID) -> bool:
+    def update(
+        self,
+        peer_id: ID,
+        peer_info: PeerInfo | None = None,
+        is_permanent: bool = True,
+        is_connected: bool = False,
+    ) -> bool:
+        """Synchronously update a bucket for tests and local-only callers."""
+        if peer_info is None:
+            peer_info = PeerInfo(peer_id, [])
+        if peer_id == self.local_id:
+            return False
+
+        bucket_index = self._get_bucket_index(NodeId(peer_id))
+        if bucket_index is None:
+            return False
+
+        bucket = self.buckets[bucket_index]
+        if bucket.add_peer(
+            peer_id,
+            peer_info=peer_info,
+            is_replaceable=not is_permanent,
+            is_connected=is_connected,
+        ):
+            return True
+
+        removed_id = bucket.remove_replaceable_peer()
+        if removed_id is None:
+            return False
+        return bucket.add_peer(
+            peer_id,
+            peer_info=peer_info,
+            is_replaceable=not is_permanent,
+            is_connected=is_connected,
+        )
+
+    def remove_peer(self, peer_id: ID) -> bool:
         """
         Remove a peer from the routing table.
 
@@ -331,6 +397,19 @@ class GridRoutingTable:
             return False
 
         return self.buckets[bucket_index].remove_peer(peer_id)
+
+    def remove(self, peer_id: ID) -> bool:
+        """Backward-compatible alias for remove_peer."""
+        return self.remove_peer(peer_id)
+
+    def find_local_closest_peers(self, key: bytes, count: int = 20) -> list[ID]:
+        """Find the closest local routing-table peers to a DHT key."""
+        target_hash = hashlib.sha256(key).digest()
+        all_peers = self.get_peer_ids()
+        all_peers.sort(
+            key=lambda peer_id: xor_distance(peer_id_to_key(peer_id), target_hash)
+        )
+        return all_peers[:count]
 
     def get_nearest_peers(self, target_key: bytes, count: int) -> list[ID]:
         """
@@ -391,16 +470,39 @@ class GridRoutingTable:
                     distance = peer_node.distance(target_node)
                     result_peers.append((peer_info.peer_id, distance))
 
-        result_peers.sort(key=lambda x: int.from_bytes(x[1], byteorder="big"))
+        result_peers.sort(key=lambda x: key_to_int(x[1]))
 
         return [peer_id for peer_id, _ in result_peers[:count]]
 
     def get_all_peers(self) -> list[ID]:
         """Get all peer IDs in the routing table."""
+        return self.get_peer_ids()
+
+    def get_peer_ids(self) -> list[ID]:
+        """Get all peer IDs in the routing table."""
         peers = []
         for bucket in self.buckets:
             peers.extend(bucket.peer_ids())
         return peers
+
+    def get_peer_info(self, peer_id: ID) -> PeerInfo | None:
+        """Get the peer info for a specific peer."""
+        if peer_id == self.local_id:
+            return None
+
+        bucket_index = self._get_bucket_index(NodeId(peer_id))
+        if bucket_index is None:
+            return None
+        return self.buckets[bucket_index].get_peer_info(peer_id)
+
+    def get_peer_infos(self) -> list[PeerInfo]:
+        """Get all PeerInfo objects in the routing table."""
+        peer_infos = []
+        for bucket in self.buckets:
+            peer_infos.extend(
+                peer.peer_info for peer in bucket.peer_infos() if peer.peer_info
+            )
+        return peer_infos
 
     def contains(self, peer_id: ID) -> bool:
         """Check if a peer is in the routing table."""
@@ -414,6 +516,10 @@ class GridRoutingTable:
             return False
 
         return self.buckets[bucket_index].contains(peer_id)
+
+    def peer_in_table(self, peer_id: ID) -> bool:
+        """Check if a peer is in the routing table."""
+        return self.contains(peer_id)
 
     def size(self) -> int:
         """Get the total number of peers in the routing table."""
@@ -437,3 +543,80 @@ class GridRoutingTable:
             "bucket_distribution": [b.size() for b in self.buckets],
         }
         return stats
+
+    def get_stale_peers(self, stale_threshold_seconds: int = 3600) -> list[ID]:
+        """Get all stale peer IDs from all buckets."""
+        stale_peers = []
+        for bucket in self.buckets:
+            stale_peers.extend(bucket.get_stale_peers(stale_threshold_seconds))
+        return stale_peers
+
+    def cleanup_routing_table(self) -> None:
+        """Remove all peers from the routing table."""
+        self.buckets = [
+            GridBucket(self.max_bucket_size) for _ in range(GRID_BUCKET_COUNT)
+        ]
+        logger.info("Grid routing table cleaned up, all data removed.")
+
+    async def _periodic_peer_refresh(self) -> None:
+        """Background task to periodically refresh stale peers."""
+        try:
+            while True:
+                await trio.sleep(PEER_REFRESH_INTERVAL)
+                for peer_id in self.get_stale_peers():
+                    if await self._ping_peer(peer_id):
+                        await self.add_peer(peer_id, skip_server_mode_check=True)
+                    else:
+                        self.remove_peer(peer_id)
+        except trio.Cancelled:
+            logger.debug("Grid peer refresh task cancelled")
+
+    async def _coerce_peer_info(self, peer_obj: PeerInfo | ID) -> PeerInfo | None:
+        """Resolve a PeerInfo from a PeerInfo object or peerstore-backed peer ID."""
+        if isinstance(peer_obj, PeerInfo):
+            return peer_obj
+
+        if self.host is None:
+            logger.debug("No host available to resolve peer %s, skipping", peer_obj)
+            return None
+
+        try:
+            addrs = self.host.get_peerstore().addrs(peer_obj)
+        except Exception as peerstore_error:
+            logger.debug(
+                "Peer %s not found in peerstore: %s, skipping",
+                peer_obj,
+                peerstore_error,
+            )
+            return None
+
+        if not addrs:
+            logger.debug(
+                "No addresses found for peer %s in peerstore, skipping",
+                peer_obj,
+            )
+            return None
+        return PeerInfo(peer_obj, addrs)
+
+    def _peer_supports_kad(self, peer_id: ID) -> bool:
+        """Return False only when identify says the peer lacks KAD support."""
+        try:
+            from .common import PROTOCOL_ID
+
+            peer_protocols = self.host.get_peerstore().get_protocols(peer_id)
+            if peer_protocols is not None and len(peer_protocols) > 0:
+                return str(PROTOCOL_ID) in peer_protocols
+        except Exception:
+            pass
+        return True
+
+    async def _ping_peer(self, peer_id: ID) -> bool:
+        """Ping a peer using the libp2p ping protocol."""
+        from libp2p.host.ping import PingService
+
+        try:
+            ping_service = PingService(self.host)
+            return bool(await ping_service.ping(peer_id, ping_amt=1))
+        except Exception as e:
+            logger.debug(f"Failed to ping peer {peer_id} via libp2p ping: {e}")
+            return False
