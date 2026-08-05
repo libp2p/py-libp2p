@@ -10,6 +10,7 @@ from collections.abc import (
     Sequence,
 )
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass
 from types import (
     TracebackType,
 )
@@ -53,6 +54,7 @@ from libp2p.peer.peerinfo import (
 )
 
 if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
     from libp2p.peer.envelope import Envelope
     from libp2p.peer.peer_record import PeerRecord
     from libp2p.protocol_muxer.multiselect import Multiselect
@@ -1700,6 +1702,39 @@ class INetwork(ABC):
         """
 
 
+@dataclass
+class CMInfo:
+    """
+    Unified snapshot of connection manager state.
+
+    Equivalent to go-libp2p's connmgr.CMInfo snapshot returned by
+    BasicConnMgr.GetInfo() — providing a single call-site for all
+    watermark / live-count / grace / last-trim data needed by
+    operators and metrics exporters.
+
+    Attributes
+    ----------
+    low_watermark : int
+        Target connection count after pruning.
+    high_watermark : int
+        Connection count that triggers pruning.
+    connected_count : int
+        Current number of live connections.
+    grace_period : float
+        Seconds a new connection is exempt from pruning.
+    last_trim : float | None
+        Unix timestamp of the most recent prune cycle, or None if
+        the connection count has never exceeded the high watermark.
+
+    """
+
+    low_watermark: int
+    high_watermark: int
+    connected_count: int
+    grace_period: float
+    last_trim: float | None  # None if never trimmed
+
+
 class INetworkService(INetwork, ServiceAPI):
     """
     Interface for a network service with connection management capabilities.
@@ -1829,6 +1864,22 @@ class INetworkService(INetwork, ServiceAPI):
         -------
         bool
             True if the peer is protected.
+
+        """
+
+    @abstractmethod
+    def get_conn_mgr_info(self) -> CMInfo:
+        """
+        Return a unified snapshot of connection manager state.
+
+        Provides a single call-site for watermarks, live connection count,
+        grace period, and the timestamp of the last prune — matching
+        go-libp2p's BasicConnMgr.GetInfo().
+
+        Returns
+        -------
+        CMInfo
+            Snapshot of current connection manager state.
 
         """
 
@@ -2035,6 +2086,23 @@ class IHost(ABC):
     def get_peerstore(self) -> IPeerStore:
         """
         :return: the peerstore of the host
+        """
+
+    @property
+    @abstractmethod
+    def conn_manager(self) -> "TagStore":
+        """
+        Return the connection manager (TagStore) for this host.
+
+        Provides access to tag_peer, untag_peer, upsert_tag, protect,
+        unprotect, and is_protected without going through the network layer
+        — matching go-libp2p's h.ConnManager().
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
         """
 
     @abstractmethod
@@ -3263,6 +3331,37 @@ class IPubsubRouter(ABC):
         ----------
         topic : str
             The topic to leave.
+
+        """
+
+    async def flush_pending_messages(self, peer_id: ID) -> None:
+        """
+        Send messages the router queued while the peer was still connecting.
+
+        Optional hook, invoked once the outbound stream for the peer is
+        registered and again when the peer announces a new subscription.
+        Routers that do not queue during connection setup keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer whose queued messages should be sent.
+
+        """
+
+    async def send_recent_messages(self, peer_id: ID, topic: str) -> None:
+        """
+        Replay recently seen messages for a topic to a peer.
+
+        Optional hook, invoked when a peer that is subscribed to the topic
+        becomes writable. Routers without a message cache keep the no-op.
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer to replay messages to.
+        topic : str
+            The topic to replay messages for.
 
         """
 

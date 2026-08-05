@@ -149,7 +149,7 @@ async def run_provider(file_path: str, port: int = 0, seed: str | None = None):
         logger.info(f"Total blocks stored: {len(all_cids)}")
         for i, cid in enumerate(all_cids, 1):
             block_data = await bitswap.block_store.get_block(cid)
-            block_size = len(block_data) if block_data else 0
+            block_size = len(block_data) if block_data is not None else 0
             logger.info(
                 f"  {i}. {format_cid_for_display(cid)} ({format_size(block_size)})"
             )

@@ -131,14 +131,19 @@ class ProviderStore:
 
     async def _republish_provider_records(self) -> None:
         """Republish all provider records for content this node is providing."""
+        # Snapshot the sets/dicts to avoid mutation during iteration
+        providing_keys_snapshot = list(self.providing_keys)
+        providers_snapshot = {
+            key: dict(providers) for key, providers in self.providers.items()
+        }
+
         # First, republish keys we're actively providing
-        for key in self.providing_keys:
+        for key in providing_keys_snapshot:
             logger.debug(f"Republishing provider record for key {key.hex()}")
             await self.provide(key)
 
         # Also check for any records that should be republished
-        time.time()
-        for key, providers in self.providers.items():
+        for key, providers in providers_snapshot.items():
             for peer_id_str, record in providers.items():
                 # Only republish records for our own peer
                 if self.local_peer_id and str(self.local_peer_id) == peer_id_str:
@@ -302,7 +307,8 @@ class ProviderStore:
         finally:
             if stream is not None:
                 await stream.close()
-            return result
+
+        return result
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
         """
@@ -452,11 +458,10 @@ class ProviderStore:
                         # Consume the provider's signed-peer-record if sent, peer-id
                         # already sent with the provider-proto
                         if not maybe_consume_signed_record(provider_proto, self.host):
-                            logger.error(
-                                "Received an invalid-signed-record, "
-                                "ignoring the response"
+                            logger.warning(
+                                "Received an invalid-signed-record, skipping provider"
                             )
-                            return []
+                            continue
 
                         # Create peer ID from bytes
                         provider_id = ID(provider_proto.id)
@@ -477,11 +482,12 @@ class ProviderStore:
 
             finally:
                 await stream.close()
-                return providers
 
         except Exception as e:
             logger.warning(f"Error getting providers from {peer_id}: {e}")
             return []
+
+        return providers
 
     def add_provider(self, key: bytes, provider: PeerInfo) -> None:
         """
