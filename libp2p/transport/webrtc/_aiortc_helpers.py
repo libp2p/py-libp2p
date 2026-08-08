@@ -37,6 +37,12 @@ _ICE_CONNECT_TIMEOUT = 30.0
 # Timeout for HTTP SDP exchange (seconds).
 _SDP_HTTP_TIMEOUT = 15.0
 
+# Bounds for the HTTP /sdp dev harness — defend against memory-amplification
+# DoS while the harness exists (until the STUN-based listener lands, #1352).
+_MAX_SDP_BODY_SIZE = 32 * 1024  # 32 KiB; SDP offers are typically 1–4 KiB
+_MAX_HEADER_LINES = 64
+_MAX_HEADER_BYTES = 8 * 1024  # 8 KiB total across all header lines
+
 
 # ------------------------------------------------------------------
 # Peer-connection lifecycle
@@ -380,19 +386,53 @@ async def run_signaling_server(
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            # Read HTTP request line (consumed but not used) + headers
+            # Request line (consumed but not validated)
             await asyncio.wait_for(reader.readline(), timeout=_SDP_HTTP_TIMEOUT)
+
+            # Headers — bounded by line count and accumulated byte size.
+            # The for/else fires when the loop exhausts _MAX_HEADER_LINES
+            # reads without finding the blank-line terminator.
             headers: dict[str, str] = {}
-            while True:
+            header_bytes = 0
+            for _ in range(_MAX_HEADER_LINES):
                 line = await asyncio.wait_for(
                     reader.readline(), timeout=_SDP_HTTP_TIMEOUT
                 )
                 if line in (b"\r\n", b"\n", b""):
                     break
+                header_bytes += len(line)
+                if header_bytes > _MAX_HEADER_BYTES:
+                    writer.write(
+                        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
+                    )
+                    await writer.drain()
+                    return
                 key, _, value = line.decode().partition(":")
                 headers[key.strip().lower()] = value.strip()
+            else:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+                return
 
-            content_length = int(headers.get("content-length", "0"))
+            # Validate Content-Length before touching any body buffer.
+            raw_cl = headers.get("content-length", "0")
+            try:
+                content_length = int(raw_cl)
+            except ValueError:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+                return
+            if content_length < 0:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+                return
+            if content_length > _MAX_SDP_BODY_SIZE:
+                writer.write(
+                    b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n"
+                )
+                await writer.drain()
+                return
+
             body = b""
             if content_length > 0:
                 body = await asyncio.wait_for(
@@ -400,11 +440,8 @@ async def run_signaling_server(
                     timeout=_SDP_HTTP_TIMEOUT,
                 )
 
-            # Process: call the offer handler, get answer SDP
             answer_sdp = await on_offer(body.decode())
             answer_bytes = answer_sdp.encode()
-
-            # Send HTTP response
             response = (
                 b"HTTP/1.1 200 OK\r\n"
                 b"Content-Type: application/sdp\r\n"
