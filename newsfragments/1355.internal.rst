@@ -1,0 +1,1 @@
+Removed ``libp2p/transport/webrtc/_varint.py`` and migrated WebRTC stream and signaling framing to use the shared ``libp2p.utils.varint`` utilities (``encode_uvarint``, ``decode_varint_with_size``, ``decode_uvarint_from_stream``), eliminating a duplicate in-tree varint implementation.

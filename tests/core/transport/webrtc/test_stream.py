@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from libp2p.transport.webrtc._varint import decode_uvarint, encode_uvarint
 from libp2p.transport.webrtc.constants import MAX_PAYLOAD_SIZE
 from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
 from libp2p.transport.webrtc.stream import StreamState, WebRTCStream
+from libp2p.utils.varint import decode_varint_with_size, encode_uvarint
 
 
 def _framed(msg: Message) -> bytes:
@@ -23,7 +23,7 @@ def _framed(msg: Message) -> bytes:
 
 def _parse_framed(raw: bytes) -> Message:
     """Inverse of :func:`_framed` — decode the wire format back to a Message."""
-    length, consumed = decode_uvarint(raw)
+    length, consumed = decode_varint_with_size(raw)
     msg = Message()
     msg.ParseFromString(raw[consumed : consumed + length])
     return msg
