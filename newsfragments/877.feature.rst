@@ -1,0 +1,1 @@
+Added a P2P file sharing example demonstrating NAT traversal and local peer persistence.
