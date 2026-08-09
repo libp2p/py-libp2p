@@ -372,12 +372,16 @@ def balanced_layout(
         raise ValueError("Cannot build balanced layout from empty leaf list")
 
     if len(leaves) == 1:
-        return leaves[0][0], leaves[0][1], len(leaves[0][1])
+        # For single-leaf, block_bytes may be None (memory optimization).
+        # The caller retrieves from blockstore if needed.
+        blk = leaves[0][1]
+        return leaves[0][0], blk, len(blk) if blk is not None else 0
 
     # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
     # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
+    # block_bytes may be None for leaves (memory optimization) — only used in single-leaf case
     level: list[tuple[bytes, bytes, int, int]] = [
-        (cid, blk, fsize, len(blk)) for cid, blk, fsize in leaves
+        (cid, blk, fsize, len(blk) if blk is not None else 0) for cid, blk, fsize in leaves
     ]
 
     while len(level) > 1:

@@ -304,7 +304,12 @@ class MerkleDag:
         # For raw leaves (Kubo default): leaf_block = raw chunk bytes,
         # CID uses CODEC_RAW. This matches Kubo's RawLeaves=true behavior
         # for multi-chunk files, producing identical CIDs.
-        leaf_triples: list[tuple[bytes, bytes, int]] = []
+        #
+        # Memory optimization: For multi-leaf files, balanced_layout() only
+        # uses CID and file_data_size from each leaf (ignores block_bytes).
+        # So we store None for block_bytes after putting the block in the
+        # blockstore, avoiding holding the entire file in memory.
+        leaf_triples: list[tuple[bytes, bytes | None, int]] = []
         bytes_processed = 0
 
         # Process file in chunks (memory efficient)
@@ -313,7 +318,11 @@ class MerkleDag:
             chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
 
             await self._put_block(chunk_cid, chunk_data)
-            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
+            # Store None for block_bytes — data is already in blockstore.
+            # balanced_layout() ignores block_bytes for leaves (line 396: uses `_`).
+            # For the single-leaf case, balanced_layout returns leaves[0][1],
+            # but we handle that separately below.
+            leaf_triples.append((chunk_cid, None, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
             # Progress callback
@@ -357,6 +366,11 @@ class MerkleDag:
         logger.info(f"Storing {len(internal_nodes)} internal DAG nodes...")
         for cid, data in internal_nodes:
             await self._put_block(cid, data)
+
+        # For single-leaf files, balanced_layout returns leaves[0][1] which is
+        # None (we passed None for block_bytes). Retrieve from blockstore.
+        if root_data is None:
+            root_data = await self._get_block(root_cid)
 
         # Store the root node
         await self._put_block(root_cid, root_data)
@@ -443,12 +457,12 @@ class MerkleDag:
 
         # Chunk the data using raw leaves (Kubo default: RawLeaves=true)
         chunks = chunk_bytes(data, chunk_size)
-        leaf_triples: list[tuple[bytes, bytes, int]] = []
+        leaf_triples: list[tuple[bytes, bytes | None, int]] = []
 
         for i, chunk_data in enumerate(chunks):
             chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
             await self._put_block(chunk_cid, chunk_data)
-            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
+            leaf_triples.append((chunk_cid, None, len(chunk_data)))
 
             if progress_callback:
                 bytes_processed = sum(s for _, _, s in leaf_triples)
@@ -468,6 +482,10 @@ class MerkleDag:
         root_cid, root_data, _tsize = balanced_layout(
             leaf_triples, put_block_callback=store_internal_node
         )
+
+        # For single-leaf, root_data is None — retrieve from blockstore
+        if root_data is None:
+            root_data = await self._get_block(root_cid)
 
         # Store all internal nodes
         for cid, data in internal_nodes:
@@ -528,14 +546,14 @@ class MerkleDag:
         if chunk_size is None:
             chunk_size = DEFAULT_CHUNK_SIZE
 
-        leaf_triples: list[tuple[bytes, bytes, int]] = []
+        leaf_triples: list[tuple[bytes, bytes | None, int]] = []
         bytes_processed = 0
 
         for i, chunk_data in enumerate(chunk_stream(stream, chunk_size)):
             # Raw leaf: store chunk bytes directly (Kubo default: RawLeaves=true)
             chunk_cid = compute_cid_v1(chunk_data, codec=CODEC_RAW)
             await self._put_block(chunk_cid, chunk_data)
-            leaf_triples.append((chunk_cid, chunk_data, len(chunk_data)))
+            leaf_triples.append((chunk_cid, None, len(chunk_data)))
             bytes_processed += len(chunk_data)
 
             if progress_callback:
@@ -566,6 +584,10 @@ class MerkleDag:
         root_cid, root_data, _tsize = balanced_layout(
             leaf_triples, put_block_callback=store_internal_node
         )
+
+        # For single-leaf, root_data is None — retrieve from blockstore
+        if root_data is None:
+            root_data = await self._get_block(root_cid)
 
         # Store all internal nodes
         for cid, data in internal_nodes:
