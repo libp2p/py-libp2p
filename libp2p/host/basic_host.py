@@ -43,7 +43,10 @@ from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
-from libp2p.discovery.mdns.mdns import MDNSDiscovery
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+    create_mdns_discovery,
+)
 from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
@@ -278,7 +281,7 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         self.mDNS = None
         if enable_mDNS:
-            self.mDNS = MDNSDiscovery(network)
+            self.mDNS = create_mdns_discovery(network, host=self)
 
         # Initialize bootstrap discovery container. Keep attribute defined so
         # we can avoid hasattr checks elsewhere.
