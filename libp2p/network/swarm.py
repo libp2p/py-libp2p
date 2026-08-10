@@ -1897,6 +1897,20 @@ class Swarm(Service, INetworkService):
             Connection direction: "inbound" or "outbound". Default: "unknown"
 
         """
+        # Deduplication: if this exact muxed connection is already registered
+        # (e.g. concurrent add_conn calls for the same IMuxedConn object),
+        # return the existing SwarmConn immediately.  Doing this BEFORE
+        # acquiring a second resource scope or starting the muxed connection
+        # keeps the dedup non-destructive — the duplicate must never close
+        # the underlying muxed connection, because it is shared with the
+        # existing connection (Bug 3).
+        peer_id = muxed_conn.peer_id
+        if peer_id in self.connections:
+            for existing_conn in self.connections[peer_id]:
+                if existing_conn.muxed_conn == muxed_conn:
+                    logger.debug(f"Connection already exists for peer {peer_id}")
+                    return existing_conn  # type: ignore[return-value]
+
         # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
         conn_scope = getattr(muxed_conn, "_resource_scope", None)
         if self._resource_manager is not None and conn_scope is None:
@@ -2001,10 +2015,19 @@ class Swarm(Service, INetworkService):
                 self.connections[peer_id] = []
 
             # Check for duplicate connections by comparing the
-            # underlying muxed connection
+            # underlying muxed connection.  This catches the race where two
+            # concurrent add_conn calls for the same IMuxedConn both passed
+            # the early check above before either registered.
             for existing_conn in self.connections[peer_id]:
                 if existing_conn.muxed_conn == muxed_conn:
                     logger.debug(f"Connection already exists for peer {peer_id}")
+                    # CRITICAL: do NOT close the underlying muxed_conn — it
+                    # is shared with `existing_conn` and closing it would tear
+                    # down the live connection we are about to return.  Mark
+                    # the duplicate as shared so SwarmConn.close() skips
+                    # muxed_conn.close(), then release only the duplicate's
+                    # own resources.
+                    swarm_conn._shared_muxed_conn = True  # type: ignore[attr-defined]
                     await swarm_conn.close()
                     # existing_conn is a SwarmConn since it's stored
                     # in the connections list
