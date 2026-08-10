@@ -108,3 +108,29 @@ class TestBug3AddConnDedup:
         # surviving SwarmConn still uses.
         muxed_conn.close.assert_not_awaited()
         assert dup_wrapper.is_closed
+
+
+@pytest.mark.trio
+class TestBug8MaxConnectionsRegistration:
+    """Bug 8: max_connections TOCTOU — the cap must be enforced atomically."""
+
+    async def test_add_conn_enforces_max_connections_at_registration(self):
+        swarm = SwarmFactory.build()
+        swarm.connection_config.max_connections = 1
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            conn1 = await swarm.add_conn(muxed_conn, direction="inbound")
+
+            # A second connection pushes the count beyond max_connections and
+            # must be rejected at registration time (not pass a stale count).
+            muxed_conn2 = _established_mock_muxed_conn(swarm.self_id)
+            with pytest.raises(
+                SwarmException, match="Maximum connections limit reached"
+            ):
+                await swarm.add_conn(muxed_conn2, direction="inbound")
+
+            # The first connection survives; only the overshooting one closed.
+            assert len(swarm.get_connections()) == 1
+            assert not conn1.is_closed
+            muxed_conn2.close.assert_awaited()

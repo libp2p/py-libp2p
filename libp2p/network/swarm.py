@@ -1615,7 +1615,10 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when security or muxer upgrade fails
         :return: network connection with security and multiplexing established
         """
-        # Check global connection limit
+        # Fast-fail check on the global connection limit: avoid doing the
+        # expensive security+muxer handshake when we are already at capacity.
+        # NOTE: this is a best-effort fast path — the race-free, authoritative
+        # enforcement happens at registration time in add_conn() (Bug 8).
         total_connections = len(self.get_connections())
         if total_connections >= self.connection_config.max_connections:
             logger.debug(
@@ -2034,6 +2037,25 @@ class Swarm(Service, INetworkService):
                     return existing_conn  # type: ignore[return-value]
 
             self.connections[peer_id].append(swarm_conn)
+
+            # Enforce the global connection limit at registration time.
+            # The append and this check are contiguous (no awaits between
+            # them), so concurrent upgrades cannot all pass a pre-registration
+            # check and overshoot the cap: the connection that pushes the
+            # count beyond max_connections is closed immediately.  This is
+            # the race-free, authoritative gate for BOTH directions (Bug 8).
+            if len(self.get_connections()) > self.connection_config.max_connections:
+                logger.debug(
+                    "Rejecting connection to %s: max_connections (%s) "
+                    "exceeded at registration",
+                    peer_id,
+                    self.connection_config.max_connections,
+                )
+                self.connections[peer_id].remove(swarm_conn)
+                if not self.connections[peer_id]:
+                    del self.connections[peer_id]
+                await swarm_conn.close()
+                raise SwarmException("Maximum connections limit reached")
 
             # Trim if we exceed max connections per peer
             max_conns = self.connection_config.max_connections_per_peer
