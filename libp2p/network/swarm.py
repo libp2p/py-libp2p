@@ -109,6 +109,12 @@ class _NegativePeerCache:
     def mark_failed(self, peer_id: str) -> None:
         if len(self._cache) >= self._max_size:
             self._evict_expired()
+        # If eviction of expired entries did not free a slot (all entries are
+        # still fresh), drop the oldest entry so the cache never exceeds
+        # max_size (Bug 10 hardening).
+        if len(self._cache) >= self._max_size and peer_id not in self._cache:
+            oldest = min(self._cache, key=lambda k: self._cache[k])
+            del self._cache[oldest]
         self._cache[peer_id] = time.monotonic() + self._ttl
 
     def _evict_expired(self) -> None:
@@ -2405,9 +2411,16 @@ class Swarm(Service, INetworkService):
         # Decrement the connection-lifecycle tracker so per-direction and
         # per-peer established counts stay in sync (Bug 1).  Safe to call for
         # connections that were never admitted (no-op).
+        #
+        # NOTE: duplicate wrappers from the add_conn race (Bug 3) share the
+        # same muxed_conn and therefore the same tracker connection_id — the
+        # admission was a set no-op, so their close must NOT decrement, or it
+        # would remove the slot held by the surviving connection.
         if self._resource_manager is not None:
             lifecycle = getattr(self._resource_manager, "connection_lifecycle", None)
-            if lifecycle is not None:
+            if lifecycle is not None and not getattr(
+                swarm_conn, "_shared_muxed_conn", False
+            ):
                 try:
                     lifecycle.notify_connection_closed(
                         str(id(swarm_conn.muxed_conn)), peer_id
@@ -2432,10 +2445,12 @@ class Swarm(Service, INetworkService):
         """
         Fan out a notifee callback to all registered notifees.
 
-        Each notifee runs in its own task with exceptions isolated, so a
-        single failing (or slow) notifee can no longer break connection
-        setup/teardown by propagating an error into ``add_conn`` or
-        ``SwarmConn._cleanup`` (Bug 7).
+        Each notifee runs in its own task with exceptions isolated: a raising
+        notifee can no longer tear down the connection by propagating an error
+        into ``add_conn`` or ``SwarmConn._cleanup`` (Bug 7).  Notifees run
+        concurrently and the nursery awaits them all, so a notifee that blocks
+        forever would still stall the caller — this matches go-libp2p, where
+        notifee callbacks are invoked inline on the event path.
         """
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:

@@ -557,3 +557,52 @@ class TestBug1LifecycleLimits:
             muxed_conn3 = _established_mock_muxed_conn(swarm.self_id)
             conn3 = await swarm.add_conn(muxed_conn3, direction="inbound")
             assert not conn3.is_closed
+
+    async def test_lifecycle_tracker_returns_to_zero_after_full_cycle(self):
+        """
+        The lifecycle tracker must balance across admit → close cycles.
+
+        Guards the invariant that every admitted connection is decremented
+        exactly once when it is torn down — including the dedup race path
+        where a duplicate wrapper shares the muxed connection (Bug 1 + 3).
+        """
+        from libp2p.rcmgr import new_resource_manager
+
+        rm = new_resource_manager()
+        lifecycle = rm.connection_lifecycle
+        assert lifecycle is not None
+        swarm = SwarmFactory.build()
+        swarm.set_resource_manager(rm, enable_stream_semaphore=False)
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            conn1 = await swarm.add_conn(muxed_conn, direction="inbound")
+
+            # Closing the connection must release its tracker slot.
+            await conn1.close()
+            assert lifecycle.get_connection_stats()["current_established_total"] == 0
+
+            # Full admit → dedup-race → close cycle stays balanced.
+            muxed_conn2 = _established_mock_muxed_conn(swarm.self_id)
+            conn_a = await swarm.add_conn(muxed_conn2, direction="inbound")
+            conn_b = await swarm.add_conn(muxed_conn2, direction="inbound")
+            # Duplicate add returns the surviving wrapper.
+            assert conn_a is conn_b
+            assert lifecycle.get_connection_stats()["current_established_total"] == 1
+
+            # Simulate the race-window duplicate wrapper: it shares the same
+            # muxed_conn (same tracker id) and is marked shared.  Closing it
+            # must NOT decrement the slot held by the surviving connection.
+            from libp2p.network.connection.swarm_connection import SwarmConn
+
+            dup_wrapper = SwarmConn(muxed_conn2, swarm)
+            setattr(dup_wrapper, "_shared_muxed_conn", True)
+            await dup_wrapper.close()
+            assert lifecycle.get_connection_stats()["current_established_total"] == 1
+
+            # Closing the surviving connection releases the slot.
+            await conn_a.close()
+            assert lifecycle.get_connection_stats()["current_established_total"] == 0
+            assert (
+                lifecycle.get_connection_stats()["current_peers_with_connections"] == 0
+            )
