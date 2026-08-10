@@ -418,3 +418,25 @@ class TestBug10NegativePeerCache:
         # The public unblock API lifts the block immediately.
         swarm.unblock_peer(peer_id)
         assert not swarm._negative_peer_cache.is_blocked(str(peer_id))
+
+
+@pytest.mark.trio
+class TestBug13DefensiveCopies:
+    """Bug 13: get_connections/get_connections_map must not expose internals."""
+
+    async def test_getters_return_defensive_copies(self):
+        swarm = SwarmFactory.build()
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            await swarm.add_conn(muxed_conn, direction="inbound")
+
+            # Mutating the returned list must not affect internal tracking.
+            conns = swarm.get_connections(swarm.self_id)
+            conns.clear()
+            assert len(swarm.connections[swarm.self_id]) == 1
+
+            conn_map = swarm.get_connections_map()
+            conn_map[swarm.self_id].clear()
+            conn_map.clear()
+            assert len(swarm.connections[swarm.self_id]) == 1

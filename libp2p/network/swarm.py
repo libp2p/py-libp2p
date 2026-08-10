@@ -388,8 +388,10 @@ class Swarm(Service, INetworkService):
             if peer_id is None.
 
         """
+        # Defensive copies so callers cannot mutate the swarm's internal
+        # connection tracking (Bug 13).
         if peer_id is not None:
-            return self.connections.get(peer_id, [])
+            return list(self.connections.get(peer_id, []))
 
         # Return all connections from all peers
         all_conns = []
@@ -416,10 +418,11 @@ class Swarm(Service, INetworkService):
         Returns
         -------
         dict[ID, list[INetConn]]
-            The complete mapping of peer IDs to their connection lists.
+            The complete mapping of peer IDs to their connection lists
+            (defensive copy — mutation does not affect internal state, Bug 13).
 
         """
-        return self.connections.copy()
+        return {peer_id: list(conns) for peer_id, conns in self.connections.items()}
 
     def get_connection(self, peer_id: ID) -> INetConn | None:
         """
