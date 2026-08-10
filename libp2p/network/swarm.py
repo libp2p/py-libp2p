@@ -757,6 +757,20 @@ class Swarm(Service, INetworkService):
                     num_addrs_tried=len(exceptions),
                 ) from MultiError(exceptions)
 
+            # The happy-eyeballs cancellation is asynchronous: a few extra
+            # dials may have succeeded before it landed.  Cap the returned
+            # connections at max_connections_per_peer and close the excess so
+            # the per-peer limit is never exceeded (Bug 11).
+            max_conns = self.connection_config.max_connections_per_peer
+            if len(connections) > max_conns:
+                excess = connections[max_conns:]
+                connections = connections[:max_conns]
+                for conn in excess:
+                    try:
+                        await conn.close()
+                    except Exception as e:
+                        logger.debug(f"Error closing excess connection: {e}")
+
             self._negative_peer_cache.evict(str(peer_id))
             return connections
         finally:

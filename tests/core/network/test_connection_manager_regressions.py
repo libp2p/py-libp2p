@@ -307,3 +307,34 @@ class TestBug6DisconnectBackoff:
         # A successful connection clears the disconnect backoff.
         swarm.auto_connector.record_successful_connection(peer_id)
         assert swarm.auto_connector._should_skip_peer(peer_id) is False
+
+
+@pytest.mark.trio
+class TestBug11PerPeerDialCap:
+    """Bug 11: dial_peer must not return more than max_connections_per_peer."""
+
+    async def test_dial_peer_caps_connections_per_peer(self):
+        swarm = SwarmFactory.build()
+        swarm.connection_config.max_connections_per_peer = 2
+        swarm.connection_config.max_connections = 100
+
+        # Four addresses that all succeed — more than the per-peer cap.
+        addrs = [
+            Multiaddr(f"/ip4/127.0.0.1/tcp/{8000 + i}") for i in range(4)
+        ]
+        swarm.peerstore.add_addrs(swarm.self_id, addrs, 100)
+
+        async def fake_dial(addr, peer_id):
+            muxed_conn = _established_mock_muxed_conn(peer_id)
+            return await swarm.add_conn(muxed_conn, direction="outbound")
+
+        swarm._dial_with_retry = fake_dial
+
+        async with background_trio_service(swarm):
+            conns = await swarm.dial_peer(swarm.self_id)
+
+        # Even when several dials succeed before the happy-eyeballs cancel
+        # lands, the per-peer limit must hold on the returned list and the
+        # swarm's tracking.
+        assert len(conns) <= 2
+        assert len(swarm.connections.get(swarm.self_id, [])) <= 2
