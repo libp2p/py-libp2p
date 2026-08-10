@@ -240,6 +240,9 @@ class Swarm(Service, INetworkService):
         # instead of waiting up to auto_connect_interval for the periodic tick.
         self._last_auto_connect_trigger: float = 0.0
         self._auto_connect_trigger_min_interval: float = 5.0
+        # Set while the swarm is shutting down; disconnects during close()
+        # must not trigger the auto-connector to dial new peers (Bug 9).
+        self._closing = False
 
         # Metrics
         self.metric_send_channel = metric_send_channel
@@ -1831,37 +1834,51 @@ class Swarm(Service, INetworkService):
     async def close(self) -> None:
         """
         Close the swarm instance and cleanup resources.
+
+        Active connections are closed explicitly (best-effort) BEFORE the
+        manager is stopped, so resource scopes are released and sockets are
+        torn down deterministically instead of relying on task cancellation
+        (Bug 9).
         """
-        # Check if manager exists before trying to stop it
+        self._closing = True
+
+        # Close all connections manually first.
+        if hasattr(self, "connections"):
+            for peer_id, conns in list(self.connections.items()):
+                for conn in list(conns):
+                    try:
+                        await conn.close()
+                    except Exception as e:
+                        logger.warning(f"Error closing connection to {peer_id}: {e}")
+
+            # Clear connection tracking dictionary
+            self.connections.clear()
+
+        # Close all listeners
+        if hasattr(self, "listeners"):
+            for maddr_str, listener in list(self.listeners.items()):
+                await listener.close()
+                # Notify about listener closure
+                try:
+                    multiaddr = Multiaddr(maddr_str)
+                    await self.notify_listen_close(multiaddr)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to notify listen_close for {maddr_str}: {e}"
+                    )
+            self.listeners.clear()
+
+        # Close all transports
+        try:
+            await self.transport_manager.close_all()
+        except Exception as e:
+            logger.warning(f"Error closing transports: {e}")
+
+        # Check if manager exists before trying to stop it.  Stopping the
+        # manager cancels the remaining background tasks (muxed connection
+        # monitors, auto-connector, etc.).
         if hasattr(self, "_manager") and self._manager is not None:
             await self._manager.stop()
-        else:
-            # Perform alternative cleanup if the manager isn't initialized
-            # Close all connections manually
-            if hasattr(self, "connections"):
-                for peer_id, conns in list(self.connections.items()):
-                    for conn in conns:
-                        await conn.close()
-
-                # Clear connection tracking dictionary
-                self.connections.clear()
-
-            # Close all listeners
-            if hasattr(self, "listeners"):
-                for maddr_str, listener in self.listeners.items():
-                    await listener.close()
-                    # Notify about listener closure
-                    try:
-                        multiaddr = Multiaddr(maddr_str)
-                        await self.notify_listen_close(multiaddr)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to notify listen_close for {maddr_str}: {e}"
-                        )
-                self.listeners.clear()
-
-            # Close all transports
-            await self.transport_manager.close_all()
 
         logger.debug("swarm successfully closed")
 
@@ -2103,6 +2120,9 @@ class Swarm(Service, INetworkService):
         disconnect path never blocks on dials.  At most one trigger per
         cooldown window.
         """
+        # Disconnects during shutdown must not cause new dials.
+        if self._closing:
+            return
         now = time.monotonic()
         if now - self._last_auto_connect_trigger < self._auto_connect_trigger_min_interval:
             return

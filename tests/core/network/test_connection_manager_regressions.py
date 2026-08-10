@@ -265,3 +265,24 @@ class TestBug7NotifeeIsolation:
             conn = await swarm.add_conn(muxed_conn, direction="inbound")
             assert not conn.is_closed
             assert conn in swarm.connections[swarm.self_id]
+
+
+@pytest.mark.trio
+class TestBug9CloseClosesConnections:
+    """Bug 9: Swarm.close() must close active connections deterministically."""
+
+    async def test_close_closes_all_active_connections(self):
+        swarm = SwarmFactory.build()
+        muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+
+        async with background_trio_service(swarm):
+            conn = await swarm.add_conn(muxed_conn, direction="inbound")
+            assert not conn.is_closed
+
+            # close() must explicitly close the connection (releasing its
+            # resource scope / socket) rather than relying on task cancel.
+            await swarm.close()
+
+        assert conn.is_closed
+        muxed_conn.close.assert_awaited()
+        assert swarm.get_total_connections() == 0
