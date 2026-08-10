@@ -260,6 +260,26 @@ class ConnectionLifecycleManager:
             reason: Reason for connection closure
 
         """
+        self.notify_connection_closed(connection_id, peer_id, reason)
+
+    def notify_connection_closed(
+        self,
+        connection_id: ConnectionId,
+        peer_id: ID | None = None,
+        reason: str = "unknown",
+    ) -> None:
+        """
+        Synchronous connection-closed notification (no awaits inside).
+
+        Provided so synchronous teardown paths (e.g. ``Swarm.remove_conn``)
+        can decrement the tracker without an async boundary.
+
+        Args:
+            connection_id: Connection identifier
+            peer_id: Peer ID if known
+            reason: Reason for connection closure
+
+        """
         logger.debug(f"Handling connection closed {connection_id}, reason: {reason}")
 
         # Remove from tracking

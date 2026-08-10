@@ -1459,7 +1459,8 @@ class QUICListener(IListener):
 
             if self._transport._swarm:
                 logger.debug("Adding QUIC connection directly to swarm")
-                await self._transport._swarm.add_conn(connection)
+                # These are inbound connections accepted by the listener.
+                await self._transport._swarm.add_conn(connection, direction="inbound")
                 logger.debug("Successfully added QUIC connection to swarm")
             else:
                 logger.error("No swarm available for QUIC connection")

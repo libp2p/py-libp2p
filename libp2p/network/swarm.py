@@ -69,6 +69,8 @@ from libp2p.utils.multiaddr_utils import (
     extract_ip_from_multiaddr,
 )
 
+from libp2p.rcmgr.exceptions import ResourceLimitExceeded
+
 from ..exceptions import (
     MultiError,
 )
@@ -1980,6 +1982,55 @@ class Swarm(Service, INetworkService):
                     logger.debug(f"Connection already exists for peer {peer_id}")
                     return existing_conn  # type: ignore[return-value]
 
+        # Enforce the connection lifecycle limits (per-direction, per-peer and
+        # total established connections) that were previously never enforced
+        # (Bug 1).  When the limit is exceeded the connection is rejected
+        # before it is registered.
+        if self._resource_manager is not None:
+            lifecycle = getattr(self._resource_manager, "connection_lifecycle", None)
+            if lifecycle is not None:
+                try:
+                    connection_id = str(id(muxed_conn))
+                    # The lifecycle handlers only use the addresses for
+                    # logging, but build the real remote one best-effort.
+                    remote_maddr = Multiaddr("/ip4/0.0.0.0/tcp/0")
+                    try:
+                        remote = muxed_conn.get_remote_address()
+                        if remote is not None:
+                            host, port = remote
+                            ip = ipaddress.ip_address(host)
+                            proto = (
+                                "ip6"
+                                if isinstance(ip, ipaddress.IPv6Address)
+                                else "ip4"
+                            )
+                            remote_maddr = Multiaddr(
+                                f"/{proto}/{host}/tcp/{port}"
+                            )
+                    except Exception:
+                        pass
+                    if direction == "inbound":
+                        await lifecycle.handle_established_inbound_connection(
+                            connection_id, peer_id, remote_maddr, remote_maddr
+                        )
+                    else:
+                        await lifecycle.handle_established_outbound_connection(
+                            connection_id, peer_id, remote_maddr, "outbound"
+                        )
+                except ResourceLimitExceeded as e:
+                    logger.debug(
+                        "Connection to %s denied by connection limits: %s",
+                        peer_id,
+                        e,
+                    )
+                    try:
+                        await muxed_conn.close()
+                    except Exception:
+                        pass
+                    raise SwarmException(
+                        f"Connection denied by connection limits: {e}"
+                    ) from e
+
         # Apply resource manager checks to ALL connection types (TCP, WebSocket, QUIC)
         conn_scope = getattr(muxed_conn, "_resource_scope", None)
         if self._resource_manager is not None and conn_scope is None:
@@ -2342,6 +2393,22 @@ class Swarm(Service, INetworkService):
             ]
             if not self.connections[peer_id]:
                 del self.connections[peer_id]
+
+        # Decrement the connection-lifecycle tracker so per-direction and
+        # per-peer established counts stay in sync (Bug 1).  Safe to call for
+        # connections that were never admitted (no-op).
+        if self._resource_manager is not None:
+            lifecycle = getattr(self._resource_manager, "connection_lifecycle", None)
+            if lifecycle is not None:
+                try:
+                    lifecycle.notify_connection_closed(
+                        str(id(swarm_conn.muxed_conn)), peer_id
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to notify connection lifecycle for %s", peer_id,
+                        exc_info=True,
+                    )
 
     # Notifee
 

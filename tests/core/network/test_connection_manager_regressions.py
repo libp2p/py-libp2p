@@ -17,6 +17,13 @@ from libp2p.tools.anyio_service import background_trio_service
 from tests.utils.factories import SwarmFactory
 
 
+def swarm_peer_id():
+    """A deterministic peer ID for tests that don't need a full swarm."""
+    from libp2p.peer.id import ID
+
+    return ID.from_string("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+
+
 async def _block_on_accept():
     """Muxed-conn accept stream that blocks forever (no new streams)."""
     await trio.sleep_forever()
@@ -508,3 +515,53 @@ class TestBug12ConnectionPoolOptIn:
         from libp2p.rcmgr.config import PerformanceConfig
 
         assert PerformanceConfig().enable_connection_pooling is False
+
+
+@pytest.mark.trio
+class TestBug1LifecycleLimits:
+    """Bug 1: Rust-style connection limits must actually be enforced."""
+
+    async def test_lifecycle_manager_enforces_per_peer_limit(self):
+        from libp2p.rcmgr.connection_limits import ConnectionLimits
+        from libp2p.rcmgr.connection_lifecycle import ConnectionLifecycleManager
+        from libp2p.rcmgr.connection_tracker import ConnectionTracker
+        from libp2p.rcmgr.exceptions import ResourceLimitExceeded
+
+        limits = ConnectionLimits().with_max_established_per_peer(1)
+        mgr = ConnectionLifecycleManager(ConnectionTracker(limits), limits)
+        peer_id = swarm_peer_id()
+        addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+
+        await mgr.handle_established_inbound_connection("c1", peer_id, addr, addr)
+        # Second connection to the same peer exceeds the per-peer limit.
+        with pytest.raises(ResourceLimitExceeded):
+            await mgr.handle_established_inbound_connection("c2", peer_id, addr, addr)
+
+        # Closing the first connection frees the slot.
+        mgr.notify_connection_closed("c1", peer_id)
+        await mgr.handle_established_inbound_connection("c3", peer_id, addr, addr)
+
+    async def test_add_conn_enforces_lifecycle_per_peer_limit(self):
+        from libp2p.rcmgr import new_resource_manager
+        from libp2p.rcmgr.connection_limits import ConnectionLimits
+
+        limits = ConnectionLimits().with_max_established_per_peer(1)
+        rm = new_resource_manager(connection_limits=limits)
+        swarm = SwarmFactory.build()
+        swarm.set_resource_manager(rm, enable_stream_semaphore=False)
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            conn1 = await swarm.add_conn(muxed_conn, direction="inbound")
+
+            # Second connection to the same peer must be rejected.
+            muxed_conn2 = _established_mock_muxed_conn(swarm.self_id)
+            with pytest.raises(SwarmException, match="denied by connection limits"):
+                await swarm.add_conn(muxed_conn2, direction="inbound")
+            assert len(swarm.connections[swarm.self_id]) == 1
+
+            # Closing the admitted connection frees the per-peer slot.
+            await conn1.close()
+            muxed_conn3 = _established_mock_muxed_conn(swarm.self_id)
+            conn3 = await swarm.add_conn(muxed_conn3, direction="inbound")
+            assert not conn3.is_closed

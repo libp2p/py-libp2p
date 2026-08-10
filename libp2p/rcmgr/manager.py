@@ -8,6 +8,7 @@ from .allowlist import Allowlist, AllowlistConfig
 from .cidr_limits import CIDRLimiter
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
 from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
+from .connection_lifecycle import ConnectionLifecycleManager
 from .connection_pool import ConnectionPool
 from .connection_tracker import ConnectionTracker
 from .exceptions import ResourceScopeClosed
@@ -161,15 +162,25 @@ class ResourceManager:
         self._current_memory = 0
         self._current_streams = 0
 
-        # Connection tracking
-        self.connection_tracker: ConnectionTracker | None = None
-        if enable_connection_tracking:
-            self.connection_tracker = ConnectionTracker()
-
-        # Connection limits
+        # Connection limits (Rust-style per-direction/per-peer limits)
         self.connection_limits = (
             connection_limits or new_connection_limits_with_defaults()
         )
+
+        # Connection tracking + lifecycle enforcement (Bug 1).  The lifecycle
+        # manager was previously created nowhere and its handlers were never
+        # called, so max_pending_inbound, max_established_inbound,
+        # max_established_outbound, max_established_per_peer and
+        # max_established_total were silently non-functional.  Swarm.add_conn
+        # now invokes the lifecycle handlers; removal is wired through
+        # Swarm.remove_conn.
+        self.connection_tracker: ConnectionTracker | None = None
+        self.connection_lifecycle: ConnectionLifecycleManager | None = None
+        if enable_connection_tracking:
+            self.connection_tracker = ConnectionTracker(self.connection_limits)
+            self.connection_lifecycle = ConnectionLifecycleManager(
+                self.connection_tracker, self.connection_limits
+            )
 
         # Memory limits
         self.memory_limits = (
