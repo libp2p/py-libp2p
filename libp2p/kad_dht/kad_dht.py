@@ -247,8 +247,11 @@ class KadDHT(Service):
                 enable_auto_refresh=True,
             )
 
-        # Set protocol handlers
-        host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+        # Set protocol handlers — only in server mode per spec:
+        # "Server mode nodes accept incoming streams using the KAD protocol.
+        #  Client mode nodes do not offer the KAD protocol for incoming streams."
+        if self.mode == DHTMode.SERVER:
+            host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
 
     @property
     def strict_validation(self) -> bool:
@@ -309,20 +312,23 @@ class KadDHT(Service):
         """Run the main DHT service loop."""
         # Main service loop
         while self.manager.is_running:
-            # Periodically refresh the routing table
-            await self.refresh_routing_table()
+            try:
+                # Periodically refresh the routing table
+                await self.refresh_routing_table()
 
-            # Check if it's time to republish provider records
-            current_time = time.time()
-            # await self._republish_provider_records()
-            self._last_provider_republish = current_time
+                # Check if it's time to republish provider records
+                current_time = time.time()
+                await self.provider_store._republish_provider_records()
+                self._last_provider_republish = current_time
 
-            # Clean up expired values and provider records
-            expired_values = self.value_store.cleanup_expired()
-            if expired_values > 0:
-                logger.debug(f"Cleaned up {expired_values} expired values")
+                # Clean up expired values and provider records
+                expired_values = self.value_store.cleanup_expired()
+                if expired_values > 0:
+                    logger.debug(f"Cleaned up {expired_values} expired values")
 
-            self.provider_store.cleanup_expired()
+                self.provider_store.cleanup_expired()
+            except Exception as e:
+                logger.error(f"Error in DHT maintenance loop: {e}")
 
             # Wait before next maintenance cycle
             await trio.sleep(ROUTING_TABLE_REFRESH_INTERVAL)
@@ -427,11 +433,15 @@ class KadDHT(Service):
                 "Can only add namespaced validators to a NamespacedValidator"
             )
 
-        self.validator._validators["ns"] = val
+        self.validator._validators[ns] = val
 
     async def switch_mode(self, new_mode: DHTMode) -> DHTMode:
         """
         Switch the DHT mode.
+
+        Per spec: "Server mode nodes accept incoming streams using the KAD
+        protocol. Client mode nodes do not offer the KAD protocol for
+        incoming streams."
 
         :param new_mode: The new mode - must be DHTMode enum
         :return: The new mode as DHTMode enum
@@ -440,9 +450,18 @@ class KadDHT(Service):
         if not isinstance(new_mode, DHTMode):
             raise TypeError(f"new_mode must be DHTMode enum, got {type(new_mode)}")
 
-        if new_mode == DHTMode.CLIENT:
-            self.routing_table.cleanup_routing_table()
+        old_mode = self.mode
         self.mode = new_mode
+
+        # Register/unregister KAD stream handler based on mode
+        if new_mode == DHTMode.SERVER and old_mode == DHTMode.CLIENT:
+            self.host.set_stream_handler(PROTOCOL_ID, self.handle_stream)
+            logger.debug("Registered KAD stream handler (switched to server mode)")
+        elif new_mode == DHTMode.CLIENT and old_mode == DHTMode.SERVER:
+            self.host.remove_stream_handler(PROTOCOL_ID)
+            logger.debug("Removed KAD stream handler (switched to client mode)")
+            self.routing_table.cleanup_routing_table()
+
         logger.info(f"Switched to {new_mode.value} mode")
         return self.mode
 
@@ -451,11 +470,12 @@ class KadDHT(Service):
         Handle an incoming DHT stream using varint length prefixes.
         """
         if self.mode == DHTMode.CLIENT:
-            stream.close
+            await stream.close()
             return
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
-        await self.add_peer(peer_id)
+        # Peer initiated a KAD stream, so they MUST support KAD server mode
+        await self.add_peer(peer_id, skip_server_mode_check=True)
         logger.debug(f"Added peer {peer_id} to routing table")
 
         closer_peer_envelope: Envelope | None = None
@@ -464,6 +484,7 @@ class KadDHT(Service):
         try:
             # Read varint-prefixed length for the message
             length_prefix = b""
+            max_varint_bytes = 10  # varint max is 10 bytes for uint64
             while True:
                 byte = await stream.read(1)
                 if not byte:
@@ -473,14 +494,34 @@ class KadDHT(Service):
                 length_prefix += byte
                 if byte[0] & 0x80 == 0:
                     break
+                if len(length_prefix) >= max_varint_bytes:
+                    logger.warning("Varint length exceeds maximum bytes")
+                    await stream.close()
+                    return
             msg_length = varint.decode_bytes(length_prefix)
 
-            # Read the message bytes
-            msg_bytes = await stream.read(msg_length)
-            if len(msg_bytes) < msg_length:
-                logger.warning("Failed to read full message from stream")
+            # Sanity check message size to prevent OOM
+            max_message_size = 4 * 1024 * 1024  # 4 MB
+            if msg_length > max_message_size:
+                logger.warning(
+                    "DHT message too large: %s bytes (max %s)",
+                    msg_length,
+                    max_message_size,
+                )
                 await stream.close()
                 return
+
+            # Read the message bytes
+            msg_bytes = b""
+            remaining = msg_length
+            while remaining > 0:
+                chunk = await stream.read(remaining)
+                if not chunk:
+                    logger.warning("Failed to read full message from stream")
+                    await stream.close()
+                    return
+                msg_bytes += chunk
+                remaining -= len(chunk)
 
             try:
                 # Parse as protobuf
@@ -496,22 +537,28 @@ class KadDHT(Service):
 
                 # Handle FIND_NODE message
                 if message.type == Message.MessageType.FIND_NODE:
-                    # Get target key directly from protobuf
-                    target_key = message.key
-
-                    # Find closest peers to the target key
-                    closest_peers = self.routing_table.find_local_closest_peers(
-                        target_key, 20
-                    )
-                    logger.debug(f"Found {len(closest_peers)} peers close to target")
-
-                    # Consume the source signed_peer_record if sent
+                    # Consume the source signed_peer_record if sent (validate first)
                     if not maybe_consume_signed_record(message, self.host, peer_id):
                         logger.error(
                             "Received an invalid-signed-record, dropping the stream"
                         )
                         await stream.close()
                         return
+
+                    # Get target key directly from protobuf
+                    target_key = message.key
+
+                    # Per spec: "key must be set to the binary PeerId"
+                    if not target_key:
+                        logger.warning("FIND_NODE received with empty key, ignoring")
+                        await stream.close()
+                        return
+
+                    # Find closest peers to the target key
+                    closest_peers = self.routing_table.find_local_closest_peers(
+                        target_key, 20
+                    )
+                    logger.debug(f"Found {len(closest_peers)} peers close to target")
 
                     # Metrics Event
                     event.find_node = True
@@ -525,6 +572,8 @@ class KadDHT(Service):
                         target_known = bool(self.host.get_peerstore().addrs(target))
                     except Exception:
                         target_known = False
+                    if not target_known and target == self.host.get_id():
+                        target_known = True
                     if target_known:
                         closest_peers = [target] + [
                             p for p in closest_peers if p != target
@@ -533,7 +582,7 @@ class KadDHT(Service):
                     # Add closest peers to response
                     for peer in closest_peers:
                         # Skip if the peer is the requester
-                        if peer == peer_id and peer != target:
+                        if peer == peer_id:
                             continue
 
                         # Add peer to closerPeers field
@@ -570,14 +619,45 @@ class KadDHT(Service):
                     await stream.write(varint.encode(len(response_bytes)))
                     await stream.write(response_bytes)
                     logger.debug(
-                        f"Sent FIND_NODE response with{len(response.closerPeers)} peers"
+                        "Sent FIND_NODE response with %s peers",
+                        len(response.closerPeers),
                     )
+
+                # Handle PING message
+                elif message.type == Message.MessageType.PING:
+                    logger.debug(f"Received PING from {peer_id}")
+
+                    # Send PING response
+                    response = Message()
+                    response.type = Message.MessageType.PING
+                    response_bytes = response.SerializeToString()
+                    await stream.write(varint.encode(len(response_bytes)))
+                    await stream.write(response_bytes)
+                    logger.debug(f"Sent PING response to {peer_id}")
 
                 # Handle ADD_PROVIDER message
                 elif message.type == Message.MessageType.ADD_PROVIDER:
                     # Process ADD_PROVIDER
                     key = message.key
                     logger.debug(f"Received ADD_PROVIDER for key {key.hex()}")
+
+                    # Per spec: verify key is a valid CID
+                    try:
+                        from cid import make_cid
+
+                        make_cid(key)
+                    except Exception:
+                        logger.warning(
+                            f"ADD_PROVIDER key is not a valid CID: {key.hex()}, "
+                            "ignoring"
+                        )
+                        response = Message()
+                        response.type = Message.MessageType.ADD_PROVIDER
+                        response_bytes = response.SerializeToString()
+                        await stream.write(varint.encode(len(response_bytes)))
+                        await stream.write(response_bytes)
+                        await stream.close()
+                        return
 
                     # Consume the source signed-peer-record if sent
                     if not maybe_consume_signed_record(message, self.host, peer_id):
@@ -698,42 +778,39 @@ class KadDHT(Service):
                         for addr in provider_info.addrs:
                             provider_proto.addrs.append(addr.to_bytes())
 
-                    # Also include closest peers if we don't have providers
-                    if not providers:
-                        closest_peers = self.routing_table.find_local_closest_peers(
-                            key, 20
+                    # Also include closest peers (always, per IPFS spec)
+                    closest_peers = self.routing_table.find_local_closest_peers(key, 20)
+                    logger.debug(
+                        f"Including {len(closest_peers)} closest peers"
+                        " in GET_PROVIDERS response"
+                    )
+
+                    for peer in closest_peers:
+                        # Skip if peer is the requester
+                        if peer == peer_id:
+                            continue
+
+                        peer_proto = response.closerPeers.add()
+                        peer_proto.id = peer.to_bytes()
+                        peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+
+                        # Add the signed-records of closest_peers if cached
+                        closer_peer_envelope = (
+                            self.host.get_peerstore().get_peer_record(peer)
                         )
-                        logger.debug(
-                            f"No providers found, including {len(closest_peers)}"
-                            "closest peers"
-                        )
 
-                        for peer in closest_peers:
-                            # Skip if peer is the requester
-                            if peer == peer_id:
-                                continue
-
-                            peer_proto = response.closerPeers.add()
-                            peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
-
-                            # Add the signed-records of closest_peers if cached
-                            closer_peer_envelope = (
-                                self.host.get_peerstore().get_peer_record(peer)
+                        if closer_peer_envelope is not None:
+                            peer_proto.signedRecord = (
+                                closer_peer_envelope.marshal_envelope()
                             )
 
-                            if closer_peer_envelope is not None:
-                                peer_proto.signedRecord = (
-                                    closer_peer_envelope.marshal_envelope()
-                                )
-
-                            # Add addresses if available
-                            try:
-                                addrs = self.host.get_peerstore().addrs(peer)
-                                for addr in addrs:
-                                    peer_proto.addrs.append(addr.to_bytes())
-                            except Exception:
-                                pass
+                        # Add addresses if available
+                        try:
+                            addrs = self.host.get_peerstore().addrs(peer)
+                            for addr in addrs:
+                                peer_proto.addrs.append(addr.to_bytes())
+                        except Exception:
+                            pass
 
                     # Serialize and send response
                     response_bytes = response.SerializeToString()
@@ -774,11 +851,37 @@ class KadDHT(Service):
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
                         response.senderRecord = envelope_bytes
 
+                        # Per spec: also include closerPeers even when value is found
+                        closest_peers = self.routing_table.find_local_closest_peers(
+                            key, 20
+                        )
+                        for peer in closest_peers:
+                            if peer == peer_id:
+                                continue
+                            peer_proto = response.closerPeers.add()
+                            peer_proto.id = peer.to_bytes()
+                            peer_proto.connection = Message.ConnectionType.CAN_CONNECT
+                            closer_peer_envelope = (
+                                self.host.get_peerstore().get_peer_record(peer)
+                            )
+                            if closer_peer_envelope is not None:
+                                peer_proto.signedRecord = (
+                                    closer_peer_envelope.marshal_envelope()
+                                )
+                            try:
+                                addrs = self.host.get_peerstore().addrs(peer)
+                                for addr in addrs:
+                                    peer_proto.addrs.append(addr.to_bytes())
+                            except Exception:
+                                pass
+
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
-                        logger.debug("Sent GET_VALUE response")
+                        logger.debug(
+                            "Sent GET_VALUE response with record and closer peers"
+                        )
                     else:
                         logger.debug(f"No value found for key {key.hex()}")
 
@@ -874,11 +977,13 @@ class KadDHT(Service):
                             f"{key.hex()}: {e}"
                         )
                     finally:
-                        # Send acknowledgement
+                        # Send acknowledgement — echo the request per spec
                         response = Message()
                         response.type = Message.MessageType.PUT_VALUE
                         if success:
                             response.key = key
+                            # Echo the record back per spec requirement
+                            response.record.CopyFrom(message.record)
 
                         # Create sender_signed_peer_record for the response
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -889,6 +994,17 @@ class KadDHT(Service):
                         await stream.write(varint.encode(len(response_bytes)))
                         await stream.write(response_bytes)
                         logger.debug("Sent PUT_VALUE acknowledgement")
+
+                # Handle PUT_VALUE without record field
+                elif message.type == Message.MessageType.PUT_VALUE:
+                    logger.warning(f"Received PUT_VALUE without record from {peer_id}")
+                    response = Message()
+                    response.type = Message.MessageType.PUT_VALUE
+                    envelope_bytes, _ = env_to_send_in_RPC(self.host)
+                    response.senderRecord = envelope_bytes
+                    response_bytes = response.SerializeToString()
+                    await stream.write(varint.encode(len(response_bytes)))
+                    await stream.write(response_bytes)
 
             except Exception as proto_err:
                 logger.warning(f"Failed to parse protobuf message: {proto_err}")
@@ -905,7 +1021,10 @@ class KadDHT(Service):
     async def refresh_routing_table(self) -> None:
         """Refresh the routing table."""
         logger.debug("Refreshing routing table")
-        await self.peer_routing.refresh_routing_table()
+        if getattr(self, "rt_refresh_manager", None) is not None:
+            await self.rt_refresh_manager._do_refresh(force=True)  # type: ignore
+        else:
+            await self.peer_routing.refresh_routing_table()
 
     # Peer routing methods
 
@@ -1013,6 +1132,10 @@ class KadDHT(Service):
         """
         logger.debug(f"Getting value for key: {key}")
 
+        # Validate quorum parameter
+        if quorum < 0:
+            quorum = 0
+
         # Convert string key to bytes for lookup
         key_bytes = key.encode("utf-8")
 
@@ -1032,6 +1155,8 @@ class KadDHT(Service):
 
         # Collect valid records from peers: mapping peer -> Record
         valid_records: list[tuple[ID, Record]] = []
+        # Track peers that returned no valid record (for entry correction)
+        peers_with_no_record: set[ID] = set()
 
         # 3. Query peers using a semaphore-based sliding window (up to ALPHA
         #    concurrent queries). A new query starts as soon as any finishes.
@@ -1067,10 +1192,15 @@ class KadDHT(Service):
                                 )
                                 quorum_reached.set()
                         except Exception as e:
+                            peers_with_no_record.add(peer)
                             logger.debug(
                                 f"Received invalid record from {peer}, discarding: {e}"
                             )
+                    else:
+                        # Peer returned no record
+                        peers_with_no_record.add(peer)
             except Exception as e:
+                peers_with_no_record.add(peer)
                 logger.debug(f"Error querying peer {peer}: {e}")
             finally:
                 sem.release()
@@ -1141,6 +1271,33 @@ class KadDHT(Service):
                     for p in outdated_peers:
                         nursery.start_soon(propagate, p)
 
+            # Entry correction: also update peers that returned no record
+            # but are among the k closest to the key (per spec requirement)
+            missing_peers = [
+                p for p in peers_with_no_record if p in closest_peers[:BUCKET_SIZE]
+            ]
+            if missing_peers:
+                logger.debug(
+                    f"Entry correction: propagating value to {len(missing_peers)} "
+                    "peers that had no record among k closest"
+                )
+
+                async def propagate_to_missing(peer: ID) -> None:
+                    try:
+                        with trio.move_on_after(QUERY_TIMEOUT):
+                            await self.value_store._store_at_peer(
+                                peer, key_bytes, best_value
+                            )
+                            logger.debug(
+                                f"Propagated record to peer {peer} (had no record)"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Failed to propagate to peer {peer}: {e}")
+
+                async with trio.open_nursery() as nursery:
+                    for p in missing_peers:
+                        nursery.start_soon(propagate_to_missing, p)
+
             # Store the best value locally
             self.value_store.put(key_bytes, best_value)
             logger.info("Successfully retrieved value from network")
@@ -1154,11 +1311,14 @@ class KadDHT(Service):
 
     # Utility methods
 
-    async def add_peer(self, peer_id: ID) -> bool:
+    async def add_peer(
+        self, peer_id: ID, *, skip_server_mode_check: bool = False
+    ) -> bool:
         """
         Add a peer to the routing table.
 
         params: peer_id: The peer ID to add.
+        params: skip_server_mode_check: If True, skip the server-mode protocol check
 
         Returns
         -------
@@ -1166,7 +1326,9 @@ class KadDHT(Service):
             True if peer was added or updated, False otherwise.
 
         """
-        return await self.routing_table.add_peer(peer_id)
+        return await self.routing_table.add_peer(
+            peer_id, skip_server_mode_check=skip_server_mode_check
+        )
 
     async def provide(self, key: str) -> bool:
         """

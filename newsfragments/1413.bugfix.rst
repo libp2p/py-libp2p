@@ -1,0 +1,1 @@
+kademlia-dht: fix random walk stalls caused by artificial ``min_refresh_threshold``, correct KBucket splitting and eviction logic, hash target keys before XOR distance computation, align random walk concurrency with go-libp2p (10), support configurable random walk targets, add discovered peers to routing table, and support ``dnsaddr`` resolution.

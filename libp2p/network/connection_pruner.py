@@ -177,6 +177,9 @@ class ConnectionPruner:
         else:
             self.allow_list = allow_list
         self._started = False
+        # Unix timestamp of the last successful prune; None if never trimmed.
+        # Read by Swarm.get_conn_mgr_info() to build CMInfo.last_trim.
+        self._last_trim_time: float | None = None
 
     async def start(self) -> None:
         """Start the connection pruner."""
@@ -204,6 +207,11 @@ class ConnectionPruner:
     async def _maybe_prune_connections(self) -> None:
         """Internal method to prune connections if needed."""
         connections = self.swarm.get_connections()
+
+        # Reap temp TagStore entries that never got a real connection.
+        # Must run before the sort so is_temp keys are fresh.
+        self._reap_stale_temp_entries()
+
         num_connections = len(connections)
         high_watermark = self.swarm.connection_config.high_watermark
         low_watermark = self.swarm.connection_config.low_watermark
@@ -292,6 +300,8 @@ class ConnectionPruner:
                     await connection.close()
                 except Exception as e:
                     logger.warning("Error closing connection during pruning: %s", e)
+            # Record the trim timestamp after the prune cycle completes.
+            self._last_trim_time = time.time()
 
     def _is_connection_within_grace_period(
         self, connection: INetConn, grace_period: float
@@ -313,6 +323,31 @@ class ConnectionPruner:
             return age < grace_period
         except (TypeError, ValueError):
             return True
+
+    def _reap_stale_temp_entries(self) -> None:
+        """
+        Delete temp TagStore entries that never received a real connection.
+
+        Temp entries are created when tag_peer/upsert_tag is called before
+        a dial completes. If the dial never happens (e.g. speculative DHT tagging),
+        the entry would accumulate forever. This reaper removes them after
+        grace_period has elapsed without any connection arriving.
+        """
+        tag_store = getattr(self.swarm, "tag_store", None)
+        if tag_store is None:
+            return
+        grace = self.swarm.connection_config.grace_period
+        now = time.time()
+        for peer_id in tag_store.get_all_peers():
+            info = tag_store.get_tag_info(peer_id)
+            if (
+                info
+                and info.temp
+                and not info.conns
+                and (now - info.first_seen) > grace
+            ):
+                tag_store.clear_peer(peer_id)
+                logger.debug("Reaped stale temp entry for peer %s", peer_id)
 
     def sort_connections(
         self, connections: list[INetConn], peer_values: dict[ID, int]
@@ -390,6 +425,16 @@ class ConnectionPruner:
             dir_value = direction.value if direction != Direction.UNKNOWN else 0
             direction_sort_value = dir_value
 
+            # Temp flag: connections where the peer has no confirmed real connection
+            # are pruned first (temp=True → is_temp=0 sorts before real connections).
+            # This matches go-libp2p's trim heuristic: temp entries go first.
+            tag_store = getattr(self.swarm, "tag_store", None)
+            is_temp = 1  # default: treat as real
+            if tag_store is not None and peer_id is not None:
+                info = tag_store.get_tag_info(peer_id)
+                if info is not None and info.temp:
+                    is_temp = 0
+
             connection_data.append(
                 {
                     "conn": conn,
@@ -397,6 +442,7 @@ class ConnectionPruner:
                     "stream_count": stream_count,
                     "direction": direction_sort_value,
                     "age": connection_age,
+                    "is_temp": is_temp,
                 }
             )
 
@@ -462,6 +508,17 @@ class ConnectionPruner:
             return 0
 
         connection_data.sort(key=get_sort_peer_value)
+
+        # 5. Sort by temp flag — temp peers go first (is_temp=0 < is_temp=1).
+        # This is the highest-priority sort (applied last in stable sort).
+        # Matches go-libp2p's trim heuristic: temp entries are always pruned first.
+        def get_sort_is_temp(x: dict[str, Any]) -> int:
+            val = x.get("is_temp", 1)
+            if isinstance(val, (int, float)):
+                return int(val)
+            return 1
+
+        connection_data.sort(key=get_sort_is_temp)
 
         # Extract connections - we know they're INetConn from construction
         return [item["conn"] for item in connection_data]  # type: ignore[misc]
