@@ -235,6 +235,12 @@ class Swarm(Service, INetworkService):
         self._prune_debounce: float = 1.0
         self._prune_task_running = False
 
+        # Auto-connect trigger state (Bug 6): when connections drop below the
+        # low watermark we trigger auto-connect immediately (cooldown-limited)
+        # instead of waiting up to auto_connect_interval for the periodic tick.
+        self._last_auto_connect_trigger: float = 0.0
+        self._auto_connect_trigger_min_interval: float = 5.0
+
         # Metrics
         self.metric_send_channel = metric_send_channel
 
@@ -2089,6 +2095,24 @@ class Swarm(Service, INetworkService):
                 pass
             raise
 
+    def _schedule_auto_connect(self) -> None:
+        """
+        Fire-and-forget auto-connect trigger, cooldown-limited (Bug 6).
+
+        Runs AutoConnector.maybe_connect in a background task so the
+        disconnect path never blocks on dials.  At most one trigger per
+        cooldown window.
+        """
+        now = time.monotonic()
+        if now - self._last_auto_connect_trigger < self._auto_connect_trigger_min_interval:
+            return
+        self._last_auto_connect_trigger = now
+        try:
+            self.manager.run_task(self.auto_connector.maybe_connect)
+        except Exception:
+            # No running manager — auto-connector is not started either.
+            logger.debug("Failed to schedule auto-connect", exc_info=True)
+
     def _schedule_prune(self) -> None:
         """
         Debounced, fire-and-forget connection pruning.
@@ -2237,6 +2261,11 @@ class Swarm(Service, INetworkService):
                 nursery.start_soon(notifee.connected, self, conn)
 
     async def notify_disconnected(self, conn: INetConn) -> None:
+        # Replenish connections promptly when disconnects drop us below the
+        # low watermark, instead of waiting up to auto_connect_interval for
+        # the periodic tick (Bug 6).  `maybe_connect` is a cheap no-op when
+        # we are at/above the low watermark; the cooldown prevents storms.
+        self._schedule_auto_connect()
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
                 nursery.start_soon(notifee.disconnected, self, conn)

@@ -182,3 +182,48 @@ class TestBug5BackgroundPrune:
             swarm._schedule_prune()
             await trio.sleep(0.2)
             assert run_count == 1
+
+
+@pytest.mark.trio
+class TestBug6AutoConnectOnDisconnect:
+    """Bug 6: disconnects must trigger the auto-connector promptly."""
+
+    async def test_disconnect_schedules_auto_connect(self):
+        swarm = SwarmFactory.build()
+        triggered = 0
+
+        async def fake_maybe_connect():
+            nonlocal triggered
+            triggered += 1
+
+        swarm.auto_connector.maybe_connect = fake_maybe_connect
+
+        async with background_trio_service(swarm):
+            # The periodic task fires maybe_connect once at startup — measure
+            # the disconnect-triggered increment relative to that baseline.
+            await trio.sleep(0.1)
+            baseline = triggered
+            await swarm.notify_disconnected(Mock())
+            await trio.sleep(0.2)
+            assert triggered == baseline + 1
+
+    async def test_auto_connect_trigger_is_cooldown_limited(self):
+        swarm = SwarmFactory.build()
+        triggered = 0
+
+        async def fake_maybe_connect():
+            nonlocal triggered
+            triggered += 1
+
+        swarm.auto_connector.maybe_connect = fake_maybe_connect
+
+        async with background_trio_service(swarm):
+            await trio.sleep(0.1)
+            baseline = triggered
+            # Rapid disconnects within the cooldown window collapse into a
+            # single auto-connect trigger.
+            await swarm.notify_disconnected(Mock())
+            await swarm.notify_disconnected(Mock())
+            await swarm.notify_disconnected(Mock())
+            await trio.sleep(0.2)
+            assert triggered == baseline + 1
