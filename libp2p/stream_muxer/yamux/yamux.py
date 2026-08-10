@@ -512,21 +512,24 @@ class YamuxStream(IMuxedStream):
                     data += chunk
                     await self._auto_tune_and_send_window_update(bytes_read=len(chunk))
 
+                # Return available data immediately (stream semantics, not EOF-gated).
+                # This matches read_stream() behavior and prevents deadlocks where
+                # the reader blocks waiting for stream close while the writer blocks
+                # waiting for the reader to consume data and respond.
+                if data:
+                    return data
+
+                # No data yet — check for terminal states before waiting.
+
                 # Check for reset
                 if self.reset_received:
                     logger.debug(f"Stream {self.stream_id}: Stream was reset")
-                    # Return any data we managed to read before the reset
-                    if data:
-                        return data
                     raise MuxedStreamReset("Stream was reset")
 
                 # If stream is closed and buffer is empty
-                if self.recv_closed and len(buffer) == 0:
+                if self.recv_closed:
                     logger.debug(f"Stream {self.stream_id}: Closed with empty buffer")
-                    if data:
-                        return data
-                    else:
-                        raise MuxedStreamEOF("Stream is closed for receiving")
+                    raise MuxedStreamEOF("Stream is closed for receiving")
 
                 # Wait for more data or stream closure
                 logger.debug(f"Stream {self.stream_id}: Waiting for data or FIN")
