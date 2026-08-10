@@ -464,3 +464,26 @@ class TestBug14PrunerAllowListRemoteAddr:
         # A connection genuinely from the allow-listed IP is exempt.
         muxed_conn.get_remote_address = Mock(return_value=("10.0.0.1", 4001))
         assert is_connection_in_allow_list(conn, swarm) is True
+
+
+@pytest.mark.trio
+class TestBug15MinConnectionsFunctional:
+    """Bug 15: min_connections must drive behavior, not just logging."""
+
+    async def test_below_min_connections_triggers_critical_state(self):
+        swarm = SwarmFactory.build()
+        connector = swarm.auto_connector
+        # No connections yet → critically below the floor.
+        assert connector._below_min_connections() is True
+
+        # Above the floor → normal state.
+        fake_conn = Mock()
+        fake_conn.is_closed = False
+        for _ in range(swarm.connection_config.min_connections):
+            swarm.connections.setdefault(swarm.self_id, []).append(fake_conn)
+        assert connector._below_min_connections() is False
+
+    async def test_critical_check_interval_is_shorter(self):
+        swarm = SwarmFactory.build()
+        connector = swarm.auto_connector
+        assert connector._critical_check_interval < connector.auto_connect_interval

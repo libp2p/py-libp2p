@@ -65,6 +65,10 @@ class AutoConnector:
         # otherwise reconnect to the peer we just closed in a tight loop).
         self._recent_disconnects: dict[ID, float] = {}
         self._disconnect_backoff = 60.0  # seconds
+        # Critical poll interval: when the connection count falls below
+        # min_connections we poll far more often than auto_connect_interval
+        # so the node recovers from a critically-low state quickly (Bug 15).
+        self._critical_check_interval = 5.0
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -101,9 +105,37 @@ class AutoConnector:
             except Exception as e:
                 logger.error(f"Error in auto-connect: {e}", exc_info=e)
 
-            # Wait for the next interval or shutdown
-            with trio.move_on_after(self.auto_connect_interval):
+            # Wait for the next interval or shutdown.  When the connection
+            # count is critically below min_connections, poll much more
+            # frequently so the node recovers promptly (Bug 15).
+            if self._below_min_connections():
+                interval = self._critical_check_interval
+            else:
+                interval = self.auto_connect_interval
+            with trio.move_on_after(interval):
                 await self._shutdown_event.wait()
+
+    def _below_min_connections(self) -> bool:
+        """
+        Whether the connection count is below the critical floor.
+
+        ``min_connections`` is the absolute minimum the connection manager
+        tries to keep open; when the count drops below it, the periodic task
+        polls at ``_critical_check_interval`` instead of
+        ``auto_connect_interval``.
+
+        Returns
+        -------
+        bool
+            True if the current connection count is below min_connections
+
+        """
+        try:
+            num_connections = self.swarm.get_total_connections()
+            min_connections = self.swarm.connection_config.min_connections
+            return num_connections < min_connections
+        except Exception:
+            return False
 
     async def maybe_connect(self) -> None:
         """
