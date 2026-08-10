@@ -227,3 +227,41 @@ class TestBug6AutoConnectOnDisconnect:
             await swarm.notify_disconnected(Mock())
             await trio.sleep(0.2)
             assert triggered == baseline + 1
+
+
+@pytest.mark.trio
+class TestBug7NotifeeIsolation:
+    """Bug 7: a failing notifee must not tear down connections."""
+
+    class BrokenNotifee:
+        """A notifee whose connected callback always raises."""
+
+        async def connected(self, network, conn):
+            raise RuntimeError("boom")
+
+        async def disconnected(self, network, conn):
+            pass
+
+        async def opened_stream(self, network, stream):
+            pass
+
+        async def closed_stream(self, network, stream):
+            pass
+
+        async def listen(self, network, multiaddr):
+            pass
+
+        async def listen_close(self, network, multiaddr):
+            pass
+
+    async def test_failing_notifee_does_not_break_add_conn(self):
+        swarm = SwarmFactory.build()
+        muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+
+        async with background_trio_service(swarm):
+            swarm.register_notifee(self.BrokenNotifee())
+            # add_conn calls notify_connected, whose notifee raises — the
+            # connection must still be established successfully.
+            conn = await swarm.add_conn(muxed_conn, direction="inbound")
+            assert not conn.is_closed
+            assert conn in swarm.connections[swarm.self_id]

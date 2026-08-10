@@ -2250,15 +2250,35 @@ class Swarm(Service, INetworkService):
         """
         self.notifees.append(notifee)
 
-    async def notify_opened_stream(self, stream: INetStream) -> None:
+    async def _notify(self, method: str, *args: Any) -> None:
+        """
+        Fan out a notifee callback to all registered notifees.
+
+        Each notifee runs in its own task with exceptions isolated, so a
+        single failing (or slow) notifee can no longer break connection
+        setup/teardown by propagating an error into ``add_conn`` or
+        ``SwarmConn._cleanup`` (Bug 7).
+        """
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
-                nursery.start_soon(notifee.opened_stream, self, stream)
+
+                async def _call(
+                    method_name: str = method, n: INotifee = notifee
+                ) -> None:
+                    try:
+                        await getattr(n, method_name)(self, *args)
+                    except Exception:
+                        logger.exception(
+                            "Notifee %s.%s raised", type(n).__name__, method_name
+                        )
+
+                nursery.start_soon(_call)
+
+    async def notify_opened_stream(self, stream: INetStream) -> None:
+        await self._notify("opened_stream", stream)
 
     async def notify_connected(self, conn: INetConn) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.connected, self, conn)
+        await self._notify("connected", conn)
 
     async def notify_disconnected(self, conn: INetConn) -> None:
         # Replenish connections promptly when disconnects drop us below the
@@ -2266,14 +2286,10 @@ class Swarm(Service, INetworkService):
         # the periodic tick (Bug 6).  `maybe_connect` is a cheap no-op when
         # we are at/above the low watermark; the cooldown prevents storms.
         self._schedule_auto_connect()
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.disconnected, self, conn)
+        await self._notify("disconnected", conn)
 
     async def notify_listen(self, multiaddr: Multiaddr) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.listen, self, multiaddr)
+        await self._notify("listen", multiaddr)
 
     async def notify_closed_stream(self, stream: INetStream) -> None:
         # Release RM + semaphore resources exactly once per stream
@@ -2297,20 +2313,25 @@ class Swarm(Service, INetworkService):
                             "failed to release stream semaphore", exc_info=True
                         )
 
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.closed_stream, self, stream)
+        await self._notify("closed_stream", stream)
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-                nursery.start_soon(notifee.listen_close, self, multiaddr)
+        await self._notify("listen_close", multiaddr)
 
     # Generic notifier used by NetStream._notify_closed
     async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
         async with trio.open_nursery() as nursery:
             for notifee in self.notifees:
-                nursery.start_soon(notifier, notifee)
+
+                async def _call(n: INotifee = notifee) -> None:
+                    try:
+                        await notifier(n)
+                    except Exception:
+                        logger.exception(
+                            "Notifee %s callback raised", type(n).__name__
+                        )
+
+                nursery.start_soon(_call)
 
     # Backward compatibility properties
     @property
