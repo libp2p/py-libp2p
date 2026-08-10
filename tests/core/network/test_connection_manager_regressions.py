@@ -440,3 +440,27 @@ class TestBug13DefensiveCopies:
             conn_map[swarm.self_id].clear()
             conn_map.clear()
             assert len(swarm.connections[swarm.self_id]) == 1
+
+
+@pytest.mark.trio
+class TestBug14PrunerAllowListRemoteAddr:
+    """Bug 14: pruner allow-list must use the connection's real remote IP."""
+
+    async def test_allow_list_uses_connection_remote_address(self):
+        from libp2p.network.connection.swarm_connection import SwarmConn
+        from libp2p.network.connection_pruner import is_connection_in_allow_list
+
+        swarm = SwarmFactory.build()
+        # Only 10.0.0.1 is allow-listed by the gate.
+        swarm.connection_gate.add_to_allow_list("10.0.0.1")
+
+        muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+        # The actual connection is from a non-allow-listed IP, even though the
+        # peerstore could claim an allow-listed address.
+        muxed_conn.get_remote_address = Mock(return_value=("10.0.0.2", 4001))
+        conn = SwarmConn(muxed_conn, swarm)
+        assert is_connection_in_allow_list(conn, swarm) is False
+
+        # A connection genuinely from the allow-listed IP is exempt.
+        muxed_conn.get_remote_address = Mock(return_value=("10.0.0.1", 4001))
+        assert is_connection_in_allow_list(conn, swarm) is True

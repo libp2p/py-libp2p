@@ -7,6 +7,7 @@ to close when connection limits are exceeded, matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+import ipaddress
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -113,8 +114,10 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
     """
     Check if connection is in the allow list.
 
-    Uses ConnectionGate to check if connection's IP is in allow list.
-    ConnectionGate is a required attribute of Swarm.
+    Uses ConnectionGate to check if the connection's actual remote IP is in
+    the allow list.  Previously this consulted the peer's peerstore addresses,
+    which could exempt a connection made over a non-allow-listed IP simply
+    because the peer had *some* allow-listed address on record (Bug 14).
 
     Parameters
     ----------
@@ -130,20 +133,27 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
 
     """
     try:
-        # muxed_conn is a required attribute of INetConn interface
-        peer_id = connection.muxed_conn.peer_id
-        # Get peer addresses from peerstore
-        peer_addrs = swarm.peerstore.addrs(peer_id)
-        # Check if any peer address is in allow list
-        # connection_gate is a required attribute of Swarm
-        for addr in peer_addrs:
-            if swarm.connection_gate.is_in_allow_list(addr):
-                return True
+        remote = None
+        if hasattr(connection, "get_remote_address"):
+            remote = connection.get_remote_address()
+        if remote is None:
+            # Fall back to the underlying muxed connection's remote address.
+            muxed_conn = getattr(connection, "muxed_conn", None)
+            if muxed_conn is not None and hasattr(muxed_conn, "get_remote_address"):
+                remote = muxed_conn.get_remote_address()
+        if remote is None:
+            return False
+        host, port = remote
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        proto = "ip6" if isinstance(ip, ipaddress.IPv6Address) else "ip4"
+        remote_maddr = Multiaddr(f"/{proto}/{host}/tcp/{port}")
+        return swarm.connection_gate.is_in_allow_list(remote_maddr)
     except Exception as e:
         logger.debug("Error checking allow list for connection: %s", e)
         return False
-
-    return False
 
 
 class ConnectionPruner:
