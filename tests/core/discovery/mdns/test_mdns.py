@@ -52,7 +52,7 @@ class TestMDNSDiscovery:
             assert "host1._p2p._udp.local." in host2_listener.discovered_services
 
             # Verify that host1's peer info was added to host2's peerstore
-            discovered_peer_id = host2_listener.discovered_services[
+            discovered_peer_id, _ = host2_listener.discovered_services[
                 "host1._p2p._udp.local."
             ]
             assert str(discovered_peer_id) == host1_peer_id
@@ -76,7 +76,7 @@ class TestMDNSDiscovery:
             host2_zeroconf.close()
 
     def test_service_info_extraction(self):
-        """Test service info extraction functionality."""
+        """Test service info extraction with spec-compliant dnsaddr TXT records."""
         peerstore = PeerStore()
         zeroconf = Zeroconf()
 
@@ -88,30 +88,32 @@ class TestMDNSDiscovery:
                 service_name="test-listener._p2p._udp.local.",
             )
 
-            # Create a test service info
             test_peer_id = ID.from_base58(
                 "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
             )
             hostname = socket.gethostname()
+            local_ip = "192.168.1.100"
 
             from zeroconf import ServiceInfo
 
+            # Spec-compliant: dnsaddr TXT record
             service_info = ServiceInfo(
                 type_="_p2p._udp.local.",
                 name="test-service._p2p._udp.local.",
                 port=8001,
-                properties={b"id": str(test_peer_id).encode()},
+                properties={
+                    b"dnsaddr": f"/ip4/{local_ip}/tcp/8001/p2p/{test_peer_id}".encode(),
+                },
                 server=f"{hostname}.local.",
-                addresses=[socket.inet_aton("192.168.1.100")],
+                addresses=[socket.inet_aton(local_ip)],
             )
 
-            # Test extraction
             peer_info = listener._extract_peer_info(service_info)
 
             assert peer_info is not None
             assert peer_info.peer_id == test_peer_id
             assert len(peer_info.addrs) == 1
-            assert "/tcp/8001" in str(peer_info.addrs[0])
+            assert f"/ip4/{local_ip}/tcp/8001" in str(peer_info.addrs[0])
 
         finally:
             zeroconf.close()
