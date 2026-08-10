@@ -2301,6 +2301,13 @@ class Swarm(Service, INetworkService):
         await self._notify("connected", conn)
 
     async def notify_disconnected(self, conn: INetConn) -> None:
+        # Record the disconnect so the auto-connector backs off from
+        # immediately re-dialing this peer (avoids reconnect loops).
+        try:
+            peer_id = conn.muxed_conn.peer_id
+            self.auto_connector.record_disconnect(peer_id)
+        except Exception:
+            pass
         # Replenish connections promptly when disconnects drop us below the
         # low watermark, instead of waiting up to auto_connect_interval for
         # the periodic tick (Bug 6).  `maybe_connect` is a cheap no-op when

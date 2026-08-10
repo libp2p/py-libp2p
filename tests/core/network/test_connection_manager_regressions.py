@@ -286,3 +286,24 @@ class TestBug9CloseClosesConnections:
         assert conn.is_closed
         muxed_conn.close.assert_awaited()
         assert swarm.get_total_connections() == 0
+
+
+@pytest.mark.trio
+class TestBug6DisconnectBackoff:
+    """Disconnect-triggered auto-connect must not re-dial the lost peer."""
+
+    async def test_recently_disconnected_peer_is_skipped(self):
+        from libp2p.peer.id import ID
+
+        swarm = SwarmFactory.build()
+        peer_id = ID.from_string(
+            "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
+
+        # A peer that just disconnected is skipped by the auto-connector.
+        swarm.auto_connector.record_disconnect(peer_id)
+        assert swarm.auto_connector._should_skip_peer(peer_id) is True
+
+        # A successful connection clears the disconnect backoff.
+        swarm.auto_connector.record_successful_connection(peer_id)
+        assert swarm.auto_connector._should_skip_peer(peer_id) is False

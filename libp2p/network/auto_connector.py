@@ -60,6 +60,11 @@ class AutoConnector:
         self._failure_counts: dict[ID, int] = {}
         self._base_cooldown = 300.0  # base retry interval (seconds)
         self._max_cooldown = 3600.0  # cap at 1 hour for persistent failures
+        # Peers that recently disconnected: we back off from immediately
+        # re-dialing them (event-driven auto-connect on disconnect would
+        # otherwise reconnect to the peer we just closed in a tight loop).
+        self._recent_disconnects: dict[ID, float] = {}
+        self._disconnect_backoff = 60.0  # seconds
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -293,6 +298,13 @@ class AutoConnector:
             if time.time() - last_attempt < self._get_cooldown(peer_id):
                 return True
 
+        # Back off recently-disconnected peers so a disconnect-triggered
+        # auto-connect does not immediately re-dial the peer we just lost.
+        last_disconnect = self._recent_disconnects.get(peer_id)
+        if last_disconnect is not None:
+            if time.time() - last_disconnect < self._disconnect_backoff:
+                return True
+
         return False
 
     def record_successful_connection(self, peer_id: ID) -> None:
@@ -309,6 +321,23 @@ class AutoConnector:
         """
         self._last_connect_attempt.pop(peer_id, None)
         self._failure_counts.pop(peer_id, None)
+        self._recent_disconnects.pop(peer_id, None)
+
+    def record_disconnect(self, peer_id: ID) -> None:
+        """
+        Record that a connection to a peer closed.
+
+        The auto-connector will not attempt to re-dial this peer for
+        ``_disconnect_backoff`` seconds, avoiding immediate reconnect loops
+        when disconnects trigger auto-connect (Bug 6 fixup).
+
+        Parameters
+        ----------
+        peer_id : ID
+            The peer that disconnected
+
+        """
+        self._recent_disconnects[peer_id] = time.time()
 
     def record_failed_connection(self, peer_id: ID) -> None:
         """
@@ -337,8 +366,10 @@ class AutoConnector:
         """
         self._last_connect_attempt.pop(peer_id, None)
         self._failure_counts.pop(peer_id, None)
+        self._recent_disconnects.pop(peer_id, None)
 
     def clear_all_cooldowns(self) -> None:
         """Clear all peer cooldowns and failure counts."""
         self._last_connect_attempt.clear()
         self._failure_counts.clear()
+        self._recent_disconnects.clear()
