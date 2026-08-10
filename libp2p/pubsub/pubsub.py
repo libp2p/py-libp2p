@@ -592,10 +592,7 @@ class Pubsub(Service, IPubsub):
                     # to know that it is subscribed to the topic (doesn't
                     # need everyone to know)
                     event.subopts = True
-                    if (
-                        len(rpc_incoming.subscriptions)
-                        > self.max_subscriptions_per_rpc
-                    ):
+                    if len(rpc_incoming.subscriptions) > self.max_subscriptions_per_rpc:
                         logger.warning(
                             "Peer %s sent %d subscriptions exceeding limit %d, "
                             "rejecting subscriptions",
