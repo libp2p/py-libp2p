@@ -14,6 +14,8 @@ point the whole ``libp2p`` package has finished loading.
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = [
     "GossipSub",
     "PROTOCOL_ID",
@@ -36,7 +38,7 @@ _GOSSIPSUB_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "Pubsub":
         from .pubsub import Pubsub
 

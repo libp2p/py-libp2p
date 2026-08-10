@@ -169,7 +169,8 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
                 await trio.sleep(0.005)
 
     async def reader(stream, received, name):
-        """Read messages and store them for verification.
+        """
+        Read messages and store them for verification.
 
         read() returns available data without waiting for stream close,
         so we accumulate across multiple reads until EOF.

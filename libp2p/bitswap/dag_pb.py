@@ -337,10 +337,10 @@ def create_leaf_node(data: bytes) -> bytes:
 
 
 def balanced_layout(
-    leaves: list[tuple[bytes, bytes, int]],
+    leaves: list[tuple[bytes, bytes | None, int]],
     max_links: int = MAX_LINKS_PER_NODE,
     put_block_callback: Callable[[bytes, bytes], None] | None = None,
-) -> tuple[bytes, bytes, int]:
+) -> tuple[bytes, bytes | None, int]:
     """
     Build a balanced Merkle DAG from a flat list of leaf blocks.
 
@@ -351,7 +351,10 @@ def balanced_layout(
     Args:
         leaves: List of (cid_bytes, block_bytes, file_data_size) tuples where
                 - cid_bytes:      CID of the leaf block as raw bytes
-                - block_bytes:    The encoded dag-pb leaf block bytes
+                - block_bytes:    The encoded dag-pb leaf block bytes, or None
+                                  for multi-leaf files (memory optimization —
+                                  the caller has already stored the block and
+                                  balanced_layout only needs the CID and size)
                 - file_data_size: Size of the raw file data inside this leaf
                                   (i.e. len(original chunk), NOT len(block))
         max_links: Max links per internal node (default 174, matches Kubo)
@@ -361,8 +364,10 @@ def balanced_layout(
     Returns:
         (root_cid_bytes, root_block_bytes, cumulative_tsize)
         where cumulative_tsize = len(root_block) + sum of all descendant block sizes.
-        This matches the Tsize value Kubo stores in directory links pointing to
-        the root of a multi-block file.
+        root_block_bytes is None only in the single-leaf case where the caller
+        passed None for the leaf's block bytes (caller retrieves it from the
+        block store).  This matches the Tsize value Kubo stores in directory
+        links pointing to the root of a multi-block file.
 
     Raises:
         ValueError: If leaves is empty
@@ -379,13 +384,15 @@ def balanced_layout(
 
     # Each level entry: (cid_bytes, block_bytes, file_data_size, cumulative_block_size)
     # cumulative_block_size = len(this block) + sum(children's cumulative sizes)
-    # block_bytes may be None for leaves (memory optimization) — only used in single-leaf case
-    level: list[tuple[bytes, bytes, int, int]] = [
-        (cid, blk, fsize, len(blk) if blk is not None else 0) for cid, blk, fsize in leaves
+    # block_bytes may be None for leaves (memory optimization) — only used
+    # in single-leaf case
+    level: list[tuple[bytes, bytes | None, int, int]] = [
+        (cid, blk, fsize, len(blk) if blk is not None else 0)
+        for cid, blk, fsize in leaves
     ]
 
     while len(level) > 1:
-        next_level: list[tuple[bytes, bytes, int, int]] = []
+        next_level: list[tuple[bytes, bytes | None, int, int]] = []
         for i in range(0, len(level), max_links):
             batch = level[i : i + max_links]
             if len(batch) == 1:

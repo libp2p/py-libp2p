@@ -369,8 +369,11 @@ class MerkleDag:
 
         # For single-leaf files, balanced_layout returns leaves[0][1] which is
         # None (we passed None for block_bytes). Retrieve from blockstore.
+        # _get_block checks the local store first, so no network round-trip
+        # happens when the block is already present.
         if root_data is None:
-            root_data = await self._get_block(root_cid)
+            session = self.bitswap.new_session()
+            root_data = await self._get_block(root_cid, session)
 
         # Store the root node
         await self._put_block(root_cid, root_data)
@@ -484,8 +487,10 @@ class MerkleDag:
         )
 
         # For single-leaf, root_data is None — retrieve from blockstore
+        # (local-first; no network round-trip when already present).
         if root_data is None:
-            root_data = await self._get_block(root_cid)
+            session = self.bitswap.new_session()
+            root_data = await self._get_block(root_cid, session)
 
         # Store all internal nodes
         for cid, data in internal_nodes:
@@ -586,8 +591,10 @@ class MerkleDag:
         )
 
         # For single-leaf, root_data is None — retrieve from blockstore
+        # (local-first; no network round-trip when already present).
         if root_data is None:
-            root_data = await self._get_block(root_cid)
+            session = self.bitswap.new_session()
+            root_data = await self._get_block(root_cid, session)
 
         # Store all internal nodes
         for cid, data in internal_nodes:
