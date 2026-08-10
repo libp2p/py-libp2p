@@ -780,7 +780,8 @@ async def test_dead_peer_clears_subscriptions_of_half_registered_peer():
 
         pubsub._handle_dead_peer(peer_id)
 
-        assert peer_id not in pubsub.peer_topics[TESTING_TOPIC]
+        assert peer_id not in pubsub.peer_topics.get(TESTING_TOPIC, set())
+        assert TESTING_TOPIC not in pubsub.peer_topics
 
 
 @pytest.mark.trio
