@@ -306,7 +306,7 @@ class TestRecentMessageReplayGate:
             pubsub.handle_subscription(
                 peer_id, rpc_pb2.RPC.SubOpts(subscribe=False, topicid=self.TOPIC)
             )
-            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub.peer_topics.get(self.TOPIC, set())
 
             pubsub.peer_topics[self.TOPIC] = {peer_id}
             await pubsub._send_recent_messages_to_new_peer(peer_id)
@@ -322,7 +322,7 @@ class TestRecentMessageReplayGate:
 
             await pubsub._send_recent_messages_to_new_peer(peer_id)
             pubsub._handle_dead_peer(peer_id)
-            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub.peer_topics.get(self.TOPIC, set())
             assert peer_id not in pubsub._replayed_recent_topics
 
             pubsub.peer_topics[self.TOPIC] = {peer_id}
