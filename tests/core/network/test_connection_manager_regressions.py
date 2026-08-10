@@ -134,3 +134,51 @@ class TestBug8MaxConnectionsRegistration:
             assert len(swarm.get_connections()) == 1
             assert not conn1.is_closed
             muxed_conn2.close.assert_awaited()
+
+
+@pytest.mark.trio
+class TestBug5BackgroundPrune:
+    """Bug 5: pruning must not block the dial/accept hot path."""
+
+    async def test_prune_scheduling_returns_immediately(self):
+        swarm = SwarmFactory.build()
+        run_count = 0
+
+        async def fake_prune():
+            nonlocal run_count
+            run_count += 1
+            await trio.sleep(0.05)
+
+        swarm.connection_pruner.maybe_prune_connections = fake_prune
+
+        async with background_trio_service(swarm):
+            # _schedule_prune is synchronous — it must return immediately and
+            # let the prune run in a background task.
+            import time
+
+            started = time.monotonic()
+            swarm._schedule_prune()
+            elapsed = time.monotonic() - started
+            assert elapsed < 0.01
+
+            await trio.sleep(0.2)
+            assert run_count == 1
+
+    async def test_prune_is_debounced(self):
+        swarm = SwarmFactory.build()
+        run_count = 0
+
+        async def fake_prune():
+            nonlocal run_count
+            run_count += 1
+
+        swarm.connection_pruner.maybe_prune_connections = fake_prune
+
+        async with background_trio_service(swarm):
+            # Three quick triggers within the debounce window collapse into a
+            # single background prune.
+            swarm._schedule_prune()
+            swarm._schedule_prune()
+            swarm._schedule_prune()
+            await trio.sleep(0.2)
+            assert run_count == 1

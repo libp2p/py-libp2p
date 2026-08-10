@@ -227,6 +227,14 @@ class Swarm(Service, INetworkService):
         self._resource_manager = None
         self._stream_semaphore: trio.Semaphore | None = None
 
+        # Background pruning state (Bug 5): pruning runs fire-and-forget with
+        # a debounce so the dial/accept hot path never blocks on the
+        # O(n log n) sort and the per-connection closes (each close performs
+        # a 100ms sleep in SwarmConn._cleanup).
+        self._last_prune_attempt: float = 0.0
+        self._prune_debounce: float = 1.0
+        self._prune_task_running = False
+
         # Metrics
         self.metric_send_channel = metric_send_channel
 
@@ -2062,8 +2070,10 @@ class Swarm(Service, INetworkService):
             if len(self.connections[peer_id]) > max_conns:
                 self._trim_connections(peer_id)
 
-            # Trigger connection pruning if global limit is exceeded
-            await self.connection_pruner.maybe_prune_connections()
+            # Trigger connection pruning if the global limit is exceeded.
+            # Runs in the background (debounced) so this hot path never blocks
+            # on the sort + closes (Bug 5).
+            self._schedule_prune()
 
             # Call notifiers since event occurred
             await self.notify_connected(swarm_conn)
@@ -2078,6 +2088,36 @@ class Swarm(Service, INetworkService):
             except Exception:
                 pass
             raise
+
+    def _schedule_prune(self) -> None:
+        """
+        Debounced, fire-and-forget connection pruning.
+
+        Runs ConnectionPruner in a background task instead of blocking the
+        dial/accept path. At most one prune starts per debounce window and
+        at most one prune runs concurrently.
+        """
+        now = time.monotonic()
+        if now - self._last_prune_attempt < self._prune_debounce:
+            return
+        self._last_prune_attempt = now
+        try:
+            self.manager.run_task(self._prune_in_background)
+        except Exception:
+            # No running manager (e.g. swarm not started yet) — pruner is not
+            # started either, so there is nothing to do.
+            logger.debug("Failed to schedule background prune", exc_info=True)
+
+    async def _prune_in_background(self) -> None:
+        if self._prune_task_running:
+            return
+        self._prune_task_running = True
+        try:
+            await self.connection_pruner.maybe_prune_connections()
+        except Exception as e:
+            logger.error("Error in background prune: %s", e, exc_info=True)
+        finally:
+            self._prune_task_running = False
 
     def _build_remote_multiaddr(
         self, read_write_closer: ReadWriteCloser
