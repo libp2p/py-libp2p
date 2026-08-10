@@ -1994,7 +1994,10 @@ class Swarm(Service, INetworkService):
                     # logging, but build the real remote one best-effort.
                     remote_maddr = Multiaddr("/ip4/0.0.0.0/tcp/0")
                     try:
-                        remote = muxed_conn.get_remote_address()
+                        if hasattr(muxed_conn, "get_remote_address"):
+                            remote = muxed_conn.get_remote_address()  # type: ignore[attr-defined]
+                        else:
+                            remote = None
                         if remote is not None:
                             host, port = remote
                             ip = ipaddress.ip_address(host)
@@ -2362,9 +2365,11 @@ class Swarm(Service, INetworkService):
                 # No running manager — fall back to a best-effort inline close.
                 logger.debug("Failed to schedule trimmed connection close")
                 try:
-                    self.background_nursery.start_soon(
-                        self._close_connection_async, conn
-                    )
+                    background_nursery = self.background_nursery
+                    if background_nursery is not None:
+                        background_nursery.start_soon(
+                            self._close_connection_async, conn
+                        )
                 except Exception:
                     logger.warning(
                         "Could not schedule close for trimmed connection",

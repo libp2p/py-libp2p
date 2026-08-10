@@ -108,7 +108,7 @@ class TestBug3AddConnDedup:
         # Simulate the duplicate wrapper created during the add_conn race: it
         # shares the same muxed_conn and is marked _shared_muxed_conn.
         dup_wrapper = SwarmConn(muxed_conn, swarm)
-        dup_wrapper._shared_muxed_conn = True
+        setattr(dup_wrapper, "_shared_muxed_conn", True)
         await dup_wrapper.close()
 
         # Closing the duplicate must NOT close the muxed connection that the
@@ -149,11 +149,10 @@ class TestBug5BackgroundPrune:
 
     async def test_prune_scheduling_returns_immediately(self):
         swarm = SwarmFactory.build()
-        run_count = 0
+        run_count: list[int] = []
 
         async def fake_prune():
-            nonlocal run_count
-            run_count += 1
+            run_count.append(1)
             await trio.sleep(0.05)
 
         swarm.connection_pruner.maybe_prune_connections = fake_prune
@@ -169,15 +168,14 @@ class TestBug5BackgroundPrune:
             assert elapsed < 0.01
 
             await trio.sleep(0.2)
-            assert run_count == 1
+            assert len(run_count) == 1
 
     async def test_prune_is_debounced(self):
         swarm = SwarmFactory.build()
-        run_count = 0
+        run_count: list[int] = []
 
         async def fake_prune():
-            nonlocal run_count
-            run_count += 1
+            run_count.append(1)
 
         swarm.connection_pruner.maybe_prune_connections = fake_prune
 
@@ -188,7 +186,7 @@ class TestBug5BackgroundPrune:
             swarm._schedule_prune()
             swarm._schedule_prune()
             await trio.sleep(0.2)
-            assert run_count == 1
+            assert len(run_count) == 1
 
 
 @pytest.mark.trio
@@ -197,11 +195,10 @@ class TestBug6AutoConnectOnDisconnect:
 
     async def test_disconnect_schedules_auto_connect(self):
         swarm = SwarmFactory.build()
-        triggered = 0
+        triggered: list[int] = []
 
         async def fake_maybe_connect():
-            nonlocal triggered
-            triggered += 1
+            triggered.append(1)
 
         swarm.auto_connector.maybe_connect = fake_maybe_connect
 
@@ -209,31 +206,30 @@ class TestBug6AutoConnectOnDisconnect:
             # The periodic task fires maybe_connect once at startup — measure
             # the disconnect-triggered increment relative to that baseline.
             await trio.sleep(0.1)
-            baseline = triggered
+            baseline = len(triggered)
             await swarm.notify_disconnected(Mock())
             await trio.sleep(0.2)
-            assert triggered == baseline + 1
+            assert len(triggered) == baseline + 1
 
     async def test_auto_connect_trigger_is_cooldown_limited(self):
         swarm = SwarmFactory.build()
-        triggered = 0
+        triggered: list[int] = []
 
         async def fake_maybe_connect():
-            nonlocal triggered
-            triggered += 1
+            triggered.append(1)
 
         swarm.auto_connector.maybe_connect = fake_maybe_connect
 
         async with background_trio_service(swarm):
             await trio.sleep(0.1)
-            baseline = triggered
+            baseline = len(triggered)
             # Rapid disconnects within the cooldown window collapse into a
             # single auto-connect trigger.
             await swarm.notify_disconnected(Mock())
             await swarm.notify_disconnected(Mock())
             await swarm.notify_disconnected(Mock())
             await trio.sleep(0.2)
-            assert triggered == baseline + 1
+            assert len(triggered) == baseline + 1
 
 
 @pytest.mark.trio

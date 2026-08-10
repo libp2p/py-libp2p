@@ -134,14 +134,16 @@ def is_connection_in_allow_list(connection: INetConn, swarm: "Swarm") -> bool:
     """
     try:
         remote = None
-        if hasattr(connection, "get_remote_address"):
-            remote = connection.get_remote_address()
+        get_remote = getattr(connection, "get_remote_address", None)
+        if callable(get_remote):
+            remote = get_remote()
         if remote is None:
             # Fall back to the underlying muxed connection's remote address.
             muxed_conn = getattr(connection, "muxed_conn", None)
-            if muxed_conn is not None and hasattr(muxed_conn, "get_remote_address"):
-                remote = muxed_conn.get_remote_address()
-        if remote is None:
+            get_remote = getattr(muxed_conn, "get_remote_address", None)
+            if callable(get_remote):
+                remote = get_remote()
+        if not isinstance(remote, (tuple, list)) or len(remote) != 2:
             return False
         host, port = remote
         try:
