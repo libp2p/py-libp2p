@@ -487,3 +487,24 @@ class TestBug15MinConnectionsFunctional:
         swarm = SwarmFactory.build()
         connector = swarm.auto_connector
         assert connector._critical_check_interval < connector.auto_connect_interval
+
+
+class TestBug12ConnectionPoolOptIn:
+    """Bug 12: the dead connection pool must be off by default."""
+
+    def test_connection_pool_off_by_default(self):
+        from libp2p.rcmgr.manager import new_resource_manager
+
+        rm = new_resource_manager()
+        assert rm.connection_pool is None
+
+    def test_connection_pool_can_be_opted_in(self):
+        from libp2p.rcmgr.manager import new_resource_manager
+
+        rm = new_resource_manager(enable_connection_pooling=True)
+        assert rm.connection_pool is not None
+
+    def test_config_default_is_false(self):
+        from libp2p.rcmgr.config import PerformanceConfig
+
+        assert PerformanceConfig().enable_connection_pooling is False

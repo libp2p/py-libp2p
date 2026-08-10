@@ -827,7 +827,10 @@ def new_resource_manager(
     enable_connection_tracking: bool = True,
     memory_limits: MemoryConnectionLimits | None = None,
     enable_memory_limits: bool = True,
-    enable_connection_pooling: bool = True,
+    # Off by default: the connection pool is never actually used for
+    # acquire/release (dead code), so creating it by default was pure waste
+    # (Bug 12).
+    enable_connection_pooling: bool = False,
     enable_memory_pooling: bool = True,
     enable_circuit_breaker: bool = True,
     enable_graceful_degradation: bool = True,
