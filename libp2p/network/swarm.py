@@ -98,7 +98,9 @@ def create_default_stream_handler(network: INetworkService) -> StreamHandlerFn:
 class _NegativePeerCache:
     """Short-lived cache of peers whose all addresses recently failed."""
 
-    def __init__(self, ttl: float = 300.0, max_size: int = 10000) -> None:
+    # 60s (was 300s): transient failures (temporarily closed port, NAT, gate
+    # reconfiguration) should not blacklist a peer for minutes (Bug 10).
+    def __init__(self, ttl: float = 60.0, max_size: int = 10000) -> None:
         self._cache: dict[str, float] = {}  # peer_id -> expiry timestamp
         self._ttl = ttl
         self._max_size = max_size
@@ -126,6 +128,10 @@ class _NegativePeerCache:
     def evict(self, peer_id: str) -> None:
         """Remove from cache when a peer successfully connects."""
         self._cache.pop(peer_id, None)
+
+    def clear(self) -> None:
+        """Clear the whole cache (e.g. after gate/peerstore reconfiguration)."""
+        self._cache.clear()
 
 
 class Swarm(Service, INetworkService):
@@ -586,6 +592,15 @@ class Swarm(Service, INetworkService):
         """
         return self.tag_store.is_protected(peer_id, tag)
 
+    def unblock_peer(self, peer_id: ID) -> None:
+        """
+        Remove a peer from the negative cache so it can be dialed again.
+
+        Useful when a peer's addresses change or a transient failure caused
+        the peer to be temporarily blocked (Bug 10).
+        """
+        self._negative_peer_cache.evict(str(peer_id))
+
     def get_conn_mgr_info(self) -> CMInfo:
         """
         Return a unified snapshot of connection manager state.
@@ -811,6 +826,9 @@ class Swarm(Service, INetworkService):
                         self.peerstore.clear_addrs(peer_id)
                     except Exception:
                         pass
+                    # Addresses changed — lift any negative-cache block so the
+                    # corrected addresses can be tried immediately (Bug 10).
+                    self._negative_peer_cache.evict(str(peer_id))
                     break
 
                 if attempt < self.retry_config.max_retries:

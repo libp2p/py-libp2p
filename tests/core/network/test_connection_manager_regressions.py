@@ -392,3 +392,29 @@ class TestBug4TrimConnectionsSafeguards:
             assert not conn1.is_closed
             assert not conn2.is_closed
             assert len(swarm.connections[swarm.self_id]) == 2
+
+
+@pytest.mark.trio
+class TestBug10NegativePeerCache:
+    """Bug 10: negative peer cache must be short-lived and evictable."""
+
+    async def test_default_ttl_is_short(self):
+        from libp2p.network.swarm import _NegativePeerCache
+
+        cache = _NegativePeerCache()
+        assert cache._ttl <= 60.0
+
+    async def test_unblock_peer_lifts_the_block(self):
+        swarm = SwarmFactory.build()
+        peer_id = swarm.self_id
+
+        swarm._negative_peer_cache.mark_failed(str(peer_id))
+        assert swarm._negative_peer_cache.is_blocked(str(peer_id))
+
+        # dial_peer refuses while blocked.
+        with pytest.raises(SwarmException, match="recently failed"):
+            await swarm.dial_peer(peer_id)
+
+        # The public unblock API lifts the block immediately.
+        swarm.unblock_peer(peer_id)
+        assert not swarm._negative_peer_cache.is_blocked(str(peer_id))
