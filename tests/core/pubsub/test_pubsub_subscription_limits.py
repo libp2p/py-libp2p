@@ -1,5 +1,6 @@
 """Tests for pubsub subscription flood protections (GHSA-4f8r-922h-2vgv)."""
 
+from collections.abc import Callable
 from typing import cast
 
 import pytest
@@ -12,6 +13,12 @@ from libp2p.utils import encode_varint_prefixed
 from tests.utils.factories import IDFactory, PubsubFactory, net_stream_pair_factory
 
 pytestmark = pytest.mark.trio
+
+
+async def _wait_until(predicate: Callable[[], bool], timeout: float = 1.0) -> None:
+    with trio.fail_after(timeout):
+        while not predicate():
+            await trio.sleep(0.01)
 
 
 @pytest.mark.trio
@@ -28,6 +35,7 @@ async def test_unsubscribe_removes_empty_topic_key():
             peer_id, rpc_pb2.RPC.SubOpts(subscribe=False, topicid=topic)
         )
         assert topic not in pubsubs[0].peer_topics
+        assert peer_id not in pubsubs[0]._peer_subscription_count
 
 
 @pytest.mark.trio
@@ -42,9 +50,10 @@ async def test_disconnect_removes_empty_topic_keys():
             )
         assert len(pubsub.peer_topics) == 20
 
-        pubsub._clear_peer_from_all_topics(peer_id)
+        pubsub._forget_all_subscriptions(peer_id)
         assert len(pubsub.peer_topics) == 0
         assert peer_id not in pubsub._peer_subscription_count
+        assert peer_id not in pubsub._replayed_recent_topics
 
 
 @pytest.mark.trio
@@ -81,9 +90,7 @@ async def test_blacklist_clears_peer_topics():
         assert "blacklist-topic" in pubsub0.peer_topics
 
         pubsub0.add_to_blacklist(pubsub1.my_id)
-        with trio.fail_after(5.0):
-            while pubsub1.my_id in pubsub0.peers:
-                await trio.sleep(0.01)
+        await _wait_until(lambda: pubsub1.my_id not in pubsub0.peers, timeout=5.0)
 
         assert pubsub1.my_id not in pubsub0.peers
         assert "blacklist-topic" not in pubsub0.peer_topics
@@ -101,6 +108,7 @@ async def test_stop_clears_subscription_state():
         pubsub._clear_subscription_state()
         assert not pubsub.peer_topics
         assert not pubsub._peer_subscription_count
+        assert not pubsub._replayed_recent_topics
 
 
 @pytest.mark.trio
@@ -206,16 +214,27 @@ async def test_per_rpc_subscription_limit_rejected(nursery, security_protocol):
         pubsub = pubsubs[0]
         nursery.start_soon(pubsub.continuously_read_stream, stream_pair[0])
 
-        rpc = rpc_pb2.RPC(
+        over_limit_rpc = rpc_pb2.RPC(
             subscriptions=[
                 rpc_pb2.RPC.SubOpts(subscribe=True, topicid=f"rpc-topic-{i}")
                 for i in range(limit + 1)
             ]
         )
-        await stream_pair[1].write(encode_varint_prefixed(rpc.SerializeToString()))
-        await trio.sleep(0.1)
+        await stream_pair[1].write(
+            encode_varint_prefixed(over_limit_rpc.SerializeToString())
+        )
 
-        assert len(pubsub.peer_topics) == 0
+        # A later in-limit RPC proves the reader is still alive and processing.
+        ok_rpc = rpc_pb2.RPC(
+            subscriptions=[
+                rpc_pb2.RPC.SubOpts(subscribe=True, topicid="rpc-topic-ok"),
+            ]
+        )
+        await stream_pair[1].write(encode_varint_prefixed(ok_rpc.SerializeToString()))
+        await _wait_until(lambda: "rpc-topic-ok" in pubsub.peer_topics)
+
+        assert len(pubsub.peer_topics) == 1
+        assert all(f"rpc-topic-{i}" not in pubsub.peer_topics for i in range(limit + 1))
 
 
 @pytest.mark.trio
@@ -240,9 +259,7 @@ async def test_per_rpc_subscription_at_limit_accepted(nursery, security_protocol
             ]
         )
         await stream_pair[1].write(encode_varint_prefixed(rpc.SerializeToString()))
-        await trio.sleep(0.1)
-
-        assert len(pubsub.peer_topics) == limit
+        await _wait_until(lambda: len(pubsub.peer_topics) == limit)
         assert pubsub._peer_subscription_count[remote_peer_id] == limit
 
 
@@ -258,16 +275,22 @@ async def test_inbound_rpc_oversize_rejected(nursery, security_protocol):
         net_stream_pair_factory(security_protocol=security_protocol) as stream_pair,
     ):
         pubsub = pubsubs[0]
-        peer_id = IDFactory()
+        stream_peer_id = stream_pair[0].muxed_conn.peer_id
+        # Register the stream peer so oversize teardown can remove it.
+        pubsub.peers[stream_peer_id] = stream_pair[0]
+
+        other_peer_id = IDFactory()
         nursery.start_soon(pubsub.continuously_read_stream, stream_pair[0])
 
         pubsub.handle_subscription(
-            peer_id, rpc_pb2.RPC.SubOpts(subscribe=True, topicid="existing")
+            other_peer_id, rpc_pb2.RPC.SubOpts(subscribe=True, topicid="existing")
         )
         topics_before = len(pubsub.peer_topics)
 
         oversized_payload = b"x" * (max_size + 1)
         await stream_pair[1].write(encode_varint_prefixed(oversized_payload))
-        await trio.sleep(0.1)
+        await _wait_until(lambda: stream_peer_id not in pubsub.peers)
 
         assert len(pubsub.peer_topics) == topics_before
+        assert "existing" in pubsub.peer_topics
+        assert stream_peer_id not in pubsub.peers
