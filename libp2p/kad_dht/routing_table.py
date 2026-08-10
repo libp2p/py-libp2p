@@ -149,8 +149,12 @@ class KBucket:
 
     async def add_peer(self, peer_info: PeerInfo) -> bool:
         """
-        Add a peer to the bucket. Returns True if the peer was added or updated,
-        False if the bucket is full.
+        Add a peer to the bucket.
+
+        Returns True if the peer was added or updated. Returns False if the
+        bucket is full (and the oldest peer could not be replaced) or if the
+        peer was rejected by IP/subnet diversity (issue #1383:
+        ``MAX_PEERS_PER_SUBNET``).
         """
         current_time = time.time()
         peer_id = peer_info.peer_id
@@ -540,11 +544,27 @@ class RoutingTable:
             # this will ping the oldest peer and replace it if unresponsive.
             success = await bucket.add_peer(peer_info)
             if success:
-                logger.debug(f"Successfully added peer {peer_id} to routing table")
+                logger.debug("Successfully added peer %s to routing table", peer_id)
                 return True
+
+            subnet = _subnet_key(peer_info)
+            if (
+                MAX_PEERS_PER_SUBNET > 0
+                and subnet is not None
+                and bucket._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+            ):
+                logger.debug(
+                    "Peer %s dropped: subnet %s at capacity (%d)",
+                    peer_id,
+                    subnet,
+                    MAX_PEERS_PER_SUBNET,
+                )
             else:
-                logger.debug(f"Bucket full and cannot split, peer {peer_id} dropped")
-                return False
+                logger.debug(
+                    "Bucket full and cannot split, peer %s dropped",
+                    peer_id,
+                )
+            return False
 
         except Exception as e:
             logger.debug(f"Error adding peer {peer_obj} to routing table: {e}")
