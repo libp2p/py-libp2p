@@ -50,6 +50,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerstore import (
     PeerStoreError,
 )
+from libp2p.rcmgr.exceptions import ResourceLimitExceeded
 from libp2p.rcmgr.manager import ResourceManager
 from libp2p.security.pnet.protector import new_protected_conn
 from libp2p.tools.anyio_service import (
@@ -68,8 +69,6 @@ from libp2p.transport.upgrader import (
 from libp2p.utils.multiaddr_utils import (
     extract_ip_from_multiaddr,
 )
-
-from libp2p.rcmgr.exceptions import ResourceLimitExceeded
 
 from ..exceptions import (
     MultiError,
@@ -2004,9 +2003,7 @@ class Swarm(Service, INetworkService):
                                 if isinstance(ip, ipaddress.IPv6Address)
                                 else "ip4"
                             )
-                            remote_maddr = Multiaddr(
-                                f"/{proto}/{host}/tcp/{port}"
-                            )
+                            remote_maddr = Multiaddr(f"/{proto}/{host}/tcp/{port}")
                     except Exception:
                         pass
                     if direction == "inbound":
@@ -2210,7 +2207,10 @@ class Swarm(Service, INetworkService):
         if self._closing:
             return
         now = time.monotonic()
-        if now - self._last_auto_connect_trigger < self._auto_connect_trigger_min_interval:
+        if (
+            now - self._last_auto_connect_trigger
+            < self._auto_connect_trigger_min_interval
+        ):
             return
         self._last_auto_connect_trigger = now
         try:
@@ -2331,7 +2331,10 @@ class Swarm(Service, INetworkService):
         for conn in connections:
             # Skip connections within the grace period.
             created_at = getattr(conn, "_created_at", None)
-            if isinstance(created_at, (int, float)) and (now - created_at) < grace_period:
+            if (
+                isinstance(created_at, (int, float))
+                and (now - created_at) < grace_period
+            ):
                 continue
             # Skip protected peers.
             try:
@@ -2406,7 +2409,8 @@ class Swarm(Service, INetworkService):
                     )
                 except Exception:
                     logger.debug(
-                        "Failed to notify connection lifecycle for %s", peer_id,
+                        "Failed to notify connection lifecycle for %s",
+                        peer_id,
                         exc_info=True,
                     )
 
@@ -2503,9 +2507,7 @@ class Swarm(Service, INetworkService):
                     try:
                         await notifier(n)
                     except Exception:
-                        logger.exception(
-                            "Notifee %s callback raised", type(n).__name__
-                        )
+                        logger.exception("Notifee %s callback raised", type(n).__name__)
 
                 nursery.start_soon(_call)
 

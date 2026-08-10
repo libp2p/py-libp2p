@@ -12,7 +12,7 @@ from multiaddr import Multiaddr
 import trio
 
 from libp2p.abc import ConnectionType
-from libp2p.network.swarm import Swarm, SwarmException
+from libp2p.network.swarm import SwarmException
 from libp2p.tools.anyio_service import background_trio_service
 from tests.utils.factories import SwarmFactory
 
@@ -303,9 +303,7 @@ class TestBug6DisconnectBackoff:
         from libp2p.peer.id import ID
 
         swarm = SwarmFactory.build()
-        peer_id = ID.from_string(
-            "QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
-        )
+        peer_id = ID.from_string("QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
 
         # A peer that just disconnected is skipped by the auto-connector.
         swarm.auto_connector.record_disconnect(peer_id)
@@ -326,9 +324,7 @@ class TestBug11PerPeerDialCap:
         swarm.connection_config.max_connections = 100
 
         # Four addresses that all succeed — more than the per-peer cap.
-        addrs = [
-            Multiaddr(f"/ip4/127.0.0.1/tcp/{8000 + i}") for i in range(4)
-        ]
+        addrs = [Multiaddr(f"/ip4/127.0.0.1/tcp/{8000 + i}") for i in range(4)]
         swarm.peerstore.add_addrs(swarm.self_id, addrs, 100)
 
         async def fake_dial(addr, peer_id):
@@ -522,8 +518,8 @@ class TestBug1LifecycleLimits:
     """Bug 1: Rust-style connection limits must actually be enforced."""
 
     async def test_lifecycle_manager_enforces_per_peer_limit(self):
-        from libp2p.rcmgr.connection_limits import ConnectionLimits
         from libp2p.rcmgr.connection_lifecycle import ConnectionLifecycleManager
+        from libp2p.rcmgr.connection_limits import ConnectionLimits
         from libp2p.rcmgr.connection_tracker import ConnectionTracker
         from libp2p.rcmgr.exceptions import ResourceLimitExceeded
 

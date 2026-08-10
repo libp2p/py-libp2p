@@ -7,8 +7,8 @@ from typing import Any, cast
 from .allowlist import Allowlist, AllowlistConfig
 from .cidr_limits import CIDRLimiter
 from .circuit_breaker import CircuitBreaker, CircuitBreakerError
-from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_lifecycle import ConnectionLifecycleManager
+from .connection_limits import ConnectionLimits, new_connection_limits_with_defaults
 from .connection_pool import ConnectionPool
 from .connection_tracker import ConnectionTracker
 from .exceptions import ResourceScopeClosed
