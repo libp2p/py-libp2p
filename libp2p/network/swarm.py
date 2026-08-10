@@ -2235,24 +2235,71 @@ class Swarm(Service, INetworkService):
 
     def _trim_connections(self, peer_id: ID) -> None:
         """
-        Remove oldest connections when limit is exceeded.
+        Remove connections when the per-peer limit is exceeded.
+
+        Unlike the original implementation (which closed the oldest
+        connections with no safeguards via untracked system tasks), this
+        applies the same safety checks as the global pruner (Bug 4):
+
+        - connections within the grace period are never trimmed
+        - protected peers are never trimmed
+        - connections with the fewest active streams are trimmed first
+        - closes run through the swarm manager (tracked, cancellable)
         """
         connections = self.connections[peer_id]
         if len(connections) <= self.connection_config.max_connections_per_peer:
             return
 
-        # Sort by creation time and remove oldest
-        # For now, just keep the most recent connections
         max_conns = self.connection_config.max_connections_per_peer
-        connections_to_remove = connections[:-max_conns]
+        grace_period = self.connection_config.grace_period
+        now = time.time()
 
-        for conn in connections_to_remove:
-            logger.debug(f"Trimming old connection for peer {peer_id}")
-            trio.lowlevel.spawn_system_task(self._close_connection_async, conn)
+        # Build a list of trimmable candidates with safety checks.
+        candidates: list[tuple[int, float, INetConn]] = []
+        for conn in connections:
+            # Skip connections within the grace period.
+            created_at = getattr(conn, "_created_at", None)
+            if isinstance(created_at, (int, float)) and (now - created_at) < grace_period:
+                continue
+            # Skip protected peers.
+            try:
+                if self.tag_store.is_protected(conn.muxed_conn.peer_id):
+                    continue
+            except Exception:
+                pass
+            # Fewest active streams first, then oldest.
+            try:
+                stream_count = len(conn.get_streams())
+            except Exception:
+                stream_count = 0
+            candidates.append((stream_count, float(created_at or 0.0), conn))
 
-        # Keep only the most recent connections
-        max_conns = self.connection_config.max_connections_per_peer
-        self.connections[peer_id] = connections[-max_conns:]
+        # Sort by (stream count, age) — trim fewest-streams/oldest first.
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        to_trim = candidates[: max(0, len(connections) - max_conns)]
+        trim_ids = {id(conn) for _, _, conn in to_trim}
+
+        for _, _, conn in to_trim:
+            logger.debug(f"Trimming connection for peer {peer_id}")
+            try:
+                self.manager.run_task(self._close_connection_async, conn)
+            except Exception:
+                # No running manager — fall back to a best-effort inline close.
+                logger.debug("Failed to schedule trimmed connection close")
+                try:
+                    self.background_nursery.start_soon(
+                        self._close_connection_async, conn
+                    )
+                except Exception:
+                    logger.warning(
+                        "Could not schedule close for trimmed connection",
+                        exc_info=True,
+                    )
+
+        # Keep only the connections that were not trimmed.
+        self.connections[peer_id] = [
+            conn for conn in self.connections[peer_id] if id(conn) not in trim_ids
+        ]
 
     async def _close_connection_async(self, connection: INetConn) -> None:
         """Close a connection asynchronously."""

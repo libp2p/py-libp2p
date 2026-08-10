@@ -338,3 +338,57 @@ class TestBug11PerPeerDialCap:
         # swarm's tracking.
         assert len(conns) <= 2
         assert len(swarm.connections.get(swarm.self_id, [])) <= 2
+
+
+@pytest.mark.trio
+class TestBug4TrimConnectionsSafeguards:
+    """Bug 4: per-peer trimming must respect grace period and protection."""
+
+    async def test_trim_skips_grace_period_and_trims_old_unprotected(self):
+        import time
+
+        swarm = SwarmFactory.build()
+        swarm.connection_config.max_connections_per_peer = 1
+        swarm.connection_config.grace_period = 20.0
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            conn1 = await swarm.add_conn(muxed_conn, direction="inbound")
+            # Age conn1 past the grace period so it becomes trimmable.
+            conn1._created_at = time.time() - 100
+
+            muxed_conn2 = _established_mock_muxed_conn(swarm.self_id)
+            conn2 = await swarm.add_conn(muxed_conn2, direction="inbound")
+            # conn2 is brand new — within the grace period, so it must survive.
+
+            # The add_conn above already triggered a trim (2 > 1). Give the
+            # tracked background close a moment to run.
+            await trio.sleep(0.3)
+
+            assert conn1.is_closed
+            assert not conn2.is_closed
+            assert conn2 in swarm.connections[swarm.self_id]
+
+    async def test_trim_skips_protected_peers(self):
+        import time
+
+        swarm = SwarmFactory.build()
+        swarm.connection_config.max_connections_per_peer = 1
+        swarm.connection_config.grace_period = 0.0
+        swarm.protect(swarm.self_id, "test-protection")
+
+        async with background_trio_service(swarm):
+            muxed_conn = _established_mock_muxed_conn(swarm.self_id)
+            conn1 = await swarm.add_conn(muxed_conn, direction="inbound")
+            conn1._created_at = time.time() - 100
+
+            muxed_conn2 = _established_mock_muxed_conn(swarm.self_id)
+            conn2 = await swarm.add_conn(muxed_conn2, direction="inbound")
+            conn2._created_at = time.time() - 100
+
+            await trio.sleep(0.3)
+
+            # The protected peer's connections must all survive the trim.
+            assert not conn1.is_closed
+            assert not conn2.is_closed
+            assert len(swarm.connections[swarm.self_id]) == 2
