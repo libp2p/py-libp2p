@@ -836,6 +836,13 @@ class Swarm(Service, INetworkService):
         :raises SwarmException: raised when an error occurs
         :return: network connection
         """
+        # Enforce the global connection limit on outbound dials too.
+        # Previously only the inbound path checked ``max_connections``, so a
+        # node could exceed its configured cap purely through outbound dials
+        # (concurrent application dials, DHT queries, auto-connector).
+        if len(self.get_connections()) >= self.connection_config.max_connections:
+            raise SwarmException("Maximum connections limit reached")
+
         # For the dial to be successful, there needs to be a registered transport
         # that can dial the provided `maddr`
         transport = self.transport_manager.transport_for_dialing(addr)
