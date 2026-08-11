@@ -106,8 +106,13 @@ async def test_expiry_removal():
     """Test that expired items are removed by the background sweeper."""
     cache = LastSeenCache(ttl=2, sweep_interval=1)
     cache.add(MSG_1)
-    await trio.sleep(2.1)  # Wait for sweeper to remove expired items
-    assert MSG_1 not in cache.cache  # Should be removed
+    # Poll until the background sweeper removes the expired entry instead of a
+    # fixed sleep. The sweeper is a real thread on a `sweep_interval` cadence and
+    # the TTL is integer-second, so removal timing is coarse; a fixed 2.1s sleep
+    # raced on slow CI runners and left the entry still present.
+    with trio.fail_after(15):
+        while MSG_1 in cache.cache:
+            await trio.sleep(0.1)
     cache.stop()
 
 
