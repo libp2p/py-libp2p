@@ -1520,8 +1520,13 @@ class KadDHT(Service):
         # Candidate peers for iterative lookup (closer peers from responses)
         # Use list wrapper for mutable reference in closure
         candidate_peers_wrapper: list[list[ID]] = [list(closest_peers)]
+        # Per-query cancel scopes for the in-flight queries below. Each query
+        # runs in its own scope so that, when quorum is reached, we can cancel
+        # the outstanding slow queries without cancelling the scheduling loop
+        # (which must keep running to stop dispatching and collect the results).
+        query_scopes: list[trio.CancelScope] = []
 
-        async def query_one(peer: ID, cancel_scope: trio.CancelScope) -> None:
+        async def query_one(peer: ID) -> None:
             closer_peers: list[ID] = []
             try:
                 with trio.move_on_after(QUERY_TIMEOUT):
@@ -1576,8 +1581,10 @@ class KadDHT(Service):
                                     f"({len(valid_records)} valid records)"
                                 )
                                 quorum_reached.set()
-                                # Per spec: cancel outstanding requests
-                                cancel_scope.cancel()
+                                # Per spec: cancel outstanding requests only
+                                # (not the scheduling loop below)
+                                for scope in query_scopes:
+                                    scope.cancel()
                         except Exception as e:
                             peers_with_no_record.add(peer)
                             logger.debug(
@@ -1608,8 +1615,12 @@ class KadDHT(Service):
                     )
                 sem.release()
 
+        async def run_query(peer: ID, scope: trio.CancelScope) -> None:
+            """Run a single peer query inside its own quorum cancel scope."""
+            with scope:
+                await query_one(peer)
+
         async with trio.open_nursery() as nursery:
-            cancel_scope = nursery.cancel_scope
             # Iterative lookup: query peers, add closer peers, continue
             while candidate_peers_wrapper[0] and not quorum_reached.is_set():
                 # Take next unqueried peer from candidates
@@ -1625,7 +1636,9 @@ class KadDHT(Service):
                 if quorum_reached.is_set():
                     sem.release()
                     break
-                nursery.start_soon(query_one, peer, cancel_scope)
+                scope = trio.CancelScope()
+                query_scopes.append(scope)
+                nursery.start_soon(run_query, peer, scope)
 
         logger.debug(
             f"get_value query complete: {total_responses_list[0]} responses, "
