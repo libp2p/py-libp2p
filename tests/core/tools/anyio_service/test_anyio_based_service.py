@@ -81,7 +81,7 @@ def test_service_manager_initial_state():
     assert manager.is_finished is False
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_clean_exit():
     trigger_exit = Event()
 
@@ -100,7 +100,7 @@ async def test_anyio_service_lifecycle_run_and_clean_exit():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_external_cancellation():
     @as_service
     async def ServiceTest(manager):
@@ -117,7 +117,7 @@ async def test_anyio_service_lifecycle_run_and_external_cancellation():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_exception():
     trigger_error = Event()
 
@@ -141,7 +141,7 @@ async def test_anyio_service_lifecycle_run_and_exception():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_task_exception():
     trigger_error = Event()
 
@@ -168,7 +168,7 @@ async def test_anyio_service_lifecycle_run_and_task_exception():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_sub_service_cancelled_when_parent_stops():
     ready_cancel = Event()
 
@@ -202,7 +202,7 @@ async def test_sub_service_cancelled_when_parent_stops():
     assert sub_manager.is_finished
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_daemon_task_exit():
     trigger_error = Event()
 
@@ -229,7 +229,7 @@ async def test_anyio_service_lifecycle_run_and_daemon_task_exit():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_exceptiongroup_in_run():
     # This test should cause AnyIOManager.run() to explicitly raise an ExceptionGroup
     # containing two exceptions -- one raised inside its run() method and another
@@ -258,7 +258,7 @@ async def test_exceptiongroup_in_run():
     assert any(isinstance(err, ValueError) for err in exc.exceptions)
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_background_service_context_manager():
     service = WaitCancelledService()
 
@@ -278,7 +278,7 @@ async def test_anyio_service_background_service_context_manager():
     assert manager.is_finished is True
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_stop():
     service = WaitCancelledService()
 
@@ -296,7 +296,7 @@ async def test_anyio_service_manager_stop():
         assert manager.is_finished is True
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_run_task():
     task_event = Event()
 
@@ -313,7 +313,7 @@ async def test_anyio_service_manager_run_task():
             await task_event.wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_run_task_waits_for_task_completion():
     task_event = Event()
 
@@ -333,7 +333,7 @@ async def test_anyio_service_manager_run_task_waits_for_task_completion():
             await task_event.wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishes():
     task_event = Event()
     service_finished = Event()
@@ -365,7 +365,7 @@ async def test_anyio_service_manager_run_task_can_still_cancel_after_run_finishe
             await manager.wait_finished()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_run_task_reraises_exceptions():
     task_event = Event()
 
@@ -386,7 +386,7 @@ async def test_anyio_service_manager_run_task_reraises_exceptions():
                 await Event().wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
     task_event = Event()
 
@@ -406,7 +406,7 @@ async def test_anyio_service_manager_run_daemon_task_cancels_if_exits():
                 await Event().wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_manager_propogates_and_records_exceptions():
     @as_service
     async def ThrowErrorService(manager):
@@ -423,7 +423,7 @@ async def test_anyio_service_manager_propogates_and_records_exceptions():
     assert manager.did_error is True
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_lifecycle_run_and_clean_exit_with_child_service():
     trigger_exit = Event()
 
@@ -447,7 +447,7 @@ async def test_anyio_service_lifecycle_run_and_clean_exit_with_child_service():
     )
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_daemon_child_service():
     ready = Event()
 
@@ -467,7 +467,7 @@ async def test_anyio_service_with_daemon_child_service():
         await ready.wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_daemon_child_task():
     ready = Event()
     started = Event()
@@ -488,7 +488,7 @@ async def test_anyio_service_with_daemon_child_task():
         await ready.wait()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_async_generator():
     is_within_agen = Event()
 
@@ -507,7 +507,7 @@ async def test_anyio_service_with_async_generator():
         manager.cancel()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_disallows_task_scheduling_when_not_running():
     class ServiceTest(Service):
         async def run(self):
@@ -525,7 +525,7 @@ async def test_anyio_service_disallows_task_scheduling_when_not_running():
         service.do_schedule()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_disallows_task_scheduling_after_cancel():
     @as_service
     async def ServiceTest(manager):
@@ -535,7 +535,7 @@ async def test_anyio_service_disallows_task_scheduling_after_cancel():
     await AnyIOManager.run_service(ServiceTest())
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_cancellation_with_running_daemon_task():
     in_daemon = Event()
 
@@ -554,7 +554,7 @@ async def test_anyio_service_cancellation_with_running_daemon_task():
         manager.cancel()
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_try_finally_cleanup():
     ready_cancel = Event()
 
@@ -576,7 +576,7 @@ async def test_anyio_service_with_try_finally_cleanup():
     assert service.cleanup_up
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
     ready_cancel = Event()
 
@@ -599,7 +599,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_unshielded_await():
     assert not service.cleanup_up
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
     ready_cancel = Event()
 
@@ -623,7 +623,7 @@ async def test_anyio_service_with_try_finally_cleanup_with_shielded_await():
     assert service.cleanup_up
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_error_in_service_run():
     class ServiceTest(Service):
         async def run(self):
@@ -634,7 +634,7 @@ async def test_error_in_service_run():
         await AnyIOManager.run_service(ServiceTest())
 
 
-@pytest.mark.anyio
+@pytest.mark.trio
 async def test_daemon_task_finishes_leaving_children():
     class ServiceTest(Service):
         async def sleep_and_fail(self):
