@@ -77,9 +77,9 @@ class WebRTCCertificate:
             now = datetime.now(timezone.utc)
             subject = issuer = x509.Name(
                 [
-                    x509.NameAttribute(
+                    x509.NameAttribute(  # pyrefly: ignore[bad-argument-type]
                         NameOID.COMMON_NAME, common_name
-                    )  # pyrefly: ignore[bad-argument-type]
+                    )
                 ]
             )
             certificate = (
