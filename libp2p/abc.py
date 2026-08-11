@@ -1684,6 +1684,18 @@ class INetwork(ABC):
         """
 
     @abstractmethod
+    def remove_notifee(self, notifee: "INotifee") -> None:
+        """
+        Unregister a notifee instance so it stops receiving network events.
+
+        Parameters
+        ----------
+        notifee : INotifee
+            The notifee previously passed to ``register_notifee``.
+
+        """
+
+    @abstractmethod
     async def close(self) -> None:
         """
         Close the network and all associated connections and listeners.

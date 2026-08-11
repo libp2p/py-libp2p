@@ -1,0 +1,6 @@
+Fix resource leaks that accumulate on long-running nodes: yamux now sweeps
+fully-closed streams whose receive buffers still hold unread data (previously
+they leaked one entry per stream for the connection's lifetime), and the
+bitswap client now reaps all per-peer state (wantlists, negotiated protocols,
+pending bytes, peer stats, presence) when a peer's last connection closes, via
+a new INotifee integration.

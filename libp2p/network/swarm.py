@@ -2441,6 +2441,11 @@ class Swarm(Service, INetworkService):
         """
         self.notifees.append(notifee)
 
+    def remove_notifee(self, notifee: INotifee) -> None:
+        """Unregister a notifee so it stops receiving network events."""
+        if notifee in self.notifees:
+            self.notifees.remove(notifee)
+
     async def _notify(self, method: str, *args: Any) -> None:
         """
         Fan out a notifee callback to all registered notifees.

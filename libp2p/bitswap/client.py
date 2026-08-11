@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import trio
 import varint
 
-from libp2p.abc import IHost, INetStream
+from libp2p.abc import IHost, INetStream, INotifee
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.exceptions import StreamEOF, StreamError
 from libp2p.peer.id import ID as PeerID
@@ -52,7 +52,7 @@ from .sim import SessionInterestManager
 logger = logging.getLogger(__name__)
 
 
-class BitswapClient:
+class BitswapClient(INotifee):
     """
     Bitswap client for exchanging blocks with other peers.
 
@@ -60,6 +60,11 @@ class BitswapClient:
     content discovery and file sharing in a peer-to-peer network.
 
     For 1.3.0 payment support, register a PaymentExtension.
+
+    Implements :class:`~libp2p.abc.INotifee` so that per-peer state (wantlists,
+    negotiated protocols, peer stats, presence) is reaped when a peer's
+    connection closes — otherwise it would accumulate for every peer a
+    long-running node ever talks to.
     """
 
     def __init__(
@@ -108,6 +113,8 @@ class BitswapClient:
         self._nursery: trio.Nursery | None = None
         self._started = False
         self._cancel_scope: trio.CancelScope | None = None
+        self._presence_cleanup_started = False
+        self._notifee_registered = False
 
     def register_extension(self, protocol: str, extension: "IBitswapExtension") -> None:
         """Register an extension for a specific protocol."""
@@ -130,8 +137,17 @@ class BitswapClient:
 
         self._started = True
         self._cancel_scope = trio.CancelScope()
-        if self._nursery is not None:
+        if self._nursery is not None and not self._presence_cleanup_started:
+            self._presence_cleanup_started = True
             self._nursery.start_soon(self._presence_cleanup_loop)
+        # Register as a network notifee so per-peer state is reaped when a
+        # peer disconnects (prevents unbounded per-peer accumulation on
+        # long-running nodes).
+        try:
+            self.host.get_network().register_notifee(self)
+            self._notifee_registered = True
+        except Exception as e:
+            logger.debug(f"Failed to register bitswap notifee: {e}")
         logger.info(f"Bitswap client started (protocol: {self.protocol_version})")
 
     async def _presence_cleanup_loop(self) -> None:
@@ -149,8 +165,15 @@ class BitswapClient:
             return
 
         self._started = False
+        self._presence_cleanup_started = False
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
+        if self._notifee_registered:
+            try:
+                self.host.get_network().remove_notifee(self)
+            except Exception as e:
+                logger.debug(f"Failed to unregister bitswap notifee: {e}")
+            self._notifee_registered = False
         # Unregister stream handlers for all supported Bitswap protocols
         for protocol in self.supported_protocols:
             self.host.remove_stream_handler(TProtocol(protocol))
@@ -167,6 +190,63 @@ class BitswapClient:
     def set_nursery(self, nursery: trio.Nursery) -> None:
         """Set the nursery for background tasks."""
         self._nursery = nursery
+        # The presence-cleanup loop can only run once a nursery is available;
+        # if start() ran first, start it now.
+        if self._started and not self._presence_cleanup_started:
+            self._presence_cleanup_started = True
+            nursery.start_soon(self._presence_cleanup_loop)
+
+    # ── INotifee (network lifecycle hooks) ───────────────────────────────
+
+    async def opened_stream(self, network: Any, stream: INetStream) -> None:
+        """No-op — Bitswap does not track stream open events."""
+
+    async def closed_stream(self, network: Any, stream: INetStream) -> None:
+        """No-op — Bitswap does not track stream close events."""
+
+    async def connected(self, network: Any, conn: Any) -> None:
+        """No-op — per-peer state is created lazily on demand."""
+
+    async def disconnected(self, network: Any, conn: Any) -> None:
+        """
+        Reap all per-peer state when a peer's *last* connection closes.
+
+        ``disconnected`` fires once per ``SwarmConn`` that closes; a peer may
+        hold several connections, so the state is only dropped once no
+        connection to the peer remains (mirrors TagStoreNotifee's
+        last-connection semantics).
+        """
+        try:
+            peer_id = conn.muxed_conn.peer_id
+        except Exception:
+            return
+        try:
+            remaining = network.get_connections(peer_id)
+        except Exception:
+            remaining = None
+        if not remaining:
+            self.cleanup_peer(peer_id)
+
+    async def listen(self, network: Any, multiaddr: Any) -> None:
+        """No-op."""
+
+    async def listen_close(self, network: Any, multiaddr: Any) -> None:
+        """No-op."""
+
+    def cleanup_peer(self, peer_id: PeerID) -> None:
+        """
+        Drop all per-peer state accumulated for ``peer_id``.
+
+        Called on peer disconnect so long-running nodes don't accumulate
+        wantlists, negotiated protocols, presence and peer stats for every
+        peer they have ever talked to.
+        """
+        self._peer_wantlists.pop(peer_id, None)
+        self._peer_protocols.pop(peer_id, None)
+        self._peer_pending_bytes.pop(peer_id, None)
+        self.peer_manager.remove_peer(peer_id)
+        self.presence_manager.remove_peer(peer_id)
+        logger.debug(f"Cleaned up per-peer state for {peer_id}")
 
     def new_session(self) -> BitswapSession:
         """Create a new Bitswap session for fetching blocks."""
@@ -391,13 +471,16 @@ class BitswapClient:
                 logger.debug(f"Sent wantlist to peer {peer_id}")
 
                 # Keep stream open and read responses
-                # This allows the provider to send blocks back on the same stream
+                # This allows the provider to send blocks back on the same stream.
+                # Track the exact CIDs this wantlist covered so the reader only
+                # waits for those (multiple concurrent streams to the same peer
+                # each own their own subset of the peer's expected blocks).
                 if self._nursery:
                     self._nursery.start_soon(
-                        self._read_responses_from_stream, stream, peer_id
+                        self._read_responses_from_stream, stream, peer_id, list(cids)
                     )
                 else:
-                    await self._read_responses_from_stream(stream, peer_id)
+                    await self._read_responses_from_stream(stream, peer_id, list(cids))
                 return True
             except Exception as inner_e:
                 try:
@@ -505,13 +588,21 @@ class BitswapClient:
                         pass
 
     async def _read_responses_from_stream(
-        self, stream: INetStream, peer_id: PeerID
+        self,
+        stream: INetStream,
+        peer_id: PeerID,
+        wanted_cids: list[CIDObject] | None = None,
     ) -> None:
         """
         Read responses from a stream after sending a wantlist.
 
         This keeps the stream open so the provider can send blocks back.
         Stops reading once all expected blocks are received or after a timeout.
+
+        ``wanted_cids`` optionally scopes this reader to the exact CIDs its
+        wantlist covered. Without it, the reader falls back to the peer-global
+        expected set (which also contains CIDs requested by other concurrent
+        streams to the same peer).
         """
         try:
             peer_id_str = str(peer_id)
@@ -521,9 +612,15 @@ class BitswapClient:
             STREAM_IDLE_TIMEOUT = 30.0
 
             while True:
-                # Check if we've received all expected blocks from this peer
+                # Check if we've received all expected blocks. When this stream
+                # was opened for a specific set of CIDs, only those matter —
+                # otherwise the reader would linger for the whole transfer
+                # because other batches keep the peer's expected set non-empty.
                 expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
-                remaining = len(expected_cids)
+                if wanted_cids is not None:
+                    remaining = len(set(wanted_cids) & expected_cids)
+                else:
+                    remaining = len(expected_cids)
                 if remaining == 0:
                     logger.info(
                         f"All expected blocks received from "
@@ -564,25 +661,31 @@ class BitswapClient:
 
             logger.error(traceback.format_exc())
         finally:
-            # Clean up expected blocks for this peer
+            # The session owns the peer's expected-block accounting (it removes
+            # entries when a batch completes or times out, and the presence
+            # manager TTL reaps stragglers). This reader only reports —
+            # non-destructively — which of the CIDs it was opened for were
+            # still pending when the stream closed, so slow-but-ongoing batches
+            # are not falsely flagged as lost and concurrent readers' tracking
+            # is never disturbed.
             expected_cids = self.presence_manager.get_expected_for_peer(peer_id)
-            remaining = len(expected_cids)
-            if remaining > 0:
-                peer_id_str = str(peer_id)
-                logger.error("")
-                logger.error("=" * 70)
-                logger.error("⚠️  STREAM CLOSED WITH MISSING BLOCKS")
-                logger.error("=" * 70)
-                logger.error(f"Peer: {peer_id_str}")
-                logger.error(f"Missing {remaining} blocks:")
-                for i, cid in enumerate(expected_cids):
-                    logger.error(f"  {i + 1}. {format_cid_for_display(cid)}")
-                    self.presence_manager.remove_have(peer_id, cid)
-                logger.error("=" * 70)
-                logger.error("")
+            if wanted_cids is not None:
+                pending = [c for c in wanted_cids if c in expected_cids]
             else:
-                for cid in list(expected_cids):
-                    self.presence_manager.remove_have(peer_id, cid)
+                pending = list(expected_cids)
+            pending_strs = sorted({format_cid_for_display(c) for c in pending})
+            if pending_strs:
+                peer_id_str = str(peer_id)
+                logger.warning("")
+                logger.warning("=" * 70)
+                logger.warning("⚠️  STREAM CLOSED WITH BLOCKS STILL PENDING")
+                logger.warning("=" * 70)
+                logger.warning(f"Peer: {peer_id_str}")
+                logger.warning(f"{len(pending_strs)} unique block(s) still pending:")
+                for cid_str in pending_strs:
+                    logger.warning(f"  - {cid_str}")
+                logger.warning("=" * 70)
+                logger.warning("")
             try:
                 await stream.close()
             except Exception as e:
