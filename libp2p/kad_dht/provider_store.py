@@ -782,6 +782,7 @@ class ProviderStore:
         """Remove expired provider records."""
         current_time = time.time()
         expired_keys = []
+        removed_any = False
 
         for key, providers in self.providers.items():
             expired_providers = []
@@ -800,6 +801,9 @@ class ProviderStore:
             for peer_id in expired_providers:
                 del providers[peer_id]
 
+            if expired_providers:
+                removed_any = True
+
             # Track empty keys for removal
             if not providers:
                 expired_keys.append(key)
@@ -809,7 +813,7 @@ class ProviderStore:
             del self.providers[key]
             logger.debug(f"Removed key with no providers: {key.hex()}")
 
-        if expired_keys or any(True for _ in expired_providers):
+        if expired_keys or removed_any:
             self._save()
 
     def get_provided_keys(self, peer_id: ID) -> list[bytes]:

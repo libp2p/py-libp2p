@@ -406,6 +406,16 @@ class TestProviderStore:
         assert key1 in store.providers
         assert key2 not in store.providers
 
+    def test_cleanup_expired_empty_store(self):
+        """Test cleanup_expired on an empty store does not raise."""
+        store = ProviderStore(host=mock_host)
+
+        # Must not raise UnboundLocalError when the store has no entries
+        store.cleanup_expired()
+
+        assert store.size() == 0
+        assert len(store.providers) == 0
+
     def test_get_provided_keys_empty_store(self):
         """Test get_provided_keys with empty store."""
         store = ProviderStore(host=mock_host)
