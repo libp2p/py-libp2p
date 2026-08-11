@@ -32,6 +32,7 @@ import ctypes
 import ctypes.util
 from pathlib import Path
 import ssl
+import subprocess
 import sys
 from typing import Any
 
@@ -40,6 +41,41 @@ _VERIFY_PEER = 0x01
 
 _libssl: ctypes.CDLL | None = None
 _SSL_CTX_set_verify: Any = None
+
+
+def _linked_libssl_path() -> str | None:
+    """
+    Return the exact libssl path that CPython's ``_ssl`` module links against.
+
+    ``ctypes.util.find_library("ssl")`` can resolve to a different OpenSSL
+    than the one the ``_ssl`` extension was built against (common on macOS,
+    where a Homebrew/MacPorts OpenSSL coexists with the system LibreSSL
+    stub). Calling ``SSL_CTX_set_verify`` through the wrong library is
+    undefined behavior and can abort the interpreter, so prefer the library
+    that ``_ssl`` actually links to.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        import _ssl
+
+        ssl_ext_path = getattr(_ssl, "__file__", None)
+        if ssl_ext_path is None:
+            return None
+        out = subprocess.run(
+            ["otool", "-L", ssl_ext_path],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout
+    except Exception:
+        return None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("/") and "libssl" in line:
+            return line.split(" (")[0]
+    return None
 
 
 def _load_libssl() -> ctypes.CDLL:
@@ -57,6 +93,13 @@ def _load_libssl() -> ctypes.CDLL:
                 except OSError:
                     continue
         raise RuntimeError("Could not load libssl on Windows")
+
+    linked = _linked_libssl_path()
+    if linked is not None:
+        try:
+            return ctypes.CDLL(linked)
+        except OSError:
+            pass
 
     libname = ctypes.util.find_library("ssl")
     if libname is not None:
