@@ -6,9 +6,16 @@ from collections import (
     OrderedDict,
 )
 import hashlib
+from ipaddress import (
+    ip_address,
+    ip_network,
+)
 import logging
 import time
 
+from multiaddr.exceptions import (
+    ProtocolLookupError,
+)
 import trio
 
 from libp2p.abc import (
@@ -26,9 +33,12 @@ from libp2p.peer.peerinfo import (
 
 from .common import (
     BUCKET_SIZE,
+    MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
     PEER_REFRESH_INTERVAL,
     STALE_PEER_THRESHOLD,
+    SUBNET_PREFIX_LEN_V4,
+    SUBNET_PREFIX_LEN_V6,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,30 +60,47 @@ def key_to_int(key: bytes) -> int:
     return int.from_bytes(key, byteorder="big")
 
 
-def get_ip_prefix(addr_str: str, prefix_len: int = 16) -> str:
+def _subnet_key(peer_info: PeerInfo) -> str | None:
     """
-    Extract IP prefix for diversity filtering.
+    Return a stable subnet key for a peer's first globally-routable IP address,
+    used to enforce IP/subnet diversity in k-buckets (issue #1383).
 
-    For IPv4: returns first 2 octets (e.g., "192.168")
-    For IPv6: returns first 4 octets (e.g., "2001:0db8")
+    Returns ``None`` (peer exempt from the diversity check) when the peer has no
+    globally-routable IP literal — this covers loopback, private (RFC1918/ULA),
+    CGNAT (100.64.0.0/10), link-local, documentation ranges, DNS-named peers,
+    and relayed (``p2p-circuit``) addresses. Only ``ip4``/``ip6`` literals on
+    non-relayed multiaddrs are grouped; ``is_global`` is used as the routable
+    predicate so behaviour is stable regardless of the exact private-range set.
+
+    A relayed address carries the *relay's* IP, not the peer's, so it is skipped
+    to avoid grouping distinct peers behind a shared relay.
+
+    Divergence from go-libp2p (go-libp2p-kbucket/peerdiversity): go checks *every*
+    address of the peer and rejects if any group is saturated. We group by the
+    *first* globally-routable address only — simpler, and it avoids false
+    rejections of legitimately multi-homed peers. A stricter all-addresses check
+    is a reasonable follow-up once address ordering is well-defined.
     """
-    try:
-        if "/ip4/" in addr_str:
-            ip = addr_str.split("/ip4/")[1].split("/")[0]
-            parts = ip.split(".")
-            if len(parts) >= 2:
-                return f"{parts[0]}.{parts[1]}"
-        elif "/ip6/" in addr_str:
-            ip = addr_str.split("/ip6/")[1].split("/")[0]
-            parts = ip.split(":")
-            if len(parts) >= 4:
-                return ":".join(parts[:4])
-    except (IndexError, ValueError):
-        pass
-    return ""
-
-
-MAX_PEERS_PER_IP_PREFIX = 3  # Max peers from same /16 subnet per bucket
+    for addr in peer_info.addrs:
+        # Relayed addrs expose the relay's IP, not the peer's — never group them.
+        if "p2p-circuit" in str(addr):
+            continue
+        for proto, prefix_len in (
+            ("ip4", SUBNET_PREFIX_LEN_V4),
+            ("ip6", SUBNET_PREFIX_LEN_V6),
+        ):
+            try:
+                value = addr.value_for_protocol(proto)
+                if value is None:
+                    continue
+                ip = ip_address(value)
+            except (ProtocolLookupError, ValueError):
+                continue
+            if not ip.is_global:
+                # loopback / private / CGNAT / link-local / doc range → exempt
+                continue
+            return str(ip_network(f"{ip}/{prefix_len}", strict=False))
+    return None
 
 
 class KBucket:
@@ -123,8 +150,12 @@ class KBucket:
 
     async def add_peer(self, peer_info: PeerInfo) -> bool:
         """
-        Add a peer to the bucket. Returns True if the peer was added or updated,
-        False if the bucket is full.
+        Add a peer to the bucket.
+
+        Returns True if the peer was added or updated. Returns False if the
+        bucket is full (and the oldest peer could not be replaced) or if the
+        peer was rejected by IP/subnet diversity (issue #1383:
+        ``MAX_PEERS_PER_SUBNET``).
         """
         async with self._lock:
             current_time = time.time()
@@ -134,6 +165,24 @@ class KBucket:
             if peer_id in self.peers:
                 self.refresh_peer_last_seen(peer_id)
                 return True
+
+            # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
+            # globally-routable subnet already holds MAX_PEERS_PER_SUBNET peers
+            # in this bucket. Exempt peers (subnet is None) are never grouped.
+            # Disabled when MAX_PEERS_PER_SUBNET <= 0.
+            if MAX_PEERS_PER_SUBNET > 0:
+                subnet = _subnet_key(peer_info)
+                if (
+                    subnet is not None
+                    and self._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+                ):
+                    logger.debug(
+                        "Subnet %s at capacity (%d), rejecting peer %s",
+                        subnet,
+                        MAX_PEERS_PER_SUBNET,
+                        peer_id,
+                    )
+                    return False
 
             # If bucket has space, add the peer
             if len(self.peers) < self.bucket_size:
@@ -158,34 +207,43 @@ class KBucket:
                     peer_id,
                 )
                 return False
-            else:
-                # If the old peer is unresponsive, we can replace it with the new peer
+
+            # If the old peer is unresponsive, we can replace it with the new peer
+            logger.debug(
+                "Old peer %s is unresponsive, replacing with new peer %s",
+                oldest_peer_id,
+                peer_id,
+            )
+            # Re-check bucket state after the await — another coroutine may have
+            # modified the bucket while we were pinging.
+            if peer_id in self.peers:
+                # Another coroutine added this peer (or the old peer) during ping
+                self.refresh_peer_last_seen(peer_id)
+                return True
+
+            if oldest_peer_id in self.peers:
+                del self.peers[oldest_peer_id]
+
+            # Re-check capacity: another coroutine may have added a peer
+            # during the ping, potentially filling the bucket to capacity.
+            if len(self.peers) >= self.bucket_size:
                 logger.debug(
-                    "Old peer %s is unresponsive, replacing with new peer %s",
-                    oldest_peer_id,
+                    "Bucket full after ping, cannot add new peer %s",
                     peer_id,
                 )
-                # Re-check bucket state after the await — another coroutine may have
-                # modified the bucket while we were pinging.
-                if peer_id in self.peers:
-                    # Another coroutine added this peer (or the old peer) during ping
-                    self.refresh_peer_last_seen(peer_id)
-                    return True
+                return False
 
-                if oldest_peer_id in self.peers:
-                    del self.peers[oldest_peer_id]
-
-                # Re-check capacity: another coroutine may have added a peer
-                # during the ping, potentially filling the bucket to capacity.
-                if len(self.peers) >= self.bucket_size:
-                    logger.debug(
-                        "Bucket full after ping, cannot add new peer %s",
-                        peer_id,
-                    )
-                    return False
-
-                self.peers[peer_id] = (peer_info, current_time)
+            self.peers[peer_id] = (peer_info, current_time)
             return True
+
+    def _peers_in_subnet(self, subnet: str) -> int:
+        """
+        Count resident peers whose subnet key matches ``subnet`` (issue #1383).
+
+        Recomputes ``_subnet_key`` for each resident peer; O(k) with k bounded
+        by ``bucket_size`` (default 20), so the per-add cost is negligible.
+        """
+        return sum(1 for info, _ in self.peers.values() if _subnet_key(info) == subnet)
 
     def remove_peer(self, peer_id: ID) -> bool:
         """
@@ -481,43 +539,6 @@ class RoutingTable:
                 except Exception:
                     pass
 
-            # IP diversity filtering: limit peers from same /16 subnet
-            try:
-                peer_addrs = self.host.get_peerstore().addrs(peer_id)
-                if peer_addrs:
-                    # Count peers from same IP prefix in this bucket
-                    bucket = self.find_bucket(peer_id)
-                    ip_prefix_counts: dict[str, int] = {}
-                    for existing_peer in bucket.peer_infos():
-                        try:
-                            existing_addrs = self.host.get_peerstore().addrs(
-                                existing_peer.peer_id
-                            )
-                            for addr in existing_addrs:
-                                prefix = get_ip_prefix(str(addr))
-                                if prefix:
-                                    ip_prefix_counts[prefix] = (
-                                        ip_prefix_counts.get(prefix, 0) + 1
-                                    )
-                        except Exception:
-                            pass
-
-                    # Check if adding this peer would exceed the limit
-                    for addr in peer_addrs:
-                        prefix = get_ip_prefix(str(addr))
-                        count = ip_prefix_counts.get(prefix, 0)
-                        if prefix and count >= MAX_PEERS_PER_IP_PREFIX:
-                            logger.debug(
-                                "Peer %s rejected: too many peers from %s "
-                                "(max %d per /16 subnet)",
-                                peer_id,
-                                prefix,
-                                MAX_PEERS_PER_IP_PREFIX,
-                            )
-                            return False
-            except Exception:
-                pass
-
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
 
@@ -539,11 +560,27 @@ class RoutingTable:
             # this will ping the oldest peer and replace it if unresponsive.
             success = await bucket.add_peer(peer_info)
             if success:
-                logger.debug(f"Successfully added peer {peer_id} to routing table")
+                logger.debug("Successfully added peer %s to routing table", peer_id)
                 return True
+
+            subnet = _subnet_key(peer_info)
+            if (
+                MAX_PEERS_PER_SUBNET > 0
+                and subnet is not None
+                and bucket._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+            ):
+                logger.debug(
+                    "Peer %s dropped: subnet %s at capacity (%d)",
+                    peer_id,
+                    subnet,
+                    MAX_PEERS_PER_SUBNET,
+                )
             else:
-                logger.debug(f"Bucket full and cannot split, peer {peer_id} dropped")
-                return False
+                logger.debug(
+                    "Bucket full and cannot split, peer %s dropped",
+                    peer_id,
+                )
+            return False
 
         except Exception as e:
             logger.debug(f"Error adding peer {peer_obj} to routing table: {e}")
@@ -716,6 +753,12 @@ class RoutingTable:
         :param bucket: The bucket to check
         :return: True if the bucket should be split
         """
+        # Only full buckets should ever split. A non-full bucket can now return
+        # False from add_peer for reasons other than fullness (e.g. a subnet
+        # diversity rejection, issue #1383), which must not trigger a split.
+        if len(bucket.peers) < bucket.bucket_size:
+            return False
+
         # Check if we've exceeded maximum buckets
         if len(self.buckets) >= MAXIMUM_BUCKETS:
             logger.debug("Maximum number of buckets reached, cannot split")
