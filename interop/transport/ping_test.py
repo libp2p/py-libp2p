@@ -77,8 +77,6 @@ def _mk_identify_protobuf_nim_interop(host, observed_multiaddr):
     return msg
 
 
-_identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
-
 PING_PROTOCOL_ID = TProtocol("/ipfs/ping/1.0.0")
 PING_LENGTH = 32
 MAX_TEST_TIMEOUT = 300  # Max timeout (default Docker timeout is 600s)
@@ -1541,6 +1539,13 @@ async def main() -> None:
     """Main entry point."""
     args = parse_args()
     configure_logging()
+    # nim-libp2p identify `decodeMsg` is strict and aborts on any protobuf
+    # field it cannot decode, so strip the problematic fields from every
+    # identify response this process sends. This is applied here (when the
+    # ping test actually runs) rather than at import time: importing this
+    # module must not globally replace `_mk_identify_protobuf` for other
+    # tests running in the same process.
+    _identify_mod._mk_identify_protobuf = _mk_identify_protobuf_nim_interop
     ping_test = PingTest(test_plans=args.test_plans)
     await ping_test.run()
 
