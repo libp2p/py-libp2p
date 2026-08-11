@@ -59,7 +59,7 @@ def _linked_libssl_path() -> str | None:
     try:
         import _ssl
 
-        ssl_ext_path = getattr(_ssl, "__file__", None)
+        ssl_ext_path: str | None = getattr(_ssl, "__file__", None)
         if ssl_ext_path is None:
             return None
         out = subprocess.run(
