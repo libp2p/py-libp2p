@@ -1,6 +1,9 @@
 import pytest
 import trio
 
+from libp2p.tools.timed_cache.base_timed_cache import (
+    BaseTimedCache,
+)
 from libp2p.tools.timed_cache.first_seen_cache import (
     FirstSeenCache,
 )
@@ -9,6 +12,26 @@ from libp2p.tools.timed_cache.last_seen_cache import (
 )
 
 MSG_1 = b"msg1"
+
+
+async def _wait_until_expired(
+    cache: BaseTimedCache, key: bytes, *, timeout: float = 15
+) -> None:
+    """
+    Wait until ``key`` is no longer considered present.
+
+    ``LastSeenCache.has()`` refreshes TTL while the key remains in the dict, so
+    for that class we poll dict membership until the background sweeper removes
+    the entry. ``FirstSeenCache.has()`` reports logical expiry without refresh,
+    so polling ``has()`` is correct there.
+    """
+    with trio.fail_after(timeout):
+        if isinstance(cache, LastSeenCache):
+            while key in cache.cache:
+                await trio.sleep(0.1)
+        else:
+            while cache.has(key):
+                await trio.sleep(0.1)
 
 
 @pytest.mark.trio
@@ -20,7 +43,7 @@ async def test_simple_first_seen_cache():
     assert cache.has(MSG_1) is True  # Should exist
     assert cache.add(MSG_1) is False  # Duplicate should return False
 
-    await trio.sleep(2.5)  # Wait beyond TTL
+    await _wait_until_expired(cache, MSG_1)
     assert cache.has(MSG_1) is False  # Should be expired
 
     cache.stop()
@@ -34,14 +57,8 @@ async def test_simple_last_seen_cache():
     assert cache.add(MSG_1) is True
     assert cache.has(MSG_1) is True
 
-    await trio.sleep(2.5)  # Wait past TTL
-
-    # Retry loop to ensure sweep happens
-    for _ in range(10):  # Up to 1 second extra
-        if not cache.has(MSG_1):
-            break
-        await trio.sleep(0.1)
-
+    # Do not poll has() while waiting: it refreshes TTL and can prevent expiry.
+    await _wait_until_expired(cache, MSG_1)
     assert cache.has(MSG_1) is False  # Should be expired
 
     cache.stop()
@@ -54,7 +71,7 @@ async def test_timed_cache_expiry():
         cache = cache_class(ttl=1, sweep_interval=1)
 
         assert cache.add(MSG_1) is True
-        await trio.sleep(1.5)  # Let it expire
+        await _wait_until_expired(cache, MSG_1)
         assert cache.has(MSG_1) is False  # Should be expired
 
         cache.stop()
@@ -92,7 +109,9 @@ async def test_timed_cache_stress_test():
     for i in range(1000):
         assert cache.has(f"msg{i}".encode()) is True
 
-    await trio.sleep(2.5)  # Wait for expiry
+    with trio.fail_after(15):
+        while any(cache.has(f"msg{i}".encode()) for i in range(1000)):
+            await trio.sleep(0.1)
 
     # Ensure all elements have expired
     for i in range(1000):
@@ -110,9 +129,7 @@ async def test_expiry_removal():
     # fixed sleep. The sweeper is a real thread on a `sweep_interval` cadence and
     # the TTL is integer-second, so removal timing is coarse; a fixed 2.1s sleep
     # raced on slow CI runners and left the entry still present.
-    with trio.fail_after(15):
-        while MSG_1 in cache.cache:
-            await trio.sleep(0.1)
+    await _wait_until_expired(cache, MSG_1)
     cache.stop()
 
 
@@ -121,7 +138,7 @@ async def test_readding_after_expiry():
     """Test that an item can be re-added after expiry."""
     cache = FirstSeenCache(ttl=2, sweep_interval=1)
     cache.add(MSG_1)
-    await trio.sleep(3)  # Let it expire
+    await _wait_until_expired(cache, MSG_1)
     assert cache.add(MSG_1) is True  # Should allow re-adding
     assert cache.has(MSG_1) is True
     cache.stop()
