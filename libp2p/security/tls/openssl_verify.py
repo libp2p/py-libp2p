@@ -57,20 +57,17 @@ def _linked_libssl_path() -> str | None:
     if sys.platform != "darwin":
         return None
     try:
-        import _ssl
+        import importlib.util
 
-        # Annotate as `object` (not `Any`) so that isinstance() narrows the
-        # type to `str` reliably across all pyrefly/mypy versions.  When the
-        # result of getattr() is left as `Any`, pyrefly 0.17.x on Python 3.11
-        # does not narrow through isinstance, which causes a type error on the
-        # subprocess.run call in CI even though the code is correct at runtime.
-        ssl_ext_file: object = getattr(_ssl, "__file__", None)
-        if not isinstance(ssl_ext_file, str):
+        # importlib.util.find_spec is fully typed in typeshed; spec.origin
+        # is str | None.  This avoids accessing _ssl.__file__ directly, which
+        # is not in _ssl's typeshed stub and causes pyrefly errors.
+        spec = importlib.util.find_spec("_ssl")
+        if spec is None or not spec.origin:
             return None
-        # ssl_ext_file is now narrowed to str; build an explicit str sequence.
-        otool_cmd: tuple[str, str, str] = ("otool", "-L", ssl_ext_file)
+        ssl_ext_path: str = spec.origin
         out = subprocess.run(
-            otool_cmd,
+            ["otool", "-L", ssl_ext_path],
             capture_output=True,
             text=True,
             check=True,
