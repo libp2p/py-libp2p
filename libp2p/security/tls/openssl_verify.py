@@ -63,7 +63,7 @@ def _linked_libssl_path() -> str | None:
         # is str | None.  This avoids accessing _ssl.__file__ directly, which
         # is not in _ssl's typeshed stub and causes pyrefly errors.
         spec = importlib.util.find_spec("_ssl")
-        if spec is None or not spec.origin:
+        if spec is None or not isinstance(spec.origin, str):
             return None
         ssl_ext_path: str = spec.origin
         out = subprocess.run(
