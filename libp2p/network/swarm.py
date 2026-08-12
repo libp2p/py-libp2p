@@ -984,7 +984,21 @@ class Swarm(Service, INetworkService):
                 type(transport).__name__,
             )
             try:
-                swarm_conn = await self.add_conn(raw_conn, direction="outbound")
+                # The transport handshake has already completed successfully
+                # (peer cert verified).  An enclosing dial deadline (e.g. the
+                # auto-connector's dial_timeout) must NOT tear this
+                # connection down: the deadline can fire while add_conn() is
+                # still registering the connection, cancelling
+                # event_started.wait() and closing a healthy connection — the
+                # swarm then never accumulates connections and peers decay to
+                # 0.  Shield the registration from outer cancellation and
+                # bound it with the upgrade timeout so a wedged connection
+                # cannot hang the caller forever.
+                with trio.CancelScope(shield=True):
+                    with trio.fail_after(
+                        self.connection_config.outbound_upgrade_timeout
+                    ):
+                        swarm_conn = await self.add_conn(raw_conn, direction="outbound")
 
                 # Release pre-upgrade scope now that we have a real scope in add_conn
                 try:

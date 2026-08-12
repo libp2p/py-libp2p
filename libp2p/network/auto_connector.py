@@ -204,12 +204,30 @@ class AutoConnector:
                         await self.swarm.dial_peer(peer_id)
                         connected = True  # only set if dial completes before timeout
                     if cancel_scope.cancelled_caught:
-                        # Dial timed out — treat as failure, apply backoff
-                        logger.debug(f"Dial to {peer_id} timed out")
-                        self._failure_counts[peer_id] = (
-                            self._failure_counts.get(peer_id, 0) + 1
-                        )
-                        self._last_connect_attempt[peer_id] = time.time()
+                        # Dial deadline fired.  The connection may STILL have
+                        # been established and registered — Swarm shields
+                        # add_conn() registration from this deadline, so a
+                        # handshake that completed just before the timeout
+                        # lands in the swarm's connection table even though
+                        # dial_peer() raised Cancelled.  In that case treat
+                        # the dial as a success instead of piling on a
+                        # failure cooldown (which would eventually put every
+                        # peer in 3600s backoff and strand the node at 0
+                        # connections).
+                        if self.swarm.get_connections(peer_id):
+                            connected = True
+                            logger.info(
+                                f"Auto-connected to peer {peer_id} "
+                                "(registered despite dial deadline)"
+                            )
+                            self._last_connect_attempt.pop(peer_id, None)
+                            self._failure_counts.pop(peer_id, None)
+                        else:
+                            logger.debug(f"Dial to {peer_id} timed out")
+                            self._failure_counts[peer_id] = (
+                                self._failure_counts.get(peer_id, 0) + 1
+                            )
+                            self._last_connect_attempt[peer_id] = time.time()
                     elif connected:
                         logger.info(f"Auto-connected to peer {peer_id}")
                         # Success — clear cooldown so peer is immediately
