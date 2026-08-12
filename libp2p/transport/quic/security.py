@@ -26,8 +26,9 @@ from .exceptions import (
     QUICPeerVerificationError,
 )
 
+# Library must not force a log level — the application controls verbosity
+# (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 # libp2p TLS Extension OID - Official libp2p specification
 LIBP2P_TLS_EXTENSION_OID = x509.ObjectIdentifier("1.3.6.1.4.1.53594.1.1")

@@ -41,9 +41,9 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
-# Library should not call basicConfig
+# Library should not call basicConfig or force a log level — the application
+# controls verbosity (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class ServerQuicConnection(QuicConnection):

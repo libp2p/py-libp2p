@@ -12,14 +12,13 @@ from .exceptions import (
     ProtocolNotSupportedError,
 )
 
+# Library must not force a log level — the application controls verbosity
+# (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
 PROTOCOL_NOT_FOUND_MSG = "na"
 DEFAULT_NEGOTIATE_TIMEOUT = 30  # Increased for high-concurrency scenarios
-
-logger = logging.getLogger(__name__)
 
 
 class MultiselectClient(IMultiselectClient):
