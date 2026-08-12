@@ -43,6 +43,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Event-loop cadence for QUIC connections.  The sans-IO aioquic core needs
+# periodic pumping for timers and queued events, but the old fixed 1-10ms
+# polling (and a zero-sleep yield while events were being processed) made
+# every connection — including fully idle ones and in-flight handshakes —
+# wake the trio event loop hundreds to thousands of times per second.
+# With hundreds of connections that saturates a core, starves established
+# connections, and causes mass disconnects.  Idle connections now sleep up
+# to _IDLE_POLL_INTERVAL (waking sooner when aioquic reports a pending
+# timer), and active connections pace themselves at _ACTIVE_POLL_INTERVAL.
+_IDLE_POLL_INTERVAL = 0.05  # seconds: max idle gap between event-loop polls
+_ACTIVE_POLL_INTERVAL = 0.001  # seconds: min gap between event-processing runs
+
 
 class QUICConnection(IRawConnection, IMuxedConn):
     """
@@ -483,7 +495,6 @@ class QUICConnection(IRawConnection, IMuxedConn):
         )
 
         try:
-            consecutive_idle_iterations = 0
             while not self._closed:
                 # Batch process events - returns True if events were processed
                 events_processed = await self._process_quic_events_batched()
@@ -494,20 +505,38 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Transmit any pending data
                 await self._transmit()
 
-                # Adaptive sleep based on activity
-                # When processing events: use minimal sleep (just yield) for low latency
-                # When idle: use longer sleep to reduce CPU usage
-                if not events_processed:
-                    consecutive_idle_iterations += 1
-                    # Use longer sleep when idle to reduce CPU usage
-                    # Start with 1ms, increase to 10ms after several idle iterations
-                    sleep_time = 0.01 if consecutive_idle_iterations > 5 else 0.001
-                    await trio.sleep(sleep_time)
+                if events_processed:
+                    # Bound the processing rate.  aioquic can generate events
+                    # as fast as we consume them (handshakes, flow-control
+                    # updates, acks), and the previous zero-sleep yield let
+                    # every active connection spin the trio event loop at
+                    # 100% CPU — with dozens of in-flight handshakes that
+                    # saturates the core, starves established connections,
+                    # and peers drop.  A 1ms breather keeps latency low
+                    # without busy-spinning.
+                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
                 else:
-                    consecutive_idle_iterations = 0
-                    # Minimal sleep when processing events - just yield to allow
-                    # other tasks to run, but keep latency low
-                    await trio.sleep(0)  # Yield without sleeping
+                    # Timer-aware idle sleep: sleep until the next aioquic
+                    # timer deadline (ack / loss-detection / pacing) if one is
+                    # pending, capped by _IDLE_POLL_INTERVAL.  Fully idle
+                    # connections (``get_timer()`` returns None) sleep the
+                    # whole interval instead of waking 100-1000x/sec — the
+                    # dominant source of timer-heap churn once the node holds
+                    # hundreds of idle connections.  Inbound datagrams are
+                    # fed directly by the listener / packet receiver, so the
+                    # idle poll only needs to pick up queued events promptly.
+                    timer = self._quic.get_timer()
+                    if timer is not None:
+                        # Clamp to at least _ACTIVE_POLL_INTERVAL so a timer
+                        # that aioquic keeps reporting as due (e.g. a blocked
+                        # sender) can never degrade into a sleep(0) busy-spin.
+                        delay = min(
+                            max(timer - time.time(), _ACTIVE_POLL_INTERVAL),
+                            _IDLE_POLL_INTERVAL,
+                        )
+                    else:
+                        delay = _IDLE_POLL_INTERVAL
+                    await trio.sleep(delay)
 
         except Exception as e:
             logger.error(f"Error in event processing loop: {e}")
