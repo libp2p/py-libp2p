@@ -1410,7 +1410,7 @@ class KadDHT(Service):
         """
         return self.enable_random_walk
 
-    def get_diagnostics(self) -> "RoutingTableDiagnostics":
+    def get_diagnostics(self) -> RoutingTableDiagnostics:
         """
         Return a diagnostics analyser for the routing table.
 

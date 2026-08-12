@@ -12,7 +12,7 @@ Run two terminal windows:
 
     # Window 2 — client node (connects to bootstrap and prints a report)
     python examples/kademlia/routing_table_diagnostics.py \
-        --port 9999 --mode server --bootstrap /ip4/127.0.0.1/tcp/8888
+        --port 9999 --mode server --bootstrap /ip4/127.0.0.1/tcp/8888/p2p/<PeerID>
 
 The client node will print a full diagnostic report after a short warm-up.
 """
@@ -22,12 +22,12 @@ from __future__ import annotations
 import argparse
 import logging
 
+from multiaddr import Multiaddr
 import trio
 
-from libp2p import new_node
+from libp2p import new_host
 from libp2p.crypto.secp256k1 import create_new_key_pair
 from libp2p.kad_dht import KadDHT
-from libp2p.kad_dht.diagnostics import RoutingTableDiagnostics
 from libp2p.kad_dht.kad_dht import DHTMode
 from libp2p.peer.peerinfo import info_from_p2p_addr
 from libp2p.tools.anyio_service import background_trio_service
@@ -42,11 +42,10 @@ async def run(
     bootstrap_addr: str | None,
 ) -> None:
     key_pair = create_new_key_pair()
-    listen_addr = f"/ip4/0.0.0.0/tcp/{port}"
+    listen_addr = Multiaddr(f"/ip4/0.0.0.0/tcp/{port}")
+    host = new_host(key_pair=key_pair)
 
-    async with background_trio_service(
-        await new_node(key_pair=key_pair, listen_addrs=[listen_addr])
-    ) as host:
+    async with host.run(listen_addrs=[listen_addr]):
         dht_mode = DHTMode.SERVER if mode == "server" else DHTMode.CLIENT
         dht = KadDHT(host, dht_mode, enable_random_walk=True)
 
@@ -55,7 +54,7 @@ async def run(
             print(f"Listening on: {listen_addr}\n")
 
             if bootstrap_addr:
-                peer_info = info_from_p2p_addr(bootstrap_addr)
+                peer_info = info_from_p2p_addr(Multiaddr(bootstrap_addr))
                 await host.connect(peer_info)
                 print(f"Connected to bootstrap peer: {peer_info.peer_id.to_base58()}")
                 print("Warming up routing table (5 s)…")
@@ -72,7 +71,7 @@ async def run(
             # ── Bucket-level breakdown ───────────────────────────────────────
             print("\nBucket breakdown:")
             print(f"  {'#':>3}  {'Peers':>6}  {'Fill':>6}  Health")
-            print(f"  {'-'*3}  {'-'*6}  {'-'*6}  {'-'*8}")
+            print(f"  {'-' * 3}  {'-' * 6}  {'-' * 6}  {'-' * 8}")
             for stat in report.bucket_stats:
                 print(
                     f"  {stat.index:>3}  {stat.peer_count:>6}  "
@@ -81,7 +80,8 @@ async def run(
 
             # ── Coverage gaps ────────────────────────────────────────────────
             if report.coverage_gaps:
-                print(f"\nCoverage gaps ({len(report.coverage_gaps)} buckets below threshold):")
+                n_gaps = len(report.coverage_gaps)
+                print(f"\nCoverage gaps ({n_gaps} buckets below threshold):")
                 for gap in report.coverage_gaps[:5]:
                     print(
                         f"  bucket #{gap.bucket_index}: "
@@ -94,7 +94,9 @@ async def run(
             score = report.health_score
             print(f"\nFinal health score: {score:.1f}/100  ({report.verdict})")
             if score < 40:
-                print("  Suggestion: run more random-walk rounds or add bootstrap peers.")
+                print(
+                    "  Suggestion: run more random-walk rounds or add bootstrap peers."
+                )
 
             # Keep bootstrap node alive
             if not bootstrap_addr:
@@ -106,11 +108,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="KadDHT routing table diagnostics")
     parser.add_argument("--port", type=int, default=9000, help="TCP port to listen on")
     parser.add_argument(
-        "--mode", choices=["server", "client"], default="server",
-        help="DHT mode (default: server)"
+        "--mode",
+        choices=["server", "client"],
+        default="server",
+        help="DHT mode (default: server)",
     )
     parser.add_argument(
-        "--bootstrap", default=None,
+        "--bootstrap",
+        default=None,
         metavar="MULTIADDR",
         help="Bootstrap peer multiaddr, e.g. /ip4/127.0.0.1/tcp/8888/p2p/<PeerID>",
     )

@@ -8,22 +8,19 @@ fast and deterministically, exercising every dimension of the diagnostics.
 from __future__ import annotations
 
 import time
-from collections import OrderedDict
 from unittest.mock import MagicMock
 
 import pytest
 
 from libp2p.kad_dht.diagnostics import (
     BucketStat,
-    CoverageGap,
     FreshnessDistribution,
     RoutingTableDiagnostics,
     RoutingTableReport,
 )
-from libp2p.kad_dht.routing_table import KBucket, RoutingTable, peer_id_to_key
+from libp2p.kad_dht.routing_table import RoutingTable
 from libp2p.peer.id import ID
 from libp2p.peer.peerinfo import PeerInfo
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -46,7 +43,9 @@ def _host_stub() -> MagicMock:
     return host
 
 
-def _make_routing_table(n_peers: int = 0, last_seen_offset: float = 0.0) -> RoutingTable:
+def _make_routing_table(
+    n_peers: int = 0, last_seen_offset: float = 0.0
+) -> RoutingTable:
     """
     Build a RoutingTable backed by a mock host and populate it with
     *n_peers* synthetic peers whose last_seen timestamp is (now - last_seen_offset).
@@ -132,6 +131,9 @@ class TestFreshnessDistribution:
 class TestRoutingTableDiagnosticsEmpty:
     """Tests against an empty routing table (single bucket, zero peers)."""
 
+    rt: RoutingTable
+    diag: RoutingTableDiagnostics
+
     def setup_method(self):
         self.rt = _make_routing_table(n_peers=0)
         self.diag = RoutingTableDiagnostics(self.rt)
@@ -165,6 +167,9 @@ class TestRoutingTableDiagnosticsEmpty:
 class TestRoutingTableDiagnosticsPopulated:
     """Tests against a routing table with several fresh peers."""
 
+    rt: RoutingTable
+    diag: RoutingTableDiagnostics
+
     def setup_method(self):
         # 10 peers all seen < 1 hour ago
         self.rt = _make_routing_table(n_peers=10, last_seen_offset=100)
@@ -197,6 +202,9 @@ class TestRoutingTableDiagnosticsPopulated:
 class TestRoutingTableDiagnosticsStalePeers:
     """Tests against a routing table with only very stale peers."""
 
+    rt: RoutingTable
+    diag: RoutingTableDiagnostics
+
     def setup_method(self):
         # peers last seen 30 hours ago
         self.rt = _make_routing_table(n_peers=5, last_seen_offset=30 * 3600)
@@ -226,8 +234,9 @@ class TestHealthScoreMonotonicity:
 
         for i in range(len(scores) - 1):
             assert scores[i] <= scores[i + 1], (
-                f"Score dropped from {scores[i]} to {scores[i+1]} "
-                f"when going from {[0,5,10,15,20][i]} to {[0,5,10,15,20][i+1]} peers"
+                f"Score dropped from {scores[i]} to {scores[i + 1]} "
+                f"when going from {[0, 5, 10, 15, 20][i]} to "
+                f"{[0, 5, 10, 15, 20][i + 1]} peers"
             )
 
 

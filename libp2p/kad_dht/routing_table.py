@@ -408,7 +408,7 @@ class KBucket:
         key = peer_id_to_key(peer_id)
         return self.key_in_range(key)
 
-    def split(self) -> tuple["KBucket", "KBucket"]:
+    def split(self) -> tuple[KBucket, KBucket]:
         """
         Split the bucket into two buckets.
 
@@ -732,7 +732,7 @@ class RoutingTable:
         self.buckets = [KBucket(self.host, BUCKET_SIZE)]
         logger.info("Routing table cleaned up, all data removed.")
 
-    def get_diagnostics(self) -> "RoutingTableDiagnostics":
+    def get_diagnostics(self) -> RoutingTableDiagnostics:
         """
         Return a :class:`~libp2p.kad_dht.diagnostics.RoutingTableDiagnostics`
         analyser bound to this routing table.

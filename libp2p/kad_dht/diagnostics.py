@@ -15,15 +15,17 @@ Key questions answered:
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+import time
 
 from .common import BUCKET_SIZE, STALE_PEER_THRESHOLD
-from .routing_table import RoutingTable, key_to_int, peer_id_to_key
+from .routing_table import RoutingTable
 
-if TYPE_CHECKING:
-    pass
+# ── Freshness time bands ────────────────────────────────────────────────────
+
+_ONE_HOUR = 3600
+_TWELVE_HOURS = 12 * _ONE_HOUR
+_TWENTY_FOUR_HOURS = 24 * _ONE_HOUR
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -72,9 +74,9 @@ class CoverageGap:
 class FreshnessDistribution:
     """How old the known peers are, bucketed by age band."""
 
-    fresh: int = 0       # seen in the last hour
-    aging: int = 0       # seen 1–12 hours ago
-    stale: int = 0       # seen 12–24 hours ago
+    fresh: int = 0  # seen in the last hour
+    aging: int = 0  # seen 1–12 hours ago
+    stale: int = 0  # seen 12–24 hours ago
     very_stale: int = 0  # not seen for > 24 hours
 
     @property
@@ -112,29 +114,31 @@ class RoutingTableReport:
     # Raw keyspace coverage fraction (populated ranges / total ranges)
     keyspace_coverage: float
 
-    extra: dict = field(default_factory=dict)
+    extra: dict[str, object] = field(default_factory=dict)
 
     def summary(self) -> str:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.timestamp))
+        populated = f"{self.populated_buckets}/{self.total_buckets} populated"
         lines = [
-            f"=== KadDHT Routing Table Report ===",
-            f"Timestamp       : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.timestamp))}",
+            "=== KadDHT Routing Table Report ===",
+            f"Timestamp       : {ts}",
             f"Local peer      : {self.local_peer_id_hex[:16]}…",
             f"Health score    : {self.health_score:.1f}/100  ({self.verdict})",
-            f"",
+            "",
             f"Peers           : {self.total_peers}",
-            f"Buckets         : {self.populated_buckets}/{self.total_buckets} populated",
+            f"Buckets         : {populated}",
             f"Keyspace cover  : {self.keyspace_coverage * 100:.1f}%",
             f"Coverage gaps   : {len(self.coverage_gaps)}",
-            f"",
-            f"Peer freshness",
+            "",
+            "Peer freshness",
             f"  Fresh  (<1 h) : {self.freshness.fresh}",
             f"  Aging (1–12 h): {self.freshness.aging}",
             f"  Stale (12–24h): {self.freshness.stale}",
             f"  Very stale    : {self.freshness.very_stale}",
         ]
         if self.coverage_gaps:
-            lines.append(f"")
-            lines.append(f"Top coverage gaps (first 3):")
+            lines.append("")
+            lines.append("Top coverage gaps (first 3):")
             for gap in self.coverage_gaps[:3]:
                 lines.append(
                     f"  bucket #{gap.bucket_index}: {gap.min_range_hex[:8]}…"
@@ -180,7 +184,7 @@ class RoutingTableDiagnostics:
         bucket_stats = self._collect_bucket_stats(now)
         freshness = self._collect_freshness(now)
         gaps = self._find_coverage_gaps(bucket_stats)
-        keyspace_coverage = self._calc_keyspace_coverage(bucket_stats)
+        keyspace_coverage = self._calc_keyspace_coverage()
         health_score = self._calc_health_score(
             bucket_stats, freshness, keyspace_coverage
         )
@@ -221,7 +225,7 @@ class RoutingTableDiagnostics:
         now = time.time()
         stats = self._collect_bucket_stats(now)
         freshness = self._collect_freshness(now)
-        coverage = self._calc_keyspace_coverage(stats)
+        coverage = self._calc_keyspace_coverage()
         return self._calc_health_score(stats, freshness, coverage)
 
     # ── Private helpers ─────────────────────────────────────────────────────
@@ -247,18 +251,15 @@ class RoutingTableDiagnostics:
 
     def _collect_freshness(self, now: float) -> FreshnessDistribution:
         dist = FreshnessDistribution()
-        ONE_HOUR = 3600
-        TWELVE_HOURS = 12 * ONE_HOUR
-        TWENTY_FOUR_HOURS = 24 * ONE_HOUR
 
         for bucket in self._rt.buckets:
             for _peer_id, (_info, last_seen) in bucket.peers.items():
                 age = now - last_seen
-                if age < ONE_HOUR:
+                if age < _ONE_HOUR:
                     dist.fresh += 1
-                elif age < TWELVE_HOURS:
+                elif age < _TWELVE_HOURS:
                     dist.aging += 1
-                elif age < TWENTY_FOUR_HOURS:
+                elif age < _TWENTY_FOUR_HOURS:
                     dist.stale += 1
                 else:
                     dist.very_stale += 1
@@ -280,21 +281,20 @@ class RoutingTableDiagnostics:
         gaps.sort(key=lambda g: g.peer_count)
         return gaps
 
-    def _calc_keyspace_coverage(self, stats: list[BucketStat]) -> float:
+    def _calc_keyspace_coverage(self) -> float:
         """
         Fraction of the full 256-bit keyspace that is *covered*.
 
         A bucket is considered covered when it has at least one peer.
         We weight each bucket by the fraction of the keyspace it represents.
+        Range integers are read directly from the buckets, avoiding an
+        int -> hex -> int round-trip.
         """
         FULL_SPACE = 2**256
         covered = 0
-        for stat in stats:
-            if stat.peer_count > 0:
-                # Width of this bucket's range in key-space units
-                lo = int(stat.min_range_hex, 16)
-                hi = int(stat.max_range_hex, 16)
-                covered += hi - lo
+        for bucket in self._rt.buckets:
+            if bucket.size() > 0:
+                covered += bucket.max_range - bucket.min_range
         return covered / FULL_SPACE
 
     def _calc_health_score(
