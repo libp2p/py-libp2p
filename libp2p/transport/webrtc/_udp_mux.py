@@ -9,12 +9,19 @@ This is the foundational primitive for a spec-aligned WebRTC-Direct listener
 that advertises a single fixed UDP port and demuxes concurrent inbound dials
 without spinning up a new port per peer.
 
+Validated against ``aioice`` 0.10.x. It relies on private ``aioice`` internals
+(``StunProtocol``, ``Connection._protocols`` / ``_local_candidates`` /
+``_local_candidates_end``) to inject a mux-backed protocol without aioice
+binding its own UDP socket, so it may need updating on aioice major bumps.
+Upstreaming a real ``UdpMux`` into aioice is tracked as follow-up on #1352.
+
 Refs: libp2p/specs#715 (WebRTC-Direct v2), libp2p/py-libp2p#1352 (spike).
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import logging
 from typing import Protocol
 
@@ -83,9 +90,15 @@ class UdpMux(asyncio.DatagramProtocol):
 
         mux, port = await UdpMux.create("0.0.0.0", 0)
 
+        # Observe first-contact STUN for unregistered ufrags:
+        mux.set_unknown_stun_handler(on_new_dial)
+
         # When a new STUN BINDING REQUEST arrives for ufrag "abc":
         conn = mux.add_ice_connection("abc", "password123", host="0.0.0.0")
-        # ... feed candidates, call conn.connect(), await ICE completion ...
+        for c in remote_candidates:
+            await conn.add_remote_candidate(c)
+        await conn.add_remote_candidate(None)  # end-of-candidates
+        await conn.connect()                   # do NOT call gather_candidates()
 
         # After ICE selects a candidate pair:
         mux.register_addr(("203.0.113.5", 54321), conn._protocols[0])
@@ -103,6 +116,11 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_ufrag: dict[str, _HasConnectionLost] = {}
         # (host, port) -> StunProtocol (post-ICE DTLS/SCTP dispatch)
         self._by_addr: dict[tuple[str, int], _HasConnectionLost] = {}
+        # Called for a STUN packet whose ufrag is not registered (see
+        # set_unknown_stun_handler); lets a listener observe first-contact dials.
+        self._unknown_stun_handler: (
+            Callable[[str, bytes, tuple[str, int]], None] | None
+        ) = None
 
     # ------------------------------------------------------------------
     # Factory
@@ -114,7 +132,7 @@ class UdpMux(asyncio.DatagramProtocol):
         Bind a shared UDP socket on *host*:*port* (use ``port=0`` for OS choice).
         Returns ``(mux, bound_port)``.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         mux = cls()
         transport, _ = await loop.create_datagram_endpoint(
             lambda: mux, local_addr=(host, port)
@@ -142,6 +160,12 @@ class UdpMux(asyncio.DatagramProtocol):
             protocol = self._by_ufrag.get(ufrag)
             if protocol is not None:
                 protocol.datagram_received(data, norm)
+                return
+            # First contact: an inbound BINDING REQUEST for an unregistered
+            # ufrag. A WebRTC-Direct listener registers a handler to create the
+            # connection (add_ice_connection) and replay this datagram.
+            if self._unknown_stun_handler is not None:
+                self._unknown_stun_handler(ufrag, data, norm)
                 return
             logger.debug("UdpMux: no handler for ufrag %r from %s", ufrag, norm)
         except ValueError:
@@ -178,6 +202,21 @@ class UdpMux(asyncio.DatagramProtocol):
     def unregister_addr(self, addr: tuple[str, int]) -> None:
         self._by_addr.pop(addr, None)
 
+    def set_unknown_stun_handler(
+        self, handler: Callable[[str, bytes, tuple[str, int]], None] | None
+    ) -> None:
+        """
+        Register a callback for STUN packets whose ufrag is not yet registered.
+
+        The callback receives ``(ufrag, data, addr)``. For WebRTC-Direct this is
+        how a listener observes the *first* inbound BINDING REQUEST from a new
+        dialer — it can create and register the connection via
+        :meth:`add_ice_connection` and replay ``data``. Called from the asyncio
+        event-loop thread; keep it non-blocking (e.g. hand off to a queue).
+        Pass ``None`` to clear.
+        """
+        self._unknown_stun_handler = handler
+
     # ------------------------------------------------------------------
     # Connection factory
     # ------------------------------------------------------------------
@@ -194,10 +233,14 @@ class UdpMux(asyncio.DatagramProtocol):
 
         The connection is pre-registered for *local_username* so that inbound
         STUN connectivity checks are dispatched correctly before the caller
-        has a chance to set remote candidates.
+        has a chance to set remote candidates. The single host candidate on the
+        shared port is injected as the connection's local candidate, so the
+        caller must **not** call ``conn.gather_candidates()`` — doing so binds
+        additional UDP sockets and defeats the shared-port design.
 
         The caller must:
-        1. Call ``conn.set_remote_candidates([...])`` with the dialer's candidates.
+        1. For each of the dialer's candidates, ``await conn.add_remote_candidate(c)``,
+           then ``await conn.add_remote_candidate(None)`` to signal end-of-candidates.
         2. Await ``conn.connect()`` to complete ICE negotiation.
         3. Call ``register_addr(remote_addr, conn._protocols[0])`` once ICE
            selects a candidate pair so that post-ICE DTLS/SCTP is routed.
@@ -223,7 +266,7 @@ class UdpMux(asyncio.DatagramProtocol):
         # aioice types connection_lost(exc: Exception) but asyncio protocol is Optional.
         muxed_transport._protocol = protocol  # type: ignore[assignment]
 
-        protocol.local_candidate = Candidate(
+        local_candidate = Candidate(
             foundation=_ice.candidate_foundation("host", "udp", host),
             component=1,
             transport="udp",
@@ -232,9 +275,15 @@ class UdpMux(asyncio.DatagramProtocol):
             port=self._local_addr[1],
             type="host",
         )
+        protocol.local_candidate = local_candidate
 
-        # Inject into aioice's internal protocol list, bypassing _gather_candidates.
+        # Inject into aioice's internal protocol list, bypassing gather_candidates
+        # (which would bind extra UDP sockets). Also mark gathering complete and
+        # expose the candidate so Connection.connect() proceeds instead of raising
+        # "Local candidates gathering was not performed".
         conn._protocols.append(protocol)
+        conn._local_candidates = [local_candidate]
+        conn._local_candidates_end = True
         self.register(local_username, protocol)  # type: ignore[arg-type]
         return conn
 
@@ -247,7 +296,12 @@ class UdpMux(asyncio.DatagramProtocol):
         return self._local_addr
 
     async def close(self) -> None:
-        """Close the shared UDP socket."""
+        """Close the shared UDP socket and drop all dispatch registrations."""
         if self._transport is not None:
             self._transport.close()
             self._transport = None
+        # Clear routing tables so a datagram racing with close() can't be
+        # dispatched to a half-torn-down protocol.
+        self._by_ufrag.clear()
+        self._by_addr.clear()
+        self._unknown_stun_handler = None

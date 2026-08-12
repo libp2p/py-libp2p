@@ -100,6 +100,24 @@ class TestStunDispatch:
         finally:
             await mux.close()
 
+    def test_unknown_ufrag_invokes_handler(self) -> None:
+        asyncio.run(self._unknown_ufrag_handler())
+
+    async def _unknown_ufrag_handler(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        seen: list[tuple[str, bytes, tuple[str, int]]] = []
+        mux.set_unknown_stun_handler(
+            lambda ufrag, data, addr: seen.append((ufrag, data, addr))
+        )
+        try:
+            data = _stun_binding_request("newdialer:remote")
+            mux.datagram_received(data, ("10.0.0.9", 5555))
+            # First contact for an unregistered ufrag reaches the handler with
+            # the ufrag, raw datagram (for replay), and source address.
+            assert seen == [("newdialer", data, ("10.0.0.9", 5555))]
+        finally:
+            await mux.close()
+
     def test_unregister_stops_dispatch(self) -> None:
         asyncio.run(self._unregister())
 
@@ -196,7 +214,11 @@ class TestMuxedTransport:
             try:
                 mt = _MuxedTransport(mux._transport, mux.local_addr)
                 mt.sendto(b"hello", server_addr)
-                await asyncio.sleep(0.05)  # give event loop time to deliver
+                # Poll until delivered instead of a fixed sleep (flakes on load).
+                for _ in range(200):
+                    if received:
+                        break
+                    await asyncio.sleep(0.01)
                 assert received == [b"hello"]
             finally:
                 server_transport.close()
@@ -260,6 +282,35 @@ class TestAddIceConnection:
             # local_username / local_password set correctly
             assert conn.local_username == ufrag
             assert conn.local_password == password
+        finally:
+            await mux.close()
+
+    def test_connect_reachable_without_extra_binds(self) -> None:
+        asyncio.run(self._connect_reachable())
+
+    async def _connect_reachable(self) -> None:
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        ufrag = "cxn1"
+        password = "cxnpassword1234567890ab"
+        try:
+            conn = mux.add_ice_connection(ufrag, password, host="127.0.0.1")
+            # The fix: gathering is marked complete and the host candidate is
+            # exposed, so connect() clears the "Local candidates gathering was
+            # not performed" guard. A real gather would have appended extra
+            # protocols (each binding its own UDP socket); we have exactly one.
+            assert conn._local_candidates_end is True
+            assert conn._local_candidates == [conn._protocols[0].local_candidate]
+            assert len(conn._protocols) == 1
+
+            # Drive connect() to prove it gets past the gather guard: with remote
+            # creds set and end-of-candidates, it fails on ICE negotiation (no
+            # real peer) — NOT on skipped gathering.
+            conn.remote_username = "remoteuf1"
+            conn.remote_password = "remotepassword1234567890"
+            await conn.add_remote_candidate(None)
+            with pytest.raises(ConnectionError) as exc:
+                await asyncio.wait_for(conn.connect(), timeout=5.0)
+            assert "gathering" not in str(exc.value).lower()
         finally:
             await mux.close()
 
