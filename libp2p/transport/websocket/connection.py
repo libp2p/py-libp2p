@@ -140,6 +140,12 @@ class P2PWebSocketConnection(ReadWriteCloser):
         self._is_secure = is_secure
         self._max_buffered_amount = max_buffered_amount
 
+        # Optional cancel scope of the dedicated nursery that hosts this
+        # connection's trio_websocket background tasks (set by the transport
+        # for outbound connections).  Cancelled on close() so the hosted
+        # background task does not accumulate.
+        self._hosted_nursery_scope: Any = None
+
         # State management
         self._closed = False
         self._read_lock = trio.Lock()
@@ -499,6 +505,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
             except Exception as e:
                 logger.error(f"WebSocket close error: {e}")
             finally:
+                # Stop the dedicated nursery that hosts this connection's
+                # background tasks (outbound connections only).
+                if self._hosted_nursery_scope is not None:
+                    self._hosted_nursery_scope.cancel()
                 logger.debug("WebSocket connection closed")
 
     def is_closed(self) -> bool:

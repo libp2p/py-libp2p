@@ -1369,3 +1369,72 @@ async def test_websocket_transport_can_dial():
         assert not is_valid_websocket_multiaddr(maddr), (
             f"Address {addr_str} should be invalid"
         )
+
+
+@pytest.mark.trio
+async def test_ws_dial_to_http_server_does_not_crash_swarm():
+    """
+    Regression test: dialing a plain HTTP server must not kill the swarm.
+
+    A WebSocket dial to a server that answers HTTP 200 (instead of a WebSocket
+    upgrade) makes trio_websocket's reader task raise ``ConnectionRejected``.
+    Previously that exception escaped into the swarm's shared background
+    nursery and killed the whole daemon (``service.run`` crashed, connections
+    collapsed to 0, Docker restarted the process).  The dial must instead fail
+    with ``OpenConnectionError`` and leave the swarm fully alive.
+    """
+    from libp2p.tools.anyio_service import background_trio_service
+
+    key_pair = create_new_key_pair()
+    peer_id = ID.from_pubkey(key_pair.public_key)
+    peer_store = PeerStore()
+    peer_store.add_key_pair(peer_id, key_pair)
+    upgrader = create_upgrader()
+    transport = WebsocketTransport(upgrader)
+    swarm = Swarm(peer_id, peer_store, upgrader, [transport])
+
+    # Plain HTTP server that answers every request with HTTP 200 (no upgrade).
+    listeners = await trio.open_tcp_listeners(0, host="127.0.0.1")
+    port = listeners[0].socket.getsockname()[1]
+
+    async def http_handler(stream):
+        try:
+            await stream.receive_some(4096)
+            await stream.send_all(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: 2\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                b"OK"
+            )
+        finally:
+            with trio.move_on_after(1):
+                await stream.aclose()
+
+    async with background_trio_service(swarm):
+        await swarm.event_background_nursery_created.wait()
+
+        async with trio.open_nursery() as srv_nursery:
+            srv_nursery.start_soon(trio.serve_listeners, http_handler, listeners)
+
+            maddr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")
+
+            # The bad dial must fail cleanly...
+            with pytest.raises(OpenConnectionError):
+                await transport.dial(maddr)
+
+            # ...and the swarm must still be running (did not crash).
+            await trio.sleep(0.2)
+            manager = swarm._manager  # type: ignore[attr-defined]
+            assert manager.is_running
+            assert not manager.did_error
+
+            # Repeat to prove repeatability: more bad dials, swarm still alive.
+            with pytest.raises(OpenConnectionError):
+                await transport.dial(maddr)
+            await trio.sleep(0.2)
+            assert manager.is_running
+            assert not manager.did_error
+
+            srv_nursery.cancel_scope.cancel()
