@@ -158,25 +158,34 @@ async def dht_pair(security_protocol):
 
         # Start both DHT services
         async with background_trio_service(dht_a), background_trio_service(dht_b):
-            # Best-effort nudge to speed up mutual discovery.
-            try:
-                await dht_a.find_peer(dht_b.host.get_id())
-                await dht_b.find_peer(dht_a.host.get_id())
-            except Exception as e:
-                logger.warning(f"Initial peer discovery failed: {e}")
-                # Continue anyway, the poll below handles it.
-
-            # Wait until both nodes know about each other in their routing tables.
-            # The background refresh manager populates these via mutual FIND_NODE
-            # streams, which is time-driven; a fixed sleep raced under CI load. Poll
-            # with a ceiling that still fails loud (TooSlowError) if a peer never
-            # lands, rather than a fixed wait that can assert before discovery.
-            with trio.fail_after(10):
+            # Wait until each peer is in the other's routing table. The direct
+            # add_peer pre-seed above can be rejected intermittently (#1423) and
+            # is then re-established by the background refresh manager, so poll
+            # with a ceiling that still fails loud (TooSlowError) on genuine
+            # non-convergence instead of a fixed sleep that raced under CI load.
+            with trio.fail_after(15):
                 while not (
                     dht_a.routing_table.peer_in_table(dht_b.host.get_id())
                     and dht_b.routing_table.peer_in_table(dht_a.host.get_id())
                 ):
                     await trio.sleep(0.05)
+
+            # Also wait until both signed peer records reach the peerstores.
+            # Dependent tests read get_peer_record() right after this fixture and
+            # expect an Envelope. find_peer short-circuits on the pre-seeded
+            # routing table (see peer_routing.py) and does NOT populate these, so
+            # the records come from the DHT's startup FIND_NODE exchange. Mirror
+            # test_find_node: wait briefly, then nudge with find_peer and wait
+            # fully — so the fixture guarantees envelope readiness, not just RT
+            # entries.
+            try:
+                await wait_for_peer_record(dht_a, dht_b.host.get_id(), timeout=1.0)
+                await wait_for_peer_record(dht_b, dht_a.host.get_id(), timeout=1.0)
+            except TimeoutError:
+                await dht_a.find_peer(dht_b.host.get_id())
+                await dht_b.find_peer(dht_a.host.get_id())
+                await wait_for_peer_record(dht_a, dht_b.host.get_id())
+                await wait_for_peer_record(dht_b, dht_a.host.get_id())
 
             logger.debug(
                 "After bootstrap: Node A peers: %s", dht_a.routing_table.get_peer_ids()
