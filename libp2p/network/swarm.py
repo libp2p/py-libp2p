@@ -66,6 +66,10 @@ from libp2p.transport.quic.config import QUICTransportConfig
 from libp2p.transport.upgrader import (
     TransportUpgrader,
 )
+from libp2p.utils.address_validation import (
+    has_public_ipv6,
+    is_relay_address,
+)
 from libp2p.utils.multiaddr_utils import (
     extract_ip_from_multiaddr,
 )
@@ -719,12 +723,52 @@ class Swarm(Service, INetworkService):
             if public_addrs:
                 allowed_addrs = public_addrs
 
-            from libp2p.utils.address_validation import is_ipv6_available
+            # Skip relay (p2p-circuit) addresses: this node has no relay
+            # transport, so these can never be dialed (mirrors go-libp2p,
+            # which only uses relay addresses when a relay client is
+            # configured).  The QUIC transport cannot even derive a peer id
+            # from a ``/p2p-circuit`` address and wastes CPU failing every
+            # attempt.
+            allowed_addrs = [a for a in allowed_addrs if not is_relay_address(a)]
+            if not allowed_addrs:
+                raise SwarmException(
+                    f"All addresses for peer {peer_id} are unusable "
+                    "(relay-only or blocked by connection gate)"
+                )
 
-            if not is_ipv6_available():
+            # Only dial IPv6 (and DNS6) addresses when the host actually has
+            # a non-loopback IPv6 interface.  Loopback-only IPv6 (``::1``)
+            # does not imply IPv6 routing: on hosts without a public IPv6
+            # address every IPv6 dial fails with "Network is unreachable",
+            # burning CPU and churning the auto-connector.
+            if not has_public_ipv6():
                 allowed_addrs = [
-                    a for a in allowed_addrs if not str(a).startswith("/ip6/")
+                    a
+                    for a in allowed_addrs
+                    if not any(p.name in ("ip6", "dns6") for p in a.protocols())
                 ]
+                if not allowed_addrs:
+                    raise SwarmException(
+                        f"All addresses for peer {peer_id} require IPv6 "
+                        "but the host has no public IPv6"
+                    )
+
+            # Prefer cheap transports for outbound dials.  The Python QUIC
+            # stack (aioquic) is far more CPU-hungry than TCP/WebSocket, and
+            # leading with QUIC under load contributes to CPU saturation on
+            # small instances.  TCP and WebSocket addresses are dialed first
+            # (Happy-Eyeballs parallelism still applies within each class).
+            def _transport_priority(addr: Multiaddr) -> int:
+                protos = {p.name for p in addr.protocols()}
+                if "tcp" in protos:
+                    return 0
+                if "ws" in protos or "wss" in protos:
+                    return 1
+                if "quic" in protos or "quic-v1" in protos:
+                    return 2
+                return 3
+
+            allowed_addrs.sort(key=_transport_priority)
 
             connections = []
             exceptions: list[SwarmException] = []

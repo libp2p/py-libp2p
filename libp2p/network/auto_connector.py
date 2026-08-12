@@ -19,6 +19,7 @@ import trio
 
 from libp2p.network.config import AUTO_CONNECT_INTERVAL
 from libp2p.peer.id import ID
+from libp2p.utils.address_validation import is_relay_address
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
@@ -86,6 +87,21 @@ def _addr_is_routable(addr: Multiaddr) -> bool:
 
     # No IP/DNS component (e.g. relay-only addrs), or only private IPs.
     return False
+
+
+def _addr_is_direct(addr: Multiaddr) -> bool:
+    """
+    Return True if ``addr`` is a directly-dialable public address.
+
+    A direct address must be routable (see :func:`_addr_is_routable`) and
+    must NOT traverse a relay (``/p2p-circuit``).  Relay paths are only
+    usable when a relay client is configured; this node does not use one,
+    so dialing them is pure waste — the QUIC transport cannot even derive
+    a peer id from a ``/p2p-circuit`` address and fails every attempt.
+    """
+    if not _addr_is_routable(addr):
+        return False
+    return not is_relay_address(addr)
 
 
 def _node_has_public_addr(swarm: "Swarm") -> bool:
@@ -395,12 +411,13 @@ class AutoConnector:
                 if not addrs:
                     continue
                 if filter_private and not any(
-                    _addr_is_routable(a) for a in addrs
+                    _addr_is_direct(a) for a in addrs
                 ):
-                    # Peers whose *only* addresses are private
-                    # (Docker-internal 172.x/10.x, loopback, etc.) can never
-                    # be dialed from a public node, so they are skipped
-                    # instead of burning dial attempts.
+                    # Peers whose *only* addresses are unusable from a public
+                    # node are skipped instead of burning dial attempts:
+                    # private-only (Docker-internal 172.x/10.x, loopback,
+                    # etc.) or relay-only (``/p2p-circuit``) paths can never
+                    # be dialed directly.
                     continue
                 candidates.append(peer_id)
             except Exception:

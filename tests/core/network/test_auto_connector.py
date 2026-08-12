@@ -212,7 +212,7 @@ class TestAutoConnectorCandidateFiltering:
         """Peers with only private IP addrs are excluded from candidates."""
         from multiaddr import Multiaddr
 
-        from libp2p.network.auto_connector import _addr_is_routable
+        from libp2p.network.auto_connector import _addr_is_direct, _addr_is_routable
 
         # Sanity-check the address classifier directly.
         assert _addr_is_routable(Multiaddr("/ip4/8.8.8.8/tcp/4001"))
@@ -222,6 +222,16 @@ class TestAutoConnectorCandidateFiltering:
         assert not _addr_is_routable(Multiaddr("/ip4/10.0.0.5/tcp/4001"))
         assert not _addr_is_routable(Multiaddr("/ip4/192.168.1.5/tcp/4001"))
         assert not _addr_is_routable(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+
+        # Relay (p2p-circuit) paths are routable but NOT directly dialable.
+        relay_addr = Multiaddr(
+            "/ip4/141.11.164.205/udp/4001/quic-v1/p2p/"
+            "12D3KooWEnYdmNc1VkgodEq8Hyoi9WtAsYqeXsV96rPJyuZjhYSc/p2p-circuit"
+        )
+        assert _addr_is_routable(relay_addr)
+        assert not _addr_is_direct(relay_addr)
+        assert _addr_is_direct(Multiaddr("/ip4/8.8.8.8/tcp/4001"))
+        assert _addr_is_direct(Multiaddr("/ip4/52.7.183.75/udp/4001/quic-v1"))
 
     @pytest.mark.trio
     async def test_get_candidate_peers_filters_private_only_on_public_node(self):
@@ -273,6 +283,57 @@ class TestAutoConnectorCandidateFiltering:
         assert pub_peer in candidates
         assert mixed_peer in candidates  # has at least one public addr
         assert priv_peer not in candidates
+        assert self_peer not in candidates
+
+    @pytest.mark.trio
+    async def test_get_candidate_peers_excludes_relay_only_peers(self):
+        """A public node excludes peers whose only addrs are p2p-circuit relays."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        direct_peer = ID("12D3KooW1" + "a" * 46)
+        relay_peer = ID("12D3KooW2" + "b" * 46)
+        self_peer = ID("12D3KooW3" + "c" * 46)
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return [direct_peer, relay_peer, self_peer]
+
+            def addrs(self, peer_id):
+                if peer_id == direct_peer:
+                    return [Multiaddr("/ip4/8.8.8.8/tcp/4001")]
+                if peer_id == relay_peer:
+                    # Routable IP embedded, but the path goes through a relay.
+                    return [
+                        Multiaddr(
+                            "/ip4/141.11.164.205/udp/4001/quic-v1/p2p/"
+                            "12D3KooWEnYdmNc1VkgodEq8Hyoi9WtAsYqeXsV96rPJyuZjhYSc"
+                            "/p2p-circuit"
+                        )
+                    ]
+                return []
+
+            def get_local_record(self):
+                class _FakeRecord:
+                    def record(self):
+                        class _FakeRec:
+                            addrs = [Multiaddr("/ip4/52.7.183.75/tcp/4001")]
+
+                        return _FakeRec()
+
+                return _FakeRecord()
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = self_peer
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        candidates = await connector._get_candidate_peers()
+
+        assert direct_peer in candidates
+        assert relay_peer not in candidates
         assert self_peer not in candidates
 
     @pytest.mark.trio

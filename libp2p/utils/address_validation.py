@@ -94,12 +94,66 @@ def is_ipv6_available() -> bool:
     """
     Probe once at startup whether the OS has usable IPv6.
     Caches the result for the lifetime of the process.
+
+    NOTE: this only proves the OS *speaks* IPv6 (loopback binding).  Hosts
+    without a public IPv6 address still pass this check but cannot reach
+    public IPv6 peers; use :func:`has_public_ipv6` for dial filtering.
     """
     try:
         with socket.socket(socket.AF_INET6, socket.SOCK_DGRAM) as s:
             s.bind(("::1", 0))
         return True
     except OSError:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def has_public_ipv6() -> bool:
+    """
+    Return True if the host has a usable non-loopback IPv6 interface.
+
+    Some hosts (e.g. EC2 instances without an IPv6 subnet) have IPv6 enabled
+    on loopback (``::1``) but no IPv6 routing, so every dial to a public
+    IPv6 peer fails with ``Network is unreachable``.  This probe requires at
+    least one non-loopback IPv6 address before reporting IPv6 as usable for
+    dialing.
+
+    On Linux it reads the kernel's IPv6 address table
+    (``/proc/net/if_inet6``); on other platforms it falls back to the
+    loopback probe from :func:`is_ipv6_available`.
+    """
+    try:
+        # /proc/net/if_inet6 lines:
+        #   address(32 hex) index prefixlen scope flags ifname
+        # The scope column (4th) discriminates address types: 00 = global,
+        # 10 = host (loopback), 20 = link-local.  Only a global-scope,
+        # non-loopback address implies the host can actually reach public
+        # IPv6 peers; link-local/ULA/Docker-bridge IPv6 does not.
+        with open("/proc/net/if_inet6", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 6 and parts[3] == "00" and parts[5] != "lo":
+                    return True
+        return False
+    except OSError:
+        # Non-Linux (e.g. macOS) or unreadable: fall back to the loopback
+        # probe (the old behavior).
+        return is_ipv6_available()
+
+
+def is_relay_address(addr: Multiaddr) -> bool:
+    """
+    Return True if the multiaddr traverses a relay (``/p2p-circuit``).
+
+    Relay paths are only usable when a relay client is configured; this
+    node does not use one, so dialing them is pure waste — the QUIC
+    transport cannot even derive a peer id from a ``/p2p-circuit`` address
+    and fails every attempt.  Parsing is done defensively so malformed
+    multiaddrs never raise.
+    """
+    try:
+        return "p2p-circuit" in {p.name for p in addr.protocols()}
+    except Exception:
         return False
 
 
@@ -225,4 +279,6 @@ __all__ = [
     "get_wildcard_address",
     "expand_wildcard_address",
     "find_free_port",
+    "has_public_ipv6",
+    "is_relay_address",
 ]
