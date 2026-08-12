@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import time
 from typing import Any
 
 import multiaddr
@@ -285,6 +286,60 @@ class ConnectionLifecycleManager:
         # Remove from tracking
         self.tracker.remove_connection(connection_id, peer_id)
         logger.debug(f"Removed connection {connection_id} from tracking")
+
+    def reconcile_live_connections(
+        self, live_connection_ids: set[ConnectionId], min_age_seconds: float = 30.0
+    ) -> int:
+        """
+        Prune tracker entries whose connection no longer exists.
+
+        Dead QUIC connections that were torn down before registration (e.g.
+        rcmgr denial, upgrade-timeout cancellation) leak their established
+        slot forever, ratcheting ``established_outbound`` to its cap and
+        wedging the node at 0 peers.  This method removes any established
+        entry whose connection id is not in the caller-provided live set
+        (the swarm's authoritative connection table) and is older than
+        ``min_age_seconds`` (so in-flight registrations are never pruned).
+
+        Args:
+            live_connection_ids: Connection ids currently alive in the swarm.
+            min_age_seconds: Minimum age before an unbacked entry is pruned.
+
+        Returns:
+            Number of entries pruned.
+
+        """
+        # NOTE on the age guard: a connection is admitted to the tracker
+        # (established_at = now) and then registered in the swarm's table a
+        # few awaits later.  ``min_age_seconds`` keeps those in-flight
+        # registrations safe from a concurrent reconcile.  In the pathological
+        # case where registration hangs longer than the guard, the entry could
+        # be pruned while add_conn is still running; the subsequent
+        # remove_conn() then becomes a no-op removal — a benign accounting
+        # skew (never a wedge), accepted in exchange for self-healing.
+        now = time.time()
+        stale: list[tuple[ConnectionId, ID | None]] = []
+        with self.tracker._lock:
+            candidates = (
+                self.tracker.established_inbound | self.tracker.established_outbound
+            )
+            for cid in candidates:
+                if cid in live_connection_ids:
+                    continue
+                info = self.tracker._connections.get(cid)
+                if info is None:
+                    continue
+                established_at = info.established_at or info.created_at
+                if (
+                    established_at is not None
+                    and (now - established_at) < min_age_seconds
+                ):
+                    # Too young to be a phantom — likely mid-registration.
+                    continue
+                stale.append((cid, info.peer_id))
+        for cid, peer_id in stale:
+            self.notify_connection_closed(cid, peer_id, reason="reconcile")
+        return len(stale)
 
     def get_connection_stats(self) -> dict[str, Any]:
         """

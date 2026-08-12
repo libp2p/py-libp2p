@@ -2001,6 +2001,36 @@ class Swarm(Service, INetworkService):
                     logger.debug(f"Connection already exists for peer {peer_id}")
                     return existing_conn  # type: ignore[return-value]
 
+        # Self-heal the lifecycle tracker before enforcing limits: dead
+        # connections that were torn down mid-registration (rcmgr denial,
+        # upgrade-timeout cancellation) leak their established slot forever,
+        # ratcheting the per-direction caps to their maximum and permanently
+        # wedging the node at 0 peers.  Reconcile the tracker against the
+        # swarm's live connection table — any established entry whose
+        # connection no longer exists is a phantom and is pruned here on
+        # every dial/accept attempt.
+        if self._resource_manager is not None:
+            reconcile_lifecycle = getattr(
+                self._resource_manager, "connection_lifecycle", None
+            )
+            if reconcile_lifecycle is not None:
+                try:
+                    live_ids = {
+                        str(id(sc.muxed_conn))
+                        for peer_conns in self.connections.values()
+                        for sc in peer_conns
+                    }
+                    pruned = reconcile_lifecycle.reconcile_live_connections(
+                        live_ids
+                    )
+                    if pruned:
+                        logger.warning(
+                            "Lifecycle reconcile pruned %d phantom connection(s)",
+                            pruned,
+                        )
+                except Exception:
+                    logger.debug("Lifecycle reconcile failed", exc_info=True)
+
         # Enforce the connection lifecycle limits (per-direction, per-peer and
         # total established connections) that were previously never enforced
         # (Bug 1).  When the limit is exceeded the connection is rejected
@@ -2062,6 +2092,21 @@ class Swarm(Service, INetworkService):
                 )
                 if conn_scope is None:
                     # Resource manager denied the connection.
+                    # The lifecycle tracker already counted this connection
+                    # during admission — release its slot so a denied
+                    # connection cannot ratchet the established limit up to
+                    # its cap and wedge the node at 0 peers (Bug: the 127
+                    # RCMGR_DENIED events leaked one established slot each).
+                    try:
+                        _deny_lifecycle = getattr(
+                            self._resource_manager, "connection_lifecycle", None
+                        )
+                        if _deny_lifecycle is not None:
+                            _deny_lifecycle.notify_connection_closed(
+                                str(id(muxed_conn)), muxed_conn.peer_id
+                            )
+                    except Exception:
+                        pass
                     # Keep the message concise so it fits within the
                     # project's line-length limit.
                     raise SwarmException(
@@ -2210,10 +2255,18 @@ class Swarm(Service, INetworkService):
 
         except BaseException:
             # swarm_conn is not yet registered in self.connections — close it
-            # explicitly so its resource scope (rcmgr _current_connections slot)
-            # is always released, even under trio.Cancelled.
+            # explicitly so its resource scope (rcmgr _current_connections
+            # slot) and its lifecycle tracker slot are always released.
+            #
+            # This MUST run shielded: the enclosing fail_after upgrade
+            # timeout may already have fired (Cancelled is pending), and an
+            # unshielded await inside close() would immediately re-raise
+            # Cancelled, aborting _cleanup() → remove_conn() and leaking the
+            # lifecycle established slot forever (ratcheting the limit to its
+            # cap and wedging the node at 0 peers).
             try:
-                await swarm_conn.close()
+                with trio.CancelScope(shield=True):
+                    await swarm_conn.close()
             except Exception:
                 pass
             raise

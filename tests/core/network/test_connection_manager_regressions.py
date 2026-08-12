@@ -44,6 +44,10 @@ def _established_mock_muxed_conn(peer_id) -> Mock:
     muxed_conn.accept_stream = _block_on_accept
     muxed_conn.get_transport_addresses = Mock(return_value=[])
     muxed_conn.get_connection_type = Mock(return_value=ConnectionType.UNKNOWN)
+    # Explicitly no pre-acquired resource scope: Mock auto-creates
+    # attributes, and a truthy _resource_scope would make add_conn skip the
+    # rcmgr open_connection check entirely (and hence never deny).
+    muxed_conn._resource_scope = None
     return muxed_conn
 
 
@@ -606,3 +610,125 @@ class TestBug1LifecycleLimits:
             assert (
                 lifecycle.get_connection_stats()["current_peers_with_connections"] == 0
             )
+
+    async def test_reconcile_prunes_phantom_established_entries(self):
+        """
+        Reconciling against the live connection table prunes phantom slots.
+
+        Guards the fix for the node wedging at 0 peers: dead connections that
+        were torn down mid-registration leaked their ``established_outbound``
+        slot forever, ratcheting the 256 cap and denying every new dial
+        (``LIFECYCLE_DENIED: Established outbound limit exceeded``).  The
+        reconcile must prune any established entry whose connection is no
+        longer in the swarm's live table.
+        """
+        from libp2p.rcmgr import new_resource_manager
+
+        rm = new_resource_manager()
+        lifecycle = rm.connection_lifecycle
+        assert lifecycle is not None
+
+        # Admit two connections into the tracker, as if their SwarmConns
+        # were torn down before registration (rcmgr denial / cancellation).
+        peer_id = swarm_peer_id()
+        addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+        await lifecycle.handle_established_outbound_connection(
+            "phantom-1", peer_id, addr, "outbound"
+        )
+        await lifecycle.handle_established_outbound_connection(
+            "phantom-2", peer_id, addr, "outbound"
+        )
+        stats = lifecycle.get_connection_stats()
+        assert stats["current_established_outbound"] == 2
+
+        # Age the entries so the reconcile treats them as stale phantoms.
+        import time
+
+        for cid in ("phantom-1", "phantom-2"):
+            lifecycle.tracker._connections[cid].established_at = (
+                time.time() - 120
+            )
+
+        # Only "phantom-1" is backed by a live connection in the swarm.
+        pruned = lifecycle.reconcile_live_connections({"phantom-1"})
+        assert pruned == 1
+        stats = lifecycle.get_connection_stats()
+        assert stats["current_established_outbound"] == 1
+        assert stats["total_connections_closed"] == 1
+
+        # A live connection is never pruned.
+        pruned = lifecycle.reconcile_live_connections({"phantom-1"})
+        assert pruned == 0
+        assert lifecycle.get_connection_stats()["current_established_outbound"] == 1
+
+    async def test_reconcile_skips_young_entries(self):
+        """
+        The reconcile must never prune entries still mid-registration.
+
+        An entry admitted milliseconds ago (connection not yet registered in
+        the swarm table) is not a phantom — pruning it would let connections
+        exceed the cap.  The age guard prevents that.
+        """
+        from libp2p.rcmgr import new_resource_manager
+
+        rm = new_resource_manager()
+        lifecycle = rm.connection_lifecycle
+        assert lifecycle is not None
+
+        peer_id = swarm_peer_id()
+        addr = Multiaddr("/ip4/127.0.0.1/tcp/4001")
+        await lifecycle.handle_established_outbound_connection(
+            "fresh-1", peer_id, addr, "outbound"
+        )
+
+        # Not in the live set but freshly established (< min_age) — must stay.
+        pruned = lifecycle.reconcile_live_connections(set())
+        assert pruned == 0
+        assert lifecycle.get_connection_stats()["current_established_outbound"] == 1
+
+    async def test_rcmgr_denied_connection_releases_lifecycle_slot(self):
+        """
+        A connection denied by the rcmgr must release its lifecycle slot.
+
+        Guards the ``RCMGR_DENIED`` leak: connections were admitted to the
+        lifecycle tracker and then denied by the resource manager, closing
+        the connection without ever decrementing the tracker — each denial
+        ratcheted ``established_outbound`` toward its cap.
+
+        To actually reach the rcmgr ``open_connection`` denial (rather than
+        the lifecycle limit denying first), the lifecycle outbound cap is
+        left high and the rcmgr's own connection counter is capped at 1.
+        """
+        from libp2p.rcmgr import ResourceLimits, new_resource_manager
+
+        # The rcmgr's own connection counter caps at 1, so the SECOND
+        # add_conn hits open_connection -> None (RCMGR_DENIED) after the
+        # lifecycle has already admitted it.
+        rm = new_resource_manager(limits=ResourceLimits(max_connections=1))
+        lifecycle = rm.connection_lifecycle
+        assert lifecycle is not None
+        swarm = SwarmFactory.build()
+        swarm.set_resource_manager(rm, enable_stream_semaphore=False)
+
+        async with background_trio_service(swarm):
+            conn1 = await swarm.add_conn(
+                _established_mock_muxed_conn(swarm.self_id), direction="outbound"
+            )
+            assert (
+                lifecycle.get_connection_stats()["current_established_outbound"] == 1
+            )
+
+            # Second connection: lifecycle admits it (slot 1 -> 2), then the
+            # rcmgr denies.  The denied connection must release its slot, so
+            # the count returns to 1 instead of ratcheting to 2.
+            with pytest.raises(SwarmException, match="resource manager"):
+                await swarm.add_conn(
+                    _established_mock_muxed_conn(swarm.self_id),
+                    direction="outbound",
+                )
+            stats = lifecycle.get_connection_stats()
+            assert stats["current_established_outbound"] == 1
+            assert stats["current_established_total"] == 1
+
+            # Clean up so the service shuts down cleanly.
+            await conn1.close()
