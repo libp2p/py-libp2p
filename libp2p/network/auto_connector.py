@@ -297,8 +297,24 @@ class AutoConnector:
 
         # Try to connect to candidates
         # We need to limit concurrency to avoid OS "Too many open files" errors
-        # (Kubo default is 160 concurrent outbound dials)
+        # (Kubo default is 160 concurrent outbound dials).
         dial_limiter = trio.CapacityLimiter(160)
+
+        # Cap the number of dials started per cycle.  Without a cap, a node
+        # that is far below the low watermark (e.g. just restarted) launches
+        # ``needed * 2`` dials (up to 600) against a peerstore full of stale
+        # addresses.  Each dial to an unreachable peer holds a background
+        # QUIC handshake task until the handshake timeout fires, so hundreds
+        # of concurrent hanging dials saturate the trio event loop with timer
+        # churn — which starves the very connections that ARE established,
+        # they get closed by remote peers, and the node spirals back to 0
+        # peers.  Dialing in bounded batches lets each cycle complete fast
+        # and lets the event loop service established connections.
+        max_dials_per_cycle = 40
+
+        # Skip peers whose dial attempts have failed too recently (cooldown).
+        # This also bounds per-cycle work when the peerstore is dominated by
+        # stale/unreachable peers.
 
         async def _dial_candidate(peer_id: ID) -> None:
             async with dial_limiter:
@@ -353,7 +369,12 @@ class AutoConnector:
                 dialed = 0
                 # We overdial (needed * 2) because in a P2P network, most dials will
                 # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
-                dial_target = needed * 2
+                # The batch is capped so a deeply-below-watermark node does not
+                # launch hundreds of concurrent dials against stale addresses
+                # (which saturates the event loop with timer churn and starves
+                # established connections).  Bounded batches keep recovering the
+                # watermark while leaving CPU for existing connections.
+                dial_target = min(needed * 2, max_dials_per_cycle)
 
                 for peer_id in candidates:
                     if dialed >= dial_target:

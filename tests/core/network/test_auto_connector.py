@@ -450,3 +450,116 @@ class TestAutoConnectorCustomInterval:
 
         connector = AutoConnector(MockSwarm())  # type: ignore
         assert connector.auto_connect_interval == AUTO_CONNECT_INTERVAL
+
+
+class TestAutoConnectorDialBatchCap:
+    """Test that the auto-connector caps dials per cycle to avoid a storm."""
+
+    @pytest.mark.trio
+    async def test_maybe_connect_dials_at_most_capped_batch(self):
+        """A node far below the watermark dials a bounded batch, not needed*2."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        self_peer = ID("12D3KooW1" + "a" * 46)
+        # 300 candidate peers, all public and directly dialable.
+        peers = [
+            ID(("12D3KooW%02d" % i) + "b" * 44) for i in range(300)
+        ]
+
+        dialed: list[ID] = []
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return peers
+
+            def addrs(self, peer_id):
+                return [Multiaddr("/ip4/8.8.8.8/tcp/4001")]
+
+            def get_local_record(self):
+                class _FakeRecord:
+                    def record(self):
+                        class _FakeRec:
+                            addrs = [Multiaddr("/ip4/52.7.183.75/tcp/4001")]
+
+                        return _FakeRec()
+
+                return _FakeRecord()
+
+        class MockConnectionConfig:
+            low_watermark = 300
+            min_connections = 50
+            dial_timeout = 5.0
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = self_peer
+            connection_config = MockConnectionConfig()
+
+            def get_total_connections(self):
+                return 0
+
+            async def dial_peer(self, peer_id):
+                dialed.append(peer_id)
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        connector._started = True
+        await connector.maybe_connect()
+
+        # Must be bounded (cap = 40), NOT needed * 2 = 600.
+        assert 0 < len(dialed) <= 40
+
+    @pytest.mark.trio
+    async def test_maybe_connect_small_need_not_capped(self):
+        """Small needs below the cap are dialed in full (no over-restriction)."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        self_peer = ID("12D3KooW1" + "a" * 46)
+        peers = [ID(("12D3KooW%02d" % i) + "b" * 44) for i in range(10)]
+
+        dialed: list[ID] = []
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return peers
+
+            def addrs(self, peer_id):
+                return [Multiaddr("/ip4/8.8.8.8/tcp/4001")]
+
+            def get_local_record(self):
+                class _FakeRecord:
+                    def record(self):
+                        class _FakeRec:
+                            addrs = [Multiaddr("/ip4/52.7.183.75/tcp/4001")]
+
+                        return _FakeRec()
+
+                return _FakeRecord()
+
+        class MockConnectionConfig:
+            low_watermark = 50
+            min_connections = 10
+            dial_timeout = 5.0
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = self_peer
+            connection_config = MockConnectionConfig()
+
+            def get_total_connections(self):
+                return 0
+
+            async def dial_peer(self, peer_id):
+                dialed.append(peer_id)
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        connector._started = True
+        await connector.maybe_connect()
+
+        # need = 50, needed*2 = 100 but only 10 candidates exist → all dialed.
+        assert len(dialed) == 10
