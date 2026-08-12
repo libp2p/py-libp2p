@@ -204,8 +204,108 @@ class TestAutoConnectorUnit:
         assert connector._should_skip_peer(peer_id_2) is False
 
 
-class TestAutoConnectorStartStop:
-    """Test AutoConnector start/stop lifecycle."""
+class TestAutoConnectorCandidateFiltering:
+    """Test _get_candidate_peers filters private/unroutable addresses."""
+
+    @pytest.mark.trio
+    async def test_candidates_exclude_private_only_peers(self):
+        """Peers with only private IP addrs are excluded from candidates."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import _addr_is_routable
+
+        # Sanity-check the address classifier directly.
+        assert _addr_is_routable(Multiaddr("/ip4/8.8.8.8/tcp/4001"))
+        assert _addr_is_routable(Multiaddr("/ip4/52.54.248.232/tcp/4001"))
+        assert _addr_is_routable(Multiaddr("/dnsaddr/bootstrap.libp2p.io/tcp/4001"))
+        assert not _addr_is_routable(Multiaddr("/ip4/172.20.0.2/tcp/4001"))
+        assert not _addr_is_routable(Multiaddr("/ip4/10.0.0.5/tcp/4001"))
+        assert not _addr_is_routable(Multiaddr("/ip4/192.168.1.5/tcp/4001"))
+        assert not _addr_is_routable(Multiaddr("/ip4/127.0.0.1/tcp/4001"))
+
+    @pytest.mark.trio
+    async def test_get_candidate_peers_filters_private_only_on_public_node(self):
+        """A public node excludes private-only peers from candidates."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        pub_peer = ID("12D3KooW1" + "a" * 46)
+        priv_peer = ID("12D3KooW2" + "b" * 46)
+        mixed_peer = ID("12D3KooW3" + "c" * 46)
+        self_peer = ID("12D3KooW4" + "d" * 46)
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return [pub_peer, priv_peer, mixed_peer, self_peer]
+
+            def addrs(self, peer_id):
+                if peer_id == pub_peer:
+                    return [Multiaddr("/ip4/8.8.8.8/tcp/4001")]
+                if peer_id == priv_peer:
+                    return [Multiaddr("/ip4/172.20.0.2/tcp/4001")]
+                if peer_id == mixed_peer:
+                    return [
+                        Multiaddr("/ip4/172.20.0.3/tcp/4001"),
+                        Multiaddr("/ip4/9.9.9.9/tcp/4001"),
+                    ]
+                return []
+
+            def get_local_record(self):
+                # This node announces a public address → treat as public node.
+                class _FakeRecord:
+                    def record(self):
+                        class _FakeRec:
+                            addrs = [Multiaddr("/ip4/52.7.183.75/tcp/4001")]
+
+                        return _FakeRec()
+
+                return _FakeRecord()
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = self_peer
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        candidates = await connector._get_candidate_peers()
+
+        assert pub_peer in candidates
+        assert mixed_peer in candidates  # has at least one public addr
+        assert priv_peer not in candidates
+        assert self_peer not in candidates
+
+    @pytest.mark.trio
+    async def test_get_candidate_peers_keeps_private_on_lan_node(self):
+        """A LAN node (no public announced addr) keeps private peers dialable."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        priv_peer = ID("12D3KooW1" + "a" * 46)
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return [priv_peer]
+
+            def addrs(self, peer_id):
+                return [Multiaddr("/ip4/192.168.1.5/tcp/4001")]
+
+            def get_local_record(self):
+                # No public address announced (LAN/mDNS deployment).
+                return None
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = ID("12D3KooW2" + "b" * 46)
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        candidates = await connector._get_candidate_peers()
+
+        assert priv_peer in candidates
+
+
 
     def test_initial_state(self):
         """Test initial state of AutoConnector."""

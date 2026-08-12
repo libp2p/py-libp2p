@@ -8,11 +8,13 @@ matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+import ipaddress
 import logging
 import random
 import time
 from typing import TYPE_CHECKING
 
+from multiaddr import Multiaddr
 import trio
 
 from libp2p.network.config import AUTO_CONNECT_INTERVAL
@@ -20,6 +22,95 @@ from libp2p.peer.id import ID
 
 if TYPE_CHECKING:
     from libp2p.network.swarm import Swarm
+
+
+def _ip_is_routable(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """
+    Return True if ``ip`` (an ipaddress address) is publicly routable.
+
+    Rejects loopback, link-local, unspecified, multicast, reserved and
+    private ranges.  CGNAT (100.64.0.0/10) is treated as routable because
+    it is used by Tailscale/WireGuard networks that peers may legitimately
+    reach (``ipaddress`` only classifies it as private on Python 3.13+).
+    """
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    if getattr(ip, "is_reserved", False):
+        return False
+    if ip.is_private:
+        if (
+            isinstance(ip, ipaddress.IPv4Address)
+            and (int(ip) & 0xFFC00000) == 0x64400000
+        ):  # 100.64.0.0/10
+            return True
+        return False
+    return True
+
+
+def _addr_is_routable(addr: Multiaddr) -> bool:
+    """
+    Return True if the multiaddr is dialable from a public node.
+
+    DNS addresses resolve to public IPs and are considered dialable.  For
+    IP addresses, only public (non-private, non-loopback) addresses count,
+    and *any* public IP component makes the address dialable (multiaddrs
+    may embed several IPs, e.g. relay paths).  This prevents the
+    auto-connector from wasting dial attempts on Docker-internal peers
+    (172.x/10.x) that can never be reached from outside the network.
+    """
+    try:
+        for part in addr.split():
+            protos = part.protocols()
+            if not protos:
+                continue
+            proto = protos[0]
+            name = proto.name
+            if name.startswith("dns"):
+                return True
+            if name not in ("ip4", "ip6"):
+                continue
+            try:
+                ip_str = part.value_for_protocol(name)
+            except Exception:
+                continue
+            if not ip_str:
+                continue
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except Exception:
+                continue
+            if _ip_is_routable(ip):
+                return True
+    except Exception:
+        return False
+
+    # No IP/DNS component (e.g. relay-only addrs), or only private IPs.
+    return False
+
+
+def _node_has_public_addr(swarm: "Swarm") -> bool:
+    """
+    Return True if this node itself announces a public address.
+
+    The check uses the local signed peer record, which reflects the host's
+    announced addresses (``announce_addrs`` if configured, otherwise the
+    transport addrs plus confirmed observed addresses).  This gates the
+    private-address candidate filter: a node that only has private
+    addresses (LAN/mDNS deployment) keeps private candidates dialable,
+    while a public node skips peers that are only reachable via
+    Docker-internal private addresses.
+    """
+    try:
+        local_record = swarm.peerstore.get_local_record()
+    except Exception:
+        return False
+    if local_record is None:
+        return False
+    try:
+        addrs = local_record.record().addrs
+    except Exception:
+        return False
+    return any(_addr_is_routable(a) for a in addrs)
 
 logger = logging.getLogger("libp2p.network.auto_connector")
 logger.setLevel(logging.INFO)
@@ -284,6 +375,11 @@ class AutoConnector:
         # Get currently connected peers
         connected_peers = set(self.swarm.connections.keys())
 
+        # Only apply the private-address filter when this node itself is a
+        # public node.  On a LAN/mDNS deployment (all-local addresses) peers
+        # with private addresses must stay dialable.
+        filter_private = _node_has_public_addr(self.swarm)
+
         for peer_id in all_peers:
             # Skip ourselves
             if peer_id == self.swarm.self_id:
@@ -296,8 +392,17 @@ class AutoConnector:
             # Check if peer has addresses
             try:
                 addrs = self.swarm.peerstore.addrs(peer_id)
-                if addrs:
-                    candidates.append(peer_id)
+                if not addrs:
+                    continue
+                if filter_private and not any(
+                    _addr_is_routable(a) for a in addrs
+                ):
+                    # Peers whose *only* addresses are private
+                    # (Docker-internal 172.x/10.x, loopback, etc.) can never
+                    # be dialed from a public node, so they are skipped
+                    # instead of burning dial attempts.
+                    continue
+                candidates.append(peer_id)
             except Exception:
                 continue
 
