@@ -586,8 +586,11 @@ class BasicHost(IHost):
         :return: first supported protocol, or None if not cached
         """
         try:
-            # Check if peer exists in peerstore first (avoid auto-creation)
-            if peer_id not in self.peerstore.peer_ids():
+            # Check if peer exists in peerstore first (avoid auto-creation).
+            # O(1) has_peer() instead of a full peer_ids() scan — persistent
+            # peerstores reconstruct + base58-hash every peer on each call,
+            # which saturated CPU on nodes with tens of thousands of peers.
+            if not self.peerstore.has_peer(peer_id):
                 return None
 
             # Only use protocol caching if we have a connection to this peer
@@ -858,6 +861,7 @@ class BasicHost(IHost):
             )
             protocol_choices = [preferred]
 
+        success = False
         try:
             muxed_conn = getattr(net_stream, "muxed_conn", None)
             stream_semaphore = (
@@ -892,6 +896,7 @@ class BasicHost(IHost):
                 communicator,
                 negotiate_timeout,
             )
+            success = True
         except MultiselectClientError as error:
             # Enhanced error logging for debugging
             error_msg = str(error)
@@ -956,14 +961,16 @@ class BasicHost(IHost):
                 f"  Registry Stats: {registry_stats}"
             )
 
-            await net_stream.reset()
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
         finally:
+            if not success:
+                with trio.CancelScope(shield=True):
+                    try:
+                        await net_stream.reset()
+                    except Exception as e:
+                        logger.debug(f"Failed to reset stream during cleanup: {e}")
             if semaphore_acquired and semaphore_to_use is not None:
                 semaphore_to_use.release()
-
-        net_stream.set_protocol(selected_protocol)
-        return net_stream
 
     async def send_command(
         self,
@@ -982,16 +989,24 @@ class BasicHost(IHost):
         """
         new_stream = await self._network.new_stream(peer_id)
 
+        success = False
         try:
             response = await self.multiselect_client.query_multistream_command(
                 MultiselectCommunicator(new_stream), command, response_timeout
             )
+            success = True
+            return response
         except MultiselectClientError as error:
-            logger.debug("fail to open a stream to peer %s, error=%s", peer_id, error)
-            await new_stream.reset()
-            raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
-
-        return response
+            raise StreamFailure(f"failed to query command {command} to peer {peer_id}") from error
+        finally:
+            with trio.CancelScope(shield=True):
+                try:
+                    if success:
+                        await new_stream.close()
+                    else:
+                        await new_stream.reset()
+                except Exception as e:
+                    logger.debug(f"Failed to clean up command stream: {e}")
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
@@ -1095,7 +1110,7 @@ class BasicHost(IHost):
             return True
         cacheable = [str(p) for p in _SAFE_CACHED_PROTOCOLS]
         try:
-            if peer_id not in self.peerstore.peer_ids():
+            if not self.peerstore.has_peer(peer_id):
                 return False
             supported = self.peerstore.supports_protocols(peer_id, cacheable)
             return bool(supported)
