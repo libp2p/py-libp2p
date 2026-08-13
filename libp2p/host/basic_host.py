@@ -1149,10 +1149,9 @@ class BasicHost(IHost):
         swarm_conn = connections[0]
         event_started = getattr(swarm_conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
-                with trio.fail_after(5.0):
-                    await event_started.wait()
-            except Exception:
+            with trio.move_on_after(5.0) as _ev_cs:
+                await event_started.wait()
+            if _ev_cs.cancelled_caught:
                 return
 
         try:
@@ -1162,7 +1161,7 @@ class BasicHost(IHost):
             return
 
         try:
-            with trio.fail_after(10.0):
+            with trio.move_on_after(10.0) as _id_cs:
                 try:
                     data = await read_length_prefixed_protobuf(
                         stream, use_varint_format=True
@@ -1170,6 +1169,15 @@ class BasicHost(IHost):
                 except Exception:
                     # Remote may use legacy raw protobuf format
                     data = await stream.read()
+            if _id_cs.cancelled_caught:
+                logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
+                import time as _time
+                self._identify_failed[peer_id] = _time.monotonic()
+                try:
+                    await stream.reset()
+                except Exception:
+                    pass
+                return
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
             await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
@@ -1252,10 +1260,9 @@ class BasicHost(IHost):
             return
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
-            try:
-                with trio.fail_after(5.0):
-                    await event_started.wait()
-            except Exception:
+            with trio.move_on_after(5.0) as _ev_cs2:
+                await event_started.wait()
+            if _ev_cs2.cancelled_caught:
                 return
         self._schedule_identify(peer_id, reason="notifee-connected")
 
