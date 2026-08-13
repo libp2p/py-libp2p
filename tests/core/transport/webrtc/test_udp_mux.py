@@ -16,6 +16,8 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+import struct
+from unittest.mock import patch
 
 import pytest
 
@@ -183,6 +185,38 @@ class TestAddrDispatch:
             data = _dtls_like_bytes()
             mux.datagram_received(data, remote)
             assert proto.received == []
+        finally:
+            await mux.close()
+
+
+# ---------------------------------------------------------------------------
+# Malformed STUN
+# ---------------------------------------------------------------------------
+
+
+class TestMalformedStun:
+    def test_struct_error_routes_by_addr_not_raise(self) -> None:
+        asyncio.run(self._struct_error())
+
+    async def _struct_error(self) -> None:
+        # aioice parses STUN attributes with struct.unpack, which raises
+        # struct.error (NOT a ValueError subclass) on a malformed/short
+        # fixed-width attribute. datagram_received must treat that as "not
+        # usable STUN" and fall through to addr routing instead of letting the
+        # exception escape — otherwise a remote peer can crash / log-flood the
+        # mux with crafted packets.
+        mux, _ = await UdpMux.create("127.0.0.1", 0)
+        proto = _RecordingProtocol()
+        remote = ("10.0.0.2", 54321)
+        mux.register_addr(remote, proto)
+        try:
+            data = b"\x00\x01" + b"\x00" * 26  # STUN-shaped bytes
+            with patch.object(
+                _stun, "parse_message", side_effect=struct.error("bad attr")
+            ):
+                # Must not raise.
+                mux.datagram_received(data, remote)
+            assert proto.received == [(data, remote)]
         finally:
             await mux.close()
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import logging
+import struct
 from typing import Protocol
 
 try:
@@ -168,7 +169,14 @@ class UdpMux(asyncio.DatagramProtocol):
                 self._unknown_stun_handler(ufrag, data, norm)
                 return
             logger.debug("UdpMux: no handler for ufrag %r from %s", ufrag, norm)
-        except ValueError:
+        except (ValueError, struct.error):
+            # Not valid STUN. aioice raises ValueError for non-STUN framing, but
+            # a STUN-shaped packet with a malformed/short fixed-width attribute
+            # makes its struct.unpack raise struct.error (NOT a ValueError
+            # subclass). Both mean "not usable STUN" and must fall through to
+            # addr-based routing rather than escape datagram_received — a remote
+            # peer must not be able to crash or log-flood the mux with crafted
+            # packets.
             # Non-STUN (DTLS handshake, SCTP frames after ICE): route by addr.
             protocol = self._by_addr.get(norm)
             if protocol is not None:
