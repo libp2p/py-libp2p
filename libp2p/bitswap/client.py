@@ -754,17 +754,6 @@ class BitswapClient(INotifee):
         """Process a received Bitswap message."""
         peer_id_str = str(peer_id)[:16]
         if msg.HasField("wantlist"):
-            logger.warning("=" * 70)
-            logger.warning(f"📥 RECEIVED WANTLIST from peer {peer_id_str}")
-            logger.warning(f"   Entries: {len(msg.wantlist.entries)}")
-            logger.warning(f"   Full: {msg.wantlist.full}")
-            for _i, _e in enumerate(msg.wantlist.entries):
-                _cid_hex = bytes(_e.block).hex()[:20] if _e.block else "N/A"
-                _wt = "WANT_HAVE" if _e.wantType == 1 else "WANT_BLOCK"
-                logger.warning(
-                    f"   [{_i + 1}] cid={_cid_hex}... type={_wt} cancel={_e.cancel}"
-                )
-            logger.warning("=" * 70)
             logger.debug(
                 f"\n📥 RECEIVED WANTLIST from peer {peer_id_str} with "
                 f"{len(msg.wantlist.entries)} entries"
@@ -828,12 +817,10 @@ class BitswapClient(INotifee):
         # Get peer protocol for response format
         peer_protocol = self._peer_protocols.get(peer_id, BITSWAP_PROTOCOL_V100)
 
-        logger.warning("=" * 70)
-        logger.warning(
-            f"[STEP 1] SERVER PROCESSING WANTLIST from {str(peer_id)[:20]}..."
+        logger.debug(
+            f"[STEP 1] SERVER PROCESSING WANTLIST from {str(peer_id)[:20]}... "
+            f"entries={len(wantlist.entries)}  protocol={peer_protocol}"
         )
-        logger.warning(f"   entries={len(wantlist.entries)}  protocol={peer_protocol}")
-        logger.warning("=" * 70)
 
         # ── Standard 1.0.0–1.2.0 wantlist handling ────────────────────────
         # Process entries sorted by priority (higher priority first per spec)
@@ -847,9 +834,9 @@ class BitswapClient(INotifee):
 
         for entry in sorted_entries:
             try:
-                logger.warning(f"  -> Processing entry: {bytes(entry.block).hex()}")
+                logger.debug(f"  -> Processing entry: {bytes(entry.block).hex()}")
                 entry_cid = parse_cid(entry.block)
-                logger.warning(f"  -> Parsed CID: {entry_cid}")
+                logger.debug(f"  -> Parsed CID: {entry_cid}")
             except Exception as e:
                 logger.warning(f"  -> EXCEPTION in parse_cid: {e}")
                 continue
@@ -867,15 +854,13 @@ class BitswapClient(INotifee):
                 }
 
                 # Check if we have this block
-                logger.warning(f"  -> Checking if we have block {entry_cid}")
                 try:
                     has_block = await self.block_store.has_block(entry_cid)
-                    logger.warning(f"  -> has_block result: {has_block}")
                 except Exception as e:
                     logger.warning(f"  -> EXCEPTION in has_block: {e}")
                     has_block = False
 
-                logger.warning(
+                logger.debug(
                     f"[WANTLIST ENTRY] "
                     f"cid={format_cid_for_display(entry_cid, max_len=16)} "
                     f"wantType={entry.wantType} cancel={entry.cancel} "
@@ -894,11 +879,6 @@ class BitswapClient(INotifee):
                         data = await self.block_store.get_block(entry_cid)
                         if data:
                             logger.debug(
-                                f"\n[WANT_HAVE] Sending block directly "
-                                f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}"
-                            )
-                            logger.warning(
                                 f"[WANT_HAVE] Sending block directly "
                                 f"({len(data)} bytes) for "
                                 f"{format_cid_for_display(entry_cid, max_len=16)} "
@@ -913,11 +893,7 @@ class BitswapClient(INotifee):
                         # Don't have the block — send DontHave so requester
                         # knows to look elsewhere.
                         logger.debug(
-                            f"\n[WANT_HAVE] DontHave for "
-                            f"{format_cid_for_display(entry_cid, max_len=16)}"
-                        )
-                        logger.warning(
-                            f"[WANT_HAVE] Sending DontHave for "
+                            f"[WANT_HAVE] DontHave for "
                             f"{format_cid_for_display(entry_cid, max_len=16)}"
                         )
                         presences_to_send.append((entry_cid, False))
@@ -926,12 +902,8 @@ class BitswapClient(INotifee):
                         data = await self.block_store.get_block(entry_cid)
                         if data:
                             logger.debug(
-                                f"\n[WANT_BLOCK] Sending block directly "
+                                f"[WANT_BLOCK] Sending block directly "
                                 f"({len(data)} bytes) for "
-                                f"{format_cid_for_display(entry_cid, max_len=16)}"
-                            )
-                            logger.warning(
-                                f"[WANT_BLOCK] Sending block for "
                                 f"{format_cid_for_display(entry_cid, max_len=16)}"
                             )
                             if peer_protocol == BITSWAP_PROTOCOL_V100:
