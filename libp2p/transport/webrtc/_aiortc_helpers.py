@@ -390,11 +390,14 @@ async def run_signaling_server(
             await asyncio.wait_for(reader.readline(), timeout=_SDP_HTTP_TIMEOUT)
 
             # Headers — bounded by line count and accumulated byte size.
-            # The for/else fires when the loop exhausts _MAX_HEADER_LINES
-            # reads without finding the blank-line terminator.
+            # The for/else fires when the loop exhausts the reads without
+            # finding the blank-line terminator.  We read _MAX_HEADER_LINES + 1
+            # times so the last read can be the blank terminator after a full
+            # _MAX_HEADER_LINES header lines (otherwise the effective cap would
+            # be one below the named constant).
             headers: dict[str, str] = {}
             header_bytes = 0
-            for _ in range(_MAX_HEADER_LINES):
+            for _ in range(_MAX_HEADER_LINES + 1):
                 line = await asyncio.wait_for(
                     reader.readline(), timeout=_SDP_HTTP_TIMEOUT
                 )
