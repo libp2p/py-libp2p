@@ -1158,6 +1158,12 @@ class BasicHost(IHost):
             stream = await self.new_stream(peer_id, [IdentifyID])
         except Exception as exc:
             logger.debug("Identify[%s]: failed to open stream: %s", reason, exc)
+            # Apply the same backoff as a read timeout so we don't spin-retry
+            # every time protocol negotiation times out (which is the far more
+            # common failure path). Without this, identify retries immediately
+            # on every auto-connector reconnect cycle → 22 concurrent 10-second
+            # timeout tasks → 100% CPU busy-loop.
+            self._identify_failed[peer_id] = _time.monotonic()
             return
 
         try:
