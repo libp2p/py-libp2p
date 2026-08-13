@@ -2,6 +2,8 @@
 Kademlia DHT routing table implementation.
 """
 
+from __future__ import annotations
+
 from collections import (
     OrderedDict,
 )
@@ -12,11 +14,15 @@ from ipaddress import (
 )
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from multiaddr.exceptions import (
     ProtocolLookupError,
 )
 import trio
+
+if TYPE_CHECKING:
+    from .diagnostics import RoutingTableDiagnostics
 
 from libp2p.abc import (
     IHost,
@@ -417,7 +423,7 @@ class KBucket:
         key = peer_id_to_key(peer_id)
         return self.key_in_range(key)
 
-    def split(self) -> tuple["KBucket", "KBucket"]:
+    def split(self) -> tuple[KBucket, KBucket]:
         """
         Split the bucket into two buckets.
 
@@ -741,6 +747,20 @@ class RoutingTable:
         """
         self.buckets = [KBucket(self.host, BUCKET_SIZE)]
         logger.info("Routing table cleaned up, all data removed.")
+
+    def get_diagnostics(self) -> RoutingTableDiagnostics:
+        """
+        Return a :class:`~libp2p.kad_dht.diagnostics.RoutingTableDiagnostics`
+        analyser bound to this routing table.
+
+        Example::
+
+            report = dht.routing_table.get_diagnostics().analyse()
+            print(report.summary())
+        """
+        from .diagnostics import RoutingTableDiagnostics
+
+        return RoutingTableDiagnostics(self)
 
     def _should_split_bucket(self, bucket: KBucket) -> bool:
         """
