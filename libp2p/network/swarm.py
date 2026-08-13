@@ -1812,11 +1812,14 @@ class Swarm(Service, INetworkService):
                 try:
                     secured_conn = await self.upgrader.upgrade_security(raw_conn, False)
                 except SecurityUpgradeFailure as exc:
-                    logger.error(
+                    # Expected churn on a public node: peers dial in that do
+                    # not share a security protocol (or drop mid-handshake).
+                    # Kubo logs these at debug; a full traceback per failure
+                    # at ERROR burned a CPU core (60+ tracebacks/sec).
+                    logger.debug(
                         "failed to upgrade security for peer at %s: %s",
                         maddr,
                         exc,
-                        exc_info=True,
                     )
                     await _cleanup_inbound_upgrade()
                     raise SwarmException(
