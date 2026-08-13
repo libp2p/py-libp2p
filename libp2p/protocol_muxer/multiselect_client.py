@@ -77,8 +77,8 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
         logger.debug("MultiselectClient select_one_of: protocols=%s", list(protocols))
-        try:
-            with trio.fail_after(negotiate_timeout):
+        with trio.move_on_after(negotiate_timeout) as timeout_scope:
+            try:
                 await self.handshake(communicator)
                 logger.debug("MultiselectClient select_one_of: handshake completed")
 
@@ -102,11 +102,14 @@ class MultiselectClient(IMultiselectClient):
                         protocols, negotiate_timeout, unsupported_errors
                     )
                 )
-        except trio.TooSlowError:
-            raise MultiselectClientError(
-                f"response timed out after {negotiate_timeout}s, "
-                f"protocols tried: {list(protocols)}"
-            )
+            except MultiselectClientError:
+                raise
+
+        # Reached here only if move_on_after fired (timeout)
+        raise MultiselectClientError(
+            f"response timed out after {negotiate_timeout}s, "
+            f"protocols tried: {list(protocols)}"
+        )
 
     async def query_multistream_command(
         self,
@@ -124,8 +127,8 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
-        try:
-            with trio.fail_after(response_timeout):
+        with trio.move_on_after(response_timeout) as timeout_scope:
+            try:
                 await self.handshake(communicator)
 
                 if command == "ls":
@@ -148,11 +151,14 @@ class MultiselectClient(IMultiselectClient):
                     ) from error
 
                 return response_list
-        except trio.TooSlowError:
-            raise MultiselectClientError(
-                f"command response timed out after {response_timeout}s, "
-                f"command={command}"
-            )
+            except MultiselectClientError:
+                raise
+
+        # Reached here only if move_on_after fired (timeout)
+        raise MultiselectClientError(
+            f"command response timed out after {response_timeout}s, "
+            f"command={command}"
+        )
 
     async def try_select(
         self, communicator: IMultiselectCommunicator, protocol: TProtocol
