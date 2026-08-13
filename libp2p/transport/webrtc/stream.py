@@ -309,6 +309,19 @@ class WebRTCStream(IMuxedStream):
                 e,
             )
             return
+        # decode_varint_with_size does not raise on a truncated/empty prefix
+        # (unlike the old webrtc _varint decoder): it returns bytes_consumed
+        # for what it saw. An empty message (consumed == 0) or a prefix whose
+        # final consumed byte still has the continuation bit set (0x80) means
+        # the varint never terminated — reject it on the malformed-prefix path.
+        if consumed == 0 or raw[consumed - 1] & 0x80:
+            logger.warning(
+                "WebRTCStream channel=%d: malformed varint prefix: "
+                "incomplete/empty length (%d byte(s))",
+                self._channel_id,
+                consumed,
+            )
+            return
         proto_bytes = raw[consumed : consumed + length]
         if len(proto_bytes) != length:
             logger.warning(

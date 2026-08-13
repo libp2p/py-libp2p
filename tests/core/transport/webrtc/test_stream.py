@@ -5,6 +5,7 @@ Tests for WebRTCStream protobuf framing and lifecycle.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -116,12 +117,23 @@ class TestRead:
         assert data == b"defgh"
 
     @pytest.mark.trio
-    async def test_malformed_varint_is_logged_not_raised(self):
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b"",  # empty message: no length prefix at all
+            b"\x80",  # single continuation byte, no terminator
+            b"\xff\xff\xff\xff\xff",  # five continuation bytes, no terminator
+        ],
+    )
+    async def test_malformed_varint_is_logged_not_raised(self, raw, caplog):
+        # decode_varint_with_size does not raise on these; on_data must still
+        # reject them on the malformed-varint-prefix path (not the downstream
+        # length-mismatch path) so the classification matches the old decoder.
         stream = _make_stream()
-        # Five continuation bytes with no terminator is a truncated varint.
-        stream.on_data(b"\xff\xff\xff\xff\xff")
-        # No payload delivered.
+        with caplog.at_level(logging.WARNING, logger="libp2p.transport.webrtc.stream"):
+            stream.on_data(raw)
         assert not stream._read_buf
+        assert any("malformed varint prefix" in r.getMessage() for r in caplog.records)
 
 
 class TestFlags:
