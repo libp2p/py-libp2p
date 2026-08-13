@@ -184,6 +184,10 @@ class PeerStore(IPeerStore):
         """
         return list(self.peer_data_map.keys())
 
+    def has_peer(self, peer_id: ID) -> bool:
+        """Return True if the peer is known to this store."""
+        return peer_id in self.peer_data_map
+
     def clear_peerdata(self, peer_id: ID) -> None:
         """Clears all data associated with the given peer_id."""
         if peer_id in self.peer_data_map:

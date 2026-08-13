@@ -1625,6 +1625,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._closed = True
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
+        import traceback as _tb
+        _stack = "".join(_tb.format_stack()[-18:])[-1800:]
+        logger.warning(
+            "[CONN_CLOSE_TRACE] closing QUIC conn to %s from:\n%s",
+            self._remote_peer_id,
+            _stack,
+        )
 
         try:
             # Close all streams gracefully, but limit concurrency to prevent

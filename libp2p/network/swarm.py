@@ -2112,10 +2112,32 @@ class Swarm(Service, INetworkService):
                             connection_id, peer_id, remote_maddr, "outbound"
                         )
                 except ResourceLimitExceeded as e:
-                    logger.debug(
-                        "Connection to %s denied by connection limits: %s",
+                    logger.warning(
+                        "[ADDCONN_DENY] Connection to %s denied by connection "
+                        "limits: %s (tracker counts: outbound=%s inbound=%s "
+                        "total=%s peer=%s)",
                         peer_id,
                         e,
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_outbound"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_inbound"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_connection_count",
+                            lambda k: "n/a",
+                        )("established_total"),
+                        getattr(
+                            getattr(lifecycle, "tracker", None),
+                            "get_peer_connection_count",
+                            lambda k: "n/a",
+                        )(peer_id),
                     )
                     try:
                         await muxed_conn.close()
@@ -2151,6 +2173,17 @@ class Swarm(Service, INetworkService):
                             )
                     except Exception:
                         pass
+                    logger.warning(
+                        "[ADDCONN_DENY] Connection to %s denied by resource "
+                        "manager (rcmgr current_connections=%s max=%s)",
+                        peer_id,
+                        getattr(self._resource_manager, "_current_connections", "n/a"),
+                        getattr(
+                            getattr(self._resource_manager, "limits", None),
+                            "max_connections",
+                            "n/a",
+                        ),
+                    )
                     # Keep the message concise so it fits within the
                     # project's line-length limit.
                     raise SwarmException(
@@ -2297,7 +2330,14 @@ class Swarm(Service, INetworkService):
             await self.notify_connected(swarm_conn)
             return swarm_conn
 
-        except BaseException:
+        except BaseException as exc:
+            import traceback as _tb
+            logger.warning(
+                "[ADDCONN_FAIL] add_conn failed for peer %s: %r\n%s",
+                getattr(muxed_conn, "peer_id", None),
+                exc,
+                "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))[-2000:],
+            )
             # swarm_conn is not yet registered in self.connections — close it
             # explicitly so its resource scope (rcmgr _current_connections
             # slot) and its lifecycle tracker slot are always released.
