@@ -421,12 +421,12 @@ class TestQUICListenerRaceConditions:
                     except Exception:
                         pass  # Some attempts may fail, that's expected
 
-                # Launch multiple concurrent promotion attempts
-                for _ in range(10):
-                    nursery.start_soon(attempt_promotion)
-
-                # Give time for promotions to complete
-                await trio.sleep(0.1)
+                # Launch concurrent promotion attempts. Wait for all of them to
+                # finish by joining a dedicated nursery instead of sleeping a
+                # fixed amount, which races under load.
+                async with trio.open_nursery() as attempt_nursery:
+                    for _ in range(10):
+                        attempt_nursery.start_soon(attempt_promotion)
 
                 # Verify only one connection object was created
                 assert len(set(connection_objects)) <= 1, (
@@ -555,14 +555,15 @@ class TestQUICListenerRaceConditions:
                     if conn:
                         found_connections.append((cid, id(conn)))
 
-                # Route packets with different CIDs concurrently
+                # Route packets with different CIDs concurrently. Wait for every
+                # lookup to finish by joining a dedicated nursery rather than
+                # sleeping a fixed amount: under load a single lookup can take
+                # longer than the sleep, leaving found_connections empty.
                 cids = [primary_cid, secondary_cid1, secondary_cid2, secondary_cid3]
-                for _ in range(5):  # Multiple rounds
-                    for cid in cids:
-                        nursery.start_soon(route_packet, cid)
-
-                # Give time for routing to complete
-                await trio.sleep(0.1)
+                async with trio.open_nursery() as route_nursery:
+                    for _ in range(5):  # Multiple rounds
+                        for cid in cids:
+                            route_nursery.start_soon(route_packet, cid)
 
                 # Verify all CIDs route to the same connection object
                 connection_ids = {conn_id for _, conn_id in found_connections}
