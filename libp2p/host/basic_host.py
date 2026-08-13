@@ -322,6 +322,11 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: dict[ID, str] = {}
         self._identify_tasks: set[trio.CancelScope] = set()
+        # Per-peer identify failure backoff: peer_id -> monotonic time of last failure.
+        # After a timeout we skip identify for IDENTIFY_BACKOFF_SECONDS so we
+        # don't hammer busy/slow peers every time they reconnect.
+        self._identify_failed: dict[ID, float] = {}
+        self._IDENTIFY_BACKOFF_SECONDS = 60.0
         self._network.register_notifee(_IdentifyNotifee(self))
 
         # Metrics
@@ -1078,6 +1083,11 @@ class BasicHost(IHost):
             return
         if peer_id in self._identify_inflight:
             return
+        # Check backoff: skip if this peer recently failed identify
+        import time as _time
+        last_fail = self._identify_failed.get(peer_id)
+        if last_fail is not None and (_time.monotonic() - last_fail) < self._IDENTIFY_BACKOFF_SECONDS:
+            return
         # Add to inflight before checks to prevent duplicate tasks
         self._identify_inflight.add(peer_id)
         if self._has_cached_protocols(peer_id):
@@ -1222,6 +1232,8 @@ class BasicHost(IHost):
             )
         except Exception as exc:
             logger.debug("Identify[%s]: error reading response: %s", reason, exc)
+            import time as _time
+            self._identify_failed[peer_id] = _time.monotonic()
             try:
                 await stream.reset()
             except Exception:
@@ -1231,6 +1243,8 @@ class BasicHost(IHost):
                 await stream.close()
             except Exception:
                 pass
+        # Clear failure record on success
+        self._identify_failed.pop(peer_id, None)
 
     async def _on_notifee_connected(self, conn: INetConn) -> None:
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
@@ -1251,6 +1265,8 @@ class BasicHost(IHost):
             return
         self._identified_peers.pop(peer_id, None)
         self._identify_inflight.discard(peer_id)
+        # Keep failure backoff across disconnects so we don't retry immediately
+        # on reconnect. The backoff expires naturally after IDENTIFY_BACKOFF_SECONDS.
         self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
