@@ -972,6 +972,9 @@ class BasicHost(IHost):
             if semaphore_acquired and semaphore_to_use is not None:
                 semaphore_to_use.release()
 
+        net_stream.set_protocol(selected_protocol)
+        return net_stream
+
     async def send_command(
         self,
         peer_id: ID,
