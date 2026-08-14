@@ -1,0 +1,1 @@
+Added an opt-in table-wide IP-group cap (``max_peers_per_subnet_table`` on ``RoutingTable``) limiting peers sharing one subnet across all k-buckets (issue #1421).
