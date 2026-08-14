@@ -41,7 +41,13 @@ def encode_uvarint(value: int) -> bytes:
 
 
 def decode_uvarint(data: bytes) -> int:
-    """Decode a varint from bytes."""
+    """
+    Decode a varint from bytes.
+
+    Raises ``ParseError`` if ``data`` is empty or ends mid-varint (its final
+    byte still has the continuation bit set), and ``ValueError`` if the value
+    exceeds 64 bits.
+    """
     if not data:
         raise ParseError("Unexpected end of data")
 
@@ -51,12 +57,14 @@ def decode_uvarint(data: bytes) -> int:
     for byte in data:
         result |= (byte & 0x7F) << shift
         if (byte & 0x80) == 0:
-            break
+            return result
         shift += 7
         if shift >= 64:
             raise ValueError("Varint too long")
 
-    return result
+    # The loop consumed every byte without finding a terminator: the final
+    # byte still had the continuation bit set, so the varint is truncated.
+    raise ParseError("truncated varint: missing terminating byte")
 
 
 def decode_varint_from_bytes(data: bytes) -> int:
@@ -68,7 +76,10 @@ async def decode_uvarint_from_stream(reader: Reader) -> int:
     """https://en.wikipedia.org/wiki/LEB128."""
     res = 0
     for shift in itertools.count(0, 7):
-        if shift > SHIFT_64_BIT_MAX:
+        # A canonical 64-bit uvarint is at most 10 bytes (shifts 0..63); a
+        # shift of SHIFT_64_BIT_MAX (70) means an 11th byte, which would encode
+        # a value > 64 bits. Reject it before reading rather than after.
+        if shift >= SHIFT_64_BIT_MAX:
             raise ParseError(
                 "Varint decoding error: integer exceeds maximum size of 64 bits."
             )
