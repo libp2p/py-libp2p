@@ -196,6 +196,16 @@ class RTRefreshManager:
                 f"duration: {duration:.2f}s"
             )
 
+            # Post-walk connection trim: random walk QUIC connections have served
+            # their purpose (DHT queries done). Close excess connections above the
+            # high-watermark immediately rather than waiting for the 600s QUIC idle
+            # timeout.  Each QUIC connection holds ~5MB of crypto/buffer state in
+            # aioquic, so 133 walk connections accumulate ~665MB that isn't freed
+            # until idle timeout fires — a memory leak pattern.
+            # The swarm's connection pruner respects "protected" peers so
+            # auto-connector's persistent connections won't be closed.
+            await self._trim_walk_connections()
+
             # Notify refresh completion
             for callback in self._refresh_done_callbacks:
                 try:
@@ -206,6 +216,26 @@ class RTRefreshManager:
         except Exception as e:
             logger.error(f"Routing table refresh failed: {e}")
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
+
+    async def _trim_walk_connections(self) -> None:
+        """Close connections above the high-watermark after a random walk.
+
+        The random walk may open many transient QUIC connections for DHT queries.
+        Each aioquic QuicConnection holds ~5MB of crypto/buffer state.  Without
+        explicit pruning they persist in memory until the 600-second idle timeout.
+        With 133 dials per walk (CONCURRENCY=3) that's ~665MB retained for 10min.
+
+        ConnectionPruner.maybe_prune_connections() sorts by: temp-entries first,
+        then lowest stream-count, then inbound direction.  Auto-connector outbound
+        connections are older with more stream history, so they survive pruning.
+        """
+        try:
+            network = self.host.get_network()  # type: ignore[attr-defined]
+            if hasattr(network, "connection_pruner") and network.connection_pruner:
+                await network.connection_pruner.maybe_prune_connections()
+                logger.debug("Post-walk connection prune complete")
+        except Exception as e:
+            logger.debug("Post-walk connection prune error (non-fatal): %s", e)
 
     def add_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when refresh completes."""
