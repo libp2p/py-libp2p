@@ -300,6 +300,16 @@ class KadDHT(Service):
         self._provider_rate_window = 10.0  # seconds
         self._provider_rate_max = 10  # max ADD_PROVIDER messages per window
 
+        # Concurrency limiter for inbound DHT stream handlers.
+        # Without this, 60+ simultaneous inbound streams (from a flood of Kubo
+        # connections) each spawn a handler task. At 60 concurrent tasks doing
+        # protobuf parse + routing table lookup + write the Python event loop
+        # saturates to 100% CPU and the node becomes functionally dead.
+        # Cap at 12: allows healthy DHT participation without overwhelming the
+        # single-threaded event loop. Excess streams are immediately reset per
+        # the Kademlia spec ("On any error, the stream is reset.").
+        self._inbound_limiter = trio.CapacityLimiter(12)
+
         # Last time we republished provider records
         self._last_provider_republish = time.time()
 
@@ -545,6 +555,22 @@ class KadDHT(Service):
         if self.mode == DHTMode.CLIENT:
             await stream.close()
             return
+
+        # Cap concurrent inbound handlers to prevent CPU saturation.
+        # If the limiter is full, reset the stream immediately — the remote
+        # will retry and we'll have capacity again shortly.
+        if self._inbound_limiter.borrowed_tokens >= self._inbound_limiter.total_tokens:
+            try:
+                await stream.reset()
+            except Exception:
+                pass
+            return
+
+        async with self._inbound_limiter:
+            await self._do_handle_stream(stream)
+
+    async def _do_handle_stream(self, stream: INetStream) -> None:
+        """Core DHT stream handler (called with inbound concurrency limiter held)."""
         peer_id = stream.muxed_conn.peer_id
         logger.debug(f"Received DHT stream from peer {peer_id}")
         # Peer initiated a KAD stream, so they MUST support KAD server mode
