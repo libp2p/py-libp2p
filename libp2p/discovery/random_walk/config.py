@@ -1,19 +1,21 @@
 from typing import Final
 
-# Timing constants (matching go-libp2p)
+# Timing constants
+# NOTE: go-libp2p defaults (CONCURRENCY=10, INTERVAL=60s) were designed for
+# multi-threaded Go. Python is single-threaded — 10 concurrent random walks
+# each dialing 20+ peers = 200 QUIC dials/minute → 100% CPU.
+# Reduced to safe levels for a Python single-threaded event loop.
 PEER_PING_TIMEOUT: Final[float] = 10.0  # seconds
 REFRESH_QUERY_TIMEOUT: Final[float] = 60.0  # seconds
-REFRESH_INTERVAL: Final[float] = 60.0  # 1 minute
+REFRESH_INTERVAL: Final[float] = 300.0  # 5 minutes (was 60s)
 SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD: Final[float] = 60.0  # 1 minute
 # Wall-clock cap for one full random-walk batch inside _do_refresh().
-# With RANDOM_WALK_CONCURRENCY=10 and REFRESH_QUERY_TIMEOUT=60 s the
-# cumulative worst-case without this guard is 10 × 60 = 600 s.
 REFRESH_TOTAL_TIMEOUT: Final[float] = 30.0  # seconds
 
 # Routing table thresholds
 MAX_N_BOOTSTRAPPERS: Final[int] = 2  # Maximum bootstrap peers to try
 
 # Random walk specific
-RANDOM_WALK_CONCURRENCY: Final[int] = 10  # Number of concurrent random walks
-RANDOM_WALK_ENABLED: Final[bool] = True  # Enable automatic random walks
+RANDOM_WALK_CONCURRENCY: Final[int] = 3   # 3 concurrent walks (was 10)
+RANDOM_WALK_ENABLED: Final[bool] = True
 RANDOM_WALK_RT_THRESHOLD: Final[int] = 20  # RT size threshold for peerstore fallback
