@@ -306,6 +306,26 @@ class Swarm(Service, INetworkService):
         self.tag_store = TagStore()
         self.register_notifee(TagStoreNotifee(self.tag_store))
 
+        # Inbound connection limiter — prevents the DHT query flood from overwhelming
+        # the event loop.  939 Kubo nodes connected in 5 minutes (3/sec) means
+        # 3 TLS+Yamux handshakes/sec which saturates the Python event loop at 100% CPU.
+        # Limit inbound slots to (max_connections - min_connections) so outbound
+        # auto-connector connections always have room.
+        # acquire_nowait() is synchronous (no await), so check+acquire is atomic
+        # in Trio's cooperative scheduler — no race condition.
+        _max_inbound = max(
+            1,
+            self.connection_config.max_connections
+            - self.connection_config.min_connections,
+        )
+        self._inbound_limiter = trio.CapacityLimiter(_max_inbound)
+        logger.debug(
+            "Inbound connection cap: %d (max_connections=%d, min_connections=%d)",
+            _max_inbound,
+            self.connection_config.max_connections,
+            self.connection_config.min_connections,
+        )
+
     def set_resource_manager(
         self,
         resource_manager: ResourceManager | None,
@@ -1655,6 +1675,35 @@ class Swarm(Service, INetworkService):
         # Metric event for inbound connection failure
         failure_event = SwarmEvent()
 
+        # --- Inbound connection cap (race-condition free) ---
+        # acquire_nowait() is synchronous: check+acquire with no intervening
+        # checkpoint so multiple concurrent coroutines cannot all pass.
+        # Releases automatically in the finally block when the connection ends.
+        try:
+            self._inbound_limiter.acquire_nowait()
+        except trio.WouldBlock:
+            logger.debug(
+                "Inbound connection cap (%d) reached; rejecting new inbound connection",
+                int(self._inbound_limiter.total_tokens),
+            )
+            try:
+                await read_write_closer.close()
+            except Exception:
+                pass
+            return
+
+        try:
+            await self._do_handle_inbound_connection(read_write_closer, maddr, failure_event)
+        finally:
+            self._inbound_limiter.release()
+
+    async def _do_handle_inbound_connection(
+        self,
+        read_write_closer: ReadWriteCloser,
+        maddr: Multiaddr,
+        failure_event: "SwarmEvent",
+    ) -> None:
+        """Inner inbound-connection handler, called after acquiring the inbound slot."""
         # Enforce connection gate on inbound connections.
         remote_maddr = self._build_remote_multiaddr(read_write_closer)
         logger.debug(
