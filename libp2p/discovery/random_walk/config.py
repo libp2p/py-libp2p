@@ -7,7 +7,7 @@ from typing import Final
 # Reduced to safe levels for a Python single-threaded event loop.
 PEER_PING_TIMEOUT: Final[float] = 10.0  # seconds
 REFRESH_QUERY_TIMEOUT: Final[float] = 60.0  # seconds
-REFRESH_INTERVAL: Final[float] = 300.0  # 5 minutes (was 60s)
+REFRESH_INTERVAL: Final[float] = 600.0  # 10 minutes (was 300s → halves burst frequency)
 SUCCESSFUL_OUTBOUND_QUERY_GRACE_PERIOD: Final[float] = 60.0  # 1 minute
 # Wall-clock cap for one full random-walk batch inside _do_refresh().
 REFRESH_TOTAL_TIMEOUT: Final[float] = 30.0  # seconds
