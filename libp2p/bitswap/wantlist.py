@@ -338,12 +338,17 @@ class BitswapMessage:
         if proto.HasField("wantlist") and proto.wantlist.entries:
             wl = Wantlist(full=proto.wantlist.full)
             for e in proto.wantlist.entries:
+                try:
+                    want_type = WantType(e.wantType)
+                except ValueError:
+                    # Unknown wantType from newer protocol version — default to Block
+                    want_type = WantType.Block
                 wl.entries.append(
                     WantlistEntry(
                         cid=bytes(e.block),
                         priority=e.priority,
                         cancel=e.cancel,
-                        want_type=WantType(e.wantType),
+                        want_type=want_type,
                         send_dont_have=e.sendDontHave,
                     )
                 )

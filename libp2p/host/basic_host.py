@@ -8,6 +8,7 @@ from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
 )
+from datetime import datetime, timezone
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -42,7 +43,10 @@ from libp2p.custom_types import (
     TProtocol,
 )
 from libp2p.discovery.bootstrap.bootstrap import BootstrapDiscovery
-from libp2p.discovery.mdns.mdns import MDNSDiscovery
+from libp2p.discovery.mdns.mdns import (
+    MDNSDiscovery,
+    create_mdns_discovery,
+)
 from libp2p.discovery.upnp.upnp import UpnpManager
 from libp2p.host.defaults import (
     get_default_protocols,
@@ -65,7 +69,9 @@ from libp2p.identity.identify.pb.identify_pb2 import (
 )
 from libp2p.identity.identify_push.identify_push import (
     ID_PUSH as IdentifyPushID,
-    _update_peerstore_from_identify,
+)
+from libp2p.identity.update import (
+    update_peerstore_from_identify,
 )
 from libp2p.peer.id import (
     ID,
@@ -73,7 +79,7 @@ from libp2p.peer.id import (
 from libp2p.peer.peerinfo import (
     PeerInfo,
 )
-from libp2p.peer.peerstore import create_signed_peer_record
+from libp2p.peer.peerstore import PeerStoreError, create_signed_peer_record
 from libp2p.protocol_muxer.exceptions import (
     MultiselectClientError,
     MultiselectError,
@@ -107,6 +113,8 @@ if TYPE_CHECKING:
         OrderedDict,
     )
 
+    from libp2p.network.tag_store import TagStore
+
 # Upon host creation, host takes in options,
 # including the list of addresses on which to listen.
 # Host then parses these options and delegates to its Network instance,
@@ -136,6 +144,7 @@ class _IdentifyNotifee(INotifee):
 
     def __init__(self, host: BasicHost):
         self._host_ref = weakref.ref(host)
+        self._push_identify_scheduled: bool = False
 
     async def connected(self, network: INetwork, conn: INetConn) -> None:
         host = self._host_ref()
@@ -156,7 +165,27 @@ class _IdentifyNotifee(INotifee):
         return None
 
     async def listen(self, network: INetwork, multiaddr: multiaddr.Multiaddr) -> None:
-        return None
+        host = self._host_ref()
+        if host is None:
+            return
+        # Debounce: when multiple addresses are bound in rapid succession,
+        # only push identify once after the current batch completes.
+        if self._push_identify_scheduled:
+            return
+        self._push_identify_scheduled = True
+
+        async def _deferred_push() -> None:
+            # Yield control so all listen() calls in the current batch complete
+            await trio.sleep(0)
+            self._push_identify_scheduled = False
+            h = self._host_ref()
+            if h is not None:
+                try:
+                    await h._push_identify_to_all_peers()
+                except Exception:
+                    pass  # Best-effort; don't crash the notifee chain
+
+        trio.lowlevel.spawn_system_task(_deferred_push)
 
     async def listen_close(
         self, network: INetwork, multiaddr: multiaddr.Multiaddr
@@ -252,7 +281,7 @@ class BasicHost(IHost):
         self.multiselect_client = MultiselectClient()
         self.mDNS = None
         if enable_mDNS:
-            self.mDNS = MDNSDiscovery(network)
+            self.mDNS = create_mdns_discovery(network, host=self)
 
         # Initialize bootstrap discovery container. Keep attribute defined so
         # we can avoid hasattr checks elsewhere.
@@ -291,7 +320,8 @@ class BasicHost(IHost):
 
         # Automatic identify coordination
         self._identify_inflight: set[ID] = set()
-        self._identified_peers: set[ID] = set()
+        self._identified_peers: dict[ID, str] = {}
+        self._identify_tasks: set[trio.CancelScope] = set()
         self._network.register_notifee(_IdentifyNotifee(self))
 
         # Metrics
@@ -320,6 +350,26 @@ class BasicHost(IHost):
         :return: peerstore of the host (same one as in its network instance)
         """
         return self.peerstore
+
+    @property
+    def conn_manager(self) -> TagStore:
+        """
+        Return the connection manager (TagStore) from the underlying network.
+
+        Delegates to the Swarm's tag_store, the same object — not a copy.
+        Protocol code can use ``host.conn_manager.tag_peer(...)`` without
+        navigating ``host.get_network().tag_store``, matching go-libp2p's
+        ``h.ConnManager()`` accessor.
+
+        Returns
+        -------
+        TagStore
+            The tag store managing peer priorities and protections.
+
+        """
+        from libp2p.network.tag_store import TagStore  # noqa: F401 (type reference)
+
+        return self._network.tag_store  # type: ignore[attr-defined]
 
     def _detect_negotiate_timeout_from_transport(self) -> float | None:
         """
@@ -480,11 +530,13 @@ class BasicHost(IHost):
                     logger.debug("Starting Bootstrap Discovery")
                     await self.bootstrap.start()
 
-                try:
-                    yield
-                finally:
-                    if self.mDNS is not None:
-                        self.mDNS.stop()
+                async with trio.open_nursery() as nursery:
+                    try:
+                        yield
+                    finally:
+                        nursery.cancel_scope.cancel()
+                        if self.mDNS is not None:
+                            self.mDNS.stop()
                     if self.upnp and self.upnp.get_external_ip():
                         upnp_manager = self.upnp
                         logger.debug("Removing UPnP port mappings")
@@ -990,57 +1042,13 @@ class BasicHost(IHost):
             # Kick off identify in the background so protocol caching can engage.
             self._schedule_identify(peer_info.peer_id, reason="connect")
 
-    async def _run_identify(self, peer_id: ID) -> None:
-        """
-        Run identify protocol with a peer to discover supported protocols.
-
-        This method opens an identify stream, receives the peer's information,
-        and stores the supported protocols in the peerstore for later use.
-        This enables protocol caching to skip multiselect negotiation.
-
-        :param peer_id: ID of the peer to identify
-        """
-        try:
-            # Import here to avoid circular dependency
-            from libp2p.identity.identify.identify import (
-                ID as IDENTIFY_ID,
-            )
-            from libp2p.identity.identify_push.identify_push import (
-                _update_peerstore_from_identify,
-                read_length_prefixed_protobuf,
-            )
-
-            # Open identify stream (this will use multiselect negotiation)
-            stream = await self.new_stream(peer_id, [IDENTIFY_ID])
-
-            # Read identify response (length-prefixed protobuf)
-            response = await read_length_prefixed_protobuf(
-                stream, use_varint_format=True
-            )
-            await stream.close()
-
-            # Parse the identify message
-            from libp2p.identity.identify.pb.identify_pb2 import Identify
-
-            identify_msg = Identify()
-            identify_msg.ParseFromString(response)
-
-            # Store protocols in peerstore
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-
-            logger.debug(
-                f"Identify completed for peer {peer_id}, "
-                f"protocols: {list(identify_msg.protocols)}"
-            )
-        except Exception as e:
-            # Don't fail the connection if identify fails
-            # Protocol caching just won't be available for this peer
-            logger.debug(f"Failed to run identify for peer {peer_id}: {e}")
-
     async def disconnect(self, peer_id: ID) -> None:
         await self._network.close_peer(peer_id)
 
     async def close(self) -> None:
+        for cs in self._identify_tasks:
+            cs.cancel()
+        self._identify_tasks.clear()
         await self._network.close()
 
     def _schedule_identify(self, peer_id: ID, *, reason: str) -> None:
@@ -1048,16 +1056,29 @@ class BasicHost(IHost):
         Ensure identify is running for `peer_id`. If a task is already running or
         cached protocols exist, this is a no-op.
         """
-        if (
-            peer_id == self.get_id()
-            or self._has_cached_protocols(peer_id)
-            or peer_id in self._identify_inflight
-        ):
+        if peer_id == self.get_id():
+            return
+        if peer_id in self._identify_inflight:
+            return
+        # Add to inflight before checks to prevent duplicate tasks
+        self._identify_inflight.add(peer_id)
+        if self._has_cached_protocols(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
         if not self._should_identify_peer(peer_id):
+            self._identify_inflight.discard(peer_id)
             return
-        self._identify_inflight.add(peer_id)
-        trio.lowlevel.spawn_system_task(self._identify_task_entry, peer_id, reason)
+        cs = trio.CancelScope()
+        self._identify_tasks.add(cs)
+
+        async def _tracked_identify() -> None:
+            with cs:
+                try:
+                    await self._identify_task_entry(peer_id, reason)
+                finally:
+                    self._identify_tasks.discard(cs)
+
+        trio.lowlevel.spawn_system_task(_tracked_identify)
 
     async def _identify_task_entry(self, peer_id: ID, reason: str) -> None:
         try:
@@ -1078,7 +1099,14 @@ class BasicHost(IHost):
                 return False
             supported = self.peerstore.supports_protocols(peer_id, cacheable)
             return bool(supported)
+        except PeerStoreError:
+            return False
         except Exception:
+            logger.debug(
+                "Unexpected error checking cached protocols for %s",
+                peer_id,
+                exc_info=True,
+            )
             return False
 
     async def _identify_peer(self, peer_id: ID, *, reason: str) -> None:
@@ -1094,7 +1122,8 @@ class BasicHost(IHost):
         event_started = getattr(swarm_conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
             try:
-                await event_started.wait()
+                with trio.fail_after(5.0):
+                    await event_started.wait()
             except Exception:
                 return
 
@@ -1105,11 +1134,21 @@ class BasicHost(IHost):
             return
 
         try:
-            data = await read_length_prefixed_protobuf(stream, use_varint_format=True)
+            with trio.fail_after(10.0):
+                try:
+                    data = await read_length_prefixed_protobuf(
+                        stream, use_varint_format=True
+                    )
+                except Exception:
+                    # Remote may use legacy raw protobuf format
+                    data = await stream.read()
             identify_msg = IdentifyMsg()
             identify_msg.ParseFromString(data)
-            await _update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
-            self._identified_peers.add(peer_id)
+            await update_peerstore_from_identify(self.peerstore, peer_id, identify_msg)
+            # Only mark as identified if still connected (avoid stale entries)
+            if self._network.get_connections(peer_id):
+                ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+                self._identified_peers[peer_id] = ts
 
             if identify_msg.HasField("observed_addr") and identify_msg.observed_addr:
                 try:
@@ -1182,7 +1221,8 @@ class BasicHost(IHost):
         event_started = getattr(conn, "event_started", None)
         if event_started is not None and not event_started.is_set():
             try:
-                await event_started.wait()
+                with trio.fail_after(5.0):
+                    await event_started.wait()
             except Exception:
                 return
         self._schedule_identify(peer_id, reason="notifee-connected")
@@ -1191,7 +1231,8 @@ class BasicHost(IHost):
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
         if peer_id is None:
             return
-        self._identified_peers.discard(peer_id)
+        self._identified_peers.pop(peer_id, None)
+        self._identify_inflight.discard(peer_id)
         self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:
@@ -1199,6 +1240,24 @@ class BasicHost(IHost):
         if connections:
             return connections[0]
         return None
+
+    async def _push_identify_to_all_peers(self) -> None:
+        """
+        Push identify updates to all connected peers.
+
+        Called when the host's addresses or protocols change, per the
+        identify/push spec: ``When a peer's basic information changes, for
+        example, because they've obtained a new public listen address, they
+        can use identify/push to inform others about the new information.``
+        """
+        from libp2p.identity.identify_push.identify_push import (
+            push_identify_to_peers,
+        )
+
+        try:
+            await push_identify_to_peers(self)
+        except Exception:
+            pass  # Best-effort push; don't crash the host
 
     def _should_identify_peer(self, peer_id: ID) -> bool:
         """
