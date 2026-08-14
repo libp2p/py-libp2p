@@ -480,12 +480,17 @@ class QUICTransport(ITransport):
     async def _cleanup_terminated_connection(
         self, connection: "QUICConnection"
     ) -> None:
-        """Clean up a terminated connection from all listeners."""
+        """Clean up a terminated connection from transport and all listeners."""
         try:
+            # Remove from transport connection tracking
+            keys_to_remove = [k for k, v in self._connections.items() if v == connection]
+            for k in keys_to_remove:
+                self._connections.pop(k, None)
+
             for listener in self._listeners:
                 await listener._remove_connection_by_object(connection)
             logger.debug(
-                "✅ TRANSPORT: Cleaned up terminated connection from all listeners"
+                "✅ TRANSPORT: Cleaned up terminated connection from transport and all listeners"
             )
         except Exception as e:
             logger.error(f"❌ TRANSPORT: Error cleaning up terminated connection: {e}")

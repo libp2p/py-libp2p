@@ -189,6 +189,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         # Background task management
         self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
+        self._cancel_scope: trio.CancelScope = trio.CancelScope()
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
@@ -479,11 +480,20 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         self._background_tasks_started = True
 
-        if self._is_initiator:
-            self._nursery.start_soon(async_fn=self._client_packet_receiver)
+        async def _run_scoped(fn: Callable[[], Awaitable[None]]) -> None:
+            try:
+                with self._cancel_scope:
+                    await fn()
+            except trio.Cancelled:
+                pass
+            except Exception as e:
+                logger.debug(f"QUIC background task exited: {e}")
 
-        self._nursery.start_soon(async_fn=self._event_processing_loop)
-        self._nursery.start_soon(async_fn=self._periodic_maintenance)
+        if self._is_initiator:
+            self._nursery.start_soon(_run_scoped, self._client_packet_receiver)
+
+        self._nursery.start_soon(_run_scoped, self._event_processing_loop)
+        self._nursery.start_soon(_run_scoped, self._periodic_maintenance)
 
         logger.debug("Started background tasks for QUIC connection")
 
@@ -1674,6 +1684,17 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._streams.clear()
             self._stream_cache.clear()  # Clear cache
             self._closed_event.set()
+
+            # Immediately cancel background tasks (receiver, event loop, maintenance)
+            if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+                self._cancel_scope.cancel()
+
+            # Always notify parent transport and listener to remove this connection
+            # from their connection tracking dictionaries to prevent memory leaks.
+            try:
+                await self._notify_parent_of_termination()
+            except Exception as e:
+                logger.debug(f"Error notifying parent of connection termination: {e}")
 
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 

@@ -108,6 +108,15 @@ class ConnectionIDRegistry:
         # Lock for thread-safe operations
         self._lock = lock
 
+    def _record_timing(self, op: str, duration: float) -> None:
+        """Record operation timing only when debug timing is enabled, bounded."""
+        if not self._debug_timing:
+            return
+        times = self._operation_timings[op]
+        if len(times) >= 100:
+            times.pop(0)
+        times.append(duration)
+
     async def find_by_connection_id(  # pyrefly: ignore[bad-return]
         self, connection_id: bytes, is_initial: bool = False
     ) -> tuple["QUICConnection | None", "QuicConnection | None", bool]:
@@ -184,7 +193,7 @@ class ConnectionIDRegistry:
                     )
 
                 # Track operation timing
-                self._operation_timings["find_by_connection_id"].append(total_duration)
+                self._record_timing("find_by_connection_id", total_duration)
 
                 return result
             finally:
@@ -260,9 +269,7 @@ class ConnectionIDRegistry:
                             )
 
                         # Track operation timing
-                        self._operation_timings["find_by_address"].append(
-                            total_duration
-                        )
+                        self._record_timing("find_by_address", total_duration)
                         self._fallback_routing_count += 1
 
                         return (connection, original_connection_id)
@@ -294,9 +301,7 @@ class ConnectionIDRegistry:
                             )
 
                         # Track operation timing
-                        self._operation_timings["find_by_address"].append(
-                            total_duration
-                        )
+                        self._record_timing("find_by_address", total_duration)
 
                         return (None, None)
 
@@ -334,7 +339,7 @@ class ConnectionIDRegistry:
                         )
 
                     # Track operation timing
-                    self._operation_timings["find_by_address"].append(total_duration)
+                    self._record_timing("find_by_address", total_duration)
                     return (connection, original_connection_id)
 
                 # Not found
@@ -361,7 +366,7 @@ class ConnectionIDRegistry:
                     )
 
                 # Track operation timing
-                self._operation_timings["find_by_address"].append(total_duration)
+                self._record_timing("find_by_address", total_duration)
 
                 return (None, None)
             finally:
@@ -444,7 +449,7 @@ class ConnectionIDRegistry:
                         f"{connection_id.hex()[:8]}"
                     )
 
-                self._operation_timings["register_connection"].append(total_duration)
+                self._record_timing("register_connection", total_duration)
             finally:
                 self._lock_stats["current_holds"] -= 1
 
@@ -507,7 +512,7 @@ class ConnectionIDRegistry:
                         f"{connection_id.hex()[:8]}"
                     )
 
-                self._operation_timings["register_pending"].append(total_duration)
+                self._record_timing("register_pending", total_duration)
             finally:
                 self._lock_stats["current_holds"] -= 1
 
@@ -598,7 +603,7 @@ class ConnectionIDRegistry:
                         f"for Connection ID {new_connection_id.hex()[:8]}"
                     )
 
-                self._operation_timings["add_connection_id"].append(total_duration)
+                self._record_timing("add_connection_id", total_duration)
             finally:
                 self._lock_stats["current_holds"] -= 1
 
@@ -730,7 +735,7 @@ class ConnectionIDRegistry:
                         f"{connection_id.hex()[:8]}"
                     )
 
-                self._operation_timings["remove_connection_id"].append(total_duration)
+                self._record_timing("remove_connection_id", total_duration)
 
                 return addr
             finally:

@@ -1352,9 +1352,8 @@ class QUICListener(IListener):
                     # Receive UDP packet
                     data, addr = await self._socket.recvfrom(65536)
 
-                    # Process packet asynchronously
-                    if self._nursery:
-                        self._nursery.start_soon(self._process_packet, data, addr)
+                    # Process packet directly in the event loop
+                    await self._process_packet(data, addr)
 
                 except trio.ClosedResourceError:
                     logger.debug("Socket closed, exiting packet handler")
