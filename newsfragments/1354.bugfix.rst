@@ -1,0 +1,1 @@
+Hardened the WebRTC Direct ``POST /sdp`` dev-harness HTTP server against memory-amplification DoS: bounded ``Content-Length`` to 32 KiB (returns 413 on excess), rejected negative/non-integer values with 400, and capped header parsing at 64 lines / 8 KiB to prevent indefinite task hold via slow header flooding.
