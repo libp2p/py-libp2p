@@ -1322,8 +1322,16 @@ class KadDHT(Service):
                 if stream.metric_send_channel is not None:
                     await stream.metric_send_channel.send(event)
 
+        except (trio.ClosedResourceError, trio.BrokenResourceError) as e:
+            # Peer disconnected mid-stream — normal P2P behaviour, not a bug.
+            logger.debug("DHT stream closed by peer: %s(%s)", type(e).__name__, e)
         except Exception as e:
-            logger.error(f"Error handling DHT stream: {e}")
+            logger.error(
+                "Error handling DHT stream: %s(%s)",
+                type(e).__name__,
+                e,
+                exc_info=True,
+            )
             # Per spec: "On any error, the stream is reset."
             try:
                 await stream.reset()

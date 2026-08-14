@@ -1163,6 +1163,9 @@ class BasicHost(IHost):
             # common failure path). Without this, identify retries immediately
             # on every auto-connector reconnect cycle → 22 concurrent 10-second
             # timeout tasks → 100% CPU busy-loop.
+            # NOTE: _time is imported inline below (line 1180+), so Python makes
+            # it a local variable for the whole function. We must import before use.
+            import time as _time
             self._identify_failed[peer_id] = _time.monotonic()
             return
 
