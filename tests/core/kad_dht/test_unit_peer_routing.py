@@ -25,6 +25,9 @@ import varint
 from libp2p.crypto.secp256k1 import (
     create_new_key_pair,
 )
+from libp2p.kad_dht.common import (
+    QUERY_TIMEOUT,
+)
 from libp2p.kad_dht.pb.kademlia_pb2 import (
     Message,
 )
@@ -454,6 +457,37 @@ class TestPeerRouting:
 
         assert result == []
         mock_stream.close.assert_called_once()
+
+    @pytest.mark.trio
+    async def test_query_single_peer_times_out_on_silent_peer(
+        self, peer_routing, mock_host, sample_peer_info, autojump_clock
+    ):
+        """
+        A peer that opens the stream but never replies must not hang the query.
+
+        Without a per-query timeout, ``stream.read`` blocks forever and the
+        lookup nursery never completes. The bounded query should give up after
+        ``QUERY_TIMEOUT`` and append nothing.
+        """
+        target_key = b"target_key"
+
+        async def _never_returns(*args, **kwargs):
+            await trio.sleep_forever()
+
+        mock_stream = AsyncMock()
+        mock_stream.read.side_effect = _never_returns
+        mock_host.new_stream.return_value = mock_stream
+        mock_host.get_peerstore().addrs.return_value = [sample_peer_info.addrs[0]]
+
+        new_peers: list[ID] = []
+        # Outer guard well above QUERY_TIMEOUT; with autojump_clock this resolves
+        # in virtual time. If the query is unbounded, this fail_after trips.
+        with trio.fail_after(QUERY_TIMEOUT + 30):
+            await peer_routing._query_single_peer_for_closest(
+                sample_peer_info.peer_id, target_key, new_peers
+            )
+
+        assert new_peers == []
 
     @pytest.mark.trio
     async def test_refresh_routing_table(self, peer_routing, mock_host):
