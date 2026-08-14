@@ -260,9 +260,11 @@ class ConnectionPruner:
         # Sort connections for pruning
         sorted_connections = self.sort_connections(connections, peer_values)
 
-        # Prune down to low_watermark (not high_watermark)
-        # This avoids thrashing between high and low watermark
-        to_prune = max(num_connections - low_watermark, 0)
+        # Prune down towards low_watermark in bounded batches (max 20 per cycle)
+        # to prevent sudden connection cliffs and network degradation.
+        raw_to_prune = max(num_connections - low_watermark, 0)
+        max_prune_batch = 20
+        to_prune = min(raw_to_prune, max_prune_batch)
         to_close: list[INetConn] = []
 
         for connection in sorted_connections:
@@ -285,6 +287,28 @@ class ConnectionPruner:
                 logger.debug(
                     "Skipping connection to %s - within grace period",
                     conn_peer_id,
+                )
+                continue
+
+            # 1. Skip connections that currently have active multiplexed streams (never interrupt live traffic)
+            try:
+                streams = connection.get_streams()
+                if streams and len(streams) > 0:
+                    logger.debug(
+                        "Skipping connection to %s - has %d active streams",
+                        conn_peer_id,
+                        len(streams),
+                    )
+                    continue
+            except Exception:
+                pass
+
+            # 2. Skip peers with positive tag score (preserve valued routing/bitswap peers)
+            if conn_peer_id is not None and peer_values.get(conn_peer_id, 0) > 0:
+                logger.debug(
+                    "Skipping connection to %s - positive tag score (%d)",
+                    conn_peer_id,
+                    peer_values[conn_peer_id],
                 )
                 continue
 
