@@ -1445,8 +1445,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     scope.release()
                 elif hasattr(scope, "done"):
                     scope.done()
-                self._resource_scope = None
         except Exception as e:
+            logger.debug(f"Error releasing resource scope: {e}")
+
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
 
