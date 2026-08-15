@@ -929,8 +929,12 @@ class BitswapClient(INotifee):
                             presences_to_send.append((entry_cid, False))
 
         # Send responses in batches to stay under MAX_MESSAGE_SIZE
-        # and Noise protocol limit (65535 bytes)
-        if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
+        # and Noise protocol limit (65535 bytes).
+        # Only open an expensive outbound dial-back stream if we ACTUALLY have
+        # blocks to deliver. For DontHave presences, reply inline on the existing
+        # inbound stream so we do not spam thousands of outbound streams to peers.
+        has_actual_blocks = bool(blocks_to_send_v100 or blocks_to_send_v110)
+        if has_actual_blocks:
             if self._nursery is not None:
                 try:
                     self._nursery.start_soon(
@@ -949,9 +953,6 @@ class BitswapClient(INotifee):
                     else:
                         raise
             else:
-                # Fallback to writing to the inbound stream if nursery is not available.
-                # This works for Python-to-Python tests, but may fail for
-                # Go-libp2p interop.
                 await self._send_wantlist_responses_inline(
                     stream,
                     peer_id,
@@ -959,6 +960,17 @@ class BitswapClient(INotifee):
                     blocks_to_send_v110,
                     presences_to_send,
                 )
+        elif presences_to_send:
+            try:
+                await self._send_wantlist_responses_inline(
+                    stream,
+                    peer_id,
+                    [],
+                    [],
+                    presences_to_send,
+                )
+            except Exception:
+                pass
 
     async def _send_wantlist_responses_bg(
         self,
