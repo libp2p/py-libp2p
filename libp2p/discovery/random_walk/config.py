@@ -16,6 +16,6 @@ REFRESH_TOTAL_TIMEOUT: Final[float] = 30.0  # seconds
 MAX_N_BOOTSTRAPPERS: Final[int] = 2  # Maximum bootstrap peers to try
 
 # Random walk specific
-RANDOM_WALK_CONCURRENCY: Final[int] = 10  # Standard libp2p spec concurrency
+RANDOM_WALK_CONCURRENCY: Final[int] = 3  # Safe concurrency for Python async event loop
 RANDOM_WALK_ENABLED: Final[bool] = True
 RANDOM_WALK_RT_THRESHOLD: Final[int] = 20  # RT size threshold for peerstore fallback
