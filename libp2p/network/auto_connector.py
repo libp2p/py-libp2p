@@ -276,23 +276,34 @@ class AutoConnector:
                 min_connections,
             )
 
-            # Only connect if below low watermark (counting in-flight dials)
-            if num_connections + in_flight >= low_watermark:
+            # Calculate target connections within [low_watermark, high_watermark]
+            # Aim for midpoint between low and high watermarks (e.g. 400 when range is 300-500)
+            # so connections stay comfortably above the floor without hitting the pruning ceiling.
+            high_watermark = getattr(
+                self.swarm.connection_config, "high_watermark", low_watermark
+            )
+            if high_watermark > low_watermark:
+                target = int((low_watermark + high_watermark) / 2)
+            else:
+                target = low_watermark
+
+            # Only connect if below target (counting in-flight dials)
+            if num_connections + in_flight >= target:
                 return
 
-            # Calculate how many connections we need
-            target = low_watermark
             needed = target - (num_connections + in_flight)
 
             if needed <= 0:
                 return
 
             logger.info(
-                "the connection (%s, in_flight=%s) is less the low limit (%s) "
-                "so connection manager is initiating %s number of new connections",
+                "Connections (%s, in_flight=%s) below target (%s, low_water=%s, high_water=%s); "
+                "initiating %s new dials",
                 num_connections,
                 in_flight,
+                target,
                 low_watermark,
+                high_watermark,
                 needed,
             )
 
@@ -306,14 +317,9 @@ class AutoConnector:
             # Shuffle to randomize connection order
             random.shuffle(candidates)
 
-            # Try to connect to candidates
-            # We limit concurrency to prevent CPU saturation from simultaneous
-            # TLS handshakes while maintaining sufficient throughput to reach
-            # and sustain 300–500 peer watermarks.
-            dial_limiter = trio.CapacityLimiter(30)
-
-            # Cap the number of dials started per cycle.
-            max_dials_per_cycle = 60
+            # Concurrency limiter and dial batch sizing to comfortably reach 300-500 peers
+            dial_limiter = trio.CapacityLimiter(40)
+            max_dials_per_cycle = 80
 
             # Skip peers whose dial attempts have failed too recently (cooldown).
             # This also bounds per-cycle work when the peerstore is dominated by
