@@ -1447,10 +1447,29 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     scope.done()
                 self._resource_scope = None
         except Exception as e:
-            logger.debug(f"Error releasing resource scope: {e}")
-
         self._stream_accept_event.set()
         logger.debug(f"Woke up pending accept_stream() calls, {id(self)}")
+
+        # Ensure socket is closed immediately on connection termination
+        if self._socket and self._owns_socket:
+            try:
+                self._socket.close()
+            except Exception:
+                pass
+            self._socket = None
+
+        # Cancel background tasks
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
+        if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
+            try:
+                self._cancel_scope.cancel()
+            except Exception:
+                pass
 
         await self._notify_parent_of_termination()
 
@@ -1634,6 +1653,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
     async def close(self) -> None:
         """Connection close with proper stream cleanup."""
         if self._closed:
+            if self._socket and self._owns_socket:
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
+                self._socket = None
             return
 
         self._closed = True
