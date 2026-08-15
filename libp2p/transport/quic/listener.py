@@ -710,6 +710,7 @@ class QUICListener(IListener):
         try:
             # Feed data to the connection's QUIC instance
             connection._quic.receive_datagram(data, addr, now=time.time())
+            connection._signal_activity()
             await connection._process_quic_events_batched()
             await connection._transmit()
 
@@ -1267,6 +1268,7 @@ class QUICListener(IListener):
                 self._listening = True
 
                 self._nursery.start_soon(self._handle_incoming_packets)
+                self._nursery.start_soon(self._periodic_cleanup_loop)
                 logger.info(
                     f"QUIC listener started on {bound_maddr} with connection ID support"
                 )
@@ -1299,6 +1301,7 @@ class QUICListener(IListener):
                         self._listening = True
 
                         inner_nursery.start_soon(self._handle_incoming_packets)
+                        inner_nursery.start_soon(self._periodic_cleanup_loop)
                         logger.info(
                             f"QUIC listener started on {bound_maddr} "
                             "with connection ID support"
@@ -1373,6 +1376,24 @@ class QUICListener(IListener):
             raise
         finally:
             logger.debug("Enhanced packet handling loop terminated")
+
+    async def _periodic_cleanup_loop(self) -> None:
+        """Periodically clean up stale pending handshakes and tracking state."""
+        try:
+            while self._listening:
+                await trio.sleep(10.0)
+                await self._registry.cleanup_stale_pending(max_age=15.0)
+                async with self._promotion_lock:
+                    active_keys = set(self._pending_cid_by_quic_id.keys()) | set(
+                        self._conn_by_quic_id.keys()
+                    )
+                    stale_keys = [
+                        k for k in self._promotion_locks if k not in active_keys
+                    ]
+                    for k in stale_keys:
+                        self._promotion_locks.pop(k, None)
+        except trio.Cancelled:
+            pass
 
     async def close(self) -> None:
         """Close the listener and clean up resources."""

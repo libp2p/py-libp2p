@@ -56,6 +56,7 @@ class ConnectionIDRegistry:
 
         # Pending connections: Connection ID -> QuicConnection (aioquic)
         self._pending: dict[bytes, "QuicConnection"] = {}
+        self._pending_created_at: dict[bytes, float] = {}
 
         # Connection ID -> address mapping
         self._connection_id_to_addr: dict[bytes, tuple[str, int]] = {}
@@ -482,7 +483,26 @@ class ConnectionIDRegistry:
             hold_start = time.time()
 
             try:
+                # Cap pending handshakes to prevent memory accumulation from scans
+                if len(self._pending) >= 256 and self._pending_created_at:
+                    oldest_cid = min(
+                        self._pending_created_at,
+                        key=lambda k: self._pending_created_at[k],
+                    )
+                    self._pending.pop(oldest_cid, None)
+                    self._pending_created_at.pop(oldest_cid, None)
+                    self._initial_connection_ids.pop(oldest_cid, None)
+                    oldest_addr = self._connection_id_to_addr.pop(oldest_cid, None)
+                    if (
+                        oldest_addr
+                        and self._addr_to_connection_id.get(oldest_addr) == oldest_cid
+                    ):
+                        self._addr_to_connection_id.pop(oldest_addr, None)
+                    self._connection_id_sequences.pop(oldest_cid, None)
+                    self._connection_sequence_counters.pop(oldest_cid, None)
+
                 self._pending[connection_id] = quic_conn
+                self._pending_created_at[connection_id] = time.time()
                 self._connection_id_to_addr[connection_id] = addr
                 self._addr_to_connection_id[addr] = connection_id
 
@@ -751,6 +771,7 @@ class ConnectionIDRegistry:
         """
         async with self._lock:
             self._pending.pop(connection_id, None)
+            self._pending_created_at.pop(connection_id, None)
             addr = self._connection_id_to_addr.pop(connection_id, None)
             if addr:
                 if self._addr_to_connection_id.get(addr) == connection_id:
@@ -819,6 +840,7 @@ class ConnectionIDRegistry:
             self._initial_connection_ids.pop(connection_id, None)
             # Remove from pending
             self._pending.pop(connection_id, None)
+            self._pending_created_at.pop(connection_id, None)
 
             # Add to established (may already exist, that's OK)
             if connection_id in self._connections:
@@ -953,6 +975,32 @@ class ConnectionIDRegistry:
         """
         async with self._lock:
             return list(self._connections.keys())
+
+    async def cleanup_stale_pending(self, max_age: float = 15.0) -> list[bytes]:
+        """
+        Clean up pending connections that exceeded handshake timeout.
+
+        Returns:
+            List of removed Connection IDs.
+
+        """
+        async with self._lock:
+            now = time.time()
+            stale_cids = [
+                cid
+                for cid, created_at in self._pending_created_at.items()
+                if now - created_at > max_age
+            ]
+            for cid in stale_cids:
+                self._pending.pop(cid, None)
+                self._pending_created_at.pop(cid, None)
+                self._initial_connection_ids.pop(cid, None)
+                addr = self._connection_id_to_addr.pop(cid, None)
+                if addr and self._addr_to_connection_id.get(addr) == cid:
+                    self._addr_to_connection_id.pop(addr, None)
+                self._connection_id_sequences.pop(cid, None)
+                self._connection_sequence_counters.pop(cid, None)
+            return stale_cids
 
     async def get_all_pending_cids(self) -> list[bytes]:
         """

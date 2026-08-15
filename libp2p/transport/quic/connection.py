@@ -194,6 +194,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
+        self._activity_event: trio.Event = trio.Event()
 
         self._available_connection_ids: set[bytes] = set()
         self._current_connection_id: bytes | None = None
@@ -503,6 +504,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
         logger.debug("Started background tasks for QUIC connection")
 
+    def _signal_activity(self) -> None:
+        """Signal that new datagram or stream activity occurred."""
+        if hasattr(self, "_activity_event") and not self._activity_event.is_set():
+            self._activity_event.set()
+
     async def _event_processing_loop(self) -> None:
         """Main event processing loop for the connection."""
         logger.debug(
@@ -513,7 +519,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             while not self._closed:
                 # Batch process events - returns True if events were processed
-                events_processed = await self._process_quic_events_batched()
+                await self._process_quic_events_batched()
 
                 # Handle timer events
                 await self._handle_timer_events()
@@ -521,42 +527,22 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Transmit any pending data
                 await self._transmit()
 
-                if events_processed:
-                    # Bound the processing rate.  aioquic can generate events
-                    # as fast as we consume them (handshakes, flow-control
-                    # updates, acks), and the previous zero-sleep yield let
-                    # every active connection spin the trio event loop at
-                    # 100% CPU — with dozens of in-flight handshakes that
-                    # saturates the core, starves established connections,
-                    # and peers drop.  A 1ms breather keeps latency low
-                    # without busy-spinning.
-                    await trio.sleep(_ACTIVE_POLL_INTERVAL)
+                # Calculate next sleep duration based on pending aioquic timer
+                timer = self._quic.get_timer()
+                now = time.time()
+                if timer is not None and timer > now:
+                    delay = min(timer - now, _IDLE_POLL_INTERVAL)
                 else:
-                    # Timer-aware idle sleep: sleep until the next aioquic
-                    # timer deadline (ack / loss-detection / pacing) if one is
-                    # pending, capped by _IDLE_POLL_INTERVAL.  Fully idle
-                    # connections (``get_timer()`` returns None) sleep the
-                    # whole interval instead of waking 100-1000x/sec — the
-                    # dominant source of timer-heap churn once the node holds
-                    # hundreds of idle connections.  Inbound datagrams are
-                    # fed directly by the listener / packet receiver, so the
-                    # idle poll only needs to pick up queued events promptly.
-                    timer = self._quic.get_timer()
-                    if timer is not None:
-                        # Clamp to at least _ACTIVE_POLL_INTERVAL so a timer
-                        # that aioquic keeps reporting as due (e.g. a blocked
-                        # sender) can never degrade into a sleep(0) busy-spin.
-                        delay = min(
-                            max(timer - time.time(), _ACTIVE_POLL_INTERVAL),
-                            _IDLE_POLL_INTERVAL,
-                        )
-                    else:
-                        delay = _IDLE_POLL_INTERVAL
-                    await trio.sleep(delay)
+                    delay = _IDLE_POLL_INTERVAL
+
+                with trio.move_on_after(delay):
+                    await self._activity_event.wait()
+                self._activity_event = trio.Event()
 
         except Exception as e:
-            logger.error(f"Error in event processing loop: {e}")
-            await self._handle_connection_error(e)
+            if not self._closed:
+                logger.error(f"Error in event processing loop: {e}")
+                await self._handle_connection_error(e)
         finally:
             logger.debug("QUIC event processing loop finished")
 
@@ -607,6 +593,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                     # Feed packet to QUIC connection
                     self._quic.receive_datagram(data, addr, now=time.time())
+                    self._signal_activity()
 
                     # Batch process events
                     await self._process_quic_events_batched()
