@@ -333,8 +333,8 @@ class PeerStore(IPeerStore):
 
     def clear_protocol_data(self, peer_id: ID) -> None:
         """Clears prtocoldata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_protocol_data()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_protocol_data()
 
     # ------METADATA---------
 
@@ -364,8 +364,8 @@ class PeerStore(IPeerStore):
 
     def clear_metadata(self, peer_id: ID) -> None:
         """Clears metadata"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metadata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metadata()
 
     # -----CERT-ADDR-BOOK-----
 
@@ -558,7 +558,7 @@ class PeerStore(IPeerStore):
         :param pubkey:
         :raise PeerStoreError: if peer ID and pubkey does not match
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(pubkey) != peer_id:
             raise PeerStoreError("peer ID and pubkey does not match")
         peer_data.add_pubkey(pubkey)
@@ -584,7 +584,7 @@ class PeerStore(IPeerStore):
         :param privkey:
         :raise PeerStoreError: if peer ID or peer privkey not found
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         if ID.from_pubkey(privkey.get_public_key()) != peer_id:
             raise PeerStoreError("peer ID and privkey does not match")
         peer_data.add_privkey(privkey)
@@ -622,8 +622,8 @@ class PeerStore(IPeerStore):
 
     def clear_keydata(self, peer_id: ID) -> None:
         """Clears the keys of the peer"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_keydata()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_keydata()
 
     # --------METRICS--------
 
@@ -635,7 +635,7 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :param RTT: the new latency value (round trip time)
         """
-        peer_data = self.peer_data_map[peer_id]
+        peer_data = self.peer_data_map.setdefault(peer_id, PeerData())
         peer_data.record_latency(RTT)
 
     def latency_EWMA(self, peer_id: ID) -> float:
@@ -643,13 +643,14 @@ class PeerStore(IPeerStore):
         :param peer_id: peer ID to get private key for
         :return: The latency EWMA value for that peer
         """
-        peer_data = self.peer_data_map[peer_id]
-        return peer_data.latency_EWMA()
+        if peer_id in self.peer_data_map:
+            return self.peer_data_map[peer_id].latency_EWMA()
+        return 0.0
 
     def clear_metrics(self, peer_id: ID) -> None:
         """Clear the latency metrics"""
-        peer_data = self.peer_data_map[peer_id]
-        peer_data.clear_metrics()
+        if peer_id in self.peer_data_map:
+            self.peer_data_map[peer_id].clear_metrics()
 
 
 class PeerStoreError(KeyError):
