@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import trio
 
 from libp2p.abc import IMuxedStream
+from libp2p.utils.varint import decode_varint_with_size, encode_uvarint
 
-from ._varint import decode_uvarint, encode_uvarint
 from .constants import MAX_MESSAGE_SIZE, MAX_PAYLOAD_SIZE
 from .exceptions import WebRTCStreamError
 from .pb.webrtc_pb2 import Message
@@ -301,12 +301,25 @@ class WebRTCStream(IMuxedStream):
         the mutations inline.
         """
         try:
-            length, consumed = decode_uvarint(raw)
+            length, consumed = decode_varint_with_size(raw)
         except ValueError as e:
             logger.warning(
                 "WebRTCStream channel=%d: malformed varint prefix: %s",
                 self._channel_id,
                 e,
+            )
+            return
+        # decode_varint_with_size does not raise on a truncated/empty prefix
+        # (unlike the old webrtc _varint decoder): it returns bytes_consumed
+        # for what it saw. An empty message (consumed == 0) or a prefix whose
+        # final consumed byte still has the continuation bit set (0x80) means
+        # the varint never terminated — reject it on the malformed-prefix path.
+        if consumed == 0 or raw[consumed - 1] & 0x80:
+            logger.warning(
+                "WebRTCStream channel=%d: malformed varint prefix: "
+                "incomplete/empty length (%d byte(s))",
+                self._channel_id,
+                consumed,
             )
             return
         proto_bytes = raw[consumed : consumed + length]

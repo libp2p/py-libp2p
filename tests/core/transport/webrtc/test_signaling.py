@@ -13,14 +13,16 @@ from __future__ import annotations
 import pytest
 import trio
 
-from libp2p.transport.webrtc._varint import encode_uvarint as _encode_uvarint
 from libp2p.transport.webrtc.signaling import (
     SignalingSession,
-    _read_uvarint,
     read_signaling_message,
     write_signaling_message,
 )
 from libp2p.transport.webrtc.signaling_pb.signaling_pb2 import SignalingMessage
+from libp2p.utils.varint import (
+    decode_uvarint_from_stream,
+    encode_uvarint as _encode_uvarint,
+)
 
 
 class MockStream:
@@ -83,7 +85,7 @@ class TestVarintEncoding:
         for value in [0, 1, 127, 128, 255, 256, 300, 65535, 100000]:
             varint_bytes = _encode_uvarint(value)
             await stream.write(varint_bytes)
-            decoded = await _read_uvarint(stream)
+            decoded = await decode_uvarint_from_stream(stream)
             assert decoded == value, f"Failed for value {value}"
 
 

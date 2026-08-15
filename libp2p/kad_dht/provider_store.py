@@ -30,9 +30,11 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     ALPHA,
+    MAX_DHT_MESSAGE_SIZE,
     PROTOCOL_ID,
     QUERY_TIMEOUT,
 )
@@ -265,27 +267,9 @@ class ProviderStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
-            # Read response length prefix
-            length_bytes = b""
-            while True:
-                logger.debug("Reading response length prefix in add provider")
-                b = await stream.read(1)
-                if not b:
-                    return False
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-
-            response_length = varint.decode_bytes(length_bytes)
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    return False
-                response_bytes += chunk
-                remaining -= len(chunk)
+            response_bytes = await read_varint_prefixed_bytes_limited(
+                stream, MAX_DHT_MESSAGE_SIZE
+            )
 
             # Parse response
             response = Message()
@@ -415,26 +399,9 @@ class ProviderStore:
                 await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
 
-                # Read response length prefix
-                length_bytes = b""
-                while True:
-                    b = await stream.read(1)
-                    if not b:
-                        return []
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
-
-                response_length = varint.decode_bytes(length_bytes)
-                # Read response data
-                response_bytes = b""
-                remaining = response_length
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        return []
-                    response_bytes += chunk
-                    remaining -= len(chunk)
+                response_bytes = await read_varint_prefixed_bytes_limited(
+                    stream, MAX_DHT_MESSAGE_SIZE
+                )
 
                 # Parse response
                 response = Message()
