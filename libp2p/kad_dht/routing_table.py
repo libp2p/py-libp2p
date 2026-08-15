@@ -41,7 +41,6 @@ from .common import (
     BUCKET_SIZE,
     MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
-    PEER_REFRESH_INTERVAL,
     STALE_PEER_THRESHOLD,
     SUBNET_PREFIX_LEN_V4,
     SUBNET_PREFIX_LEN_V6,
@@ -786,7 +785,11 @@ class RoutingTable:
             return False
 
     async def _periodic_peer_refresh(self) -> None:
-        """Single background task to periodically refresh stale peers across all buckets."""
+        """
+        Periodically refresh stale peers across all buckets.
+
+        Single table-level background task that runs every 5 minutes.
+        """
         try:
             while True:
                 await trio.sleep(300.0)  # Check every 5 minutes
@@ -810,7 +813,7 @@ class RoutingTable:
                 for peer_id in stale_peers[:5]:
                     try:
                         # Find which bucket contains this peer
-                        target_bucket = self.find_bucket_for_peer_id(peer_id)
+                        target_bucket = self.find_bucket(peer_id)
                         if target_bucket is None:
                             continue
 

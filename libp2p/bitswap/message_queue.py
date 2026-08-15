@@ -1,15 +1,18 @@
 """
-Bitswap MessageQueue for managing persistent outbound streams and debounced message batching.
+Bitswap MessageQueue for managing persistent outbound streams and
+debounced message batching.
 
 Matches the Kubo (go-bitswap/messagequeue) architecture:
 - Maintains at most 1 persistent outbound stream per peer.
 - Coalesces and batches wantlists, cancels, block presences, and data blocks.
-- Applies a short debounce window (10ms-20ms) to merge rapid updates into a single write frame.
-- Automatically handles stream reconnection on errors without dialing per-message streams.
+- Applies a short debounce window (10ms-20ms) to merge rapid updates into
+  a single write frame.
+- Automatically handles stream reconnection on errors without dialing
+  per-message streams.
 """
 
-import logging
 from collections.abc import Sequence
+import logging
 from typing import Any
 
 import trio
@@ -17,7 +20,7 @@ import varint
 
 from libp2p.abc import IHost, INetStream
 from libp2p.bitswap.cid import CIDObject
-from libp2p.bitswap.config import BITSWAP_PROTOCOL_V100, MAX_MESSAGE_SIZE
+from libp2p.bitswap.config import MAX_MESSAGE_SIZE
 from libp2p.bitswap.messages import create_message, create_wantlist_entry
 from libp2p.custom_types import TProtocol
 from libp2p.peer.id import ID as PeerID
@@ -177,7 +180,9 @@ class BitswapMessageQueue:
     async def flush(self) -> None:
         """Snapshot, drain, and send all pending items over the stream."""
         async with self._lock:
-            wants = dict(self._pending_wants)
+            wants: dict[CIDObject, dict[str, Any]] = {
+                k: v for k, v in self._pending_wants.items()
+            }
             self._pending_wants.clear()
 
             cancels = set(self._pending_cancels)
@@ -196,12 +201,7 @@ class BitswapMessageQueue:
             self._full_wantlist = False
 
         if not (
-            wants
-            or cancels
-            or presences
-            or blocks_v100
-            or blocks_v110
-            or full_wantlist
+            wants or cancels or presences or blocks_v100 or blocks_v110 or full_wantlist
         ):
             return
 
@@ -211,10 +211,10 @@ class BitswapMessageQueue:
             entries.append(
                 create_wantlist_entry(
                     cid,
-                    priority=info["priority"],
+                    priority=int(info.get("priority", 1)),
                     cancel=False,
-                    want_type=info["want_type"],
-                    send_dont_have=info["send_dont_have"],
+                    want_type=int(info.get("want_type", 0)),
+                    send_dont_have=bool(info.get("send_dont_have", False)),
                 )
             )
         for cid in cancels:
@@ -281,9 +281,7 @@ class BitswapMessageQueue:
                 current_v110_size = 0
                 for prefix, block_data in blocks_v110:
                     item_size = len(prefix) + len(block_data)
-                    if current_v110_batch and (
-                        current_v110_size + item_size > 60_000
-                    ):
+                    if current_v110_batch and (current_v110_size + item_size > 60_000):
                         msg = create_message(blocks_v110=current_v110_batch)
                         await self._write_protobuf_message(stream, msg)
                         current_v110_batch = []
@@ -295,9 +293,7 @@ class BitswapMessageQueue:
                     await self._write_protobuf_message(stream, msg)
 
         except Exception as e:
-            logger.debug(
-                f"Error writing to Bitswap stream for {self.peer_id}: {e}"
-            )
+            logger.debug(f"Error writing to Bitswap stream for {self.peer_id}: {e}")
             # Invalidate stream on write error so next cycle reconnects
             async with self._lock:
                 if self._stream is stream:
@@ -307,9 +303,7 @@ class BitswapMessageQueue:
                         pass
                     self._stream = None
 
-    async def _write_protobuf_message(
-        self, stream: INetStream, msg: Any
-    ) -> None:
+    async def _write_protobuf_message(self, stream: INetStream, msg: Any) -> None:
         """Serialize and write a varint length-prefixed protobuf message."""
         msg_bytes = msg.SerializeToString()
         if len(msg_bytes) > MAX_MESSAGE_SIZE:

@@ -8,8 +8,9 @@ Matches Kubo (boxo/bitswap/server/internal/decision):
 - Coordinates with BitswapMessageQueue for debounced, persistent stream transmission.
 """
 
+from collections.abc import Callable
 import logging
-from typing import Any, Callable
+from typing import Any
 
 import trio
 
@@ -108,7 +109,8 @@ class BitswapDecisionEngine:
                 elif send_dont_have:  # WANT_BLOCK with sendDontHave=True
                     presences_to_send.append((entry_cid, False))
 
-        # 1. Forward DontHave presences to the peer's MessageQueue for debounced batching
+        # 1. Forward DontHave presences to the peer's MessageQueue for
+        # debounced batching
         if presences_to_send:
             try:
                 msg_queue = self.get_message_queue(peer_id)
@@ -116,9 +118,7 @@ class BitswapDecisionEngine:
                 if not msg_queue._started:
                     await msg_queue.flush()
             except Exception as e:
-                logger.debug(
-                    f"Failed to queue presences for {peer_id}: {e}"
-                )
+                logger.debug(f"Failed to queue presences for {peer_id}: {e}")
 
         # 2. Schedule block delivery tasks
         for task in blocks_to_schedule:
@@ -127,7 +127,7 @@ class BitswapDecisionEngine:
                     self._send_channel.send_nowait(task)
                 except (trio.WouldBlock, trio.ClosedResourceError):
                     logger.warning(
-                        f"DecisionEngine task queue full; dropping block task for {peer_id}"
+                        f"DecisionEngine queue full; dropping block task for {peer_id}"
                     )
             else:
                 # Standalone fallback when no nursery worker loop is attached
@@ -157,9 +157,7 @@ class BitswapDecisionEngine:
                 f"({len(data)} bytes) for {peer_id}"
             )
         except Exception as e:
-            logger.debug(
-                f"Error preparing block for {peer_id}: {e}"
-            )
+            logger.debug(f"Error preparing block for {peer_id}: {e}")
 
     async def _worker_loop(self, worker_id: int) -> None:
         """Worker task that retrieves blocks and pushes them to MessageQueue."""

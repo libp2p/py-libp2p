@@ -816,7 +816,8 @@ class ConnectionIDRegistry:
                     self._connection_cid_counts.pop(connection, None)
                     self._connection_sequences.pop(connection, None)
 
-                    # Remove any leftover initial_connection_ids pointing to this connection
+                    # Remove any leftover initial_connection_ids pointing
+                    # to this connection.
                     raw_quic = getattr(connection, "_quic", None)
                     if raw_quic:
                         for k, v in list(self._initial_connection_ids.items()):
@@ -953,11 +954,10 @@ class ConnectionIDRegistry:
             primary = self._connection_primary_cid.get(connection)
             return [primary] if primary is not None else []
 
-    async def unregister_connection_object(
-        self, connection: "QUICConnection"
-    ) -> None:
+    async def unregister_connection_object(self, connection: "QUICConnection") -> None:
         """
-        Completely purge a connection object and all its associated Connection IDs from all registry dictionaries.
+        Completely purge a connection object and all its associated
+        Connection IDs from all registry dictionaries.
 
         Ensures zero memory leaks when a connection terminates.
         """

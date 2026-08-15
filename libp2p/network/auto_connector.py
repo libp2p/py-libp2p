@@ -276,9 +276,10 @@ class AutoConnector:
                 min_connections,
             )
 
-            # Calculate target connections within [low_watermark, high_watermark]
-            # Aim for midpoint between low and high watermarks (e.g. 400 when range is 300-500)
-            # so connections stay comfortably above the floor without hitting the pruning ceiling.
+            # Calculate target connections within [low_watermark, high_watermark].
+            # Aim for midpoint between low and high watermarks (e.g. 400 for 300-500)
+            # so connections stay comfortably above the floor without hitting the
+            # pruning ceiling.
             high_watermark = getattr(
                 self.swarm.connection_config, "high_watermark", low_watermark
             )
@@ -297,8 +298,8 @@ class AutoConnector:
                 return
 
             logger.info(
-                "Connections (%s, in_flight=%s) below target (%s, low_water=%s, high_water=%s); "
-                "initiating %s new dials",
+                "Connections (%s, in_flight=%s) below target (%s, "
+                "low_water=%s, high_water=%s); initiating %s new dials",
                 num_connections,
                 in_flight,
                 target,
@@ -317,7 +318,7 @@ class AutoConnector:
             # Shuffle to randomize connection order
             random.shuffle(candidates)
 
-            # Concurrency limiter and dial batch sizing (matches go-libp2p defaultBatchSize = 16)
+            # Concurrency limiter and dial batch sizing (matches go-libp2p: 16)
             CONN_MGR_BATCH_SIZE = 16
             dial_limiter = trio.CapacityLimiter(CONN_MGR_BATCH_SIZE)
             max_dials_per_cycle = CONN_MGR_BATCH_SIZE
@@ -393,7 +394,7 @@ class AutoConnector:
 
                         dial_nursery.start_soon(_dial_candidate, peer_id)
                         dialed += 1
-                        # 50ms stagger between dispatches to eliminate CPU spikes (matches go-libp2p pacing)
+                        # 50ms stagger between dispatches to eliminate CPU spikes
                         await trio.sleep(0.05)
             except Exception as e:
                 logger.error(f"Error in auto_connect dial nursery: {e}")
@@ -474,12 +475,13 @@ class AutoConnector:
                     # be dialed directly.
                     continue
 
-                # Filter out peers with no addresses supported by our registered transports
+                # Filter out peers with no addresses supported by registered transports
                 if (
                     hasattr(self.swarm, "transport_manager")
                     and self.swarm.transport_manager is not None
                     and not any(
-                        self.swarm.transport_manager.transport_for_dialing(a) is not None
+                        self.swarm.transport_manager.transport_for_dialing(a)
+                        is not None
                         for a in addrs
                     )
                 ):

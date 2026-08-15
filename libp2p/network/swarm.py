@@ -89,8 +89,11 @@ from .exceptions import (
 
 logger = logging.getLogger(__name__)
 
-_HAPPY_EYEBALLS_DELAY = 0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
-MAX_CONCURRENT_DIALS = 16  # Global max concurrent in-flight dials (matches go-libp2p DefaultMaxConcurrentDials)
+_HAPPY_EYEBALLS_DELAY = (
+    0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
+)
+# Global max concurrent in-flight dials (matches go-libp2p DefaultMaxConcurrentDials)
+MAX_CONCURRENT_DIALS = 16
 MAX_ADDRS_PER_PEER = 2  # Top 1-2 addresses per peer (at most 1 per transport class)
 _MAX_PARALLEL_DIALS = 2
 
@@ -781,13 +784,12 @@ class Swarm(Service, INetworkService):
                         "but the host has no public IPv6"
                     )
 
-            # Filter addresses to only those supported by our local registered transports
-            # (matches go-libp2p addrFilter discarding unsupported transport multiaddrs upfront)
+            # Filter addresses to only those supported by local transports
+            # (matches go-libp2p addrFilter discarding unsupported multiaddrs)
             def _is_supported_transport(addr: Multiaddr) -> bool:
                 try:
                     return (
-                        self.transport_manager.transport_for_dialing(addr)
-                        is not None
+                        self.transport_manager.transport_for_dialing(addr) is not None
                     )
                 except Exception:
                     return False
@@ -799,7 +801,7 @@ class Swarm(Service, INetworkService):
                 )
 
             # Transport Priority Ranking (matches go-libp2p):
-            # QUIC-v1 (0) > WebRTC Direct (1) > TCP (2) > WebSocket (3) > Circuit Relay (4)
+            # QUIC-v1 (0) > WebRTC Direct (1) > TCP (2) > WS (3) > Relay (4)
             def _transport_priority(addr: Multiaddr) -> int:
                 protos = {p.name for p in addr.protocols()}
                 if "quic-v1" in protos or "quic" in protos:
@@ -816,7 +818,7 @@ class Swarm(Service, INetworkService):
 
             allowed_addrs.sort(key=_transport_priority)
 
-            # Smart Address Selection: pick top 1-2 addresses (at most 1 per transport class)
+            # Smart Address Selection: pick top 1-2 addrs (at most 1 per class)
             selected_addrs: list[Multiaddr] = []
             seen_ranks: set[int] = set()
             for addr in allowed_addrs:
@@ -832,7 +834,7 @@ class Swarm(Service, INetworkService):
             connections = []
             exceptions: list[SwarmException] = []
 
-            # Try allowed addresses using Happy Eyeballs algorithm with global concurrency limit
+            # Try addresses using Happy Eyeballs with global concurrency limiter
             with trio.CancelScope() as cancel_scope:
                 async with trio.open_nursery() as nursery:
                     for multiaddr in selected_addrs:
@@ -843,13 +845,15 @@ class Swarm(Service, INetworkService):
                         ) -> None:
                             try:
                                 async with self._global_dial_limiter:
-                                    connection = await self._dial_with_retry(addr, peer_id)
+                                    connection = await self._dial_with_retry(
+                                        addr, peer_id
+                                    )
                                     connections.append(connection)
                                     # Limit number of connections per peer
-                                    if (
-                                        len(connections)
-                                        >= self.connection_config.max_connections_per_peer
-                                    ):
+                                    max_per_peer = (
+                                        self.connection_config.max_connections_per_peer
+                                    )
+                                    if len(connections) >= max_per_peer:
                                         cancel_scope.cancel()
                             except SwarmException as e:
                                 exceptions.append(e)
@@ -861,12 +865,14 @@ class Swarm(Service, INetworkService):
                                 )
                                 ev.set()
                             except Exception as e:
-                                logger.debug(f"Unexpected exception dialing {addr}: {e}")
+                                logger.debug(
+                                    f"Unexpected exception dialing {addr}: {e}"
+                                )
                                 ev.set()
 
                         nursery.start_soon(dial_task)
 
-                        # Start next dial (fallback) after 250ms head start, or immediately if primary fails
+                        # Start fallback dial after 250ms or if primary fails
                         with trio.move_on_after(_HAPPY_EYEBALLS_DELAY):
                             await failed_event.wait()
 

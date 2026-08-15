@@ -154,7 +154,7 @@ class PeerStore(IPeerStore):
         self.peer_record_map: dict[ID, PeerRecordState] = {}
         self.local_peer_record: Envelope | None = None
         self.max_records = max_records
-        # Hard cap on peer_data_map size. 1000 covers routing table (400) + active swarm (300).
+        # Hard cap on peer_data_map size (covers routing table + active swarm).
         self.max_peers = max_peers
 
     def get_local_record(self) -> Envelope | None:

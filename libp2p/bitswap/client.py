@@ -43,7 +43,7 @@ from .errors import (
     MessageTooLargeError,
 )
 from .message_queue import BitswapMessageQueue
-from .messages import create_message, create_wantlist_entry
+from .messages import create_message
 from .pb.bitswap_pb2 import Message
 from .peer_manager import BitswapPeerManager
 from .presence import BlockPresenceManager
@@ -495,7 +495,9 @@ class BitswapClient(INotifee):
                     "priority": want_info["priority"],
                     "want_type": want_info.get("want_type", 0) if supports_1_2_0 else 0,
                     "send_dont_have": (
-                        want_info.get("send_dont_have", False) if supports_1_2_0 else False
+                        want_info.get("send_dont_have", False)
+                        if supports_1_2_0
+                        else False
                     ),
                 }
             msg_queue.add_wants(cids, want_infos=want_infos, full_wantlist=False)
@@ -822,7 +824,8 @@ class BitswapClient(INotifee):
             except Exception:
                 continue
 
-        # If stream is writable, write responses immediately on this existing stream (0 new streams!).
+        # If stream is writable, write responses immediately on this existing stream
+        # (0 new streams!).
         if blocks_to_send_v100 or blocks_to_send_v110 or presences_to_send:
             try:
                 await self._send_wantlist_responses_inline(

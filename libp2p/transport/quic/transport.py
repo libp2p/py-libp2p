@@ -327,7 +327,8 @@ class QUICTransport(ITransport):
 
         except BaseException as e:
             if connection is not None:
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope() as close_scope:
+                    close_scope.shield = True
                     try:
                         await connection.close()
                     except Exception:

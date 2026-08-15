@@ -473,7 +473,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
         except BaseException as e:
             if not isinstance(e, trio.Cancelled):
                 logger.error(f"Failed to establish connection: {e}")
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope() as close_scope:
+                close_scope.shield = True
                 await self.close()
             raise
 
@@ -1754,7 +1755,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
             except Exception as e:
                 logger.debug(f"Error notifying parent of connection termination: {e}")
 
-            # Clear internal aioquic event queues and stream maps to free memory immediately
+            # Clear internal aioquic event queues and stream maps to free memory
+            # immediately.
             if self._quic is not None:
                 if hasattr(self._quic, "_events"):
                     try:

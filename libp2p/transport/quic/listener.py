@@ -1469,7 +1469,9 @@ class QUICListener(IListener):
 
             # Completely wipe from registry
             await self._registry.unregister_connection_object(connection_obj)
-            logger.debug(f"Unregistered connection object {id(connection_obj)} from registry")
+            logger.debug(
+                f"Unregistered connection object {id(connection_obj)} from registry"
+            )
 
         except Exception as e:
             logger.error(f"Error removing connection by object: {e}")
