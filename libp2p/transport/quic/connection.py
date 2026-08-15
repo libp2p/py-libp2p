@@ -519,13 +519,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
         try:
             while not self._closed:
                 # Batch process events - returns True if events were processed
-                await self._process_quic_events_batched()
+                events_processed = await self._process_quic_events_batched()
 
                 # Handle timer events
                 await self._handle_timer_events()
 
                 # Transmit any pending data
                 await self._transmit()
+
+                if events_processed:
+                    # When active events were processed, pace at 1ms so other tasks
+                    # run and remaining in-flight events are drained without spinning.
+                    await trio.sleep(0.001)
+                    continue
 
                 # Calculate next sleep duration based on pending aioquic timer
                 timer = self._quic.get_timer()
