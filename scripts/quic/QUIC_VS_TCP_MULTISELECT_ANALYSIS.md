@@ -75,7 +75,9 @@ QUIC provides native stream multiplexing, so there's no separate muxer layer. Ea
 Looking at the code in `basic_host.py`:
 
 ```python
-async def new_stream(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> INetStream:
+async def new_stream(
+    self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+) -> INetStream:
     net_stream = await self._network.new_stream(peer_id)
     # ... multiselect negotiation happens here for EVERY stream
     selected_protocol = await self.multiselect_client.select_one_of(...)
@@ -183,9 +185,7 @@ NEGOTIATION_SEMAPHORE_LIMIT: int = 5
 2. **Semaphore Initialization** (`libp2p/transport/quic/connection.py:137-146`):
 
 ```python
-negotiation_limit = getattr(
-    self._transport._config, "NEGOTIATION_SEMAPHORE_LIMIT", 5
-)
+negotiation_limit = getattr(self._transport._config, "NEGOTIATION_SEMAPHORE_LIMIT", 5)
 # Ensure it's an int (handles Mock objects in tests)
 if not isinstance(negotiation_limit, int):
     negotiation_limit = 5

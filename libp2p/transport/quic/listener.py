@@ -350,9 +350,8 @@ class QUICListener(IListener):
 
             if not connection_obj and not pending_quic_conn:
                 if is_initial:
-                    pending_quic_conn = await self._handle_new_connection(
-                        data, addr, packet_info
-                    )
+                    await self._handle_new_connection(data, addr, packet_info)
+                    return
                 else:
                     # Try to find connection by address (fallback routing)
                     # This handles the race condition where packets with new
@@ -711,8 +710,8 @@ class QUICListener(IListener):
         try:
             # Feed data to the connection's QUIC instance
             connection._quic.receive_datagram(data, addr, now=time.time())
-            # NOTE: Established connections process events and transmit in their own
-            # event loop. Avoid double-consuming `next_event()` here.
+            await connection._process_quic_events_batched()
+            await connection._transmit()
 
         except Exception as e:
             logger.error(
@@ -991,6 +990,9 @@ class QUICListener(IListener):
         promotion_start = time.time()
 
         quic_key = id(quic_conn)
+        if quic_key in self._handler_invoked_quic_ids:
+            return
+
         pending_cid = self._pending_cid_by_quic_id.get(
             quic_key, destination_connection_id
         )
@@ -1008,6 +1010,8 @@ class QUICListener(IListener):
             raise
 
         async with per_cid_lock:
+            if quic_key in self._handler_invoked_quic_ids:
+                return
             try:
                 connection = self._conn_by_quic_id.get(quic_key)
                 if connection is None:
@@ -1113,7 +1117,10 @@ class QUICListener(IListener):
                     )
                     if quic_key not in self._handler_invoked_quic_ids:
                         self._handler_invoked_quic_ids.add(quic_key)
-                        await self._handler(connection)
+                        if self._nursery:
+                            self._nursery.start_soon(self._handler, connection)
+                        else:
+                            await self._handler(connection)
 
                 except Exception as e:
                     logger.error(f"Error in user callback: {e}")

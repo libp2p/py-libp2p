@@ -1416,7 +1416,11 @@ async def test_ws_dial_to_http_server_does_not_crash_swarm():
         await swarm.event_background_nursery_created.wait()
 
         async with trio.open_nursery() as srv_nursery:
-            srv_nursery.start_soon(trio.serve_listeners, http_handler, listeners)
+            srv_nursery.start_soon(  # type: ignore
+                trio.serve_listeners,
+                http_handler,
+                listeners,
+            )
 
             maddr = Multiaddr(f"/ip4/127.0.0.1/tcp/{port}/ws")
 

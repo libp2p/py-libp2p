@@ -240,10 +240,10 @@ class TestAutoConnectorCandidateFiltering:
 
         from libp2p.network.auto_connector import AutoConnector
 
-        pub_peer = ID("12D3KooW1" + "a" * 46)
-        priv_peer = ID("12D3KooW2" + "b" * 46)
-        mixed_peer = ID("12D3KooW3" + "c" * 46)
-        self_peer = ID("12D3KooW4" + "d" * 46)
+        pub_peer = ID(b"12D3KooW1" + b"a" * 46)
+        priv_peer = ID(b"12D3KooW2" + b"b" * 46)
+        mixed_peer = ID(b"12D3KooW3" + b"c" * 46)
+        self_peer = ID(b"12D3KooW4" + b"d" * 46)
 
         class MockPeerstore:
             def peer_ids(self):
@@ -292,9 +292,9 @@ class TestAutoConnectorCandidateFiltering:
 
         from libp2p.network.auto_connector import AutoConnector
 
-        direct_peer = ID("12D3KooW1" + "a" * 46)
-        relay_peer = ID("12D3KooW2" + "b" * 46)
-        self_peer = ID("12D3KooW3" + "c" * 46)
+        direct_peer = ID(b"12D3KooW1" + b"a" * 46)
+        relay_peer = ID(b"12D3KooW2" + b"b" * 46)
+        self_peer = ID(b"12D3KooW3" + b"c" * 46)
 
         class MockPeerstore:
             def peer_ids(self):
@@ -343,7 +343,7 @@ class TestAutoConnectorCandidateFiltering:
 
         from libp2p.network.auto_connector import AutoConnector
 
-        priv_peer = ID("12D3KooW1" + "a" * 46)
+        priv_peer = ID(b"12D3KooW1" + b"a" * 46)
 
         class MockPeerstore:
             def peer_ids(self):
@@ -359,14 +359,12 @@ class TestAutoConnectorCandidateFiltering:
         class MockSwarm:
             peerstore = MockPeerstore()
             connections = {}
-            self_id = ID("12D3KooW2" + "b" * 46)
+            self_id = ID(b"12D3KooW2" + b"b" * 46)
 
         connector = AutoConnector(MockSwarm())  # type: ignore
         candidates = await connector._get_candidate_peers()
 
         assert priv_peer in candidates
-
-
 
     def test_initial_state(self):
         """Test initial state of AutoConnector."""
@@ -462,11 +460,9 @@ class TestAutoConnectorDialBatchCap:
 
         from libp2p.network.auto_connector import AutoConnector
 
-        self_peer = ID("12D3KooW1" + "a" * 46)
+        self_peer = ID(b"12D3KooW1" + b"a" * 46)
         # 300 candidate peers, all public and directly dialable.
-        peers = [
-            ID(("12D3KooW%02d" % i) + "b" * 44) for i in range(300)
-        ]
+        peers = [ID((b"12D3KooW%02d" % i) + b"b" * 44) for i in range(300)]
 
         dialed: list[ID] = []
 
@@ -518,8 +514,8 @@ class TestAutoConnectorDialBatchCap:
 
         from libp2p.network.auto_connector import AutoConnector
 
-        self_peer = ID("12D3KooW1" + "a" * 46)
-        peers = [ID(("12D3KooW%02d" % i) + "b" * 44) for i in range(10)]
+        self_peer = ID(b"12D3KooW1" + b"a" * 46)
+        peers = [ID((b"12D3KooW%02d" % i) + b"b" * 44) for i in range(10)]
 
         dialed: list[ID] = []
 

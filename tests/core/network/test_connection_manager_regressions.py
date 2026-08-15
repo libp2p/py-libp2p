@@ -645,9 +645,7 @@ class TestBug1LifecycleLimits:
         import time
 
         for cid in ("phantom-1", "phantom-2"):
-            lifecycle.tracker._connections[cid].established_at = (
-                time.time() - 120
-            )
+            lifecycle.tracker._connections[cid].established_at = time.time() - 120
 
         # Only "phantom-1" is backed by a live connection in the swarm.
         pruned = lifecycle.reconcile_live_connections({"phantom-1"})
@@ -714,9 +712,7 @@ class TestBug1LifecycleLimits:
             conn1 = await swarm.add_conn(
                 _established_mock_muxed_conn(swarm.self_id), direction="outbound"
             )
-            assert (
-                lifecycle.get_connection_stats()["current_established_outbound"] == 1
-            )
+            assert lifecycle.get_connection_stats()["current_established_outbound"] == 1
 
             # Second connection: lifecycle admits it (slot 1 -> 2), then the
             # rcmgr denies.  The denied connection must release its slot, so

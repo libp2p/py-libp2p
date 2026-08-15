@@ -179,7 +179,9 @@ selected, err = msmux.SelectOneOf(pids, s)
 1. **Add `preferred_protocol()` method to BasicHost**:
 
 ```python
-def preferred_protocol(self, peer_id: ID, protocol_ids: Sequence[TProtocol]) -> TProtocol | None:
+def preferred_protocol(
+    self, peer_id: ID, protocol_ids: Sequence[TProtocol]
+) -> TProtocol | None:
     """Check if peer already supports any of the requested protocols."""
     supported = self.peerstore.peer_protocols(peer_id)
     for pid in protocol_ids:

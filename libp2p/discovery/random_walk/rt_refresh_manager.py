@@ -218,7 +218,8 @@ class RTRefreshManager:
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
 
     async def _trim_walk_connections(self) -> None:
-        """Close connections above the high-watermark after a random walk.
+        """
+        Close connections above the high-watermark after a random walk.
 
         The random walk may open many transient QUIC connections for DHT queries.
         Each aioquic QuicConnection holds ~5MB of crypto/buffer state.  Without
@@ -231,8 +232,9 @@ class RTRefreshManager:
         """
         try:
             network = self.host.get_network()  # type: ignore[attr-defined]
-            if hasattr(network, "connection_pruner") and network.connection_pruner:
-                await network.connection_pruner.maybe_prune_connections()
+            pruner = getattr(network, "connection_pruner", None)
+            if pruner and hasattr(pruner, "maybe_prune_connections"):
+                await pruner.maybe_prune_connections()
                 logger.debug("Post-walk connection prune complete")
         except Exception as e:
             logger.debug("Post-walk connection prune error (non-fatal): %s", e)

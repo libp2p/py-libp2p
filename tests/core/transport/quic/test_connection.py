@@ -668,9 +668,9 @@ async def test_event_processing_loop_active_does_not_busy_spin():
     # 0.6s at the 1ms pacing cadence allows at most ~600 iterations (~10
     # next_event() calls each), i.e. well under 10k calls.  A sleep(0)
     # busy-spin runs orders of magnitude more and starves the event loop.
-    assert (
-        calls["n"] < 20000
-    ), f"event loop busy-spun: {calls['n']} next_event() calls in 0.6s"
+    assert calls["n"] < 20000, (
+        f"event loop busy-spun: {calls['n']} next_event() calls in 0.6s"
+    )
     assert calls["n"] > 50, f"event loop barely ran: {calls['n']} calls in 0.6s"
 
 
@@ -721,9 +721,9 @@ async def test_event_processing_loop_idle_sleeps():
     # 0.6s / 50ms = at most ~13 iterations.  The old 1-10ms polling would
     # have run 60-600 iterations in the same window.  Bound at 40 for
     # generous headroom while still catching the old behavior.
-    assert (
-        calls["n"] < 40
-    ), f"idle event loop churned: {calls['n']} next_event() calls in 0.6s"
+    assert calls["n"] < 40, (
+        f"idle event loop churned: {calls['n']} next_event() calls in 0.6s"
+    )
     assert calls["n"] > 3, f"event loop barely ran: {calls['n']} calls in 0.6s"
 
 

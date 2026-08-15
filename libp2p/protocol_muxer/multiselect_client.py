@@ -77,7 +77,7 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: raised when protocol negotiation failed
         """
         logger.debug("MultiselectClient select_one_of: protocols=%s", list(protocols))
-        with trio.move_on_after(negotiate_timeout) as timeout_scope:
+        with trio.move_on_after(negotiate_timeout):
             try:
                 await self.handshake(communicator)
                 logger.debug("MultiselectClient select_one_of: handshake completed")
@@ -127,7 +127,7 @@ class MultiselectClient(IMultiselectClient):
         :raise MultiselectClientError: If the communicator fails to process data.
         :return: list of strings representing the response from peer.
         """
-        with trio.move_on_after(response_timeout) as timeout_scope:
+        with trio.move_on_after(response_timeout):
             try:
                 await self.handshake(communicator)
 
@@ -156,8 +156,7 @@ class MultiselectClient(IMultiselectClient):
 
         # Reached here only if move_on_after fired (timeout)
         raise MultiselectClientError(
-            f"command response timed out after {response_timeout}s, "
-            f"command={command}"
+            f"command response timed out after {response_timeout}s, command={command}"
         )
 
     async def try_select(

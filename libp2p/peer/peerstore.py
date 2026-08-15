@@ -1,6 +1,3 @@
-from collections import (
-    defaultdict,
-)
 from collections.abc import (
     AsyncIterable,
     Sequence,
@@ -158,7 +155,7 @@ class PeerStore(IPeerStore):
         # creates an empty PeerData that is never cleaned up until the hourly GC.
         # 939 inbound Kubo DHT visitors per 5 min each created one such entry,
         # growing the map to ~10k entries / hour with no bound.
-        self.peer_data_map: dict[ID, PeerData] = {}
+        self.peer_data_map = {}
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
         self.local_peer_record: Envelope | None = None
@@ -216,13 +213,17 @@ class PeerStore(IPeerStore):
         # Evict peers with no addresses first (empty/zombie entries), then
         # expire-first (oldest TTL). This is O(n) but only runs during cleanup.
         to_evict = len(self.peer_data_map) - self.max_peers
+
         # Sort: empty entries first, then expired, then oldest TTL
-        def evict_priority(item: tuple) -> tuple:
+        def evict_priority(item: tuple[ID, PeerData]) -> tuple[bool, bool]:
             pid, pd = item
             has_addrs = bool(pd.get_addrs())
             is_expired = pd.is_expired()
             return (not has_addrs, is_expired)  # True sorts before False
-        candidates = sorted(self.peer_data_map.items(), key=evict_priority, reverse=True)
+
+        candidates = sorted(
+            self.peer_data_map.items(), key=evict_priority, reverse=True
+        )
         for peer_id, _ in candidates[:to_evict]:
             self.peer_record_map.pop(peer_id, None)
             del self.peer_data_map[peer_id]
@@ -252,7 +253,8 @@ class PeerStore(IPeerStore):
                 del self.peer_record_map[peer_id]
 
     async def start_cleanup_task(self, cleanup_interval: int = 300) -> None:
-        """Start periodic cleanup of expired peer records and addresses.
+        """
+        Start periodic cleanup of expired peer records and addresses.
 
         Runs every ``cleanup_interval`` seconds (default 300s / 5 minutes).
         Previously defaulted to 3600s which meant peers with a 3600s TTL
@@ -411,7 +413,7 @@ class PeerStore(IPeerStore):
         new_addrs = set(record.addrs)
 
         self.peer_record_map[peer_id] = PeerRecordState(envelope, record.seq)
-        self.peer_data_map[peer_id].clear_addrs()
+        self.peer_data_map.setdefault(peer_id, PeerData()).clear_addrs()
         self.add_addrs(peer_id, list(new_addrs), ttl)
 
         return True
@@ -503,15 +505,6 @@ class PeerStore(IPeerStore):
 
         peer_data = self.peer_data_map[peer_id]
         peer_data.clear_addrs()
-
-        # Remove the whole entry if it has no protocols or metadata left.
-        # Previously this left a zombie PeerData({}) in peer_data_map that
-        # accumulated over thousands of transient connections and was only
-        # cleaned up by the hourly GC — a memory leak.
-        if not peer_data.get_protocols() and not peer_data.get_addrs():
-            del self.peer_data_map[peer_id]
-            self.peer_record_map.pop(peer_id, None)
-            return
 
         self.maybe_delete_peer_record(peer_id)
 

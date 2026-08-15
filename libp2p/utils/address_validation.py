@@ -129,7 +129,7 @@ def has_public_ipv6() -> bool:
         # 10 = host (loopback), 20 = link-local.  Only a global-scope,
         # non-loopback address implies the host can actually reach public
         # IPv6 peers; link-local/ULA/Docker-bridge IPv6 does not.
-        with open("/proc/net/if_inet6", "r", encoding="utf-8") as f:
+        with open("/proc/net/if_inet6", encoding="utf-8") as f:
             for line in f:
                 parts = line.split()
                 if len(parts) >= 6 and parts[3] == "00" and parts[5] != "lo":

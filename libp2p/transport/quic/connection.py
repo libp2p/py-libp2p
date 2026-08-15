@@ -190,6 +190,7 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._background_tasks_started: bool = False
         self._nursery: trio.Nursery | None = None
         self._cancel_scope: trio.CancelScope = trio.CancelScope()
+        self._task_cancel_scopes: list[trio.CancelScope] = []
         self._event_processing_task: Any | None = None
         self.on_close: Callable[[], Awaitable[None]] | None = None
         self.event_started = trio.Event()
@@ -481,13 +482,18 @@ class QUICConnection(IRawConnection, IMuxedConn):
         self._background_tasks_started = True
 
         async def _run_scoped(fn: Callable[[], Awaitable[None]]) -> None:
+            scope = trio.CancelScope()
+            self._task_cancel_scopes.append(scope)
             try:
-                with self._cancel_scope:
+                with scope:
                     await fn()
             except trio.Cancelled:
                 pass
             except Exception as e:
                 logger.debug(f"QUIC background task exited: {e}")
+            finally:
+                if scope in self._task_cancel_scopes:
+                    self._task_cancel_scopes.remove(scope)
 
         if self._is_initiator:
             self._nursery.start_soon(_run_scoped, self._client_packet_receiver)
@@ -1033,11 +1039,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 self._event_batch.append(event)
                 events_processed += 1
 
-            # Process batch if we have events or timeout
-            if self._event_batch and (
-                len(self._event_batch) >= self._event_batch_size
-                or current_time - self._last_event_time > 0.01  # 10ms timeout
-            ):
+            # Process batch if we have events
+            if self._event_batch:
                 await self._process_event_batch()
                 self._event_batch.clear()
                 self._last_event_time = current_time
@@ -1686,6 +1689,9 @@ class QUICConnection(IRawConnection, IMuxedConn):
             self._closed_event.set()
 
             # Immediately cancel background tasks (receiver, event loop, maintenance)
+            if hasattr(self, "_task_cancel_scopes"):
+                for s in list(self._task_cancel_scopes):
+                    s.cancel()
             if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
                 self._cancel_scope.cancel()
 

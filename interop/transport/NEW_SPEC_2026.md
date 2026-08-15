@@ -39,15 +39,12 @@ except Exception:
 self.redis_client.rpush(redis_key, actual_addr)
 
 # Dialer: Wait for address
-blpop_result = self.redis_client.blpop(
-    redis_key, timeout=remaining_timeout
-)
+blpop_result = self.redis_client.blpop(redis_key, timeout=remaining_timeout)
 if blpop_result:
     # BLPOP returns (key, value) tuple - extract the multiaddr string
     listener_addr = (
         blpop_result[1]
-        if isinstance(blpop_result, (list, tuple))
-        and len(blpop_result) > 1
+        if isinstance(blpop_result, (list, tuple)) and len(blpop_result) > 1
         else blpop_result
     )
 ```

@@ -65,7 +65,7 @@ def _addr_is_routable(addr: Multiaddr) -> bool:
             if not protos:
                 continue
             proto = protos[0]
-            name = proto.name
+            name = getattr(proto, "name", "")
             if name.startswith("dns"):
                 return True
             if name not in ("ip4", "ip6"):
@@ -127,6 +127,7 @@ def _node_has_public_addr(swarm: "Swarm") -> bool:
     except Exception:
         return False
     return any(_addr_is_routable(a) for a in addrs)
+
 
 logger = logging.getLogger("libp2p.network.auto_connector")
 logger.setLevel(logging.INFO)
@@ -431,9 +432,7 @@ class AutoConnector:
                 addrs = self.swarm.peerstore.addrs(peer_id)
                 if not addrs:
                     continue
-                if filter_private and not any(
-                    _addr_is_direct(a) for a in addrs
-                ):
+                if filter_private and not any(_addr_is_direct(a) for a in addrs):
                     # Peers whose *only* addresses are unusable from a public
                     # node are skipped instead of burning dial attempts:
                     # private-only (Docker-internal 172.x/10.x, loopback,

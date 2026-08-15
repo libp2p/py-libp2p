@@ -264,6 +264,9 @@ class Swarm(Service, INetworkService):
         # Metrics
         self.metric_send_channel = metric_send_channel
 
+        # Inbound limiter initialized before connection management
+        self._inbound_limiter: trio.CapacityLimiter = trio.CapacityLimiter(1)
+
         # Initialize connection management components
         self._init_connection_management()
         self._negative_peer_cache = _NegativePeerCache()
@@ -722,7 +725,7 @@ class Swarm(Service, INetworkService):
 
             # Filter addresses through connection gate (InterceptAddrDial)
             gate = self.connection_gate
-            allowed_addrs = []
+            allowed_addrs: list[Multiaddr] = []
             for addr in addrs:
                 if await gate.is_allowed(addr):
                     allowed_addrs.append(addr)
@@ -1058,7 +1061,7 @@ class Swarm(Service, INetworkService):
                 # 0.  Shield the registration from outer cancellation and
                 # bound it with the upgrade timeout so a wedged connection
                 # cannot hang the caller forever.
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
                     with trio.fail_after(
                         self.connection_config.outbound_upgrade_timeout
                     ):
@@ -1693,7 +1696,9 @@ class Swarm(Service, INetworkService):
             return
 
         try:
-            await self._do_handle_inbound_connection(read_write_closer, maddr, failure_event)
+            await self._do_handle_inbound_connection(
+                read_write_closer, maddr, failure_event
+            )
         finally:
             self._inbound_limiter.release()
 
@@ -2116,9 +2121,7 @@ class Swarm(Service, INetworkService):
                         for peer_conns in self.connections.values()
                         for sc in peer_conns
                     }
-                    pruned = reconcile_lifecycle.reconcile_live_connections(
-                        live_ids
-                    )
+                    pruned = reconcile_lifecycle.reconcile_live_connections(live_ids)
                     if pruned:
                         logger.warning(
                             "Lifecycle reconcile pruned %d phantom connection(s)",
@@ -2384,11 +2387,13 @@ class Swarm(Service, INetworkService):
 
         except BaseException as exc:
             import traceback as _tb
+
+            tb_str = "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))
             logger.warning(
                 "[ADDCONN_FAIL] add_conn failed for peer %s: %r\n%s",
                 getattr(muxed_conn, "peer_id", None),
                 exc,
-                "".join(_tb.format_exception(type(exc), exc, exc.__traceback__))[-2000:],
+                tb_str[-2000:],
             )
             # swarm_conn is not yet registered in self.connections — close it
             # explicitly so its resource scope (rcmgr _current_connections
@@ -2401,7 +2406,7 @@ class Swarm(Service, INetworkService):
             # lifecycle established slot forever (ratcheting the limit to its
             # cap and wedging the node at 0 peers).
             try:
-                with trio.CancelScope(shield=True):
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
                     await swarm_conn.close()
             except Exception:
                 pass

@@ -290,7 +290,8 @@ class ConnectionPruner:
                 )
                 continue
 
-            # 1. Skip connections that currently have active multiplexed streams (never interrupt live traffic)
+            # 1. Skip connections that currently have active multiplexed streams
+            # (never interrupt live traffic)
             try:
                 streams = connection.get_streams()
                 if streams and len(streams) > 0:
@@ -303,7 +304,7 @@ class ConnectionPruner:
             except Exception:
                 pass
 
-            # 2. Skip peers with positive tag score (preserve valued routing/bitswap peers)
+            # 2. Skip peers with positive tag score (preserve valued peers)
             if conn_peer_id is not None and peer_values.get(conn_peer_id, 0) > 0:
                 logger.debug(
                     "Skipping connection to %s - positive tag score (%d)",

@@ -114,7 +114,8 @@ def test_has_public_ipv6_linux_proc(
     """has_public_ipv6 requires a non-loopback IPv6 interface on Linux."""
     has_public_ipv6.cache_clear()
     monkeypatch.setattr(
-        "builtins.open", lambda *a, **k: _FakeIfInet6File(lines)  # type: ignore[no-any-return]
+        "builtins.open",
+        lambda *a, **k: _FakeIfInet6File(lines),  # type: ignore[no-any-return]
     )
     try:
         assert has_public_ipv6() is expected
@@ -140,7 +141,9 @@ def test_is_relay_address() -> None:
         )
     )
     assert is_relay_address(
-        Multiaddr("/ip4/8.8.8.8/tcp/4001/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N")
+        Multiaddr(
+            "/ip4/8.8.8.8/tcp/4001/p2p-circuit/p2p/QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N"
+        )
     )
     assert not is_relay_address(Multiaddr("/ip4/8.8.8.8/tcp/4001"))
     assert not is_relay_address(Multiaddr("/ip4/52.7.183.75/udp/4001/quic-v1"))

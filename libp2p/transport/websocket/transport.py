@@ -765,10 +765,7 @@ class WebsocketTransport(ITransport):
                             outcome["error"] = e
                         else:
                             outcome["ws"] = ws
-                        if (
-                            outcome["ws"] is not None
-                            or outcome["error"] is not None
-                        ):
+                        if outcome["ws"] is not None or outcome["error"] is not None:
                             handshake_done.set()
                         # Keep the nursery open for the connection's lifetime —
                         # the trio_websocket reader task runs here.  Exceptions

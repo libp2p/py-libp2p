@@ -969,7 +969,8 @@ class BasicHost(IHost):
             raise StreamFailure(f"failed to open a stream to peer {peer_id}") from error
         finally:
             if not success:
-                with trio.CancelScope(shield=True):
+                # Shield cleanup from cancellation
+                with trio.CancelScope(shield=True):  # type: ignore[call-arg]
                     try:
                         await net_stream.reset()
                     except Exception as e:
@@ -1005,9 +1006,11 @@ class BasicHost(IHost):
             success = True
             return response
         except MultiselectClientError as error:
-            raise StreamFailure(f"failed to query command {command} to peer {peer_id}") from error
+            raise StreamFailure(
+                f"failed to query command {command} to peer {peer_id}"
+            ) from error
         finally:
-            with trio.CancelScope(shield=True):
+            with trio.CancelScope(shield=True):  # type: ignore[call-arg]
                 try:
                     if success:
                         await new_stream.close()
@@ -1015,6 +1018,7 @@ class BasicHost(IHost):
                         await new_stream.reset()
                 except Exception as e:
                     logger.debug(f"Failed to clean up command stream: {e}")
+        raise StreamFailure(f"failed to query command {command} to peer {peer_id}")
 
     async def connect(self, peer_info: PeerInfo) -> None:
         """
@@ -1085,8 +1089,12 @@ class BasicHost(IHost):
             return
         # Check backoff: skip if this peer recently failed identify
         import time as _time
+
         last_fail = self._identify_failed.get(peer_id)
-        if last_fail is not None and (_time.monotonic() - last_fail) < self._IDENTIFY_BACKOFF_SECONDS:
+        if (
+            last_fail is not None
+            and (_time.monotonic() - last_fail) < self._IDENTIFY_BACKOFF_SECONDS
+        ):
             return
         # Add to inflight before checks to prevent duplicate tasks
         self._identify_inflight.add(peer_id)
@@ -1166,6 +1174,7 @@ class BasicHost(IHost):
             # NOTE: _time is imported inline below (line 1180+), so Python makes
             # it a local variable for the whole function. We must import before use.
             import time as _time
+
             self._identify_failed[peer_id] = _time.monotonic()
             return
 
@@ -1181,6 +1190,7 @@ class BasicHost(IHost):
             if _id_cs.cancelled_caught:
                 logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
                 import time as _time
+
                 self._identify_failed[peer_id] = _time.monotonic()
                 try:
                     await stream.reset()
@@ -1250,6 +1260,7 @@ class BasicHost(IHost):
         except Exception as exc:
             logger.debug("Identify[%s]: error reading response: %s", reason, exc)
             import time as _time
+
             self._identify_failed[peer_id] = _time.monotonic()
             try:
                 await stream.reset()

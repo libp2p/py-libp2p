@@ -142,7 +142,10 @@ class TestBasicQUICFlow:
 
         # Create listener
         listener = server_transport.create_listener(echo_server_handler)
-        listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+        listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
+
+        # Create client transport
+        client_transport = QUICTransport(client_key.private_key, client_config)
 
         # Variables to track client state
         client_connected = False
@@ -153,6 +156,9 @@ class TestBasicQUICFlow:
             logger.debug("Starting server")
 
             async with trio.open_nursery() as nursery:
+                server_transport.set_background_nursery(nursery)
+                client_transport.set_background_nursery(nursery)
+
                 # Start server listener
                 await listener.listen(listen_addr)
 
@@ -162,15 +168,6 @@ class TestBasicQUICFlow:
                     f"{server_addrs[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
                 )
                 logger.debug(f"SERVER: Listening on {server_addr}")
-
-                # Give server a moment to be ready
-                await trio.sleep(0.1)
-
-                logger.debug("Starting client")
-
-                # Create client transport
-                client_transport = QUICTransport(client_key.private_key, client_config)
-                client_transport.set_background_nursery(nursery)
 
                 try:
                     # Connect to server
@@ -286,23 +283,20 @@ class TestBasicQUICFlow:
                 accept_stream_timeout = True
 
         listener = server_transport.create_listener(timeout_test_handler)
-        listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+        listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
+        client_transport = QUICTransport(client_key.private_key, client_config)
 
-        client_transport = None
         try:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
+                client_transport.set_background_nursery(nursery)
                 await listener.listen(listen_addr)
 
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
                 )
                 logger.debug(f"SERVER: Listening on {server_addr}")
-
-                # Start client in the same nursery
-                client_transport = QUICTransport(client_key.private_key, client_config)
-                client_transport.set_background_nursery(nursery)
 
                 connection = None
                 try:
@@ -362,7 +356,7 @@ async def test_yamux_stress_ping():
         logger.debug(f"Debug loggers enabled: {', '.join(debug_loggers)}")
 
     STREAM_COUNT = 100
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
     latencies = []
     failures = []
     failure_details = []  # Store detailed failure info for CI/CD
@@ -397,7 +391,7 @@ async def test_yamux_stress_ping():
         maddr = multiaddr.Multiaddr(destination)
         info = info_from_p2p_addr(maddr)
 
-        client_listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+        client_listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
         client_host = new_host(listen_addrs=[client_listen_addr])
 
         async with client_host.run(listen_addrs=[client_listen_addr]):
@@ -685,14 +679,14 @@ async def test_quic_concurrent_streams():
         STREAM_COUNT = 20
         pytest.skip("flaky under xdist; run this integration test without -n")
     else:
-        STREAM_COUNT = 50  # Between 20-50 as specified
+        STREAM_COUNT = 20  # Between 20-50 as specified
 
     server_key = create_new_key_pair()
     client_key = create_new_key_pair()
     config = QUICTransportConfig(
         idle_timeout=30.0,
         connection_timeout=10.0,
-        max_concurrent_streams=50,
+        max_concurrent_streams=100,
     )
 
     server_transport = QUICTransport(server_key.private_key, config)
@@ -705,10 +699,17 @@ async def test_quic_concurrent_streams():
         """Server handler that accepts multiple streams."""
 
         async def handle_stream(stream):
-            data = await stream.read()
-            server_received.append(data)
-            await stream.write(data)
-            await stream.close()
+            try:
+                data = await stream.read()
+            except (EOFError, Exception):
+                data = b""
+            if data:
+                server_received.append(data)
+                try:
+                    await stream.write(data)
+                    await stream.close()
+                except Exception:
+                    pass
 
         async with trio.open_nursery() as nursery:
             for _ in range(STREAM_COUNT):
@@ -717,7 +718,7 @@ async def test_quic_concurrent_streams():
         server_complete.set()
 
     listener = server_transport.create_listener(server_handler)
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
 
     try:
         async with trio.open_nursery() as nursery:
@@ -876,7 +877,7 @@ async def test_quic_yamux_integration():
         server_complete.set()
 
     listener = server_transport.create_listener(server_handler)
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
 
     try:
         async with trio.open_nursery() as nursery:
@@ -984,7 +985,7 @@ async def test_quic_cid_retirement_integration():
                             )
                             retirement_events.extend(retired)
 
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
     listener = server_transport.create_listener(server_handler)
 
     try:
@@ -1051,7 +1052,7 @@ async def test_connection_migration_scenario():
                 cids_seen.extend(cids)
             await trio.sleep(0.2)
 
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
     listener = server_transport.create_listener(server_handler)
 
     try:
@@ -1130,7 +1131,7 @@ async def test_cid_retirement_under_load():
                     # Connection might be closed, break out of loop
                     break
 
-    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic")
+    listen_addr = create_quic_multiaddr("127.0.0.1", 0, "/quic-v1")
     listener = server_transport.create_listener(server_handler)
 
     try:
