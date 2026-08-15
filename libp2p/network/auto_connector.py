@@ -174,9 +174,9 @@ class AutoConnector:
         self._recent_disconnects: dict[ID, float] = {}
         self._disconnect_backoff = 60.0  # seconds
         # Critical poll interval: when the connection count falls below
-        # min_connections we poll far more often than auto_connect_interval
-        # so the node recovers from a critically-low state quickly (Bug 15).
-        self._critical_check_interval = 5.0
+        # min_connections we poll at _critical_check_interval so the node
+        # recovers steadily without overwhelming the CPU (Bug 15).
+        self._critical_check_interval = 10.0
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -297,21 +297,12 @@ class AutoConnector:
         random.shuffle(candidates)
 
         # Try to connect to candidates
-        # We need to limit concurrency to avoid OS "Too many open files" errors
-        # (Kubo default is 160 concurrent outbound dials).
-        dial_limiter = trio.CapacityLimiter(160)
+        # We limit concurrency to prevent CPU saturation from simultaneous
+        # TLS handshakes.
+        dial_limiter = trio.CapacityLimiter(25)
 
-        # Cap the number of dials started per cycle.  Without a cap, a node
-        # that is far below the low watermark (e.g. just restarted) launches
-        # ``needed * 2`` dials (up to 600) against a peerstore full of stale
-        # addresses.  Each dial to an unreachable peer holds a background
-        # QUIC handshake task until the handshake timeout fires, so hundreds
-        # of concurrent hanging dials saturate the trio event loop with timer
-        # churn — which starves the very connections that ARE established,
-        # they get closed by remote peers, and the node spirals back to 0
-        # peers.  Dialing in bounded batches lets each cycle complete fast
-        # and lets the event loop service established connections.
-        max_dials_per_cycle = 40
+        # Cap the number of dials started per cycle.
+        max_dials_per_cycle = 20
 
         # Skip peers whose dial attempts have failed too recently (cooldown).
         # This also bounds per-cycle work when the peerstore is dominated by
