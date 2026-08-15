@@ -68,6 +68,7 @@ from libp2p.transport.upgrader import (
 )
 from libp2p.utils.address_validation import (
     has_public_ipv6,
+    is_public_ipv6_address,
     is_relay_address,
 )
 from libp2p.utils.multiaddr_utils import (
@@ -767,20 +768,19 @@ class Swarm(Service, INetworkService):
                     "(relay-only or blocked by connection gate)"
                 )
 
-            # Only dial IPv6 (and DNS6) addresses when the host actually has
-            # a non-loopback IPv6 interface.  Loopback-only IPv6 (``::1``)
+            # Only dial public IPv6 (and DNS6) addresses when the host actually has
+            # a non-loopback IPv6 interface. Loopback-only IPv6 (``::1``)
             # does not imply IPv6 routing: on hosts without a public IPv6
-            # address every IPv6 dial fails with "Network is unreachable",
-            # burning CPU and churning the auto-connector.
+            # address every IPv6 dial to a public peer fails with "Network is
+            # unreachable", burning CPU and churning the auto-connector.
+            # Local loopback / private IPv6 addresses (e.g. ::1) can still be dialed.
             if not has_public_ipv6():
                 allowed_addrs = [
-                    a
-                    for a in allowed_addrs
-                    if not any(p.name in ("ip6", "dns6") for p in a.protocols())
+                    a for a in allowed_addrs if not is_public_ipv6_address(a)
                 ]
                 if not allowed_addrs:
                     raise SwarmException(
-                        f"All addresses for peer {peer_id} require IPv6 "
+                        f"All addresses for peer {peer_id} require public IPv6 "
                         "but the host has no public IPv6"
                     )
 

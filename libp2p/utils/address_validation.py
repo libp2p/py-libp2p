@@ -157,6 +157,32 @@ def is_relay_address(addr: Multiaddr) -> bool:
         return False
 
 
+def is_public_ipv6_address(addr: Multiaddr) -> bool:
+    """
+    Return True if the multiaddr contains a public / globally routable IPv6
+    or DNS6 component that requires global IPv6 internet connectivity.
+
+    Local loopback (::1), link-local (fe80::), and private ULA addresses do not
+    require public IPv6 routing and can be dialed locally/privately.
+    """
+    try:
+        for proto, val in addr.items():
+            if proto.name == "dns6":
+                return True
+            if proto.name == "ip6":
+                if not val:
+                    continue
+                try:
+                    ip = ipaddress.ip_address(val)
+                    if ip.is_global:
+                        return True
+                except ValueError:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
 def get_available_interfaces(port: int, protocol: str = "tcp") -> list[Multiaddr]:
     """
     Discover available network interfaces (IPv4 + IPv6 if supported) for binding.
@@ -280,5 +306,6 @@ __all__ = [
     "expand_wildcard_address",
     "find_free_port",
     "has_public_ipv6",
+    "is_public_ipv6_address",
     "is_relay_address",
 ]

@@ -613,3 +613,36 @@ async def test_swarm_peer_id_validation(security_protocol):
         # Verify connections are established
         assert correct_peer_id in swarms[0].connections
         assert swarms[0].get_peer_id() in swarms[1].connections
+
+
+@pytest.mark.trio
+async def test_swarm_dial_ipv6_filtering(monkeypatch, security_protocol):
+    """Test that public IPv6 is filtered out when host has no public IPv6."""
+    from unittest.mock import AsyncMock
+
+    from multiaddr import Multiaddr
+
+    from libp2p.peer.id import ID
+
+    swarm = SwarmFactory.build(security_protocol=security_protocol)
+    monkeypatch.setattr("libp2p.network.swarm.has_public_ipv6", lambda: False)
+
+    test_peer = ID.from_base58("Qmb8pHPnFHNYot4CGtXhYLbgF8Zb7oQ6CBs1s7zZiwZFgH")
+
+    # 1. Public IPv6 only -> should raise SwarmException
+    public_ip6 = Multiaddr("/ip6/2607:f8b0:4005:805::200e/tcp/4001")
+    swarm.peerstore.add_addrs(test_peer, [public_ip6], 10000)
+    with pytest.raises(SwarmException, match="require public IPv6"):
+        await swarm.dial_peer(test_peer)
+
+    # 2. Local loopback IPv6 (::1) -> not filtered by has_public_ipv6 check
+    loopback_ip6 = Multiaddr("/ip6/::1/tcp/4001")
+    swarm.peerstore.clear_addrs(test_peer)
+    swarm.peerstore.add_addrs(test_peer, [loopback_ip6], 10000)
+
+    # Mock the actual transport dial to prevent real network I/O
+    mock_conn = AsyncMock()
+    mock_conn.is_closed = False
+    monkeypatch.setattr(swarm, "_dial_with_retry", AsyncMock(return_value=mock_conn))
+    result = await swarm.dial_peer(test_peer)
+    assert result == [mock_conn]
