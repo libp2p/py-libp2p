@@ -718,13 +718,13 @@ async def test_event_processing_loop_idle_sleeps():
             nursery.start_soon(conn._event_processing_loop)
             await trio.sleep_forever()
 
-    # 0.6s / 50ms = at most ~13 iterations.  The old 1-10ms polling would
+    # 0.6s with 2s idle interval = at most 1-2 iterations.  The old 1-10ms polling would
     # have run 60-600 iterations in the same window.  Bound at 40 for
     # generous headroom while still catching the old behavior.
     assert calls["n"] < 40, (
         f"idle event loop churned: {calls['n']} next_event() calls in 0.6s"
     )
-    assert calls["n"] > 3, f"event loop barely ran: {calls['n']} calls in 0.6s"
+    assert calls["n"] >= 1, f"event loop barely ran: {calls['n']} calls in 0.6s"
 
 
 @pytest.mark.trio

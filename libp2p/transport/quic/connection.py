@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # connections, and causes mass disconnects.  Idle connections now sleep up
 # to _IDLE_POLL_INTERVAL (waking sooner when aioquic reports a pending
 # timer), and active connections pace themselves at _ACTIVE_POLL_INTERVAL.
-_IDLE_POLL_INTERVAL = 0.05  # seconds: max idle gap between event-loop polls
+_IDLE_POLL_INTERVAL = 2.0  # seconds: max idle gap between event-loop polls
 _ACTIVE_POLL_INTERVAL = 0.001  # seconds: min gap between event-processing runs
 
 
@@ -537,7 +537,8 @@ class QUICConnection(IRawConnection, IMuxedConn):
 
                 with trio.move_on_after(delay):
                     await self._activity_event.wait()
-                self._activity_event = trio.Event()
+                if self._activity_event.is_set():
+                    self._activity_event = trio.Event()
 
         except Exception as e:
             if not self._closed:
