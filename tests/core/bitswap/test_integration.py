@@ -156,7 +156,7 @@ class TestBitswapIntegration:
 
                     # Client: Request all blocks
                     for data, cid in blocks.items():
-                        retrieved = await client_bitswap.get_block(
+                        retrieved = await client_bitswap.new_session().get_block(
                             cid, peer_id=provider_host.get_id(), timeout=2.0
                         )
                         assert retrieved == data
@@ -210,19 +210,21 @@ class TestBitswapIntegration:
                     cid_hex = block_cid.hex()
                     cid_path = f"/ipfs/{cid_canonical}"
 
-                    retrieved_from_canonical = await client_bitswap.get_block(
-                        cid_canonical, peer_id=provider_host.get_id(), timeout=2.0
+                    retrieved_from_canonical = (
+                        await client_bitswap.new_session().get_block(
+                            cid_canonical, peer_id=provider_host.get_id(), timeout=2.0
+                        )
                     )
                     assert retrieved_from_canonical == block_data
 
                     await client_store.delete_block(block_cid)
-                    retrieved_from_hex = await client_bitswap.get_block(
+                    retrieved_from_hex = await client_bitswap.new_session().get_block(
                         cid_hex, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_from_hex == block_data
 
                     await client_store.delete_block(block_cid)
-                    retrieved_from_path = await client_bitswap.get_block(
+                    retrieved_from_path = await client_bitswap.new_session().get_block(
                         cid_path, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_from_path == block_data
@@ -350,13 +352,13 @@ class TestBitswapIntegration:
                     await trio.sleep(0.2)
 
                     # Node1 requests block B from Node2
-                    retrieved_b = await node1_bitswap.get_block(
+                    retrieved_b = await node1_bitswap.new_session().get_block(
                         cid_b, peer_id=node2_host.get_id(), timeout=2.0
                     )
                     assert retrieved_b == block_b
 
                     # Node2 requests block A from Node1
-                    retrieved_a = await node2_bitswap.get_block(
+                    retrieved_a = await node2_bitswap.new_session().get_block(
                         cid_a, peer_id=node1_host.get_id(), timeout=2.0
                     )
                     assert retrieved_a == block_a
@@ -433,12 +435,12 @@ class TestBitswapIntegration:
                     )
 
                     # Client requests existing blocks - these should succeed
-                    retrieved_a = await client_bitswap.get_block(
+                    retrieved_a = await client_bitswap.new_session().get_block(
                         cid_a, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_a == block_a
 
-                    retrieved_b = await client_bitswap.get_block(
+                    retrieved_b = await client_bitswap.new_session().get_block(
                         cid_b, peer_id=provider_host.get_id(), timeout=2.0
                     )
                     assert retrieved_b == block_b
@@ -460,7 +462,7 @@ class TestBitswapIntegration:
 
                         async def request_nonexistent():
                             try:
-                                await client_bitswap.get_block(
+                                await client_bitswap.new_session().get_block(
                                     nonexistent_cid,
                                     peer_id=provider_host.get_id(),
                                     timeout=3.0,
@@ -477,23 +479,17 @@ class TestBitswapIntegration:
 
                         # The ACTUAL test: Did we receive a DontHave
                         # response?
+                        cid_obj = parse_cid(nonexistent_cid)
+                        dont_have_peers = (
+                            client_bitswap.presence_manager.get_dont_have_peers(cid_obj)
+                        )
                         logger.debug(
-                            "DontHave responses: %s",
-                            client_bitswap._dont_have_responses,
+                            "DontHave responses peers: %s",
+                            dont_have_peers,
                         )
-                        assert (
-                            parse_cid(nonexistent_cid)
-                            in client_bitswap._dont_have_responses
-                        ), (
-                            "Client should have received a DontHave "
-                            "response for the nonexistent CID"
+                        assert provider_host.get_id() in dont_have_peers, (
+                            "Provider should have sent the DontHave response"
                         )
-                        assert (
-                            provider_host.get_id()
-                            in client_bitswap._dont_have_responses[
-                                parse_cid(nonexistent_cid)
-                            ]
-                        ), "Provider should have sent the DontHave response"
                         logger.debug("DontHave response received from provider")
 
                         # Cancel the background request

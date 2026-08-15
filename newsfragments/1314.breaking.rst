@@ -1,0 +1,1 @@
+Removed the ``nursery`` parameter from ``IListener.listen()`` and all concrete listener implementations (TCP, WebSocket, QUIC, Circuit Relay v2). Listeners now own their background task lifetime internally and are cancelled via ``close()``. Callers should update ``await listener.listen(maddr, nursery)`` to ``await listener.listen(maddr)``.

@@ -24,7 +24,16 @@ from libp2p.stream_muxer.yamux.yamux import (
 
 
 class TrioStreamAdapter(IRawConnection):
-    """Adapter to make trio memory streams work with libp2p."""
+    """
+    Adapter to make trio memory streams work with libp2p.
+
+    Read/write wrap each syscall with :func:`trio.move_on_after(2)`. Checkpoints
+    alone are not enough on Trio memory streams under this load: the scope still
+    installs cancel machinery that improves scheduling fairness versus the peer
+    ``handle_incoming`` loop. Deadline should not elapse on a passing run (~2–3s).
+    The race test accumulates reads to match partial-read semantics of
+    :class:`~libp2p.stream_muxer.yamux.yamux.YamuxStream`.
+    """
 
     def __init__(self, send_stream, receive_stream, is_initiator=False):
         self.send_stream = send_stream
@@ -124,7 +133,8 @@ async def yamux_pair(secure_conn_pair, peer_id):
         with trio.move_on_after(5):
             nursery.start_soon(client_yamux.start)
             nursery.start_soon(server_yamux.start)
-            await trio.sleep(0.1)
+            await client_yamux.event_started.wait()
+            await server_yamux.event_started.wait()
             logging.debug("yamux_pair started")
         yield client_yamux, server_yamux
     logging.debug("yamux_pair cleanup")
@@ -170,8 +180,11 @@ async def test_yamux_race_condition_without_locks(yamux_pair):
     async def reader(stream, received, name):
         """Read messages and store them for verification."""
         for i in range(MSG_COUNT):
-            data = await stream.read(MSG_SIZE)
-            received.append(data)
+            buf = bytearray()
+            while len(buf) < MSG_SIZE:
+                chunk = await stream.read(MSG_SIZE - len(buf))
+                buf.extend(chunk)
+            received.append(bytes(buf))
             if i % 3 == 0:
                 await trio.sleep(0.001)
 

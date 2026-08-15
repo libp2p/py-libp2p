@@ -1,0 +1,25 @@
+// WebRTC data-channel message framing.
+// Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc.md
+//
+// Each libp2p stream maps to one WebRTC data channel.  Every write is
+// wrapped in a Message with an optional Flag for lifecycle signaling.
+
+syntax = "proto3";
+
+package webrtc.pb;
+
+message Message {
+  enum Flag {
+    // Sender will no longer write to this stream (half-close).
+    FIN = 0;
+    // Sender will no longer read from this stream.
+    STOP_SENDING = 1;
+    // Abrupt termination of the stream.
+    RESET = 2;
+    // Acknowledges a received FIN.
+    FIN_ACK = 3;
+  }
+
+  optional Flag flag = 1;
+  optional bytes message = 2;
+}

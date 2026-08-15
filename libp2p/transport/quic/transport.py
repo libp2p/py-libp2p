@@ -13,7 +13,6 @@ from aioquic.quic.configuration import (
 from aioquic.quic.connection import (
     QuicConnection as NativeQUICConnection,
 )
-from aioquic.quic.logger import QuicLogger
 import multiaddr
 import trio
 
@@ -72,6 +71,8 @@ class QUICTransport(ITransport):
     """
     QUIC Stream implementation following libp2p IMuxedStream interface.
     """
+
+    provides_native_muxing: bool = True
 
     def __init__(
         self,
@@ -268,13 +269,17 @@ class QUICTransport(ITransport):
 
             # Get appropriate QUIC client configuration
             config_key = TProtocol(f"{quic_version}_client")
-            logger.debug("config_key", config_key, self._quic_configs.keys())
+            logger.debug("config_key %s %s", config_key, self._quic_configs.keys())
             config = self._quic_configs.get(config_key)
             if not config:
                 raise QUICDialError(f"Unsupported QUIC version: {quic_version}")
 
+            import copy
+
+            config = copy.copy(config)
             config.is_client = True
-            config.quic_logger = QuicLogger()
+            # Remove quic_logger to prevent
+            # "QuicLoggerTrace does not belong to QuicLogger" crash
 
             # Ensure client certificate is properly set for mutual authentication
             if not config.certificate or not config.private_key:
@@ -284,9 +289,11 @@ class QUICTransport(ITransport):
                 client_tls_config = self._security_manager.create_client_config()
                 self._apply_tls_configuration(config, client_tls_config)
 
+            config.is_client = True
+
             # Debug log to verify certificate is present
             logger.info(
-                f"Dialing QUIC connection to {host}:{port} (version: {{quic_version}})"
+                f"Dialing QUIC connection to {host}:{port} (version: {quic_version})"
             )
 
             logger.debug("Starting QUIC Connection")
@@ -409,7 +416,7 @@ class QUICTransport(ITransport):
         """
         return is_quic_multiaddr(maddr)
 
-    def protocols(self) -> list[TProtocol]:
+    def protocols(self) -> list[str]:
         """
         Get supported protocol identifiers.
 
@@ -417,10 +424,24 @@ class QUICTransport(ITransport):
             List of supported protocol strings
 
         """
-        protocols = [QUIC_V1_PROTOCOL]
+        protocols: list[str] = [str(QUIC_V1_PROTOCOL)]
         if self._config.enable_draft29:
-            protocols.append(QUIC_DRAFT29_PROTOCOL)
+            protocols.append(str(QUIC_DRAFT29_PROTOCOL))
         return protocols
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """
+        Get supported protocol identifiers.
+        Return True if this QUIC transport can listen on the given multiaddr.
+
+        Args:
+            maddr: Multiaddr to check.
+
+        Returns:
+            True if the multiaddr contains a QUIC protocol component.
+
+        """
+        return is_quic_multiaddr(maddr)
 
     def listen_order(self) -> int:
         """

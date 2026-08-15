@@ -21,7 +21,7 @@ class TestLink:
 
     def test_link_creation(self):
         """Test creating a Link."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
         link = Link(cid=cid, name="file.txt", size=1024)
 
         assert link.cid == cid
@@ -30,7 +30,7 @@ class TestLink:
 
     def test_link_optional_fields(self):
         """Test Link with optional fields."""
-        cid = b"\x01\x23\x45\x67" * 8
+        cid = compute_cid_v1(b"test_link_data", codec=CODEC_RAW)
         link = Link(cid=cid)
 
         assert link.cid == cid
@@ -166,6 +166,20 @@ class TestEncodeDecode:
         """Test decoding invalid data."""
         with pytest.raises(Exception):
             decode_dag_pb(b"invalid protobuf data")
+
+    def test_encode_canonical_field_ordering(self):
+        """Test canonical wire field ordering (0x12 link tags before 0x0a data tags)."""
+        chunk = b"test"
+        cid = compute_cid_v1(chunk, codec=CODEC_RAW)
+        links = [Link(cid=cid, name="test_link", size=len(chunk))]
+        unixfs_data = UnixFSData(type="file", data=b"data")
+
+        encoded = encode_dag_pb(links=links, unixfs_data=unixfs_data)
+
+        # Link tag (field 2, wire type 2) is 0x12.
+        assert encoded[0] == 0x12, (
+            f"Expected first byte to be 0x12 (link tag), got 0x{encoded[0]:02x}"
+        )
 
 
 class TestFileNode:

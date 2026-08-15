@@ -1,0 +1,1 @@
+Fixed CI lint failure on ``main`` caused by mypy 2.2 ``comparison-overlap`` in the QUIC stream read loop. Reads blocked on ``_receive_event`` still raise ``QUICStreamResetError`` when the stream is reset concurrently.

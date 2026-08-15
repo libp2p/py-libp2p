@@ -12,16 +12,22 @@ once the peer is fully registered.
 
 import logging
 import time
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import trio
 
+from libp2p.peer.id import (
+    ID,
+)
 from libp2p.pubsub.gossipsub import (
     PROTOCOL_ID,
     GossipSub,
 )
 from libp2p.pubsub.pb import rpc_pb2
+from libp2p.pubsub.pubsub import (
+    Pubsub,
+)
 from libp2p.tools.utils import connect
 from tests.utils.factories import (
     IDFactory,
@@ -181,6 +187,125 @@ class TestPendingMessageQueue:
         assert peer not in gs._pending_messages
 
 
+class TestRecentMessageReplayGate:
+    """
+    The mcache replay must run once per subscription, not once per event.
+
+    These drive the real ``GossipSub.send_recent_messages`` over a seeded
+    mcache and count the RPCs that reach the wire, so the assertions are about
+    messages delivered rather than about the gate's own bookkeeping.
+    """
+
+    TOPIC = "replay-gate-topic"
+
+    def _seed_mcache(self, pubsub: Pubsub) -> AsyncMock:
+        """Put one message in the mcache and capture what gets written out."""
+        msg = rpc_pb2.Message(
+            from_id=pubsub.my_id.to_bytes(),
+            seqno=b"\x00" * 8,
+            data=b"cached-payload",
+            topicIDs=[self.TOPIC],
+        )
+        gossipsub = pubsub.router
+        assert isinstance(gossipsub, GossipSub)
+        gossipsub.mcache.put(msg)
+
+        writes = AsyncMock()
+        pubsub.write_msg = writes  # type: ignore[method-assign]
+        return writes
+
+    def _register_subscribed_peer(self, pubsub: Pubsub) -> ID:
+        peer_id = IDFactory()
+        pubsub.peers[peer_id] = MagicMock()
+        pubsub.peer_topics[self.TOPIC] = {peer_id}
+        return peer_id
+
+    @pytest.mark.trio
+    async def test_replay_runs_once_per_subscription(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_replay_deferred_until_peer_is_writable(self):
+        """Before the outbound stream exists the replay is a no-op, not spent."""
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = IDFactory()
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+
+            await pubsub._replay_recent_messages(peer_id, self.TOPIC)
+            assert writes.await_count == 0
+
+            pubsub.peers[peer_id] = MagicMock()
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_failed_replay_is_retried(self):
+        """A replay that raises must not burn the peer's one chance."""
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            gossipsub = pubsub.router
+            assert isinstance(gossipsub, GossipSub)
+            with patch.object(
+                gossipsub, "send_recent_messages", side_effect=ConnectionError("boom")
+            ):
+                await pubsub._send_recent_messages_to_new_peer(peer_id)
+            assert writes.await_count == 0
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 1
+
+    @pytest.mark.trio
+    async def test_replay_gate_cleared_on_unsubscribe(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            pubsub.handle_subscription(
+                peer_id, rpc_pb2.RPC.SubOpts(subscribe=False, topicid=self.TOPIC)
+            )
+            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 2
+
+    @pytest.mark.trio
+    async def test_replay_gate_cleared_on_reconnect(self):
+        async with PubsubFactory.create_batch_with_gossipsub(1) as pubsubs:
+            pubsub = pubsubs[0]
+            writes = self._seed_mcache(pubsub)
+            peer_id = self._register_subscribed_peer(pubsub)
+
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+            pubsub._handle_dead_peer(peer_id)
+            assert peer_id not in pubsub.peer_topics[self.TOPIC]
+            assert peer_id not in pubsub._replayed_recent_topics
+
+            pubsub.peer_topics[self.TOPIC] = {peer_id}
+            pubsub.peers[peer_id] = MagicMock()
+            await pubsub._send_recent_messages_to_new_peer(peer_id)
+
+            assert writes.await_count == 2
+
+
 # ---------------------------------------------------------------------------
 # Integration tests – full pubsub stack
 # ---------------------------------------------------------------------------
@@ -234,6 +359,71 @@ async def test_publish_before_identify_completes():
         assert received, (
             "Message published before identify was not delivered to the peer. "
             "The identify-aware publish queue may not be working."
+        )
+
+
+@pytest.mark.trio
+async def test_publish_before_identify_with_subscription_before_stream(monkeypatch):
+    """
+    Regression test for the ordering that makes
+    ``test_publish_before_identify_completes`` flaky under load.
+
+    When the publisher learns of the peer's subscription *before* its own
+    outbound pubsub stream is registered, nothing is queued at publish time
+    (the peer is in neither ``peers`` nor ``peer_topics``) and the mcache
+    catch-up in ``handle_subscription`` cannot write yet. The replay must
+    therefore also run once the stream becomes available.
+    """
+    topic = "test-subscription-before-stream"
+    data = b"hello-from-early-publish"
+
+    # The publisher's delay must be the longer one: the subscriber's stream, and
+    # so its subscription, has to reach the publisher while the publisher's own
+    # outbound stream is still pending. Equal or inverted delays make this test
+    # exercise the ordering that already worked.
+    publisher_stream_delay = 1.0
+    subscriber_stream_delay = 0.3
+
+    original_handle_new_peer = Pubsub._handle_new_peer
+    delays: dict[Pubsub, float] = {}
+
+    async def delayed_handle_new_peer(self: Pubsub, peer_id: ID) -> None:
+        await trio.sleep(delays.get(self, 0))
+        await original_handle_new_peer(self, peer_id)
+
+    monkeypatch.setattr(Pubsub, "_handle_new_peer", delayed_handle_new_peer)
+
+    async with PubsubFactory.create_batch_with_gossipsub(
+        2,
+        degree=1,
+        degree_low=1,
+        degree_high=2,
+        heartbeat_interval=1,
+    ) as pubsubs:
+        delays[pubsubs[0]] = publisher_stream_delay
+        delays[pubsubs[1]] = subscriber_stream_delay
+
+        await pubsubs[0].subscribe(topic)
+        sub_1 = await pubsubs[1].subscribe(topic)
+
+        await connect(pubsubs[0].host, pubsubs[1].host)
+        await pubsubs[0].publish(topic, data)
+
+        # The replay fires as soon as the publisher's outbound stream is
+        # registered, so wait for that instead of the worst-case setup time.
+        await pubsubs[0].wait_for_peer(
+            pubsubs[1].my_id, timeout=publisher_stream_delay + 3
+        )
+
+        received = False
+        with trio.move_on_after(3):
+            async for msg in sub_1:
+                if msg.data == data:
+                    received = True
+                    break
+        assert received, (
+            "Message published before identify was not delivered when the peer's "
+            "subscription arrived before the outbound pubsub stream was ready."
         )
 
 

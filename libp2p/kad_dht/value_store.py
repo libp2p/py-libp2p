@@ -20,9 +20,12 @@ from libp2p.peer.id import (
     ID,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.records.record import make_signed_put_record
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     DEFAULT_TTL,
+    MAX_DHT_MESSAGE_SIZE,
     PROTOCOL_ID,
 )
 from .pb.kademlia_pb2 import Message, Record
@@ -57,22 +60,25 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param validity: validity in seconds before the value expires.
-         Defaults to `DEFAULT_TTL` if set to 0.0.
+        :param validity: Absolute Unix timestamp when the value expires.
+         Defaults to `time.time() + DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
         None
 
         """
-        from libp2p.records.record import make_put_record
-
         if validity == 0.0:
             validity = time.time() + DEFAULT_TTL
         logger.debug(
             "Storing value for key %s... with validity %s", key.hex(), validity
         )
-        record = make_put_record(key, value)
+
+        # Create a signed record using the host's private key
+        private_key = self.host.get_private_key()
+        record = make_signed_put_record(key, value, private_key)
+
+        # Set timeReceived when storing locally
         record.timeReceived = str(time.time())
 
         self.store[key] = (record, validity)
@@ -123,44 +129,30 @@ class ValueStore:
             envelope_bytes, _ = env_to_send_in_RPC(self.host)
             message.senderRecord = envelope_bytes
 
-            # Set message fields
+            # Build the outbound record from the locally-stored signed record when
+            # available (normal put() path), otherwise sign the record now so the
+            # outbound message always carries signature and author fields.
+            local_entry = self.store.get(key)
+            if local_entry is not None:
+                signed_record, _ = local_entry
+                message.record.CopyFrom(signed_record)
+            else:
+                private_key = self.host.get_private_key()
+                signed_record = make_signed_put_record(key, value, private_key)
+                message.record.CopyFrom(signed_record)
             message.key = key
-            message.record.key = key
-            message.record.value = value
-            message.record.timeReceived = str(time.time())
+            # Note: timeReceived will be set by the receiving peer when storing
+            message.record.ClearField("timeReceived")
 
             # Serialize and send the protobuf message with length prefix
             proto_bytes = message.SerializeToString()
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug("Sent PUT_VALUE protobuf message with varint length")
-            # Read varint-prefixed response length
-
-            length_bytes = b""
-            while True:
-                logger.debug("Reading varint length prefix for response...")
-                b = await stream.read(1)
-                if not b:
-                    logger.warning("Connection closed while reading varint length")
-                    return False
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-            logger.debug(f"Received varint length bytes: {length_bytes.hex()}")
-            response_length = varint.decode_bytes(length_bytes)
-            logger.debug("Response length: %d bytes", response_length)
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.debug(
-                        f"Connection closed by peer {peer_id} while reading data"
-                    )
-                    return False
-                response_bytes += chunk
-                remaining -= len(chunk)
+            response_bytes = await read_varint_prefixed_bytes_limited(
+                stream, MAX_DHT_MESSAGE_SIZE
+            )
+            logger.debug("Response length: %d bytes", len(response_bytes))
 
             # Parse protobuf response
             response = Message()
@@ -185,7 +177,8 @@ class ValueStore:
         finally:
             if stream:
                 await stream.close()
-            return result
+
+        return False
 
     def get(self, key: bytes) -> Record | None:
         """
@@ -247,9 +240,14 @@ class ValueStore:
         """
         stream = None
         try:
-            # Don't try to get from ourselves
+            # If querying ourselves, return the local value directly
             if peer_id == self.local_peer_id:
-                return None
+                local_record = self.get(key)
+                if local_record is None:
+                    return None
+                if return_record:
+                    return local_record
+                return local_record.value
 
             logger.debug(f"Getting value for key {key.hex()} from peer {peer_id}")
 
@@ -271,30 +269,9 @@ class ValueStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
 
-            # Read response length
-            length_bytes = b""
-            while True:
-                b = await stream.read(1)
-                if not b:
-                    logger.warning("Connection closed while reading length")
-                    return None
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-            response_length = varint.decode_bytes(length_bytes)
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.debug(
-                        f"Connection closed by peer {peer_id} while reading data"
-                    )
-                    return None
-                response_bytes += chunk
-                remaining -= len(chunk)
-
+            response_bytes = await read_varint_prefixed_bytes_limited(
+                stream, MAX_DHT_MESSAGE_SIZE
+            )
             # Parse protobuf response
             try:
                 response = Message()
@@ -320,6 +297,10 @@ class ValueStore:
                     logger.debug(
                         f"Received value for key {key.hex()} from peer {peer_id}"
                     )
+
+                    # Update timeReceived to current time (when we received it locally)
+                    response.record.timeReceived = str(time.time())
+
                     return response.record if return_record else response.record.value
 
                 # Handle case where value is not found but peer infos are returned

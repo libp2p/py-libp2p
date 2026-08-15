@@ -200,6 +200,18 @@ class CircuitV2Transport(ITransport):
         if config.enable_dht_discovery:
             self.dht = KadDHT(host, DHTMode.CLIENT)
 
+    def can_dial(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can dial the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def can_listen(self, maddr: multiaddr.Multiaddr) -> bool:
+        """Return True if this transport can listen on the given multiaddr."""
+        return any(p.code == P_P2P_CIRCUIT for p in maddr.protocols())
+
+    def protocols(self) -> list[str]:
+        """Return the list of protocol names handled by this transport."""
+        return ["p2p-circuit"]
+
     async def dial(  # type: ignore[override]
         self,
         maddr: multiaddr.Multiaddr,
@@ -1077,7 +1089,7 @@ class CircuitV2Listener(Service, IListener):
         finally:
             logger.debug("CircuitV2Listener stopped")
 
-    async def listen(self, maddr: multiaddr.Multiaddr, nursery: trio.Nursery) -> None:
+    async def listen(self, maddr: multiaddr.Multiaddr) -> None:
         """
         Start listening on the given multiaddr.
 
@@ -1085,8 +1097,6 @@ class CircuitV2Listener(Service, IListener):
         ----------
         maddr : multiaddr.Multiaddr
             The multiaddr to listen on
-        nursery : trio.Nursery
-            The nursery to run tasks in
 
         """
         # Convert string to Multiaddr if needed

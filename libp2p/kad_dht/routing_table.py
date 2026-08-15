@@ -2,15 +2,27 @@
 Kademlia DHT routing table implementation.
 """
 
+from __future__ import annotations
+
 from collections import (
     OrderedDict,
 )
 import hashlib
+from ipaddress import (
+    ip_address,
+    ip_network,
+)
 import logging
 import time
+from typing import TYPE_CHECKING
 
-import multihash
+from multiaddr.exceptions import (
+    ProtocolLookupError,
+)
 import trio
+
+if TYPE_CHECKING:
+    from .diagnostics import RoutingTableDiagnostics
 
 from libp2p.abc import (
     IHost,
@@ -27,13 +39,12 @@ from libp2p.peer.peerinfo import (
 
 from .common import (
     BUCKET_SIZE,
+    MAX_PEERS_PER_SUBNET,
     MAXIMUM_BUCKETS,
     PEER_REFRESH_INTERVAL,
-    PROTOCOL_ID,
     STALE_PEER_THRESHOLD,
-)
-from .pb.kademlia_pb2 import (
-    Message,
+    SUBNET_PREFIX_LEN_V4,
+    SUBNET_PREFIX_LEN_V6,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,14 +58,55 @@ def peer_id_to_key(peer_id: ID) -> bytes:
     :param peer_id: The peer ID to convert
     :return: 32-byte (256-bit) key for routing table operations
     """
-    digest = hashlib.sha256(peer_id.to_bytes()).digest()
-    mh_bytes = multihash.encode(digest, "sha2-256")
-    return multihash.decode(mh_bytes).digest
+    return hashlib.sha256(peer_id.to_bytes()).digest()
 
 
 def key_to_int(key: bytes) -> int:
     """Convert a 256-bit key to an integer for range calculations."""
     return int.from_bytes(key, byteorder="big")
+
+
+def _subnet_key(peer_info: PeerInfo) -> str | None:
+    """
+    Return a stable subnet key for a peer's first globally-routable IP address,
+    used to enforce IP/subnet diversity in k-buckets (issue #1383).
+
+    Returns ``None`` (peer exempt from the diversity check) when the peer has no
+    globally-routable IP literal — this covers loopback, private (RFC1918/ULA),
+    CGNAT (100.64.0.0/10), link-local, documentation ranges, DNS-named peers,
+    and relayed (``p2p-circuit``) addresses. Only ``ip4``/``ip6`` literals on
+    non-relayed multiaddrs are grouped; ``is_global`` is used as the routable
+    predicate so behaviour is stable regardless of the exact private-range set.
+
+    A relayed address carries the *relay's* IP, not the peer's, so it is skipped
+    to avoid grouping distinct peers behind a shared relay.
+
+    Divergence from go-libp2p (go-libp2p-kbucket/peerdiversity): go checks *every*
+    address of the peer and rejects if any group is saturated. We group by the
+    *first* globally-routable address only — simpler, and it avoids false
+    rejections of legitimately multi-homed peers. A stricter all-addresses check
+    is a reasonable follow-up once address ordering is well-defined.
+    """
+    for addr in peer_info.addrs:
+        # Relayed addrs expose the relay's IP, not the peer's — never group them.
+        if "p2p-circuit" in str(addr):
+            continue
+        for proto, prefix_len in (
+            ("ip4", SUBNET_PREFIX_LEN_V4),
+            ("ip6", SUBNET_PREFIX_LEN_V6),
+        ):
+            try:
+                value = addr.value_for_protocol(proto)
+                if value is None:
+                    continue
+                ip = ip_address(value)
+            except (ProtocolLookupError, ValueError):
+                continue
+            if not ip.is_global:
+                # loopback / private / CGNAT / link-local / doc range → exempt
+                continue
+            return str(ip_network(f"{ip}/{prefix_len}", strict=False))
+    return None
 
 
 class KBucket:
@@ -103,8 +155,12 @@ class KBucket:
 
     async def add_peer(self, peer_info: PeerInfo) -> bool:
         """
-        Add a peer to the bucket. Returns True if the peer was added or updated,
-        False if the bucket is full.
+        Add a peer to the bucket.
+
+        Returns True if the peer was added or updated. Returns False if the
+        bucket is full (and the oldest peer could not be replaced) or if the
+        peer was rejected by IP/subnet diversity (issue #1383:
+        ``MAX_PEERS_PER_SUBNET``).
         """
         current_time = time.time()
         peer_id = peer_info.peer_id
@@ -113,6 +169,24 @@ class KBucket:
         if peer_id in self.peers:
             self.refresh_peer_last_seen(peer_id)
             return True
+
+        # Enforce IP/subnet diversity (issue #1383): refuse a new peer whose
+        # globally-routable subnet already holds MAX_PEERS_PER_SUBNET peers in
+        # this bucket. Exempt peers (subnet is None) are never grouped. Disabled
+        # when MAX_PEERS_PER_SUBNET <= 0.
+        if MAX_PEERS_PER_SUBNET > 0:
+            subnet = _subnet_key(peer_info)
+            if (
+                subnet is not None
+                and self._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+            ):
+                logger.debug(
+                    "Subnet %s at capacity (%d), rejecting peer %s",
+                    subnet,
+                    MAX_PEERS_PER_SUBNET,
+                    peer_id,
+                )
+                return False
 
         # If bucket has space, add the peer
         if len(self.peers) < self.bucket_size:
@@ -127,31 +201,38 @@ class KBucket:
             return False
 
         # Check if the old peer is responsive to ping request
-        try:
-            # Try to ping the oldest peer, not the new peer
-            response = await self._ping_peer(oldest_peer_id)
-            if response:
-                # If the old peer is still alive, we will not add the new peer
-                logger.debug(
-                    "Old peer %s is still alive, cannot add new peer %s",
-                    oldest_peer_id,
-                    peer_id,
-                )
-                return False
-        except Exception as e:
-            # If the old peer is unresponsive, we can replace it with the new peer
+        # Try to ping the oldest peer, not the new peer
+        response = await self._ping_peer(oldest_peer_id)
+        if response:
+            # If the old peer is still alive, we will not add the new peer
             logger.debug(
-                "Old peer %s is unresponsive, replacing with new peer %s: %s",
+                "Old peer %s is still alive, cannot add new peer %s",
                 oldest_peer_id,
                 peer_id,
-                str(e),
             )
-            self.peers.popitem(last=False)  # Remove oldest peer
-            self.peers[peer_id] = (peer_info, current_time)
-            return True
+            return False
 
-        # If we got here, the oldest peer responded but we couldn't add the new peer
-        return False
+        # If the old peer is unresponsive, we can replace it with the new peer
+        logger.debug(
+            "Old peer %s is unresponsive, replacing with new peer %s",
+            oldest_peer_id,
+            peer_id,
+        )
+        # Remove the specific peer by ID (not popitem) to handle
+        # concurrent mutations
+        if oldest_peer_id in self.peers:
+            del self.peers[oldest_peer_id]
+        self.peers[peer_id] = (peer_info, current_time)
+        return True
+
+    def _peers_in_subnet(self, subnet: str) -> int:
+        """
+        Count resident peers whose subnet key matches ``subnet`` (issue #1383).
+
+        Recomputes ``_subnet_key`` for each resident peer; O(k) with k bounded
+        by ``bucket_size`` (default 20), so the per-add cost is negligible.
+        """
+        return sum(1 for info, _ in self.peers.values() if _subnet_key(info) == subnet)
 
     def remove_peer(self, peer_id: ID) -> bool:
         """
@@ -216,8 +297,8 @@ class KBucket:
                         try:
                             # Try to ping the peer
                             logger.debug("Pinging stale peer %s", peer_id)
-                            responce = await self._ping_peer(peer_id)
-                            if responce:
+                            response = await self._ping_peer(peer_id)
+                            if response:
                                 # Update the last seen time
                                 self.refresh_peer_last_seen(peer_id)
                                 logger.debug(f"Refreshed peer {peer_id}")
@@ -244,8 +325,11 @@ class KBucket:
 
     async def _ping_peer(self, peer_id: ID) -> bool:
         """
-        Ping a peer using protobuf message to check
+        Ping a peer using the libp2p ping protocol to check
         if it's still alive and update last seen time.
+
+        Per spec: "Implementations must not actively send PING requests"
+        using the Kademlia protocol. We use the dedicated libp2p ping protocol.
 
         params: peer_id: The ID of the peer to ping
 
@@ -255,88 +339,20 @@ class KBucket:
             True if ping successful, False otherwise
 
         """
-        result = False
-        # Get peer info directly from the bucket
-        peer_info = self.get_peer_info(peer_id)
-        if not peer_info:
-            raise ValueError(f"Peer {peer_id} not in bucket")
+        from libp2p.host.ping import PingService
 
         try:
-            # Open a stream to the peer with the DHT protocol
-            stream = await self.host.new_stream(peer_id, [PROTOCOL_ID])
-
-            try:
-                # Create ping protobuf message
-                ping_msg = Message()
-                ping_msg.type = Message.PING  # Use correct enum
-
-                # Serialize and send with length prefix (4 bytes big-endian)
-                msg_bytes = ping_msg.SerializeToString()
+            ping_service = PingService(self.host)
+            rtts = await ping_service.ping(peer_id, ping_amt=1)
+            if rtts:
                 logger.debug(
-                    f"Sending PING message to {peer_id}, size: {len(msg_bytes)} bytes"
+                    f"Successfully pinged peer {peer_id} "
+                    f"(RTT: {rtts[0]}ms via libp2p ping)"
                 )
-                await stream.write(len(msg_bytes).to_bytes(4, byteorder="big"))
-                await stream.write(msg_bytes)
-
-                # Wait for response with timeout
-                with trio.move_on_after(2):  # 2 second timeout
-                    # Read response length (4 bytes)
-                    length_bytes = await stream.read(4)
-                    if not length_bytes or len(length_bytes) < 4:
-                        logger.warning(f"Peer {peer_id} disconnected during ping")
-                        return False
-
-                    msg_len = int.from_bytes(length_bytes, byteorder="big")
-                    if (
-                        msg_len <= 0 or msg_len > 1024 * 1024
-                    ):  # Sanity check on message size
-                        logger.warning(
-                            f"Invalid message length from {peer_id}: {msg_len}"
-                        )
-                        return False
-
-                    logger.debug(
-                        f"Receiving response from {peer_id}, size: {msg_len} bytes"
-                    )
-
-                    # Read full message
-                    response_bytes = await stream.read(msg_len)
-                    if not response_bytes:
-                        logger.warning(f"Failed to read response from {peer_id}")
-                        return False
-
-                    # Parse protobuf response
-                    response = Message()
-                    try:
-                        response.ParseFromString(response_bytes)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to parse protobuf response from {peer_id}: {e}"
-                        )
-                        return False
-
-                    if response.type == Message.PING:
-                        # Update the last seen timestamp for this peer
-                        logger.debug(f"Successfully pinged peer {peer_id}")
-                        result = True
-                        return result
-
-                    else:
-                        logger.warning(
-                            f"Unexpected response type from {peer_id}: {response.type}"
-                        )
-                        return False
-
-                # If we get here, the ping timed out
-                logger.warning(f"Ping to peer {peer_id} timed out")
-                return False
-
-            finally:
-                await stream.close()
-                return result
-
+                return True
+            return False
         except Exception as e:
-            logger.error(f"Error pinging peer {peer_id}: {str(e)}")
+            logger.debug(f"Failed to ping peer {peer_id} via libp2p ping: {e}")
             return False
 
     def refresh_peer_last_seen(self, peer_id: ID) -> bool:
@@ -392,7 +408,7 @@ class KBucket:
         key = peer_id_to_key(peer_id)
         return self.key_in_range(key)
 
-    def split(self) -> tuple["KBucket", "KBucket"]:
+    def split(self) -> tuple[KBucket, KBucket]:
         """
         Split the bucket into two buckets.
 
@@ -436,11 +452,19 @@ class RoutingTable:
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
 
-    async def add_peer(self, peer_obj: PeerInfo | ID) -> bool:
+    async def add_peer(
+        self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
+    ) -> bool:
         """
         Add a peer to the routing table.
 
+        Per spec: "Nodes add another node to their routing table if and only if
+        that node operates in server mode." We check if the peer supports the
+        KAD protocol via identify before adding, unless skip_server_mode_check
+        is True (e.g., when adding from an incoming KAD stream).
+
         :param peer_obj: Either PeerInfo object or peer ID to add
+        :param skip_server_mode_check: If True, skip the server-mode protocol check
 
         Returns
         -------
@@ -484,45 +508,69 @@ class RoutingTable:
             if peer_id == self.local_id:
                 return False
 
+            # Per spec: only add peers that operate in server mode.
+            # A peer is in server mode if it supports the KAD protocol
+            # (learned via identify protocol). Only check if identify has
+            # populated protocol info for this peer.
+            if not skip_server_mode_check:
+                try:
+                    from .common import PROTOCOL_ID
+
+                    peer_protocols = self.host.get_peerstore().get_protocols(peer_id)
+                    if peer_protocols is not None and len(peer_protocols) > 0:
+                        # Identify has run — check if peer supports KAD
+                        if str(PROTOCOL_ID) not in peer_protocols:
+                            logger.debug(
+                                "Peer %s does not support KAD protocol, "
+                                "not adding to routing table (client mode)",
+                                peer_id,
+                            )
+                            return False
+                except Exception:
+                    pass
+
             # Find the right bucket for this peer
             bucket = self.find_bucket(peer_id)
 
-            # Try to add to the bucket
+            # Keep splitting the bucket if it's full, we don't already have the peer,
+            # and it contains our local ID. We might need to split multiple times
+            # if all peers in the bucket happen to fall into the same half.
+            while bucket.size() >= bucket.bucket_size and not bucket.has_peer(peer_id):
+                if self._should_split_bucket(bucket):
+                    logger.debug(f"Bucket full, attempting to split for peer {peer_id}")
+                    if self._split_bucket(bucket):
+                        # Re-find the bucket for this peer after the split
+                        bucket = self.find_bucket(peer_id)
+                    else:
+                        break
+                else:
+                    break
+
+            # Now try to add to the bucket. If it's still full (couldn't split),
+            # this will ping the oldest peer and replace it if unresponsive.
             success = await bucket.add_peer(peer_info)
             if success:
-                logger.debug(f"Successfully added peer {peer_id} to routing table")
+                logger.debug("Successfully added peer %s to routing table", peer_id)
                 return True
 
-            # If bucket is full and couldn't add peer, try splitting the bucket
-            # Only split if the bucket contains our Peer ID
-            if self._should_split_bucket(bucket):
+            subnet = _subnet_key(peer_info)
+            if (
+                MAX_PEERS_PER_SUBNET > 0
+                and subnet is not None
+                and bucket._peers_in_subnet(subnet) >= MAX_PEERS_PER_SUBNET
+            ):
                 logger.debug(
-                    f"Bucket is full, attempting to split bucket for peer {peer_id}"
+                    "Peer %s dropped: subnet %s at capacity (%d)",
+                    peer_id,
+                    subnet,
+                    MAX_PEERS_PER_SUBNET,
                 )
-                split_success = self._split_bucket(bucket)
-                if split_success:
-                    # After splitting,
-                    # find the appropriate bucket for the peer and try to add it
-                    target_bucket = self.find_bucket(peer_info.peer_id)
-                    success = await target_bucket.add_peer(peer_info)
-                    if success:
-                        logger.debug(
-                            f"Successfully added peer {peer_id} after bucket split"
-                        )
-                        return True
-                    else:
-                        logger.debug(
-                            f"Failed to add peer {peer_id} even after bucket split"
-                        )
-                        return False
-                else:
-                    logger.debug(f"Failed to split bucket for peer {peer_id}")
-                    return False
             else:
                 logger.debug(
-                    f"Bucket is full and cannot be split, peer {peer_id} not added"
+                    "Bucket full and cannot split, peer %s dropped",
+                    peer_id,
                 )
-                return False
+            return False
 
         except Exception as e:
             logger.debug(f"Error adding peer {peer_obj} to routing table: {e}")
@@ -576,10 +624,13 @@ class RoutingTable:
         for bucket in self.buckets:
             all_peers.extend(bucket.peer_ids())
 
+        # Hash the target key to map it into the DHT keyspace
+        target_hash = hashlib.sha256(key).digest()
+
         # Sort by XOR distance to the key
         def distance_to_key(peer_id: ID) -> int:
             peer_key = peer_id_to_key(peer_id)
-            return xor_distance(peer_key, key)
+            return xor_distance(peer_key, target_hash)
 
         all_peers.sort(key=distance_to_key)
 
@@ -681,29 +732,43 @@ class RoutingTable:
         self.buckets = [KBucket(self.host, BUCKET_SIZE)]
         logger.info("Routing table cleaned up, all data removed.")
 
+    def get_diagnostics(self) -> RoutingTableDiagnostics:
+        """
+        Return a :class:`~libp2p.kad_dht.diagnostics.RoutingTableDiagnostics`
+        analyser bound to this routing table.
+
+        Example::
+
+            report = dht.routing_table.get_diagnostics().analyse()
+            print(report.summary())
+        """
+        from .diagnostics import RoutingTableDiagnostics
+
+        return RoutingTableDiagnostics(self)
+
     def _should_split_bucket(self, bucket: KBucket) -> bool:
         """
         Check if a bucket should be split according to Kademlia rules.
 
+        Per spec: "must try to maintain k peers with shared key prefix of
+        length L, for every L in [0..255]". We split any full bucket up
+        to the maximum of 256 buckets.
+
         :param bucket: The bucket to check
         :return: True if the bucket should be split
         """
+        # Only full buckets should ever split. A non-full bucket can now return
+        # False from add_peer for reasons other than fullness (e.g. a subnet
+        # diversity rejection, issue #1383), which must not trigger a split.
+        if len(bucket.peers) < bucket.bucket_size:
+            return False
+
         # Check if we've exceeded maximum buckets
         if len(self.buckets) >= MAXIMUM_BUCKETS:
             logger.debug("Maximum number of buckets reached, cannot split")
             return False
 
-        # Check if the bucket contains our local ID
-        local_key = peer_id_to_key(self.local_id)
-        local_key_int = key_to_int(local_key)
-        contains_local_id = bucket.min_range <= local_key_int < bucket.max_range
-
-        logger.debug(
-            f"Bucket range: {bucket.min_range} - {bucket.max_range}, "
-            f"local_key_int: {local_key_int}, contains_local: {contains_local_id}"
-        )
-
-        return contains_local_id
+        return True
 
     def _split_bucket(self, bucket: KBucket) -> bool:
         """
