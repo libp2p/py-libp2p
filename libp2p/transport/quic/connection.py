@@ -1674,14 +1674,25 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 await self.on_close()
 
             # Close QUIC connection
-            self._quic.close()
+            try:
+                self._quic.close()
+            except Exception:
+                pass
 
+            # Best-effort transmit close frame (bounded with 0.1s timeout)
             if self._socket:
-                await self._transmit()  # Send close frames
+                try:
+                    with trio.move_on_after(0.1):
+                        await self._transmit()
+                except Exception:
+                    pass
 
-            # Close socket
+            # Guaranteed socket close
             if self._socket and self._owns_socket:
-                self._socket.close()
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
                 self._socket = None
 
             self._streams.clear()
@@ -1691,9 +1702,15 @@ class QUICConnection(IRawConnection, IMuxedConn):
             # Immediately cancel background tasks (receiver, event loop, maintenance)
             if hasattr(self, "_task_cancel_scopes"):
                 for s in list(self._task_cancel_scopes):
-                    s.cancel()
+                    try:
+                        s.cancel()
+                    except Exception:
+                        pass
             if hasattr(self, "_cancel_scope") and self._cancel_scope is not None:
-                self._cancel_scope.cancel()
+                try:
+                    self._cancel_scope.cancel()
+                except Exception:
+                    pass
 
             # Always notify parent transport and listener to remove this connection
             # from their connection tracking dictionaries to prevent memory leaks.
