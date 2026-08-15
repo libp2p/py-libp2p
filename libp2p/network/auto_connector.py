@@ -319,7 +319,7 @@ class AutoConnector:
 
             # Concurrency limiter and dial batch sizing to comfortably reach 300-500 peers
             dial_limiter = trio.CapacityLimiter(40)
-            max_dials_per_cycle = 80
+            max_dials_per_cycle = 40
 
             # Skip peers whose dial attempts have failed too recently (cooldown).
             # This also bounds per-cycle work when the peerstore is dominated by
@@ -404,8 +404,31 @@ class AutoConnector:
 
             if dialed > 0:
                 logger.info(f"Auto-connected to {dialed} new peers")
+            self._prune_tracking_caches()
         finally:
             self._is_connecting = False
+
+    def _prune_tracking_caches(self) -> None:
+        """Prune tracking dictionaries to prevent memory accumulation."""
+        now = time.time()
+        if len(self._last_connect_attempt) > 500:
+            stale_keys = [
+                pid
+                for pid, ts in self._last_connect_attempt.items()
+                if now - ts > self._max_cooldown
+            ]
+            for pid in stale_keys:
+                self._last_connect_attempt.pop(pid, None)
+                self._failure_counts.pop(pid, None)
+
+        if len(self._recent_disconnects) > 500:
+            stale_disc = [
+                pid
+                for pid, ts in self._recent_disconnects.items()
+                if now - ts > self._disconnect_backoff * 2
+            ]
+            for pid in stale_disc:
+                self._recent_disconnects.pop(pid, None)
 
     async def _get_candidate_peers(self) -> list[ID]:
         """

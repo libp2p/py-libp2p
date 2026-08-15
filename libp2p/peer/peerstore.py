@@ -148,21 +148,13 @@ class PeerRecordState:
 class PeerStore(IPeerStore):
     peer_data_map: dict[ID, PeerData]
 
-    def __init__(self, max_records: int = 10000, max_peers: int = 2000) -> None:
-        # Use a plain dict (not defaultdict) to prevent auto-creating PeerData
-        # entries on every lookup for unknown peers.  With defaultdict, any call
-        # to peerstore.addrs(unknown_id) / get_protocols(unknown_id) silently
-        # creates an empty PeerData that is never cleaned up until the hourly GC.
-        # 939 inbound Kubo DHT visitors per 5 min each created one such entry,
-        # growing the map to ~10k entries / hour with no bound.
+    def __init__(self, max_records: int = 2000, max_peers: int = 1000) -> None:
         self.peer_data_map = {}
         self.addr_update_channels: dict[ID, MemorySendChannel[Multiaddr]] = {}
         self.peer_record_map: dict[ID, PeerRecordState] = {}
         self.local_peer_record: Envelope | None = None
         self.max_records = max_records
-        # Hard cap on peer_data_map size.  When exceeded, the oldest (LRU-ish)
-        # entries are evicted.  2000 covers the routing table (k=20×20 buckets=400)
-        # plus a large buffer for recently-seen peers.
+        # Hard cap on peer_data_map size. 1000 covers routing table (400) + active swarm (300).
         self.max_peers = max_peers
 
     def get_local_record(self) -> Envelope | None:
@@ -480,6 +472,8 @@ class PeerStore(IPeerStore):
                     pass  # Or consider logging / dropping / replacing stream
 
         self.maybe_delete_peer_record(peer_id)
+        if len(self.peer_data_map) > self.max_peers:
+            self._enforce_peer_limit()
 
     def addrs(self, peer_id: ID) -> list[Multiaddr]:
         """
