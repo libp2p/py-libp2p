@@ -721,12 +721,9 @@ class Yamux(IMuxedConn):
             except Exception:
                 # Connection likely closed, exit the loop
                 break
-            if self.event_shutting_down.is_set():
-                break
-            # Sleep between measurements, checking shutdown periodically
+            # Sleep between measurements, waking immediately if connection shuts down
             with trio.move_on_after(RTT_MEASURE_INTERVAL):
-                while not self.event_shutting_down.is_set():
-                    await trio.sleep(1.0)
+                await self.event_shutting_down.wait()
 
     @property
     def is_established(self) -> bool:

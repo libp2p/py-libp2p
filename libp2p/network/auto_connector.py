@@ -317,9 +317,10 @@ class AutoConnector:
             # Shuffle to randomize connection order
             random.shuffle(candidates)
 
-            # Concurrency limiter and dial batch sizing to comfortably reach 300-500 peers
-            dial_limiter = trio.CapacityLimiter(40)
-            max_dials_per_cycle = 40
+            # Concurrency limiter and dial batch sizing (matches go-libp2p defaultBatchSize = 16)
+            CONN_MGR_BATCH_SIZE = 16
+            dial_limiter = trio.CapacityLimiter(CONN_MGR_BATCH_SIZE)
+            max_dials_per_cycle = CONN_MGR_BATCH_SIZE
 
             # Skip peers whose dial attempts have failed too recently (cooldown).
             # This also bounds per-cycle work when the peerstore is dominated by
@@ -381,14 +382,7 @@ class AutoConnector:
             try:
                 async with trio.open_nursery() as dial_nursery:
                     dialed = 0
-                    # We overdial (needed * 2) because in a P2P network, most dials will
-                    # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
-                    # The batch is capped so a deeply-below-watermark node does not
-                    # launch hundreds of concurrent dials against stale addresses
-                    # (which saturates the event loop with timer churn and starves
-                    # established connections).  Bounded batches keep recovering the
-                    # watermark while leaving CPU for existing connections.
-                    dial_target = min(needed * 2, max_dials_per_cycle)
+                    dial_target = min(needed, max_dials_per_cycle)
 
                     for peer_id in candidates:
                         if dialed >= dial_target:
@@ -399,6 +393,8 @@ class AutoConnector:
 
                         dial_nursery.start_soon(_dial_candidate, peer_id)
                         dialed += 1
+                        # 50ms stagger between dispatches to eliminate CPU spikes (matches go-libp2p pacing)
+                        await trio.sleep(0.05)
             except Exception as e:
                 logger.error(f"Error in auto_connect dial nursery: {e}")
 
@@ -477,6 +473,18 @@ class AutoConnector:
                     # etc.) or relay-only (``/p2p-circuit``) paths can never
                     # be dialed directly.
                     continue
+
+                # Filter out peers with no addresses supported by our registered transports
+                if (
+                    hasattr(self.swarm, "transport_manager")
+                    and self.swarm.transport_manager is not None
+                    and not any(
+                        self.swarm.transport_manager.transport_for_dialing(a) is not None
+                        for a in addrs
+                    )
+                ):
+                    continue
+
                 candidates.append(peer_id)
             except Exception:
                 continue

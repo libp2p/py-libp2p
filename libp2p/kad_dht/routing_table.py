@@ -297,47 +297,6 @@ class KBucket:
 
         return stale_peers
 
-    async def _periodic_peer_refresh(self) -> None:
-        """Background task to periodically refresh peers"""
-        try:
-            while True:
-                await trio.sleep(PEER_REFRESH_INTERVAL)  # Check every minute
-
-                # Find stale peers (not pinged in last hour)
-                stale_peers = self.get_stale_peers(
-                    stale_threshold_seconds=STALE_PEER_THRESHOLD
-                )
-                if stale_peers:
-                    logger.debug(f"Found {len(stale_peers)} stale peers to refresh")
-
-                    for peer_id in stale_peers:
-                        try:
-                            # Try to ping the peer
-                            logger.debug("Pinging stale peer %s", peer_id)
-                            response = await self._ping_peer(peer_id)
-                            if response:
-                                # Update the last seen time
-                                self.refresh_peer_last_seen(peer_id)
-                                logger.debug(f"Refreshed peer {peer_id}")
-                            else:
-                                # If ping fails, remove the peer
-                                logger.debug(f"Failed to ping peer {peer_id}")
-                                self.remove_peer(peer_id)
-                                logger.info(f"Removed unresponsive peer {peer_id}")
-                        except Exception as e:
-                            # If ping fails, remove the peer
-                            logger.debug(
-                                "Failed to ping peer %s: %s",
-                                peer_id,
-                                e,
-                            )
-                            self.remove_peer(peer_id)
-                            logger.info(f"Removed unresponsive peer {peer_id}")
-        except trio.Cancelled:
-            logger.debug("Peer refresh task cancelled")
-        except Exception as e:
-            logger.error(f"Error in peer refresh task: {e}", exc_info=True)
-
     async def _ping_peer(self, peer_id: ID) -> bool:
         """
         Ping a peer using the libp2p ping protocol to check
@@ -820,19 +779,60 @@ class RoutingTable:
                 f"peers: {upper_bucket.size()}"
             )
 
-            # Start periodic refresh for the new buckets
-            if self._rt_refresh_nursery is not None:
-                self._rt_refresh_nursery.start_soon(lower_bucket._periodic_peer_refresh)
-                self._rt_refresh_nursery.start_soon(upper_bucket._periodic_peer_refresh)
-
             return True
 
         except Exception as e:
             logger.error(f"Error splitting bucket: {e}")
             return False
 
+    async def _periodic_peer_refresh(self) -> None:
+        """Single background task to periodically refresh stale peers across all buckets."""
+        try:
+            while True:
+                await trio.sleep(300.0)  # Check every 5 minutes
+
+                # Collect stale peers across all buckets
+                stale_peers: list[ID] = []
+                for bucket in self.buckets:
+                    stale = bucket.get_stale_peers(
+                        stale_threshold_seconds=STALE_PEER_THRESHOLD
+                    )
+                    stale_peers.extend(stale)
+
+                if not stale_peers:
+                    continue
+
+                # Rate-limit pings: at most 5 peers per 5-minute cycle
+                logger.debug(
+                    f"Found {len(stale_peers)} stale peers in routing table; "
+                    f"refreshing up to 5"
+                )
+                for peer_id in stale_peers[:5]:
+                    try:
+                        # Find which bucket contains this peer
+                        target_bucket = self.find_bucket_for_peer_id(peer_id)
+                        if target_bucket is None:
+                            continue
+
+                        response = await target_bucket._ping_peer(peer_id)
+                        if response:
+                            target_bucket.refresh_peer_last_seen(peer_id)
+                            logger.debug(f"Refreshed stale peer {peer_id}")
+                        else:
+                            target_bucket.remove_peer(peer_id)
+                            logger.info(f"Removed unresponsive stale peer {peer_id}")
+                    except Exception as e:
+                        logger.debug(f"Error checking stale peer {peer_id}: {e}")
+                    # 1s stagger between individual stale pings
+                    await trio.sleep(1.0)
+        except trio.Cancelled:
+            logger.debug("Routing table peer refresh task cancelled")
+        except Exception as e:
+            logger.error(
+                f"Error in routing table peer refresh task: {e}", exc_info=True
+            )
+
     def start_periodic_refresh(self, nursery: trio.Nursery) -> None:
-        """Start periodic stale peer refresh for all buckets."""
+        """Start single periodic stale peer refresh task for the routing table."""
         self._rt_refresh_nursery = nursery
-        for bucket in self.buckets:
-            nursery.start_soon(bucket._periodic_peer_refresh)
+        nursery.start_soon(self._periodic_peer_refresh)
