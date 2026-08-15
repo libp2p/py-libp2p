@@ -216,10 +216,20 @@ class BitswapClient(INotifee):
         connection to the peer remains (mirrors TagStoreNotifee's
         last-connection semantics).
         """
+        peer_id = None
         try:
-            peer_id = conn.muxed_conn.peer_id
+            if hasattr(conn, "muxed_conn") and conn.muxed_conn is not None:
+                peer_id = getattr(conn.muxed_conn, "peer_id", None)
+            if peer_id is None and hasattr(conn, "peer_id"):
+                peer_id = conn.peer_id
+            if peer_id is None and hasattr(conn, "get_remote_peer"):
+                peer_id = conn.get_remote_peer()
         except Exception:
             return
+
+        if peer_id is None:
+            return
+
         try:
             remaining = network.get_connections(peer_id)
         except Exception:
@@ -765,7 +775,7 @@ class BitswapClient(INotifee):
             self._peer_protocols[peer_id] = str(protocol)
 
         peer_protocol = str(protocol) if protocol else BITSWAP_PROTOCOL_V100
-        logger.info(
+        logger.debug(
             f"[FLOW] Negotiated protocol for peer {str(peer_id)[:20]}...: "
             f"{peer_protocol}"
         )

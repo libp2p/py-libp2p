@@ -308,11 +308,12 @@ class AutoConnector:
 
             # Try to connect to candidates
             # We limit concurrency to prevent CPU saturation from simultaneous
-            # TLS handshakes.
-            dial_limiter = trio.CapacityLimiter(25)
+            # TLS handshakes while maintaining sufficient throughput to reach
+            # and sustain 300–500 peer watermarks.
+            dial_limiter = trio.CapacityLimiter(30)
 
             # Cap the number of dials started per cycle.
-            max_dials_per_cycle = 20
+            max_dials_per_cycle = 60
 
             # Skip peers whose dial attempts have failed too recently (cooldown).
             # This also bounds per-cycle work when the peerstore is dominated by
