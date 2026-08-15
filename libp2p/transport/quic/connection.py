@@ -470,9 +470,11 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # start() which is the sole setter of event_started for the
                 # Swarm lifecycle contract.
 
-        except Exception as e:
-            logger.error(f"Failed to establish connection: {e}")
-            await self.close()
+        except BaseException as e:
+            if not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to establish connection: {e}")
+            with trio.CancelScope(shield=True):
+                await self.close()
             raise
 
     async def _start_background_tasks(self) -> None:

@@ -325,9 +325,11 @@ class QUICTransport(ITransport):
 
             return connection
 
-        except Exception as e:
-            logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
-            raise QUICDialError(f"Dial failed: {e}") from e
+        except BaseException as e:
+            if not isinstance(e, trio.Cancelled):
+                logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
+                raise QUICDialError(f"Dial failed: {e}") from e
+            raise
 
     async def _verify_peer_identity(
         self, connection: QUICConnection, expected_peer_id: ID
