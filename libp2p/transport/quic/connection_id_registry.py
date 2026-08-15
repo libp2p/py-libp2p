@@ -938,11 +938,10 @@ class ConnectionIDRegistry:
 
         """
         async with self._lock:
-            cids = []
-            for connection_id, conn in self._connections.items():
-                if conn is connection:
-                    cids.append(connection_id)
-            return cids
+            if connection in self._connection_sequences:
+                return list(self._connection_sequences[connection].values())
+            primary = self._connection_primary_cid.get(connection)
+            return [primary] if primary is not None else []
 
     async def cleanup_stale_address_mapping(self, addr: tuple[str, int]) -> None:
         """
