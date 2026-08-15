@@ -536,15 +536,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
                 # Calculate next sleep duration based on pending aioquic timer
                 timer = self._quic.get_timer()
                 now = time.time()
-                if timer is not None and timer > now:
-                    delay = min(timer - now, _IDLE_POLL_INTERVAL)
+                if timer is not None:
+                    delay = min(max(0.0, timer - now), _IDLE_POLL_INTERVAL)
                 else:
                     delay = _IDLE_POLL_INTERVAL
 
-                with trio.move_on_after(delay):
-                    await self._activity_event.wait()
-                if self._activity_event.is_set():
-                    self._activity_event = trio.Event()
+                if delay > 0.0:
+                    with trio.move_on_after(delay):
+                        await self._activity_event.wait()
+                    if self._activity_event.is_set():
+                        self._activity_event = trio.Event()
+                else:
+                    # Timer already due; yield cooperatively to drain immediately
+                    await trio.sleep(0.001)
 
         except Exception as e:
             if not self._closed:
