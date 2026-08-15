@@ -614,10 +614,12 @@ class QUICConnection(IRawConnection, IMuxedConn):
                     # Send any response packets
                     await self._transmit()
 
-                except trio.ClosedResourceError:
+                except (trio.ClosedResourceError, OSError):
                     logger.debug("Client socket closed")
                     break
                 except Exception as e:
+                    if self._closed or not self._socket:
+                        break
                     logger.error(f"Error receiving client packet: {e}")
                     await trio.sleep(0.01)
 
@@ -1663,6 +1665,13 @@ class QUICConnection(IRawConnection, IMuxedConn):
             return
 
         self._closed = True
+        self._signal_activity()
+        if hasattr(self, "_task_cancel_scopes"):
+            for s in list(self._task_cancel_scopes):
+                try:
+                    s.cancel()
+                except Exception:
+                    pass
         logger.debug(f"Closing QUIC connection to {self._remote_peer_id}")
 
         try:

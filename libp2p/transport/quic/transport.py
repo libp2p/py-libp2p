@@ -326,6 +326,12 @@ class QUICTransport(ITransport):
             return connection
 
         except BaseException as e:
+            if connection is not None:
+                with trio.CancelScope(shield=True):
+                    try:
+                        await connection.close()
+                    except Exception:
+                        pass
             if not isinstance(e, trio.Cancelled):
                 logger.error(f"Failed to dial QUIC connection to {maddr}: {e}")
                 raise QUICDialError(f"Dial failed: {e}") from e
