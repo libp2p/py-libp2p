@@ -22,9 +22,11 @@ from libp2p.peer.peerinfo import (
     PeerInfo,
 )
 from libp2p.peer.peerstore import env_to_send_in_RPC
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     ALPHA,
+    MAX_DHT_MESSAGE_SIZE,
     PROTOCOL_ID,
 )
 from .pb.kademlia_pb2 import (
@@ -333,30 +335,9 @@ class PeerRouting(IPeerRouting):
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
 
-            # Read varint-prefixed response length
-            length_bytes = b""
-            while True:
-                b = await stream.read(1)
-                if not b:
-                    logger.warning(
-                        "Error reading varint length from stream: connection closed"
-                    )
-                    return []
-                length_bytes += b
-                if b[0] & 0x80 == 0:
-                    break
-            response_length = varint.decode_bytes(length_bytes)
-
-            # Read response data
-            response_bytes = b""
-            remaining = response_length
-            while remaining > 0:
-                chunk = await stream.read(remaining)
-                if not chunk:
-                    logger.debug(f"Connection closed by peer {peer} while reading data")
-                    return []
-                response_bytes += chunk
-                remaining -= len(chunk)
+            response_bytes = await read_varint_prefixed_bytes_limited(
+                stream, MAX_DHT_MESSAGE_SIZE
+            )
 
             # Parse the protobuf response
             response_msg = Message()
