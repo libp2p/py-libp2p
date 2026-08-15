@@ -815,6 +815,16 @@ class ConnectionIDRegistry:
                     self._connection_primary_cid.pop(connection, None)
                     self._connection_cid_counts.pop(connection, None)
                     self._connection_sequences.pop(connection, None)
+
+                    # Remove any leftover initial_connection_ids pointing to this connection
+                    raw_quic = getattr(connection, "_quic", None)
+                    if raw_quic:
+                        for k, v in list(self._initial_connection_ids.items()):
+                            if v is raw_quic:
+                                self._initial_connection_ids.pop(k, None)
+                                self._pending_created_at.pop(k, None)
+                                self._connection_id_to_addr.pop(k, None)
+                                self._connection_id_sequences.pop(k, None)
             return connection_id
 
     async def promote_pending(
@@ -990,15 +1000,29 @@ class ConnectionIDRegistry:
                 for cid, created_at in self._pending_created_at.items()
                 if now - created_at > max_age
             ]
+            stale_conns = set()
             for cid in stale_cids:
-                self._pending.pop(cid, None)
+                conn = self._pending.pop(cid, None)
+                if conn:
+                    stale_conns.add(conn)
+                init_conn = self._initial_connection_ids.pop(cid, None)
+                if init_conn:
+                    stale_conns.add(init_conn)
                 self._pending_created_at.pop(cid, None)
-                self._initial_connection_ids.pop(cid, None)
                 addr = self._connection_id_to_addr.pop(cid, None)
                 if addr and self._addr_to_connection_id.get(addr) == cid:
                     self._addr_to_connection_id.pop(addr, None)
                 self._connection_id_sequences.pop(cid, None)
                 self._connection_sequence_counters.pop(cid, None)
+
+            # Sweep any orphan initial_connection_ids pointing to stale connections
+            if stale_conns:
+                for k, v in list(self._initial_connection_ids.items()):
+                    if v in stale_conns:
+                        self._initial_connection_ids.pop(k, None)
+                        self._pending_created_at.pop(k, None)
+                        self._connection_id_to_addr.pop(k, None)
+                        self._connection_id_sequences.pop(k, None)
             return stale_cids
 
     async def get_all_pending_cids(self) -> list[bytes]:
@@ -1033,7 +1057,16 @@ class ConnectionIDRegistry:
 
         """
         async with self._lock:
+            # Cap initial_connection_ids to prevent unbounded accumulation
+            if len(self._initial_connection_ids) >= 256:
+                oldest_k = next(iter(self._initial_connection_ids))
+                self._initial_connection_ids.pop(oldest_k, None)
+                self._pending_created_at.pop(oldest_k, None)
+                self._connection_id_to_addr.pop(oldest_k, None)
+                self._connection_id_sequences.pop(oldest_k, None)
+
             self._initial_connection_ids[connection_id] = quic_conn
+            self._pending_created_at[connection_id] = time.time()
             self._connection_id_to_addr[connection_id] = addr
             self._addr_to_connection_id[addr] = connection_id
             # Track sequence number

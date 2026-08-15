@@ -1382,8 +1382,19 @@ class QUICListener(IListener):
         try:
             while self._listening:
                 await trio.sleep(10.0)
-                await self._registry.cleanup_stale_pending(max_age=15.0)
+                stale_cids = await self._registry.cleanup_stale_pending(max_age=15.0)
                 async with self._promotion_lock:
+                    if stale_cids:
+                        stale_set = set(stale_cids)
+                        stale_qids = [
+                            qid
+                            for qid, cid in self._pending_cid_by_quic_id.items()
+                            if cid in stale_set
+                        ]
+                        for qid in stale_qids:
+                            self._pending_cid_by_quic_id.pop(qid, None)
+                            self._handler_invoked_quic_ids.discard(qid)
+
                     active_keys = set(self._pending_cid_by_quic_id.keys()) | set(
                         self._conn_by_quic_id.keys()
                     )
