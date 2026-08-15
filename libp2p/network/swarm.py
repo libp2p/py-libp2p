@@ -2423,6 +2423,8 @@ class Swarm(Service, INetworkService):
         # Disconnects during shutdown must not cause new dials.
         if self._closing:
             return
+        if getattr(self.auto_connector, "_is_connecting", False):
+            return
         now = time.monotonic()
         if (
             now - self._last_auto_connect_trigger

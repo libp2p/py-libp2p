@@ -161,9 +161,10 @@ class AutoConnector:
         """
         self.swarm = swarm
         self.auto_connect_interval = auto_connect_interval
-
         self._started = False
         self._shutdown_event = trio.Event()
+        self._is_connecting = False
+        self._in_flight_dials: set[ID] = set()
         self._last_connect_attempt: dict[ID, float] = {}
         self._failure_counts: dict[ID, int] = {}
         self._base_cooldown = 300.0  # base retry interval (seconds)
@@ -255,133 +256,149 @@ class AutoConnector:
         if not self._started:
             return
 
-        num_connections = self.swarm.get_total_connections()
-        low_watermark = self.swarm.connection_config.low_watermark
-        min_connections = self.swarm.connection_config.min_connections
-
-        logger.info(
-            "AUTO_CONNECTOR_STATE: num_connections=%s, "
-            "low_watermark=%s, min_connections=%s",
-            num_connections,
-            low_watermark,
-            min_connections,
-        )
-
-        # Only connect if below low watermark
-        if num_connections >= low_watermark:
+        if self._is_connecting:
+            logger.debug("Auto-connect cycle already in progress, skipping")
             return
 
-        # Calculate how many connections we need
-        target = low_watermark
-        needed = target - num_connections
+        self._is_connecting = True
+        try:
+            num_connections = self.swarm.get_total_connections()
+            low_watermark = self.swarm.connection_config.low_watermark
+            min_connections = self.swarm.connection_config.min_connections
+            in_flight = len(self._in_flight_dials)
 
-        if needed <= 0:
-            return
+            logger.info(
+                "AUTO_CONNECTOR_STATE: num_connections=%s (in_flight=%s), "
+                "low_watermark=%s, min_connections=%s",
+                num_connections,
+                in_flight,
+                low_watermark,
+                min_connections,
+            )
 
-        logger.info(
-            "the connection (%s) is less the low limit (%s) "
-            "so connection manager is initiating %s number of new connections",
-            num_connections,
-            low_watermark,
-            needed,
-        )
+            # Only connect if below low watermark (counting in-flight dials)
+            if num_connections + in_flight >= low_watermark:
+                return
 
-        # Get candidate peers from peerstore
-        candidates = await self._get_candidate_peers()
+            # Calculate how many connections we need
+            target = low_watermark
+            needed = target - (num_connections + in_flight)
 
-        if not candidates:
-            logger.debug("No candidate peers available for auto-connection")
-            return
+            if needed <= 0:
+                return
 
-        # Shuffle to randomize connection order
-        random.shuffle(candidates)
+            logger.info(
+                "the connection (%s, in_flight=%s) is less the low limit (%s) "
+                "so connection manager is initiating %s number of new connections",
+                num_connections,
+                in_flight,
+                low_watermark,
+                needed,
+            )
 
-        # Try to connect to candidates
-        # We limit concurrency to prevent CPU saturation from simultaneous
-        # TLS handshakes.
-        dial_limiter = trio.CapacityLimiter(25)
+            # Get candidate peers from peerstore
+            candidates = await self._get_candidate_peers()
 
-        # Cap the number of dials started per cycle.
-        max_dials_per_cycle = 20
+            if not candidates:
+                logger.debug("No candidate peers available for auto-connection")
+                return
 
-        # Skip peers whose dial attempts have failed too recently (cooldown).
-        # This also bounds per-cycle work when the peerstore is dominated by
-        # stale/unreachable peers.
+            # Shuffle to randomize connection order
+            random.shuffle(candidates)
 
-        async def _dial_candidate(peer_id: ID) -> None:
-            async with dial_limiter:
-                connected = False
+            # Try to connect to candidates
+            # We limit concurrency to prevent CPU saturation from simultaneous
+            # TLS handshakes.
+            dial_limiter = trio.CapacityLimiter(25)
+
+            # Cap the number of dials started per cycle.
+            max_dials_per_cycle = 20
+
+            # Skip peers whose dial attempts have failed too recently (cooldown).
+            # This also bounds per-cycle work when the peerstore is dominated by
+            # stale/unreachable peers.
+
+            async def _dial_candidate(peer_id: ID) -> None:
+                self._in_flight_dials.add(peer_id)
                 try:
-                    logger.debug(f"Auto-connecting to peer {peer_id}")
-                    with trio.move_on_after(
-                        self.swarm.connection_config.dial_timeout
-                    ) as cancel_scope:
-                        await self.swarm.dial_peer(peer_id)
-                        connected = True  # only set if dial completes before timeout
-                    if cancel_scope.cancelled_caught:
-                        # Dial deadline fired.  The connection may STILL have
-                        # been established and registered — Swarm shields
-                        # add_conn() registration from this deadline, so a
-                        # handshake that completed just before the timeout
-                        # lands in the swarm's connection table even though
-                        # dial_peer() raised Cancelled.  In that case treat
-                        # the dial as a success instead of piling on a
-                        # failure cooldown (which would eventually put every
-                        # peer in 3600s backoff and strand the node at 0
-                        # connections).
-                        if self.swarm.get_connections(peer_id):
-                            connected = True
-                            logger.info(
-                                f"Auto-connected to peer {peer_id} "
-                                "(registered despite dial deadline)"
-                            )
-                            self._last_connect_attempt.pop(peer_id, None)
-                            self._failure_counts.pop(peer_id, None)
-                        else:
-                            logger.debug(f"Dial to {peer_id} timed out")
+                    async with dial_limiter:
+                        connected = False
+                        try:
+                            logger.debug(f"Auto-connecting to peer {peer_id}")
+                            with trio.move_on_after(
+                                self.swarm.connection_config.dial_timeout
+                            ) as cancel_scope:
+                                await self.swarm.dial_peer(peer_id)
+                                # only set if dial completes before timeout
+                                connected = True
+                            if cancel_scope.cancelled_caught:
+                                # Dial deadline fired.  The connection may STILL have
+                                # been established and registered — Swarm shields
+                                # add_conn() registration from this deadline, so a
+                                # handshake that completed just before the timeout
+                                # lands in the swarm's connection table even though
+                                # dial_peer() raised Cancelled.  In that case treat
+                                # the dial as a success instead of piling on a
+                                # failure cooldown (which would eventually put every
+                                # peer in 3600s backoff and strand the node at 0
+                                # connections).
+                                if self.swarm.get_connections(peer_id):
+                                    connected = True
+                                    logger.info(
+                                        f"Auto-connected to peer {peer_id} "
+                                        "(registered despite dial deadline)"
+                                    )
+                                    self._last_connect_attempt.pop(peer_id, None)
+                                    self._failure_counts.pop(peer_id, None)
+                                else:
+                                    logger.debug(f"Dial to {peer_id} timed out")
+                                    self._failure_counts[peer_id] = (
+                                        self._failure_counts.get(peer_id, 0) + 1
+                                    )
+                                    self._last_connect_attempt[peer_id] = time.time()
+                            elif connected:
+                                logger.info(f"Auto-connected to peer {peer_id}")
+                                # Success — clear cooldown so peer is immediately
+                                # re-dialable if it disconnects later
+                                self._last_connect_attempt.pop(peer_id, None)
+                                self._failure_counts.pop(peer_id, None)
+                        except Exception as e:
+                            logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
                             self._failure_counts[peer_id] = (
                                 self._failure_counts.get(peer_id, 0) + 1
                             )
                             self._last_connect_attempt[peer_id] = time.time()
-                    elif connected:
-                        logger.info(f"Auto-connected to peer {peer_id}")
-                        # Success — clear cooldown so peer is immediately
-                        # re-dialable if it disconnects later
-                        self._last_connect_attempt.pop(peer_id, None)
-                        self._failure_counts.pop(peer_id, None)
-                except Exception as e:
-                    logger.debug(f"Failed to auto-connect to {peer_id}: {e}")
-                    self._failure_counts[peer_id] = (
-                        self._failure_counts.get(peer_id, 0) + 1
-                    )
-                    self._last_connect_attempt[peer_id] = time.time()
+                finally:
+                    self._in_flight_dials.discard(peer_id)
 
-        try:
-            async with trio.open_nursery() as dial_nursery:
-                dialed = 0
-                # We overdial (needed * 2) because in a P2P network, most dials will
-                # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
-                # The batch is capped so a deeply-below-watermark node does not
-                # launch hundreds of concurrent dials against stale addresses
-                # (which saturates the event loop with timer churn and starves
-                # established connections).  Bounded batches keep recovering the
-                # watermark while leaving CPU for existing connections.
-                dial_target = min(needed * 2, max_dials_per_cycle)
+            try:
+                async with trio.open_nursery() as dial_nursery:
+                    dialed = 0
+                    # We overdial (needed * 2) because in a P2P network, most dials will
+                    # fail due to offline peers, NAT traversal issues, or obsolete addresses.  # noqa: E501
+                    # The batch is capped so a deeply-below-watermark node does not
+                    # launch hundreds of concurrent dials against stale addresses
+                    # (which saturates the event loop with timer churn and starves
+                    # established connections).  Bounded batches keep recovering the
+                    # watermark while leaving CPU for existing connections.
+                    dial_target = min(needed * 2, max_dials_per_cycle)
 
-                for peer_id in candidates:
-                    if dialed >= dial_target:
-                        break
+                    for peer_id in candidates:
+                        if dialed >= dial_target:
+                            break
 
-                    if self._should_skip_peer(peer_id):
-                        continue
+                        if self._should_skip_peer(peer_id):
+                            continue
 
-                    dial_nursery.start_soon(_dial_candidate, peer_id)
-                    dialed += 1
-        except Exception as e:
-            logger.error(f"Error in auto_connect dial nursery: {e}")
+                        dial_nursery.start_soon(_dial_candidate, peer_id)
+                        dialed += 1
+            except Exception as e:
+                logger.error(f"Error in auto_connect dial nursery: {e}")
 
-        if dialed > 0:
-            logger.info(f"Auto-connected to {dialed} new peers")
+            if dialed > 0:
+                logger.info(f"Auto-connected to {dialed} new peers")
+        finally:
+            self._is_connecting = False
 
     async def _get_candidate_peers(self) -> list[ID]:
         """
