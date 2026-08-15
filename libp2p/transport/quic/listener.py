@@ -1467,17 +1467,9 @@ class QUICListener(IListener):
                 await self._cleanup_promotion_lock(quic_key)
                 await self._cleanup_quic_tracking(quic_key)
 
-            # Find the connection ID for this object
-            connection_ids = await self._registry.get_all_cids_for_connection(
-                connection_obj
-            )
-            if connection_ids:
-                # Remove using the first Connection ID found
-                connection_connection_id = connection_ids[0]
-                await self._remove_connection(connection_connection_id)
-                logger.debug(f"Removed connection {connection_connection_id.hex()}")
-            else:
-                logger.debug("Connection object not found in tracking")
+            # Completely wipe from registry
+            await self._registry.unregister_connection_object(connection_obj)
+            logger.debug(f"Unregistered connection object {id(connection_obj)} from registry")
 
         except Exception as e:
             logger.error(f"Error removing connection by object: {e}")

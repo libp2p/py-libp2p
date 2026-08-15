@@ -1754,6 +1754,19 @@ class QUICConnection(IRawConnection, IMuxedConn):
             except Exception as e:
                 logger.debug(f"Error notifying parent of connection termination: {e}")
 
+            # Clear internal aioquic event queues and stream maps to free memory immediately
+            if self._quic is not None:
+                if hasattr(self._quic, "_events"):
+                    try:
+                        self._quic._events.clear()
+                    except Exception:
+                        pass
+                if hasattr(self._quic, "_streams"):
+                    try:
+                        self._quic._streams.clear()
+                    except Exception:
+                        pass
+
             logger.debug(f"QUIC connection to {self._remote_peer_id} closed")
 
             # Release resource scope if present

@@ -953,6 +953,65 @@ class ConnectionIDRegistry:
             primary = self._connection_primary_cid.get(connection)
             return [primary] if primary is not None else []
 
+    async def unregister_connection_object(
+        self, connection: "QUICConnection"
+    ) -> None:
+        """
+        Completely purge a connection object and all its associated Connection IDs from all registry dictionaries.
+
+        Ensures zero memory leaks when a connection terminates.
+        """
+        async with self._lock:
+            cids_to_remove: set[bytes] = set()
+            if connection in self._connection_sequences:
+                cids_to_remove.update(self._connection_sequences[connection].values())
+            primary = self._connection_primary_cid.get(connection)
+            if primary:
+                cids_to_remove.add(primary)
+            for cid, conn in list(self._connections.items()):
+                if conn == connection:
+                    cids_to_remove.add(cid)
+
+            for cid in cids_to_remove:
+                self._connections.pop(cid, None)
+                self._initial_connection_ids.pop(cid, None)
+                self._pending.pop(cid, None)
+                self._pending_created_at.pop(cid, None)
+                self._connection_id_sequences.pop(cid, None)
+                self._connection_sequence_counters.pop(cid, None)
+                addr = self._connection_id_to_addr.pop(cid, None)
+                if addr and self._addr_to_connection_id.get(addr) == cid:
+                    self._addr_to_connection_id.pop(addr, None)
+
+            addr = self._connection_addresses.pop(connection, None)
+            if addr:
+                conns = self._addr_to_connections.get(addr)
+                if conns:
+                    conns.discard(connection)
+                    if not conns:
+                        self._addr_to_connections.pop(addr, None)
+                if self._addr_to_connection_id.get(addr) in cids_to_remove:
+                    self._addr_to_connection_id.pop(addr, None)
+
+            self._connection_primary_cid.pop(connection, None)
+            self._connection_cid_counts.pop(connection, None)
+            self._connection_sequences.pop(connection, None)
+
+            raw_quic = getattr(connection, "_quic", None)
+            if raw_quic:
+                for k, v in list(self._initial_connection_ids.items()):
+                    if v is raw_quic:
+                        self._initial_connection_ids.pop(k, None)
+                        self._pending_created_at.pop(k, None)
+                        self._connection_id_to_addr.pop(k, None)
+                        self._connection_id_sequences.pop(k, None)
+                for k, v in list(self._pending.items()):
+                    if v is raw_quic:
+                        self._pending.pop(k, None)
+                        self._pending_created_at.pop(k, None)
+                        self._connection_id_to_addr.pop(k, None)
+                        self._connection_id_sequences.pop(k, None)
+
     async def cleanup_stale_address_mapping(self, addr: tuple[str, int]) -> None:
         """
         Clean up a stale address mapping.
