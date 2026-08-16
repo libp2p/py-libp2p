@@ -30,6 +30,7 @@ from libp2p.abc import (
 )
 from libp2p.custom_types import TProtocol
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
+from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
 from libp2p.kad_dht.utils import maybe_consume_signed_record
 from libp2p.network.stream.net_stream import (
     INetStream,
@@ -48,10 +49,12 @@ from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.anyio_service import (
     Service,
 )
+from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
     ALPHA,
     BUCKET_SIZE,
+    MAX_DHT_MESSAGE_SIZE,
     MAX_PROVIDERS_PER_MSG,
     MAX_RECORD_AGE,
     MAX_RECORD_SIZE,
@@ -585,51 +588,29 @@ class KadDHT(Service):
 
         try:
             while True:
-                # Read varint-prefixed length for the message
-                length_prefix = b""
-                max_varint_bytes = 10  # varint max is 10 bytes for uint64
-                eof = False
-                while True:
-                    byte = await stream.read(1)
-                    if not byte:
-                        logger.debug("Stream closed (EOF), exiting message loop")
-                        eof = True
-                        break
-                    length_prefix += byte
-                    if byte[0] & 0x80 == 0:
-                        break
-                    if len(length_prefix) >= max_varint_bytes:
-                        logger.warning("Varint length exceeds maximum bytes")
-                        eof = True
-                        break
-                if eof:
-                    break
-
-                msg_length = varint.decode_bytes(length_prefix)
-
-                # Sanity check message size to prevent OOM
-                max_message_size = 4 * 1024 * 1024  # 4 MB
-                if msg_length > max_message_size:
-                    logger.warning(
-                        "DHT message too large: %s bytes (max %s)",
-                        msg_length,
-                        max_message_size,
+                # Read varint-prefixed message with a hard size limit (DoS mitigation)
+                try:
+                    msg_bytes = await read_varint_prefixed_bytes_limited(
+                        stream, MAX_DHT_MESSAGE_SIZE
                     )
-                    break
-
-                # Read the message bytes
-                msg_bytes = b""
-                remaining = msg_length
-                read_failed = False
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        logger.debug("Failed to read full message from stream, exiting")
-                        read_failed = True
+                except IncompleteReadError as e:
+                    if e.received_bytes == 0:
+                        # Clean EOF
+                        logger.debug("Stream closed (EOF), exiting message loop")
                         break
-                    msg_bytes += chunk
-                    remaining -= len(chunk)
-                if read_failed:
+                    logger.warning("Incomplete DHT message from stream: %s", e)
+                    should_reset = True
+                    break
+                except MessageTooLarge:
+                    logger.warning(
+                        "DHT message too large (max %s bytes)",
+                        MAX_DHT_MESSAGE_SIZE,
+                    )
+                    should_reset = True
+                    break
+                except Exception as e:
+                    logger.warning("Failed to read DHT message from stream: %s", e)
+                    should_reset = True
                     break
 
                 try:
