@@ -13,13 +13,19 @@ from libp2p.crypto.ed25519 import create_new_key_pair
 from libp2p.crypto.x25519 import create_new_key_pair as create_x25519_key_pair
 from libp2p.peer.id import ID
 from libp2p.transport.webrtc.certificate import WebRTCCertificate
-from libp2p.transport.webrtc.constants import NOISE_PROLOGUE_PREFIX
+from libp2p.transport.webrtc.constants import (
+    MAX_MESSAGE_SIZE,
+    MAX_PAYLOAD_SIZE,
+    NOISE_PROLOGUE_PREFIX,
+)
 from libp2p.transport.webrtc.exceptions import WebRTCHandshakeError
 from libp2p.transport.webrtc.noise_handshake import (
     DataChannelReadWriter,
     build_noise_prologue,
     perform_noise_handshake,
 )
+from libp2p.transport.webrtc.pb.webrtc_pb2 import Message
+from libp2p.transport.webrtc.stream import _frame
 
 
 class TestBuildNoisePrologue:
@@ -69,28 +75,56 @@ class TestBuildNoisePrologue:
 
 class TestDataChannelReadWriter:
     @pytest.mark.trio
-    async def test_write_calls_send_cb(self):
+    async def test_write_frames_as_stream_message(self):
+        """Wire format = uvarint-prefixed webrtc.pb.Message (spec/go/js)."""
         send_cb = AsyncMock()
-        recv_cb = AsyncMock(return_value=b"response")
         rw = DataChannelReadWriter(
-            send_cb=send_cb,
-            recv_cb=recv_cb,
-            is_initiator=True,
+            send_cb=send_cb, recv_cb=AsyncMock(), is_initiator=True
         )
         await rw.write(b"hello")
-        send_cb.assert_called_once_with(b"hello")
+        send_cb.assert_called_once_with(_frame(Message(message=b"hello")))
 
     @pytest.mark.trio
-    async def test_read_calls_recv_cb(self):
+    async def test_write_chunks_large_payloads(self):
         send_cb = AsyncMock()
-        recv_cb = AsyncMock(return_value=b"data-from-peer")
         rw = DataChannelReadWriter(
-            send_cb=send_cb,
-            recv_cb=recv_cb,
+            send_cb=send_cb, recv_cb=AsyncMock(), is_initiator=True
+        )
+        await rw.write(b"x" * (MAX_PAYLOAD_SIZE + 1))
+        assert send_cb.await_count == 2
+        for call in send_cb.await_args_list:
+            assert len(call.args[0]) <= MAX_MESSAGE_SIZE
+
+    @pytest.mark.trio
+    async def test_read_unframes_stream_message(self):
+        recv_cb = AsyncMock(return_value=_frame(Message(message=b"data-from-peer")))
+        rw = DataChannelReadWriter(
+            send_cb=AsyncMock(), recv_cb=recv_cb, is_initiator=False
+        )
+        assert await rw.read() == b"data-from-peer"
+
+    @pytest.mark.trio
+    async def test_read_stops_at_fin(self):
+        frames = [
+            _frame(Message(message=b"ab")),
+            _frame(Message(flag=Message.FIN)),
+        ]
+        rw = DataChannelReadWriter(
+            send_cb=AsyncMock(),
+            recv_cb=AsyncMock(side_effect=frames),
             is_initiator=False,
         )
-        data = await rw.read()
-        assert data == b"data-from-peer"
+        assert await rw.read(4) == b"ab"  # short read: peer finished
+
+    @pytest.mark.trio
+    async def test_read_rejects_malformed_frame(self):
+        rw = DataChannelReadWriter(
+            send_cb=AsyncMock(),
+            recv_cb=AsyncMock(return_value=b"\xff\xff\xff"),
+            is_initiator=False,
+        )
+        with pytest.raises(WebRTCHandshakeError):
+            await rw.read(1)
 
     @pytest.mark.trio
     async def test_close_is_noop(self):
@@ -124,7 +158,7 @@ class TestDataChannelReadWriter:
         2-byte length prefix first, then the payload, while a data channel
         delivers whole messages.
         """
-        messages = [b"\x00\x03abc", b"de", b"fgh"]
+        messages = [_frame(Message(message=m)) for m in (b"\x00\x03abc", b"de", b"fgh")]
         recv_cb = AsyncMock(side_effect=messages)
         rw = DataChannelReadWriter(
             send_cb=AsyncMock(), recv_cb=recv_cb, is_initiator=False

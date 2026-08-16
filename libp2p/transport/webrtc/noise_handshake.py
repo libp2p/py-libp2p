@@ -29,9 +29,12 @@ from libp2p.connection_types import ConnectionType
 from libp2p.crypto.keys import PrivateKey
 from libp2p.peer.id import ID
 from libp2p.security.noise.patterns import PatternXX
+from libp2p.utils.varint import decode_varint_with_size
 
-from .constants import NOISE_PROLOGUE_PREFIX
+from .constants import MAX_PAYLOAD_SIZE, NOISE_PROLOGUE_PREFIX
 from .exceptions import WebRTCHandshakeError
+from .pb.webrtc_pb2 import Message
+from .stream import _frame
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +124,29 @@ async def perform_noise_handshake(
         raise WebRTCHandshakeError(f"Noise handshake failed: {e}") from e
 
 
+def _unframe(raw: bytes) -> tuple[bytes, bool]:
+    """
+    Decode one uvarint-prefixed ``webrtc.pb.Message`` from a channel message.
+
+    :returns: ``(payload, fin)`` — the ``message`` bytes (possibly empty for a
+        pure flag frame) and whether the peer signalled FIN/RESET.
+    :raises WebRTCHandshakeError: on malformed framing.
+    """
+    try:
+        length, consumed = decode_varint_with_size(raw)
+    except ValueError as e:
+        raise WebRTCHandshakeError(f"malformed handshake frame: {e}") from e
+    if consumed == 0 or raw[consumed - 1] & 0x80 or consumed + length != len(raw):
+        raise WebRTCHandshakeError("malformed handshake frame length")
+    msg = Message()
+    try:
+        msg.ParseFromString(raw[consumed:])
+    except Exception as e:  # DecodeError
+        raise WebRTCHandshakeError(f"malformed handshake frame: {e}") from e
+    fin = msg.HasField("flag") and msg.flag in (Message.FIN, Message.RESET)
+    return msg.message, fin
+
+
 class DataChannelReadWriter(IRawConnection):
     """
     Wraps a WebRTC data channel (stream) as an ``IRawConnection`` so the
@@ -130,10 +156,13 @@ class DataChannelReadWriter(IRawConnection):
     The data channel is represented by ``send_cb`` and ``recv_cb`` callables
     rather than a direct aiortc reference.
 
-    Data channels are message-oriented while the Noise packet reader is
-    byte-oriented (``read_exactly(conn, 2)`` for the length prefix, then the
-    payload), so ``read(n)`` buffers whole channel messages internally and
-    hands out exactly ``n`` bytes at a time.
+    Wire format (spec, "Multiplexing" + go/js behaviour): the handshake runs
+    over a WebRTC *stream* on channel 0, i.e. every data-channel message is a
+    uvarint-length-prefixed ``webrtc.pb.Message`` whose ``message`` field
+    carries a chunk of the Noise byte stream (2-byte length prefix + payload).
+    ``write`` frames, ``read`` unframes and buffers, so the byte-oriented
+    Noise packet reader (``read_exactly(conn, 2)`` then the payload) works
+    unchanged and the bytes on the wire match other implementations.
     """
 
     def __init__(
@@ -145,34 +174,49 @@ class DataChannelReadWriter(IRawConnection):
         self._send_cb = send_cb
         self._recv_cb = recv_cb
         self._buffer = bytearray()
+        self._closed = False
         self.is_initiator = is_initiator
+
+    async def _fill(self) -> bool:
+        """Pull one channel message into the buffer. False once the peer is done."""
+        if self._closed:
+            return False
+        raw = await self._recv_cb()
+        if not raw:
+            self._closed = True
+            return False
+        payload, fin = _unframe(raw)
+        self._buffer.extend(payload)
+        if fin:
+            self._closed = True
+        return True
 
     async def read(self, n: int | None = None) -> bytes:
         """
         Read from the data channel.
 
-        With ``n=None`` return the next whole channel message (or any buffered
-        remainder). With ``n`` return exactly ``n`` bytes, pulling further
-        channel messages as needed.
+        With ``n=None`` return whatever is buffered, or the payload of the next
+        channel message. With ``n`` return exactly ``n`` bytes, pulling further
+        channel messages as needed (short only if the peer closed).
         """
         if n is None:
-            if self._buffer:
-                data = bytes(self._buffer)
-                self._buffer.clear()
-                return data
-            return await self._recv_cb()
+            if not self._buffer:
+                await self._fill()
+            data = bytes(self._buffer)
+            self._buffer.clear()
+            return data
         while len(self._buffer) < n:
-            chunk = await self._recv_cb()
-            if not chunk:
-                break  # channel closed; return what we have (read_exactly raises)
-            self._buffer.extend(chunk)
+            if not await self._fill():
+                break  # closed; return what we have (read_exactly raises)
         data = bytes(self._buffer[:n])
         del self._buffer[:n]
         return data
 
     async def write(self, data: bytes) -> None:
-        """Write a message to the data channel."""
-        await self._send_cb(data)
+        """Write Noise bytes to the data channel, framed as stream messages."""
+        for offset in range(0, len(data), MAX_PAYLOAD_SIZE):
+            chunk = data[offset : offset + MAX_PAYLOAD_SIZE]
+            await self._send_cb(_frame(Message(message=chunk)))
 
     async def close(self) -> None:
         """No-op — the channel lifecycle is managed by the connection."""

@@ -15,7 +15,7 @@ Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from multiaddr import Multiaddr
 import trio
@@ -143,6 +143,7 @@ class WebRTCDirectTransport(ITransport):
                 "Ensure aiortc is installed and config uses from_aiortc()."
             )
 
+        pc: Any = None
         try:
             # 1. Create RTCPeerConnection + Noise channel
             pc = await bridge.run_coro(create_peer_connection(rtc_cert))
@@ -176,7 +177,6 @@ class WebRTCDirectTransport(ITransport):
             expected_fp = fingerprint_from_multibase(certhash)
             remote_fp = get_remote_fingerprint(pc)  # sync, safe off-thread
             if remote_fp != expected_fp:
-                await bridge.run_coro(pc.close())
                 raise WebRTCConnectionError(
                     "Remote DTLS fingerprint does not match certhash in the multiaddr"
                 )
@@ -212,19 +212,21 @@ class WebRTCDirectTransport(ITransport):
                 recv_cb=_trio_noise_recv,
                 is_initiator=False,
             )
-            authenticated_peer = await perform_noise_handshake(
-                conn=noise_rw,
-                local_peer=self._local_peer_id,
-                libp2p_privkey=self._private_key,
-                noise_static_key=noise_kp.private_key,
-                dialer_fingerprint=self._certificate.fingerprint,
-                server_fingerprint=expected_fp,
-                is_initiator=False,
-            )
+            # As responder our first step is a read; bound it — nothing else
+            # (swarm, transport) times out a hung dial.
+            with trio.fail_after(self._config.handshake_timeout):
+                authenticated_peer = await perform_noise_handshake(
+                    conn=noise_rw,
+                    local_peer=self._local_peer_id,
+                    libp2p_privkey=self._private_key,
+                    noise_static_key=noise_kp.private_key,
+                    dialer_fingerprint=self._certificate.fingerprint,
+                    server_fingerprint=expected_fp,
+                    is_initiator=False,
+                )
             # The responder cannot pin the peer during the handshake, so
             # verify the authenticated identity against ``/p2p/`` here.
             if remote_peer_id is not None and authenticated_peer != remote_peer_id:
-                await bridge.run_coro(pc.close())
                 raise WebRTCConnectionError(
                     f"Remote peer ID {authenticated_peer} does not match "
                     f"/p2p/{remote_peer_id} in the multiaddr"
@@ -239,9 +241,18 @@ class WebRTCDirectTransport(ITransport):
             )
             return conn
 
-        except WebRTCConnectionError:
-            raise
-        except Exception as e:
+        except BaseException as e:
+            # Every failure path (ICE timeout, fingerprint/peer-ID mismatch,
+            # Noise failure, cancellation) must release the PC — it owns UDP
+            # sockets and asyncio tasks on the bridge loop.
+            if pc is not None:
+                with trio.CancelScope(shield=True):
+                    try:
+                        await bridge.run_coro(pc.close())
+                    except Exception:
+                        pass
+            if isinstance(e, WebRTCConnectionError | trio.Cancelled):
+                raise
             raise WebRTCConnectionError(f"WebRTC Direct dial failed: {e}") from e
 
     def create_listener(self, handler_function: THandler) -> WebRTCDirectListener:
