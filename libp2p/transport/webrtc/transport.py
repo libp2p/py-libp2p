@@ -204,21 +204,31 @@ class WebRTCDirectTransport(ITransport):
             async def _trio_noise_recv() -> bytes:
                 return await bridge.run_coro(noise_recv())
 
+            # Per the WebRTC-Direct spec the *server* is the Noise initiator
+            # and the dialer is the responder (this is independent of the
+            # transport-level ``is_initiator`` used for stream-ID parity).
             noise_rw = DataChannelReadWriter(
                 send_cb=_trio_noise_send,
                 recv_cb=_trio_noise_recv,
-                is_initiator=True,
+                is_initiator=False,
             )
             authenticated_peer = await perform_noise_handshake(
                 conn=noise_rw,
                 local_peer=self._local_peer_id,
                 libp2p_privkey=self._private_key,
                 noise_static_key=noise_kp.private_key,
-                local_fingerprint=self._certificate.fingerprint,
-                remote_fingerprint=expected_fp,
-                is_initiator=True,
-                remote_peer=remote_peer_id,
+                dialer_fingerprint=self._certificate.fingerprint,
+                server_fingerprint=expected_fp,
+                is_initiator=False,
             )
+            # The responder cannot pin the peer during the handshake, so
+            # verify the authenticated identity against ``/p2p/`` here.
+            if remote_peer_id is not None and authenticated_peer != remote_peer_id:
+                await bridge.run_coro(pc.close())
+                raise WebRTCConnectionError(
+                    f"Remote peer ID {authenticated_peer} does not match "
+                    f"/p2p/{remote_peer_id} in the multiaddr"
+                )
 
             # 9. Finalize connection
             conn.peer_id = authenticated_peer

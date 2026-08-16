@@ -40,19 +40,25 @@ _MH_SHA256_HEADER = struct.pack("BB", 0x12, 32)
 
 
 def build_noise_prologue(
-    local_fingerprint: bytes,
-    remote_fingerprint: bytes,
+    dialer_fingerprint: bytes,
+    server_fingerprint: bytes,
 ) -> bytes:
     """
     Build the Noise prologue that binds the handshake to the DTLS session.
 
-    :param local_fingerprint: Raw SHA-256 of the local DTLS certificate.
-    :param remote_fingerprint: Raw SHA-256 of the remote DTLS certificate.
+    Per the WebRTC-Direct spec the prologue is
+    ``"libp2p-webrtc-noise:" || multihash(FP_A) || multihash(FP_B)`` where *A*
+    is the dialer (Noise **responder**) and *B* is the server (Noise
+    **initiator**). The order is fixed by role, not by "local"/"remote", so both
+    sides must pass the same two values in the same order.
+
+    :param dialer_fingerprint: Raw SHA-256 of the dialer's DTLS certificate.
+    :param server_fingerprint: Raw SHA-256 of the server's DTLS certificate.
     :returns: The prologue bytes for ``NoiseState.set_prologue()``.
     """
-    local_mh = _MH_SHA256_HEADER + local_fingerprint
-    remote_mh = _MH_SHA256_HEADER + remote_fingerprint
-    return NOISE_PROLOGUE_PREFIX + local_mh + remote_mh
+    dialer_mh = _MH_SHA256_HEADER + dialer_fingerprint
+    server_mh = _MH_SHA256_HEADER + server_fingerprint
+    return NOISE_PROLOGUE_PREFIX + dialer_mh + server_mh
 
 
 async def perform_noise_handshake(
@@ -60,26 +66,32 @@ async def perform_noise_handshake(
     local_peer: ID,
     libp2p_privkey: PrivateKey,
     noise_static_key: PrivateKey,
-    local_fingerprint: bytes,
-    remote_fingerprint: bytes,
+    dialer_fingerprint: bytes,
+    server_fingerprint: bytes,
     is_initiator: bool,
     remote_peer: ID | None = None,
 ) -> ID:
     """
     Run the Noise XX handshake over a data-channel-0 connection.
 
+    Roles follow the WebRTC-Direct spec: the **server (listener) is the Noise
+    initiator** and the **dialer is the responder**. This is independent of
+    which side opened the WebRTC connection.
+
     :param conn: A :class:`IRawConnection` wrapping data channel 0.
     :param local_peer: The local peer's ID.
     :param libp2p_privkey: The local peer's libp2p identity private key.
     :param noise_static_key: An ephemeral X25519 key for the Noise session.
-    :param local_fingerprint: Raw SHA-256 of the local DTLS certificate.
-    :param remote_fingerprint: Raw SHA-256 of the remote DTLS certificate.
-    :param is_initiator: True if this peer initiated the connection.
-    :param remote_peer: Expected remote peer ID (for outbound connections).
+    :param dialer_fingerprint: Raw SHA-256 of the dialer's DTLS certificate.
+    :param server_fingerprint: Raw SHA-256 of the server's DTLS certificate.
+    :param is_initiator: True if this peer is the Noise initiator (the server).
+    :param remote_peer: Expected remote peer ID, or ``None`` if unknown (the
+        server does not know the dialer's ID; the dialer should verify the
+        returned ID against the ``/p2p/`` component itself).
     :returns: The authenticated remote peer ID.
     :raises WebRTCHandshakeError: If the handshake fails.
     """
-    prologue = build_noise_prologue(local_fingerprint, remote_fingerprint)
+    prologue = build_noise_prologue(dialer_fingerprint, server_fingerprint)
     logger.debug(
         "Noise handshake prologue: %d bytes (initiator=%s)",
         len(prologue),
@@ -95,10 +107,6 @@ async def perform_noise_handshake(
 
     try:
         if is_initiator:
-            if remote_peer is None:
-                raise WebRTCHandshakeError(
-                    "remote_peer is required for outbound Noise handshake"
-                )
             secure_conn = await pattern.handshake_outbound(conn, remote_peer)
         else:
             secure_conn = await pattern.handshake_inbound(conn)
@@ -121,6 +129,11 @@ class DataChannelReadWriter(IRawConnection):
 
     The data channel is represented by ``send_cb`` and ``recv_cb`` callables
     rather than a direct aiortc reference.
+
+    Data channels are message-oriented while the Noise packet reader is
+    byte-oriented (``read_exactly(conn, 2)`` for the length prefix, then the
+    payload), so ``read(n)`` buffers whole channel messages internally and
+    hands out exactly ``n`` bytes at a time.
     """
 
     def __init__(
@@ -131,11 +144,31 @@ class DataChannelReadWriter(IRawConnection):
     ) -> None:
         self._send_cb = send_cb
         self._recv_cb = recv_cb
+        self._buffer = bytearray()
         self.is_initiator = is_initiator
 
     async def read(self, n: int | None = None) -> bytes:
-        """Read the next message from the data channel."""
-        return await self._recv_cb()
+        """
+        Read from the data channel.
+
+        With ``n=None`` return the next whole channel message (or any buffered
+        remainder). With ``n`` return exactly ``n`` bytes, pulling further
+        channel messages as needed.
+        """
+        if n is None:
+            if self._buffer:
+                data = bytes(self._buffer)
+                self._buffer.clear()
+                return data
+            return await self._recv_cb()
+        while len(self._buffer) < n:
+            chunk = await self._recv_cb()
+            if not chunk:
+                break  # channel closed; return what we have (read_exactly raises)
+            self._buffer.extend(chunk)
+        data = bytes(self._buffer[:n])
+        del self._buffer[:n]
+        return data
 
     async def write(self, data: bytes) -> None:
         """Write a message to the data channel."""

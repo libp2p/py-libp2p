@@ -162,10 +162,17 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
     :returns: 32-byte SHA-256 digest.
     :raises ValueError: If the remote certificate is not available.
     """
-    dtls = getattr(pc, "_dtlsTransport", None)
+    # aiortc keeps one DTLS transport per SCTP association; for a
+    # data-channel-only PC that is ``pc.sctp.transport``.  The peer cert
+    # lives on the pyOpenSSL connection once the handshake completed.
+    sctp = getattr(pc, "sctp", None)
+    dtls = getattr(sctp, "transport", None) if sctp is not None else None
     if dtls is None:
         raise ValueError("DTLS transport not available on peer connection")
-    remote_cert = getattr(dtls, "_remote_certificate", None)
+    ssl_conn = getattr(dtls, "_ssl", None)
+    if ssl_conn is None:
+        raise ValueError("DTLS handshake has not started")
+    remote_cert = ssl_conn.get_peer_certificate(as_cryptography=True)
     if remote_cert is None:
         raise ValueError("Remote DTLS certificate not available")
     # remote_cert is a cryptography x509.Certificate
@@ -354,6 +361,11 @@ def make_noise_channel_callbacks(
         recv_queue.put_nowait(data)
 
     async def send(data: bytes) -> None:
+        # The negotiated channel exists before SCTP is up; aiortc raises
+        # InvalidStateError on send() until it is "open".  The Noise
+        # initiator (the listener) sends first, right after DTLS connects,
+        # so wait here rather than in every caller.
+        await _wait_channel_open(channel)
         channel.send(data)
 
     async def recv() -> bytes:
