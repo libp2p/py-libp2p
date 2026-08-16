@@ -274,7 +274,9 @@ class ProviderStore:
         Send ADD_PROVIDER message to a specific peer.
 
         Per the libp2p DHT spec, the receiver echoes the request to confirm
-        success. We send the message and validate the echo response.
+        success. However, Kubo and most implementations treat ADD_PROVIDER as
+        fire-and-forget and never send a response, so we send the message and
+        close the stream without waiting for an echo.
 
         :param peer_id: The peer to send the message to
         :param key: The content key being provided
@@ -282,7 +284,7 @@ class ProviderStore:
         Returns
         -------
         bool
-            True if the message was successfully sent and acknowledged
+            True if the message was successfully sent
 
         """
         stream = None
@@ -318,21 +320,10 @@ class ProviderStore:
             await stream.write(varint.encode(len(proto_bytes)))
             await stream.write(proto_bytes)
             logger.debug(f"Sent ADD_PROVIDER to {peer_id} for key {key.hex()}")
-            response_bytes = await read_varint_prefixed_bytes_limited(
-                stream, MAX_DHT_MESSAGE_SIZE
-            )
-
-            # Parse response
-            response = Message()
-            response.ParseFromString(response_bytes)
-
-            if response.type == Message.MessageType.ADD_PROVIDER:
-                # Consume the sender's signed-peer-record if sent
-                if not maybe_consume_signed_record(response, self.host, peer_id):
-                    logger.error(
-                        "Received an invalid-signed-record, ignoring the response"
-                    )
-                    return False
+            # Fire-and-forget: do not read an echo response. Kubo never
+            # responds to ADD_PROVIDER, so reading here would block for the
+            # full QUERY_TIMEOUT on every provide() call and stall provider
+            # announcement ("DHT provide timed out after 30s").
             return True
 
         except Exception as e:
