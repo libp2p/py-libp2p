@@ -130,6 +130,8 @@ class TestDirectUsername:
             "libp2p+webrtc+v1/abcd:cl",  # client ufrag < 4
             "libp2p+webrtc+v1/" + "a" * 250 + ":cli1",  # server ufrag > 256
             "libp2p+webrtc+v1/abcd:",  # empty client ufrag
+            "libp2p+webrtc+v1/abcd\n:cli1",  # trailing newline is not an ice-char
+            "libp2p+webrtc+v1/abcd:cli1\n",
             "",
         ],
     )

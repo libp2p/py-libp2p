@@ -61,7 +61,7 @@ WEBRTC_DIRECT_V2_PREFIX = "libp2p+webrtc+v2/"
 _VERSION_PREFIXES = {WEBRTC_DIRECT_V1_PREFIX: 1, WEBRTC_DIRECT_V2_PREFIX: 2}
 
 # RFC 8839 §5.4: ice-char = ALPHA / DIGIT / "+" / "/"; ufrag 4..256, pwd 22..256.
-_ICE_CHARS = re.compile(r"^[A-Za-z0-9+/]+$")
+_ICE_CHARS = re.compile(r"[A-Za-z0-9+/]+")
 ICE_UFRAG_MIN, ICE_UFRAG_MAX = 4, 256
 ICE_PWD_MIN, ICE_PWD_MAX = 22, 256
 
@@ -74,12 +74,14 @@ _PLACEHOLDER_FINGERPRINT = ":".join(["00"] * 32)
 
 def is_ice_ufrag(value: str) -> bool:
     return ICE_UFRAG_MIN <= len(value) <= ICE_UFRAG_MAX and bool(
-        _ICE_CHARS.match(value)
+        _ICE_CHARS.fullmatch(value)
     )
 
 
 def is_ice_pwd(value: str) -> bool:
-    return ICE_PWD_MIN <= len(value) <= ICE_PWD_MAX and bool(_ICE_CHARS.match(value))
+    return ICE_PWD_MIN <= len(value) <= ICE_PWD_MAX and bool(
+        _ICE_CHARS.fullmatch(value)
+    )
 
 
 def parse_direct_username(username: str) -> tuple[int, str, str]:
