@@ -715,13 +715,21 @@ class TestValueStore:
 
         from libp2p.kad_dht.peer_routing import PeerRouting
 
-        # Check _get_from_peer source for max varint check
+        # Check _get_from_peer source for max varint check / bounded reader
         vs_source = inspect.getsource(ValueStore._get_from_peer)
-        has_max_varint = "max_varint" in vs_source or "max_varint_bytes" in vs_source
+        has_max_varint = (
+            "max_varint" in vs_source
+            or "max_varint_bytes" in vs_source
+            or "read_varint_prefixed_bytes_limited" in vs_source
+        )
 
-        # Check _query_peer_for_closest source for max varint check
+        # Check _query_peer_for_closest source for max varint check / bounded reader
         pr_source = inspect.getsource(PeerRouting._query_peer_for_closest)
-        has_max_varint_pr = "max_varint" in pr_source or "max_varint_bytes" in pr_source
+        has_max_varint_pr = (
+            "max_varint" in pr_source
+            or "max_varint_bytes" in pr_source
+            or "read_varint_prefixed_bytes_limited" in pr_source
+        )
 
         assert has_max_varint, (
             "_get_from_peer (value_store.py) has no max varint byte check. "
