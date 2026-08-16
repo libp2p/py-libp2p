@@ -16,6 +16,9 @@ from typing import (
 )
 import weakref
 
+if TYPE_CHECKING:
+    from libp2p.network.tag_store import TagStore
+
 from cryptography import x509
 from cryptography.x509.oid import ExtensionOID
 import multiaddr
@@ -367,8 +370,6 @@ class BasicHost(IHost):
             The tag store managing peer priorities and protections.
 
         """
-        from libp2p.network.tag_store import TagStore  # noqa: F401 (type reference)
-
         return self._network.tag_store  # type: ignore[attr-defined]
 
     def _detect_negotiate_timeout_from_transport(self) -> float | None:

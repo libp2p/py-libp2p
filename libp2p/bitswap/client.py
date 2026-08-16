@@ -15,7 +15,6 @@ from libp2p.abc import IHost, INetStream, INotifee
 from libp2p.custom_types import TProtocol
 from libp2p.network.stream.exceptions import StreamEOF, StreamError
 from libp2p.peer.id import ID as PeerID
-from libp2p.peer.peerinfo import PeerInfo  # noqa: F401
 
 if TYPE_CHECKING:
     from .extension import IBitswapExtension

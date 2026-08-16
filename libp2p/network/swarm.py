@@ -1,7 +1,3 @@
-from collections.abc import (
-    Awaitable,
-    Callable,
-)
 import ipaddress
 import logging
 import random
@@ -2782,19 +2778,6 @@ class Swarm(Service, INetworkService):
 
     async def notify_listen_close(self, multiaddr: Multiaddr) -> None:
         await self._notify("listen_close", multiaddr)
-
-    # Generic notifier used by NetStream._notify_closed
-    async def notify_all(self, notifier: Callable[[INotifee], Awaitable[None]]) -> None:
-        async with trio.open_nursery() as nursery:
-            for notifee in self.notifees:
-
-                async def _call(n: INotifee = notifee) -> None:
-                    try:
-                        await notifier(n)
-                    except Exception:
-                        logger.exception("Notifee %s callback raised", type(n).__name__)
-
-                nursery.start_soon(_call)
 
     # Backward compatibility properties
     @property
