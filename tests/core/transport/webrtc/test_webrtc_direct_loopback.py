@@ -180,3 +180,48 @@ async def test_dial_rejects_wrong_p2p_id():
         await listener.close()
         await dialer.close()
         await server.close()
+
+
+@pytest.mark.trio
+async def test_handler_exception_does_not_crash_listener():
+    """
+    A raising handler must only affect its own connection: the listener
+    nursery lives in a trio system task, so an escaping exception would
+    otherwise abort the whole trio run.
+    """
+    from multiaddr import Multiaddr
+
+    from libp2p.transport.webrtc.config import WebRTCTransportConfig
+
+    server = WebRTCDirectTransport(
+        private_key=create_new_key_pair().private_key,
+        config=WebRTCTransportConfig(ice_servers=[]),
+    )
+    dialer = WebRTCDirectTransport(
+        private_key=create_new_key_pair().private_key,
+        config=WebRTCTransportConfig(ice_servers=[]),
+    )
+    calls = 0
+
+    async def bad_handler(conn) -> None:  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("boom")
+
+    listener = server.create_listener(bad_handler)
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    (maddr,) = listener.get_addrs()
+    try:
+        with trio.fail_after(30):
+            conn = await dialer.dial(maddr)  # handshake completes before handler
+            while calls == 0:
+                await trio.sleep(0.01)
+            await conn.close()
+            # Listener still alive and usable.
+            conn2 = await dialer.dial(maddr)
+            await conn2.close()
+        assert calls == 2
+    finally:
+        await listener.close()
+        await dialer.close()
+        await server.close()

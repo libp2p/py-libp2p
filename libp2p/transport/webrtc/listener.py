@@ -324,7 +324,16 @@ class WebRTCDirectListener(IListener):
                 pass
             return
 
-        await self._handler(conn)
+        # The nursery lives in a trio system task: an exception escaping here
+        # would take down the whole trio run, not just this connection.
+        try:
+            await self._handler(conn)
+        except Exception:
+            logger.exception("WebRTC Direct handler failed for %s", conn.peer_id)
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
     def get_addrs(self) -> tuple[Multiaddr, ...]:
         """Return the listening multiaddrs (includes certhash and peer ID)."""
