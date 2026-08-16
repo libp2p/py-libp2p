@@ -28,10 +28,14 @@ import varint
 from libp2p.abc import (
     IHost,
 )
+from libp2p.bitswap.cid import parse_cid
 from libp2p.custom_types import TProtocol
 from libp2p.discovery.random_walk.rt_refresh_manager import RTRefreshManager
 from libp2p.io.exceptions import IncompleteReadError, MessageTooLarge
-from libp2p.kad_dht.utils import maybe_consume_signed_record
+from libp2p.kad_dht.utils import (
+    maybe_consume_signed_record,
+    sort_peer_ids_by_distance,
+)
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
@@ -45,6 +49,7 @@ from libp2p.peer.peerinfo import (
 from libp2p.peer.peerstore import env_to_send_in_RPC
 from libp2p.records.ipns import IPNSValidator
 from libp2p.records.pubkey import PublicKeyValidator
+from libp2p.records.utils import verify_record
 from libp2p.records.validator import NamespacedValidator, Validator
 from libp2p.tools.anyio_service import (
     Service,
@@ -987,8 +992,6 @@ class KadDHT(Service):
 
                             # Validate signature before serving
                             if value_record and value_record.signature:
-                                from libp2p.records.utils import verify_record
-
                                 if not verify_record(
                                     value_record.signature,
                                     value_record.author,
@@ -1166,8 +1169,6 @@ class KadDHT(Service):
 
                             # Verify signature if present (py-libp2p record format)
                             if cleaned_record.signature and cleaned_record.author:
-                                from libp2p.records.utils import verify_record
-
                                 if not verify_record(
                                     cleaned_record.signature,
                                     cleaned_record.author,
@@ -1562,8 +1563,6 @@ class KadDHT(Service):
             finally:
                 # Add closer peers from response to candidates for iterative lookup
                 if closer_peers:
-                    from .utils import sort_peer_ids_by_distance
-
                     candidates = candidate_peers_wrapper[0]
                     for cp in closer_peers:
                         if (
@@ -1759,8 +1758,6 @@ class KadDHT(Service):
 
         Accepts either a CID string or a multihash hex string.
         """
-        from libp2p.bitswap.cid import parse_cid
-
         try:
             cid_obj = parse_cid(key)
             key_bytes = cid_obj.multihash
@@ -1777,8 +1774,6 @@ class KadDHT(Service):
 
         Accepts either a CID string or a multihash hex string.
         """
-        from libp2p.bitswap.cid import parse_cid
-
         try:
             cid_obj = parse_cid(key)
             key_bytes = cid_obj.multihash

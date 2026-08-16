@@ -532,32 +532,9 @@ class ProviderStore:
                 await stream.write(varint.encode(len(proto_bytes)))
                 await stream.write(proto_bytes)
 
-                # Read response length prefix with max byte limit
-                length_bytes = b""
-                max_varint_bytes = 10
-                while True:
-                    b = await stream.read(1)
-                    if not b:
-                        return [], []
-                    length_bytes += b
-                    if b[0] & 0x80 == 0:
-                        break
-                    if len(length_bytes) >= max_varint_bytes:
-                        logger.warning(
-                            "Varint length exceeds maximum bytes, ignoring response"
-                        )
-                        return [], []
-
-                response_length = varint.decode_bytes(length_bytes)
-                # Read response data
-                response_bytes = b""
-                remaining = response_length
-                while remaining > 0:
-                    chunk = await stream.read(remaining)
-                    if not chunk:
-                        return [], []
-                    response_bytes += chunk
-                    remaining -= len(chunk)
+                response_bytes = await read_varint_prefixed_bytes_limited(
+                    stream, MAX_DHT_MESSAGE_SIZE
+                )
 
                 # Parse response
                 response = Message()

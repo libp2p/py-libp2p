@@ -10,6 +10,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from multiaddr import Multiaddr
 import varint
 
 from libp2p.abc import (
@@ -27,6 +28,7 @@ from libp2p.records.record import make_signed_put_record
 from libp2p.utils.varint import read_varint_prefixed_bytes_limited
 
 from .common import (
+    BUCKET_SIZE,
     DEFAULT_TTL,
     MAX_DHT_MESSAGE_SIZE,
     MAX_VALUE_STORE_SIZE,
@@ -214,8 +216,6 @@ class ValueStore:
 
         :param peer_routing: PeerRouting instance for finding closest peers
         """
-        from .common import BUCKET_SIZE
-
         current_time = time.time()
         # Republish interval: 22 hours (same as provider records)
         REPUBLISH_INTERVAL = 22 * 60 * 60
@@ -505,8 +505,6 @@ class ValueStore:
                                     closer.append(closer_id)
                                     # Per spec: store addresses in peerbook
                                     if peer_proto.addrs:
-                                        from multiaddr import Multiaddr
-
                                         addrs = [Multiaddr(a) for a in peer_proto.addrs]
                                         self.host.get_peerstore().add_addrs(
                                             closer_id, addrs, 600
@@ -531,8 +529,6 @@ class ValueStore:
                                     closer.append(closer_id)
                                     # Per spec: store addresses in peerbook
                                     if peer_proto.addrs:
-                                        from multiaddr import Multiaddr
-
                                         addrs = [Multiaddr(a) for a in peer_proto.addrs]
                                         self.host.get_peerstore().add_addrs(
                                             closer_id, addrs, 600

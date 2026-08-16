@@ -36,6 +36,7 @@ from .pb.kademlia_pb2 import (
 )
 from .routing_table import (
     RoutingTable,
+    gen_random_key_in_bucket,
 )
 from .utils import (
     maybe_consume_signed_record,
@@ -508,12 +509,7 @@ class PeerRouting(IPeerRouting):
         # and look it up to discover new peers
         for bucket in self.routing_table.buckets:
             if bucket.size() > 0:
-                # Generate a random peer ID that falls in this bucket's range
-                # The bucket's range is [min_range, max_range)
-                import random
-
-                random_int = random.randint(bucket.min_range, bucket.max_range - 1)
-                random_key = random_int.to_bytes(32, byteorder="big")
+                random_key = gen_random_key_in_bucket(bucket)
                 try:
                     random_peers = await self.find_closest_peers_network(random_key)
                     for peer_id in random_peers:
