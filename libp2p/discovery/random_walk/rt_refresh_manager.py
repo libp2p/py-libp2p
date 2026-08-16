@@ -228,9 +228,6 @@ class RTRefreshManager:
                 f"duration: {duration:.2f}s"
             )
 
-            # Post-walk connection trim: close excess connections above high-watermark
-            await self._trim_walk_connections()
-
             # Notify refresh completion
             for callback in self._refresh_done_callbacks:
                 try:
@@ -243,28 +240,6 @@ class RTRefreshManager:
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
         finally:
             self._is_refreshing = False
-
-    async def _trim_walk_connections(self) -> None:
-        """
-        Close connections above the high-watermark after a random walk.
-
-        The random walk may open many transient QUIC connections for DHT queries.
-        Each aioquic QuicConnection holds ~5MB of crypto/buffer state.  Without
-        explicit pruning they persist in memory until the 600-second idle timeout.
-        With 133 dials per walk (CONCURRENCY=3) that's ~665MB retained for 10min.
-
-        ConnectionPruner.maybe_prune_connections() sorts by: temp-entries first,
-        then lowest stream-count, then inbound direction.  Auto-connector outbound
-        connections are older with more stream history, so they survive pruning.
-        """
-        try:
-            network = self.host.get_network()  # type: ignore[attr-defined]
-            pruner = getattr(network, "connection_pruner", None)
-            if pruner and hasattr(pruner, "maybe_prune_connections"):
-                await pruner.maybe_prune_connections()
-                logger.debug("Post-walk connection prune complete")
-        except Exception as e:
-            logger.debug("Post-walk connection prune error (non-fatal): %s", e)
 
     def add_refresh_done_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when refresh completes."""
