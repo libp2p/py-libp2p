@@ -37,7 +37,6 @@ from .config import (
     MAX_BLOCK_SIZE,
     MAX_MESSAGE_SIZE,
 )
-from .decision_engine import BitswapDecisionEngine
 from .errors import (
     BlockTooLargeError,
     MessageTooLargeError,
@@ -113,11 +112,6 @@ class BitswapClient(INotifee):
         self.peer_manager = BitswapPeerManager()
 
         self._message_queues: dict[PeerID, BitswapMessageQueue] = {}
-        self.decision_engine = BitswapDecisionEngine(
-            block_store=self.block_store,
-            get_message_queue_fn=self.get_or_create_message_queue,
-            num_workers=8,
-        )
 
         self._nursery: trio.Nursery | None = None
         self._started = False
@@ -170,7 +164,6 @@ class BitswapClient(INotifee):
         self._started = True
         self._cancel_scope = trio.CancelScope()
         if self._nursery is not None:
-            self.decision_engine.start(self._nursery)
             for queue in self._message_queues.values():
                 queue.start(self._nursery)
             if not self._presence_cleanup_started:
@@ -204,7 +197,6 @@ class BitswapClient(INotifee):
         self._presence_cleanup_started = False
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
-        await self.decision_engine.stop()
         for queue in list(self._message_queues.values()):
             await queue.stop()
         self._message_queues.clear()
@@ -232,7 +224,6 @@ class BitswapClient(INotifee):
         """Set the nursery for background tasks."""
         self._nursery = nursery
         if self._started:
-            self.decision_engine.start(nursery)
             for queue in self._message_queues.values():
                 queue.start(nursery)
         # The presence-cleanup loop can only run once a nursery is available;

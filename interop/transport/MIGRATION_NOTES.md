@@ -112,7 +112,7 @@ self.host = new_host(
     listen_addrs=listen_addrs,
     enable_quic=(self.transport == "quic-v1"),
     tls_client_config=tls_client_config,  # ADD THIS
-    tls_server_config=tls_server_config,  # ADD THIS
+    tls_server_config=tls_server_config    # ADD THIS
 )
 ```
 

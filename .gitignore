@@ -202,4 +202,3 @@ libp2p-metrics
 # OSO health report generated outputs
 reports/*.json
 reports/*.md
-.freebuff/

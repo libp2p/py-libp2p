@@ -125,30 +125,15 @@ class TestRead:
             b"\xff\xff\xff\xff\xff",  # five continuation bytes, no terminator
         ],
     )
-    async def test_malformed_varint_is_logged_not_raised(self, raw):
+    async def test_malformed_varint_is_logged_not_raised(self, raw, caplog):
         # decode_varint_with_size does not raise on these; on_data must still
         # reject them on the malformed-varint-prefix path (not the downstream
         # length-mismatch path) so the classification matches the old decoder.
         stream = _make_stream()
-        log = logging.getLogger("libp2p.transport.webrtc.stream")
-
-        class LogCollector(logging.Handler):
-            def __init__(self):
-                super().__init__()
-                self.records: list[logging.LogRecord] = []
-
-            def emit(self, record: logging.LogRecord) -> None:
-                self.records.append(record)
-
-        handler = LogCollector()
-        log.addHandler(handler)
-        try:
+        with caplog.at_level(logging.WARNING, logger="libp2p.transport.webrtc.stream"):
             stream.on_data(raw)
-        finally:
-            log.removeHandler(handler)
-
         assert not stream._read_buf
-        assert any("malformed varint prefix" in r.getMessage() for r in handler.records)
+        assert any("malformed varint prefix" in r.getMessage() for r in caplog.records)
 
 
 class TestFlags:

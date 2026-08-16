@@ -322,11 +322,6 @@ class BasicHost(IHost):
         self._identify_inflight: set[ID] = set()
         self._identified_peers: dict[ID, str] = {}
         self._identify_tasks: set[trio.CancelScope] = set()
-        # Per-peer identify failure backoff: peer_id -> monotonic time of last failure.
-        # After a timeout we skip identify for IDENTIFY_BACKOFF_SECONDS so we
-        # don't hammer busy/slow peers every time they reconnect.
-        self._identify_failed: dict[ID, float] = {}
-        self._IDENTIFY_BACKOFF_SECONDS = 60.0
         self._network.register_notifee(_IdentifyNotifee(self))
 
         # Metrics
@@ -1087,15 +1082,6 @@ class BasicHost(IHost):
             return
         if peer_id in self._identify_inflight:
             return
-        # Check backoff: skip if this peer recently failed identify
-        import time as _time
-
-        last_fail = self._identify_failed.get(peer_id)
-        if (
-            last_fail is not None
-            and (_time.monotonic() - last_fail) < self._IDENTIFY_BACKOFF_SECONDS
-        ):
-            return
         # Add to inflight before checks to prevent duplicate tasks
         self._identify_inflight.add(peer_id)
         if self._has_cached_protocols(peer_id):
@@ -1166,16 +1152,6 @@ class BasicHost(IHost):
             stream = await self.new_stream(peer_id, [IdentifyID])
         except Exception as exc:
             logger.debug("Identify[%s]: failed to open stream: %s", reason, exc)
-            # Apply the same backoff as a read timeout so we don't spin-retry
-            # every time protocol negotiation times out (which is the far more
-            # common failure path). Without this, identify retries immediately
-            # on every auto-connector reconnect cycle → 22 concurrent 10-second
-            # timeout tasks → 100% CPU busy-loop.
-            # NOTE: _time is imported inline below (line 1180+), so Python makes
-            # it a local variable for the whole function. We must import before use.
-            import time as _time
-
-            self._identify_failed[peer_id] = _time.monotonic()
             return
 
         try:
@@ -1189,9 +1165,6 @@ class BasicHost(IHost):
                     data = await stream.read()
             if _id_cs.cancelled_caught:
                 logger.debug("Identify[%s]: read timed out for %s", reason, peer_id)
-                import time as _time
-
-                self._identify_failed[peer_id] = _time.monotonic()
                 try:
                     await stream.reset()
                 except Exception:
@@ -1259,9 +1232,6 @@ class BasicHost(IHost):
             )
         except Exception as exc:
             logger.debug("Identify[%s]: error reading response: %s", reason, exc)
-            import time as _time
-
-            self._identify_failed[peer_id] = _time.monotonic()
             try:
                 await stream.reset()
             except Exception:
@@ -1271,8 +1241,6 @@ class BasicHost(IHost):
                 await stream.close()
             except Exception:
                 pass
-        # Clear failure record on success
-        self._identify_failed.pop(peer_id, None)
 
     async def _on_notifee_connected(self, conn: INetConn) -> None:
         peer_id = getattr(conn.muxed_conn, "peer_id", None)
@@ -1292,8 +1260,6 @@ class BasicHost(IHost):
             return
         self._identified_peers.pop(peer_id, None)
         self._identify_inflight.discard(peer_id)
-        # Keep failure backoff across disconnects so we don't retry immediately
-        # on reconnect. The backoff expires naturally after IDENTIFY_BACKOFF_SECONDS.
         self._observed_addr_manager.remove_conn(conn)
 
     def _get_first_connection(self, peer_id: ID) -> INetConn | None:

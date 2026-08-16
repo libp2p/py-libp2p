@@ -1,13 +1,11 @@
 from dataclasses import dataclass
 import logging
 import ssl
-from typing import Any
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
 from multiaddr.resolvers import DNSResolver
 import trio
-from trio_typing import TaskStatus
 
 from libp2p.abc import IListener, ITransport
 from libp2p.custom_types import THandler
@@ -722,114 +720,37 @@ class WebsocketTransport(ITransport):
 
         logger.debug(f"WebsocketTransport.dial connecting to {ws_url}")
 
-        if self._background_nursery is None:
-            raise OpenConnectionError(
-                "No background nursery available. "
-                "WebSocket transport requires Swarm to set background nursery."
+        # Apply timeout to the connection process
+        with trio.fail_after(self._config.handshake_timeout):
+            from trio_websocket import connect_websocket_url
+
+            # Use background nursery if available (set by Swarm),
+            # otherwise create temporary one
+            if self._background_nursery is None:
+                raise OpenConnectionError(
+                    "No background nursery available. "
+                    "WebSocket transport requires Swarm to set background nursery."
+                )
+
+            # Create the WebSocket connection using the Swarm's background nursery
+            # This nursery stays alive for the lifetime of the Swarm service
+            ws = await connect_websocket_url(
+                self._background_nursery,
+                ws_url,
+                ssl_context=ssl_context,
+                message_queue_size=1024,
+                max_message_size=self._config.max_message_size,
             )
 
-        from trio_websocket import connect_websocket_url
+            # Create our connection wrapper
+            conn = P2PWebSocketConnection(
+                ws,
+                None,  # local_addr will be set after upgrade
+                is_secure=proto_info.is_wss,
+                max_buffered_amount=self._config.max_buffered_amount,
+            )
 
-        # Host each connection's trio_websocket background tasks (the reader
-        # task) in a DEDICATED nursery instead of the swarm's shared background
-        # nursery.  A reader task that crashes during the handshake — e.g.
-        # ``ConnectionRejected`` when the remote is a plain HTTP server rather
-        # than a WebSocket endpoint — is contained here and surfaced to the
-        # dialer as an ``OpenConnectionError``.  Previously it escaped into the
-        # swarm's background nursery and killed the entire daemon (connections
-        # collapsed to 0 and Docker restarted the process).
-        outcome: dict[str, Any] = {"ws": None, "error": None}
-        handshake_done = trio.Event()
-
-        async def _dial_and_host(
-            task_status: TaskStatus[trio.CancelScope],
-        ) -> None:
-            with trio.CancelScope() as scope:
-                task_status.started(scope)
-                try:
-                    async with trio.open_nursery() as conn_nursery:
-                        try:
-                            ws = await connect_websocket_url(
-                                conn_nursery,
-                                ws_url,
-                                ssl_context=ssl_context,
-                                message_queue_size=1024,
-                                max_message_size=self._config.max_message_size,
-                            )
-                        except BaseException as e:
-                            if isinstance(e, trio.Cancelled):
-                                # Handshake interrupted (reader task failed);
-                                # the real error surfaces at ``__aexit__``
-                                # below and is recorded by the outer handler.
-                                raise
-                            outcome["error"] = e
-                        else:
-                            outcome["ws"] = ws
-                        if outcome["ws"] is not None or outcome["error"] is not None:
-                            handshake_done.set()
-                        # Keep the nursery open for the connection's lifetime —
-                        # the trio_websocket reader task runs here.  Exceptions
-                        # raised by that task surface at ``__aexit__`` and are
-                        # contained below instead of crashing the swarm.
-                        await trio.sleep_forever()
-                except BaseException as e:
-                    if isinstance(e, trio.Cancelled):
-                        raise
-                    logger.warning(
-                        "WebSocket connection to %s dropped: background task "
-                        "failed: %s",
-                        ws_url,
-                        e,
-                    )
-                    if outcome["error"] is None:
-                        outcome["error"] = e
-                    handshake_done.set()
-                    # Best-effort: if the handshake had already completed and
-                    # the reader later crashed, close the underlying WS so
-                    # downstream reads fail and the swarm prunes the dead
-                    # connection instead of keeping a stale "open" entry.
-                    dead_ws = outcome.get("ws")
-                    if dead_ws is not None:
-                        try:
-                            await dead_ws.aclose()
-                        except Exception:
-                            pass
-
-        scope: trio.CancelScope | None = None
-        try:
-            # Apply timeout to the connection process
-            with trio.fail_after(self._config.handshake_timeout):
-                scope = await self._background_nursery.start(_dial_and_host)
-                await handshake_done.wait()
-        except BaseException:
-            # Timeout or cancellation: clean up the hosted nursery so a
-            # half-established connection cannot leak background tasks.
-            if scope is not None:
-                scope.cancel()
-            raise
-
-        if outcome["error"] is not None:
-            if scope is not None:
-                scope.cancel()
-            raise OpenConnectionError(
-                f"WebSocket handshake to {ws_url} failed: {outcome['error']}"
-            ) from outcome["error"]
-
-        ws = outcome["ws"]
-        if ws is None:  # pragma: no cover - defensive
-            raise OpenConnectionError(f"WebSocket handshake to {ws_url} failed")
-
-        # Create our connection wrapper
-        conn = P2PWebSocketConnection(
-            ws,
-            None,  # local_addr will be set after upgrade
-            is_secure=proto_info.is_wss,
-            max_buffered_amount=self._config.max_buffered_amount,
-        )
-        # Hand the hosted nursery's cancel scope to the connection so that
-        # close() cancels its background tasks (no task accumulation).
-        conn._hosted_nursery_scope = scope
-        return conn
+            return conn
 
     async def _create_proxy_connection(
         self,
