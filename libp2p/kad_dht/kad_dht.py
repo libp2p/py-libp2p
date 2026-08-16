@@ -62,8 +62,6 @@ from .common import (
     PROTOCOL_PREFIX,
     QUERY_TIMEOUT,
     format_time_rfc3339,
-    is_cid_like_key,
-    is_reserved_or_private_addr,
     parse_time_received,
 )
 from .pb.kademlia_pb2 import (
@@ -744,12 +742,6 @@ class KadDHT(Service):
                             should_reset = True
                             break
 
-                        # Per spec: "The target node verifies key is a valid CID"
-                        # Log a warning if key doesn't look like a CID,
-                        # but don't reject (backward compatibility)
-                        if not is_cid_like_key(key):
-                            logger.debug("ADD_PROVIDER key does not look like a CID")
-
                         # Consume the source signed_peer_record if sent
                         if not maybe_consume_signed_record(message, self.host, peer_id):
                             logger.error(
@@ -802,29 +794,8 @@ class KadDHT(Service):
                                     )
                                     continue
 
-                                # Validate addresses are public and not reserved
-                                valid_addrs = []
-                                for addr in addrs:
-                                    addr_str = str(addr)
-                                    if is_reserved_or_private_addr(addr_str):
-                                        logger.debug(
-                                            "Skipping reserved address "
-                                            f"{addr_str} for provider "
-                                            f"{provider_id}"
-                                        )
-                                        continue
-                                    valid_addrs.append(addr)
-
-                                # Require at least one valid public address
-                                if not valid_addrs:
-                                    logger.warning(
-                                        f"Provider {provider_id} "
-                                        "has no public addresses, skipping"
-                                    )
-                                    continue
-
                                 # Add to provider store
-                                provider_info = PeerInfo(provider_id, valid_addrs)
+                                provider_info = PeerInfo(provider_id, addrs)
                                 self.provider_store.add_provider(key, provider_info)
                                 provider_count += 1
                                 logger.debug(
@@ -882,12 +853,6 @@ class KadDHT(Service):
                             )
                             should_reset = True
                             break
-
-                        # Per spec: key is set to a CID
-                        # Log a warning if key doesn't look like a CID,
-                        # but don't reject (backward compatibility)
-                        if not is_cid_like_key(key):
-                            logger.debug("GET_PROVIDERS key does not look like a CID")
 
                         # Metrics event
                         event.get_providers = True

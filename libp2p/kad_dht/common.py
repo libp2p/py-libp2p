@@ -3,11 +3,7 @@ Shared constants and protocol parameters for the Kademlia DHT.
 """
 
 from datetime import datetime, timezone
-import ipaddress
 import logging
-
-import cid
-import multihash
 
 from libp2p.custom_types import (
     TProtocol,
@@ -54,45 +50,6 @@ SUBNET_PREFIX_LEN_V4 = 24
 SUBNET_PREFIX_LEN_V6 = 48
 PEER_REFRESH_INTERVAL = 60  # Interval to refresh peers in seconds
 STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
-
-
-def is_reserved_or_private_addr(addr_str: str) -> bool:
-    """Check if an address string is a reserved or private IP address."""
-    try:
-        parts = addr_str.split("/")
-        ip_str = None
-        for i, part in enumerate(parts):
-            if part in ("ip4", "ip6") and i + 1 < len(parts):
-                ip_str = parts[i + 1]
-                break
-        if ip_str is None:
-            return True
-
-        addr = ipaddress.ip_address(ip_str)
-        return not addr.is_global
-    except (ValueError, IndexError):
-        return True
-
-
-def is_cid_like_key(key: bytes) -> bool:
-    """Check if a key looks like a valid CID or multihash using py-cid/multihash."""
-    if not key or len(key) > 128:
-        return False
-
-    try:
-        if cid.is_cid(key):
-            return True
-    except Exception:
-        pass
-
-    try:
-        if multihash.is_valid(key):
-            return True
-    except Exception:
-        pass
-
-    # Accept arbitrary reasonable-length keys for backward compatibility
-    return 4 <= len(key) <= 64
 
 
 def format_time_rfc3339(dt: datetime | None = None) -> str:
