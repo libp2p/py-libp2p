@@ -57,13 +57,20 @@ class _MuxedTransport:
         self,
         real_transport: asyncio.DatagramTransport,
         local_addr: tuple[str, int],
+        mux: UdpMux | None = None,
     ) -> None:
         self._real = real_transport
         self._local_addr = local_addr
+        self._mux = mux
         # Set by UdpMux after the StunProtocol is constructed (avoids circular ref).
         self._protocol: _HasConnectionLost | None = None
 
     def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
+        # Anything we send to (our own connectivity checks included) will
+        # answer from that address without a USERNAME, so learn the mapping
+        # on the way out.
+        if self._mux is not None and self._protocol is not None:
+            self._mux._learn_addr((addr[0], addr[1]), self._protocol)
         self._real.sendto(data, addr)
 
     def close(self) -> None:
@@ -101,13 +108,15 @@ class UdpMux(asyncio.DatagramProtocol):
         await conn.add_remote_candidate(None)  # end-of-candidates
         await conn.connect()                   # do NOT call gather_candidates()
 
-        # After ICE selects a candidate pair:
-        mux.register_addr(("203.0.113.5", 54321), conn._protocols[0])
+        # The peer's address is learned from its STUN checks; register_addr()
+        # can add more (e.g. the nominated pair's remote address).
 
-        # Teardown:
+        # Teardown (also drops the addresses learned for "abc"):
         mux.unregister("abc")
-        mux.unregister_addr(("203.0.113.5", 54321))
         await mux.close()
+
+    To run a full aiortc ``RTCPeerConnection`` over a muxed connection use
+    :func:`libp2p.transport.webrtc._aiortc_helpers.attach_muxed_connection`.
     """
 
     def __init__(self) -> None:
@@ -156,33 +165,77 @@ class UdpMux(asyncio.DatagramProtocol):
         norm: tuple[str, int] = (addr[0], addr[1])
         try:
             msg = _stun.parse_message(data)
-            username: str = msg.attributes.get("USERNAME", "")
-            ufrag = username.split(":")[0]
-            protocol = self._by_ufrag.get(ufrag)
-            if protocol is not None:
-                protocol.datagram_received(data, norm)
-                return
+        except ValueError:
+            # Non-STUN (DTLS handshake, SCTP frames after ICE): route by addr.
+            # aioice's StunProtocol re-parses, hits the same ValueError and
+            # forwards the bytes to the connection's data path.
+            self._route_by_addr(data, norm, stun_shaped=False)
+            return
+        except struct.error:
+            # STUN-shaped but malformed: aioice parses attributes with
+            # struct.unpack, which raises struct.error (NOT a ValueError
+            # subclass) on a short fixed-width attribute. StunProtocol only
+            # catches ValueError, so handing this to protocol.datagram_received
+            # would let the same struct.error escape the loop callback. Deliver
+            # straight to the ICE connection's data path instead (DTLS/SCTP
+            # discard garbage) so a crafted packet can neither raise here nor
+            # log-flood.
+            self._route_by_addr(data, norm, stun_shaped=True)
+            return
+
+        # Only BINDING REQUESTs carry USERNAME (``local:remote``); responses
+        # and indications must be routed by address.
+        username: str = msg.attributes.get("USERNAME", "")
+        ufrag = username.split(":")[0]
+        protocol = self._by_ufrag.get(ufrag) if ufrag else None
+        if protocol is not None:
+            # Learn the peer address from its STUN checks so post-ICE DTLS/SCTP
+            # from that address routes even if it races ahead of our own ICE
+            # "completed" transition (the controlling dialer sends its DTLS
+            # ClientHello as soon as *it* nominates). Same approach as pion's
+            # UDPMux. A spoofed STUN with a known ufrag can only cause the
+            # attacker's bytes to be fed to that connection's DTLS, which
+            # discards them.
+            self._learn_addr(norm, protocol)
+            protocol.datagram_received(data, norm)
+            return
+        is_first_contact = (
+            ufrag != ""
+            and msg.message_class == _stun.Class.REQUEST
+            and msg.message_method == _stun.Method.BINDING
+        )
+        if is_first_contact and self._unknown_stun_handler is not None:
             # First contact: an inbound BINDING REQUEST for an unregistered
             # ufrag. A WebRTC-Direct listener registers a handler to create the
             # connection (add_ice_connection) and replay this datagram.
-            if self._unknown_stun_handler is not None:
-                self._unknown_stun_handler(ufrag, data, norm)
-                return
-            logger.debug("UdpMux: no handler for ufrag %r from %s", ufrag, norm)
-        except (ValueError, struct.error):
-            # Not valid STUN. aioice raises ValueError for non-STUN framing, but
-            # a STUN-shaped packet with a malformed/short fixed-width attribute
-            # makes its struct.unpack raise struct.error (NOT a ValueError
-            # subclass). Both mean "not usable STUN" and must fall through to
-            # addr-based routing rather than escape datagram_received — a remote
-            # peer must not be able to crash or log-flood the mux with crafted
-            # packets.
-            # Non-STUN (DTLS handshake, SCTP frames after ICE): route by addr.
-            protocol = self._by_addr.get(norm)
-            if protocol is not None:
-                protocol.datagram_received(data, norm)
-                return
+            self._unknown_stun_handler(ufrag, data, norm)
+            return
+        protocol = self._by_addr.get(norm)
+        if protocol is not None:
+            protocol.datagram_received(data, norm)
+            return
+        logger.debug("UdpMux: no handler for STUN ufrag %r from %s", ufrag, norm)
+
+    def _learn_addr(self, addr: tuple[str, int], protocol: _HasConnectionLost) -> None:
+        self._by_addr.setdefault(addr, protocol)
+
+    def _route_by_addr(
+        self, data: bytes, norm: tuple[str, int], *, stun_shaped: bool
+    ) -> None:
+        protocol = self._by_addr.get(norm)
+        if protocol is None:
             logger.debug("UdpMux: no handler for non-STUN datagram from %s", norm)
+            return
+        if not stun_shaped:
+            protocol.datagram_received(data, norm)
+            return
+        # Bypass StunProtocol's parser (see datagram_received); StunProtocol
+        # exposes the owning aioice.Connection as ``receiver``.
+        receiver = getattr(protocol, "receiver", None)
+        if receiver is not None and hasattr(receiver, "data_received"):
+            receiver.data_received(data, 1)
+        else:
+            logger.debug("UdpMux: dropped malformed STUN-shaped datagram from %s", norm)
 
     def error_received(self, exc: Exception) -> None:
         logger.warning("UdpMux socket error: %s", exc)
@@ -205,7 +258,12 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_addr[addr] = protocol
 
     def unregister(self, ufrag: str) -> None:
-        self._by_ufrag.pop(ufrag, None)
+        """Drop *ufrag* and every address learned/registered for its protocol."""
+        protocol = self._by_ufrag.pop(ufrag, None)
+        if protocol is None:
+            return
+        for addr in [a for a, p in self._by_addr.items() if p is protocol]:
+            del self._by_addr[addr]
 
     def unregister_addr(self, addr: tuple[str, int]) -> None:
         self._by_addr.pop(addr, None)
@@ -250,10 +308,10 @@ class UdpMux(asyncio.DatagramProtocol):
         1. For each of the dialer's candidates, ``await conn.add_remote_candidate(c)``,
            then ``await conn.add_remote_candidate(None)`` to signal end-of-candidates.
         2. Await ``conn.connect()`` to complete ICE negotiation.
-        3. Call ``register_addr(remote_addr, conn._protocols[0])`` once ICE
-           selects a candidate pair so that post-ICE DTLS/SCTP is routed.
-        4. Call ``unregister(local_username)`` and
-           ``unregister_addr(remote_addr)`` on teardown.
+        3. (Optional) call ``register_addr(remote_addr, conn._protocols[0])``
+           once ICE selects a candidate pair; the mux already learns the peer's
+           address from its STUN checks.
+        4. Call ``unregister(local_username)`` on teardown.
         """
         if not _HAS_AIOICE:
             raise RuntimeError("aioice is required (install py-libp2p[webrtc])")
@@ -266,7 +324,7 @@ class UdpMux(asyncio.DatagramProtocol):
             local_password=local_password,
         )
 
-        muxed_transport = _MuxedTransport(self._transport, self._local_addr)
+        muxed_transport = _MuxedTransport(self._transport, self._local_addr, self)
         protocol = _ice.StunProtocol(conn)
         # Wire the fake transport so aioice can send responses.
         protocol.transport = muxed_transport  # type: ignore[assignment]
@@ -286,11 +344,16 @@ class UdpMux(asyncio.DatagramProtocol):
         protocol.local_candidate = local_candidate
 
         # Inject into aioice's internal protocol list, bypassing gather_candidates
-        # (which would bind extra UDP sockets). Also mark gathering complete and
-        # expose the candidate so Connection.connect() proceeds instead of raising
-        # "Local candidates gathering was not performed".
+        # (which would bind extra UDP sockets). Mark gathering both *started*
+        # and *complete*: ``_end`` lets Connection.connect() proceed instead of
+        # raising "Local candidates gathering was not performed"; ``_start``
+        # makes a later gather_candidates() call — which aiortc's
+        # RTCIceGatherer.gather() issues unconditionally from
+        # setLocalDescription — a no-op instead of binding fresh sockets and
+        # appending their candidates to ours.
         conn._protocols.append(protocol)
         conn._local_candidates = [local_candidate]
+        conn._local_candidates_start = True
         conn._local_candidates_end = True
         self.register(local_username, protocol)  # type: ignore[arg-type]
         return conn
