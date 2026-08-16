@@ -1,10 +1,6 @@
 from typing import Final
 
 # Timing constants
-# NOTE: go-libp2p defaults (CONCURRENCY=10, INTERVAL=60s) were designed for
-# multi-threaded Go. Python is single-threaded — 10 concurrent random walks
-# each dialing 20+ peers = 200 QUIC dials/minute → 100% CPU.
-# Reduced to safe levels for a Python single-threaded event loop.
 PEER_PING_TIMEOUT: Final[float] = 10.0  # seconds
 REFRESH_QUERY_TIMEOUT: Final[float] = 60.0  # seconds
 REFRESH_INTERVAL: Final[float] = 120.0  # 2 minutes for steady discovery
