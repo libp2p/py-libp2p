@@ -586,10 +586,6 @@ class BasicHost(IHost):
         :return: first supported protocol, or None if not cached
         """
         try:
-            # Check if peer exists in peerstore first (avoid auto-creation).
-            # O(1) has_peer() instead of a full peer_ids() scan — persistent
-            # peerstores reconstruct + base58-hash every peer on each call,
-            # which saturated CPU on nodes with tens of thousands of peers.
             if not self.peerstore.has_peer(peer_id):
                 return None
 
