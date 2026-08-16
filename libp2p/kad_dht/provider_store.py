@@ -241,31 +241,34 @@ class ProviderStore:
             key.hex(),
         )
 
-        # Send ADD_PROVIDER messages to these ALPHA peers in parallel.
-        success_count = 0
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
-            results: list[bool] = [False] * len(batch)
+        # Send ADD_PROVIDER messages using a semaphore-based sliding window
+        # (up to ALPHA in flight at once) so a slow or unresponsive peer does
+        # not stall the whole batch of announcements.
+        success_count_list: list[int] = [0]
+        sem = trio.Semaphore(ALPHA)
 
-            async def send_one(
-                idx: int, peer_id: ID, results: list[bool] = results
-            ) -> None:
+        async def send_one(peer_id: ID) -> None:
+            try:
                 if peer_id == self.local_peer_id:
                     return
                 try:
                     with trio.move_on_after(QUERY_TIMEOUT):
                         success = await self._send_add_provider(peer_id, key)
-                        results[idx] = success
-                        if not success:
+                        if success:
+                            success_count_list[0] += 1
+                        else:
                             logger.warning(f"Failed to send ADD_PROVIDER to {peer_id}")
                 except Exception as e:
                     logger.warning(f"Error sending ADD_PROVIDER to {peer_id}: {e}")
+            finally:
+                sem.release()
 
-            async with trio.open_nursery() as nursery:
-                for idx, peer_id in enumerate(batch):
-                    nursery.start_soon(send_one, idx, peer_id, results)
-            success_count += sum(results)
+        async with trio.open_nursery() as nursery:
+            for peer_id in closest_peers:
+                await sem.acquire()
+                nursery.start_soon(send_one, peer_id)
 
+        success_count = success_count_list[0]
         logger.info(f"Successfully advertised to {success_count} peers")
         return success_count > 0
 

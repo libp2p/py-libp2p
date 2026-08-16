@@ -263,6 +263,11 @@ class KadDHT(Service):
         # Defaults should not be used
         self.validator_changed = validator_changed
 
+        # Register the default namespace validators (pk, ipns) when the
+        # caller did not supply a custom validator. Without this, IPNS
+        # records are silently accepted without validation.
+        self.apply_fallbacks()
+
         # Initialize peer routing
         self.peer_routing = PeerRouting(host, self.routing_table)
 
