@@ -1,0 +1,1 @@
+Made the per-bucket subnet-diversity limit runtime-configurable via a ``max_peers_per_subnet`` argument on ``RoutingTable`` and ``KBucket`` (issue #1422).
