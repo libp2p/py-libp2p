@@ -98,6 +98,8 @@ class WebRTCDirectListener(IListener):
         self._nursery: trio.Nursery | None = None
         self._nursery_ready = trio.Event()
         self._nursery_done = trio.Event()
+        # asyncio tasks driving inbound PCs (spec path); cancelled on close.
+        self._accept_tasks: set[asyncio.Future[Any]] = set()
         # Bound the number of not-yet-authenticated inbound connections.
         # ponytail: soft cap — updated from both the asyncio and trio threads
         # (GIL-atomic int ops); use a lock if it ever needs to be exact.
@@ -127,13 +129,18 @@ class WebRTCDirectListener(IListener):
             )
         self._rtc_cert = rtc_cert
 
-        await self._start_trio_nursery()
-
         from ._udp_mux import UdpMux
 
         # Shared UDP socket + STUN dispatch (runs on the asyncio thread).
-        mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+        # Bind before spawning anything so a bind failure leaves no orphans.
+        try:
+            mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+        except OSError as e:
+            raise WebRTCConnectionError(
+                f"Failed to bind WebRTC Direct listener on {host}:{port}: {e}"
+            ) from e
         self._mux = mux
+        await self._start_trio_nursery()
         advertised_host = host if host != "0.0.0.0" else "127.0.0.1"
         self._candidate_host = advertised_host
         mux.set_unknown_stun_handler(self._on_unknown_stun)
@@ -207,7 +214,9 @@ class WebRTCDirectListener(IListener):
         # protocol (which answers the check and queues it) and teaches the
         # mux the peer's address.
         mux.datagram_received(data, addr)
-        asyncio.ensure_future(self._accept_v1(conn, server_ufrag, addr))
+        task = asyncio.ensure_future(self._accept_v1(conn, server_ufrag, addr))
+        self._accept_tasks.add(task)
+        task.add_done_callback(self._accept_tasks.discard)
 
     async def _accept_v1(
         self, conn: Any, server_ufrag: str, addr: tuple[str, int]
@@ -473,8 +482,18 @@ class WebRTCDirectListener(IListener):
         if self._mux is not None and self._bridge is not None:
             mux, self._mux = self._mux, None
             mux.set_unknown_stun_handler(None)
+
+            async def _shutdown_mux() -> None:
+                # Cancel in-flight inbound setups so their PCs close now
+                # rather than after handshake_timeout, then drop the socket.
+                for task in list(self._accept_tasks):
+                    task.cancel()
+                if self._accept_tasks:
+                    await asyncio.gather(*self._accept_tasks, return_exceptions=True)
+                await mux.close()
+
             try:
-                await self._bridge.run_coro(mux.close())
+                await self._bridge.run_coro(_shutdown_mux())
             except Exception:
                 logger.debug("Error closing UdpMux", exc_info=True)
 

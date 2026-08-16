@@ -26,6 +26,11 @@ from libp2p.transport.webrtc.transport import WebRTCDirectTransport
 
 pytestmark = pytest.mark.skipif(not HAS_AIORTC, reason="aiortc not installed")
 
+# Bind on all interfaces (advertised as 127.0.0.1): dialer PCs gather LAN host
+# candidates only (aioice skips loopback), and on Windows a 127.0.0.1-bound
+# socket cannot answer a LAN-bound peer socket (WinError 1231).
+LISTEN_ADDR = "/ip4/0.0.0.0/udp/0/webrtc-direct"
+
 
 @pytest.mark.trio
 async def test_listener_advertises_certhash_in_multiaddr():
@@ -66,7 +71,7 @@ async def test_listener_binds_actual_port():
     listener = transport.create_listener(noop_handler)
     from multiaddr import Multiaddr
 
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
 
     addrs = listener.get_addrs()
     addr_str = str(addrs[0])
@@ -129,7 +134,7 @@ async def test_dial_listen_open_stream_echo(harness):
         await handler_done.wait()
 
     listener = server.create_listener(echo_handler)
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     assert listener._mux is not None  # STUN path is always on
     assert (listener._signaling_server is not None) is harness
@@ -170,7 +175,7 @@ async def test_concurrent_dials_share_one_udp_port():
         await release.wait()
 
     listener = server.create_listener(handler)
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     conns = []
 
@@ -212,7 +217,7 @@ async def test_unknown_version_prefix_is_rejected():
 
     server, _ = _transport()
     listener = server.create_listener(lambda conn: trio.sleep_forever())
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     port = int(str(maddr).split("/udp/")[1].split("/")[0])
     bridge = await server._ensure_bridge()
@@ -251,7 +256,7 @@ async def test_in_flight_cap_drops_excess_first_contacts():
 
     server, _ = _transport(max_in_flight_connections=1)
     listener = server.create_listener(lambda conn: trio.sleep_forever())
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     port = int(str(maddr).split("/udp/")[1].split("/")[0])
     bridge = await server._ensure_bridge()
@@ -275,8 +280,36 @@ async def test_in_flight_cap_drops_excess_first_contacts():
         await bridge.run_coro(_poke())
         assert listener._in_flight == 1
         assert len(listener._mux._by_ufrag) == 1
+        assert len(listener._accept_tasks) == 1
+        # close() cancels the in-flight setup instead of letting it wait out
+        # handshake_timeout.
+        with trio.fail_after(5):
+            await listener.close()
+        assert listener._accept_tasks == set()
     finally:
         await listener.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_listen_bind_failure_raises_connection_error():
+    """A port already in use surfaces as WebRTCConnectionError, no orphans."""
+    from multiaddr import Multiaddr
+
+    from libp2p.transport.webrtc.exceptions import WebRTCConnectionError
+
+    server, _ = _transport()
+    first = server.create_listener(lambda conn: trio.sleep_forever())
+    await first.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    (maddr,) = first.get_addrs()
+    port = int(str(maddr).split("/udp/")[1].split("/")[0])
+    second = server.create_listener(lambda conn: trio.sleep_forever())
+    try:
+        with pytest.raises(WebRTCConnectionError):
+            await second.listen(Multiaddr(f"/ip4/127.0.0.1/udp/{port}/webrtc-direct"))
+        assert second._nursery is None and second._mux is None
+    finally:
+        await first.close()
         await server.close()
 
 
@@ -295,7 +328,7 @@ async def test_dial_rejects_wrong_p2p_id():
         await trio.sleep_forever()
 
     listener = server.create_listener(handler)
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     impostor = ID.from_pubkey(create_new_key_pair().public_key)
     wrong = Multiaddr(str(maddr).rsplit("/p2p/", 1)[0] + f"/p2p/{impostor}")
@@ -319,16 +352,8 @@ async def test_handler_exception_does_not_crash_listener():
     """
     from multiaddr import Multiaddr
 
-    from libp2p.transport.webrtc.config import WebRTCTransportConfig
-
-    server = WebRTCDirectTransport(
-        private_key=create_new_key_pair().private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
-    dialer = WebRTCDirectTransport(
-        private_key=create_new_key_pair().private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
+    server, _ = _transport()
+    dialer, _ = _transport()
     calls = 0
 
     async def bad_handler(conn) -> None:  # type: ignore[no-untyped-def]
@@ -337,7 +362,7 @@ async def test_handler_exception_does_not_crash_listener():
         raise RuntimeError("boom")
 
     listener = server.create_listener(bad_handler)
-    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
     try:
         with trio.fail_after(30):
