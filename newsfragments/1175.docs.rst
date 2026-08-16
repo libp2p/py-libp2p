@@ -1,0 +1,1 @@
+Installation documentation now recommends ``uv`` as the primary package manager, with ``pip`` documented as an alternative, including development setup for both workflows.

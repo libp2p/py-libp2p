@@ -129,7 +129,7 @@ class AutoTLSBrowserDemo:
             peer_id=peer_id,
             peerstore=peer_store,
             upgrader=upgrader,
-            transport=transport,
+            transports=[transport],
         )
         self.host = BasicHost(swarm)
 

@@ -19,12 +19,15 @@ import uuid
 import pytest
 import multiaddr
 import trio
+import varint
 
 from libp2p.crypto.rsa import create_new_key_pair
+from libp2p.kad_dht.common import PROTOCOL_ID
 from libp2p.kad_dht.kad_dht import (
     DHTMode,
     KadDHT,
 )
+from libp2p.kad_dht.pb.kademlia_pb2 import Message
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.id import ID
 from libp2p.peer.peer_record import PeerRecord
@@ -35,9 +38,10 @@ from libp2p.peer.peerstore import create_signed_peer_record
 from libp2p.records.pubkey import PublicKeyValidator
 from libp2p.records.utils import InvalidRecordType
 from libp2p.records.validator import NamespacedValidator, Validator
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
+from libp2p.utils.varint import read_varint_prefixed_bytes
 from tests.utils.factories import (
     host_pair_factory,
 )
@@ -277,9 +281,12 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     local_value_record = dht_a.value_store.get(key_bytes)
     assert local_value_record is not None
     assert local_value_record.value == value, "Local value storage failed"
-    print("number of nodes in peer store", dht_a.host.get_peerstore().peer_ids())
+    logger.debug(
+        "Number of nodes in peer store: %s",
+        dht_a.host.get_peerstore().peer_ids(),
+    )
     await dht_a.routing_table.add_peer(peer_b_info)
-    print("Routing table of a has ", dht_a.routing_table.get_peer_ids())
+    logger.debug("Routing table of a has: %s", dht_a.routing_table.get_peer_ids())
 
     # An extra FIND_NODE req is sent between the 2 nodes while dht creation,
     # so both the nodes will have records of each other before PUT_VALUE req is sent
@@ -330,7 +337,7 @@ async def test_put_and_get_value(dht_pair: tuple[KadDHT, KadDHT]):
     # Retrieve the value using the second node
     with trio.fail_after(TEST_TIMEOUT):
         retrieved_value = await dht_b.get_value(key)
-        print("the value stored in node b is", dht_b.get_value_store_size())
+        logger.debug("Value store size in node b: %s", dht_b.get_value_store_size())
         logger.debug("Retrieved value: %s", retrieved_value)
 
     # These are the records that were sent between the peers during the PUT_VALUE req
@@ -654,7 +661,97 @@ async def test_register_validator(dht_pair: tuple[KadDHT, KadDHT]):
     with pytest.raises(ValueError, match="Value must start with 'valid:'"):
         await dht_a.put_value(key, invalid_value)
 
-    # Test 3: Key with unregistered namespace should raise InvalidRecordType
+    # Test 3: Key with unregistered namespace should be accepted with
+    # strict_validation=False (default behavior for backward compatibility)
     unregistered_key = "/unknown/some-key"
-    with pytest.raises(InvalidRecordType):
-        await dht_a.put_value(unregistered_key, b"some-value")
+    # With default settings (strict_validation=False), this should succeed
+    await dht_a.put_value(unregistered_key, b"some-value")
+
+    # Test 4: Enable strict_validation and verify it rejects unregistered namespaces
+    if dht_a.validator is not None:
+        # Toggling validator.strict_validation should be reflected by
+        # dht.strict_validation.
+        assert dht_a.strict_validation is False
+        dht_a.validator.strict_validation = True
+        assert dht_a.strict_validation is True
+        with pytest.raises(InvalidRecordType, match="strict validation"):
+            await dht_a.put_value(unregistered_key, b"another-value")
+
+        # Toggling dht.strict_validation should synchronize back to validator.
+        dht_a.strict_validation = False
+        assert dht_a.validator.strict_validation is False
+
+        # Reset to default
+        dht_a.validator.strict_validation = False
+
+
+@pytest.mark.trio
+async def test_find_node_reply_includes_requester_asking_for_itself(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = a_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert a_id.to_bytes() not in [p.id for p in resp.closerPeers]
+
+
+@pytest.mark.trio
+async def test_find_node_reply_excludes_requester_when_not_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    a_id = dht_a.host.get_id()
+    b_id = dht_b.host.get_id()
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = b_id.to_bytes()
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    closer_ids = [p.id for p in resp.closerPeers]
+    assert a_id.to_bytes() not in closer_ids
+    assert b_id.to_bytes() in closer_ids
+
+
+@pytest.mark.trio
+async def test_find_node_reply_does_not_prepend_unknown_target(
+    dht_pair: tuple[KadDHT, KadDHT],
+):
+    dht_a, dht_b = dht_pair
+    unknown_key = b"content-key-not-in-peerstore-" + os.urandom(16)
+
+    req = Message()
+    req.type = Message.MessageType.FIND_NODE
+    req.key = unknown_key
+    raw = req.SerializeToString()
+
+    stream = await dht_a.host.new_stream(dht_b.host.get_id(), [PROTOCOL_ID])
+    await stream.write(varint.encode(len(raw)))
+    await stream.write(raw)
+
+    resp = Message()
+    resp.ParseFromString(await read_varint_prefixed_bytes(stream))
+    await stream.close()
+
+    assert unknown_key not in [p.id for p in resp.closerPeers]

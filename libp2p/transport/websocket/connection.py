@@ -7,7 +7,7 @@ from typing import Any
 
 from multiaddr import Multiaddr
 import trio
-from trio_websocket import WebSocketConnection
+from trio_websocket import ConnectionClosed, WebSocketConnection
 
 from libp2p.io.abc import ReadWriteCloser
 from libp2p.io.exceptions import ConnectionClosedError, IOException
@@ -168,6 +168,10 @@ class P2PWebSocketConnection(ReadWriteCloser):
         """
         Check if an exception indicates WebSocket connection closure.
 
+        Uses ``isinstance`` against ``trio_websocket.ConnectionClosed``
+        instead of fragile string matching on the exception message or
+        type name.
+
         Args:
             e: The exception to check
 
@@ -175,13 +179,7 @@ class P2PWebSocketConnection(ReadWriteCloser):
             True if the exception indicates connection closure
 
         """
-        error_str = str(e)
-        error_type = type(e).__name__
-        return (
-            "CloseReason" in error_str
-            or "ConnectionClosed" in error_type
-            or "closed" in error_str.lower()
-        )
+        return isinstance(e, ConnectionClosed)
 
     def _extract_close_info(self, e: Exception) -> tuple[int | None, str]:
         """

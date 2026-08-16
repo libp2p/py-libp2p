@@ -1,0 +1,1 @@
+Add per-peer outbound RPC queue with priority support and message splitting, matching go-libp2p-pubsub's ``rpcQueue`` and ``split`` pipeline. GossipSub and FloodSub now route all sends through bounded queues instead of writing directly to streams.

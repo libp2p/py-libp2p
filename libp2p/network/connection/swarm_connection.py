@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -38,24 +39,33 @@ class SwarmConn(INetConn):
     streams: set[NetStream]
     event_closed: trio.Event
     _resource_scope: Any | None
+    _direction: Direction
     _actual_transport_addresses: list[Multiaddr] | None
     _connection_type: ConnectionType
-    _connection_metadata: dict[str, Any]
+    _metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
         self,
         muxed_conn: IMuxedConn,
         swarm: "Swarm",
+        direction: Direction | str = Direction.UNKNOWN,
     ) -> None:
         self.muxed_conn = muxed_conn
         self.swarm = swarm
         self.streams = set()
         self.event_closed = trio.Event()
         self.event_started = trio.Event()
+        # Track connection creation time for pruning
+        self._created_at = time.time()
         self._resource_scope = None
+        # Track connection direction (inbound/outbound)
+        # Support both Direction enum and string for backward compatibility
+        if isinstance(direction, Direction):
+            self._direction = direction
+        else:
+            self._direction = Direction.from_string(str(direction))
         self._actual_transport_addresses = None
         self._connection_type = ConnectionType.UNKNOWN
-        self._connection_metadata = {}
         # Provide back-references/hooks expected by NetStream
         try:
             setattr(self.muxed_conn, "swarm", self.swarm)
@@ -86,6 +96,35 @@ class SwarmConn(INetConn):
         self._resource_scope = scope
 
     @property
+    def direction(self) -> Direction:
+        """
+        Get the connection direction.
+
+        Returns
+        -------
+        Direction
+            INBOUND if we accepted the connection, OUTBOUND if we initiated it.
+
+        """
+        return self._direction
+
+    @direction.setter
+    def direction(self, value: Direction | str) -> None:
+        """
+        Set the connection direction.
+
+        Parameters
+        ----------
+        value : Direction | str
+            The direction value (enum or string).
+
+        """
+        if isinstance(value, Direction):
+            self._direction = value
+        else:
+            self._direction = Direction.from_string(str(value))
+
+    @property
     def is_closed(self) -> bool:
         return self.event_closed.is_set()
 
@@ -107,10 +146,22 @@ class SwarmConn(INetConn):
         if self._resource_scope is not None:
             try:
                 # Release the resource scope
+                import inspect
+
                 if hasattr(self._resource_scope, "close"):
-                    self._resource_scope.close()
+                    close_method = getattr(self._resource_scope, "close")
+                    # Check if close() is a coroutine
+                    if inspect.iscoroutinefunction(close_method):
+                        await close_method()
+                    else:
+                        # Synchronous close
+                        close_method()
                 elif hasattr(self._resource_scope, "release"):
-                    self._resource_scope.release()
+                    release_method = getattr(self._resource_scope, "release")
+                    if inspect.iscoroutinefunction(release_method):
+                        await release_method()
+                    else:
+                        release_method()
                 logging.debug(
                     f"Released resource scope for peer {self.muxed_conn.peer_id}"
                 )
@@ -167,11 +218,25 @@ class SwarmConn(INetConn):
                 except MuxedConnUnavailable:
                     await self.close()
                     break
+                except Exception as e:
+                    # Catch QUICConnectionClosedError and other unexpected disconnects
+                    logging.debug(
+                        f"Connection closed for peer {self.muxed_conn.peer_id}: {e}"
+                    )
+                    await self.close()
+                    break
                 # Asynchronously handle the accepted stream, to avoid blocking
                 # the next stream.
                 nursery.start_soon(self._handle_muxed_stream, stream)
 
     async def _handle_muxed_stream(self, muxed_stream: IMuxedStream) -> None:
+        # Acquire semaphore slot for inbound stream (queues if at capacity)
+        semaphore = getattr(self.swarm, "_stream_semaphore", None)
+        semaphore_acquired = False
+        if semaphore is not None:
+            await semaphore.acquire()
+            semaphore_acquired = True
+
         # Acquire inbound stream resource if a manager is configured
         rm = getattr(self.swarm, "_resource_manager", None)
         peer_id_str = str(getattr(self.muxed_conn, "peer_id", ""))
@@ -183,6 +248,9 @@ class SwarmConn(INetConn):
                 acquired = False
 
         if rm is not None and not acquired:
+            # Release semaphore since we're rejecting this stream
+            if semaphore_acquired and semaphore is not None:
+                semaphore.release()
             # Deny stream: best-effort reset/close
             try:
                 await muxed_stream.reset()  # type: ignore[attr-defined]
@@ -194,22 +262,19 @@ class SwarmConn(INetConn):
             return
 
         net_stream = await self._add_stream(muxed_stream)
+        # Tag stream with direction so notify_closed_stream releases resources
+        net_stream._direction = Direction.INBOUND
         try:
             await self.swarm.common_stream_handler(net_stream)
         finally:
-            # Always remove the stream when the handler finishes
-            # Use simple remove_stream since stream handles notifications itself
+            # Safety net: ensure stream is removed from connection tracking
             self.remove_stream(net_stream)
-            # Release inbound stream resource
-            if rm is not None and acquired:
-                try:
-                    rm.release_stream(peer_id_str, Direction.INBOUND)
-                except Exception:
-                    pass
+            # Release resources via notify_closed_stream (idempotent guard)
+            if not net_stream._resource_released:
+                await self.swarm.notify_closed_stream(net_stream)
 
     async def _add_stream(self, muxed_stream: IMuxedStream) -> NetStream:
-        #
-        net_stream = NetStream(muxed_stream, self)
+        net_stream = NetStream(muxed_stream, self, self._metric_send_channel)
         # Set Stream state to OPEN if the event has already started.
         # This is to ensure that the new streams created after connection has started
         # are immediately set to OPEN state.

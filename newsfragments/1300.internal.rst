@@ -1,0 +1,1 @@
+Extended ``interop/transport/ping_test.py`` for the libp2p test-plans harness: TLS and WSS transport paths, test-plans JSON dialer output, ``listenerAddr`` Redis coordination, and related timing and compatibility adjustments.

@@ -13,7 +13,7 @@ import trio
 
 from libp2p.abc import INetConn
 from libp2p.peer.id import ID
-from libp2p.tools.async_service import Service
+from libp2p.tools.anyio_service import Service
 
 from .data_structures import HealthMonitorStatus
 

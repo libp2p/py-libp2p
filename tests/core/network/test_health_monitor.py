@@ -20,7 +20,7 @@ from libp2p.network.health.data_structures import (
 )
 from libp2p.network.health.monitor import ConnectionHealthMonitor
 from libp2p.peer.id import ID
-from libp2p.tools.async_service import background_trio_service
+from libp2p.tools.anyio_service import background_trio_service
 
 
 class MockConnection(INetConn):

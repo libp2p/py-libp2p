@@ -1,0 +1,1 @@
+Updated contributor setup documentation to use ``uv sync`` with the default ``.venv`` workflow, including clearer setup-script guidance for Linux and macOS.

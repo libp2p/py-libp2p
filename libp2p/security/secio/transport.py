@@ -1,6 +1,7 @@
 from dataclasses import (
     dataclass,
 )
+import hashlib
 import itertools
 
 import multihash
@@ -208,8 +209,8 @@ async def _response_to_msg(read_writer: SecioPacketReadWriter, msg: bytes) -> by
 
 
 def _mk_multihash_sha256(data: bytes) -> bytes:
-    mh = multihash.digest(data, "sha2-256")
-    return mh.encode()
+    digest = hashlib.sha256(data).digest()
+    return multihash.encode(digest, "sha2-256")
 
 
 def _mk_score(public_key: PublicKey, nonce: bytes) -> bytes:

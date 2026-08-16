@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import trio
@@ -38,7 +39,7 @@ from libp2p.relay.circuit_v2.resources import (
     RelayResourceManager,
 )
 from libp2p.relay.circuit_v2.utils import maybe_consume_signed_record
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -520,6 +521,56 @@ async def test_circuit_v2_voucher_verification_complete():
         logger.info("Reservation correctly rejected when no host available")
 
         logger.info("All voucher verification tests passed successfully!")
+
+
+@pytest.mark.trio
+async def test_handle_reserve_returns_signed_reservation_payload():
+    relay_key_pair = create_new_key_pair()
+    client_key_pair = create_new_key_pair()
+    client_peer_id = ID.from_pubkey(client_key_pair.public_key)
+
+    mock_peerstore = Mock()
+    mock_peerstore.addrs.return_value = []
+
+    mock_host = Mock()
+    mock_host.get_private_key.return_value = relay_key_pair.private_key
+    mock_host.get_public_key.return_value = relay_key_pair.public_key
+    mock_host.get_peerstore.return_value = mock_peerstore
+
+    protocol = CircuitV2Protocol(mock_host, DEFAULT_RELAY_LIMITS, allow_hop=True)
+
+    stream = AsyncMock()
+    stream.write = AsyncMock()
+
+    reserve_msg = proto.HopMessage(type=proto.HopMessage.RESERVE)
+    reserve_msg.peer = client_peer_id.to_bytes()
+
+    fake_envelope = Mock()
+    fake_envelope.marshal_envelope.return_value = b"signed-relay-record"
+
+    with (
+        patch(
+            "libp2p.relay.circuit_v2.protocol.env_to_send_in_RPC",
+            return_value=(b"relay-record", None),
+        ),
+        patch(
+            "libp2p.relay.circuit_v2.protocol.unmarshal_envelope",
+            return_value=fake_envelope,
+        ),
+    ):
+        await protocol._handle_reserve(stream, reserve_msg)
+
+    assert stream.write.await_count == 1
+    await_args = stream.write.await_args
+    assert await_args is not None
+    response_bytes = await_args.args[0]
+    response = proto.HopMessage()
+    response.ParseFromString(response_bytes)
+
+    assert response.type == proto.HopMessage.STATUS
+    assert response.status.code == proto.Status.OK
+    assert response.reservation.voucher != b""
+    assert response.reservation.signature != b""
 
 
 @pytest.mark.trio
@@ -1167,3 +1218,165 @@ async def test_reservation_fails_with_invalid_record_transfer():
                 logger.info("Invalid SPR was correctly rejected")
 
         logger.info("Invalid SPR correctly rejected, peerstore protected")
+
+
+@pytest.mark.trio
+async def test_circuit_v2_connect_fails_without_reservation():
+    """Test that relay rejects CONNECT requests for unreserved destinations."""
+    async with HostFactory.create_batch_and_listen(3) as hosts:
+        relay_host, source_host, dest_host = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_connect_fails_without_reservation"
+        )
+
+        # Setup relay
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=DEFAULT_RELAY_LIMITS.max_circuit_conns,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+        relay_protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
+
+        async with background_trio_service(relay_protocol):
+            await relay_protocol.event_started.wait()
+
+            # Connect source to relay
+            await connect(source_host, relay_host)
+            await trio.sleep(SLEEP_TIME)
+
+            # Source sends CONNECT request for dest (who has NO reservation)
+            stream = None
+            try:
+                with trio.fail_after(STREAM_TIMEOUT):
+                    stream = await source_host.new_stream(
+                        relay_host.get_id(), [PROTOCOL_ID]
+                    )
+
+                    connect_msg = proto.HopMessage(
+                        type=proto.HopMessage.CONNECT,
+                        peer=dest_host.get_id().to_bytes(),
+                    )
+
+                    await stream.write(connect_msg.SerializeToString())
+                    logger.info(
+                        "Sent CONNECT request for destination without reservation"
+                    )
+
+                    # Read response
+                    response_bytes = await stream.read(MAX_READ_LEN)
+                    assert response_bytes, "No response received"
+
+                    response = proto.HopMessage()
+                    response.ParseFromString(response_bytes)
+
+                    # Verify response status is NO_RESERVATION (204)
+                    assert response.type == proto.HopMessage.STATUS
+                    assert response.status.code == proto.Status.NO_RESERVATION, (
+                        "Expected status NO_RESERVATION(204), "
+                        f"got {response.status.code}"
+                    )
+
+                    # Verify stream is reset (or EOF)
+                    try:
+                        next_data = await stream.read(MAX_READ_LEN)
+                        assert not next_data, (
+                            "Stream should be closed/reset after error status"
+                        )
+                    except (StreamEOF, StreamReset, StreamError):
+                        pass
+
+            finally:
+                if stream:
+                    await close_stream(stream)
+
+
+@pytest.mark.trio
+async def test_circuit_v2_connect_fails_when_source_limit_exceeded():
+    """Test that relay rejects CONNECT when source exceeds connection limit."""
+    async with HostFactory.create_batch_and_listen(3) as hosts:
+        relay_host, source_host, dest_host = hosts
+        logger.info(
+            "Created hosts for test_circuit_v2_connect_fails_when_source_limit_exceeded"
+        )
+
+        limits = RelayLimits(
+            duration=DEFAULT_RELAY_LIMITS.duration,
+            data=DEFAULT_RELAY_LIMITS.data,
+            max_circuit_conns=1,
+            max_reservations=DEFAULT_RELAY_LIMITS.max_reservations,
+        )
+        relay_protocol = CircuitV2Protocol(relay_host, limits, allow_hop=True)
+
+        async with background_trio_service(relay_protocol):
+            await relay_protocol.event_started.wait()
+
+            async def send_reserve(host) -> None:
+                envelope_bytes, _ = env_to_send_in_RPC(host)
+                stream = await host.new_stream(relay_host.get_id(), [PROTOCOL_ID])
+                try:
+                    reserve_msg = proto.HopMessage(
+                        type=proto.HopMessage.RESERVE,
+                        peer=host.get_id().to_bytes(),
+                        senderRecord=envelope_bytes,
+                    )
+                    await stream.write(reserve_msg.SerializeToString())
+                    await stream.read(MAX_READ_LEN)
+                finally:
+                    await close_stream(stream)
+
+            await connect(dest_host, relay_host)
+            await connect(source_host, relay_host)
+            await trio.sleep(SLEEP_TIME)
+
+            await send_reserve(dest_host)
+            await send_reserve(source_host)
+            await trio.sleep(SLEEP_TIME)
+
+            source_reservation = relay_protocol.resource_manager.get_reservation(
+                source_host.get_id()
+            )
+            assert source_reservation is not None
+            source_reservation.active_connections = 1
+
+            stream = None
+            try:
+                with trio.fail_after(STREAM_TIMEOUT):
+                    stream = await source_host.new_stream(
+                        relay_host.get_id(), [PROTOCOL_ID]
+                    )
+
+                    connect_msg = proto.HopMessage(
+                        type=proto.HopMessage.CONNECT,
+                        peer=dest_host.get_id().to_bytes(),
+                    )
+                    await stream.write(connect_msg.SerializeToString())
+                    logger.info(
+                        "Sent CONNECT request with source connection limit exceeded"
+                    )
+
+                    response_bytes = await stream.read(MAX_READ_LEN)
+                    assert response_bytes, "No response received"
+
+                    response = proto.HopMessage()
+                    response.ParseFromString(response_bytes)
+
+                    assert response.type == proto.HopMessage.STATUS
+                    assert (
+                        response.status.code == proto.Status.RESOURCE_LIMIT_EXCEEDED
+                    ), (
+                        "Expected status RESOURCE_LIMIT_EXCEEDED(101), "
+                        f"got {response.status.code}"
+                    )
+
+                    try:
+                        next_data = await stream.read(MAX_READ_LEN)
+                        assert not next_data, (
+                            "Stream should be closed/reset after error status"
+                        )
+                    except (StreamEOF, StreamReset, StreamError):
+                        pass
+
+            finally:
+                if stream:
+                    await close_stream(stream)

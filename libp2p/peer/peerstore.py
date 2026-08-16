@@ -5,9 +5,7 @@ from collections.abc import (
     AsyncIterable,
     Sequence,
 )
-from typing import (
-    Any,
-)
+import logging
 
 from multiaddr import (
     Multiaddr,
@@ -24,6 +22,9 @@ from libp2p.crypto.keys import (
     PrivateKey,
     PublicKey,
 )
+from libp2p.custom_types import (
+    MetadataValue,
+)
 from libp2p.peer.envelope import Envelope, seal_record
 from libp2p.peer.peer_record import PeerRecord
 
@@ -39,6 +40,23 @@ from .peerinfo import (
 )
 
 PERMANENT_ADDR_TTL = 0
+
+logger = logging.getLogger(__name__)
+
+
+def _peer_record_signer_matches(envelope: Envelope) -> bool:
+    """Return True if envelope signer identity matches record.peer_id."""
+    try:
+        record = envelope.record()
+        if ID.from_pubkey(envelope.public_key) != record.peer_id:
+            logger.debug(
+                "Rejected peer record: signer identity does not match record peer_id"
+            )
+            return False
+        return True
+    except Exception:
+        logger.debug("Rejected peer record: failed to validate signer identity")
+        return False
 
 
 def create_signed_peer_record(
@@ -275,7 +293,7 @@ class PeerStore(IPeerStore):
 
     # ------METADATA---------
 
-    def get(self, peer_id: ID, key: str) -> Any:
+    def get(self, peer_id: ID, key: str) -> MetadataValue:
         """
         :param peer_id: peer ID to get peer data for
         :param key: the key to search value for
@@ -290,7 +308,7 @@ class PeerStore(IPeerStore):
             return val
         raise PeerStoreError("peer ID not found")
 
-    def put(self, peer_id: ID, key: str, val: Any) -> None:
+    def put(self, peer_id: ID, key: str, val: MetadataValue) -> None:
         """
         :param peer_id: peer ID to put peer data for
         :param key:
@@ -327,6 +345,7 @@ class PeerStore(IPeerStore):
 
         This function:
         - Extracts the peer ID and sequence number from the envelope
+        - Rejects the record if the signer identity does not match record.peer_id
         - Rejects the record if it's older (lower seq)
         - Updates the stored peer record and replaces associated addresses if accepted
 
@@ -334,6 +353,9 @@ class PeerStore(IPeerStore):
         :param ttl: Time-to-live for the included multiaddrs (in seconds).
         :return: True if the record was accepted and stored; False if it was rejected.
         """
+        if not _peer_record_signer_matches(envelope):
+            return False
+
         record = envelope.record()
         peer_id = record.peer_id
 

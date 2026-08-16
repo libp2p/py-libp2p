@@ -33,6 +33,9 @@ class PeerInfo:
             and self.addrs == other.addrs
         )
 
+    def __hash__(self) -> int:
+        return hash(self.peer_id)
+
 
 def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
     if not addr:
@@ -50,8 +53,8 @@ def info_from_p2p_addr(addr: multiaddr.Multiaddr) -> PeerInfo:
             f"instead of `{last_protocol.code}`"
         )
 
-    # make sure the /p2p value parses as a peer.ID
-    peer_id_str = addr.value_for_protocol(protocols.P_P2P)
+    # Use get_peer_id() for peer ID extraction (Section 3.1 multiaddr integration)
+    peer_id_str = addr.get_peer_id()
     if peer_id_str is None:
         raise InvalidAddrError("Missing value for /p2p protocol in multiaddr")
 
@@ -79,6 +82,8 @@ def peer_info_from_bytes(data: bytes) -> PeerInfo:
         peer_id = ID.from_string(lines[0])
         addrs = [multiaddr.Multiaddr(addr_str) for addr_str in lines[1:]]
         return PeerInfo(peer_id, addrs)
+    except InvalidAddrError:
+        raise
     except Exception as e:
         raise InvalidAddrError(f"failed to decode PeerInfo: {e}")
 

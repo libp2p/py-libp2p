@@ -52,6 +52,14 @@ class Multiselect(IMultiselectMuxer):
         """
         self.handlers[protocol] = handler
 
+    def remove_handler(self, protocol: TProtocol) -> None:
+        """
+        Remove the handler for the given protocol.
+
+        :param protocol: protocol name to remove
+        """
+        self.handlers.pop(protocol, None)
+
     async def negotiate(
         self,
         communicator: IMultiselectCommunicator,

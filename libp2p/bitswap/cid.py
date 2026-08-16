@@ -21,13 +21,20 @@ This matches the multicodec specification but changes binary format
 for dag-jose, dag-json, and experimental codecs.
 """
 
-import hashlib
 from typing import TypeAlias
 
 from cid import CIDv0, CIDv1, V0Builder, V1Builder, from_string, make_cid
 from cid.prefix import Prefix
 from multicodec import Code, is_codec
-from multicodec.code_table import DAG_PB, RAW, SHA2_256
+from multicodec.code_table import (
+    DAG_CBOR,
+    DAG_JOSE,
+    DAG_JSON,
+    DAG_PB,
+    IPLD,
+    RAW,
+    SHA2_256,
+)
 
 # Simplified CID version constants
 CID_V0 = 0
@@ -36,6 +43,10 @@ CID_V1 = 1
 # Multicodec and multihash constants (type-safe Code objects)
 CODEC_DAG_PB: Code = DAG_PB
 CODEC_RAW: Code = RAW
+CODEC_DAG_JSON: Code = DAG_JSON
+CODEC_DAG_CBOR: Code = DAG_CBOR
+CODEC_IPLD: Code = IPLD
+CODEC_DAG_JOSE: Code = DAG_JOSE
 HASH_SHA256: Code = SHA2_256
 CIDInput: TypeAlias = bytes | str | CIDv0 | CIDv1
 CIDObject: TypeAlias = CIDv0 | CIDv1
@@ -108,7 +119,7 @@ def compute_cid_v1(data: bytes, codec: Code | str | int = CODEC_RAW) -> bytes:
     return compute_cid_v1_obj(data, codec).buffer
 
 
-def get_cid_prefix(cid: bytes) -> bytes:
+def get_cid_prefix(cid: CIDInput) -> bytes:
     """
     Extract the CID prefix (everything except the digest).
 
@@ -156,12 +167,10 @@ def reconstruct_cid_from_prefix_and_data(prefix: bytes, data: bytes) -> bytes:
     try:
         return Prefix.from_bytes(prefix).sum(data).buffer
     except ValueError:
-        # Preserve previous permissive behavior for malformed prefixes.
-        digest = hashlib.sha256(data).digest()
-        return prefix + digest
+        raise
 
 
-def verify_cid(cid: bytes, data: bytes) -> bool:
+def verify_cid(cid: CIDInput, data: bytes) -> bool:
     """
     Verify that data matches the given CID.
 
@@ -178,7 +187,7 @@ def verify_cid(cid: bytes, data: bytes) -> bool:
     logger = logging.getLogger(__name__)
 
     logger.debug("      verify_cid:")
-    logger.debug(f"        CID: {cid.hex()}")
+    logger.debug(f"        CID: {format_cid_for_display(cid)}")
     logger.debug(f"        Data size: {len(data)} bytes")
     try:
         cid_obj = parse_cid(cid)
@@ -209,7 +218,16 @@ def parse_cid(value: CIDInput) -> CIDv0 | CIDv1:
         return value
 
     if isinstance(value, bytes):
-        return make_cid(value)
+        try:
+            return make_cid(value)
+        except ValueError:
+            # make_cid(bytes) fails for raw CIDv0 buffers (multihash bytes).
+            # CIDv0 is simply a bare multihash, so try constructing directly.
+            try:
+                return CIDv0(value)
+            except Exception:
+                pass
+            raise
 
     if isinstance(value, str):
         cid_str = value.strip()
@@ -234,45 +252,29 @@ def cid_to_bytes(value: CIDInput) -> bytes:
 
 
 def cid_to_text(value: CIDInput) -> str:
-    """Convert CID input to canonical CID string form."""
-    return str(parse_cid(value))
-
-
-def cid_to_string(cid: bytes) -> str:
     """
-    Convert CID bytes to a readable hex string.
-
-    Args:
-        cid: The CID bytes
-
-    Returns:
-        Hex string representation
-
+    Convert CID input to canonical CID string form
+    (base32 for CIDv1, base58btc for CIDv0).
     """
-    return cid.hex()
+    cid_obj = parse_cid(value)
+    # Use base32 for CIDv1 (matches Kubo's default output)
+    if cid_obj.version == 1:
+        return cid_obj.encode("base32").decode()
+    # Use base58btc for CIDv0 (legacy format)
+    return str(cid_obj)
 
 
-def parse_cid_version(cid: bytes) -> int:
-    """
-    Determine the CID version.
-
-    Args:
-        cid: The CID bytes
-
-    Returns:
-        CID version (0 or 1)
-
-    """
-    if len(cid) < 1:
-        return CID_V0
-
+def format_cid_for_display(cid: CIDInput, max_len: int | None = None) -> str:
+    """Return CID text for display, with hex fallback and optional truncation."""
     try:
-        return parse_cid(cid).version
-    except ValueError:
-        # Preserve previous behavior for malformed CIDs.
-        if cid[0] == CID_V1:
-            return CID_V1
-        return CID_V0
+        result = cid_to_text(cid)
+    except (TypeError, ValueError):
+        # Best-effort fallback: hex for raw bytes, str() for anything else.
+        result = cid.hex() if isinstance(cid, bytes) else str(cid)
+
+    if max_len is not None and len(result) > max_len:
+        return f"{result[:max_len]}..."
+    return result
 
 
 def compute_cid(

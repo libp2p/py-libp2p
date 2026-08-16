@@ -114,7 +114,7 @@ from libp2p.stream_muxer.yamux.yamux import (
     Yamux,
     YamuxStream,
 )
-from libp2p.tools.async_service import (
+from libp2p.tools.anyio_service import (
     background_trio_service,
 )
 from libp2p.tools.constants import (
@@ -249,18 +249,25 @@ async def raw_conn_factory(
 
     tcp_transport = TCP()
     listener = tcp_transport.create_listener(tcp_stream_handler)
-    await listener.listen(LISTEN_MADDR, nursery)
-    listening_maddr = listener.get_addrs()[0]
-    conn_0 = await tcp_transport.dial(listening_maddr)
-    await event.wait()
-    assert conn_0 is not None and conn_1 is not None
-    yield conn_0, conn_1
+    try:
+        await listener.listen(LISTEN_MADDR)
+        listening_maddr = listener.get_addrs()[0]
+        conn_0 = await tcp_transport.dial(listening_maddr)
+        await event.wait()
+        assert conn_0 is not None and conn_1 is not None
+        yield conn_0, conn_1
+    finally:
+        await listener.close()
 
 
 @asynccontextmanager
 async def noise_conn_factory(
     nursery: trio.Nursery,
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
+    # create_ed25519_key_pair() supplies the libp2p identity KeyPair only.
+    # The Noise static private key is not taken from that argument:
+    # noise_transport_factory always sets noise_privkey=noise_static_key_factory()
+    # (X25519). See noise_transport_factory above.
     local_transport = cast(
         NoiseTransport, noise_transport_factory(create_ed25519_key_pair())
     )
@@ -411,9 +418,7 @@ async def tls_conn_factory(
 ) -> AsyncIterator[tuple[ISecureConn, ISecureConn]]:
     local_transport = client_transport or TLSTransport(create_secp256k1_key_pair())
     remote_transport = server_transport or TLSTransport(create_secp256k1_key_pair())
-    # Trust each other's certs for test handshake
-    local_transport.trust_peer_cert_pem(remote_transport.get_certificate_pem())
-    remote_transport.trust_peer_cert_pem(local_transport.get_certificate_pem())
+    # Interop-style handshakes work without a PKIX trust store (libp2p extension only).
 
     local_secure_conn: ISecureConn | None = None
     remote_secure_conn: ISecureConn | None = None
@@ -458,7 +463,7 @@ class SwarmFactory(factory.Factory):
             o.muxer_opt,
         )
     )
-    transport = factory.LazyFunction(TCP)
+    transports = factory.LazyFunction(lambda: [TCP()])
 
     @classmethod
     @asynccontextmanager
@@ -611,6 +616,8 @@ class GossipsubFactory(factory.Factory):
     unsubscribe_back_off = GOSSIPSUB_PARAMS.unsubscribe_back_off
     score_params = None
     max_idontwant_messages = 10
+    max_pending_messages_per_peer = GOSSIPSUB_PARAMS.max_pending_messages_per_peer
+    pending_messages_ttl = GOSSIPSUB_PARAMS.pending_messages_ttl
 
 
 class PubsubFactory(factory.Factory):
@@ -742,6 +749,8 @@ class PubsubFactory(factory.Factory):
         unsubscribe_back_off: int = GOSSIPSUB_PARAMS.unsubscribe_back_off,
         score_params: ScoreParams | None = None,
         max_idontwant_messages: int = 10,
+        max_pending_messages_per_peer: int = GOSSIPSUB_PARAMS.max_pending_messages_per_peer,  # noqa: E501
+        pending_messages_ttl: float = GOSSIPSUB_PARAMS.pending_messages_ttl,
         security_protocol: TProtocol | None = None,
         muxer_opt: TMuxerOptions | None = None,
         msg_id_constructor: None
@@ -768,6 +777,8 @@ class PubsubFactory(factory.Factory):
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
         else:
             gossipsubs = GossipsubFactory.create_batch(
@@ -788,6 +799,8 @@ class PubsubFactory(factory.Factory):
                 unsubscribe_back_off=unsubscribe_back_off,
                 score_params=score_params,
                 max_idontwant_messages=max_idontwant_messages,
+                max_pending_messages_per_peer=max_pending_messages_per_peer,
+                pending_messages_ttl=pending_messages_ttl,
             )
 
         async with cls._create_batch_with_router(

@@ -50,6 +50,19 @@ The registry tracks performance metrics including:
 
 These metrics can be accessed via the ``get_stats()`` method and reset using ``reset_stats()``.
 
+Security
+~~~~~~~~
+
+Inbound QUIC connections must present a TLS certificate containing the libp2p
+extension so the remote peer identity can be established. Connections that complete
+the QUIC/TLS handshake without a peer certificate, or whose identity cannot be
+verified, are rejected before the application callback is invoked. The listener
+``connections_rejected`` statistic is incremented when such connections are closed.
+
+Production QUIC listeners should always use the transport's default security
+manager; disabling ``_security_manager`` skips libp2p identity verification even
+when a TLS certificate is present.
+
 Submodules
 ----------
 

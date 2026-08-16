@@ -2,7 +2,12 @@
 QUIC Transport exceptions
 """
 
+import logging
 from typing import Any, Literal
+
+import trio
+
+logger = logging.getLogger(__name__)
 
 
 class QUICError(Exception):
@@ -351,29 +356,58 @@ class QUICErrorContext:
     def __enter__(self) -> "QUICErrorContext":
         return self
 
-    # TODO: Fix types for exc_type
     def __exit__(
         self,
-        exc_type: type[BaseException] | None | None,
+        exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: Any,
     ) -> Literal[False]:
-        if exc_type is None:
+        if exc_type is None or exc_val is None:
             return False
 
-        if exc_val is None:
-            return False
+        # Import aioquic exception classes for isinstance() checks
+        # instead of fragile string matching on type names.
+        try:
+            from aioquic.quic.connection import (
+                QuicConnectionError,
+                StreamFinishedError,
+            )
+        except ImportError:
+            QuicConnectionError = None  # type: ignore[assignment,misc]
+            StreamFinishedError = None  # type: ignore[assignment,misc]
 
-        # Map common aioquic exceptions to our exceptions
-        if "ConnectionClosed" in str(exc_type):
+        # Map aioquic exceptions to our typed exception hierarchy,
+        # extracting structured attributes where available.
+        if QuicConnectionError is not None and isinstance(exc_val, QuicConnectionError):
+            error_code = getattr(exc_val, "error_code", None)
             raise QUICConnectionClosedError(
-                f"Connection closed during {self.operation}: {exc_val}"
+                f"Connection closed during {self.operation}: {exc_val}",
+                error_code=error_code,
             ) from exc_val
-        elif "StreamReset" in str(exc_type):
-            raise QUICStreamResetError(
-                f"Stream reset during {self.operation}: {exc_val}"
+        elif StreamFinishedError is not None and isinstance(
+            exc_val, StreamFinishedError
+        ):
+            raise QUICStreamClosedError(
+                f"Stream finished during {self.operation}: {exc_val}"
             ) from exc_val
-        elif "timeout" in str(exc_val).lower():
+        elif isinstance(exc_val, AssertionError):
+            # aioquic uses assert for "cannot call write() after FIN"
+            # and "cannot call write() after reset()".
+            msg = str(exc_val)
+            if "after FIN" in msg or "after reset" in msg:
+                raise QUICStreamClosedError(
+                    f"Stream already closed during {self.operation}: {exc_val}"
+                ) from exc_val
+            return False
+        elif isinstance(exc_val, ValueError):
+            # aioquic raises ValueError for unknown / invalid streams.
+            msg = str(exc_val)
+            if "peer-initiated" in msg or "unidirectional stream" in msg:
+                raise QUICStreamError(
+                    f"Invalid stream during {self.operation}: {exc_val}"
+                ) from exc_val
+            return False
+        elif isinstance(exc_val, (TimeoutError, trio.TooSlowError)):
             if "stream" in self.component.lower():
                 raise QUICStreamTimeoutError(
                     f"Timeout during {self.operation}: {exc_val}"
@@ -382,10 +416,6 @@ class QUICErrorContext:
                 raise QUICConnectionTimeoutError(
                     f"Timeout during {self.operation}: {exc_val}"
                 ) from exc_val
-        elif "flow control" in str(exc_val).lower():
-            raise QUICStreamBackpressureError(
-                f"Flow control error during {self.operation}: {exc_val}"
-            ) from exc_val
 
         # Let other exceptions propagate
         return False

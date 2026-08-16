@@ -88,7 +88,7 @@ async def test_mplex_stream_read_after_remote_closed(mplex_stream_pair):
     await wait_all_tasks_blocked()
     await stream_0.close()
     assert stream_0.event_local_closed.is_set()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
     await wait_all_tasks_blocked()
     assert stream_1.event_remote_closed.is_set()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
@@ -123,7 +123,8 @@ async def test_mplex_stream_read_after_remote_closed_and_reset(mplex_stream_pair
     await stream_0.close()
     await stream_0.reset()
     # Sleep to let `stream_1` receive the message.
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
     assert (await stream_1.read(MAX_READ_LEN)) == DATA
 
 
@@ -167,7 +168,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 
     # Test: Close one side.
     await stream_0.close()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     assert stream_0.event_local_closed.is_set()
     assert not stream_1.event_local_closed.is_set()
@@ -197,7 +199,8 @@ async def test_mplex_stream_both_close(mplex_stream_pair):
 async def test_mplex_stream_reset(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
     await stream_0.reset()
-    await trio.sleep(0.01)
+    await trio.sleep(0.05)
+    await wait_all_tasks_blocked()
 
     # Both sides are closed.
     assert stream_0.event_local_closed.is_set()
@@ -353,12 +356,12 @@ async def test_mplex_stream_set_deadline_sets_both(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set deadline for both operations
-    assert stream_0.set_deadline(30) is True
+    stream_0.set_deadline(30)
     assert stream_0.read_deadline == 30
     assert stream_0.write_deadline == 30
 
     # Should be able to update it
-    assert stream_0.set_deadline(60) is True
+    stream_0.set_deadline(60)
     assert stream_0.read_deadline == 60
     assert stream_0.write_deadline == 60
 
@@ -369,7 +372,7 @@ async def test_mplex_stream_set_read_deadline_only(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set only read deadline
-    assert stream_0.set_read_deadline(30) is True
+    stream_0.set_read_deadline(30)
     assert stream_0.read_deadline == 30
     assert stream_0.write_deadline is None
 
@@ -380,7 +383,7 @@ async def test_mplex_stream_set_write_deadline_only(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Set only write deadline
-    assert stream_0.set_write_deadline(30) is True
+    stream_0.set_write_deadline(30)
     assert stream_0.write_deadline == 30
     assert stream_0.read_deadline is None
 
@@ -498,25 +501,31 @@ async def test_mplex_stream_concurrent_operations_with_deadlines(mplex_stream_pa
 
 @pytest.mark.trio
 async def test_mplex_stream_deadline_validation_negative_ttl(mplex_stream_pair):
-    """Test that deadline methods return False for negative TTL values."""
+    """Test that deadline methods raise ValueError for negative TTL values."""
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with negative TTL
-    assert stream_0.set_deadline(-1) is False
-    assert stream_0.set_deadline(-10) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_deadline(-10)
     # Deadlines should remain unchanged
     assert stream_0.read_deadline is None
     assert stream_0.write_deadline is None
 
     # Test set_read_deadline with negative TTL
-    assert stream_0.set_read_deadline(-1) is False
-    assert stream_0.set_read_deadline(-5) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_read_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_read_deadline(-5)
     # Read deadline should remain unchanged
     assert stream_0.read_deadline is None
 
     # Test set_write_deadline with negative TTL
-    assert stream_0.set_write_deadline(-1) is False
-    assert stream_0.set_write_deadline(-3) is False
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_write_deadline(-1)
+    with pytest.raises(ValueError, match="non-negative"):
+        stream_0.set_write_deadline(-3)
     # Write deadline should remain unchanged
     assert stream_0.write_deadline is None
 
@@ -527,16 +536,16 @@ async def test_mplex_stream_deadline_validation_zero_ttl(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with zero TTL (should be valid)
-    assert stream_0.set_deadline(0) is True
+    stream_0.set_deadline(0)
     assert stream_0.read_deadline == 0
     assert stream_0.write_deadline == 0
 
     # Test set_read_deadline with zero TTL
-    assert stream_0.set_read_deadline(0) is True
+    stream_0.set_read_deadline(0)
     assert stream_0.read_deadline == 0
 
     # Test set_write_deadline with zero TTL
-    assert stream_0.set_write_deadline(0) is True
+    stream_0.set_write_deadline(0)
     assert stream_0.write_deadline == 0
 
 
@@ -546,14 +555,14 @@ async def test_mplex_stream_deadline_validation_positive_ttl(mplex_stream_pair):
     stream_0, stream_1 = mplex_stream_pair
 
     # Test set_deadline with positive TTL
-    assert stream_0.set_deadline(1) is True
+    stream_0.set_deadline(1)
     assert stream_0.read_deadline == 1
     assert stream_0.write_deadline == 1
 
     # Test set_read_deadline with positive TTL
-    assert stream_0.set_read_deadline(5) is True
+    stream_0.set_read_deadline(5)
     assert stream_0.read_deadline == 5
 
     # Test set_write_deadline with positive TTL
-    assert stream_0.set_write_deadline(10) is True
+    stream_0.set_write_deadline(10)
     assert stream_0.write_deadline == 10

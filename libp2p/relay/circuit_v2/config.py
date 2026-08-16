@@ -106,6 +106,7 @@ class RelayConfig:
     min_relays: int = DEFAULT_MIN_RELAYS
     max_relays: int = DEFAULT_MAX_RELAYS
     discovery_interval: int = DEFAULT_DISCOVERY_INTERVAL
+    dht_discovery_enabled: bool = False
 
     # Connection configuration
     reservation_ttl: int = DEFAULT_RESERVATION_TTL
@@ -134,7 +135,7 @@ class RelayConfig:
 
     @property
     def enable_dht_discovery(self) -> bool:  # pragma: no cover - helper
-        return False
+        return self.dht_discovery_enabled
 
     def __post_init__(self) -> None:
         """Initialize default values."""

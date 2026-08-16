@@ -517,7 +517,8 @@ class TestMeshMaintenance:
         # Check that a peer was pruned (the exact peer depends on scoring)
         assert len(to_prune) == 1
 
-    def test_peer_replacement_consideration(self):
+    @pytest.mark.trio
+    async def test_peer_replacement_consideration(self):
         """Test consideration of peer replacement in mesh."""
         gossipsub = GossipSub(
             protocols=[PROTOCOL_ID_V20],
@@ -552,8 +553,15 @@ class TestMeshMaintenance:
         gossipsub.supports_scoring = Mock(return_value=True)
         gossipsub._check_back_off = Mock(return_value=False)
 
+        # Mock async methods so replacement can complete
+        async def noop(*args, **kwargs):
+            pass
+
+        gossipsub.emit_prune = Mock(return_value=noop())
+        gossipsub.emit_graft = Mock(return_value=noop())
+
         # Should consider replacement (logged but not actually performed in test)
-        gossipsub._consider_peer_replacement(topic)
+        await gossipsub._consider_peer_replacement(topic)
 
         # Verify scoring was called for mesh peers
         assert score_mock.called

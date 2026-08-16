@@ -15,7 +15,7 @@ import logging
 import pytest
 from trio_websocket import CloseReason, ConnectionClosed
 
-from libp2p.io.exceptions import IOException
+from libp2p.io.exceptions import ConnectionClosedError, IOException
 from libp2p.io.utils import read_exactly
 from libp2p.transport.websocket.connection import P2PWebSocketConnection
 
@@ -90,15 +90,14 @@ async def test_websocket_read_during_active_yamux_stream():
     # Try to read more - connection should close
     # read() should raise IOException immediately (not return b"")
     # This is the key fix: immediate detection instead of retrying 100 times
-    with pytest.raises(IOException) as exc_info:
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await read_exactly(ws_conn, 2)
 
-    # Verify error message is meaningful and includes WebSocket close details
-    error_msg = str(exc_info.value)
-    assert "websocket" in error_msg.lower() or "connection closed" in error_msg.lower()
-    assert "peer" in error_msg.lower() or "closed" in error_msg.lower()
-    # Should include close code and reason
-    assert "1000" in error_msg or "code" in error_msg.lower()
+    # Verify structured attributes instead of fragile string matching
+    exc = exc_info.value
+    assert isinstance(exc, ConnectionClosedError)
+    assert exc.close_code == 1000
+    assert exc.transport == "websocket"
 
 
 @pytest.mark.trio
@@ -122,12 +121,12 @@ async def test_websocket_message_boundary_handling():
     header = await read_exactly(ws_conn, 12)
     assert len(header) == 12
 
-    # Next read should detect connection closure with clear error
-    with pytest.raises(IOException) as exc_info:
+    # Next read should detect connection closure with typed exception
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await read_exactly(ws_conn, 2)
 
-    error_msg = str(exc_info.value)
-    assert "WebSocket" in error_msg or "connection" in error_msg.lower()
+    exc = exc_info.value
+    assert exc.transport == "websocket"
 
 
 @pytest.mark.trio
@@ -140,16 +139,13 @@ async def test_websocket_yamux_incomplete_read_error_message():
 
     ws_conn = P2PWebSocketConnection(mock_ws)
 
-    # Attempt to read should raise IOException (not return b"")
-    with pytest.raises(IOException) as exc_info:
+    # Attempt to read should raise ConnectionClosedError (not return b"")
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await read_exactly(ws_conn, 12)
 
-    error_msg = str(exc_info.value)
-    # Verify error message includes useful context
-    assert any(
-        keyword in error_msg.lower()
-        for keyword in ["websocket", "connection", "closed", "peer"]
-    )
+    exc = exc_info.value
+    assert exc.transport == "websocket"
+    assert exc.close_code is not None
 
 
 @pytest.mark.trio
@@ -165,14 +161,14 @@ async def test_websocket_connection_close_detection():
 
     ws_conn = P2PWebSocketConnection(mock_ws)
 
-    # Should raise IOException immediately, not return b""
-    with pytest.raises(IOException) as exc_info:
+    # Should raise ConnectionClosedError immediately, not return b""
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await ws_conn.read(1)
 
-    error_msg = str(exc_info.value)
-    assert "WebSocket" in error_msg
-    assert "connection closed" in error_msg.lower()
-    assert "1000" in error_msg or "code" in error_msg.lower()
+    exc = exc_info.value
+    assert isinstance(exc, ConnectionClosedError)
+    assert exc.close_code == 1000
+    assert exc.transport == "websocket"
 
 
 @pytest.mark.trio
@@ -187,13 +183,14 @@ async def test_websocket_close_code_and_reason():
 
     ws_conn = P2PWebSocketConnection(mock_ws)
 
-    with pytest.raises(IOException) as exc_info:
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await ws_conn.read(1)
 
-    error_msg = str(exc_info.value)
-    # Verify close code and reason are in error message
-    assert "1001" in error_msg or "code" in error_msg.lower()
-    assert "Going away" in error_msg or "reason" in error_msg.lower()
+    exc = exc_info.value
+    # Verify close code and reason via structured attributes
+    assert exc.close_code == 1001
+    assert exc.close_reason == "Going away"
+    assert exc.transport == "websocket"
 
 
 @pytest.mark.trio
@@ -205,12 +202,12 @@ async def test_websocket_read_none_on_close():
 
     ws_conn = P2PWebSocketConnection(mock_ws)
 
-    # read(n=None) should also raise IOException, not return b""
-    with pytest.raises(IOException) as exc_info:
+    # read(n=None) should also raise ConnectionClosedError, not return b""
+    with pytest.raises(ConnectionClosedError) as exc_info:
         await ws_conn.read(None)
 
-    error_msg = str(exc_info.value)
-    assert "WebSocket" in error_msg or "connection closed" in error_msg.lower()
+    exc = exc_info.value
+    assert exc.transport == "websocket"
 
 
 @pytest.mark.trio

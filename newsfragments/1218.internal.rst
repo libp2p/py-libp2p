@@ -1,0 +1,1 @@
+Replaced fragile string matching on exception messages with typed exception subclasses across QUIC, TLS, WebSocket, Circuit Relay, and Bootstrap modules, and updated tests to assert on structured exception attributes.

@@ -1,0 +1,1 @@
+Deduplicated repeated `requests` and `types-requests` entries in project dependencies to keep dependency metadata consistent and reduce false duplicate signals in observability reports.

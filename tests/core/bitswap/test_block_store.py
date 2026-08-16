@@ -3,7 +3,7 @@
 import pytest
 
 from libp2p.bitswap.block_store import MemoryBlockStore
-from libp2p.bitswap.cid import compute_cid_v1
+from libp2p.bitswap.cid import cid_to_text, compute_cid_v1, parse_cid
 
 
 class TestMemoryBlockStore:
@@ -144,3 +144,23 @@ class TestMemoryBlockStore:
         # Verify count
         all_cids = store.get_all_cids()
         assert len(all_cids) == len(blocks)
+
+    @pytest.mark.trio
+    async def test_normalizes_mixed_cid_input_types(self):
+        """Test CID normalization across bytes, text, hex text, and CID objects."""
+        store = MemoryBlockStore()
+        data = b"mixed input data"
+        cid_bytes = compute_cid_v1(data)
+        cid_text = cid_to_text(cid_bytes)
+        cid_hex = cid_bytes.hex()
+        cid_obj = parse_cid(cid_bytes)
+
+        await store.put_block(cid_text, data)
+
+        assert await store.has_block(cid_bytes) is True
+        assert await store.has_block(cid_obj) is True
+        assert await store.has_block(cid_hex) is True
+        assert await store.get_block(cid_obj) == data
+
+        await store.delete_block(cid_hex)
+        assert await store.has_block(cid_text) is False

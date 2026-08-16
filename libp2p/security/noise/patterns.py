@@ -16,7 +16,6 @@ import logging
 from cryptography.hazmat.primitives import (
     serialization,
 )
-from cryptography.hazmat.primitives.asymmetric import x25519
 from noise.backends.default.keypairs import KeyPair as NoiseKeyPair
 from noise.connection import (
     Keypair as NoiseKeypairEnum,
@@ -27,12 +26,13 @@ from libp2p.abc import (
     IRawConnection,
     ISecureConn,
 )
-from libp2p.crypto.ed25519 import (
-    Ed25519PublicKey,
-)
 from libp2p.crypto.keys import (
+    KeyType,
     PrivateKey,
     PublicKey,
+)
+from libp2p.crypto.x25519 import (
+    X25519PublicKey,
 )
 from libp2p.peer.id import (
     ID,
@@ -128,69 +128,64 @@ class BasePattern(IPattern):
     libp2p_privkey: PrivateKey
     early_data: bytes | None
 
-    def create_noise_state(self) -> NoiseState:
+    def create_noise_state(self, prologue: bytes | None = None) -> NoiseState:
         noise_state = NoiseState.from_name(self.protocol_name)
         noise_state.set_keypair_from_private_bytes(
             NoiseKeypairEnum.STATIC, self.noise_static_key.to_bytes()
         )
         if noise_state.noise_protocol is None:
             raise NoiseStateError("noise_protocol is not initialized")
+        if prologue is not None:
+            noise_state.noise_protocol.prologue = prologue
         return noise_state
+
+    def _validate_noise_static_key(self) -> X25519PublicKey:
+        """
+        Validate and return the X25519 public key from noise_static_key.
+
+        Raises:
+            NoiseStateError: If noise_static_key is not X25519 type
+
+        """
+        if self.noise_static_key.get_type() != KeyType.X25519:
+            raise NoiseStateError(
+                "noise_static_key must be X25519 for Noise DH; "
+                f"got {self.noise_static_key.get_type()}"
+            )
+        pubkey = self.noise_static_key.get_public_key()
+        assert isinstance(pubkey, X25519PublicKey), "Expected X25519PublicKey"
+        return pubkey
 
     def make_handshake_payload(
         self, extensions: NoiseExtensions | None = None
     ) -> NoiseHandshakePayload:
         # Sign the X25519 public key (not the Ed25519 public key)
         # The Noise protocol uses X25519 keys for the DH exchange
-        priv_bytes = self.noise_static_key.to_bytes()
-        x25519_key = x25519.X25519PrivateKey.from_private_bytes(priv_bytes)
-        x25519_pub_bytes = x25519_key.public_key().public_bytes(
-            serialization.Encoding.Raw,
-            serialization.PublicFormat.Raw,
-        )
-        noise_static_pubkey = Ed25519PublicKey.from_bytes(x25519_pub_bytes)
+        noise_static_pubkey = self._validate_noise_static_key()
+        noise_static_pubkey_hex = noise_static_pubkey.to_bytes().hex()
         logger.debug(
-            f"make_handshake_payload: derived X25519 pubkey: {x25519_pub_bytes.hex()}"
+            f"make_handshake_payload: X25519 pubkey: {noise_static_pubkey_hex}"
         )
         signature = make_handshake_payload_sig(self.libp2p_privkey, noise_static_pubkey)
 
-        # Handle early data through extensions (prioritize extensions early data)
-        if extensions is not None:
-            # Extensions provided - use extensions early data if available
-            if extensions.early_data is not None:
-                # Extensions have early data - use it
-                return NoiseHandshakePayload(
-                    self.libp2p_privkey.get_public_key(),
-                    signature,
-                    extensions=extensions,
-                )
-            elif self.early_data is not None:
-                # No extensions early data, but pattern has early data
-                # - embed in extensions
-                extensions_with_early_data = NoiseExtensions(
-                    webtransport_certhashes=extensions.webtransport_certhashes,
-                    stream_muxers=extensions.stream_muxers,
-                    early_data=self.early_data,
-                )
-                return NoiseHandshakePayload(
-                    self.libp2p_privkey.get_public_key(),
-                    signature,
-                    extensions=extensions_with_early_data,
-                )
-            else:
-                # No early data anywhere - just extensions
-                return NoiseHandshakePayload(
-                    self.libp2p_privkey.get_public_key(),
-                    signature,
-                    extensions=extensions,
-                )
-        else:
-            # No extensions, create empty payload
-            return NoiseHandshakePayload(
-                self.libp2p_privkey.get_public_key(),
-                signature,
-                extensions=None,
+        # Prefer explicit early_data and fall back to self.early_data.
+        final_extensions = extensions
+        if (
+            extensions is not None
+            and extensions.early_data is None
+            and self.early_data is not None
+        ):
+            final_extensions = NoiseExtensions(
+                webtransport_certhashes=extensions.webtransport_certhashes,
+                stream_muxers=extensions.stream_muxers,
+                early_data=self.early_data,
             )
+
+        return NoiseHandshakePayload(
+            self.libp2p_privkey.get_public_key(),
+            signature,
+            extensions=final_extensions,
+        )
 
 
 class PatternXX(BasePattern):
@@ -212,16 +207,18 @@ class PatternXX(BasePattern):
         libp2p_privkey: PrivateKey,
         noise_static_key: PrivateKey,
         early_data: bytes | None = None,
+        prologue: bytes | None = None,
     ) -> None:
         self.protocol_name = b"Noise_XX_25519_ChaChaPoly_SHA256"
         self.local_peer = local_peer
         self.libp2p_privkey = libp2p_privkey
         self.noise_static_key = noise_static_key
         self.early_data = early_data
+        self.prologue = prologue
 
     async def handshake_inbound(self, conn: IRawConnection) -> ISecureConn:
         logger.debug(f"Noise XX handshake_inbound started for peer {self.local_peer}")
-        noise_state = self.create_noise_state()
+        noise_state = self.create_noise_state(prologue=self.prologue)
         noise_state.set_as_responder()
         noise_state.start_handshake()
         if noise_state.noise_protocol is None:
@@ -285,7 +282,7 @@ class PatternXX(BasePattern):
         self, conn: IRawConnection, remote_peer: ID
     ) -> ISecureConn:
         logger.debug(f"Noise XX handshake_outbound started to peer {remote_peer}")
-        noise_state = self.create_noise_state()
+        noise_state = self.create_noise_state(prologue=self.prologue)
 
         read_writer = NoiseHandshakeReadWriter(conn, noise_state)
         noise_state.set_as_initiator()
@@ -370,10 +367,10 @@ class PatternXX(BasePattern):
 
     @staticmethod
     def _get_pubkey_from_noise_keypair(key_pair: NoiseKeyPair) -> PublicKey:
-        # Use `Ed25519PublicKey` since 25519 is used in our pattern.
+        # Use `X25519PublicKey` since X25519 is used for Noise DH.
         if key_pair.public is None:
             raise NoiseStateError("public key is not initialized")
         raw_bytes = key_pair.public.public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw
         )
-        return Ed25519PublicKey.from_bytes(raw_bytes)
+        return X25519PublicKey.from_bytes(raw_bytes)

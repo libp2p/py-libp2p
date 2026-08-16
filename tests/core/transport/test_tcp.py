@@ -39,11 +39,92 @@ async def test_tcp_listener(nursery):
         pass
 
     listener = transport.create_listener(handler)
-    assert len(listener.get_addrs()) == 0
-    await listener.listen(LISTEN_MADDR, nursery)
-    assert len(listener.get_addrs()) == 1
-    await listener.listen(LISTEN_MADDR, nursery)
+    try:
+        assert len(listener.get_addrs()) == 0
+        result = await listener.listen(LISTEN_MADDR)
+        assert result is None
+        assert len(listener.get_addrs()) == 1
+        result = await listener.listen(LISTEN_MADDR)
+        assert result is None
+        assert len(listener.get_addrs()) == 2
+    finally:
+        await listener.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_missing_port(nursery):
+    """listen() raises OpenConnectionError when TCP port is missing in multiaddr."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+    try:
+        with pytest.raises(OpenConnectionError, match="TCP port is missing"):
+            await listener.listen(Multiaddr("/ip4/127.0.0.1"))
+    finally:
+        await listener.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listener_raises_on_bind_failure(nursery):
+    """listen() raises OpenConnectionError (not a raw OSError) when port is in use."""
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+
+    # Bind to a specific port with the first listener
+    listener1 = transport.create_listener(noop_handler)
+    try:
+        await listener1.listen(Multiaddr("/ip4/127.0.0.1/tcp/0"))
+        bound_port = listener1.get_addrs()[0].value_for_protocol("tcp")
+
+        # Attempting to bind the same port a second time should raise
+        # OpenConnectionError, not a raw OSError from trio.serve_tcp.
+        listener2 = transport.create_listener(noop_handler)
+        try:
+            with pytest.raises(
+                OpenConnectionError, match="Failed to start TCP listener"
+            ):
+                await listener2.listen(Multiaddr(f"/ip4/127.0.0.1/tcp/{bound_port}"))
+        finally:
+            await listener2.close()
+    finally:
+        await listener1.close()
+
+
+@pytest.mark.trio
+async def test_tcp_listener_close_cancels_all_binds(nursery):
+    """
+    close() tears down every bind from a multi-bind listener and is idempotent.
+
+    Validates that TCPListener owns a single long-lived nursery across
+    repeated listen() calls, so close() cancels all of them — and that a
+    second close() and a post-close listen() both behave sanely.
+    """
+
+    async def noop_handler(_s):
+        pass
+
+    transport = TCP()
+    listener = transport.create_listener(noop_handler)
+
+    await listener.listen(LISTEN_MADDR)
+    await listener.listen(LISTEN_MADDR)
     assert len(listener.get_addrs()) == 2
+
+    await listener.close()
+    assert listener.get_addrs() == ()
+
+    # Second close() is a safe no-op.
+    await listener.close()
+
+    # listen() after close() is rejected rather than silently reopening.
+    with pytest.raises(OpenConnectionError, match="listener is closed"):
+        await listener.listen(LISTEN_MADDR)
 
 
 @pytest.mark.trio
@@ -64,7 +145,7 @@ async def test_tcp_dial(nursery):
         await transport.dial(Multiaddr("/ip4/127.0.0.1/tcp/1"))
 
     listener = transport.create_listener(handler)
-    await listener.listen(LISTEN_MADDR, nursery)
+    await listener.listen(LISTEN_MADDR)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
     listen_addr = addrs[0]
@@ -154,10 +235,10 @@ async def test_tcp_yamux_stress_ping():
                     if response == b"\x01" * PING_LENGTH:
                         latency_ms = int((trio.current_time() - start) * 1000)
                         latencies.append(latency_ms)
-                        print(f"[TCP Ping #{i}] Latency: {latency_ms} ms")
+                        logger.debug("[TCP Ping #%d] Latency: %d ms", i, latency_ms)
                     await stream.close()
                 except Exception as e:
-                    print(f"[TCP Ping #{i}] Failed: {e}")
+                    logger.warning("[TCP Ping #%d] Failed: %s", i, e)
                     failures.append(i)
                     if stream:
                         try:
@@ -218,18 +299,11 @@ async def test_ipv6_tcp_dial_fails_on_nonexistent_server():
     """
     transport = TCP()
 
-    try:
+    with pytest.raises(OpenConnectionError):
         await transport.dial(Multiaddr("/ip6/::1/tcp/1"))
-        assert False, "Should have raised OpenConnectionError"
-    except Exception as e:
-        assert "Failed to open TCP stream" in str(e) or "Failed to dial" in str(e)
 
 
 @pytest.mark.trio
-@pytest.mark.skip(
-    reason="IPv6 listener hangs - trio.serve_tcp may need IPv6-specific configuration"
-)
-# TODO: Open follow-up issue to re-enable when IPv6 listen/dial is stable
 async def test_ipv6_tcp_listen_and_dial(nursery):
     """Test that TCP transport can listen and dial using IPv6 addresses."""
     transport = TCP()
@@ -245,7 +319,7 @@ async def test_ipv6_tcp_listen_and_dial(nursery):
     # Listen on IPv6 loopback
     listen_addr = Multiaddr("/ip6/::1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
+    await listener.listen(listen_addr)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
 
@@ -281,7 +355,7 @@ async def test_ipv6_tcp_dial_with_ipv4_fallback(nursery):
     # Listen on IPv4 loopback
     listen_addr = Multiaddr("/ip4/127.0.0.1/tcp/0")
     listener = transport.create_listener(handler)
-    await listener.listen(listen_addr, nursery)
+    await listener.listen(listen_addr)
     addrs = listener.get_addrs()
     assert len(addrs) == 1
 

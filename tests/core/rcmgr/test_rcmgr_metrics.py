@@ -306,9 +306,10 @@ class TestMetrics:
 
     def test_string_conversion(self):
         """Test string conversion of enums."""
-        # Test direction string conversion (IntEnum uses numeric values)
-        assert str(Direction.INBOUND) == "0"
-        assert str(Direction.OUTBOUND) == "1"
+        # Test direction string conversion (now human-readable)
+        assert str(Direction.UNKNOWN) == "unknown"
+        assert str(Direction.INBOUND) == "inbound"
+        assert str(Direction.OUTBOUND) == "outbound"
 
         # Test metric type string conversion (IntEnum uses numeric values)
         assert str(MetricType.CONNECTIONS_INBOUND) == "0"

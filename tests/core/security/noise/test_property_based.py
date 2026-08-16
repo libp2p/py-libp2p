@@ -8,7 +8,8 @@ cryptographic properties and invariants are maintained.
 import random
 import string
 
-from libp2p.crypto.ed25519 import create_new_key_pair
+from libp2p.crypto.ed25519 import create_new_key_pair as create_new_ed25519_key_pair
+from libp2p.crypto.x25519 import create_new_key_pair as create_new_x25519_key_pair
 from libp2p.security.noise.messages import (
     NoiseExtensions,
     NoiseHandshakePayload,
@@ -37,7 +38,7 @@ class TestNoisePropertyBased:
         """Test Ed25519 cryptographic properties with random data."""
         # Test multiple random key pairs
         for _ in range(10):
-            key_pair = create_new_key_pair()
+            key_pair = create_new_ed25519_key_pair()
             private_key = key_pair.private_key
             public_key = key_pair.public_key
 
@@ -68,7 +69,7 @@ class TestNoisePropertyBased:
         """Test Ed25519 key derivation properties."""
         # Test multiple random key pairs
         for _ in range(10):
-            key_pair = create_new_key_pair()
+            key_pair = create_new_ed25519_key_pair()
             private_key = key_pair.private_key
             public_key = key_pair.public_key
 
@@ -90,7 +91,7 @@ class TestNoisePropertyBased:
         """Test Ed25519 serialization properties."""
         # Test multiple random key pairs
         for _ in range(10):
-            key_pair = create_new_key_pair()
+            key_pair = create_new_ed25519_key_pair()
             private_key = key_pair.private_key
             public_key = key_pair.public_key
 
@@ -122,8 +123,8 @@ class TestNoisePropertyBased:
         """Test handshake payload properties with random data."""
         # Test multiple random key pairs
         for _ in range(10):
-            libp2p_keypair = create_new_key_pair()
-            noise_keypair = create_new_key_pair()
+            libp2p_keypair = create_new_ed25519_key_pair()
+            noise_keypair = create_new_x25519_key_pair()
 
             libp2p_privkey = libp2p_keypair.private_key
             libp2p_pubkey = libp2p_keypair.public_key
@@ -155,7 +156,7 @@ class TestNoisePropertyBased:
             assert verification_result is True
 
             # Property: Signature verification should fail for wrong noise key
-            wrong_noise_keypair = create_new_key_pair()
+            wrong_noise_keypair = create_new_x25519_key_pair()
             verification_result = verify_handshake_payload_sig(
                 payload, wrong_noise_keypair.public_key
             )
@@ -220,8 +221,8 @@ class TestNoisePropertyBased:
         """Test handshake payload serialization properties."""
         # Test multiple random payloads
         for _ in range(10):
-            libp2p_keypair = create_new_key_pair()
-            noise_keypair = create_new_key_pair()
+            libp2p_keypair = create_new_ed25519_key_pair()
+            noise_keypair = create_new_x25519_key_pair()
 
             libp2p_privkey = libp2p_keypair.private_key
             libp2p_pubkey = libp2p_keypair.public_key
@@ -282,8 +283,8 @@ class TestNoisePropertyBased:
         # Test multiple random scenarios
         for _ in range(20):
             # Generate random key pairs
-            libp2p_keypair = create_new_key_pair()
-            noise_keypair = create_new_key_pair()
+            libp2p_keypair = create_new_ed25519_key_pair()
+            noise_keypair = create_new_x25519_key_pair()
 
             # Generate random data
             random_data = self.generate_random_bytes(0, 1000)
@@ -296,7 +297,7 @@ class TestNoisePropertyBased:
 
             # Invariant: Different private keys should produce different signatures
             # for same data
-            different_keypair = create_new_key_pair()
+            different_keypair = create_new_ed25519_key_pair()
             different_signature = different_keypair.private_key.sign(random_data)
             assert signature1 != different_signature
 
@@ -324,7 +325,7 @@ class TestNoisePropertyBased:
             assert handshake_sig1 == handshake_sig2
 
             # Invariant: Handshake signature should be different for different inputs
-            different_noise_keypair = create_new_key_pair()
+            different_noise_keypair = create_new_x25519_key_pair()
             different_handshake_sig = make_handshake_payload_sig(
                 libp2p_keypair.private_key, different_noise_keypair.public_key
             )
@@ -333,7 +334,7 @@ class TestNoisePropertyBased:
     def test_edge_cases(self):
         """Test edge cases with boundary values."""
         # Test with empty data
-        key_pair = create_new_key_pair()
+        key_pair = create_new_ed25519_key_pair()
         empty_data = b""
 
         signature = key_pair.private_key.sign(empty_data)

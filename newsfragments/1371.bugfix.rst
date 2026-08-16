@@ -1,0 +1,1 @@
+Fixed transport interop listener crashes when publishing IPv6-only multiaddrs. ``_get_ip_value`` now catches ``ProtocolLookupError`` instead of assuming ``value_for_protocol("ip4")`` returns falsy on IPv6 addresses.

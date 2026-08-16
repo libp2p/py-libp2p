@@ -4,6 +4,7 @@ import ssl
 from urllib.parse import urlparse
 
 from multiaddr import Multiaddr
+from multiaddr.resolvers import DNSResolver
 import trio
 
 from libp2p.abc import IListener, ITransport
@@ -16,6 +17,7 @@ from libp2p.transport.websocket.multiaddr_utils import (
     ParsedWebSocketMultiaddr,
     parse_websocket_multiaddr,
 )
+from libp2p.utils.dns_utils import resolve_multiaddr_with_retry
 from libp2p.utils.multiaddr_utils import (
     extract_host_from_multiaddr,
     format_host_for_url,
@@ -47,6 +49,10 @@ class WebsocketConfig:
     handshake_timeout: float = 15.0
     max_buffered_amount: int = 4 * 1024 * 1024
     max_connections: int = 1000
+
+    # DNS resolution (for dial when multiaddr has dns/dns4/dns6/dnsaddr)
+    dns_resolution_timeout: float = 5.0
+    dns_max_retries: int = 3
 
     # Proxy configuration
     proxy_url: str | None = None
@@ -484,13 +490,41 @@ class WebsocketTransport(ITransport):
         ):
             nursery.start_soon(self._initialize_autotls, self._peer_id)
 
-    async def can_dial(self, maddr: Multiaddr) -> bool:
-        """Check if we can dial the given multiaddr."""
+    def can_dial(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can dial the given multiaddr.
+
+        Checks whether the multiaddr matches the WebSocket multiaddr pattern
+        (e.g. ``/ip4/.../tcp/.../ws`` or ``/ip4/.../tcp/.../wss``).
+
+        The check is purely protocol-level (no I/O); it changed from async
+        to sync to satisfy the :class:`~libp2p.abc.ITransport` interface.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport handles the multiaddr.
+        """
         try:
             parse_websocket_multiaddr(maddr)
-            return True  # If parsing succeeds, it's a valid WebSocket multiaddr
+            return True
         except (ValueError, KeyError):
             return False
+
+    def can_listen(self, maddr: Multiaddr) -> bool:
+        """
+        Return True if this WebSocket transport can listen on the given multiaddr.
+
+        :param maddr: The multiaddress to check.
+        :return: True if this transport can listen on the multiaddr.
+        """
+        return self.can_dial(maddr)
+
+    def protocols(self) -> list[str]:
+        """
+        Return the list of multiaddr protocol names handled by WebSocket transport.
+
+        :return: ["ws", "wss"]
+        """
+        return ["ws", "wss"]
 
     async def _initialize_autotls(self, peer_id: ID | None = None) -> None:
         """Initialize AutoTLS if configured."""
@@ -790,6 +824,8 @@ class WebsocketTransport(ITransport):
         """
         Dial a WebSocket connection to the given multiaddr.
 
+        Resolves DNS (dns, dns4, dns6, dnsaddr) before dialing (Phase 3.1).
+
         Args:
             maddr: The multiaddr to dial (e.g., /ip4/127.0.0.1/tcp/8000/ws)
 
@@ -801,24 +837,57 @@ class WebsocketTransport(ITransport):
         :raises ValueError: If multiaddr is invalid or cannot be parsed
 
         """
-        logger.debug(f"WebsocketTransport.dial called with {maddr}")
+        logger.debug("WebsocketTransport.dial called with %s", maddr)
 
-        if not await self.can_dial(maddr):
+        protocols = list(maddr.protocols())
+        dns_protocols = {"dns", "dns4", "dns6", "dnsaddr"}
+        if protocols and protocols[0].name in dns_protocols:
+            resolved = await resolve_multiaddr_with_retry(
+                maddr,
+                resolver=DNSResolver(),
+                max_retries=self._config.dns_max_retries,
+                timeout_seconds=self._config.dns_resolution_timeout,
+            )
+            if not resolved:
+                raise OpenConnectionError(
+                    f"Failed to resolve DNS for {maddr} (retries exhausted)"
+                )
+            last_error: Exception | None = None
+            for resolved_addr in resolved:
+                try:
+                    return await self._dial_resolved(resolved_addr)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(
+                        "Dial to resolved address %s failed: %s",
+                        resolved_addr,
+                        e,
+                    )
+                    continue
+            if last_error is not None:
+                raise OpenConnectionError(
+                    f"Failed to connect to any resolved address for {maddr}"
+                ) from last_error
+            raise OpenConnectionError(
+                f"Failed to connect to any resolved address for {maddr}"
+            )
+        return await self._dial_resolved(maddr)
+
+    async def _dial_resolved(self, maddr: Multiaddr) -> RawConnection:
+        """Dial using a multiaddr that has an IP (no DNS)."""
+        if not self.can_dial(maddr):
             raise OpenConnectionError(f"Cannot dial {maddr}")
 
         try:
-            # Parse multiaddr and create connection
             proto_info = parse_websocket_multiaddr(maddr)
             conn = await self._create_connection(proto_info)
-
-            # Return RawConnection - connection upgrading (security + muxing)
-            # is handled by the Swarm layer via TransportUpgrader
             try:
-                return RawConnection(conn, True)  # True for initiator
+                return RawConnection(conn, True)
             except Exception as e:
                 await conn.close()
-                raise OpenConnectionError(f"Failed to upgrade connection: {str(e)}")
-
+                raise OpenConnectionError(
+                    f"Failed to upgrade connection: {str(e)}"
+                ) from e
         except Exception as e:
             if isinstance(e, OpenConnectionError):
                 raise

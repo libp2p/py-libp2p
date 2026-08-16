@@ -279,19 +279,18 @@ class MplexStream(IMuxedStream):
         """
         return ttl >= 0
 
-    def _set_deadline_with_validation(self, ttl: int, deadline_attr: str) -> bool:
+    def _set_deadline_with_validation(self, ttl: int, deadline_attr: str) -> None:
         """
         Set deadline with validation for a specific deadline attribute.
 
         :param ttl: timeout value
         :param deadline_attr: attribute name to set ('read_deadline' or
             'write_deadline')
-        :return: True if successful, False if ttl is invalid
+        :raises ValueError: if ttl is negative
         """
         if not self._validate_ttl(ttl):
-            return False
+            raise ValueError(f"Deadline TTL must be non-negative, got {ttl}")
         setattr(self, deadline_attr, ttl)
-        return True
 
     async def _with_timeout(
         self,
@@ -334,7 +333,7 @@ class MplexStream(IMuxedStream):
         initiator_flag, receiver_flag = flag_map[operation_type]
         return initiator_flag if self.is_initiator else receiver_flag
 
-    def set_deadline(self, ttl: int) -> bool:
+    def set_deadline(self, ttl: int) -> None:
         """
         Set deadline for both read and write operations on the muxed stream.
 
@@ -343,15 +342,14 @@ class MplexStream(IMuxedStream):
         is raised.
 
         :param ttl: timeout in seconds for read and write operations
-        :return: True if successful, False if ttl is invalid (negative)
+        :raises ValueError: if ttl is negative
         """
         if not self._validate_ttl(ttl):
-            return False
+            raise ValueError(f"Deadline TTL must be non-negative, got {ttl}")
         self.read_deadline = ttl
         self.write_deadline = ttl
-        return True
 
-    def set_read_deadline(self, ttl: int) -> bool:
+    def set_read_deadline(self, ttl: int) -> None:
         """
         Set read deadline for muxed stream.
 
@@ -360,11 +358,11 @@ class MplexStream(IMuxedStream):
         a TimeoutError is raised.
 
         :param ttl: timeout in seconds for read operations
-        :return: True if successful, False if ttl is invalid (negative)
+        :raises ValueError: if ttl is negative
         """
-        return self._set_deadline_with_validation(ttl, "read_deadline")
+        self._set_deadline_with_validation(ttl, "read_deadline")
 
-    def set_write_deadline(self, ttl: int) -> bool:
+    def set_write_deadline(self, ttl: int) -> None:
         """
         Set write deadline for muxed stream.
 
@@ -373,9 +371,9 @@ class MplexStream(IMuxedStream):
         a TimeoutError is raised.
 
         :param ttl: timeout in seconds for write operations
-        :return: True if successful, False if ttl is invalid (negative)
+        :raises ValueError: if ttl is negative
         """
-        return self._set_deadline_with_validation(ttl, "write_deadline")
+        self._set_deadline_with_validation(ttl, "write_deadline")
 
     def get_remote_address(self) -> tuple[str, int] | None:
         """Delegate to the parent Mplex connection."""

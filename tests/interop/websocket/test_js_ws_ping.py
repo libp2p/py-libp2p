@@ -1,4 +1,4 @@
-import os
+import logging
 import shutil
 import subprocess
 
@@ -19,6 +19,9 @@ from libp2p.security.noise.transport import (
     Transport as NoiseTransport,
 )
 from libp2p.stream_muxer.yamux.yamux import Yamux
+from libp2p.utils.paths import get_script_dir, join_paths
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_NODE_MAJOR = (
     22  # Required for Promise.withResolvers in @chainsafe/libp2p-noise v17+
@@ -41,10 +44,11 @@ async def test_ping_with_js_node():
             pytest.skip(f"Node.js >= {REQUIRED_NODE_MAJOR} required, found {out}")
     except Exception:
         pytest.skip("Unable to determine Node.js version")
-    js_node_dir = os.path.join(os.path.dirname(__file__), "js_libp2p", "js_node", "src")
+
+    js_node_dir = join_paths(get_script_dir(__file__), "js_libp2p", "js_node", "src")
     script_name = "./ws_ping_node.mjs"
 
-    if not os.path.isdir(js_node_dir):
+    if not js_node_dir.is_dir():
         pytest.skip(f"JS interop directory not found: {js_node_dir}")
     try:
         subprocess.run(
@@ -125,11 +129,11 @@ async def test_ping_with_js_node():
     maddr = Multiaddr(addr_line)
 
     # Debug: Print what we're trying to connect to
-    print(f"JS Node Peer ID: {peer_id_line}")
-    print(f"JS Node Address: {addr_line}")
+    logger.debug("JS Node Peer ID: %s", peer_id_line)
+    logger.debug("JS Node Address: %s", addr_line)
     # Optional: print captured logs for debugging
-    print("--- JS stdout (partial) ---\n" + "".join(captured_out)[-2000:])
-    print("--- JS stderr (partial) ---\n" + "".join(captured_err)[-2000:])
+    logger.debug("JS stdout (partial):\n%s", "".join(captured_out)[-2000:])
+    logger.debug("JS stderr (partial):\n%s", "".join(captured_err)[-2000:])
 
     # Set up Python host using new_host() factory - same approach as test-plans
     # This properly handles WebSocket transport for dialing
@@ -164,7 +168,7 @@ async def test_ping_with_js_node():
     # Add peer info to peerstore before connecting
     host.get_peerstore().add_addrs(peer_id, [maddr], 60)  # 60 second TTL
 
-    print(f"Python trying to connect to: {peer_info}")
+    logger.debug("Python trying to connect to: %s", peer_info)
 
     # Use the host as a context manager
     async with host.run(listen_addrs=[ws_listen_addr]):

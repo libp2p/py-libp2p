@@ -1,0 +1,1 @@
+Fixed message ID (mid) handling in pubsub/mcache to use ``bytes`` (``from_id + seqno``) instead of ``tuple[bytes, bytes]``, consistent with go-libp2p's ``DefaultMsgIdFn``.

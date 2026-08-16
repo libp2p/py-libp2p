@@ -131,8 +131,6 @@ If you want to customize limits, construct and pass your own manager:
 Custom Setup
 ~~~~~~~~~~~~
 
-**NOTE: The current implementation of py-libp2p doesn't yet support dnsaddr multiaddresses. When connecting to bootstrap peers, use direct IP addresses instead.**
-
 Once your libp2p node is running, it is time to get it connected to the public network. We can do this via peer discovery.
 
 Peer Discovery
@@ -144,6 +142,19 @@ For Python, you can use the bootstrap list to connect to known peers:
 
 .. literalinclude:: ../examples/doc-examples/example_peer_discovery.py
    :language: python
+
+Bootstrap address formats
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Bootstrap discovery supports both IP and DNS multiaddrs. You can use:
+
+- **IP addresses:** ``/ip4/127.0.0.1/tcp/4001/p2p/PEER_ID`` or ``/ip6/::1/tcp/4001/p2p/PEER_ID``
+- **DNS (any):** ``/dns/bootstrap.example.com/tcp/4001/p2p/PEER_ID``
+- **DNS IPv4-only:** ``/dns4/bootstrap.example.com/tcp/4001/p2p/PEER_ID``
+- **DNS IPv6-only:** ``/dns6/bootstrap.example.com/tcp/4001/p2p/PEER_ID``
+- **DNS multiaddr resolution (dnsaddr):** ``/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN``
+
+If a DNS bootstrap address fails to resolve or returns no results, the bootstrap module logs a warning and continues with the next address. See :doc:`libp2p.discovery.bootstrap` for API details.
 
 Debugging
 ---------

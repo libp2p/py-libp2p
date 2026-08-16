@@ -1,0 +1,2 @@
+Implemented advanced connection management features including priority-based dial queues, automatic reconnection, connection limits and pruning, rate limiting, IP allow/deny lists, DNS resolution, and comprehensive connection metrics.
+These features bring py-libp2p's connection management capabilities in line with JavaScript libp2p.

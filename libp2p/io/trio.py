@@ -5,6 +5,9 @@ import trio
 from libp2p.io.abc import (
     ReadWriteCloser,
 )
+from libp2p.io.exceptions import (
+    ConnectionClosedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +32,18 @@ class TrioTCPStream(ReadWriteCloser):
         async with self.write_lock:
             try:
                 await self.stream.send_all(data)
-            except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
-                # Underlying socket is closed or broken — treat as normal closure
-                # during peer disconnection scenarios rather than raising an error
-                logger.debug("Write attempted on closed/broken resource: %s", error)
-                # Don't raise IOException - treat as successful write to closed stream
+            except trio.BrokenResourceError as error:
+                # Remote peer broke/reset the connection — surface this so
+                # higher layers (RawConnection, yamux, mplex) can react.
+                logger.debug("Write to broken resource (remote reset): %s", error)
+                raise ConnectionClosedError(
+                    f"TCP connection reset by remote peer: {error}",
+                    transport="tcp",
+                ) from error
+            except trio.ClosedResourceError as error:
+                # Local code closed the resource — expected during normal
+                # cleanup/teardown. Silently return for backward compat.
+                logger.debug("Write attempted on locally closed resource: %s", error)
                 return
 
     async def read(self, n: int | None = None) -> bytes:
@@ -42,11 +52,18 @@ class TrioTCPStream(ReadWriteCloser):
                 return b""
             try:
                 return await self.stream.receive_some(n)
-            except (trio.ClosedResourceError, trio.BrokenResourceError) as error:
-                # Underlying socket is closed/broken. Return empty bytes to
-                # indicate EOF/closure and allow higher layers to handle removal
-                # without raising additional exceptions during their cleanup.
-                logger.debug("Read attempted on closed/broken resource: %s", error)
+            except trio.BrokenResourceError as error:
+                # Remote peer broke/reset the connection — surface this so
+                # higher layers (RawConnection, yamux, mplex) can react.
+                logger.debug("Read from broken resource (remote reset): %s", error)
+                raise ConnectionClosedError(
+                    f"TCP connection reset by remote peer: {error}",
+                    transport="tcp",
+                ) from error
+            except trio.ClosedResourceError as error:
+                # Local code closed the resource — return empty bytes to
+                # indicate EOF and allow higher layers to clean up gracefully.
+                logger.debug("Read attempted on locally closed resource: %s", error)
                 return b""
 
     async def close(self) -> None:

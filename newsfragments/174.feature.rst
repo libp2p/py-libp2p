@@ -1,0 +1,1 @@
+py-libp2p now uses trio exclusively for async operations, removing remaining asyncio usage.

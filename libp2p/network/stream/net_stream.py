@@ -5,6 +5,7 @@ from enum import (
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
 )
 
 import trio
@@ -16,6 +17,7 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
+from libp2p.rcmgr.metrics import Direction
 from libp2p.stream_muxer.exceptions import (
     MuxedStreamClosed,
     MuxedStreamEOF,
@@ -121,9 +123,13 @@ class NetStream(INetStream):
 
     muxed_stream: IMuxedStream
     protocol_id: TProtocol | None
+    metric_send_channel: trio.MemorySendChannel[Any] | None = None
 
     def __init__(
-        self, muxed_stream: IMuxedStream, swarm_conn: "SwarmConn | None"
+        self,
+        muxed_stream: IMuxedStream,
+        swarm_conn: "SwarmConn | None",
+        metric_send_channel: trio.MemorySendChannel[Any] | None,
     ) -> None:
         self.muxed_stream = muxed_stream
         self.muxed_conn = muxed_stream.muxed_conn
@@ -132,8 +138,16 @@ class NetStream(INetStream):
         self.swarm_conn = swarm_conn
         self.logger = logging.getLogger(__name__)
 
+        # Stream direction for resource release tracking
+        self._direction: Direction = Direction.UNKNOWN
+        # Idempotency guard against double-release of RM/semaphore resources
+        self._resource_released: bool = False
+
         # Thread safety for state operations (following AkMo3's approach)
         self._state_lock = trio.Lock()
+
+        # Metrics emit endpoint
+        self.metric_send_channel = metric_send_channel
 
     def get_protocol(self) -> TProtocol | None:
         """

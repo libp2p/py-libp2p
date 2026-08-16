@@ -1,0 +1,1 @@
+Reorganized example scripts from the root examples/ directory into subdirectories (e.g. examples/websocket/, examples/tls/, examples/tcp/, examples/transport/, examples/path_handling/). Updated in-file usage and run instructions; the path-handling demo is now ``python -m examples.path_handling.path_handling_demo`` (console script unchanged).

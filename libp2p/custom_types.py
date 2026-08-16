@@ -28,6 +28,7 @@ from libp2p.pubsub.pb import (
 )
 
 TProtocol = NewType("TProtocol", str)
+MetadataValue = str | int | float | bool | None
 StreamHandlerFn = Callable[[INetStream], Awaitable[None]]
 THandler = Callable[[ReadWriteCloser], Awaitable[None]]
 TSecurityOptions = Mapping[TProtocol, ISecureTransport]

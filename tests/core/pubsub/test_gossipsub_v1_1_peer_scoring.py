@@ -794,13 +794,17 @@ class TestGossipSubScoringIntegration:
         # Get stats
         stats = scorer.get_score_stats(peer_id, topic)
 
-        # Verify all components are present
+        # Verify all components are present (including v1.4 penalty fields)
         expected_keys = {
             "time_in_mesh",
             "first_deliveries",
             "mesh_deliveries",
             "invalid_messages",
             "behavior_penalty",
+            "graft_flood_penalty",
+            "iwant_spam_penalty",
+            "ihave_spam_penalty",
+            "equivocation_penalty",
             "app_specific_score",
             "ip_colocation_penalty",
             "peer_ip",

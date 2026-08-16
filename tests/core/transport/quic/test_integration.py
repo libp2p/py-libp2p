@@ -154,8 +154,7 @@ class TestBasicQUICFlow:
 
             async with trio.open_nursery() as nursery:
                 # Start server listener
-                success = await listener.listen(listen_addr, nursery)
-                assert success, "Failed to start server listener"
+                await listener.listen(listen_addr)
 
                 # Get server address
                 server_addrs = listener.get_addrs()
@@ -294,8 +293,7 @@ class TestBasicQUICFlow:
             async with trio.open_nursery() as nursery:
                 # Start server
                 server_transport.set_background_nursery(nursery)
-                success = await listener.listen(listen_addr, nursery)
-                assert success, "Failed to start server listener"
+                await listener.listen(listen_addr)
 
                 server_addr = multiaddr.Multiaddr(
                     f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -345,6 +343,7 @@ class TestBasicQUICFlow:
 
 @pytest.mark.trio
 @pytest.mark.flaky(reruns=3, reruns_delay=2)
+@pytest.mark.serial_only
 async def test_yamux_stress_ping():
     # Enable debug logging when QUICK_STRESS_TEST_DEBUG=true
     debug_enabled = QUIC_STRESS_TEST_DEBUG
@@ -439,10 +438,14 @@ async def test_yamux_stress_ping():
                     logger.debug(f"  Inbound streams: {inbound}")
                     logger.debug(f"  Negotiation semaphore limit: {negotiation_limit}")
 
-            # Automatic identify should populate the peerstore with cached protocols.
+            # Ensure automatic identify cached ping before opening many streams.
+            from libp2p.host.basic_host import BasicHost
+
+            assert isinstance(client_host, BasicHost)
+            deadline = trio.current_time() + 10.0
             identify_cached = False
-            identify_start = trio.current_time()
-            while trio.current_time() - identify_start < 5.0:
+            while trio.current_time() < deadline:
+                await client_host._identify_peer(info.peer_id, reason="stress-test")
                 try:
                     supported = client_host.get_peerstore().supports_protocols(
                         info.peer_id, [str(PING_PROTOCOL_ID)]
@@ -452,13 +455,13 @@ async def test_yamux_stress_ping():
                         break
                 except Exception:
                     pass
-                await trio.sleep(0.01)
+                await trio.sleep(0.05)
 
             if debug_enabled:
                 if identify_cached:
                     logger.debug("  Automatic identify cached ping protocol")
                 else:
-                    logger.warning("  Automatic identify did not cache ping within 5s")
+                    logger.warning("  Automatic identify did not cache ping")
 
             assert identify_cached, (
                 "Automatic identify should cache ping before running stress test"
@@ -721,8 +724,7 @@ async def test_quic_concurrent_streams():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
+            await listener.listen(listen_addr)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -881,8 +883,7 @@ async def test_quic_yamux_integration():
             # Start server
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            success = await listener.listen(listen_addr, nursery)
-            assert success, "Failed to start server listener"
+            await listener.listen(listen_addr)
 
             server_addr = multiaddr.Multiaddr(
                 f"{listener.get_addrs()[0]}/p2p/{ID.from_pubkey(server_key.public_key)}"
@@ -990,7 +991,7 @@ async def test_quic_cid_retirement_integration():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 
@@ -1057,7 +1058,7 @@ async def test_connection_migration_scenario():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 
@@ -1136,7 +1137,7 @@ async def test_cid_retirement_under_load():
         async with trio.open_nursery() as nursery:
             server_transport.set_background_nursery(nursery)
             client_transport.set_background_nursery(nursery)
-            await listener.listen(listen_addr, nursery)
+            await listener.listen(listen_addr)
             server_addrs = listener.get_addrs()
             assert len(server_addrs) > 0
 

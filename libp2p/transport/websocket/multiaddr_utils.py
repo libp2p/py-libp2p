@@ -2,10 +2,13 @@
 WebSocket multiaddr parsing utilities.
 """
 
+import logging
 from typing import NamedTuple
 
 from multiaddr import Multiaddr
-from multiaddr.protocols import Protocol
+from multiaddr.protocols import P_SNI, P_TLS, P_WS, P_WSS, Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class ParsedWebSocketMultiaddr(NamedTuple):
@@ -55,9 +58,8 @@ def parse_websocket_multiaddr(maddr: Multiaddr) -> ParsedWebSocketMultiaddr:
 
     # Handle /wss protocol (convert to /tls/ws internally)
     if is_wss and tls_index == -1:
-        # Convert /wss to /tls/ws format
-        # Remove /wss to get the base multiaddr
-        without_wss = maddr.decapsulate(Multiaddr("/wss"))
+        # Convert /wss to /tls/ws format - remove /wss using protocol code
+        without_wss = maddr.decapsulate_code(P_WSS)
         return ParsedWebSocketMultiaddr(
             is_wss=True, sni=None, rest_multiaddr=without_wss
         )
@@ -65,26 +67,17 @@ def parse_websocket_multiaddr(maddr: Multiaddr) -> ParsedWebSocketMultiaddr:
     # Handle /tls/ws and /tls/sni/.../ws formats
     if tls_index != -1:
         is_wss = True
-        # Extract the base multiaddr (everything before /tls)
-        # For /ip4/127.0.0.1/tcp/8080/tls/ws, we want /ip4/127.0.0.1/tcp/8080
-        # Use multiaddr methods to properly extract the base
-        rest_multiaddr = maddr
-        # Remove /tls/ws or /tls/sni/.../ws from the end
+        # Extract the base multiaddr (everything before /tls) using protocol codes
+        rest_multiaddr = maddr.decapsulate_code(P_WS)
         if sni_index != -1:
-            # /tls/sni/example.com/ws format
-            rest_multiaddr = rest_multiaddr.decapsulate(Multiaddr("/ws"))
-            rest_multiaddr = rest_multiaddr.decapsulate(Multiaddr(f"/sni/{sni}"))
-            rest_multiaddr = rest_multiaddr.decapsulate(Multiaddr("/tls"))
-        else:
-            # /tls/ws format
-            rest_multiaddr = rest_multiaddr.decapsulate(Multiaddr("/ws"))
-            rest_multiaddr = rest_multiaddr.decapsulate(Multiaddr("/tls"))
+            rest_multiaddr = rest_multiaddr.decapsulate_code(P_SNI)
+        rest_multiaddr = rest_multiaddr.decapsulate_code(P_TLS)
         return ParsedWebSocketMultiaddr(
             is_wss=is_wss, sni=sni, rest_multiaddr=rest_multiaddr
         )
 
-    # Regular /ws multiaddr - remove /ws and any additional protocols
-    rest_multiaddr = maddr.decapsulate(Multiaddr("/ws"))
+    # Regular /ws multiaddr - remove /ws using protocol code
+    rest_multiaddr = maddr.decapsulate_code(P_WS)
     return ParsedWebSocketMultiaddr(
         is_wss=False, sni=None, rest_multiaddr=rest_multiaddr
     )
@@ -194,11 +187,14 @@ def is_valid_websocket_multiaddr(maddr: Multiaddr) -> bool:
             # Check protocols after the WebSocket protocol
             for i in range(ws_index + 1, len(protocols)):
                 if protocols[i].name not in valid_continuations:
-                    print(f"DEBUG: Invalid continuation protocol: {protocols[i].name}")
+                    logger.debug(
+                        "Invalid continuation protocol: %s",
+                        protocols[i].name,
+                    )
                     return False
 
         return True
 
     except Exception as e:
-        print(f"DEBUG: Validation exception: {e}")
+        logger.debug("Validation exception: %s", e)
         return False

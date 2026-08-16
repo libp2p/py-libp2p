@@ -6,11 +6,11 @@ This example demonstrates how to use the new persistent peerstore implementation
 with Protocol Buffer serialization instead of unsafe pickle.
 """
 
-import asyncio
 from pathlib import Path
 import tempfile
 
 from multiaddr import Multiaddr
+import trio
 
 from libp2p.peer.id import ID
 from libp2p.peer.persistent import (
@@ -111,7 +111,7 @@ def security_example():
 
 if __name__ == "__main__":
     # Run async example
-    asyncio.run(async_example())
+    trio.run(async_example)
 
     # Run sync example
     sync_example()

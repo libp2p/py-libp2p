@@ -5,7 +5,6 @@ QUIC Listener
 import logging
 import socket
 import struct
-import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -42,13 +41,28 @@ from .utils import (
 if TYPE_CHECKING:
     from .transport import QUICTransport
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
+# Library should not call basicConfig
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+
+class ServerQuicConnection(QuicConnection):
+    """
+    A custom QuicConnection that ensures the server requests a client certificate.
+    aioquic's tls.Context defaults _request_client_certificate to False. Since
+    the ServerHello is generated synchronously inside receive_datagram, we must
+    override _initialize to set the flag immediately after the TLS context is created.
+
+    Coupled to aioquic internal APIs (``_initialize``,
+    ``tls._request_client_certificate``) stable for ``aioquic>=1.2.0``; guarded by
+    ``test_server_quic_connection_requests_client_certificate``.
+    """
+
+    def _initialize(self, peer_cid: bytes) -> None:
+        super()._initialize(peer_cid)
+        if hasattr(self, "tls") and self.tls:
+            self.tls._request_client_certificate = True
+            logger.debug("ServerQuicConnection: Set _request_client_certificate=True")
 
 
 class QUICPacketInfo:
@@ -106,6 +120,12 @@ class QUICListener(IListener):
         self._closed = False
         self._listening = False
         self._nursery: trio.Nursery | None = None
+
+        # State for the "owned nursery" fallback path in listen().  Populated
+        # only when no transport background nursery is available.
+        self._owned_started: trio.Event | None = None
+        self._owned_stopped: trio.Event | None = None
+        self._owned_start_error: BaseException | None = None
 
         # Serialize promotion of pending connections to avoid duplicate promotions
         # and repeated connect() calls under concurrent packet processing.
@@ -581,7 +601,7 @@ class QUICListener(IListener):
                 f"{packet_info.destination_cid.hex()}"
             )
 
-            quic_conn = QuicConnection(
+            quic_conn = ServerQuicConnection(
                 configuration=server_config,
                 original_destination_connection_id=packet_info.destination_cid,
             )
@@ -630,17 +650,9 @@ class QUICListener(IListener):
                 initial_dcid, quic_conn, addr, sequence
             )
 
-            # Process initial packet
+            # Process initial packet. Since we use ServerQuicConnection, the
+            # TLS context will be initialized with _request_client_certificate=True
             quic_conn.receive_datagram(data, addr, now=time.time())
-            if quic_conn.tls:
-                if self._security_manager:
-                    try:
-                        quic_conn.tls._request_client_certificate = True
-                        logger.debug(
-                            "request_client_certificate set to True in server TLS"
-                        )
-                    except Exception as e:
-                        logger.error(f"FAILED to apply request_client_certificate: {e}")
 
             # Process events and send response
             await self._process_quic_events(quic_conn, addr, destination_connection_id)
@@ -948,10 +960,12 @@ class QUICListener(IListener):
 
     async def _cleanup_promotion_lock(self, quic_key: int) -> None:
         """
-        Clean up promotion lock and related tracking for a quic_key (idempotent).
+        Clean up only the promotion lock for a quic_key (idempotent).
 
-        This method safely removes all promotion-related state for a connection,
-        preventing memory leaks from stale locks and tracking dictionaries.
+        This method intentionally preserves connection-tracking state
+        (`_conn_by_quic_id`, `_handler_invoked_quic_ids`,
+        `_pending_cid_by_quic_id`) so concurrent packets cannot recreate the
+        same logical connection and re-invoke the handler.
 
         Args:
             quic_key: The identity (id()) of the aioquic QuicConnection
@@ -959,6 +973,10 @@ class QUICListener(IListener):
         """
         async with self._promotion_lock:
             self._promotion_locks.pop(quic_key, None)
+
+    async def _cleanup_quic_tracking(self, quic_key: int) -> None:
+        """Clean up per-quic connection tracking maps when a connection ends."""
+        async with self._promotion_lock:
             self._conn_by_quic_id.pop(quic_key, None)
             self._pending_cid_by_quic_id.pop(quic_key, None)
             self._handler_invoked_quic_ids.discard(quic_key)
@@ -1042,6 +1060,23 @@ class QUICListener(IListener):
                         destination_connection_id, connection, addr
                     )
 
+                # Belt-and-suspenders: reject inbound connections that have no
+                # peer certificate before connect() and the application callback.
+                # Must run before connect(), which also verifies identity and would
+                # raise without incrementing connections_rejected.
+                if not connection._is_initiator:
+                    peer_cert = await connection.get_peer_certificate()
+                    if peer_cert is None:
+                        logger.error(
+                            f"Rejecting inbound connection "
+                            f"{destination_connection_id.hex()}: "
+                            f"no peer certificate presented — "
+                            f"remote libp2p identity cannot be verified."
+                        )
+                        self._stats["connections_rejected"] += 1
+                        await connection.close()
+                        return
+
                 if self._nursery:
                     connection._nursery = self._nursery
                     # connect() will start background tasks internally. Avoid calling it
@@ -1063,6 +1098,7 @@ class QUICListener(IListener):
                             f"Security verification failed for "
                             f"{destination_connection_id.hex()}: {e}"
                         )
+                        self._stats["connections_rejected"] += 1
                         await connection.close()
                         return
 
@@ -1100,6 +1136,7 @@ class QUICListener(IListener):
                 logger.error(
                     f"Error promoting connection {destination_connection_id.hex()}: {e}"
                 )
+                self._stats["connections_rejected"] += 1
                 await self._remove_connection(destination_connection_id)
             finally:
                 # Best-effort cleanup of the per-CID lock and related tracking.
@@ -1121,6 +1158,7 @@ class QUICListener(IListener):
                 ):
                     quic_key = id(connection_obj._quic)
                     await self._cleanup_promotion_lock(quic_key)
+                    await self._cleanup_quic_tracking(quic_key)
 
             # Remove from registry (cleans up all mappings)
             await self._registry.remove_connection_id(destination_connection_id)
@@ -1190,50 +1228,90 @@ class QUICListener(IListener):
         except Exception as e:
             logger.error(f"Transmission error: {e}", exc_info=True)
 
-    async def listen(self, maddr: Multiaddr, nursery: trio.Nursery) -> bool:
-        """Start listening on the given multiaddr with enhanced connection handling."""
+    async def listen(self, maddr: Multiaddr) -> None:
+        """
+        Start listening on the given multiaddr with enhanced connection handling.
+
+        The listener uses the transport's background nursery when available
+        (set via :meth:`QUICTransport.set_background_nursery`), and otherwise
+        spawns a private internal nursery as a trio system task.  In either
+        case the listener no longer requires the caller to supply a nursery.
+        """
         if self._listening:
             raise QUICListenError("Already listening")
 
         if not is_quic_multiaddr(maddr):
             raise QUICListenError(f"Invalid QUIC multiaddr: {maddr}")
 
-        if self._transport._background_nursery:
-            active_nursery = self._transport._background_nursery
-            logger.debug("Using transport background nursery for listener")
-        elif nursery:
-            active_nursery = nursery
-            self._transport._background_nursery = nursery
-            logger.debug("Using provided nursery for listener")
-        else:
-            raise QUICListenError("No nursery available")
+        host, port = quic_multiaddr_to_endpoint(maddr)
 
-        try:
-            host, port = quic_multiaddr_to_endpoint(maddr)
+        if self._transport._background_nursery is not None:
+            # Preferred path: reuse the transport's already-running nursery.
+            try:
+                self._socket = await self._create_socket(host, port)
+                self._nursery = self._transport._background_nursery
 
-            # Create and configure socket
-            self._socket = await self._create_socket(host, port)
-            self._nursery = active_nursery
+                bound_host, bound_port = self._socket.getsockname()[:2]
+                quic_version = multiaddr_to_quic_version(maddr)
+                bound_maddr = create_quic_multiaddr(
+                    bound_host, bound_port, quic_version
+                )
+                self._bound_addresses = [bound_maddr]
+                self._listening = True
 
-            # Get the actual bound address
-            bound_host, bound_port = self._socket.getsockname()
-            quic_version = multiaddr_to_quic_version(maddr)
-            bound_maddr = create_quic_multiaddr(bound_host, bound_port, quic_version)
-            self._bound_addresses = [bound_maddr]
+                self._nursery.start_soon(self._handle_incoming_packets)
+                logger.info(
+                    f"QUIC listener started on {bound_maddr} with connection ID support"
+                )
+                return
+            except Exception as e:
+                await self.close()
+                raise QUICListenError(f"Failed to start listening: {e}") from e
 
-            self._listening = True
+        # Fallback: spawn our own internal nursery as a trio system task
+        # so the listener is fully self-contained.
+        started = trio.Event()
+        stopped = trio.Event()
+        self._owned_started = started
+        self._owned_stopped = stopped
+        self._owned_start_error = None
 
-            # Start packet handling loop
-            active_nursery.start_soon(self._handle_incoming_packets)
+        async def _run_server() -> None:
+            try:
+                async with trio.open_nursery() as inner_nursery:
+                    try:
+                        self._socket = await self._create_socket(host, port)
+                        self._nursery = inner_nursery
 
-            logger.info(
-                f"QUIC listener started on {bound_maddr} with connection ID support"
-            )
-            return True
+                        bound_host, bound_port = self._socket.getsockname()[:2]
+                        quic_version = multiaddr_to_quic_version(maddr)
+                        bound_maddr = create_quic_multiaddr(
+                            bound_host, bound_port, quic_version
+                        )
+                        self._bound_addresses = [bound_maddr]
+                        self._listening = True
 
-        except Exception as e:
+                        inner_nursery.start_soon(self._handle_incoming_packets)
+                        logger.info(
+                            f"QUIC listener started on {bound_maddr} "
+                            "with connection ID support"
+                        )
+                    except BaseException as error:
+                        self._owned_start_error = error
+                    finally:
+                        started.set()
+            finally:
+                stopped.set()
+                self._nursery = None
+
+        trio.lowlevel.spawn_system_task(_run_server)
+        await self._owned_started.wait()
+
+        if self._owned_start_error is not None:
             await self.close()
-            raise QUICListenError(f"Failed to start listening: {e}") from e
+            raise QUICListenError(
+                f"Failed to start listening: {self._owned_start_error}"
+            ) from self._owned_start_error
 
     async def _create_socket(self, host: str, port: int) -> trio.socket.SocketType:
         """Create and configure UDP socket."""
@@ -1327,6 +1405,14 @@ class QUICListener(IListener):
 
             self._bound_addresses.clear()
 
+            # If we spawned our own internal nursery (fallback path),
+            # cancel it and wait for the background system task to finish.
+            if self._owned_started is not None and self._owned_started.is_set():
+                if self._nursery is not None:
+                    self._nursery.cancel_scope.cancel()
+                if self._owned_stopped is not None:
+                    await self._owned_stopped.wait()
+
             logger.info("QUIC listener closed")
 
         except Exception as e:
@@ -1341,6 +1427,7 @@ class QUICListener(IListener):
             if hasattr(connection_obj, "_quic") and connection_obj._quic is not None:
                 quic_key = id(connection_obj._quic)
                 await self._cleanup_promotion_lock(quic_key)
+                await self._cleanup_quic_tracking(quic_key)
 
             # Find the connection ID for this object
             connection_ids = await self._registry.get_all_cids_for_connection(
@@ -1352,7 +1439,7 @@ class QUICListener(IListener):
                 await self._remove_connection(connection_connection_id)
                 logger.debug(f"Removed connection {connection_connection_id.hex()}")
             else:
-                logger.warning("Connection object not found in tracking")
+                logger.debug("Connection object not found in tracking")
 
         except Exception as e:
             logger.error(f"Error removing connection by object: {e}")

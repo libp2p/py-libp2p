@@ -91,7 +91,7 @@ def test_first_supported_protocol_none():
     input_protocols = ["protocolA", "protocolB"]
     first = peer_data.first_supported_protocol(input_protocols)
 
-    assert first == "None supported"
+    assert first == ""
 
 
 # Test case when adding addresses
@@ -127,6 +127,42 @@ def test_put_metadata():
     value = "value1"
     peer_data.put_metadata(key, value)
     assert peer_data.get_metadata(key) == value
+
+
+# Test case for each valid MetadataValue type
+def test_put_metadata_accepts_valid_types():
+    peer_data = PeerData()
+    peer_data.put_metadata("str_key", "hello")
+    peer_data.put_metadata("int_key", 42)
+    peer_data.put_metadata("float_key", 3.14)
+    peer_data.put_metadata("bool_key", True)
+    peer_data.put_metadata("none_key", None)
+
+    assert peer_data.get_metadata("str_key") == "hello"
+    assert peer_data.get_metadata("int_key") == 42
+    assert peer_data.get_metadata("float_key") == 3.14
+    assert peer_data.get_metadata("bool_key") is True
+    assert peer_data.get_metadata("none_key") is None
+
+
+# Test case for rejecting invalid (non-MetadataValue) types
+def test_put_metadata_rejects_invalid_types():
+    peer_data = PeerData()
+
+    with pytest.raises(TypeError) as exc_info:
+        peer_data.put_metadata("dict_key", {"nested": "dict"})  # type: ignore[arg-type]
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
+
+    with pytest.raises(TypeError) as exc_info:
+        peer_data.put_metadata("list_key", [1, 2, 3])  # type: ignore[arg-type]
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
+
+    class CustomObj:
+        pass
+
+    with pytest.raises(TypeError) as exc_info:
+        peer_data.put_metadata("obj_key", CustomObj())  # type: ignore[arg-type]
+    assert "MetadataValue must be str, int, float, bool, or None" in str(exc_info.value)
 
 
 # Test case for key not found in metadata

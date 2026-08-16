@@ -1,0 +1,6 @@
+Replaced return True/False pattern with try/catch pattern for better error handling.
+
+- Updated set_stream_handler method in BasicHost to validate inputs and raise HostException
+- Enhanced mplex stream deadline methods to raise ValueError for invalid TTL instead of returning False
+- Updated TCP listener to raise OpenConnectionError instead of returning False on failure
+- Fixed misleading docstrings in yamux, QUIC stream, swarm, and mplex

@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "libp2p @ file:///app/py-libp2p", # local libp2p dependency is a snapshot based on ${commitSha} in Makefile
+    "libp2p[webrtc] @ file:///app/py-libp2p", # local libp2p with WebRTC extra
     "redis>=4.0.0",
     "typing-extensions>=4.0.0",
     "cryptography>=41.0.0",  # Required for TLS/WSS support
