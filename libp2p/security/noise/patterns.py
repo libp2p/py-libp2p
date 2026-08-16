@@ -95,13 +95,15 @@ class IPattern(ABC):
         """
         Perform outbound handshake as initiator.
 
+        ``remote_peer=None`` is for initiators that do not know the
+        responder's identity up front (e.g. a WebRTC-Direct listener, which
+        is the Noise initiator per spec): the remote is still authenticated by
+        its signed handshake payload; only the peer-ID equality check is
+        skipped.
+
         Args:
             conn: Raw connection to perform handshake on
             remote_peer: Expected remote peer ID for verification, or ``None``
-                when the initiator does not know the responder's identity up
-                front (e.g. a WebRTC-Direct listener, which is the Noise
-                initiator per spec). The remote is still authenticated by its
-                signed handshake payload; only the equality check is skipped.
 
         Returns:
             ISecureConn: Established secure connection
