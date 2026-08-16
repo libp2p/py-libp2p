@@ -201,22 +201,18 @@ async def test_set_then_send_from_five_diff_nodes_five_nodes_ring_topography():
         await dummy_nodes[2].publish_send_crypto("rob", "aspyn", 2)
         await wait_for_convergence(
             dummy_nodes,
-            lambda n: (
-                n.get_balance("alex") == 17
-                and n.get_balance("rob") == 1
-                and n.get_balance("aspyn") == 2
-            ),
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 2,
             timeout=10.0,
         )
         await dummy_nodes[3].publish_send_crypto("aspyn", "zx", 1)
         await wait_for_convergence(
             dummy_nodes,
-            lambda n: (
-                n.get_balance("alex") == 17
-                and n.get_balance("rob") == 1
-                and n.get_balance("aspyn") == 1
-                and n.get_balance("zx") == 1
-            ),
+            lambda n: n.get_balance("alex") == 17
+            and n.get_balance("rob") == 1
+            and n.get_balance("aspyn") == 1
+            and n.get_balance("zx") == 1,
             timeout=10.0,
         )
         await dummy_nodes[4].publish_send_crypto("zx", "raul", 1)
