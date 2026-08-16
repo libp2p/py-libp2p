@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 import ipaddress
 import logging
 
+import cid
+import multihash
+
 from libp2p.custom_types import (
     TProtocol,
 )
@@ -52,31 +55,10 @@ SUBNET_PREFIX_LEN_V6 = 48
 PEER_REFRESH_INTERVAL = 60  # Interval to refresh peers in seconds
 STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
 
-# Reserved IP ranges per RFC 6890 / IANA
-_RESERVED_PREFIXES = [
-    ipaddress.ip_network("0.0.0.0/8"),  # "This" network
-    ipaddress.ip_network("10.0.0.0/8"),  # Private
-    ipaddress.ip_network("100.64.0.0/10"),  # Shared Address Space (CGNAT)
-    ipaddress.ip_network("127.0.0.0/8"),  # Loopback
-    ipaddress.ip_network("169.254.0.0/16"),  # Link-Local
-    ipaddress.ip_network("172.16.0.0/12"),  # Private
-    ipaddress.ip_network("192.0.0.0/24"),  # IETF Protocol Assignments
-    ipaddress.ip_network("192.0.2.0/24"),  # Documentation (TEST-NET-1)
-    ipaddress.ip_network("192.88.99.0/24"),  # 6to4 Relay Anycast
-    ipaddress.ip_network("192.168.0.0/16"),  # Private
-    ipaddress.ip_network("198.18.0.0/15"),  # Benchmarking
-    ipaddress.ip_network("198.51.100.0/24"),  # Documentation (TEST-NET-2)
-    ipaddress.ip_network("203.0.113.0/24"),  # Documentation (TEST-NET-3)
-    ipaddress.ip_network("224.0.0.0/4"),  # Multicast
-    ipaddress.ip_network("240.0.0.0/4"),  # Reserved
-    ipaddress.ip_network("255.255.255.255/32"),  # Broadcast
-]
-
 
 def is_reserved_or_private_addr(addr_str: str) -> bool:
     """Check if an address string is a reserved or private IP address."""
     try:
-        # Extract IP from multiaddr string (e.g., "/ip4/127.0.0.1/tcp/4001")
         parts = addr_str.split("/")
         ip_str = None
         for i, part in enumerate(parts):
@@ -84,109 +66,33 @@ def is_reserved_or_private_addr(addr_str: str) -> bool:
                 ip_str = parts[i + 1]
                 break
         if ip_str is None:
-            return True  # Can't parse = reject
-
-        addr = ipaddress.ip_address(ip_str)
-
-        # Check IPv6 loopback (::1) and unspecified (::)
-        if addr.is_loopback or addr.is_unspecified:
             return True
 
-        # Check IPv6 link-local and ULA
-        if isinstance(addr, ipaddress.IPv6Address):
-            if addr.is_link_local:
-                return True  # fe80::/10
-            # fc00::/7 (Unique Local Addresses)
-            if int(addr) & 0xFE00_0000_0000_0000 == 0xFC00_0000_0000_0000:
-                return True
-
-        # Check against reserved prefixes
-        for prefix in _RESERVED_PREFIXES:
-            if addr in prefix:
-                return True
-
-        return False
+        addr = ipaddress.ip_address(ip_str)
+        return not addr.is_global
     except (ValueError, IndexError):
-        return True  # Can't parse = reject
+        return True
 
 
 def is_cid_like_key(key: bytes) -> bool:
-    """
-    Check if a key looks like a valid CID or multihash.
-
-    Per spec, ADD_PROVIDER and GET_PROVIDERS keys SHOULD be CIDs.
-    A CID v1 has the structure: <version><codec><multihash>
-    - version: 0x01 for CIDv1
-    - codec: varint (typically 0x55 for raw, 0x71 for dag-pb, etc.)
-    - multihash: <hash-function-code><digest-length><digest>
-
-    We validate using basic structural checks:
-    - CIDv1: starts with 0x01, has codec varint, ends with multihash
-    - Raw multihash: starts with known hash function code
-    - CIDv0: base58btc-encoded, 46 bytes starting with Qm
-
-    Returns True if valid, False otherwise. Logs debug messages for invalid keys.
-    """
-    if not key:
-        logger.debug("Provider key is empty")
+    """Check if a key looks like a valid CID or multihash using py-cid/multihash."""
+    if not key or len(key) > 128:
         return False
 
-    # Per spec, key length must be > 0 and <= 128
-    if len(key) > 128:
-        logger.debug(f"Provider key too long: {len(key)} bytes")
-        return False
-
-    # CIDv1 starts with 0x01
-    if key[0] == 0x01:
-        if len(key) < 5:
-            logger.debug("CIDv1 key too short")
-            return False
-        # CIDv1 structure: version(1) + codec(varint) + multihash
-        # Multihash starts with hash function code + digest length
-        # Minimum multihash is 2 bytes (code + length)
-        return len(key) >= 5
-
-    # Raw multihash: starts with hash function code varint
-    # Common codes (single-byte varints):
-    # sha2-256=0x12, sha2-512=0x13, sha3-256=0x16, sha3-512=0x17
-    # blake2b-256=0x22, blake2s-256=0x23
-    valid_hash_codes = {
-        0x12,  # sha2-256
-        0x13,  # sha2-512
-        0x16,  # sha3-256
-        0x17,  # sha3-512
-        0x22,  # blake2b-256
-        0x23,  # blake2s-256
-        0x56,  # sha2-256-trunc254-padded
-        0x10,  # sha1
-        0x11,  # sha2-224
-    }
-
-    if len(key) >= 2:
-        first_byte = key[0]
-        if first_byte in valid_hash_codes:
-            # Check that digest length is reasonable (2nd byte)
-            digest_len = key[1]
-            if 1 <= digest_len <= 64 and len(key) == 2 + digest_len:
-                return True
-            # Also accept if just checking first byte match
-            # (some implementations may have extra bytes)
+    try:
+        if cid.is_cid(key):
             return True
+    except Exception:
+        pass
 
-    # CIDv0 (base58btc-encoded multihash) is typically 46 bytes starting with Qm
-    if len(key) == 46 and key[0:2] == b"Qm":
-        return True
+    try:
+        if multihash.is_valid(key):
+            return True
+    except Exception:
+        pass
 
-    # For backward compatibility, accept any reasonable-length key
-    # (the DHT should work with arbitrary keys for testing/custom use)
-    if 4 <= len(key) <= 64:
-        return True
-
-    logger.debug(
-        f"Key does not look like a CID or multihash: "
-        f"length={len(key)}, first_byte=0x{key[0]:02x}"
-    )
-    return False
+    # Accept arbitrary reasonable-length keys for backward compatibility
+    return 4 <= len(key) <= 64
 
 
 def format_time_rfc3339(dt: datetime | None = None) -> str:
