@@ -12,8 +12,6 @@ from .exceptions import (
     ProtocolNotSupportedError,
 )
 
-# Library must not force a log level — the application controls verbosity
-# (e.g. via LIBP2P_DEBUG or py-ipfs-lite's --debug flag).
 logger = logging.getLogger(__name__)
 
 MULTISELECT_PROTOCOL_ID = "/multistream/1.0.0"
