@@ -26,10 +26,32 @@ from libp2p.transport.webrtc.transport import WebRTCDirectTransport
 
 pytestmark = pytest.mark.skipif(not HAS_AIORTC, reason="aiortc not installed")
 
-# Bind on all interfaces (advertised as 127.0.0.1): dialer PCs gather LAN host
-# candidates only (aioice skips loopback), and on Windows a 127.0.0.1-bound
-# socket cannot answer a LAN-bound peer socket (WinError 1231).
-LISTEN_ADDR = "/ip4/0.0.0.0/udp/0/webrtc-direct"
+
+def _listen_addr() -> str:
+    """
+    Listen on a concrete non-loopback IPv4 interface when one exists.
+
+    aiortc dialers gather LAN host candidates only (aioice skips loopback) and
+    on Windows a LAN-bound UDP socket cannot send to 127.0.0.1 at all
+    (WinError 1214), so a listener advertising 127.0.0.1 is unreachable there.
+    Linux's weak-host model hides this. Falls back to loopback when the host
+    has no other IPv4 address.
+    """
+    from libp2p.utils.address_validation import get_available_interfaces
+
+    for maddr in get_available_interfaces(0, "udp"):
+        ip = maddr.value_for_protocol("ip4") if "/ip4/" in str(maddr) else None
+        if ip and ip != "127.0.0.1":
+            return f"/ip4/{ip}/udp/0/webrtc-direct"
+    return "/ip4/127.0.0.1/udp/0/webrtc-direct"
+
+
+LISTEN_ADDR = _listen_addr()
+
+
+def _host_port(maddr) -> tuple[str, int]:  # type: ignore[no-untyped-def]
+    parts = str(maddr).split("/")
+    return parts[2], int(parts[4])
 
 
 @pytest.mark.trio
@@ -219,18 +241,18 @@ async def test_unknown_version_prefix_is_rejected():
     listener = server.create_listener(lambda conn: trio.sleep_forever())
     await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
-    port = int(str(maddr).split("/udp/")[1].split("/")[0])
+    host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
 
     async def _poke() -> None:
         # Fresh UDP endpoint on the asyncio thread; send crafted requests.
         loop = asyncio.get_running_loop()
         transport, _ = await loop.create_datagram_endpoint(
-            asyncio.DatagramProtocol, local_addr=("127.0.0.1", 0)
+            asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
         )
         try:
             for username in ("noprefix1:cli1", "libp2p+webrtc+v9/abcd:cli1", "x:y"):
-                transport.sendto(_stun_binding_request(username), ("127.0.0.1", port))
+                transport.sendto(_stun_binding_request(username), (host, port))
             await asyncio.sleep(0.2)
         finally:
             transport.close()
@@ -258,20 +280,18 @@ async def test_in_flight_cap_drops_excess_first_contacts():
     listener = server.create_listener(lambda conn: trio.sleep_forever())
     await listener.listen(Multiaddr(LISTEN_ADDR))
     (maddr,) = listener.get_addrs()
-    port = int(str(maddr).split("/udp/")[1].split("/")[0])
+    host, port = _host_port(maddr)
     bridge = await server._ensure_bridge()
 
     async def _poke() -> None:
         loop = asyncio.get_running_loop()
         transport, _ = await loop.create_datagram_endpoint(
-            asyncio.DatagramProtocol, local_addr=("127.0.0.1", 0)
+            asyncio.DatagramProtocol, local_addr=("0.0.0.0", 0)
         )
         try:
             for i in range(3):
                 cred = f"libp2p+webrtc+v1/{'a' * 20}{i}"
-                transport.sendto(
-                    _stun_binding_request(f"{cred}:{cred}"), ("127.0.0.1", port)
-                )
+                transport.sendto(_stun_binding_request(f"{cred}:{cred}"), (host, port))
             await asyncio.sleep(0.3)
         finally:
             transport.close()
