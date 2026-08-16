@@ -96,48 +96,6 @@ class DHTMode(Enum):
     SERVER = "SERVER"
 
 
-# Timestamp validation constants
-MAX_TIMESTAMP_AGE = 24 * 60 * 60  # 24 hours in seconds
-MAX_TIMESTAMP_FUTURE = 5 * 60  # 5 minutes in the future in seconds
-
-
-def is_valid_timestamp(ts: float) -> bool:
-    """
-    Validate if a timestamp is within acceptable bounds.
-
-    Args:
-        ts: The timestamp to validate (Unix timestamp in seconds)
-
-    Returns:
-        bool: True if timestamp is valid (not too old and not too far in future)
-
-    """
-    current_time = time.time()
-    # Check if timestamp is not in the future by more than MAX_TIMESTAMP_FUTURE
-    if ts > current_time + MAX_TIMESTAMP_FUTURE:
-        return False
-    # Check if timestamp is not too far in the past
-    if current_time - ts > MAX_TIMESTAMP_AGE:
-        return False
-    return True
-
-
-def clean_record(record: Record) -> Record:
-    """
-    Strip TimeReceived from incoming record to prevent timestamp forgery.
-
-    Per go-libp2p, the receiver sets its own TimeReceived timestamp.
-    This prevents malicious peers from forging the receive timestamp.
-    """
-    cleaned = Record()
-    cleaned.key = record.key
-    cleaned.value = record.value
-    cleaned.author = record.author
-    cleaned.signature = record.signature
-    # Do NOT copy timeReceived - let the receiver set it
-    return cleaned
-
-
 def get_connection_type(host: IHost, peer_id: ID) -> Message.ConnectionType:
     """
     Get the actual connection type for a peer based on connection state.
@@ -1230,8 +1188,9 @@ class KadDHT(Service):
                             if len(record_bytes) > MAX_RECORD_SIZE:
                                 raise ValueError("Record too large")
 
-                            # Clean the record to prevent timestamp forgery
-                            cleaned_record = clean_record(message.record)
+                            # Record receive timestamp locally
+                            cleaned_record = Record()
+                            cleaned_record.CopyFrom(message.record)
                             cleaned_record.timeReceived = format_time_rfc3339()
 
                             # Validate the key-value pair before storing
