@@ -119,6 +119,10 @@ class UdpMux(asyncio.DatagramProtocol):
     :func:`libp2p.transport.webrtc._aiortc_helpers.attach_muxed_connection`.
     """
 
+    # Bound on addresses learned per connection (a real peer has a handful
+    # of candidates; anything beyond that is noise or an attack).
+    _MAX_ADDRS_PER_PROTOCOL = 16
+
     def __init__(self) -> None:
         self._transport: asyncio.DatagramTransport | None = None
         self._local_addr: tuple[str, int] | None = None
@@ -126,6 +130,8 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_ufrag: dict[str, _HasConnectionLost] = {}
         # (host, port) -> StunProtocol (post-ICE DTLS/SCTP dispatch)
         self._by_addr: dict[tuple[str, int], _HasConnectionLost] = {}
+        # id(protocol) -> number of _by_addr entries pointing at it
+        self._addr_count: dict[int, int] = {}
         # Called for a STUN packet whose ufrag is not registered (see
         # set_unknown_stun_handler); lets a listener observe first-contact dials.
         self._unknown_stun_handler: (
@@ -217,7 +223,26 @@ class UdpMux(asyncio.DatagramProtocol):
         logger.debug("UdpMux: no handler for STUN ufrag %r from %s", ufrag, norm)
 
     def _learn_addr(self, addr: tuple[str, int], protocol: _HasConnectionLost) -> None:
-        self._by_addr.setdefault(addr, protocol)
+        """
+        Map *addr* -> *protocol* for non-STUN routing.
+
+        Latest wins (like pion's UDPMux): a peer that redials from the same
+        (ip, port) with a new ufrag must reach its *new* connection, not the
+        stale one still being torn down. Learned addresses are capped per
+        protocol because inbound STUN is unauthenticated at this layer — a
+        flood of requests carrying a live ufrag from many source ports must
+        not grow the table without bound.
+        """
+        current = self._by_addr.get(addr)
+        if current is protocol:
+            return
+        n = self._addr_count.get(id(protocol), 0)
+        if n >= self._MAX_ADDRS_PER_PROTOCOL:
+            return
+        if current is not None:
+            self._addr_count[id(current)] = self._addr_count.get(id(current), 1) - 1
+        self._by_addr[addr] = protocol
+        self._addr_count[id(protocol)] = n + 1
 
     def _route_by_addr(
         self, data: bytes, norm: tuple[str, int], *, stun_shaped: bool
@@ -255,6 +280,11 @@ class UdpMux(asyncio.DatagramProtocol):
         self, addr: tuple[str, int], protocol: _HasConnectionLost
     ) -> None:
         """Route non-STUN packets from *addr* to *protocol* (call after ICE)."""
+        current = self._by_addr.get(addr)
+        if current is not None and current is not protocol:
+            self._addr_count[id(current)] = self._addr_count.get(id(current), 1) - 1
+        if current is not protocol:
+            self._addr_count[id(protocol)] = self._addr_count.get(id(protocol), 0) + 1
         self._by_addr[addr] = protocol
 
     def unregister(self, ufrag: str) -> None:
@@ -264,9 +294,12 @@ class UdpMux(asyncio.DatagramProtocol):
             return
         for addr in [a for a, p in self._by_addr.items() if p is protocol]:
             del self._by_addr[addr]
+        self._addr_count.pop(id(protocol), None)
 
     def unregister_addr(self, addr: tuple[str, int]) -> None:
-        self._by_addr.pop(addr, None)
+        protocol = self._by_addr.pop(addr, None)
+        if protocol is not None:
+            self._addr_count[id(protocol)] = self._addr_count.get(id(protocol), 1) - 1
 
     def set_unknown_stun_handler(
         self, handler: Callable[[str, bytes, tuple[str, int]], None] | None
@@ -375,4 +408,5 @@ class UdpMux(asyncio.DatagramProtocol):
         # dispatched to a half-torn-down protocol.
         self._by_ufrag.clear()
         self._by_addr.clear()
+        self._addr_count.clear()
         self._unknown_stun_handler = None
