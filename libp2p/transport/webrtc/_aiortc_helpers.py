@@ -27,6 +27,7 @@ from aiortc.rtcdtlstransport import RTCCertificate
 from .exceptions import WebRTCStreamError
 
 if TYPE_CHECKING:
+    from ._udp_mux import UdpMux
     from .connection import WebRTCConnection
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,63 @@ def get_remote_fingerprint(pc: RTCPeerConnection) -> bytes:
 
     der = remote_cert.public_bytes(Encoding.DER)
     return hashlib.sha256(der).digest()
+
+
+# ------------------------------------------------------------------
+# UdpMux bridge
+# ------------------------------------------------------------------
+
+
+def attach_muxed_connection(pc: RTCPeerConnection, mux: UdpMux, conn: Any) -> None:
+    """
+    Run *pc*'s ICE over the :class:`UdpMux`-backed ``aioice.Connection`` *conn*.
+
+    aiortc offers no injection point for an external ICE connection: the
+    gatherer builds its own ``aioice.Connection`` when the SCTP/DTLS/ICE
+    stack is created (synchronously, on the first ``createDataChannel``).
+    This swaps that connection for *conn* — created via
+    :meth:`UdpMux.add_ice_connection` — so the peer connection sends and
+    receives on the shared UDP port instead of binding its own.
+
+    Call **after** ``createDataChannel`` and **before** any
+    ``set*Description``. Touches aiortc/aioice privates (validated against
+    aiortc 1.15 / aioice 0.10):
+
+    - ``iceGatherer._connection`` / ``iceTransport._connection`` — what
+      ``getLocalParameters()`` / ``getLocalCandidates()`` / ``start()`` use;
+    - ``iceTransport._recv`` / ``_send`` — bound at construction to the
+      *original* connection's methods and used by ``RTCDtlsTransport``;
+      forgetting these leaves DTLS talking to the orphaned connection.
+
+    The orphaned original connection never bound a socket (gathering is
+    triggered later, and *conn* has it marked done), so it is simply dropped.
+    ``RTCIceTransport.stop()`` closes *conn*, which the mux tolerates. On
+    ICE ``completed`` the nominated remote address is registered on the mux
+    (belt and braces — the mux already learns it from the peer's STUN checks);
+    on ``closed``/``failed`` the connection's ufrag and addresses are dropped.
+    """
+    sctp = pc.sctp
+    if sctp is None:
+        raise ValueError("call pc.createDataChannel() before attach_muxed_connection")
+    ice = (
+        sctp.transport.transport
+    )  # RTCSctpTransport -> RTCDtlsTransport -> RTCIceTransport
+    ice.iceGatherer._connection = conn
+    ice._connection = conn
+    ice._recv = conn.recv
+    ice._send = conn.send
+
+    ufrag = conn.local_username
+
+    @ice.on("statechange")  # type: ignore[misc,untyped-decorator]
+    def _on_ice_state() -> None:
+        state = ice.state
+        if state == "completed":
+            pair = conn._nominated.get(1)
+            if pair is not None:
+                mux.register_addr(pair.remote_addr, pair.protocol)
+        elif state in ("closed", "failed"):
+            mux.unregister(ufrag)
 
 
 # ------------------------------------------------------------------
