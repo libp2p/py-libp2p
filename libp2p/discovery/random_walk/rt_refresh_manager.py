@@ -29,6 +29,10 @@ class RoutingTableProtocol(Protocol):
         """Add a peer to the routing table."""
         ...
 
+    def get_target_keys_for_refresh(self) -> list[bytes]:
+        """Return targeted keys for each bucket in the routing table."""
+        ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +83,7 @@ class RTRefreshManager:
 
         # Control variables
         self._running = False
+        self._is_refreshing = False
         self._nursery: trio.Nursery | None = None
 
         # Tracking
@@ -128,6 +133,27 @@ class RTRefreshManager:
         finally:
             logger.info("RT Refresh Manager main loop stopped")
 
+    async def trigger_refresh(self) -> None:
+        """
+        Manually trigger an asynchronous routing table refresh.
+        Debounced so redundant triggers while a refresh is running are skipped.
+        """
+        if not self._running or self._is_refreshing:
+            return
+
+        logger.info("On-demand routing table refresh triggered")
+        if self._nursery is not None:
+            self._nursery.start_soon(self._do_refresh_safe, True)
+        else:
+            await self._do_refresh_safe(force=True)
+
+    async def _do_refresh_safe(self, force: bool = False) -> None:
+        """Execute refresh safely catching exceptions."""
+        try:
+            await self._do_refresh(force=force)
+        except Exception as e:
+            logger.debug(f"On-demand refresh noticed exception: {e}")
+
     async def _periodic_refresh_task(self) -> None:
         """Task for periodic refreshes."""
         while self._running:
@@ -143,7 +169,12 @@ class RTRefreshManager:
             force: Whether to force refresh regardless of timing
 
         """
+        if self._is_refreshing:
+            logger.debug("Routing table refresh already in progress")
+            return
+
         try:
+            self._is_refreshing = True
             current_time = time.time()
 
             # Check if refresh is needed
@@ -155,13 +186,14 @@ class RTRefreshManager:
             logger.info(f"Starting routing table refresh (force={force})")
             start_time = current_time
 
-            # Perform random walks to discover new peers.
-            # Guard the whole batch with REFRESH_TOTAL_TIMEOUT so that slow or
-            # empty-routing-table peers (e.g. a freshly-started isolated Kubo
-            # node) cannot block the caller indefinitely. Each individual walk
-            # already has REFRESH_QUERY_TIMEOUT (60 s), but with
-            # RANDOM_WALK_CONCURRENCY=10 the worst-case is 10 × 60 = 600 s
-            # without this outer guard.
+            # Get targeted keys from routing table buckets if available
+            target_keys = None
+            if hasattr(self.routing_table, "get_target_keys_for_refresh"):
+                try:
+                    target_keys = self.routing_table.get_target_keys_for_refresh()
+                except Exception as e:
+                    logger.debug(f"Failed to get targeted keys: {e}")
+
             logger.info("Running concurrent random walks to discover new peers")
             current_rt_size = self.routing_table.size()
             discovered_peers: list[PeerInfo] = []
@@ -169,11 +201,11 @@ class RTRefreshManager:
                 discovered_peers = await self.random_walk.run_concurrent_random_walks(
                     count=RANDOM_WALK_CONCURRENCY,
                     current_routing_table_size=current_rt_size,
+                    target_keys=target_keys,
                 )
             if _refresh_scope.cancelled_caught:
                 logger.debug(
-                    "Random-walk batch did not complete within %.0f s "
-                    "(bootstrap peer likely has an empty routing table); "
+                    "Random-walk batch did not complete within %.0f s; "
                     "continuing with %d peer(s) discovered so far.",
                     REFRESH_TOTAL_TIMEOUT,
                     len(discovered_peers),
@@ -196,14 +228,7 @@ class RTRefreshManager:
                 f"duration: {duration:.2f}s"
             )
 
-            # Post-walk connection trim: random walk QUIC connections have served
-            # their purpose (DHT queries done). Close excess connections above the
-            # high-watermark immediately rather than waiting for the 600s QUIC idle
-            # timeout.  Each QUIC connection holds ~5MB of crypto/buffer state in
-            # aioquic, so 133 walk connections accumulate ~665MB that isn't freed
-            # until idle timeout fires — a memory leak pattern.
-            # The swarm's connection pruner respects "protected" peers so
-            # auto-connector's persistent connections won't be closed.
+            # Post-walk connection trim: close excess connections above high-watermark
             await self._trim_walk_connections()
 
             # Notify refresh completion
@@ -216,6 +241,8 @@ class RTRefreshManager:
         except Exception as e:
             logger.error(f"Routing table refresh failed: {e}")
             raise RoutingTableRefreshError(f"Refresh operation failed: {e}") from e
+        finally:
+            self._is_refreshing = False
 
     async def _trim_walk_connections(self) -> None:
         """

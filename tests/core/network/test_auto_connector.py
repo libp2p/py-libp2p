@@ -559,3 +559,110 @@ class TestAutoConnectorDialBatchCap:
 
         # need = 50, needed*2 = 100 but only 10 candidates exist → all dialed.
         assert len(dialed) == 10
+
+    @pytest.mark.trio
+    async def test_backoff_cooldown_progression(self):
+        """
+        Test exponential backoff progression:
+        5s -> 15s -> 20s -> max 300s, max 60s below floor.
+        """
+        from libp2p.network.auto_connector import AutoConnector
+
+        class MockSwarm:
+            connections = {}
+            self_id = ID(b"12D3KooW1" + b"a" * 46)
+            total_conns: int = 20
+
+            class connection_config:
+                min_connections = 10
+                low_watermark = 50
+                dial_timeout = 5.0
+
+            def get_total_connections(self) -> int:
+                return self.total_conns
+
+        swarm = MockSwarm()
+        connector = AutoConnector(swarm)  # type: ignore
+        peer = ID(b"12D3KooW2" + b"b" * 46)
+
+        # 0 failures -> 0.0
+        assert connector._get_cooldown(peer) == 0.0
+
+        # 1 failure -> 5.0s
+        connector.record_failed_connection(peer)
+        assert connector._get_cooldown(peer) == 5.0
+
+        # 2 failures -> 15.0s
+        connector.record_failed_connection(peer)
+        assert connector._get_cooldown(peer) == 15.0
+
+        # 3 failures -> 20.0s (5 * 2^2)
+        connector.record_failed_connection(peer)
+        assert connector._get_cooldown(peer) == 20.0
+
+        # Many failures -> capped at 300.0s
+        for _ in range(10):
+            connector.record_failed_connection(peer)
+        assert connector._get_cooldown(peer) == 300.0
+
+        # When below min_connections -> capped at 60.0s
+        swarm.total_conns = 5  # Below min (10)
+        assert connector._get_cooldown(peer) == 60.0
+
+    @pytest.mark.trio
+    async def test_discovery_callback_triggered_when_candidates_low(self):
+        """Test discovery callback is invoked when candidates are low."""
+        from multiaddr import Multiaddr
+
+        from libp2p.network.auto_connector import AutoConnector
+
+        self_peer = ID(b"12D3KooW1" + b"a" * 46)
+        peers = [ID((b"12D3KooW%02d" % i) + b"b" * 44) for i in range(5)]
+
+        class MockPeerstore:
+            def peer_ids(self):
+                return peers
+
+            def addrs(self, peer_id):
+                return [Multiaddr("/ip4/8.8.8.8/tcp/4001")]
+
+            def get_local_record(self):
+                class _FakeRecord:
+                    def record(self):
+                        class _FakeRec:
+                            addrs = [Multiaddr("/ip4/52.7.183.75/tcp/4001")]
+
+                        return _FakeRec()
+
+                return _FakeRecord()
+
+        class MockSwarm:
+            peerstore = MockPeerstore()
+            connections = {}
+            self_id = self_peer
+
+            class connection_config:
+                low_watermark = 50
+                high_watermark = 100
+                min_connections = 10
+                dial_timeout = 5.0
+
+            def get_total_connections(self):
+                return 0
+
+            async def dial_peer(self, peer_id):
+                pass
+
+        connector = AutoConnector(MockSwarm())  # type: ignore
+        connector._started = True
+
+        discovery_called = False
+
+        async def mock_discovery():
+            nonlocal discovery_called
+            discovery_called = True
+
+        connector.set_discovery_callback(mock_discovery)
+        await connector.maybe_connect()
+
+        assert discovery_called is True

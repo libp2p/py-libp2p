@@ -8,6 +8,10 @@ matching go-libp2p behavior.
 Reference: https://github.com/libp2p/go-libp2p/blob/master/p2p/net/connmgr/connmgr.go
 """
 
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 import ipaddress
 import logging
 import random
@@ -167,8 +171,9 @@ class AutoConnector:
         self._in_flight_dials: set[ID] = set()
         self._last_connect_attempt: dict[ID, float] = {}
         self._failure_counts: dict[ID, int] = {}
-        self._base_cooldown = 300.0  # base retry interval (seconds)
-        self._max_cooldown = 3600.0  # cap at 1 hour for persistent failures
+        self._base_cooldown = 5.0  # base retry interval (seconds, matches go-libp2p)
+        self._max_cooldown = 300.0  # cap at 5 minutes for persistent failures
+        self._discovery_callback: Callable[[], Awaitable[None]] | None = None
         # Peers that recently disconnected: we back off from immediately
         # re-dialing them (event-driven auto-connect on disconnect would
         # otherwise reconnect to the peer we just closed in a tight loop).
@@ -178,6 +183,14 @@ class AutoConnector:
         # min_connections we poll at _critical_check_interval so the node
         # recovers steadily without overwhelming the CPU (Bug 15).
         self._critical_check_interval = 10.0
+
+    def set_discovery_callback(
+        self, callback: Callable[[], Awaitable[None]] | None
+    ) -> None:
+        """
+        Set callback to trigger on-demand DHT discovery when candidates are low.
+        """
+        self._discovery_callback = callback
 
     async def start(self) -> None:
         """Start the auto-connector background task."""
@@ -311,6 +324,28 @@ class AutoConnector:
             # Get candidate peers from peerstore
             candidates = await self._get_candidate_peers()
 
+            # Filter candidates that are not currently in cooldown
+            dialable_candidates = [
+                p for p in candidates if not self._should_skip_peer(p)
+            ]
+
+            # Auto-trigger DHT peer discovery when available candidates are low
+            if (
+                len(dialable_candidates) < 20
+                and needed > 0
+                and self._discovery_callback is not None
+            ):
+                logger.info(
+                    "AutoConnector candidate pool low (%d available, needed=%d); "
+                    "triggering on-demand DHT discovery",
+                    len(dialable_candidates),
+                    needed,
+                )
+                try:
+                    await self._discovery_callback()
+                except Exception as e:
+                    logger.debug("Discovery callback error (non-fatal): %s", e)
+
             if not candidates:
                 logger.debug("No candidate peers available for auto-connection")
                 return
@@ -318,8 +353,8 @@ class AutoConnector:
             # Shuffle to randomize connection order
             random.shuffle(candidates)
 
-            # Concurrency limiter and dial batch sizing (matches go-libp2p: 16)
-            CONN_MGR_BATCH_SIZE = 16
+            # Concurrency limiter and dial batch sizing (matches go-libp2p: 16-32)
+            CONN_MGR_BATCH_SIZE = 32 if needed > 32 else 16
             dial_limiter = trio.CapacityLimiter(CONN_MGR_BATCH_SIZE)
             max_dials_per_cycle = CONN_MGR_BATCH_SIZE
 
@@ -495,10 +530,11 @@ class AutoConnector:
 
     def _get_cooldown(self, peer_id: ID) -> float:
         """
-        Calculate exponential backoff cooldown for a peer.
+        Calculate exponential backoff cooldown for a peer matching go-libp2p standards.
 
         Returns base_cooldown * 2^(failures-1), capped at max_cooldown.
-        First failure: 300s, second: 600s, third: 1200s … cap: 3600s.
+        First failure: 5s, second: 15s, third: 20s, fourth: 40s … cap: 300s.
+        When critically below min_connections floor, cap backoff at 60s.
 
         Parameters
         ----------
@@ -513,8 +549,17 @@ class AutoConnector:
         """
         n = self._failure_counts.get(peer_id, 0)
         if n <= 0:
-            return self._base_cooldown
-        return min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+            return 0.0
+        if n == 1:
+            backoff = self._base_cooldown  # 5.0s
+        elif n == 2:
+            backoff = self._base_cooldown * 3.0  # 15.0s
+        else:
+            backoff = min(self._base_cooldown * (2 ** (n - 1)), self._max_cooldown)
+
+        if self._below_min_connections():
+            return min(backoff, 60.0)
+        return min(backoff, self._max_cooldown)
 
     def _should_skip_peer(self, peer_id: ID) -> bool:
         """

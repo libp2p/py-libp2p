@@ -382,6 +382,24 @@ class KadDHT(Service):
             if self.rt_refresh_manager is not None:
                 nursery.start_soon(self.rt_refresh_manager.start)
                 logger.info("RT Refresh Manager started - Random Walk is now active")
+
+                # Wire RT refresh manager to auto-connector discovery callback
+                try:
+                    network = getattr(self.host, "get_network", lambda: None)()
+                    auto_connector = getattr(network, "auto_connector", None)
+                    if auto_connector is not None and hasattr(
+                        auto_connector, "set_discovery_callback"
+                    ):
+                        auto_connector.set_discovery_callback(
+                            self.rt_refresh_manager.trigger_refresh
+                        )
+                        logger.debug(
+                            "Wired RT Refresh Manager to AutoConnector callback"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Could not wire discovery callback to auto_connector: %s", e
+                    )
             else:
                 logger.info("Random Walk is disabled - RT Refresh Manager not started")
 

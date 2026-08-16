@@ -93,8 +93,9 @@ logger = logging.getLogger(__name__)
 _HAPPY_EYEBALLS_DELAY = (
     0.250  # 250ms head start for primary transport (matches go-libp2p DialDelay)
 )
-# Global max concurrent in-flight dials (matches go-libp2p DefaultMaxConcurrentDials)
-MAX_CONCURRENT_DIALS = 16
+# Global max concurrent in-flight dials
+# (matches go-libp2p DefaultMaxConcurrentDials: 32)
+MAX_CONCURRENT_DIALS = 32
 MAX_ADDRS_PER_PEER = 2  # Top 1-2 addresses per peer (at most 1 per transport class)
 _MAX_PARALLEL_DIALS = 2
 
@@ -259,7 +260,10 @@ class Swarm(Service, INetworkService):
         self._prune_task_running = False
 
         # Global Swarm dial limiter matching go-libp2p DefaultMaxConcurrentDials
-        self._global_dial_limiter = trio.CapacityLimiter(MAX_CONCURRENT_DIALS)
+        max_dials = getattr(
+            self.connection_config, "max_concurrent_dials", MAX_CONCURRENT_DIALS
+        )
+        self._global_dial_limiter = trio.CapacityLimiter(max_dials)
 
         # Auto-connect trigger state (Bug 6): when connections drop below the
         # low watermark we trigger auto-connect immediately (cooldown-limited)

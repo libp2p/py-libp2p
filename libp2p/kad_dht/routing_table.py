@@ -13,6 +13,7 @@ from ipaddress import (
     ip_network,
 )
 import logging
+import secrets
 import time
 from typing import TYPE_CHECKING
 
@@ -63,6 +64,47 @@ def peer_id_to_key(peer_id: ID) -> bytes:
 def key_to_int(key: bytes) -> int:
     """Convert a 256-bit key to an integer for range calculations."""
     return int.from_bytes(key, byteorder="big")
+
+
+def gen_random_key_in_bucket(bucket: KBucket) -> bytes:
+    """
+    Generate a 32-byte key uniformly at random within the bucket's key range.
+    Matches go-libp2p-kbucket targeted bucket refresh.
+    """
+    if bucket.max_range <= bucket.min_range + 1:
+        val = bucket.min_range
+    else:
+        val = secrets.randbelow(bucket.max_range - bucket.min_range) + bucket.min_range
+    return val.to_bytes(32, byteorder="big")
+
+
+def gen_random_peer_id_with_cpl(local_id: ID, cpl: int) -> bytes:
+    """
+    Generate a 32-byte key sharing exactly `cpl` prefix bits with local_id's key,
+    with the (cpl)-th bit inverted, and all subsequent bits chosen uniformly at random.
+    Matches go-libp2p-kbucket GenRandPeerID / GenRandomKey.
+    """
+    local_key = peer_id_to_key(local_id)
+    key_int = int.from_bytes(local_key, "big")
+
+    rand_int = secrets.randbits(256)
+
+    # Keep first cpl bits of local_key
+    if cpl > 0:
+        cpl_mask = ((1 << cpl) - 1) << (256 - cpl)
+        target_int = (key_int & cpl_mask) | (rand_int & ~cpl_mask)
+    else:
+        target_int = rand_int
+
+    # Flip the cpl-th bit (0-indexed from MSB)
+    bit_pos = 255 - cpl
+    if bit_pos >= 0:
+        if (key_int >> bit_pos) & 1:
+            target_int &= ~(1 << bit_pos)
+        else:
+            target_int |= 1 << bit_pos
+
+    return target_int.to_bytes(32, "big")
 
 
 def _subnet_key(peer_info: PeerInfo) -> str | None:
@@ -705,6 +747,21 @@ class RoutingTable:
         """
         self.buckets = [KBucket(self.host, BUCKET_SIZE)]
         logger.info("Routing table cleaned up, all data removed.")
+
+    def get_target_keys_for_refresh(self) -> list[bytes]:
+        """
+        Return targeted 32-byte keys for each active bucket in the routing table.
+        Matches go-libp2p rtrefresh strategy.
+        """
+        return [gen_random_key_in_bucket(bucket) for bucket in self.buckets]
+
+    def get_active_cpls(self) -> list[int]:
+        """
+        Return a list of Common Prefix Length (CPL) indices for the routing table.
+        Used to perform targeted K-bucket random walk refreshes.
+        """
+        # Bucket count determines the depth of the routing tree
+        return list(range(min(len(self.buckets) + 1, 256)))
 
     def get_diagnostics(self) -> RoutingTableDiagnostics:
         """
