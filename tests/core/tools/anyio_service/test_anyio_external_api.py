@@ -32,7 +32,7 @@ class ExternalAPIService(Service):
         return 7
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_anyio_service_external_api_fails_before_start():
     service = ExternalAPIService()
 
@@ -41,7 +41,7 @@ async def test_anyio_service_external_api_fails_before_start():
         await service.get_7()
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_anyio_service_external_api_works_while_running():
     service = ExternalAPIService()
 
@@ -49,7 +49,7 @@ async def test_anyio_service_external_api_works_while_running():
         assert await service.get_7() == 7
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_anyio_service_external_api_raises_when_cancelled():
     service = ExternalAPIService()
 
@@ -77,7 +77,7 @@ async def test_anyio_service_external_api_raises_when_cancelled():
             assert await service.get_7()
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_anyio_service_external_api_raises_when_finished():
     service = ExternalAPIService()
 
@@ -91,7 +91,7 @@ async def test_anyio_service_external_api_raises_when_finished():
         assert await service.get_7()
 
 
-@pytest.mark.trio
+@pytest.mark.anyio
 async def test_trio_external_api_call_that_schedules_task():
     done = anyio.Event()
 
