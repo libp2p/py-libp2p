@@ -1,12 +1,23 @@
 """
 WebRTC Direct listener.
 
-Runs a lightweight HTTP signaling server on TCP (same port number as the
-WebRTC UDP endpoint) that accepts SDP offers and returns answers.  After
-the SDP exchange each incoming connection completes ICE/DTLS, a Noise XX
-handshake over data-channel 0 (the listener is the Noise *initiator*, per
-spec), and then hands the fully-authenticated :class:`WebRTCConnection` to
-the registered handler on the trio side.
+Spec path (default): one shared UDP socket (:class:`UdpMux`). A dialer's
+first STUN BINDING REQUEST carries ``USERNAME = server_ufrag:client_ufrag``;
+the version prefix on ``server_ufrag`` (``libp2p+webrtc+v1/`` /
+``libp2p+webrtc+v2/``) selects the flow. The listener infers the dialer's
+SDP offer from that packet (credentials + source address), answers over the
+muxed ICE agent, completes DTLS (as DTLS server, without verifying the
+dialer's fingerprint — it cannot know it yet), then runs the Noise XX
+handshake over data-channel 0 as the Noise *initiator* and hands the
+authenticated :class:`WebRTCConnection` to the handler on the trio side.
+
+Experimental harness (``config.enable_sdp_http_harness``): additionally
+serves ``POST /sdp`` on TCP (same port number) for py↔py debugging. Not
+interoperable with other implementations.
+
+Published multiaddr format::
+
+    /ip4/<bound-ip>/udp/<bound-port>/webrtc-direct/certhash/<hash>/p2p/<peer-id>
 
 Threading model: aiortc runs on the :class:`AsyncioBridge` thread; the Noise
 handshake and the handler run on trio inside a listener-owned nursery
@@ -14,10 +25,6 @@ handshake and the handler run on trio inside a listener-owned nursery
 ``trio.from_thread.run_sync(nursery.start_soon, ...)`` — non-blocking, so
 the asyncio loop keeps servicing the data-channel callbacks the handshake
 needs.
-
-Published multiaddr format::
-
-    /ip4/<bound-ip>/udp/<bound-port>/webrtc-direct/certhash/<hash>/p2p/<peer-id>
 
 Spec: https://github.com/libp2p/specs/blob/master/webrtc/webrtc-direct.md
 """
@@ -45,9 +52,11 @@ from .multiaddr_utils import (
     build_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
+from .sdp import build_inferred_offer, parse_direct_username
 
 if TYPE_CHECKING:
     from ._asyncio_bridge import AsyncioBridge
+    from ._udp_mux import UdpMux
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +88,10 @@ class WebRTCDirectListener(IListener):
         self._closed = False
         self._signaling_server: asyncio.Server | None = None
         self._bridge: AsyncioBridge | None = None
+        self._mux: UdpMux | None = None
+        self._rtc_cert: Any = None
+        # Host used for the muxed connections' single host candidate.
+        self._candidate_host = "127.0.0.1"
 
         # trio side: long-lived nursery for inbound handshakes/handlers.
         self._trio_token: trio.lowlevel.TrioToken | None = None
@@ -94,9 +107,11 @@ class WebRTCDirectListener(IListener):
         """
         Start listening for incoming WebRTC Direct connections.
 
-        Starts an HTTP signaling server on TCP that accepts SDP offers.
-        The published multiaddr advertises the same port on UDP (for
-        WebRTC data channels) and includes the DTLS certificate hash.
+        Binds one shared UDP socket and dispatches inbound STUN by ufrag (spec
+        path). If ``config.enable_sdp_http_harness`` is set, also starts the
+        experimental HTTP ``POST /sdp`` signaling server on TCP with the same
+        port number. The published multiaddr advertises the UDP port and the
+        DTLS certificate hash.
 
         :param maddr: A ``/webrtc-direct`` multiaddr.
         :raises WebRTCConnectionError: If binding fails.
@@ -110,30 +125,34 @@ class WebRTCDirectListener(IListener):
             raise WebRTCConnectionError(
                 "WebRTC certificate was not generated via aiortc"
             )
+        self._rtc_cert = rtc_cert
 
         await self._start_trio_nursery()
 
-        from ._aiortc_helpers import run_signaling_server
+        from ._udp_mux import UdpMux
 
-        # Start HTTP signaling server on asyncio thread.
-        # Binds TCP on the same port as the WebRTC UDP endpoint.
-        self._signaling_server = await bridge.run_coro(
-            run_signaling_server(
-                host=host if host != "0.0.0.0" else "0.0.0.0",
-                port=port,
-                on_offer=self._make_offer_handler(bridge, rtc_cert),
+        # Shared UDP socket + STUN dispatch (runs on the asyncio thread).
+        mux, bound_port = await bridge.run_coro(UdpMux.create(host, port))
+        self._mux = mux
+        advertised_host = host if host != "0.0.0.0" else "127.0.0.1"
+        self._candidate_host = advertised_host
+        mux.set_unknown_stun_handler(self._on_unknown_stun)
+
+        if self._config.enable_sdp_http_harness:
+            from ._aiortc_helpers import run_signaling_server
+
+            # Experimental py<->py harness: TCP, same port number as the UDP
+            # socket so one multiaddr describes both.
+            self._signaling_server = await bridge.run_coro(
+                run_signaling_server(
+                    host=host,
+                    port=bound_port,
+                    on_offer=self._make_offer_handler(bridge, rtc_cert),
+                )
             )
-        )
-
-        # Determine the actual bound port (if port was 0).
-        bound_port = port
-        if self._signaling_server.sockets:
-            sock = self._signaling_server.sockets[0]
-            bound_port = sock.getsockname()[1]
 
         # Build advertised multiaddr with certhash and peer ID.
         certhash_mb = self._certificate.fingerprint_to_multibase()
-        advertised_host = host if host != "0.0.0.0" else "127.0.0.1"
         advertised = build_webrtc_direct_multiaddr(
             host=advertised_host,
             port=bound_port,
@@ -142,6 +161,105 @@ class WebRTCDirectListener(IListener):
         )
         self._listening_addrs.append(advertised)
         logger.info("WebRTC Direct listener on %s", advertised)
+
+    # ------------------------------------------------------------------
+    # Spec path: STUN first contact -> inferred offer -> muxed PC
+    # ------------------------------------------------------------------
+
+    def _on_unknown_stun(
+        self, username: str, data: bytes, addr: tuple[str, int]
+    ) -> None:
+        """
+        First inbound BINDING REQUEST from a new dialer (asyncio thread, sync).
+
+        Validates the ``USERNAME``, registers a mux-backed ICE connection for
+        the server ufrag (so every following packet routes without coming
+        back here), replays the packet into it, and schedules the async
+        acceptance. Anything malformed is dropped silently — this is an
+        unauthenticated network input.
+        """
+        mux, bridge = self._mux, self._bridge
+        if self._closed or mux is None or bridge is None:
+            return
+        # ponytail: in-flight cap only; add a per-source-IP token bucket if
+        # STUN floods from one address become a problem (spec: SHOULD rate-limit).
+        if self._in_flight >= self._config.max_in_flight_connections:
+            logger.debug("WebRTC Direct: in-flight cap reached, dropping %s", addr)
+            return
+        try:
+            version, server_ufrag, _client_ufrag = parse_direct_username(username)
+            if version != 1:
+                logger.debug(
+                    "WebRTC Direct: v%d not supported yet, dropping %s", version, addr
+                )
+                return
+            # v1: the dialer set ufrag == pwd on both offer and answer, so the
+            # server credential *is* the password.
+            conn = mux.add_ice_connection(
+                server_ufrag, server_ufrag, host=self._candidate_host
+            )
+        except (WebRTCConnectionError, ValueError):
+            logger.debug("WebRTC Direct: rejected first contact from %s", addr)
+            return
+
+        self._in_flight += 1
+        # Re-dispatch: the ufrag is registered now, so this reaches the aioice
+        # protocol (which answers the check and queues it) and teaches the
+        # mux the peer's address.
+        mux.datagram_received(data, addr)
+        asyncio.ensure_future(self._accept_v1(conn, server_ufrag, addr))
+
+    async def _accept_v1(
+        self, conn: Any, server_ufrag: str, addr: tuple[str, int]
+    ) -> None:
+        """Build the muxed PC for a v1 first contact and drive it to connected."""
+        from aiortc import RTCSessionDescription
+
+        from ._aiortc_helpers import (
+            attach_muxed_connection,
+            create_noise_channel,
+            create_peer_connection,
+            make_noise_channel_callbacks,
+        )
+
+        mux, bridge = self._mux, self._bridge
+        assert mux is not None and bridge is not None
+        pc: Any = None
+        try:
+            # The listener never needs STUN servers: it is reachable on the
+            # advertised address by construction.
+            pc = await create_peer_connection(self._rtc_cert, ice_servers=[])
+            noise_ch = await create_noise_channel(pc)
+            noise_send, noise_recv, _ = make_noise_channel_callbacks(noise_ch)
+            attach_muxed_connection(pc, mux, conn)
+            # Spec step 6.2/7: B cannot know A's DTLS fingerprint, so it must
+            # not verify it during DTLS; the Noise handshake authenticates.
+            pc.sctp.transport._validate_peer_identity = lambda _params: None
+
+            offer_sdp = build_inferred_offer(
+                client_ufrag=server_ufrag,
+                client_pwd=server_ufrag,
+                remote_host=addr[0],
+                remote_port=addr[1],
+                max_message_size=self._config.max_message_size,
+            )
+            await pc.setRemoteDescription(
+                RTCSessionDescription(sdp=offer_sdp, type="offer")
+            )
+            answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+        except BaseException:
+            self._in_flight -= 1
+            logger.debug("WebRTC Direct: inbound setup failed", exc_info=True)
+            mux.unregister(server_ufrag)
+            if pc is not None:
+                try:
+                    await pc.close()
+                except Exception:
+                    pass
+            return
+
+        await self._complete_inbound(pc, bridge, noise_send, noise_recv)
 
     async def _start_trio_nursery(self) -> None:
         """
@@ -351,6 +469,14 @@ class WebRTCDirectListener(IListener):
             except Exception:
                 logger.debug("Error closing signaling server", exc_info=True)
             self._signaling_server = None
+
+        if self._mux is not None and self._bridge is not None:
+            mux, self._mux = self._mux, None
+            mux.set_unknown_stun_handler(None)
+            try:
+                await self._bridge.run_coro(mux.close())
+            except Exception:
+                logger.debug("Error closing UdpMux", exc_info=True)
 
         if self._nursery is not None:
             self._nursery.cancel_scope.cancel()
