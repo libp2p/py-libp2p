@@ -12,6 +12,7 @@ import pytest
 import trio
 
 from libp2p.abc import INetConn, INetStream
+from libp2p.connection_types import ConnectionType
 from libp2p.network.config import ConnectionConfig
 from libp2p.network.swarm import Swarm
 from libp2p.peer.id import ID
@@ -47,6 +48,9 @@ class MockConnection(INetConn):
 
     def get_transport_addresses(self):
         return []
+
+    def get_connection_type(self) -> ConnectionType:
+        return ConnectionType.DIRECT
 
 
 @pytest.mark.trio

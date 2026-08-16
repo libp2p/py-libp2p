@@ -54,7 +54,7 @@ async def test_new_host_backward_compatibility() -> None:
     # Verify default config applied
     swarm = cast(Swarm, host.get_network())
     assert swarm.connection_config.enable_health_monitoring is False  # Default
-    assert swarm.connection_config.load_balancing_strategy == "round_robin"  # Default
+    assert swarm.connection_config.load_balancing_strategy == "best"  # Default
 
     await host.close()
 
@@ -295,7 +295,13 @@ async def test_new_host_non_quic_with_connection_config() -> None:
 @pytest.mark.trio
 async def test_new_host_health_monitoring_with_multiple_strategies() -> None:
     """Test different load balancing strategies can be configured."""
-    strategies = ["round_robin", "least_loaded", "health_based", "latency_based"]
+    strategies = [
+        "best",
+        "round_robin",
+        "least_loaded",
+        "health_based",
+        "latency_based",
+    ]
 
     for strategy in strategies:
         config = ConnectionConfig(
@@ -324,7 +330,7 @@ async def test_new_host_config_none_uses_defaults() -> None:
     assert swarm.connection_config is not None
     assert swarm.connection_config.enable_health_monitoring is False
     assert swarm.connection_config.max_connections_per_peer == 3
-    assert swarm.connection_config.load_balancing_strategy == "round_robin"
+    assert swarm.connection_config.load_balancing_strategy == "best"
 
     await host.close()
 

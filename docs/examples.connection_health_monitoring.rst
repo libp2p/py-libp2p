@@ -1,9 +1,12 @@
 Connection Health Monitoring
 ============================
 
-This example demonstrates the enhanced connection health monitoring capabilities
-in Python libp2p, which provides sophisticated connection health tracking,
-proactive monitoring, health-aware load balancing, and advanced metrics collection.
+This example demonstrates the **optional**, Python-local connection health
+monitoring extension for py-libp2p. It is inspired by go-libp2p ConnMgr
+(Protect/tags/watermarks), peerstore LatencyEWMA, and swarm ``bestConn``
+selection — but go-libp2p does **not** ship a proactive health monitor,
+``health_score``, or auto-replace of unhealthy connections. Those behaviors
+here are an opt-in QoS layer, not a wire-protocol or cross-impl requirement.
 
 Overview
 --------
@@ -20,7 +23,8 @@ support by adding:
 - **Health Metrics Tracking**: Latency, success rates, stream counts, and more
 - **Proactive Health Checks**: Periodic monitoring and automatic connection replacement
 - **Health-Aware Load Balancing**: Route traffic to the healthiest connections
-- **Automatic Recovery**: Replace unhealthy connections automatically
+- **Automatic Recovery**: Replace unhealthy connections automatically (dial-first;
+  skips ConnMgr-protected peers)
 
 Basic Setup
 -----------
@@ -57,7 +61,7 @@ Configuration Options
 Health Monitoring Settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **enable_health_monitoring**: Enable/disable health monitoring (default: False)
+- **enable_health_monitoring**: Enable/disable connection health monitoring (default: False)
 - **health_check_interval**: Interval between health checks in seconds (default: 60.0)
 - **ping_timeout**: Timeout for ping operations in seconds (default: 5.0)
 - **min_health_threshold**: Minimum health score (0.0-1.0) for connections (default: 0.3)
@@ -66,10 +70,11 @@ Health Monitoring Settings
 Load Balancing Strategies
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **round_robin**: Simple round-robin selection (default)
+- **best**: go-libp2p-style heuristics (prefer direct, then more streams; default)
+- **round_robin**: Simple round-robin selection
 - **least_loaded**: Select connection with fewest streams
-- **health_based**: Select connection with highest health score
-- **latency_based**: Select connection with lowest latency
+- **health_based**: Select connection with highest health score (Python extension)
+- **latency_based**: Select connection with lowest latency (Python extension)
 
 Health Metrics
 --------------

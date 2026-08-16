@@ -1,5 +1,9 @@
 # Health Monitoring Demo
 
+Optional **Python-local** connection health / resource-manager demo. Inspired by
+go-libp2p ConnMgr and metrics patterns; the proactive health monitor is **not**
+a go-libp2p feature and is off by default in `ConnectionConfig`.
+
 **Prerequisites:** The demo exposes metrics over HTTP for Prometheus. Install the client in your venv:
 
 ```bash

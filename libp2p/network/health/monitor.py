@@ -288,20 +288,33 @@ class ConnectionHealthMonitor(Service):
     async def _replace_unhealthy_connection(
         self, peer_id: ID, old_conn: INetConn
     ) -> None:
-        """Replace an unhealthy connection with a new one."""
-        try:
-            logger.info(f"Replacing unhealthy connection for peer {peer_id}")
+        """
+        Replace an unhealthy connection with a new one.
 
-            # Check if we have enough connections remaining
+        Dial a replacement first (go-libp2p does not auto-replace; this is a
+        Python-local QoS policy). Only drop the old connection after a new one
+        succeeds, so we never go below ``min_connections_per_peer`` on failure.
+        Protected peers (ConnMgr Protect / tag_store) are never auto-replaced.
+        """
+        try:
+            # Respect go-libp2p Protect semantics via TagStore
+            tag_store = getattr(self.swarm, "tag_store", None)
+            if tag_store is not None and tag_store.is_protected(peer_id):
+                logger.info(
+                    "Skipping replacement for protected peer %s "
+                    "(ConnMgr Protect / tag_store)",
+                    peer_id,
+                )
+                return
+
+            logger.info("Replacing unhealthy connection for peer %s", peer_id)
+
             current_connections = self.swarm.connections.get(peer_id, [])
             remaining_after_removal = len(current_connections) - 1
 
-            # Check if connection is critically unhealthy (very low health score)
             is_critically_unhealthy = False
             if self._has_health_data(peer_id, old_conn):
                 health = self.swarm.health_data[peer_id][old_conn]
-                # Consider critically unhealthy if health score is very low
-                # (e.g., < 0.1) or ping success rate is 0
                 critical_threshold = getattr(
                     self.config, "critical_health_threshold", 0.1
                 )
@@ -310,82 +323,79 @@ class ConnectionHealthMonitor(Service):
                     or health.ping_success_rate == 0.0
                 )
 
-            # Only remove if we have more than the minimum required,
-            # OR if the connection is critically unhealthy (allow replacement
-            # even at minimum to maintain quality)
+            # At min connections, only attempt replace for critically unhealthy
+            # (still dial-first so a failed dial leaves the old conn in place)
             if (
                 remaining_after_removal < self.config.min_connections_per_peer
                 and not is_critically_unhealthy
             ):
                 logger.warning(
-                    f"Not replacing connection to {peer_id}: would go below minimum "
-                    f"({remaining_after_removal} < "
-                    f"{self.config.min_connections_per_peer}) and connection is not "
-                    f"critically unhealthy"
+                    "Not replacing connection to %s: would go below minimum "
+                    "(%s < %s) and connection is not critically unhealthy",
+                    peer_id,
+                    remaining_after_removal,
+                    self.config.min_connections_per_peer,
                 )
                 return
 
             if is_critically_unhealthy:
                 logger.info(
-                    f"Allowing replacement of critically unhealthy connection to "
-                    f"{peer_id} even at minimum connections"
+                    "Allowing replacement of critically unhealthy connection to "
+                    "%s even at minimum connections",
+                    peer_id,
                 )
 
-            # Clean up health tracking first
-            self.swarm.cleanup_connection_health(peer_id, old_conn)
+            # Dial first; only drop the old connection after success
+            try:
+                logger.info("Attempting to dial replacement connection to %s", peer_id)
+                new_conn = await self.swarm.dial_peer_replacement(peer_id)
+            except Exception as e:
+                logger.error(
+                    "Error establishing replacement connection to %s: %s", peer_id, e
+                )
+                return
 
-            # Remove from active connections
+            if not new_conn:
+                logger.warning(
+                    "Failed to establish replacement connection to %s; "
+                    "keeping existing connection",
+                    peer_id,
+                )
+                return
+
+            logger.info(
+                "Successfully established replacement connection to %s", peer_id
+            )
+
+            # Ensure health tracking for the new connection
+            if (
+                peer_id in self.swarm.connections
+                and new_conn in self.swarm.connections.get(peer_id, [])
+            ):
+                if not self._has_health_data(peer_id, new_conn):
+                    self.swarm.initialize_connection_health(peer_id, new_conn)
+            else:
+                logger.warning(
+                    "Replacement connection to %s was not properly "
+                    "added to swarm connections tracking",
+                    peer_id,
+                )
+
+            # Now safe to drop the old connection
+            self.swarm.cleanup_connection_health(peer_id, old_conn)
             if (
                 peer_id in self.swarm.connections
                 and old_conn in self.swarm.connections[peer_id]
             ):
                 self.swarm.connections[peer_id].remove(old_conn)
 
-            # Close the unhealthy connection
             try:
                 await old_conn.close()
             except Exception as e:
-                logger.debug(f"Error closing unhealthy connection: {e}")
-
-            # Try to establish a new connection to maintain connectivity
-            try:
-                logger.info(f"Attempting to dial replacement connection to {peer_id}")
-                new_conn = await self.swarm.dial_peer_replacement(peer_id)
-                if new_conn:
-                    logger.info(
-                        f"Successfully established replacement connection to {peer_id}"
-                    )
-                    # Verify connection was added to swarm tracking
-                    # (dial_peer_replacement should handle this via add_conn,
-                    # but we verify to ensure health tracking is initialized)
-                    if (
-                        peer_id in self.swarm.connections
-                        and new_conn in self.swarm.connections[peer_id]
-                    ):
-                        # Ensure health tracking is initialized for the new connection
-                        if not self._has_health_data(peer_id, new_conn):
-                            self.swarm.initialize_connection_health(peer_id, new_conn)
-                            logger.debug(
-                                f"Initialized health tracking for replacement "
-                                f"connection to {peer_id}"
-                            )
-                    else:
-                        logger.warning(
-                            f"Replacement connection to {peer_id} was not properly "
-                            f"added to swarm connections tracking"
-                        )
-                else:
-                    logger.warning(
-                        f"Failed to establish replacement connection to {peer_id}"
-                    )
-
-            except Exception as e:
-                logger.error(
-                    f"Error establishing replacement connection to {peer_id}: {e}"
-                )
+                logger.debug("Error closing unhealthy connection: %s", e)
 
         except Exception as e:
-            logger.error(f"Error replacing connection to {peer_id}: {e}")
+            logger.error("Error replacing connection to %s: %s", peer_id, e)
 
     @property
     def _is_health_monitoring_enabled(self) -> bool:

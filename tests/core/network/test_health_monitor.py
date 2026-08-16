@@ -13,6 +13,7 @@ import pytest
 import trio
 
 from libp2p.abc import INetConn, INetStream
+from libp2p.connection_types import ConnectionType
 from libp2p.network.config import ConnectionConfig
 from libp2p.network.health.data_structures import (
     ConnectionHealth,
@@ -76,6 +77,9 @@ class MockConnection(INetConn):
     def get_transport_addresses(self) -> list[Any]:  # type: ignore[override]
         return []
 
+    def get_connection_type(self) -> ConnectionType:
+        return ConnectionType.DIRECT
+
 
 class MockSwarm:
     """Mock Swarm for testing health monitor."""
@@ -90,6 +94,8 @@ class MockSwarm:
         self.initialize_connection_health_called = 0
         self.cleanup_connection_health_called = 0
         self.dial_peer_replacement_called = 0
+        self.tag_store = Mock()
+        self.tag_store.is_protected = Mock(return_value=False)
 
     @property
     def _is_health_monitoring_enabled(self) -> bool:
@@ -569,11 +575,10 @@ async def test_replace_unhealthy_connection_respects_minimum() -> None:
 
 @pytest.mark.trio
 async def test_replace_unhealthy_connection_dial_failure() -> None:
-    """Test replacement handles dial failure gracefully."""
+    """On dial failure, keep the old connection (replace-before-drop)."""
     config = ConnectionConfig(enable_health_monitoring=True, min_connections_per_peer=1)
     swarm = MockSwarm(config)
 
-    # Make dial_peer_replacement raise an exception
     async def failing_dial(peer_id):  # type: ignore[no-untyped-def]
         raise Exception("Dial failed")
 
@@ -581,20 +586,68 @@ async def test_replace_unhealthy_connection_dial_failure() -> None:
 
     peer_id = ID(b"peer1")
     old_conn = MockConnection(peer_id)
-    healthy_conn = MockConnection(peer_id)  # Keep a healthy connection
+    healthy_conn = MockConnection(peer_id)
 
-    # Add two connections (so we can replace one)
     swarm.connections[peer_id] = [old_conn, healthy_conn]
     swarm.initialize_connection_health(peer_id, old_conn)
     swarm.initialize_connection_health(peer_id, healthy_conn)
 
     monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
 
-    # Should not raise exception even though dial fails
     await monitor._replace_unhealthy_connection(peer_id, old_conn)
 
-    # Old connection should still be cleaned up and closed
-    assert old_conn.close_called
+    # Dial-first: failed dial must leave the old connection in place
+    assert not old_conn.close_called
+    assert old_conn in swarm.connections[peer_id]
+    assert swarm.cleanup_connection_health_called == 0
+
+
+@pytest.mark.trio
+async def test_replace_unhealthy_connection_returns_none_keeps_old() -> None:
+    """When dial returns None, keep the old connection."""
+    config = ConnectionConfig(enable_health_monitoring=True, min_connections_per_peer=1)
+    swarm = MockSwarm(config)
+
+    async def none_dial(peer_id):  # type: ignore[no-untyped-def]
+        swarm.dial_peer_replacement_called += 1
+        return None
+
+    swarm.dial_peer_replacement = none_dial  # type: ignore[method-assign]
+
+    peer_id = ID(b"peer1")
+    old_conn = MockConnection(peer_id)
+    healthy_conn = MockConnection(peer_id)
+    swarm.connections[peer_id] = [old_conn, healthy_conn]
+    swarm.initialize_connection_health(peer_id, old_conn)
+    swarm.initialize_connection_health(peer_id, healthy_conn)
+
+    monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
+    await monitor._replace_unhealthy_connection(peer_id, old_conn)
+
+    assert not old_conn.close_called
+    assert old_conn in swarm.connections[peer_id]
+
+
+@pytest.mark.trio
+async def test_replace_skips_protected_peer() -> None:
+    """Protected peers (tag_store / ConnMgr Protect) are never auto-replaced."""
+    config = ConnectionConfig(enable_health_monitoring=True, min_connections_per_peer=1)
+    swarm = MockSwarm(config)
+    swarm.tag_store.is_protected = Mock(return_value=True)
+
+    peer_id = ID(b"peer1")
+    old_conn = MockConnection(peer_id)
+    healthy_conn = MockConnection(peer_id)
+    swarm.connections[peer_id] = [old_conn, healthy_conn]
+    swarm.initialize_connection_health(peer_id, old_conn)
+    swarm.initialize_connection_health(peer_id, healthy_conn)
+
+    monitor = ConnectionHealthMonitor(swarm)  # type: ignore[arg-type]
+    await monitor._replace_unhealthy_connection(peer_id, old_conn)
+
+    assert swarm.dial_peer_replacement_called == 0
+    assert not old_conn.close_called
+    assert old_conn in swarm.connections[peer_id]
 
 
 @pytest.mark.trio
