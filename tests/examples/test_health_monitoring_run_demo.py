@@ -34,12 +34,13 @@ def run_demo(
     )
 
 
-def parse_final_state(stdout: str) -> dict[str, int | None]:
+def parse_final_state(stdout: str, stderr: str = "") -> dict[str, int | None]:
     """
     Parse the last 'Current:', 'Blocked:', and 'active connections' lines.
-    Returns dict with conns, streams, memory_bytes, blocked_conns, blocked_streams,
-    blocked_memory, active_connections, blocked_connections.
+
+    Demo logs go to stderr (logging module); accept both streams.
     """
+    text = "\n".join(part for part in (stdout, stderr) if part)
     out: dict[str, int | None] = {
         "conns": None,
         "streams": None,
@@ -53,7 +54,7 @@ def parse_final_state(stdout: str) -> dict[str, int | None]:
     # Current: N conns, M streams, K bytes memory
     m = re.findall(
         r"Current:\s*(\d+)\s+conns,\s*(\d+)\s+streams,\s*(\d+)\s+bytes memory",
-        stdout,
+        text,
     )
     if m:
         last = m[-1]
@@ -63,7 +64,7 @@ def parse_final_state(stdout: str) -> dict[str, int | None]:
     # Blocked: X conns, Y streams, Z memory
     m = re.findall(
         r"Blocked:\s*(\d+)\s+conns,\s*(\d+)\s+streams,\s*(\d+)\s+memory",
-        stdout,
+        text,
     )
     if m:
         last = m[-1]
@@ -73,7 +74,7 @@ def parse_final_state(stdout: str) -> dict[str, int | None]:
     # "N active connections, X blocked"
     m = re.search(
         r"(\d+)\s+active connections,\s*(\d+)\s+blocked",
-        stdout,
+        text,
     )
     if m:
         out["active_connections"] = int(m.group(1))
@@ -85,7 +86,7 @@ def test_default_limits_few_iterations() -> None:
     """Default limits, few iterations; usage stays below limits."""
     result = run_demo("--iterations", "6", timeout=15)
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["streams"] is not None
     assert state["conns"] <= 10
     assert state["streams"] <= 20
@@ -111,7 +112,7 @@ def test_tight_limits_hit_connections_and_streams() -> None:
         timeout=15,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None, "Could not parse final conns"
     assert state["streams"] is not None
     assert state["memory_bytes"] is not None
@@ -141,7 +142,7 @@ def test_tight_limits_final_state_at_cap() -> None:
         timeout=15,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] == 1, f"Expected 1 connection, got {state['conns']}"
     assert state["streams"] == 2, f"Expected 2 streams, got {state['streams']}"
     assert state["memory_bytes"] is not None and state["memory_bytes"] <= 1024 * 1024, (
@@ -168,7 +169,7 @@ def test_custom_interval_runs_and_respects_limits() -> None:
         timeout=15,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["conns"] <= 3
     assert state["streams"] is not None and state["streams"] <= 6
     assert state["memory_bytes"] is not None
@@ -179,7 +180,7 @@ def test_duration_stops_in_time() -> None:
     """--duration: run stops after about that many seconds (we use 3s, check exit 0)."""
     result = run_demo("--duration", "3", "--max-connections", "5", timeout=10)
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["conns"] <= 5
 
 
@@ -192,7 +193,7 @@ def test_no_connection_tracking_runs() -> None:
         timeout=15,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None and state["conns"] <= 10
 
 
@@ -205,5 +206,5 @@ def test_no_protocol_metrics_runs() -> None:
         timeout=15,
     )
     assert result.returncode == 0, f"Demo failed: {result.stderr}"
-    state = parse_final_state(result.stdout)
+    state = parse_final_state(result.stdout, result.stderr)
     assert state["conns"] is not None
