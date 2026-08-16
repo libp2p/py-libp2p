@@ -40,6 +40,9 @@ from .pb.kademlia_pb2 import Message, Record
 
 logger = logging.getLogger(__name__)
 
+# Republish interval: 22 hours (same as provider records)
+REPUBLISH_INTERVAL = 22 * 60 * 60
+
 
 class ValueStore:
     """
@@ -160,8 +163,8 @@ class ValueStore:
 
         :param key: The key to store the value under
         :param value: The value to store
-        :param validity: validity in seconds before the value expires.
-         Defaults to `DEFAULT_TTL` if set to 0.0.
+        :param validity: Absolute UNIX expiration timestamp.
+         Defaults to `time.time() + DEFAULT_TTL` if set to 0.0.
 
         Returns
         -------
@@ -216,9 +219,11 @@ class ValueStore:
 
         :param peer_routing: PeerRouting instance for finding closest peers
         """
+        if peer_routing is None:
+            logger.debug("No peer routing available, skipping record republish")
+            return
+
         current_time = time.time()
-        # Republish interval: 22 hours (same as provider records)
-        REPUBLISH_INTERVAL = 22 * 60 * 60
 
         # Snapshot to avoid mutation during iteration
         local_keys_snapshot = list(self.local_keys)
@@ -238,9 +243,6 @@ class ValueStore:
             logger.debug(f"Republishing record for key {key.hex()}")
 
             # Find k closest peers and store the record at each
-            if peer_routing is None:
-                continue
-
             try:
                 closest_peers = await peer_routing.find_closest_peers_network(key)
                 # Store at up to k closest peers
@@ -473,6 +475,23 @@ class ValueStore:
                     f" {peer_id}, type: {response.type}"
                 )
 
+                # Extract closer peers if requested
+                closer: list[ID] = []
+                if return_closer_peers:
+                    for peer_proto in response.closerPeers:
+                        try:
+                            closer_id = ID(peer_proto.id)
+                            if closer_id != self.local_peer_id:
+                                closer.append(closer_id)
+                                # Per spec: store addresses in peerbook
+                                if peer_proto.addrs:
+                                    addrs = [Multiaddr(a) for a in peer_proto.addrs]
+                                    self.host.get_peerstore().add_addrs(
+                                        closer_id, addrs, 600
+                                    )
+                        except Exception:
+                            pass
+
                 # Process protobuf response
                 if (
                     response.type == Message.MessageType.GET_VALUE
@@ -497,20 +516,6 @@ class ValueStore:
 
                     result = response.record if return_record else response.record.value
                     if return_closer_peers:
-                        closer = []
-                        for peer_proto in response.closerPeers:
-                            try:
-                                closer_id = ID(peer_proto.id)
-                                if closer_id != self.local_peer_id:
-                                    closer.append(closer_id)
-                                    # Per spec: store addresses in peerbook
-                                    if peer_proto.addrs:
-                                        addrs = [Multiaddr(a) for a in peer_proto.addrs]
-                                        self.host.get_peerstore().add_addrs(
-                                            closer_id, addrs, 600
-                                        )
-                            except Exception:
-                                pass
                         return result, closer
                     return result
 
@@ -521,20 +526,6 @@ class ValueStore:
                         f" received {len(response.closerPeers)} closer peers"
                     )
                     if return_closer_peers:
-                        closer = []
-                        for peer_proto in response.closerPeers:
-                            try:
-                                closer_id = ID(peer_proto.id)
-                                if closer_id != self.local_peer_id:
-                                    closer.append(closer_id)
-                                    # Per spec: store addresses in peerbook
-                                    if peer_proto.addrs:
-                                        addrs = [Multiaddr(a) for a in peer_proto.addrs]
-                                        self.host.get_peerstore().add_addrs(
-                                            closer_id, addrs, 600
-                                        )
-                            except Exception:
-                                pass
                         return None, closer
                     return None
 

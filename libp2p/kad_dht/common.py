@@ -3,13 +3,10 @@ Shared constants and protocol parameters for the Kademlia DHT.
 """
 
 from datetime import datetime, timezone
-import logging
 
 from libp2p.custom_types import (
     TProtocol,
 )
-
-logger = logging.getLogger(__name__)
 
 # Constants for the Kademlia algorithm
 ALPHA = 10  # Concurrency parameter (per libp2p Kademlia spec)
@@ -48,7 +45,6 @@ MAXIMUM_BUCKETS = 256  # Maximum number of buckets (for 256-bit keys)
 MAX_PEERS_PER_SUBNET = 2
 SUBNET_PREFIX_LEN_V4 = 24
 SUBNET_PREFIX_LEN_V6 = 48
-PEER_REFRESH_INTERVAL = 60  # Interval to refresh peers in seconds
 STALE_PEER_THRESHOLD = 3600  # Time in seconds after which a peer is considered stale
 
 

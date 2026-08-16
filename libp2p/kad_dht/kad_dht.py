@@ -7,7 +7,11 @@ implementation based on the Kademlia algorithm and protocol.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from enum import (
     Enum,
 )
@@ -39,7 +43,6 @@ from libp2p.kad_dht.utils import (
 from libp2p.network.stream.net_stream import (
     INetStream,
 )
-from libp2p.peer.envelope import Envelope
 from libp2p.peer.id import (
     ID,
 )
@@ -125,6 +128,24 @@ def get_connection_type(host: IHost, peer_id: ID) -> Message.ConnectionType:
         return Message.ConnectionType.NOT_CONNECTED
     except Exception:
         return Message.ConnectionType.NOT_CONNECTED
+
+
+def _encode_key(key: str) -> bytes:
+    """
+    Encode a user-supplied key string as DHT key bytes.
+
+    Accepts a CID string (uses the underlying multihash), a hex-encoded
+    multihash, or falls back to UTF-8 encoding of the raw string.
+    """
+    try:
+        cid_obj = parse_cid(key)
+        return cid_obj.multihash
+    except (ValueError, TypeError):
+        pass
+    try:
+        return bytes.fromhex(key)
+    except ValueError:
+        return key.encode("utf-8")
 
 
 class KadDhtEvent:
@@ -274,9 +295,6 @@ class KadDHT(Service):
         # the Kademlia spec ("On any error, the stream is reset.").
         self._inbound_limiter = trio.CapacityLimiter(12)
 
-        # Last time we republished provider records
-        self._last_provider_republish = time.time()
-
         # Initialize RT Refresh Manager (only if random walk is enabled)
         self.rt_refresh_manager: RTRefreshManager | None = None
         if self.enable_random_walk:
@@ -379,9 +397,7 @@ class KadDHT(Service):
                 await self.refresh_routing_table()
 
                 # Check if it's time to republish provider records
-                current_time = time.time()
                 await self.provider_store._republish_provider_records()
-                self._last_provider_republish = current_time
 
                 # Republish locally-stored value records
                 await self.value_store._republish_records(self.peer_routing)
@@ -551,6 +567,36 @@ class KadDHT(Service):
         async with self._inbound_limiter:
             await self._do_handle_stream(stream)
 
+    def _add_closer_peers_to_response(
+        self,
+        response: Message,
+        closest_peers: Sequence[ID],
+        exclude_peer_id: ID | None = None,
+    ) -> None:
+        """
+        Populate response.closerPeers with IDs, connection types,
+        addrs, and signed records.
+        """
+        for peer in closest_peers:
+            if exclude_peer_id is not None and peer == exclude_peer_id:
+                continue
+
+            peer_proto = response.closerPeers.add()
+            peer_proto.id = peer.to_bytes()
+            peer_proto.connection = get_connection_type(self.host, peer)
+
+            envelope = self.host.get_peerstore().get_peer_record(peer)
+            if envelope is not None:
+                peer_proto.signedRecord = envelope.marshal_envelope()
+
+            try:
+                addrs = self.host.get_peerstore().addrs(peer)
+                if addrs:
+                    for addr in addrs:
+                        peer_proto.addrs.append(addr.to_bytes())
+            except Exception:
+                pass
+
     async def _do_handle_stream(self, stream: INetStream) -> None:
         """Core DHT stream handler (called with inbound concurrency limiter held)."""
         peer_id = stream.muxed_conn.peer_id
@@ -558,9 +604,6 @@ class KadDHT(Service):
         # Peer initiated a KAD stream, so they MUST support KAD server mode
         await self.add_peer(peer_id, skip_server_mode_check=True)
         logger.debug(f"Added peer {peer_id} to routing table")
-
-        closer_peer_envelope: Envelope | None = None
-        provider_peer_envelope: Envelope | None = None
 
         # Per spec: "On any error, the stream is reset."
         should_reset = False
@@ -678,35 +721,9 @@ class KadDHT(Service):
                             ]
 
                         # Add closest peers to response
-                        for peer in closest_peers:
-                            # Skip if the peer is the requester
-                            if peer == peer_id:
-                                continue
-
-                            # Add peer to closerPeers field
-                            peer_proto = response.closerPeers.add()
-                            peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = get_connection_type(self.host, peer)
-
-                            # Add addresses if available
-                            try:
-                                addrs = self.host.get_peerstore().addrs(peer)
-                                if addrs:
-                                    for addr in addrs:
-                                        peer_proto.addrs.append(addr.to_bytes())
-                            except Exception:
-                                pass
-
-                            # Add the signed-peer-record for each peer in the peer-proto
-                            # if cached in the peerstore
-                            closer_peer_envelope = (
-                                self.host.get_peerstore().get_peer_record(peer)
-                            )
-
-                            if closer_peer_envelope is not None:
-                                peer_proto.signedRecord = (
-                                    closer_peer_envelope.marshal_envelope()
-                                )
+                        self._add_closer_peers_to_response(
+                            response, closest_peers, exclude_peer_id=peer_id
+                        )
 
                         # Create sender_signed_peer_record
                         envelope_bytes, _ = env_to_send_in_RPC(self.host)
@@ -905,37 +922,9 @@ class KadDHT(Service):
                         closest_peers = self.routing_table.find_local_closest_peers(
                             key, BUCKET_SIZE
                         )
-                        logger.debug(
-                            f"Including {len(closest_peers)} closest peers"
-                            " in GET_PROVIDERS response"
+                        self._add_closer_peers_to_response(
+                            response, closest_peers, exclude_peer_id=peer_id
                         )
-
-                        for peer in closest_peers:
-                            # Skip if peer is the requester
-                            if peer == peer_id:
-                                continue
-
-                            peer_proto = response.closerPeers.add()
-                            peer_proto.id = peer.to_bytes()
-                            peer_proto.connection = get_connection_type(self.host, peer)
-
-                            # Add the signed-records of closest_peers if cached
-                            closer_peer_envelope = (
-                                self.host.get_peerstore().get_peer_record(peer)
-                            )
-
-                            if closer_peer_envelope is not None:
-                                peer_proto.signedRecord = (
-                                    closer_peer_envelope.marshal_envelope()
-                                )
-
-                            # Add addresses if available
-                            try:
-                                addrs = self.host.get_peerstore().addrs(peer)
-                                for addr in addrs:
-                                    peer_proto.addrs.append(addr.to_bytes())
-                            except Exception:
-                                pass
 
                         # Serialize and send response
                         response_bytes = response.SerializeToString()
@@ -1026,27 +1015,9 @@ class KadDHT(Service):
                             closest_peers = self.routing_table.find_local_closest_peers(
                                 key, BUCKET_SIZE
                             )
-                            for peer in closest_peers:
-                                if peer == peer_id:
-                                    continue
-                                peer_proto = response.closerPeers.add()
-                                peer_proto.id = peer.to_bytes()
-                                peer_proto.connection = get_connection_type(
-                                    self.host, peer
-                                )
-                                closer_peer_envelope = (
-                                    self.host.get_peerstore().get_peer_record(peer)
-                                )
-                                if closer_peer_envelope is not None:
-                                    peer_proto.signedRecord = (
-                                        closer_peer_envelope.marshal_envelope()
-                                    )
-                                try:
-                                    addrs = self.host.get_peerstore().addrs(peer)
-                                    for addr in addrs:
-                                        peer_proto.addrs.append(addr.to_bytes())
-                                except Exception:
-                                    pass
+                            self._add_closer_peers_to_response(
+                                response, closest_peers, exclude_peer_id=peer_id
+                            )
 
                             # Serialize and send response
                             response_bytes = response.SerializeToString()
@@ -1071,39 +1042,9 @@ class KadDHT(Service):
                             closest_peers = self.routing_table.find_local_closest_peers(
                                 key, BUCKET_SIZE
                             )
-                            logger.debug(
-                                "No value found,"
-                                f"including {len(closest_peers)} closest peers"
+                            self._add_closer_peers_to_response(
+                                response, closest_peers, exclude_peer_id=peer_id
                             )
-
-                            for peer in closest_peers:
-                                # Skip if peer is the requester
-                                if peer == peer_id:
-                                    continue
-
-                                peer_proto = response.closerPeers.add()
-                                peer_proto.id = peer.to_bytes()
-                                peer_proto.connection = get_connection_type(
-                                    self.host, peer
-                                )
-
-                                # Add signed-records of closer-peers if cached
-                                closer_peer_envelope = (
-                                    self.host.get_peerstore().get_peer_record(peer)
-                                )
-
-                                if closer_peer_envelope is not None:
-                                    peer_proto.signedRecord = (
-                                        closer_peer_envelope.marshal_envelope()
-                                    )
-
-                                # Add addresses if available
-                                try:
-                                    addrs = self.host.get_peerstore().addrs(peer)
-                                    for addr in addrs:
-                                        peer_proto.addrs.append(addr.to_bytes())
-                                except Exception:
-                                    pass
 
                             # Serialize and send response
                             response_bytes = response.SerializeToString()
@@ -1214,17 +1155,6 @@ class KadDHT(Service):
                                 logger.debug(f"Stored value for key {key.hex()}")
                                 success = True
 
-                            # Per spec: Sliding window PUT_VALUE propagation
-                            # When a value is stored, propagate it to the k
-                            # closest peers (entry correction)
-                            if success:
-                                try:
-                                    await self._propagate_to_closest_peers(
-                                        key, value, cleaned_record
-                                    )
-                                except Exception as e:
-                                    logger.debug(f"Failed to propagate value: {e}")
-
                         except Exception as e:
                             logger.warning(
                                 f"Failed to store value {value.hex()} for key "
@@ -1306,6 +1236,16 @@ class KadDHT(Service):
         """
         now = time.time()
         peer_key = str(peer_id)
+
+        # Prune stale entries when cache exceeds 200 entries to prevent memory leak
+        if len(self._provider_rate_limits) > 200:
+            stale_keys = [
+                k
+                for k, (ts, _) in self._provider_rate_limits.items()
+                if now - ts > self._provider_rate_window
+            ]
+            for k in stale_keys:
+                self._provider_rate_limits.pop(k, None)
 
         if peer_key in self._provider_rate_limits:
             last_time, count = self._provider_rate_limits[peer_key]
@@ -1691,46 +1631,6 @@ class KadDHT(Service):
         logger.warning(f"Value not found for key {key}")
         return None
 
-    async def _propagate_to_closest_peers(
-        self, key: bytes, value: bytes, record: Record
-    ) -> None:
-        """
-        Propagate a value to the k closest peers (sliding window PUT_VALUE).
-
-        Per spec: when a value is stored, it should be propagated to ensure
-        availability. This implements entry correction for PUT_VALUE.
-
-        :param key: The key being stored
-        :param value: The value being stored
-        :param record: The signed record to propagate
-        """
-        # Find k closest peers to the key
-        closest_peers = await self.peer_routing.find_closest_peers_network(key)
-
-        # Propagate to k closest peers in batches of ALPHA
-        for i in range(0, len(closest_peers), ALPHA):
-            batch = closest_peers[i : i + ALPHA]
-            if not batch:
-                break
-
-            async def store_at_peer(peer_id: ID) -> None:
-                if peer_id == self.local_peer_id:
-                    return
-                try:
-                    with trio.move_on_after(QUERY_TIMEOUT):
-                        await self.value_store._store_at_peer(
-                            peer_id, key, value, record=record
-                        )
-                        logger.debug(f"Propagated value to peer {peer_id}")
-                except Exception as e:
-                    logger.debug(f"Failed to propagate to peer {peer_id}: {e}")
-
-            async with trio.open_nursery() as nursery:
-                for peer_id in batch:
-                    nursery.start_soon(store_at_peer, peer_id)
-
-    # Add these methods in the Utility methods section
-
     # Utility methods
 
     async def add_peer(
@@ -1758,15 +1658,7 @@ class KadDHT(Service):
 
         Accepts either a CID string or a multihash hex string.
         """
-        try:
-            cid_obj = parse_cid(key)
-            key_bytes = cid_obj.multihash
-        except (ValueError, TypeError):
-            try:
-                key_bytes = bytes.fromhex(key)
-            except ValueError:
-                key_bytes = key.encode("utf-8")
-        return await self.provider_store.provide(key_bytes)
+        return await self.provider_store.provide(_encode_key(key))
 
     async def find_providers(self, key: str, count: int = 20) -> list[PeerInfo]:
         """
@@ -1774,15 +1666,7 @@ class KadDHT(Service):
 
         Accepts either a CID string or a multihash hex string.
         """
-        try:
-            cid_obj = parse_cid(key)
-            key_bytes = cid_obj.multihash
-        except (ValueError, TypeError):
-            try:
-                key_bytes = bytes.fromhex(key)
-            except ValueError:
-                key_bytes = key.encode("utf-8")
-        return await self.provider_store.find_providers(key_bytes, count)
+        return await self.provider_store.find_providers(_encode_key(key), count)
 
     def get_routing_table_size(self) -> int:
         """

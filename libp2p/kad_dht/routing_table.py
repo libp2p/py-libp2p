@@ -78,35 +78,6 @@ def gen_random_key_in_bucket(bucket: KBucket) -> bytes:
     return val.to_bytes(32, byteorder="big")
 
 
-def gen_random_peer_id_with_cpl(local_id: ID, cpl: int) -> bytes:
-    """
-    Generate a 32-byte key sharing exactly `cpl` prefix bits with local_id's key,
-    with the (cpl)-th bit inverted, and all subsequent bits chosen uniformly at random.
-    Matches go-libp2p-kbucket GenRandPeerID / GenRandomKey.
-    """
-    local_key = peer_id_to_key(local_id)
-    key_int = int.from_bytes(local_key, "big")
-
-    rand_int = secrets.randbits(256)
-
-    # Keep first cpl bits of local_key
-    if cpl > 0:
-        cpl_mask = ((1 << cpl) - 1) << (256 - cpl)
-        target_int = (key_int & cpl_mask) | (rand_int & ~cpl_mask)
-    else:
-        target_int = rand_int
-
-    # Flip the cpl-th bit (0-indexed from MSB)
-    bit_pos = 255 - cpl
-    if bit_pos >= 0:
-        if (key_int >> bit_pos) & 1:
-            target_int &= ~(1 << bit_pos)
-        else:
-            target_int |= 1 << bit_pos
-
-    return target_int.to_bytes(32, "big")
-
-
 def _subnet_key(peer_info: PeerInfo) -> str | None:
     """
     Return a stable subnet key for a peer's first globally-routable IP address,
@@ -261,24 +232,8 @@ class KBucket:
                 oldest_peer_id,
                 peer_id,
             )
-            # Re-check bucket state after the await — another coroutine may have
-            # modified the bucket while we were pinging.
-            if peer_id in self.peers:
-                # Another coroutine added this peer (or the old peer) during ping
-                self.refresh_peer_last_seen(peer_id)
-                return True
-
             if oldest_peer_id in self.peers:
                 del self.peers[oldest_peer_id]
-
-            # Re-check capacity: another coroutine may have added a peer
-            # during the ping, potentially filling the bucket to capacity.
-            if len(self.peers) >= self.bucket_size:
-                logger.debug(
-                    "Bucket full after ping, cannot add new peer %s",
-                    peer_id,
-                )
-                return False
 
             self.peers[peer_id] = (peer_info, current_time)
             return True
@@ -466,7 +421,6 @@ class RoutingTable:
         self.local_id = local_id
         self.host = host
         self.buckets = [KBucket(host, BUCKET_SIZE)]
-        self._rt_refresh_nursery: trio.Nursery | None = None
 
     async def add_peer(
         self, peer_obj: PeerInfo | ID, *, skip_server_mode_check: bool = False
@@ -755,14 +709,6 @@ class RoutingTable:
         """
         return [gen_random_key_in_bucket(bucket) for bucket in self.buckets]
 
-    def get_active_cpls(self) -> list[int]:
-        """
-        Return a list of Common Prefix Length (CPL) indices for the routing table.
-        Used to perform targeted K-bucket random walk refreshes.
-        """
-        # Bucket count determines the depth of the routing tree
-        return list(range(min(len(self.buckets) + 1, 256)))
-
     def get_diagnostics(self) -> RoutingTableDiagnostics:
         """
         Return a :class:`~libp2p.kad_dht.diagnostics.RoutingTableDiagnostics`
@@ -894,5 +840,4 @@ class RoutingTable:
 
     def start_periodic_refresh(self, nursery: trio.Nursery) -> None:
         """Start single periodic stale peer refresh task for the routing table."""
-        self._rt_refresh_nursery = nursery
         nursery.start_soon(self._periodic_peer_refresh)

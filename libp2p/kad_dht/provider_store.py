@@ -24,7 +24,10 @@ from libp2p.abc import (
 from libp2p.custom_types import (
     TProtocol,
 )
-from libp2p.kad_dht.utils import maybe_consume_signed_record
+from libp2p.kad_dht.utils import (
+    maybe_consume_signed_record,
+    sort_peer_ids_by_distance,
+)
 from libp2p.peer.id import (
     ID,
 )
@@ -50,7 +53,6 @@ logger = logging.getLogger(__name__)
 # Constants for provider records (based on IPFS standards)
 PROVIDER_RECORD_REPUBLISH_INTERVAL = 22 * 60 * 60  # 22 hours in seconds
 PROVIDER_RECORD_EXPIRATION_INTERVAL = 48 * 60 * 60  # 48 hours in seconds
-PROVIDER_ADDRESS_TTL = 24 * 60 * 60  # 24 hours in seconds (per spec Section 7.3.3)
 
 
 class ProviderRecord:
@@ -88,19 +90,6 @@ class ProviderRecord:
         """
         current_time = time.time()
         return (current_time - self.timestamp) >= PROVIDER_RECORD_EXPIRATION_INTERVAL
-
-    def should_republish(self) -> bool:
-        """
-        Check if this provider record should be republished.
-
-        Returns
-        -------
-        bool
-            True if the record should be republished
-
-        """
-        current_time = time.time()
-        return (current_time - self.timestamp) >= PROVIDER_RECORD_REPUBLISH_INTERVAL
 
     @property
     def peer_id(self) -> ID:
@@ -238,11 +227,11 @@ class ProviderStore:
         for addr in self.host.get_addrs():
             local_addrs.append(addr)
 
-        local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
-        self.add_provider(key, local_peer_info)
-
         # Track that we're providing this key
         self.providing_keys.add(key)
+
+        local_peer_info = PeerInfo(self.host.get_id(), local_addrs)
+        self.add_provider(key, local_peer_info)
 
         # Find the k closest peers to the key
         closest_peers = await self.peer_routing.find_closest_peers_network(key)
@@ -285,8 +274,7 @@ class ProviderStore:
         Send ADD_PROVIDER message to a specific peer.
 
         Per the libp2p DHT spec, the receiver echoes the request to confirm
-        success. We send the message and close the stream (the echo response
-        is not read by the sender).
+        success. We send the message and validate the echo response.
 
         :param peer_id: The peer to send the message to
         :param key: The content key being provided
@@ -294,7 +282,7 @@ class ProviderStore:
         Returns
         -------
         bool
-            True if the message was successfully sent
+            True if the message was successfully sent and acknowledged
 
         """
         stream = None
@@ -345,8 +333,6 @@ class ProviderStore:
                         "Received an invalid-signed-record, ignoring the response"
                     )
                     return False
-                else:
-                    return True
             return True
 
         except Exception as e:
@@ -356,6 +342,8 @@ class ProviderStore:
         finally:
             if stream is not None:
                 await stream.close()
+        # Unreachable at runtime (try/except both return), but pyrefly
+        # requires an explicit return for the declared ``-> bool``.
         return False
 
     async def find_providers(self, key: bytes, count: int = 20) -> list[PeerInfo]:
@@ -462,8 +450,6 @@ class ProviderStore:
 
             # Sort candidates by distance to key for next iteration
             if candidate_peers:
-                from .utils import sort_peer_ids_by_distance
-
                 candidate_peers = sort_peer_ids_by_distance(key, candidate_peers)
 
             # Check if we have enough providers
@@ -476,22 +462,6 @@ class ProviderStore:
 
         logger.debug(f"Found {len(all_providers)} providers for key {key.hex()}")
         return all_providers[:count]
-
-    async def _get_providers_from_peer(self, peer_id: ID, key: bytes) -> list[PeerInfo]:
-        """
-        Get content providers from a specific peer.
-
-        :param peer_id: The peer to query
-        :param key: The content key to look for
-
-        Returns
-        -------
-        List[PeerInfo]
-            List of provider information
-
-        """
-        providers, _ = await self._get_providers_from_peer_with_closers(peer_id, key)
-        return providers
 
     async def _get_providers_from_peer_with_closers(
         self, peer_id: ID, key: bytes

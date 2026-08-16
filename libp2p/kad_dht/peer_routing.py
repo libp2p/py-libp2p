@@ -305,8 +305,6 @@ class PeerRouting(IPeerRouting):
                         f"No new peers discovered but {len(unqueried_in_topk)} "
                         "unqueried closest peers remain, continuing"
                     )
-                    # Continue with remaining unqueried closest peers
-                    peers_to_query = unqueried_in_topk[:ALPHA]
                     continue
                 logger.debug("No new peers discovered and all closest queried")
                 break

@@ -574,40 +574,11 @@ class TestKBucketSubnetDiversity:
         # Relayed address exposes the relay's IP, not the peer's → exempt
         assert _subnet_key(_peer_with_addrs("/ip4/8.8.8.9/tcp/1/p2p-circuit")) is None
 
-    def test_cpl_and_targeted_bucket_key_generation(self, mock_host):
-        """Test CPL key generation and targeted K-bucket refresh keys."""
-        from libp2p.kad_dht.routing_table import (
-            gen_random_peer_id_with_cpl,
-            peer_id_to_key,
-        )
-
+    def test_targeted_bucket_key_generation(self, mock_host):
+        """Test targeted K-bucket refresh keys."""
         local_id = create_valid_peer_id("local")
-        local_key = peer_id_to_key(local_id)
-        local_int = int.from_bytes(local_key, "big")
-
-        # Test CPL key generation for various depths
-        for cpl in [0, 1, 5, 16, 64, 128, 255]:
-            target = gen_random_peer_id_with_cpl(local_id, cpl)
-            assert len(target) == 32
-            target_int = int.from_bytes(target, "big")
-
-            # Check that first cpl bits match local_int
-            if cpl > 0:
-                cpl_mask = ((1 << cpl) - 1) << (256 - cpl)
-                assert (target_int & cpl_mask) == (local_int & cpl_mask)
-
-            # Check that the cpl-th bit differs
-            bit_pos = 255 - cpl
-            assert ((target_int >> bit_pos) & 1) != ((local_int >> bit_pos) & 1)
-
-        # Test bucket key generation
         rt = RoutingTable(local_id, mock_host)
         keys = rt.get_target_keys_for_refresh()
         assert len(keys) == len(rt.buckets)
         for i, bucket in enumerate(rt.buckets):
             assert bucket.key_in_range(keys[i])
-
-        # Test active CPLs
-        cpls = rt.get_active_cpls()
-        assert len(cpls) >= 1
-        assert 0 in cpls
