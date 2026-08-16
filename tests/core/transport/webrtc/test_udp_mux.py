@@ -119,14 +119,14 @@ class TestStunDispatch:
         mux, _ = await UdpMux.create("127.0.0.1", 0)
         seen: list[tuple[str, bytes, tuple[str, int]]] = []
         mux.set_unknown_stun_handler(
-            lambda ufrag, data, addr: seen.append((ufrag, data, addr))
+            lambda username, data, addr: seen.append((username, data, addr))
         )
         try:
             data = _stun_binding_request("newdialer:remote")
             mux.datagram_received(data, ("10.0.0.9", 5555))
             # First contact for an unregistered ufrag reaches the handler with
-            # the ufrag, raw datagram (for replay), and source address.
-            assert seen == [("newdialer", data, ("10.0.0.9", 5555))]
+            # the full USERNAME, raw datagram (for replay), and source address.
+            assert seen == [("newdialer:remote", data, ("10.0.0.9", 5555))]
         finally:
             await mux.close()
 

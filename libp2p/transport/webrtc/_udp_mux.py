@@ -133,8 +133,9 @@ class UdpMux(asyncio.DatagramProtocol):
         self._by_addr: dict[tuple[str, int], _HasConnectionLost] = {}
         # id(protocol) -> number of _by_addr entries pointing at it
         self._addr_count: dict[int, int] = {}
-        # Called for a STUN packet whose ufrag is not registered (see
-        # set_unknown_stun_handler); lets a listener observe first-contact dials.
+        # Called with the full USERNAME for a BINDING REQUEST whose local ufrag
+        # is not registered (see set_unknown_stun_handler); lets a listener
+        # observe first-contact dials.
         self._unknown_stun_handler: (
             Callable[[str, bytes, tuple[str, int]], None] | None
         ) = None
@@ -227,7 +228,7 @@ class UdpMux(asyncio.DatagramProtocol):
             # First contact: an inbound BINDING REQUEST for an unregistered
             # ufrag. A WebRTC-Direct listener registers a handler to create the
             # connection (add_ice_connection) and replay this datagram.
-            self._unknown_stun_handler(ufrag, data, norm)
+            self._unknown_stun_handler(username, data, norm)
             return
         protocol = self._by_addr.get(norm)
         if protocol is not None:
@@ -320,9 +321,11 @@ class UdpMux(asyncio.DatagramProtocol):
         """
         Register a callback for STUN packets whose ufrag is not yet registered.
 
-        The callback receives ``(ufrag, data, addr)``. For WebRTC-Direct this is
-        how a listener observes the *first* inbound BINDING REQUEST from a new
-        dialer — it can create and register the connection via
+        The callback receives ``(username, data, addr)`` where ``username`` is
+        the full STUN ``USERNAME`` (``local_ufrag:remote_ufrag``) of an inbound
+        BINDING REQUEST whose local ufrag is unregistered. For WebRTC-Direct
+        this is how a listener observes the *first* packet from a new dialer —
+        it can create and register the connection via
         :meth:`add_ice_connection` and replay ``data``. Called from the asyncio
         event-loop thread; keep it non-blocking (e.g. hand off to a queue).
         Pass ``None`` to clear.

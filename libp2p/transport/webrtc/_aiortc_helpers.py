@@ -38,8 +38,9 @@ _ICE_CONNECT_TIMEOUT = 30.0
 # Timeout for HTTP SDP exchange (seconds).
 _SDP_HTTP_TIMEOUT = 15.0
 
-# Bounds for the HTTP /sdp dev harness — defend against memory-amplification
-# DoS while the harness exists (until the STUN-based listener lands, #1352).
+# Bounds for the experimental HTTP /sdp harness (config.enable_sdp_http_harness,
+# off by default; the spec path is the STUN listener) — defend against
+# memory-amplification DoS whenever it is enabled.
 _MAX_SDP_BODY_SIZE = 32 * 1024  # 32 KiB; SDP offers are typically 1–4 KiB
 _MAX_HEADER_LINES = 64
 _MAX_HEADER_BYTES = 8 * 1024  # 8 KiB total across all header lines

@@ -90,30 +90,33 @@ async def test_certificate_is_aiortc_native():
     await transport.close()
 
 
+def _transport(**cfg):  # type: ignore[no-untyped-def]
+    from libp2p.transport.webrtc.config import WebRTCTransportConfig
+
+    # ice_servers=[] keeps loopback local (no external STUN round-trip).
+    kp = create_new_key_pair()
+    return WebRTCDirectTransport(
+        private_key=kp.private_key,
+        config=WebRTCTransportConfig(ice_servers=[], **cfg),
+    ), kp
+
+
 @pytest.mark.trio
-async def test_dial_listen_open_stream_echo():
+@pytest.mark.parametrize("harness", [False, True], ids=["stun", "sdp-http-harness"])
+async def test_dial_listen_open_stream_echo(harness):
     """
     Full transport loopback: dial → ICE/DTLS → Noise (server initiates,
     dialer responds) → handler gets an authenticated connection → stream echo.
+    Runs over the spec STUN path (default) and the experimental HTTP harness.
     """
     from multiaddr import Multiaddr
 
     from libp2p.peer.id import ID
-    from libp2p.transport.webrtc.config import WebRTCTransportConfig
 
-    server_kp = create_new_key_pair()
-    dialer_kp = create_new_key_pair()
+    server, server_kp = _transport(enable_sdp_http_harness=harness)
+    dialer, dialer_kp = _transport(enable_sdp_http_harness=harness)
     server_id = ID.from_pubkey(server_kp.public_key)
     dialer_id = ID.from_pubkey(dialer_kp.public_key)
-    # ice_servers=[] keeps loopback local (no external STUN round-trip).
-    server = WebRTCDirectTransport(
-        private_key=server_kp.private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
-    dialer = WebRTCDirectTransport(
-        private_key=dialer_kp.private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
 
     seen_by_server: list[ID] = []
     handler_done = trio.Event()
@@ -128,6 +131,8 @@ async def test_dial_listen_open_stream_echo():
     listener = server.create_listener(echo_handler)
     await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
     (maddr,) = listener.get_addrs()
+    assert listener._mux is not None  # STUN path is always on
+    assert (listener._signaling_server is not None) is harness
 
     try:
         with trio.fail_after(30):
@@ -146,22 +151,145 @@ async def test_dial_listen_open_stream_echo():
 
 
 @pytest.mark.trio
+async def test_concurrent_dials_share_one_udp_port():
+    """Two dialers hit the same advertised port; the mux demuxes by ufrag."""
+    from multiaddr import Multiaddr
+
+    from libp2p.peer.id import ID
+
+    server, _ = _transport()
+    dialers = [_transport() for _ in range(2)]
+    dialer_ids = {ID.from_pubkey(kp.public_key) for _, kp in dialers}
+    seen: set[ID] = set()
+    release = trio.Event()
+
+    async def handler(conn) -> None:  # type: ignore[no-untyped-def]
+        seen.add(conn.peer_id)
+        stream = await conn.accept_stream()
+        await stream.write(await stream.read())
+        await release.wait()
+
+    listener = server.create_listener(handler)
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    (maddr,) = listener.get_addrs()
+    conns = []
+
+    async def _dial(t) -> None:  # type: ignore[no-untyped-def]
+        conn = await t.dial(maddr)
+        stream = await conn.open_stream()
+        payload = f"hello from {id(t)}".encode()
+        await stream.write(payload)
+        assert await stream.read() == payload
+        conns.append(conn)
+
+    try:
+        with trio.fail_after(30):
+            async with trio.open_nursery() as nursery:
+                for t, _ in dialers:
+                    nursery.start_soon(_dial, t)
+            assert seen == dialer_ids
+            # Both dials went through the one mux socket: two ufrags registered.
+            assert len(listener._mux._by_ufrag) == 2
+            release.set()
+            for c in conns:
+                await c.close()
+    finally:
+        await listener.close()
+        for t, _ in dialers:
+            await t.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_unknown_version_prefix_is_rejected():
+    """A first contact without a libp2p+webrtc+vN/ prefix must not create a PC."""
+    import asyncio
+
+    from multiaddr import Multiaddr
+
+    from libp2p.transport.webrtc._udp_mux import UdpMux
+    from tests.core.transport.webrtc.test_udp_mux import _stun_binding_request
+
+    server, _ = _transport()
+    listener = server.create_listener(lambda conn: trio.sleep_forever())
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    (maddr,) = listener.get_addrs()
+    port = int(str(maddr).split("/udp/")[1].split("/")[0])
+    bridge = await server._ensure_bridge()
+
+    async def _poke() -> None:
+        # Fresh UDP endpoint on the asyncio thread; send crafted requests.
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            asyncio.DatagramProtocol, local_addr=("127.0.0.1", 0)
+        )
+        try:
+            for username in ("noprefix1:cli1", "libp2p+webrtc+v9/abcd:cli1", "x:y"):
+                transport.sendto(_stun_binding_request(username), ("127.0.0.1", port))
+            await asyncio.sleep(0.2)
+        finally:
+            transport.close()
+
+    try:
+        await bridge.run_coro(_poke())
+        assert isinstance(listener._mux, UdpMux)
+        assert listener._mux._by_ufrag == {}
+        assert listener._in_flight == 0
+    finally:
+        await listener.close()
+        await server.close()
+
+
+@pytest.mark.trio
+async def test_in_flight_cap_drops_excess_first_contacts():
+    """Beyond max_in_flight_connections, new first contacts are dropped."""
+    import asyncio
+
+    from multiaddr import Multiaddr
+
+    from tests.core.transport.webrtc.test_udp_mux import _stun_binding_request
+
+    server, _ = _transport(max_in_flight_connections=1)
+    listener = server.create_listener(lambda conn: trio.sleep_forever())
+    await listener.listen(Multiaddr("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+    (maddr,) = listener.get_addrs()
+    port = int(str(maddr).split("/udp/")[1].split("/")[0])
+    bridge = await server._ensure_bridge()
+
+    async def _poke() -> None:
+        loop = asyncio.get_running_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            asyncio.DatagramProtocol, local_addr=("127.0.0.1", 0)
+        )
+        try:
+            for i in range(3):
+                cred = f"libp2p+webrtc+v1/{'a' * 20}{i}"
+                transport.sendto(
+                    _stun_binding_request(f"{cred}:{cred}"), ("127.0.0.1", port)
+                )
+            await asyncio.sleep(0.3)
+        finally:
+            transport.close()
+
+    try:
+        await bridge.run_coro(_poke())
+        assert listener._in_flight == 1
+        assert len(listener._mux._by_ufrag) == 1
+    finally:
+        await listener.close()
+        await server.close()
+
+
+@pytest.mark.trio
 async def test_dial_rejects_wrong_p2p_id():
     """A /p2p/ component that doesn't match the authenticated server fails."""
     from multiaddr import Multiaddr
 
     from libp2p.peer.id import ID
-    from libp2p.transport.webrtc.config import WebRTCTransportConfig
     from libp2p.transport.webrtc.exceptions import WebRTCConnectionError
 
-    server = WebRTCDirectTransport(
-        private_key=create_new_key_pair().private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
-    dialer = WebRTCDirectTransport(
-        private_key=create_new_key_pair().private_key,
-        config=WebRTCTransportConfig(ice_servers=[]),
-    )
+    server, _ = _transport()
+    dialer, _ = _transport()
 
     async def handler(conn) -> None:  # type: ignore[no-untyped-def]
         await trio.sleep_forever()

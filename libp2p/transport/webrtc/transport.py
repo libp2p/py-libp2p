@@ -35,7 +35,7 @@ from .multiaddr_utils import (
     is_webrtc_direct_multiaddr,
     parse_webrtc_direct_multiaddr,
 )
-from .sdp import SDPBuilder
+from .sdp import SDPBuilder, build_synthetic_answer, make_v1_credential
 
 if TYPE_CHECKING:
     pass
@@ -146,7 +146,9 @@ class WebRTCDirectTransport(ITransport):
         pc: Any = None
         try:
             # 1. Create RTCPeerConnection + Noise channel
-            pc = await bridge.run_coro(create_peer_connection(rtc_cert))
+            pc = await bridge.run_coro(
+                create_peer_connection(rtc_cert, ice_servers=self._config.ice_servers)
+            )
             noise_ch = await bridge.run_coro(create_noise_channel(pc))
 
             # make_noise_channel_callbacks is sync; wrap inline.
@@ -155,14 +157,42 @@ class WebRTCDirectTransport(ITransport):
 
             noise_send, noise_recv, _ = await bridge.run_coro(_setup_noise())
 
-            # 2. Create offer, set local description
-            offer = await bridge.run_coro(pc.createOffer())
-            await bridge.run_coro(pc.setLocalDescription(offer))
+            if self._config.enable_sdp_http_harness:
+                # Experimental py<->py harness: real SDP exchange over HTTP.
+                offer = await bridge.run_coro(pc.createOffer())
+                await bridge.run_coro(pc.setLocalDescription(offer))
+                answer_sdp = await bridge.run_coro(
+                    post_sdp(host, port, pc.localDescription.sdp)
+                )
+            else:
+                # Spec v1 (SDP munging): the same "libp2p+webrtc+v1/<random>"
+                # string is our ufrag *and* pwd on both the local offer and the
+                # synthetic remote answer, so the server can reconstruct
+                # everything from our first STUN USERNAME. aiortc regenerates
+                # local ICE credentials from its aioice Connection when
+                # setLocalDescription runs (SDP text edits are ignored), so
+                # "munging" means setting those fields.
+                cred = make_v1_credential()
 
-            # 3. Exchange SDP via HTTP POST to the listener
-            answer_sdp = await bridge.run_coro(
-                post_sdp(host, port, pc.localDescription.sdp)
-            )
+                async def _set_local_ice_credentials() -> None:
+                    assert pc.sctp is not None  # createDataChannel ran above
+                    ice_conn = pc.sctp.transport.transport._connection
+                    ice_conn._local_username = cred
+                    ice_conn._local_password = cred
+
+                await bridge.run_coro(_set_local_ice_credentials())
+                offer = await bridge.run_coro(pc.createOffer())
+                await bridge.run_coro(pc.setLocalDescription(offer))
+                # The listener is ICE-Lite/controlled and the DTLS server; its
+                # fingerprint comes from the certhash so aiortc pins it.
+                answer_sdp = build_synthetic_answer(
+                    host=host,
+                    port=port,
+                    certhash_multibase=certhash,
+                    ufrag=cred,
+                    pwd=cred,
+                    max_message_size=self._config.max_message_size,
+                )
 
             # 4. Set remote description
             from aiortc import RTCSessionDescription
