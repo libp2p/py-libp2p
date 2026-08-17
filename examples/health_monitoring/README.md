@@ -1,8 +1,36 @@
 # Health Monitoring Demo
 
-Optional **Python-local** connection health / resource-manager demo. Inspired by
+Optional **Python-local** connection health / resource-manager demos. Inspired by
 go-libp2p ConnMgr and metrics patterns; the proactive health monitor is **not**
 a go-libp2p feature and is off by default in `ConnectionConfig`.
+
+## Live multi-peer demo (recommended)
+
+Starts a hub plus N-1 local TCP leaves (default **25** peers), then runs
+configurable scenarios (`all` by default):
+
+- `healthy` — connect, echo, wait for monitor pings, print scores
+- `disabled` — observer host with monitoring off (empty health API)
+- `protect` — ConnMgr `Protect` so auto-replace skips those peers
+- `traffic` — concurrent echo streams across leaves
+- `churn` — drop some leaves and reprint health
+
+```bash
+. .venv/bin/activate
+python -m examples.health_monitoring.live_demo
+python -m examples.health_monitoring.live_demo --peers 25 --scenario all
+python -m examples.health_monitoring.live_demo --peers 10 --scenario healthy,protect
+python -m examples.health_monitoring.live_demo --list-scenarios
+# or, after install: health-monitoring-demo
+```
+
+Config-only API walkthrough (no real connections):
+
+```bash
+python examples/health_monitoring/basic_example.py
+```
+
+## Prometheus / Grafana (resource manager)
 
 **Prerequisites:** The demo exposes metrics over HTTP for Prometheus. Install the client in your venv:
 

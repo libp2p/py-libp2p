@@ -20,6 +20,14 @@ examples.health\_monitoring.configure module
    :show-inheritance:
    :undoc-members:
 
+examples.health\_monitoring.live\_demo module
+---------------------------------------------
+
+.. automodule:: examples.health_monitoring.live_demo
+   :members:
+   :show-inheritance:
+   :undoc-members:
+
 examples.health\_monitoring.quic\_example module
 ------------------------------------------------
 

@@ -15,7 +15,8 @@ Overview
    The code snippets throughout this document are excerpts demonstrating key
    concepts. They cannot be copy-pasted and run directly as they require an
    async context. For complete, runnable examples, see
-   ``examples/health_monitoring/basic_example.py``.
+   ``examples/health_monitoring/basic_example.py`` (config walkthrough) and
+   ``examples/health_monitoring/live_demo.py`` (N local peers, live scores).
 
 Connection health monitoring enhances the existing multiple connections per peer
 support by adding:
@@ -248,18 +249,27 @@ Health monitoring is fully backwards compatible:
 Running the Example
 -------------------
 
-To run the connection health monitoring example:
+To run a live multi-peer demo (default 25 hosts, all scenarios):
+
+.. code-block:: bash
+
+    python -m examples.health_monitoring.live_demo
+    python -m examples.health_monitoring.live_demo --peers 10 --scenario healthy,protect
+
+To walk through the host API without opening connections:
 
 .. code-block:: bash
 
     python examples/health_monitoring/basic_example.py
 
-This will demonstrate:
+The live demo shows:
 
-1. Basic health monitoring setup through host API
-2. Different load balancing strategies
-3. Health metrics access and export
-4. API consistency with existing examples
+1. Opt-in health monitoring through ``new_host(connection_config=...)``
+2. A configurable star of local TCP peers (``--peers``, default 25)
+3. Selectable scenarios (``--scenario``, default ``all``): healthy scores,
+   a no-monitor observer, ConnMgr ``Protect``, concurrent echo traffic,
+   and peer churn
+4. Peer and network health summaries after the monitor pings
 
 Benefits
 --------
