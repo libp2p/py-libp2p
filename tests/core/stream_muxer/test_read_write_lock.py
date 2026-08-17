@@ -480,6 +480,25 @@ async def test_read_from_reset_stream_raises(mplex_stream):
 
 
 @pytest.mark.trio
+async def test_read_from_reset_stream_returns_buffered_data_then_reset(
+    mplex_stream,
+):
+    """Reset with queued data: first read returns bytes, second raises reset."""
+    stream, send_chan, _ = mplex_stream
+
+    await send_chan.send(b"data")
+    await send_chan.aclose()
+    stream.event_reset.set()
+    stream.event_remote_closed.set()
+
+    data = await stream.read(4)
+    assert data == b"data"
+
+    with pytest.raises(MplexStreamReset):
+        await stream.read(1)
+
+
+@pytest.mark.trio
 async def test_write_to_reset_stream_raises(mplex_stream):
     """Verify writing to a reset stream raises MplexStreamClosed."""
     stream, _, _ = mplex_stream

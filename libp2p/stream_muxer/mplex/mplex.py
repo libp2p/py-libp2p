@@ -382,6 +382,8 @@ class Mplex(IMuxedConn):
                 return
             stream = self.streams[stream_id]
             send_channel = self.streams_msg_channels[stream_id]
+        # Close send_channel so the receive side sees EndOfChannel after any
+        # already-queued messages are drained (see MplexStream.read).
         await send_channel.aclose()
         async with stream.close_lock:
             if not stream.event_remote_closed.is_set():
